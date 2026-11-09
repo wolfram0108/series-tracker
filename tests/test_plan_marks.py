@@ -13,10 +13,11 @@ PRIORITY = ("vk", "cvh", "kodik")
 SOURCES = (1, 2, 3)
 
 
-def told(rows, settings=(), *, failed=frozenset(), off=()):
+def told(rows, settings=(), *, failed=frozenset(), off=(), markup=None):
     online = online_of(rows)
     choices = choices_of(rows, online, [(each.season, each.episode, each.levers) for each in settings], [],
-                         players=PRIORITY, player_groups=NO_GROUPS, sources=SOURCES, voice_order={}, off_episodes=off)
+                         players=PRIORITY, player_groups=NO_GROUPS, sources=SOURCES, voice_order={}, off_episodes=off,
+                         markup=markup)
     inputs = Inputs(online, (), choices, frozenset(failed))
     return {(each.season, each.episode): each for each in references_of(inputs, plan(inputs))}
 
@@ -72,3 +73,13 @@ def test_a_row_whose_player_has_no_video_is_no_reference():
 def test_an_episode_switched_off_is_off():
     found = told([row(1, 1, "a", 1, 1, player="vk", height=1080, voice="A")], off={(1, 1)})[(1, 1)]
     assert found.mark is ReferenceMark.OFF
+
+
+def test_with_a_markup_reference_the_reference_is_its_row_and_the_picture_is_the_higher_one():
+    rows = [row(1, 1, "pva", 1, 1, player="vk", height=2160, voice="ПВА"),
+            row(1, 3, "orig", 1, 1, player="cvh", height=1080, voice="Оригинал")]
+    found = told(rows, markup=3)[(1, 1)]
+    assert (found.source_id, found.row_key, found.markup) == (3, "orig", True)
+    assert found.picture.model_dump() == {"source_id": 1, "player": "vk", "height": 2160, "voice_group": "ПВА"}
+    plain = told(rows)[(1, 1)]
+    assert (plain.row_key, plain.markup, plain.picture) == ("pva", False, None)

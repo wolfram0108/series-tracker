@@ -18,7 +18,7 @@ const row = (over: Partial<Row> = {}): Row => ({
 })
 const ref = (season: number, episode: number, over: Partial<Reference> = {}): Reference =>
   ({ season, episode, part: null, mark: "by_level", source_id: null, row_key: null, player: null, voice_group: null, height: null,
-     reason: null, compilation: null, ...over })
+     reason: null, compilation: null, picture: null, markup: false, ...over })
 const lever = (name: string, target: string | null | undefined, value: unknown, level: Schemas["Level"]): Lever =>
   ({ lever: name, target, value, level })
 const settings = (season: number, episode: number, levers: Lever[] = []): Schemas["EpisodeSettings"] =>
@@ -334,6 +334,17 @@ describe("the strip and the state of an episode", () => {
     const cells = trackCells(view("completed", dubOf("B", "running"), dubOf("C", "error")), ["C", "A", "B", "D"])
     expect(cells.map((cell) => [cell.pos, cell.group, cell.state, cell.isReference])).toEqual([
       [1, "C", "error", false], [2, "A", "done", true], [3, "B", "align", false], [4, "D", "none", false]])
+  })
+
+  it("takes the own sound of a cut video for the picture's voice-over, the sound of its timeline being a track", () => {
+    const cut = episodeOf({
+      references: [{ ...ref1, voice_group: "Оригинал", markup: true,
+                     picture: { source_id: 8, player: "vk", height: 2160, voice_group: "ПВА" } }],
+      dubs: [dubOf("B", "done"), dubOf("Оригинал", "done")],
+      files: [{ unique_id: "u", source_id: 7, row_key: "a", status: "completed" }],
+    })
+    expect(trackCells(cut, ["ПВА", "B", "Оригинал"]).map((cell) => [cell.group, cell.state, cell.isReference])).toEqual([
+      ["ПВА", "done", true], ["B", "done", false], ["Оригинал", "done", false]])
   })
 
   it("colours an episode by the worst of its tracks, and by its switch", () => {

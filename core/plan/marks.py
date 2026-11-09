@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from core.contracts import CompilationRef, Reference, ReferenceMark
+from core.contracts import CompilationRef, CutPicture, Reference, ReferenceMark
 from core.reasons import reason
 
 from .planner import Plan
@@ -70,6 +70,12 @@ def references_of(inputs: Inputs, made: Plan,
                 "reference_other_player", taken=snapshot.player, missing=wanted[2],
                 taken_source=single.timeline.source_id, missing_source=wanted[1])
         cut_of = video.row.id if video.kind == "cut" else video.container.video.cut_of if video.container is not None else None
+        # The picture of a cut video: the row it is cut out of, as the plan has it now or as its file was made.
+        picture = None
+        if cut_of is not None:
+            shot = video.snapshot if video.kind == "cut" else video.container.video.snapshot
+            picture = CutPicture(source_id=cut_of.source_id, player=shot.player, height=shot.height,
+                                 voice_group=shot.variant_label or None)
         # The reference is the single video (the timeline a cut is made on): its row as the layout has it now, or, for a
         # row the source forgot, the snapshot of its file.
         found.append(Reference(
@@ -77,5 +83,6 @@ def references_of(inputs: Inputs, made: Plan,
             row_key=single.timeline.row_key, player=row.player if row is not None else snapshot.player,
             voice_group=(row.label or row.group) if row is not None else (snapshot.variant_label or None),
             height=row.height if row is not None else snapshot.height, reason=why,
-            compilation=members.get((cut_of.source_id, cut_of.row_key)) if cut_of is not None else None))
+            compilation=members.get((cut_of.source_id, cut_of.row_key)) if cut_of is not None else None,
+            picture=picture, markup=goal.markup is not None and single.timeline == goal.markup.id))
     return found

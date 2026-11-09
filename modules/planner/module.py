@@ -52,8 +52,9 @@ Events out:
       series is at (the card of the series), told when it changes; all false when the sync ends.
   work.series.state (owner `planner`).
 Events in: downloads.fetch.finished, conform.job.finished, conform.job.removed, system.started (syncs under way are taken up
-  again, a journal a stop cut short is carried out), series.deleted, composition.changed, voices.settings.changed and
-  series.updated with the episodes switched off (the plan is counted again from the tables and the window told: nothing on
+  again, a journal a stop cut short is carried out), series.deleted, composition.changed, voices.settings.changed,
+  series.source.updated (the markup reference of the series, stage 14: the source whose rows give the timeline of every
+  episode, read with the card of the series) and series.updated with the episodes switched off (the plan is counted again from the tables and the window told: nothing on
   disk changes between syncs).
 """
 from __future__ import annotations
@@ -250,22 +251,23 @@ class BusSync(SeriesSync):
         the queue of the alignment service and the log show it. A name another step of the sync took gets its key."""
         series = self.series.get("name_en") or self.series["name"]
         episode = label_of(op.slot) if op.slot else f"s{row.season:02d}e{row.start:02d}-e{row.end:02d}"
-        what = (f"видео для вырезки {row.player} {row.height}p" if op.id.startswith("ref2:") else
-                {"download_video": f"видео {row.player} {row.height}p", "download_dub": f"озвучка {row.group or row.label}",
-                 "download_compilation": f"компиляция {row.player} {row.height}p"}.get(op.kind, op.kind))
+        picture = f"компиляция {row.player} {row.height}p" if row.compilation else f"видео для разбора {row.player} {row.height}p"
+        what = {"download_video": f"видео {row.player} {row.height}p", "download_dub": f"озвучка {row.group or row.label}",
+                "download_picture": picture}.get(op.kind, op.kind)
         name = sanitize_name(f"{series} {episode} — {what}")
         if self.download_names.setdefault(name, op.id) != op.id:
             name = f"{name} {key.split(':')[-1]}"
         return name + ".mp4"
 
     async def _height_cap(self, op) -> int | None:
-        """The highest a download may be: the video of the reference is taken whole; everything else not above 720p (the
-        owner's rule, stage 10) — a voice-over only gives its sound, the single video a compilation is cut by only shows
-        where to cut; the compilation itself at the height of the setting `voices.cut_max_height` (none: the best)."""
-        if op.kind == "download_compilation":
+        """The highest a download may be: a single video is taken whole — the video of the reference, and the timeline a
+        cut is laid on, which gives the cut its edges and its sound (stage 14); a voice-over not above 720p (the owner's
+        rule, stage 10), it only gives its sound; the picture of a cut at the height of the setting
+        `voices.cut_max_height` (none: the best)."""
+        if op.kind == "download_picture":
             height = int((await self.m.request("voices.settings.get", {})).get("cut_max_height") or 0)
             return height or None
-        if op.kind == "download_dub" or op.id.startswith("ref2:"):
+        if op.kind == "download_dub":
             return OTHER_MAX_HEIGHT
         return None
 
@@ -330,7 +332,7 @@ class BusSync(SeriesSync):
         for op in ops:  # the name the file of each voice-over has in the job (the job taken up again has the same)
             way = op.subject[1]
             if way.kind == "download":
-                name = os.path.basename(results[f"dub:{goal.slot}:{way.dub}"].file)
+                name = os.path.basename(results[f"dub:{way.dub}"].file)
             else:
                 source = (await self.files.source_of(way.container, way.dub, way.own))[0]
                 name = sanitize_name(way.voice) + os.path.splitext(source)[1]
@@ -377,7 +379,7 @@ class BusSync(SeriesSync):
         for op in ops:
             way = op.subject[1]
             if way.kind == "download":
-                dub, stream = results[f"dub:{goal.slot}:{way.dub}"].file, 0
+                dub, stream = results[f"dub:{way.dub}"].file, 0
                 if not dub.startswith(self.downloads_dir):
                     dub = await self._copy(dub, os.path.join(folder, "dub"))
             else:  # out of a file of the library: copied once, each voice-over a name of its own (a link to the copy)
@@ -398,7 +400,8 @@ class BusSync(SeriesSync):
 
     async def _cut(self, op, results):
         way = op.subject
-        ref2 = (self.files.path(way.ref2.container.name) if way.ref2.kind == "asset" else results[f"ref2:{op.slot}"].file)
+        ref2 = (self.files.path(way.ref2.container.name) if way.ref2.kind == "asset"
+                else results[f"row:{way.ref2.row.id}"].file)
         key = self._job_key("cut", op.slot, way.row.id, ref2)
         label = f"{self.series['name']} {label_of(op.slot)}"
         folder = os.path.join(self.conform_dir, f"{label_of(op.slot)} #{key}")
@@ -412,9 +415,15 @@ class BusSync(SeriesSync):
             atrack = 0
             if way.ref2.kind == "asset":
                 atrack = await self.files.stream_of(way.ref2.container, way.ref2.container.video.id, True)
+            # The picture: a file of the library (its own sound by its tags) or this sync's download of its row.
+            if way.picture is not None:
+                picture = self.files.path(way.picture.name)
+                picture_atrack = await self.files.stream_of(way.picture, way.picture.video.id, True)
+            else:
+                picture, picture_atrack = results[f"picture:{way.row.id}"].file, 0
             found = await self.m.job(key, "conform.reverse", body={
-                "compilation": results[f"compilation:{way.row.id}"].file, "episodes": [{"path": episode, "atrack": atrack}],
-                "out_dir": places["out_dir"], "label": label})
+                "compilation": picture, "compilation_atrack": picture_atrack,
+                "episodes": [{"path": episode, "atrack": atrack}], "out_dir": places["out_dir"], "label": label})
         if found is None:
             return None
         job_id, ended = found
@@ -497,6 +506,7 @@ class PlannerModule(BaseModule):
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("composition.changed", self.on_layout_changed)
         self.handle("series.updated", self.on_series_updated)
+        self.handle("series.source.updated", self.on_source_updated)
         self.handle("voices.settings.changed", self.on_voice_settings_changed)
 
     # --- the sync -----------------------------------------------------------------------------------------------
@@ -615,11 +625,14 @@ class PlannerModule(BaseModule):
         slots = {row.slot[:2] for row in online if not row.compilation}
         off = {slot for slot in slots if slot[0] in ignored_seasons or slot[1] in ignored.get(slot[0], set())}
         order = {each.season: [span.label for span in each.voices] for each in layout.voice_orders}
-        sources = [SeriesSource.model_validate(each).id for each in series.get("sources", [])]
+        stored = [SeriesSource.model_validate(each) for each in series.get("sources", [])]
+        sources = [each.id for each in stored]
+        markup = next((each.id for each in stored if each.markup), None)
         choices = choices_of(layout.rows, online, [(each.season, each.episode, each.levers) for each in layout.settings],
                              [(each.compilation, each.levers) for each in layout.levels if each.compilation],
                              players=voices.get("priority") or [], player_groups=Groups.of(voices.get("player_groups") or {}),
-                             sources=sources, voice_order=order, off_episodes=off, titles=layout.voice_titles)
+                             sources=sources, voice_order=order, off_episodes=off, titles=layout.voice_titles,
+                             markup=markup)
         return online, choices
 
     # --- the journal ---------------------------------------------------------------------------------------------
@@ -956,6 +969,11 @@ class PlannerModule(BaseModule):
         """The user switched an episode or a season off or on (the memory of the series): the plan is counted again."""
         if {"ignored_seasons", "ignored_episodes"} & set(env.payload or {}):
             await self._publish_view(int(env.payload["series_id"]))
+
+    async def on_source_updated(self, env: Envelope) -> None:
+        """A source of the series changed — its mark of the markup reference among them (stage 14), which the plan reads
+        with the card of the series: the plan is counted again and the window told."""
+        await self._publish_view(int(env.payload["series_id"]))
 
     async def on_voice_settings_changed(self, env: Envelope) -> None:
         for series_id in await self.repo.series_with_assets():

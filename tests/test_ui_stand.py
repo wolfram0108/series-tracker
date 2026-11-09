@@ -445,3 +445,62 @@ async def test_the_name_of_a_track_given_on_its_chip_is_its_title_in_the_file_af
     held = await mkv.contents(os.path.join(ui.library, asset["name"]))
     assert [track.title for track in held.audio] == ["AniStar", "AnimeVost"]
     await expect(page.locator(".output-failure")).to_have_count(0)
+
+
+async def test_a_source_marked_the_markup_reference_lays_the_episode_onto_it_and_its_sound_goes_last(ui):
+    """Stage 14: a high picture (ПВА 2160p) and the original in the right structure (1080p). The user marks the original
+    the markup reference on its card: the sync cuts the picture onto the original's timeline, the original's sound is the
+    last of the file and the card names the markup reference; taking the mark off does no work but the order of sounds."""
+    ui.site.release("pva", "ПВА")
+    ui.site.release("orig", "Оригинал")
+    ui.site.release("dub", "AnimeVost")
+    ui.site.episode("pva", 1, height=2160)
+    ui.site.episode("orig", 1, height=1080)
+    ui.site.episode("dub", 1, height=480)
+    series_id = await ui.make_series(["pva", "orig", "dub"])
+    page = ui.page
+    await ui.open_output(SERIES)
+    await ui.tab("Свойства")
+    original = page.locator(".source-card").filter(has=page.locator(f"input[value='{ui.site.releases['orig'].url}']"))
+    switch = original.locator(".markup-switch input")
+    await expect(switch).not_to_be_checked()
+    await original.locator(".markup-switch").click()
+    await expect(switch).to_be_checked()
+    await ui.shot("60-markup-marked")
+    sources = {each["url"]: each for each in (await ui.call("GET", f"/api/series/{series_id}"))["sources"]}
+    assert [each["markup"] for each in sources.values()].count(True) == 1
+    assert sources[ui.site.releases["orig"].url]["markup"] is True
+
+    await ui.tab(text("output.tab"))
+    await ui.press_sync(series_id)
+    card = page.locator(".episode-card[data-episode='1']")
+    await expect(card).to_have_class(re.compile("is-ready"))
+    await expect(card.locator(".card-ref-shown .ref-markup")).to_have_count(1)
+    await expect(card.locator(".card-ref-shown")).to_contain_text("2160p")
+    # The window shows the sounds in the order the file holds them: the original last.
+    await expect(page.locator(".voice-order-item").last).to_contain_text("Оригинал")
+    await expect(page.locator(".voice-order-item.is-fixed")).to_have_count(1)
+    # Every sound of the file has its cell, the own sound of the cut (ПВА) the reference's.
+    await expect(card.locator(".is-done")).to_have_count(3)
+    await expect(card.locator(".is-done.is-reference")).to_have_count(1)
+    await ui.shot("61-markup-synced")
+    view = await ui.check(series_id)
+    (asset,) = view["assets"]
+    video = asset["video"]
+    assert video["cut_of"]["source_id"] == sources[ui.site.releases["pva"].url]["id"]
+    (goal,) = view["episodes"]
+    assert goal["video"]["row"]["source_id"] == sources[ui.site.releases["orig"].url]["id"]  # the timeline
+    held = await mkv.contents(os.path.join(ui.library, asset["name"]))
+    assert [each.label for each in held.audio][-1] == "Оригинал"
+    jobs = len(ui.daemon.jobs)
+
+    await ui.tab("Свойства")
+    await original.locator(".markup-switch").click()
+    await expect(switch).not_to_be_checked()
+    await ui.tab(text("output.tab"))
+    await ui.press_sync(series_id)
+    await expect(card.locator(".card-ref-shown .ref-markup")).to_have_count(0)
+    view = await ui.check(series_id)
+    (after,) = view["assets"]
+    assert after["video"] == video and len(ui.daemon.jobs) == jobs  # no cut, no alignment: only the order of the sounds
+    await ui.shot("62-markup-taken-off")

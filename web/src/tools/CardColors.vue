@@ -23,7 +23,7 @@ const episodes: EpisodeView[] = Array.from({ length: EPISODES }, (_, index) => {
   return {
     season: 1, episode, rows: [], levers: [], labels: { "2:vk": "VK", "3:vk": "VK" },
     references: [{ season: 1, episode, part: null, mark: "by_level", source_id: source, row_key: rowKey, player: "vk",
-      voice_group: group, height: 2160, reason: null, compilation: null }],
+      voice_group: group, height: 2160, reason: null, compilation: null, picture: null, markup: false }],
     files: [{ unique_id: rowKey, source_id: source, row_key: rowKey, status: "completed" }],
     dubs: TRACKS.filter((label) => label !== group).map((label) => ({
       season: 1, episode, part: null, voice_key: label, voice_label: label, detail: null, source_id: 3, player: "vk",

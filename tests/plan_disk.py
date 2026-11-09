@@ -338,7 +338,9 @@ class Daemon:
         if wanted in inside:
             out = os.path.join(body.out_dir, f"{os.path.basename(episode)}.cut.mkv")
             second = inside.index(wanted)
-            _run("-ss", str(second), "-i", body.compilation, "-t", "1", "-c:v", "mpeg4", "-q:v", "2", "-c:a", "aac", out)
+            # The picture and its own sound, the track the caller named (a file of the library holds several).
+            _run("-ss", str(second), "-i", body.compilation, "-t", "1", "-map", "0:v:0", "-map", f"0:a:{body.ref_atrack}",
+                 "-c:v", "mpeg4", "-q:v", "2", "-c:a", "aac", out)
             result = {"dub": episode, "ok": True, "out_path": out, "suspect": [],
                       "critical": ["критично"] if answer == "critical" else [], "error": None,
                       "from_ref_s": 1.0, "from_dub_s": 0.0}
@@ -436,9 +438,12 @@ class DiskWorld(World):
             return Made(None, path)
         if op.kind == "cut":
             way = op.subject
-            ref2 = self.library(way.ref2.container.name) if way.ref2.kind == "asset" else results[f"ref2:{op.slot}"].file
+            ref2 = (self.library(way.ref2.container.name) if way.ref2.kind == "asset"
+                    else results[f"row:{way.ref2.row.id}"].file)
+            picture = (self.library(way.picture.name) if way.picture is not None
+                       else results[f"picture:{way.row.id}"].file)
             label = f"cut {label_of(op.slot)}"
-            result = await self._daemon("reverse", {"compilation": results[f"compilation:{way.row.id}"].file,
+            result = await self._daemon("reverse", {"compilation": picture,
                                                     "episodes": [ref2], "out_dir": os.path.join(self.root, "work"),
                                                     "extend_edges": True, "label": label})
             if result is None:
@@ -450,7 +455,7 @@ class DiskWorld(World):
             goal, way = op.subject
             video_path = self.files.video_path(goal, results)
             if way.kind == "download":
-                dub, stream = results[f"dub:{goal.slot}:{way.dub}"].file, 0
+                dub, stream = results[f"dub:{way.dub}"].file, 0
             else:
                 dub, stream = self.library(way.container.name), await self.files.stream_of(way.container, way.dub, way.own)
             label = f"{label_of(goal.slot)} {way.voice}"

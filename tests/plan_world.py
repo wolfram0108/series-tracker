@@ -14,9 +14,11 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import Iterable
 
+from core.contracts import PlannerView
 from core.plan.executor import DOWNLOADS, Made, Passing, SeriesSync, video_of
 from core.plan.planner import OFF, Goal, Plan, own_track, plan, switched_off, voice_of
 from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
+from modules.planner.view import view_of
 
 
 def truth_of(season: int, episode: int, part: int | None = None) -> int:
@@ -73,6 +75,8 @@ class World(SeriesSync):
     namer: object = None
     commands: frozenset = frozenset()
     passing: set = field(default_factory=set)
+    # The downloads made in the sync under way, by the row: a row is downloaded once in a sync (Э-7).
+    fetched: Counter = field(default_factory=Counter)
 
     # --- the sources -------------------------------------------------------------------------------------------
 
@@ -146,7 +150,10 @@ class World(SeriesSync):
         rows = tuple(replace(row, position=place) for place, row in
                      enumerate(row for source in sorted(self.online) for row in self.online[source]))
         self.commands = self.choices.delete
+        self.fetched = Counter()
         synced = asyncio.run(SeriesSync.sync(self, rows, self.choices))
+        twice = [row for row, count in self.fetched.items() if count > 1]
+        assert not twice, f"rows downloaded twice in one sync: {twice}"
         inputs = synced.inputs
         self.choose(delete=self.commands)
         step = Step(title, inputs.online, synced.before, synced.plan, tuple(sorted(synced.failed)), synced.applied,
@@ -165,6 +172,8 @@ class World(SeriesSync):
     async def do(self, op, results):
         if op.kind in DOWNLOADS and op.subject.id in self.transient:
             raise Passing
+        if op.kind in DOWNLOADS and op.subject.id not in self.download_fails:
+            self.fetched[(op.kind, op.subject.id)] += 1
         if op.kind == "download_video":
             row = op.subject
             if row.id in self.download_fails:
@@ -172,12 +181,13 @@ class World(SeriesSync):
             video = Video(row.id, row.snapshot(), row.slot, row.id)
             self.content[video.key] = self._truth(("site", row.id))
             return Made(video)
-        if op.kind == "download_compilation":
+        if op.kind == "download_picture":
             return None if op.subject.id in self.download_fails else Made(None, self._truth(("site", op.subject.id)))
         if op.kind == "cut":
             way = op.subject
-            ref2 = way.ref2.container.video if way.ref2.kind == "asset" else results[f"ref2:{op.slot}"].value
-            inside = results[f"compilation:{way.row.id}"].file
+            ref2 = way.ref2.container.video if way.ref2.kind == "asset" else results[f"row:{way.ref2.row.id}"].value
+            inside = (self.content[way.picture.video.key] if way.picture is not None
+                      else results[f"picture:{way.row.id}"].file)
             truth = self.content[ref2.key]
             answer = self.cut_answers.get(op.slot)
             if answer == "lost":
@@ -224,6 +234,8 @@ class World(SeriesSync):
                     truth = self.content[way.container.video.key]
                 elif way.kind == "reuse":
                     truth = self.content[("track", way.container.name, way.dub)]
+                elif way.kind == "timeline":  # the sound of the timeline's own download: the episode it truly is
+                    truth = self.content[("row", way.dub)]
                 else:
                     truth = self.aligned_truth(results[f"align:{slot}:{way.voice}"])
                 moved[("track", goal.name, way.dub)] = truth
@@ -243,6 +255,8 @@ class World(SeriesSync):
         step = step or self.history[-1]
         again = plan(Inputs(step.online, step.before, step.choices, step.failed_rows))
         assert repr(again) == repr(step.plan), "the plan is not a function of its inputs"
+        # Whatever the plan is, the window is told it in the terms of its contract.
+        PlannerView.model_validate(view_of(0, self, step.plan, running=False, rows=step.online))
         online = {row.id: row for row in step.online}
 
         def slot_of_track(track: Track) -> Slot:
@@ -290,6 +304,22 @@ class World(SeriesSync):
                 voice_of(other.video.snapshot.group, other.video.timeline) == voice
                 or any(voice_of(each.group, each.dub) == voice for each in other.tracks)) for other in step.after)
             assert lives, f"the own sound {voice} of {container.name} went with nothing in its place"
+        # The markup reference (stage 14): an episode with its row lies on its timeline, unless the episode takes no new
+        # work (switched off, or a deleted video that waits); a cut is only of a picture higher than its timeline; the
+        # sound of the timeline is never aligned to it.
+        for goal in step.plan.goals:
+            video = goal.video
+            if goal.markup is not None and not goal.off and not (
+                    video.container is not None and video.container.name in deleted_names(step.choices)):
+                assert video.timeline == goal.markup.id, f"{goal.name}: not on the timeline of the markup reference"
+            if video.kind == "cut":
+                ref2 = online.get(video.timeline)
+                assert ref2 is None or video.row.height > ref2.height, f"{goal.name}: a cut no higher than its timeline"
+        for op in step.plan.ops:
+            if op.kind == "align":
+                goal, way = op.subject
+                assert not (way.kind == "download" and way.dub == goal.video.timeline), \
+                    f"{goal.name}: the sound of the timeline is aligned to itself"
         # A group whose work failed changes none of its files.
         for group in step.plan.groups:
             if group.slots in step.applied:
@@ -315,12 +345,19 @@ class World(SeriesSync):
             assert not any(group.remove or group.hide for group in fixpoint.groups), "after a sync files still move"
             # The sounds of every visible file, the own sound of its video among them, follow the order of its season.
             order = (step.choices_after or step.choices).groups
+            markups = {goal.name: goal.markup for goal in fixpoint.goals}
             for container in step.after:
                 if container.off:
                     continue
                 places = {voice: place for place, voice in enumerate(order.get(_slot_of_video(container.video, online)[0], ()))}
                 sounds = [voice_of(track.group, track.dub) for track in container.tracks]
                 sounds.insert(container.own_at, voice_of(container.video.snapshot.group, container.video.timeline))
+                # The sound of the markup reference is the last one, out of the order of the season (Э-5).
+                markup = markups.get(container.name)
+                if markup is not None and voice_of(markup.group, markup.id) in sounds:
+                    assert sounds[-1] == voice_of(markup.group, markup.id), \
+                        f"{container.name}: the sound of the markup reference is not the last one: {sounds}"
+                    sounds = sounds[:-1]
                 ranks = [places[voice] for voice in sounds if voice in places]
                 assert ranks == sorted(ranks), f"{container.name}: the sounds {sounds} are out of the order of the season"
                 # Every sound of a visible file bears the name the user gave its group, and only that one.
@@ -328,6 +365,10 @@ class World(SeriesSync):
                 titles = (step.choices_after or step.choices).titles
                 assert dict(container.titles) == {label: title for label, title in titles.items() if label in labels}, \
                     f"{container.name}: the titles {container.titles} are not the user's {titles}"
+
+
+def deleted_names(choices: Choices) -> set[str]:
+    return {each[1] for each in choices.delete if each[0] == "video"}
 
 
 def _slot_of_video(video: Video, online: dict[RowId, OnlineRow]) -> Slot:
@@ -347,7 +388,7 @@ class Chaos:
                "wrong_number", "higher", "swap_video", "delete_video", "delete_track", "off", "on", "off_group",
                "off_compilation", "reference_order", "shuffle_voices", "title", "read_fail", "download_fail", "transient",
                "answer", "cut_answer", "lose_file", "reset", "reference_deny", "voice_order", "voice_deny", "voice_off",
-               "member", "levers_reset", "put_parts")
+               "member", "levers_reset", "put_parts", "markup", "put_high")
 
     def __init__(self, world: World, rng, seasons=(1, 2), episodes=(1, 2, 3, 4), reference: str = "AniStar",
                  groups: tuple[str, ...] | None = None, actions: tuple[str, ...] | None = None) -> None:
@@ -451,6 +492,13 @@ class Chaos:
                 world.put(rng.choice((1, 3)), self._key("p"), episode, season=season, group=self.reference,
                           player=rng.choice(("vk", "cvh")), part=part)
                 world.put(2, self._key("q"), episode, season=season, group=rng.choice(self.groups), player="kodik", part=part)
+        elif action == "markup":
+            # The owner marks a source the markup reference, moves the mark or takes it off (stage 14).
+            world.choose(markup=rng.choice((None, 1, 3)))
+        elif action == "put_high":
+            # A single video higher than the references: a picture to cut onto the timeline of the markup reference.
+            world.put(rng.choice((1, 3)), self._key("h"), episode, season=season, group=rng.choice((self.reference, "A")),
+                      player="vk", height=2160)
         elif action == "levers_reset":
             world.choose(reference={}, reference_deny={}, voice_order={}, voice_deny={}, voice_off={}, member={})
         elif action == "shuffle_voices":

@@ -170,6 +170,9 @@ class Choices:
     delete: frozenset[tuple] = frozenset()
     # The episodes whose levers of the reference are their own (set on the episode itself, not on a level above it).
     own_reference: frozenset[Slot] = frozenset()
+    # The source the owner marked the markup reference of the series (stage 14): its row of an episode is the timeline
+    # of the episode's video, and a higher video is cut onto it.
+    markup: int | None = None
 
 
 @dataclass(frozen=True)

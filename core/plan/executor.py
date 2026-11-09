@@ -11,10 +11,10 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from typing import Callable
 
-from .planner import Goal, Group, Op, Plan, plan
+from .planner import Goal, Group, Op, Plan, plan, video_op
 from .tables import Choices, Container, Inputs, OnlineRow, Slot, Track, Video
 
-DOWNLOADS = ("download_video", "download_dub", "download_compilation")
+DOWNLOADS = ("download_video", "download_dub", "download_picture")
 
 
 class Passing(Exception):
@@ -74,7 +74,7 @@ def carried(op: Op, done: dict[str, tuple[object, Made]], results: dict[str, Mad
 def video_of(goal: Goal, results: dict[str, Made]) -> Video:
     if goal.video.kind == "asset":
         return goal.video.container.video
-    return results[f"video:{goal.slot}" if goal.video.kind == "download" else f"cut:{goal.slot}"].value
+    return results[video_op(goal)].value
 
 
 def problems_of(made: Plan, passing: set[str], reasons: dict[str, str]) -> tuple[tuple, ...]:
@@ -85,7 +85,10 @@ def problems_of(made: Plan, passing: set[str], reasons: dict[str, str]) -> tuple
         if op.id not in passing:
             continue
         voice = op.subject[1].voice if isinstance(op.subject, tuple) else getattr(op.subject, "group", None)
-        found.append((op.slot, op.kind, voice, reasons.get(op.id, "")))
+        # A step several episodes share (the download of a compilation) is told to each episode that waits for it.
+        slots = [op.slot] if op.slot is not None else sorted({each.slot for each in made.ops if op.id in each.needs
+                                                               and each.slot is not None})
+        found += [(slot, op.kind, voice, reasons.get(op.id, "")) for slot in slots]
     return tuple(found)
 
 
@@ -120,6 +123,8 @@ def table_after(containers: dict[str, Container], made: Plan, group: Group, resu
             elif way.kind == "reuse":
                 track = next(each for each in way.container.tracks if each.dub == way.dub)
                 tracks.append(replace(track, episode=slot, tag="", file=""))  # a new file keys it by its row and holds it
+            elif way.kind == "timeline":
+                tracks.append(Track(way.dub, way.snapshot, slot, video.timeline))
             else:
                 tracks.append(results[f"align:{slot}:{way.voice}"].value)
         built[goal.name] = Container(goal.name, video, tuple(tracks), goal.off, goal.own_at, goal.titles)

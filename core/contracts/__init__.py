@@ -14,7 +14,7 @@ from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, Confor
 from .output_settings import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, GroupQueue, GroupVariant, PlayerVariant, Queue, QueueRow, QueueView, QueuesGet, QueuesReply, EffectiveLever, EpisodeSettings, LeverSpec,
                               Level, LevelSettings, SettingRecord, SettingsReset, SettingsSet,
                               TargetKind, ValueShape, group_target, parse_group_target, parse_variant_target, variant_target)
-from .reference import OutputSwitch, Reference, ReferenceChanged, ReferenceMark
+from .reference import CutPicture, OutputSwitch, Reference, ReferenceChanged, ReferenceMark
 from .release_table import (LINE_FIELDS, LINE_SEPARATOR, ReleaseTable, RowState, RowVoice, SiteResolveReply, SiteResolveRequest,
                             SeriesReadProgress, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableRow,
                             TableState, UnreadPart, line_of, place_of)
@@ -42,7 +42,7 @@ __all__ = ["Absence", "CompilationEpisode", "CompilationRef", "CompilationView",
            "REFERENCE_ALLOW", "REFERENCE_ORDER", "VOICE_ALLOW", "VOICE_ORDER", "VOICE_TAKE", "GroupQueue", "GroupVariant", "PlayerVariant", "Queue", "QueueRow", "QueueView", "QueuesGet", "QueuesReply", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "SettingRecord", "SettingsReset", "SettingsSet",
            "TargetKind", "ValueShape",
            "group_target", "parse_group_target", "parse_variant_target", "variant_target",
-           "OutputSwitch", "Reference", "ReferenceChanged", "ReferenceMark",
+           "CutPicture", "OutputSwitch", "Reference", "ReferenceChanged", "ReferenceMark",
            "GroupsResolveReply", "GroupsResolveRequest"]
 
 from .planner import (PlanAsset, PlanAssetTrack, PlanAssetVideo, PlanCommand, PlanDelete, PlanEpisode,  # noqa: E402

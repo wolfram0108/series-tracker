@@ -2029,6 +2029,27 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * CutPicture
+         * @description The row whose picture a cut video of an episode is: a compilation, or a single row higher than the markup
+         *     reference (stage 14).
+         */
+        CutPicture: {
+            /** Source Id */
+            source_id: number;
+            /** Player */
+            player: string;
+            /**
+             * Height
+             * @default null
+             */
+            height: number | null;
+            /**
+             * Voice Group
+             * @default null
+             */
+            voice_group: string | null;
+        };
+        /**
          * DynamicObject
          * @description Динамический ответ (форма зависит от данных/типа серии): главы,
          *     композиция, медиа-элементы, превью. extra='allow' пропускает всё —
@@ -2423,6 +2444,11 @@ export interface components {
             tracks?: components["schemas"]["PlanGoalTrack"][];
             /** Voices Off */
             voices_off?: string[];
+            /**
+             * Markup
+             * @default null
+             */
+            markup: string | null;
         };
         /**
          * PlanFailure
@@ -2449,7 +2475,8 @@ export interface components {
         /**
          * PlanGoalTrack
          * @description How a voice-over of an episode is obtained: `reuse` (the file holds it aligned), `download`, `realign` (out of the
-         *     file it lies in, aligned to the new video). `own` is the own sound of a video the episode no longer has.
+         *     file it lies in, aligned to the new video), `timeline` (the sound of the single video a cut video is laid onto: taken
+         *     from its download, in step with no alignment). `own` is the own sound of a video the episode no longer has.
          */
         PlanGoalTrack: {
             /**
@@ -2488,7 +2515,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "reuse" | "download" | "realign";
+            kind: "reuse" | "download" | "realign" | "timeline";
             row: components["schemas"]["PlanRowRef"];
             /**
              * Own
@@ -2735,7 +2762,8 @@ export interface components {
          * @description `reason` is a code of core/reasons: for `other_player` it names the player taken and the one missing.
          *
          *     `compilation` is the compilation the episode stands in (stage 12): its video is cut out of it on the timeline of the
-         *     single video this reference names (REF 2).
+         *     single video this reference names (REF 2). `picture` is the row the cut video takes its picture from, whatever it is;
+         *     `markup`: the single video is the markup reference of the series (stage 14).
          */
         Reference: {
             /** Season */
@@ -2780,6 +2808,13 @@ export interface components {
             reason: string | null;
             /** @default null */
             compilation: components["schemas"]["CompilationRef"] | null;
+            /** @default null */
+            picture: components["schemas"]["CutPicture"] | null;
+            /**
+             * Markup
+             * @default false
+             */
+            markup: boolean;
         };
         /**
          * ReferenceMark
@@ -3000,6 +3035,11 @@ export interface components {
              * @default 0
              */
             color: number;
+            /**
+             * Markup
+             * @default false
+             */
+            markup: boolean;
         };
         /**
          * SeriesUpdate
@@ -3073,6 +3113,11 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[];
+            /**
+             * Markup
+             * @default false
+             */
+            markup: boolean;
             /** Position */
             position?: number | null;
         };
@@ -3091,6 +3136,8 @@ export interface components {
             players_off?: string[] | null;
             /** Position */
             position?: number | null;
+            /** Markup */
+            markup?: boolean | null;
         };
         /**
          * SourceDraft
@@ -3106,6 +3153,11 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[];
+            /**
+             * Markup
+             * @default false
+             */
+            markup: boolean;
         };
         /**
          * SourceStatus

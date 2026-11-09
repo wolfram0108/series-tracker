@@ -111,6 +111,8 @@ class ReverseSubmit(BaseModel):
     (the compilation is prepared once for the folder)."""
 
     compilation: str
+    # The audio track of the picture file that is its own sound (a file of the library holds several).
+    compilation_atrack: int = 0
     episodes: list[ReverseEpisode]
     out_dir: str
     label: str | None = None

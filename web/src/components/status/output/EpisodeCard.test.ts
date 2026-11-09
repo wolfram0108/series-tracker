@@ -29,7 +29,7 @@ const marks = { 7: { n: 1, color: 0, place: "ruchime.org" }, 8: { n: 2, color: 1
 const badge = { key: "k", letter: "A", color: 3 }
 const words = (parts: ReturnType<typeof refVariants>[number]) =>
   parts.map((part) => part.kind === "mark" ? `[${part.sourceId}]` : part.kind === "letter" ? "[A]"
-    : part.kind === "height" ? `${part.height}p` : part.text).join(" ")
+    : part.kind === "height" ? `${part.height}p` : part.kind === "markup" ? "[эталон]" : part.text).join(" ")
 
 describe("the line of where the picture of an episode is from", () => {
   it("for a cut episode grows from the source, the compilation and the height of the picture to the players and the places", () => {
@@ -39,6 +39,20 @@ describe("the line of where the picture of an episode is from", () => {
       "[7] Vibix 720p [A] Kodik 2160p",
       "[7] ruchime.org Vibix 720p [A] vkvideo.ru @mir Kodik 2160p",
     ])
+  })
+
+  it("for an episode on the markup reference names it and shows the single picture by the mark of its source", () => {
+    const view = viewOf(false)
+    view.references = [{ ...view.references[0], markup: true, picture: { source_id: 8, player: "kodik", height: 2160, voice_group: "Ruchime" } }]
+    expect(refVariants(view, marks).map(words)).toEqual([
+      "[7] [эталон] [A] 2160p",
+      "[7] [эталон] 720p [A] 2160p",
+      "[7] [эталон] Vibix 720p [A] Kodik 2160p",
+      "[7] [эталон] ruchime.org Vibix 720p [A] vkvideo.ru @mir Kodik 2160p",
+    ])
+    const w = mount(EpisodeCard, { props: { view, cells, status: "ready", marks } })
+    expect(w.find(".card-ref-shown .ref-markup").attributes("title")).toBe(t("output.reference.markup"))
+    expect(w.find(".card-ref-shown .ref-letter").exists()).toBe(false)  // no compilation: the mark of the source instead
   })
 
   it("for an episode that is not cut grows from its source and height to its player and its place", () => {

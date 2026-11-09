@@ -43,7 +43,7 @@ describe("useSourceDrafts", () => {
     expect(drafts.items.value[0]).toMatchObject({ sourceType: "web_video", url: PAGE, profileId: null })
     expect(drafts.items.value[0].view.state).toBe("reading")
     expect(drafts.bodies.value).toEqual([{
-      url: PAGE, source_type: "web_video", parser_profile_id: null, vibix_season: null, players_off: [],
+      url: PAGE, source_type: "web_video", parser_profile_id: null, vibix_season: null, players_off: [], markup: false,
     }])
   })
 

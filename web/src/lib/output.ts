@@ -362,8 +362,10 @@ export function outputLines(view: EpisodeView): OutputLine[] {
     if ((reference.source_id ?? null) === null) continue
     const player = reference.player ?? null
     const file = (view.files ?? []).find((each) => each.source_id === reference.source_id && each.row_key === (reference.row_key ?? null))
+    // The own sound of the file: of the picture for a cut video, of the reference's single video otherwise.
+    const own = reference.picture?.voice_group ?? reference.voice_group ?? ""
     lines.push({
-      key: `reference:${reference.part ?? 0}`, kind: "reference", group: reference.voice_group ?? "", part: reference.part ?? null,
+      key: `reference:${reference.part ?? 0}`, kind: "reference", group: own, part: reference.part ?? null,
       player, playerLabel: labelOf(reference.source_id ?? null, player), height: reference.height ?? null,
       file: file?.status ?? null, dub: null, online: file?.online ?? null,
     })
@@ -390,11 +392,13 @@ export interface CutPicture {
 }
 
 export function cutPictureOf(view: EpisodeView): CutPicture | null {
-  const compilation = view.references.find((each) => each.compilation)?.compilation
-  if (!compilation) return null
+  // The picture of a cut: a compilation (its letter), or a single row higher than the markup reference (stage 14).
+  const picture = view.references.find((each) => each.compilation)?.compilation
+    ?? view.references.find((each) => each.picture)?.picture
+  if (!picture) return null
   return {
-    sourceId: compilation.source_id, player: compilation.player,
-    playerLabel: view.labels?.[`${compilation.source_id}:${compilation.player}`] ?? compilation.player, height: compilation.height ?? null,
+    sourceId: picture.source_id, player: picture.player,
+    playerLabel: view.labels?.[`${picture.source_id}:${picture.player}`] ?? picture.player, height: picture.height ?? null,
   }
 }
 
@@ -405,6 +409,7 @@ export type RefPart =
   | { kind: "place"; text: string }
   | { kind: "player"; text: string }
   | { kind: "height"; height: number }
+  | { kind: "markup" }
 
 /**
  * The line of where the picture of an episode is from, from the least detailed to the most (priority+: a card shows the
@@ -428,10 +433,12 @@ export function refVariants(view: EpisodeView, marks: Record<number, SourceMark>
   const single = picture === null ? line.online
     : view.rows.some((row) => row.source_id === head?.source_id && row.row_key === head?.row_key)
   const mark: RefPart = { kind: "mark", sourceId, online: single }
+  // The reference is the markup reference of the series: the line says so right after its source.
+  const markup: RefPart[] = head?.markup ? [{ kind: "markup" }] : []
   const letter: RefPart | null = picture === null ? null : { kind: "letter", sourceId: picture.sourceId, online: line.online }
-  const reference = (detail: number): RefPart[] => [mark, ...words(sourceId, line.playerLabel ?? line.player, line.height, detail)]
+  const reference = (detail: number): RefPart[] => [mark, ...markup, ...words(sourceId, line.playerLabel ?? line.player, line.height, detail)]
   const variants = picture === null || letter === null ? [0, 1, 2].map(reference) : [
-    [mark, letter, ...words(picture.sourceId, null, picture.height, 0)],
+    [mark, ...markup, letter, ...words(picture.sourceId, null, picture.height, 0)],
     ...[0, 1, 2].map((detail) => [...reference(detail), letter, ...words(picture.sourceId, picture.playerLabel, picture.height, detail)]),
   ]
   // A detail the episode has not (no place, no player) makes a variant like the one before it: it is not repeated.

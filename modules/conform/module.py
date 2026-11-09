@@ -28,9 +28,11 @@ Query:
       daemon's history on its own, unless it ended in an error; off, the history keeps it until the owner deletes it.
   conform.settings.set {url, work_dir, work_dir_remote} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
       through settings.values.set_many and taken at once, or refused with coded problems and nothing written.
-  conform.reverse ReverseSubmit {compilation, episodes: [{path, atrack}], out_dir, label?} -> ReverseReply {outcome, jobs,
-      reason?, retry} (stage 12): episodes cut out of one compilation, one job of kind `reverse` each, on the timeline
-      of the single video of the episode (the edges the compilation lacks are taken from it). The folder of each episode
+  conform.reverse ReverseSubmit {compilation, compilation_atrack?, episodes: [{path, atrack}], out_dir, label?} ->
+      ReverseReply {outcome, jobs, reason?, retry} (stages 12 and 14): the picture of one video (a compilation, or a
+      single episode higher than the markup reference) laid onto the timeline of the single video of each episode, one
+      job of kind `reverse` each (what the picture lacks is taken from that video); `compilation_atrack` is the audio
+      track of the picture that is its own sound. The folder of each episode
       is the label of its job and carries the key that finds it again (`… #key`); `jobs` maps the keys to the jobs the
       service named. The outcome reads as for conform.submit; a key the answer does not name is asked by its key.
   conform.workspace {} -> {downloads, conform}: the two folders inside the work folder, where voice-overs wait for
@@ -298,7 +300,8 @@ class ConformModule(BaseModule):
             body = {"compilation": translate(request.compilation, mapping),
                     "episodes": [translate(each.path, mapping) for each in request.episodes],
                     "out_dir": translate(request.out_dir, mapping), "extend_edges": True, "keep_tmp": False,
-                    "label": label, "dub_atracks": [each.atrack for each in request.episodes], "audio_method": AUDIO_METHOD}
+                    "label": label, "ref_atrack": request.compilation_atrack,
+                    "dub_atracks": [each.atrack for each in request.episodes], "audio_method": AUDIO_METHOD}
         except ValueError as exc:
             self.log.warning("conform: разбор %s отклонён: %s", label, describe(str(exc)))
             return ReverseReply(outcome=SubmitOutcome.REJECTED, reason=str(exc)).model_dump()

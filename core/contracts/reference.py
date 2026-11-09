@@ -20,11 +20,23 @@ class ReferenceMark(StrEnum):
     OFF = "off"
 
 
+class CutPicture(BaseModel):
+    """The row whose picture a cut video of an episode is: a compilation, or a single row higher than the markup
+    reference (stage 14)."""
+
+    source_id: int
+    player: str
+    height: int | None = None
+    # The voice-over of the picture's row: the own sound of the cut video.
+    voice_group: str | None = None
+
+
 class Reference(BaseModel):
     """`reason` is a code of core/reasons: for `other_player` it names the player taken and the one missing.
 
     `compilation` is the compilation the episode stands in (stage 12): its video is cut out of it on the timeline of the
-    single video this reference names (REF 2)."""
+    single video this reference names (REF 2). `picture` is the row the cut video takes its picture from, whatever it is;
+    `markup`: the single video is the markup reference of the series (stage 14)."""
 
     season: int
     episode: int
@@ -37,6 +49,8 @@ class Reference(BaseModel):
     height: int | None = None
     reason: str | None = None
     compilation: CompilationRef | None = None
+    picture: CutPicture | None = None
+    markup: bool = False
 
 
 class OutputSwitch(BaseModel):

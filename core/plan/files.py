@@ -15,7 +15,7 @@ from dataclasses import asdict, replace
 from core import container as mkv
 
 from .executor import Made, video_of
-from .planner import Goal, Group, Plan
+from .planner import Goal, Group, Plan, video_op
 from .tables import Container, RowId, Snapshot, Track, Video
 
 JOURNAL = ".plan-journal.json"
@@ -114,7 +114,7 @@ class Library:
     def video_path(self, goal: Goal, results: dict[str, Made]) -> str:
         if goal.video.kind == "asset":
             return self.path(goal.video.container.name)
-        return results[f"video:{goal.slot}" if goal.video.kind == "download" else f"cut:{goal.slot}"].file
+        return results[video_op(goal)].file
 
     async def build(self, made: Plan, group: Group, results: dict[str, Made]) -> list[tuple]:
         """The containers a group builds anew, aside, each with its provenance; the steps of the journal of the group."""
@@ -135,6 +135,9 @@ class Library:
                     made_tracks.append(Track(way.dub, way.snapshot, slot, video.timeline))
                     if path != self.path(way.container.name):
                         packed.append(os.path.relpath(path, self.root))
+                elif way.kind == "timeline":  # the sound of the download of the timeline: in step with the video as it is
+                    path, stream = results[f"row:{way.row.id}"].file, 0
+                    made_tracks.append(Track(way.dub, way.snapshot, slot, video.timeline))
                 else:
                     aligned = results[f"align:{slot}:{way.voice}"]
                     path, stream = aligned.file, 0

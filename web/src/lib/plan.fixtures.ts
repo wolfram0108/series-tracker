@@ -15,14 +15,14 @@ export const goalVideo = (kind: "asset" | "download" | "cut", row: Ref, file: st
   source: "", player: "vibix", group: null, height: 1080, link: "", label: "", kind, row, file, cut_of: cutOf,
 })
 
-export const goalTrack = (voice: string, kind: "reuse" | "download" | "realign", row: Ref,
+export const goalTrack = (voice: string, kind: "reuse" | "download" | "realign" | "timeline", row: Ref,
                           over: Partial<Schemas["PlanGoalTrack"]> = {}): Schemas["PlanGoalTrack"] => ({
   source: "", player: "vibix", group: voice, height: 1080, link: "", label: voice, voice, kind, row, own: false, ...over,
 })
 
 export const goal = (slot: number[], video: Schemas["PlanGoalVideo"],
                      tracks: Schemas["PlanGoalTrack"][] = []): Schemas["PlanEpisode"] => ({
-  slot, name: slot.join(":"), off: false, video, tracks,
+  slot, name: slot.join(":"), off: false, video, tracks, markup: null,
 })
 
 export const assetTrack = (voice: string, row: Ref, online: boolean | null = true,

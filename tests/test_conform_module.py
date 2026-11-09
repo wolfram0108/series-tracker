@@ -737,7 +737,7 @@ async def test_a_batch_of_cuts_goes_with_daemon_paths_and_the_keys_find_their_jo
         assert sent["compilation"] == "/mnt/meganas/media/torrents/series-tracker/_cuts/7/c1/comp.mp4"
         assert sent["episodes"][0].endswith("/S s01e02 #k2/ep2.mkv") and sent["episodes"][0].startswith("/mnt/meganas/")
         assert sent["extend_edges"] is True and sent["dub_atracks"] == [1, 0] and sent["keep_tmp"] is False
-        assert sent["audio_method"] == "muq"
+        assert sent["audio_method"] == "muq" and sent["ref_atrack"] == 0
     finally:
         await runner.stop()
 

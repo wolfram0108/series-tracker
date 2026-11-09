@@ -20,10 +20,13 @@ defineProps<{ parts: RefPart[]; marks: Record<number, Mark>; badge?: Badge }>()
                ...(part.online == null ? [] : [t(part.online ? 'output.presence.online' : 'output.presence.offline')])].join(' · ')"
     >{{ badge.letter }}</span>
     <SourceMark v-else-if="part.kind === 'letter'" :mark="marks[part.sourceId]" :online="part.online" />
+    <i v-else-if="part.kind === 'markup'" class="pi pi-bookmark-fill ref-markup" :title="t('output.reference.markup')"
+       :aria-label="t('output.reference.markup')" />
     <span v-else class="ref-text" :class="`is-${part.kind}`">{{ part.kind === "height" ? t("output.height", { height: part.height }) : part.text }}</span>
   </template>
 </template>
 
 <style scoped>
 .ref-text { white-space: nowrap; }
+.ref-markup { color: var(--text-muted); font-size: 0.8em; }
 </style>

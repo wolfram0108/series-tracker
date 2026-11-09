@@ -6,7 +6,7 @@ from dataclasses import asdict
 from typing import Iterable
 
 from core.plan.executor import SeriesSync
-from core.plan.planner import Plan
+from core.plan.planner import Plan, voice_of
 from core.plan.tables import OnlineRow, RowId
 
 
@@ -41,7 +41,8 @@ def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: boo
                           "cut_of": _row(goal.video.row.id if goal.video.kind == "cut" else
                                          goal.video.container.video.cut_of if goal.video.container is not None else None)},
                 "tracks": [{"voice": way.voice, "kind": way.kind, "row": _row(way.dub), **asdict(way.snapshot),
-                            "own": way.own} for way in goal.tracks]})
+                            "own": way.own} for way in goal.tracks],
+                "markup": voice_of(goal.markup.group, goal.markup.id) if goal.markup is not None else None})
     by_id: dict[RowId, list[OnlineRow]] = {}
     for row in rows:
         by_id.setdefault(row.id, []).append(row)

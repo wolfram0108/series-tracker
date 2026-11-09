@@ -45,7 +45,7 @@ const partOf = (slot: number[]): number | null => (slot.length > 2 ? slot[2] : n
  *  an error of the episode until the next sync makes it; no failure, it is tried again. `voice` names the voice-over of
  *  an alignment or of a download of a voice-over, `video` the work on the video. */
 function problemOf(view: PlannerView, slot: number[], match: { voice?: string; video?: boolean }) {
-  const VIDEO = ["download_video", "cut", "download_compilation"]
+  const VIDEO = ["download_video", "cut", "download_picture"]
   return (view.problems ?? []).find((each) => each.slot != null && each.slot.join(":") === slot.join(":")
     && (match.video ? VIDEO.includes(each.kind) : !VIDEO.includes(each.kind) && each.voice === match.voice)) ?? null
 }
@@ -65,14 +65,19 @@ export interface ShownVoice {
   online: boolean
   /** The user's name of the track in the containers; none: the track bears the name of the group. */
   title?: string
+  /** The voice-over of the markup reference: the last track of the files, out of the order the user drags (stage 14). */
+  last?: boolean
 }
 export interface ShownOrder { season: number; voices: ShownVoice[] }
 
 export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: PlannerView | undefined,
                                   titles: Readonly<Record<string, string>> = {}): ShownOrder[] {
   const held = new Map<number, Map<string, number[]>>()
+  // The sound of the markup reference is the last of the files of its season, out of its order (stage 14).
+  const last = new Map<number, Set<string>>()
   for (const goal of view?.episodes ?? []) {
     const [season, episode] = goal.slot
+    if (goal.markup) last.set(season, new Set([...(last.get(season) ?? []), goal.markup]))
     const voices = held.get(season) ?? new Map<string, number[]>()
     held.set(season, voices)
     for (const voice of [goal.video.group ?? "", ...(goal.tracks ?? []).map((track) => track.voice)]) {
@@ -88,7 +93,11 @@ export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: Pla
       : here.has(voice.label) ? [{ label: voice.label, episodes: spansOf(here.get(voice.label) ?? []), online: false }] : [])
     const more = [...here.entries()]
       .filter(([voice]) => !named.has(voice)).map(([label, episodes]) => ({ label, episodes: spansOf(episodes), online: false }))
-    return { season, voices: [...shown, ...more].map((voice) => titles[voice.label] ? { ...voice, title: titles[voice.label] } : voice) }
+    const marked = last.get(season) ?? new Set<string>()
+    const ordered = [...shown, ...more]
+    const voices = [...ordered.filter((voice) => !marked.has(voice.label)),
+      ...ordered.filter((voice) => marked.has(voice.label)).map((voice) => ({ ...voice, last: true }))]
+    return { season, voices: voices.map((voice) => titles[voice.label] ? { ...voice, title: titles[voice.label] } : voice) }
   }).filter((each) => each.voices.length > 0)
 }
 
@@ -129,11 +138,12 @@ export function planDubs(view: PlannerView | undefined, orders: Record<number, r
       const problem = track.kind === "reuse" || view.running ? null : problemOf(view, goal.slot, { voice: track.voice })
       if (track.kind === "reuse") state = "done"
       else if (failed(view, "download", track.row) || failed(view, "align", track.row) || problem) state = "error"
-      else state = view.running ? (track.kind === "download" ? "downloading" : "running") : "planned"
+      // The sound of the timeline of a cut comes with its download and needs no alignment.
+      else state = view.running ? (track.kind === "download" || track.kind === "timeline" ? "downloading" : "running") : "planned"
       dubs.push({
         season, episode, part: partOf(goal.slot), voice_key: track.voice, voice_label: track.voice, state,
         source_id: track.row.source_id, player: track.player || null,
-        online: onlineOf.get(JSON.stringify(track.row)) ?? (track.kind === "download" ? true : null),
+        online: onlineOf.get(JSON.stringify(track.row)) ?? (track.kind === "download" || track.kind === "timeline" ? true : null),
         ...(problem ? { detail: passing(problem.reason) } : {}),
       })
     }

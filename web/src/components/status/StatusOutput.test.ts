@@ -31,7 +31,7 @@ const row = (season: number, episode: number, over: Partial<Row> = {}): Row => (
 })
 const reference = (season: number, episode: number, over: Partial<Reference> = {}): Reference => ({
   season, episode, part: null, mark: "by_level", source_id: 7, row_key: `r${season}-${episode}`, player: "vibix", compilation: null,
-  voice_group: "Ruchime", height: 1080, reason: null, ...over,
+  voice_group: "Ruchime", height: 1080, reason: null, picture: null, markup: false, ...over,
 })
 const composition = (): Composition => ({
   series_id: 1, rev: 1, sources: [], settings: [],

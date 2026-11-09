@@ -62,10 +62,11 @@ class PlanGoalVideo(PlanSnapshot):
 
 class PlanGoalTrack(PlanSnapshot):
     """How a voice-over of an episode is obtained: `reuse` (the file holds it aligned), `download`, `realign` (out of the
-    file it lies in, aligned to the new video). `own` is the own sound of a video the episode no longer has."""
+    file it lies in, aligned to the new video), `timeline` (the sound of the single video a cut video is laid onto: taken
+    from its download, in step with no alignment). `own` is the own sound of a video the episode no longer has."""
 
     voice: str
-    kind: Literal["reuse", "download", "realign"]
+    kind: Literal["reuse", "download", "realign", "timeline"]
     row: PlanRowRef
     own: bool = False
 
@@ -78,6 +79,9 @@ class PlanEpisode(BaseModel):
     tracks: list[PlanGoalTrack] = Field(default_factory=list)
     # The voice-over groups the user switched off for the episode: the plan takes no track of theirs.
     voices_off: list[str] = Field(default_factory=list)
+    # The voice-over of the markup reference of the episode (stage 14): its sound is the last of the file, out of the
+    # order of the season; none without one.
+    markup: str | None = None
 
 
 class PlanFailure(BaseModel):

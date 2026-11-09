@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref } from "vue"
+import { computed, nextTick, ref } from "vue"
 import { useAwaited } from "../../composables/useAwaited"
 import { t } from "../../i18n"
 import type { ShownVoice } from "../../lib/plan"
@@ -21,18 +21,24 @@ const { shown: titles, hold } = useAwaited<Titles>(
   () => Object.fromEntries(props.voices.map((voice) => [voice.label, voice.title ?? ""])),
   (each) => JSON.stringify(Object.entries(each).sort()))
 const nameOf = (voice: ShownVoice): string => titles.value[voice.label] || voice.label
+// The voice-over of the markup reference stands last in the files whatever the order: it is shown after the list, fixed,
+// and the order the user drags keeps it in its place at the end.
+const movable = computed(() => props.voices.filter((voice) => !voice.last))
+const fixed = computed(() => props.voices.filter((voice) => voice.last))
 
 const editing = ref<string | null>(null)
 const draft = ref("")
-const field = ref<HTMLInputElement | null>(null)
+// One field at a time; the fixed chips stand in a v-for of this template, where a ref is a list.
+const field = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
 
 async function start(voice: ShownVoice): Promise<void> {
   if (props.busy) return
   editing.value = voice.label
   draft.value = nameOf(voice)
   await nextTick()
-  field.value?.focus()
-  field.value?.select()
+  const input = Array.isArray(field.value) ? field.value[0] : field.value
+  input?.focus()
+  input?.select()
 }
 
 function keep(voice: ShownVoice): void {
@@ -50,8 +56,8 @@ function keep(voice: ShownVoice): void {
   <section class="voice-order" :aria-label="t('output.voices.title')">
     <span class="voice-order-title">{{ t("output.tracks") }}</span>
     <OrderList
-      class="voice-order-list" :items="voices" :item-key="(voice) => voice.label" :busy="busy || editing !== null"
-      @order="emit('order', $event.map((voice) => voice.label))"
+      class="voice-order-list" :items="movable" :item-key="(voice) => voice.label" :busy="busy || editing !== null"
+      @order="emit('order', [...$event, ...fixed].map((voice) => voice.label))"
     >
       <template #item="{ item, index, step }">
         <li
@@ -73,6 +79,24 @@ function keep(voice: ShownVoice): void {
         </li>
       </template>
     </OrderList>
+    <ol v-if="fixed.length" class="voice-order-list">
+      <li
+        v-for="(item, index) in fixed" :key="item.label" class="voice-order-item is-fixed" :class="{ 'is-busy': busy }"
+        tabindex="0" :title="t('output.voices.markup')"
+        :aria-label="t('output.voices.item', { position: movable.length + index + 1, label: nameOf(item), episodes: item.episodes })"
+        @keydown.enter.self.prevent="start(item)"
+      >
+        <VoiceMark :n="movable.length + index + 1" :online="item.online" />
+        <input
+          v-if="editing === item.label" ref="field" v-model="draft" class="voice-title-input"
+          :size="Math.max(draft.length, item.label.length)" :placeholder="item.label" :aria-label="t('output.voices.titleInput', { label: item.label })"
+          @keydown.enter.prevent="keep(item)" @keydown.esc.prevent="editing = null" @blur="keep(item)"
+        />
+        <span v-else class="voice-order-name" @click="start(item)">{{ nameOf(item) }}</span>
+        <i class="pi pi-bookmark-fill voice-order-markup" aria-hidden="true" />
+        <span class="voice-order-episodes">{{ item.episodes }}</span>
+      </li>
+    </ol>
   </section>
 </template>
 
@@ -88,6 +112,8 @@ function keep(voice: ShownVoice): void {
 .voice-order-item:focus-visible { outline: 0.125rem solid var(--color-blue); }
 .voice-order-item.is-busy { cursor: not-allowed; opacity: 0.6; }
 .voice-order-episodes { color: var(--text-muted); }
+.voice-order-item.is-fixed { cursor: default; }
+.voice-order-markup { color: var(--text-muted); font-size: 0.8em; }
 .voice-order-name { cursor: text; }
 .voice-order-item.is-busy .voice-order-name { cursor: not-allowed; }
 .voice-title-input {

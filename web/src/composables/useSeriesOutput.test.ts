@@ -28,7 +28,7 @@ const row = (over: Partial<Row> = {}): Row => ({
 })
 const reference = (over: Partial<Reference> = {}): Reference => ({
   season: 1, episode: 2, part: null, mark: "by_level", source_id: 7, row_key: "row", player: "vibix",
-  voice_group: "Ruchime", height: 1080, reason: null, compilation: null, ...over,
+  voice_group: "Ruchime", height: 1080, reason: null, compilation: null, picture: null, markup: false, ...over,
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile",

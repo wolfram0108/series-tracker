@@ -5,7 +5,9 @@ operations that leads from the asset to it. There is no rule for a situation: re
 that forgot a row, a command «Удалить» are only other inputs.
 
 Every part of the goal is reached by the first way that is open, the same list for every case:
-  the video of an episode: 1) the asset holds it; 2) its row is online — download; 3) cut out of a compilation;
+  the video of an episode: 1) the asset holds it; 2) its row is online — download; 3) cut: the picture of a higher row
+  (a compilation, or with a markup reference any single row) laid by the service onto the timeline of a single one;
+  with a markup reference (stage 14) every way onto the timeline of its row comes before every other way;
   the track of a voice-over to the video: 1) the asset holds it aligned to that video's timeline; 2) its row is online —
   download and align; 3) the asset holds it at another video — align it from that container (the container is the dub:
   its picture and the track are in sync).
@@ -49,8 +51,10 @@ HIDDEN = ".hidden-"  # a file nothing carries any more: it stays, out of the med
 
 @dataclass(frozen=True)
 class VideoWay:
-    """How the video of a goal is obtained: `asset` (held by `container`), `download` (`row`), `cut` (`row` is the
-    compilation, `ref2` the way to the single video it is cut by)."""
+    """How the video of a goal is obtained: `asset` (held by `container`), `download` (`row`), `cut` (`row` gives the
+    picture — a compilation, or a single row higher than the markup reference — and `ref2` is the way to the single video
+    whose timeline it is laid on; `picture` is the file of the library that holds the picture's row, taken instead of a
+    download of it)."""
 
     kind: str
     key: tuple
@@ -59,13 +63,16 @@ class VideoWay:
     row: OnlineRow | None = None
     container: Container | None = None
     ref2: "VideoWay | None" = None
+    picture: Container | None = None
 
 
 @dataclass(frozen=True)
 class TrackWay:
     """How the track of a voice-over is obtained: `reuse` (the track of `container` is aligned to the goal's timeline),
-    `download` (`row`, then align), `realign` (the track of `container` aligned anew to the goal's video). `own`: the track
-    is the own sound of the video of `container` — the voice-over of a video it no longer is."""
+    `download` (`row`, then align), `realign` (the track of `container` aligned anew to the goal's video), `timeline` (the
+    sound of the row that is the timeline of a cut video: in step with it by construction, taken from the download of that
+    row with no alignment). `own`: the track is the own sound of the video of `container` — the voice-over of a video it
+    no longer is."""
 
     voice: str
     dub: RowId
@@ -90,6 +97,8 @@ class Goal:
     own_at: int = 0
     # The user's names of the sounds of the file (voice-over group, title), as the container is to bear them.
     titles: tuple[tuple[str, str], ...] = ()
+    # The row of the markup reference that gives the episode its timeline (stage 14); its sound is the last of the file.
+    markup: OnlineRow | None = None
 
 
 @dataclass(frozen=True)
@@ -266,6 +275,7 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
     candidates: list[tuple[tuple, VideoWay]] = []
     seen: set[tuple] = set()
     singles = by_slot.rows.get(slot, [])
+    markup = _markup_of(inputs, singles, video_rank, denied)
     for container in by_slot.files.get(slot, []):
         video = container.video
         source = video.cut_of or video.id
@@ -284,20 +294,27 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
                 continue  # the asset holds this video at least as high: no download of it
             way = VideoWay("download", ("row", row.id), row.id, row.snapshot(), row=row)
             candidates.append((video_rank(row.variant, row.height, False, row.id), way))
-        cut = _cut(slot, inputs, by_slot.compilations, [each for each in candidates if not gone(each[1])], video_rank,
-                   denied)
-        if cut is not None:
-            candidates.append(cut)
-    # The user's word on the compilation is stronger than what the asset holds: «none» leaves out every cut video; a
-    # compilation that fits leaves out the videos cut out of the others.
+        candidates += _cuts(slot, inputs, by_slot.compilations, singles,
+                            [each for each in candidates if not gone(each[1])], video_rank, denied, markup)
+    # The user's word on the compilation is stronger than what the asset holds: «none» leaves out every video cut out of a
+    # compilation; a compilation that fits leaves out the videos cut out of the others. A cut whose picture is no single
+    # row of the episode the layout gives is taken for a compilation's.
     word = choices.member.get(episode, RULE)
+    pictures = {row.id for row in singles}
+
+    def compiled(way: VideoWay) -> bool:
+        return way.key[0] == "cut" and way.key[1] not in pictures
+
     if word is None:
-        candidates = [each for each in candidates if each[1].key[0] != "cut"]
-    elif word is not RULE and any(each[1].key[0] == "cut" and each[1].key[1] == word for each in candidates):
-        candidates = [each for each in candidates if each[1].key[0] != "cut" or each[1].key[1] == word]
+        candidates = [each for each in candidates if not compiled(each[1])]
+    elif word is not RULE and any(compiled(each[1]) and each[1].key[1] == word for each in candidates):
+        candidates = [each for each in candidates if not compiled(each[1]) or each[1].key[1] == word]
     if not candidates:
         return None
-    video = min(candidates, key=lambda each: each[0])[1]
+    # With a markup reference every video on its timeline comes before every other one; a video the user deleted still
+    # comes after them all (it goes only for another video).
+    video = min(candidates, key=lambda each: (each[0][0], markup is not None and each[1].timeline != markup.id,
+                                              *each[0][1:]))[1]
     own = voice_of(video.snapshot.group, video.timeline)
     # A switched-off episode, and a deleted video that stays for want of another one, take no new work: what the file
     # holds stays as it is.
@@ -322,8 +339,12 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
         if voice != own:
             voices.setdefault(voice, [])
 
+    # The sound of the markup reference is the last of the file, out of the order of the season (stage 14).
+    last = voice_of(markup.group, markup.id) if markup is not None else None
+    # A video laid onto the timeline of another row: the sound of that row is in step with it as it is.
+    cut = video.kind == "cut" or (video.container is not None and video.container.video.cut_of is not None)
     tracks: list[TrackWay] = []
-    for voice in sorted(voices, key=lambda voice: group_rank(slot[0], voice)):
+    for voice in sorted(voices, key=lambda voice: (voice == last, group_rank(slot[0], voice))):
         mine = [each for each in held_tracks if voice_of(each[1].group, each[1].dub) == voice]
         reuse = sorted((each for each in mine if each[1].aligned_to == video.timeline and not each[3]),
                        key=lambda each: (each[0] is not video.container, each[2], each[0].name))
@@ -339,6 +360,9 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
                                         in preferred else len(preferred)),
                                        *criteria(VOICE_RANKING, row.height, row.player, row.id.source_id),
                                        row.position, repr(row.id)))
+        if rows and rows[0].id == video.timeline and cut:
+            tracks.append(TrackWay(voice, rows[0].id, rows[0].snapshot(), "timeline", row=rows[0]))
+            continue
         if rows:
             tracks.append(TrackWay(voice, rows[0].id, rows[0].snapshot(), "download", row=rows[0]))
             continue
@@ -358,38 +382,68 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
     titles = tuple(sorted((label, title) for label, title in choices.titles.items() if label in sounds))
     if idle and video.container is not None:
         titles = video.container.titles
-    return Goal(slot, video, tuple(tracks), namer(slot, video, off), off, frozenset(taken_off),
-                own_place(slot[0], own, (way.voice for way in tracks)), titles)
+    own_at = len(tracks) if own == last else own_place(slot[0], own, (way.voice for way in tracks if way.voice != last))
+    return Goal(slot, video, tuple(tracks), namer(slot, video, off), off, frozenset(taken_off), own_at, titles, markup)
 
 
-def _cut(slot, inputs, compilations, candidates, video_rank, denied=frozenset()):
-    """The cut out of the compilation the episode stands in, by its best single video (REF 2): the one the user named while
-    it still fits, else the shortest switched-on compilation that covers the episode and is higher than its best single
-    video; none when the user said none, or when the episode has no single video."""
-    word = inputs.choices.member.get(episode_of(slot), RULE)
-    if word is None or len(slot) > 2:
-        return None  # the user said none; an episode in parts is not cut out of a compilation
-    singles = [(rank, way) for rank, way in candidates if way.key[0] == "row"]
-    if not singles:
+def _markup_of(inputs: Inputs, singles: list[OnlineRow], video_rank, denied) -> OnlineRow | None:
+    """The row of the markup reference that gives the episode its timeline (stage 14): of the rows of the marked source in
+    the place of the episode, the first by the rule of the reference that plays, did not fail to download, has a voice-over
+    group (an unknown one takes no work, Р-77) and is not left out. None: the episode goes by the rule with no markup."""
+    source = inputs.choices.markup
+    if source is None:
         return None
-    rank2, ref2 = min(singles, key=lambda each: each[0])
-    best = max(way.snapshot.height for _, way in singles)
-    covering = [row for row in compilations if row.playable and ("download", row.id) not in inputs.failed
-                and ("cut", row.id, ref2.timeline) not in inputs.failed
-                and row.season == slot[0] and row.start <= slot[1] <= row.end
-                and row.group is not None and row.id not in inputs.choices.off_compilations and row.height > best
-                and row.variant not in denied]  # a variant left out is no reference in any form: file, download or cut
+    rows = [row for row in singles if row.id.source_id == source and row.playable and row.group is not None
+            and ("download", row.id) not in inputs.failed and row.variant not in denied]
+    return min(rows, key=lambda row: video_rank(row.variant, row.height, False, row.id), default=None)
+
+
+def _cuts(slot, inputs, compilations, singles, candidates, video_rank, denied, markup) -> list[tuple[tuple, VideoWay]]:
+    """The videos a cut can give the episode. The timeline (REF 2) is the markup row, else the best single video. The
+    pictures are higher than it: with a markup reference every single row and the compilation the episode stands in,
+    without one that compilation only. The compilation is the one the user named while it fits, else the shortest
+    switched-on one that covers the episode; none when the user said none. An episode in parts is not cut."""
+    if len(slot) > 2:
+        return []
+    word = inputs.choices.member.get(episode_of(slot), RULE)
+    held = [(rank, way) for rank, way in candidates if way.key[0] == "row"]
+    if markup is not None:
+        ref2 = min((way for _, way in held if way.key == ("row", markup.id)),
+                   key=lambda way: way.kind != "asset", default=None)
+        if ref2 is None:
+            return []
+        floor = markup.height
+    elif held:
+        ref2 = min(held, key=lambda each: each[0])[1]
+        floor = max(way.snapshot.height for _, way in held)
+    else:
+        return []
+    timeline = ref2.timeline
+    failed = inputs.failed
+
+    def fits(row: OnlineRow) -> bool:
+        # A variant left out is no reference in any form: file, download or cut.
+        return (row.playable and row.group is not None and row.height > floor and row.variant not in denied
+                and ("download", row.id) not in failed and ("cut", row.id, timeline) not in failed)
+
+    pictures = [row for row in singles if markup is not None and row.id != timeline and fits(row)]
+    covering = [row for row in compilations if word is not None and fits(row) and row.season == slot[0]
+                and row.start <= slot[1] <= row.end and row.id not in inputs.choices.off_compilations]
     named = [row for row in covering if row.id == word]
     covering = named or covering
-    if not covering:
-        return None
-    compilation = min(covering, key=lambda row: (row.end - row.start, -row.height, row.position, repr(row.id)))
-    key = ("cut", compilation.id, ref2.timeline)
-    if any(way.key == key and way.snapshot.height >= compilation.height for _, way in candidates):
-        return None  # the asset holds this cut already, as high as the compilation is now
-    snapshot = compilation.snapshot()
-    way = VideoWay("cut", key, ref2.timeline, snapshot, row=compilation, ref2=ref2)
-    return video_rank(compilation.variant, compilation.height, False, compilation.id), way
+    if covering:
+        pictures.append(min(covering, key=lambda row: (row.end - row.start, -row.height, row.position, repr(row.id))))
+    found = []
+    for row in pictures:
+        key = ("cut", row.id, timeline)
+        if any(way.key == key and way.snapshot.height >= row.height for _, way in candidates):
+            continue  # the asset holds this cut already, as high as the picture is now
+        # The library holds the download of the picture's row as high: the cut takes that file.
+        picture = next((way.container for _, way in held if way.kind == "asset" and way.key == ("row", row.id)
+                        and way.snapshot.height >= row.height), None)
+        way = VideoWay("cut", key, timeline, row.snapshot(), row=row, ref2=ref2, picture=picture)
+        found.append((video_rank(row.variant, row.height, False, row.id), way))
+    return found
 
 
 def _satisfied_by(goal: Goal) -> Container | None:
@@ -413,28 +467,32 @@ def _ops(goals: Iterable[Goal], containers) -> list[Op]:
             continue
         slot, mine = goal.slot, []
         video = goal.video
+        before = []
         if video.kind == "download":
-            ops[f"video:{slot}"] = Op(f"video:{slot}", "download_video", slot, (), video.row)
-            mine.append(f"video:{slot}")
+            before.append(_fetch(ops, video.row, slot))
         elif video.kind == "cut":
-            compilation = f"compilation:{video.row.id}"
-            ops.setdefault(compilation, Op(compilation, "download_compilation", None, (), video.row))
-            needs = [compilation]
+            needs = []
+            if video.picture is None:
+                picture = f"picture:{video.row.id}"
+                ops.setdefault(picture, Op(picture, "download_picture", None, (), video.row))
+                needs.append(picture)
             if video.ref2.kind == "download":
-                ref2 = f"ref2:{slot}"
-                ops[ref2] = Op(ref2, "download_video", slot, (), video.ref2.row)
-                needs.append(ref2)
-                mine.append(ref2)
+                needs.append(_fetch(ops, video.ref2.row, slot))
             ops[f"cut:{slot}"] = Op(f"cut:{slot}", "cut", slot, tuple(needs), video)
-            mine += [compilation, f"cut:{slot}"]
-        before = [each for each in mine if each.startswith(("video:", "cut:"))]
+            mine += needs
+            before.append(f"cut:{slot}")
+        mine += before
         for way in goal.tracks:
             if way.kind == "reuse":
                 continue
+            if way.kind == "timeline":
+                mine.append(_fetch(ops, way.row, slot))
+                continue
             needs = list(before)
             if way.kind == "download":
-                fetch = f"dub:{slot}:{way.dub}"
-                ops[fetch] = Op(fetch, "download_dub", slot, (), way.row)
+                # Named by the row: a compilation that is a voice-over of several episodes is downloaded once.
+                fetch = f"dub:{way.dub}"
+                ops.setdefault(fetch, Op(fetch, "download_dub", None if way.row.compilation else slot, (), way.row))
                 needs.append(fetch)
                 mine.append(fetch)
             align = f"align:{slot}:{way.voice}"
@@ -442,6 +500,19 @@ def _ops(goals: Iterable[Goal], containers) -> list[Op]:
             mine.append(align)
         ops[f"build:{slot}"] = Op(f"build:{slot}", "build", slot, tuple(dict.fromkeys(mine)), goal)
     return list(ops.values())
+
+
+def video_op(goal: Goal) -> str:
+    """The step that makes the video of a goal that is not held: its download or its cut."""
+    return f"row:{goal.video.row.id}" if goal.video.kind == "download" else f"cut:{goal.slot}"
+
+
+def _fetch(ops: dict[str, Op], row: OnlineRow, slot: Slot) -> str:
+    """The download of a single row, one step whatever it is needed for (the video, the timeline of a cut, its sound):
+    named by the row, so that a row is downloaded once in a sync even when the plan is made again."""
+    key = f"row:{row.id}"
+    ops.setdefault(key, Op(key, "download_video", slot, (), row))
+    return key
 
 
 def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, taken_off) -> list[Group]:
@@ -473,6 +544,8 @@ def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, take
             join(here, f"file:{goal.video.container.name}")
         if goal.video.ref2 is not None and goal.video.ref2.container is not None:
             join(here, f"file:{goal.video.ref2.container.name}")
+        if goal.video.picture is not None:
+            join(here, f"file:{goal.video.picture.name}")
         for way in goal.tracks:
             if way.container is not None:
                 join(here, f"file:{way.container.name}")

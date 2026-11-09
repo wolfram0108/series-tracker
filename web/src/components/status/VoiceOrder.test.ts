@@ -32,6 +32,17 @@ describe("VoiceOrder", () => {
     expect(w.emitted("order")).toEqual([[["ruchime", "ПВА ШОУ", "AniStar"]]])
   })
 
+  it("keeps the voice-over of the markup reference last and fixed, out of the list the user drags", async () => {
+    const marked = [voices[0], voices[2], { label: "Оригинал", episodes: "1–50", online: true, last: true }]
+    const w = mount(VoiceOrder, { props: { voices: marked } })
+    const items = w.findAll(".voice-order-item")
+    expect(items.map((item) => item.find(".voice-order-name").text())).toEqual(["ПВА ШОУ", "AniStar", "Оригинал"])
+    expect(items[2].classes()).toContain("is-fixed")
+    expect(items[2].find(".figure-mark").text()).toBe("3")
+    w.findComponent(draggable).vm.$emit("update:modelValue", [voices[2], voices[0]])
+    expect(w.emitted("order")).toEqual([[["AniStar", "ПВА ШОУ", "Оригинал"]]])
+  })
+
   it("moves a voice-over with the arrow keys", async () => {
     const w = mount(VoiceOrder, { props: { voices } })
     await w.findAll(".voice-order-item")[2].trigger("keydown", { key: "ArrowLeft" })

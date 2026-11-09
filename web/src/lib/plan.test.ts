@@ -217,6 +217,14 @@ describe("seasonVoiceOrders", () => {
     expect(seasonVoiceOrders([{ season: 2, voices: [{ label: "Never", episodes: "" }] }], undefined)).toEqual([])
   })
 
+  it("puts the voice-over of the markup reference last, out of the order of its season, as the files hold it", () => {
+    const view = planView({ episodes: [{ ...goal([1, 1], goalVideo("cut", rowRef(3, "o1"), null),
+      [goalTrack("A", "download", rowRef(2, "a1")), goalTrack("Оригинал", "timeline", rowRef(3, "o1"))]), markup: "Оригинал" }] })
+    const order = [{ season: 1, voices: [{ label: "Оригинал", episodes: "1" }, { label: "ПВА", episodes: "1" }, { label: "A", episodes: "1" }] }]
+    expect(seasonVoiceOrders(order, view)[0].voices.map((voice) => voice.label)).toEqual(["ПВА", "A", "Оригинал"])
+    expect(seasonVoiceOrders(order, undefined)[0].voices.map((voice) => voice.label)).toEqual(["Оригинал", "ПВА", "A"])
+  })
+
   it("gives each voice-over the user's name of its track, in every season, the offline ones too", () => {
     const view = planView({ episodes: [goal([2, 1], goalVideo("asset", rowRef(1, "r1"), "a.mkv"), [goalTrack("Kept", "reuse", rowRef(2, "k1"))])] })
     const titles = { A: "ПМ_A", Kept: "Старая" }

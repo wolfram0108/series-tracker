@@ -107,9 +107,11 @@ async def test_the_composition_of_an_unknown_series_is_not_found(tmp_path):
 async def test_the_output_is_the_references_of_the_plan_as_they_are(tmp_path):
     references = [
         {"season": 1, "episode": 1, "part": None, "mark": "by_level", "source_id": 4, "row_key": "r1",
-         "player": "kodik", "voice_group": "Group", "height": 720, "reason": None, "compilation": None},
+         "player": "kodik", "voice_group": "Group", "height": 720, "reason": None, "compilation": None,
+         "picture": None, "markup": False},
         {"season": 1, "episode": 2, "part": None, "mark": "none", "source_id": None, "row_key": None,
-         "player": None, "voice_group": None, "height": None, "reason": reason("reference_none"), "compilation": None}]
+         "player": None, "voice_group": None, "height": None, "reason": reason("reference_none"), "compilation": None, "picture": None,
+         "markup": False}]
     async with serving(tmp_path, {"planner.references.get": references}) as (client, owners, _, spy):
         response = await client.get("/api/series/1/output")
     assert response.status_code == 200 and response.json() == references

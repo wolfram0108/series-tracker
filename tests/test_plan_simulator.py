@@ -347,7 +347,7 @@ def test_a_cut_out_of_a_compilation_survives_a_new_group_of_the_compilation():
     step = world.sync("у компиляции сменилась группа")
     world.check(step)
     assert kinds(step, (1, 3))[0] == "asset"
-    assert not any(op.startswith(("cut:", "compilation:")) for op in (each.id for each in step.plan.ops))
+    assert not any(op.startswith(("cut:", "picture:")) for op in (each.id for each in step.plan.ops))
 
 
 def test_delete_of_a_track_takes_it_away_and_an_online_one_comes_back():
