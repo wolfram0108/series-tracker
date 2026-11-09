@@ -176,3 +176,23 @@ async def test_a_voice_over_the_service_refused_to_align_is_passed_over_until_th
     view = await stand.sync(series_id)
     await stand.check(series_id)
     assert [track["group"] for track in view["assets"][0]["tracks"]] == ["AnimeVost"] and not view["failures"]
+
+
+async def test_the_voice_overs_of_an_episode_go_to_the_service_as_one_job_and_one_that_did_not_come_holds_none_back(stand):
+    """The reference of an episode is worked out once for all its voice-overs: they go to the service as one job, once
+    none of them is still being downloaded; a voice-over whose file the site lost is not waited for."""
+    stand.site.release("ref", "AniStar")
+    stand.site.episode("ref", 1)
+    voices = {"dub": "AnimeVost", "d2": "Kansai", "d3": "JAM"}
+    for slug, voice in voices.items():
+        stand.site.release(slug, voice)
+        stand.site.episode(slug, 1, height=480)
+    stand.site.gone("d3", 1)
+    await stand.configure(["AniStar", *voices.values()])
+    series_id = await stand.series("Сериал", ["ref", *voices])
+    await stand.sync(series_id)
+    (job,) = stand.daemon.jobs.values()
+    assert len(job["dubs"]) == 2, job["dubs"]
+    view = await stand.check(series_id)
+    (asset,) = view["assets"]
+    assert sorted(track["group"] for track in asset["tracks"]) == ["AnimeVost", "Kansai"]

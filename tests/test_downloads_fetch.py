@@ -352,6 +352,27 @@ async def test_fetch_rejects_a_relative_path(system):
 
 
 @pytest.mark.asyncio
+async def test_videos_of_references_and_the_rest_wait_in_lines_of_their_own_each_with_its_limit(system, tmp_path):
+    """The videos of the references (`whole`) take no place of the voice-overs and the other way round: each line runs
+    up to its own setting (max_parallel_downloads, max_parallel_dub_downloads)."""
+    bus, fake, dl, probe = system
+    dl.gate = asyncio.Event()
+    probe.publish_event("settings.changed", {"key": "max_parallel_downloads", "value": "3"})
+    probe.publish_event("settings.changed", {"key": "max_parallel_dub_downloads", "value": "1"})
+    await _quiet()
+    for i in range(4):
+        probe.send_command("downloads.fetch", {"key": f"video:{i}", "url": f"https://site/#vk={i}", "whole": True,
+                                               "path": str(tmp_path / f"v{i}.mp4"), "series_id": 3})
+        probe.send_command("downloads.fetch", {"key": f"dub:{i}", "url": f"https://site/#cvh={i}",
+                                               "path": str(tmp_path / f"d{i}.mp4"), "series_id": 3})
+    assert await _wait(lambda: dl.concurrent == 4)
+    await _running.bus.settled()
+    assert sorted(url.split("#")[1].split("=")[0] for url in dl.started) == ["cvh", "vk", "vk", "vk"]
+    dl.gate.set()
+    assert await _wait(lambda: len(dl.started) == 8)
+
+
+@pytest.mark.asyncio
 async def test_a_fetch_is_announced_when_it_leaves_the_queue_and_starts(system, tmp_path):
     bus, fake, dl, probe = system
     fake.stream_replies["https://site/#cvh=1"] = {"handled": True, "stream_url": "https://cdn/1.mp4", "headers": {}}

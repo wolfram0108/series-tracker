@@ -10,8 +10,9 @@ Owns the columns media_items.status and final_filename that the torrent pipeline
 Queries / commands:
   downloads.fetch {key, url, path, max_height?, series_id?, whole?, ytdlp?} - the stream behind the link into an absolute
       path. `whole`: a video that must come whole (a reference); `ytdlp`: the downloader may take over a link whose stream
-      request failed (a VK video). A key already waiting or under way is not asked twice. The limit of parallel fetches is
-      the setting max_parallel_dub_downloads (2 by default).
+      request failed (a VK video). A key already waiting or under way is not asked twice. The videos of the references
+      (`whole`) and the rest (voice-overs, compilations) wait in lines of their own, each with its limit of parallel
+      fetches: max_parallel_downloads and max_parallel_dub_downloads (2 by default each).
   downloads.queue.get {} -> {tasks, count} - the fetches waiting (`pending`) and under way (`downloading`, with progress,
       speed, time left and size).
   downloads.queue.clear {} -> {deleted} - the waiting fetches are dropped (their owners hear them end, failed).
@@ -22,12 +23,14 @@ Events out:
   downloads.fetch.started {key, series_id, path}, downloads.fetch.finished {key, ok, error, transient, path, series_id}.
   downloads.queue.changed {tasks, count} - the queue changed (throttled on progress), and when an interface connects
       (gateway.sse.clients): SSE download_queue_update.
-Events in: settings.changed (yt_dlp_concurrent_fragments, max_parallel_dub_downloads), work.withdrawn {series_id, keys?},
+Events in: settings.changed (yt_dlp_concurrent_fragments, max_parallel_downloads, max_parallel_dub_downloads),
+  work.withdrawn {series_id, keys?},
   series.deleted (the fetches of the series stop).
 """
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import os
 import time
 import traceback
@@ -50,7 +53,8 @@ SILENCE_FUSE_S = 900.0
 FETCH_PROGRESS = ("progress", "dlspeed", "eta", "total_size_mb")
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
-FETCH_LIMIT_KEY = "max_parallel_dub_downloads"
+# The setting of the limit of each line of fetches: the videos of the references, and the rest.
+LIMIT_KEYS = {"video": "max_parallel_downloads", "other": "max_parallel_dub_downloads"}
 # A download a signal interrupted (ytdlp.INTERRUPTED) is asked again: at a stop of the service the repeat is cancelled with
 # the module, and the work is taken up at the next start.
 _TRANSIENT_MARKERS = ("прервано сигналом", "timed out", "timeout", "connection", "network", "обрыв", "input/output error",
@@ -107,7 +111,7 @@ class DownloadsModule(BaseModule):
     def __init__(self, bus, db: Database, *, downloader=ytdlp.download) -> None:
         self.repo = DownloadsRepository(db)
         self._download = downloader  # replaced in tests
-        self._fetch_limit = 2         # parallel fetches (max_parallel_dub_downloads)
+        self._fetch_limits = {"video": 2, "other": 2}  # parallel fetches of each line (LIMIT_KEYS)
         self._fetch_queue: list[dict] = []
         self._fetch_active: dict[str, tuple[asyncio.Task, int | None]] = {}
         self._fetch_jobs: dict[str, dict] = {}  # the job of every fetch under way: the window names it by its path
@@ -130,7 +134,8 @@ class DownloadsModule(BaseModule):
 
     async def on_start(self) -> None:
         self._threads = await self._read_setting("yt_dlp_concurrent_fragments", 6)
-        self._fetch_limit = await self._read_setting(FETCH_LIMIT_KEY, 2)
+        for line, key in LIMIT_KEYS.items():
+            self._fetch_limits[line] = await self._read_setting(key, 2)
 
     async def _read_setting(self, key: str, default: int) -> int:
         try:
@@ -150,8 +155,8 @@ class DownloadsModule(BaseModule):
         if key == "yt_dlp_concurrent_fragments":
             self._threads = value
             self.log.info("параллельных фрагментов (-N): %d", self._threads)
-        elif key == FETCH_LIMIT_KEY:
-            self._fetch_limit = value
+        elif key in LIMIT_KEYS.values():
+            self._fetch_limits[next(line for line, each in LIMIT_KEYS.items() if each == key)] = value
             self._fetch_pump()
 
     async def on_series_deleted(self, env: Envelope) -> None:
@@ -262,9 +267,19 @@ class DownloadsModule(BaseModule):
         """The workers of the fetches belong to what a waiter for quiet waits for."""
         return super().background() | {runner for runner, _ in self._fetch_active.values()}
 
+    @staticmethod
+    def _line(job: dict) -> str:
+        return "video" if job.get("whole") else "other"
+
     def _fetch_pump(self) -> None:
-        while self._fetch_queue and len(self._fetch_active) < self._fetch_limit:
-            job = self._fetch_queue.pop(0)
+        """Each line starts what waits in it, in the order asked, up to its limit."""
+        busy = Counter(self._line(self._fetch_jobs[key]) for key in self._fetch_active if key in self._fetch_jobs)
+        for job in list(self._fetch_queue):
+            line = self._line(job)
+            if busy[line] >= self._fetch_limits[line]:
+                continue
+            busy[line] += 1
+            self._fetch_queue.remove(job)
             runner = self.spawn(self._fetch_one(job))
             self._fetch_active[job["key"]] = (runner, job["series_id"])
             self._fetch_jobs[job["key"]] = job

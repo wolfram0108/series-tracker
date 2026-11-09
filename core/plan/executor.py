@@ -7,6 +7,7 @@ the end. The steps are the subclass's: the service does them through its modules
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from dataclasses import dataclass, replace
 from typing import Callable
 
@@ -54,6 +55,20 @@ def judged(result: dict | None, *, cut: bool) -> str | None:
     if result.get("refused"):
         return None
     raise Passing
+
+
+def carried(op: Op, done: dict[str, tuple[object, Made]], results: dict[str, Made]) -> Made | None:
+    """What a run before in this sync made that this step asks again: a download of the same row and a cut of the same
+    compilation, an alignment of the same voice-over onto the same video. A build is always made anew of its parts."""
+    before = done.get(op.id)
+    if before is None or op.kind == "build":
+        return None
+    subject, made = before
+    if op.kind == "align":
+        goal, way = op.subject
+        track = made.value
+        return made if track.dub == way.dub and track.aligned_to == video_of(goal, results).timeline else None
+    return made if subject == op.subject else None
 
 
 def video_of(goal: Goal, results: dict[str, Made]) -> Video:
@@ -168,6 +183,17 @@ class SeriesSync:
         """One step; None when it failed (recorded), `Passing` when it failed for this sync only."""
         raise NotImplementedError
 
+    async def do_batch(self, ops: list[Op], results: dict[str, Made]) -> dict[str, Made | None | Passing]:
+        """The steps of a batch that are ready, as one piece of work: the outcome of each by its id (a `Passing` for one
+        that failed for this sync only). By default each is done on its own."""
+        async def each(op: Op) -> Made | None | Passing:
+            try:
+                return await self.do(op, results)
+            except Passing as passing:
+                return passing
+        outcomes = await asyncio.gather(*(each(op) for op in ops))
+        return {op.id: outcome for op, outcome in zip(ops, outcomes)}
+
     async def stage(self, made: Plan, group: Group, results: dict[str, Made]) -> None:
         """The files of a group made aside before anything is applied (the new containers)."""
 
@@ -195,9 +221,12 @@ class SeriesSync:
         inputs = self.inputs(online, choices)
         before = dict(self.containers)
         replanned: list[tuple] = []
+        done: dict[str, tuple[object, Made]] = {}
         while True:
             made = await self.plan_of(inputs)
-            results, failed = await self.run(made)
+            results, failed = await self.run(made, done)
+            subjects = {op.id: op.subject for op in made.ops}
+            done = {key: (subjects[key], value) for key, value in results.items()}
             new = [key for key in failures(made, results, failed, self.passing) if key not in self.failed]
             if not new:
                 break
@@ -216,8 +245,11 @@ class SeriesSync:
         return Synced(inputs, tuple(sorted(before.values(), key=lambda each: each.name)), made, tuple(failed),
                       tuple(applied), tuple(replanned), problems_of(made, self.passing, self.reasons))
 
-    async def run(self, made: Plan) -> tuple[dict[str, Made], set[str]]:
-        """The graph: a step starts on the signal that every step before it ended, so independent work runs at once."""
+    async def run(self, made: Plan, done: dict[str, tuple[object, Made]] | None = None) -> tuple[dict[str, Made], set[str]]:
+        """The graph: a step starts on the signal that every step before it ended, so independent work runs at once.
+        `done` is what a run of this sync made before a new failure made the plan again: a step the new plan asks the
+        same of is not done twice (`carried`)."""
+        done = done or {}
         self.passing = set()
         self.reasons = {}
         results: dict[str, Made] = {}
@@ -227,18 +259,49 @@ class SeriesSync:
         if missing:
             raise AssertionError(f"the graph names steps it does not have: {sorted(missing)}")
 
+        # A batch starts once every step of it is ready or left behind (a step before it failed): the ready ones go as
+        # one piece of work, and each step takes its own outcome out of it.
+        sizes = Counter(op.batch for op in made.ops if op.batch)
+        arrived: dict[str, list[Op | None]] = {key: [] for key in sizes}
+        settled = {key: asyncio.Event() for key in sizes}
+        outcomes: dict[str, Made | None | Passing] = {}
+
+        async def batch_of(op: Op, ready: bool) -> None:
+            kept = carried(op, done, results) if ready else None
+            if kept is not None:
+                outcomes[op.id] = kept
+            arrived[op.batch].append(op if ready and kept is None else None)
+            if len(arrived[op.batch]) == sizes[op.batch]:
+                try:
+                    members = [each for each in arrived[op.batch] if each is not None]
+                    if members:
+                        outcomes.update(await self.do_batch(members, results))
+                finally:
+                    settled[op.batch].set()
+            await settled[op.batch].wait()
+
         async def one(op: Op) -> None:
             try:
                 for need in op.needs:
                     await ended[need].wait()
-                if any(need in failed for need in op.needs):
+                ready = not any(need in failed for need in op.needs)
+                if op.batch:
+                    await batch_of(op, ready)
+                if not ready:
                     failed.add(op.id)
                     return
-                try:
-                    outcome = await self.do(op, results)
-                except Passing as passing:
+                if op.batch:
+                    outcome = outcomes.get(op.id, Passing("партия не выполнена"))
+                elif (kept := carried(op, done, results)) is not None:
+                    outcome = kept
+                else:
+                    try:
+                        outcome = await self.do(op, results)
+                    except Passing as passing:
+                        outcome = passing
+                if isinstance(outcome, Passing):
                     self.passing.add(op.id)
-                    self.reasons[op.id] = str(passing.args[0]) if passing.args else ""
+                    self.reasons[op.id] = str(outcome.args[0]) if outcome.args else ""
                     outcome = None
                 if outcome is None:
                     failed.add(op.id)

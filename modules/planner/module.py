@@ -13,8 +13,9 @@ the card of the series (`catalog.series.get`: the order of its sources, its fold
 Steps of the graph, each through its owner:
   download (a video, a voice-over, a compilation): the command `downloads.fetch` into the work folder of the alignment
       service; its end is the event `downloads.fetch.finished` of the key.
-  align: `conform.submit` (the video copied into the work folder; a voice-over out of a container by its track,
-      `dub_atracks`); its end is `conform.job.finished`. A result is taken by `ok` and an empty `critical`.
+  align: one `conform.submit` per episode — its reference once and every voice-over of it that came, once none of them
+      is still being downloaded (a voice-over that did not come holds none back); a voice-over out of a file of the library
+      by its track (`dub_atracks`); its end is `conform.job.finished`. A result is taken by `ok`.
   cut: `conform.reverse` with the single video of the episode; its end is `conform.job.finished`.
   build and apply: here, by core/plan/files (the container with its provenance, the journal in the folder of the series).
 A failure the service judged is recorded and the plan is counted again from the same snapshot; a failure of the moment
@@ -198,8 +199,6 @@ class BusSync(SeriesSync):
         try:
             if op.kind in DOWNLOADS:
                 return await self._download(op)
-            if op.kind == "align":
-                return await self._align(op, results)
             if op.kind == "cut":
                 return await self._cut(op, results)
             if op.kind == "build":
@@ -210,6 +209,24 @@ class BusSync(SeriesSync):
             self.m.log.exception("сериал %d: шаг %s не выполнен", self.series["id"], op.id)
             raise Passing(f"внутренняя ошибка: {exc}") from None
         raise AssertionError(op.kind)
+
+    async def do_batch(self, ops, results):
+        """The alignment of an episode is one job of the service: its reference once, every voice-over of it that came
+        (the reference is what the service works out first, for all of them)."""
+        if ops[0].kind != "align":
+            return await super().do_batch(ops, results)
+        if not self.download or not self.downloads_dir:
+            return {op.id: Passing() for op in ops}
+        self._flag("aligning", 1)
+        try:
+            return await self._align(ops, results)
+        except Passing as passing:
+            return {op.id: passing for op in ops}
+        except Exception as exc:  # noqa: BLE001 - the job that breaks is a step of the moment, not the end of the sync
+            self.m.log.exception("сериал %d: выравнивание %s не выполнено", self.series["id"], ops[0].batch)
+            return {op.id: Passing(f"внутренняя ошибка: {exc}") for op in ops}
+        finally:
+            self._flag("aligning", -1)
 
     def _key(self, op_id: str) -> str:
         return f"plan:{self.series['id']}:{hashlib.md5(op_id.encode()).hexdigest()[:12]}"
@@ -268,31 +285,65 @@ class BusSync(SeriesSync):
         await storage.call(shutil.copyfile, source, target, timeout=COPY_TIMEOUT_S, owns=(folder,))
         return target
 
-    async def _align(self, op, results):
-        goal, way = op.subject
+    async def _align(self, ops, results):
+        goal = ops[0].subject[0]
         video_path = self.files.video_path(goal, results)
-        label = f"{self.series['name']} {label_of(goal.slot)} {way.voice}"
+        label = f"{self.series['name']} {label_of(goal.slot)}"
         key = uuid.uuid4().hex[:12]
         folder = os.path.join(self.conform_dir, key)
         ref = await self._copy(video_path, os.path.join(folder, "ref"))
         ref_atrack = 0
         if goal.video.kind == "asset":
             ref_atrack = await self.files.stream_of(goal.video.container, goal.video.container.video.id, True)
-        if way.kind == "download":
-            dub, stream = results[f"dub:{goal.slot}:{way.dub}"].file, 0
-            if not dub.startswith(self.downloads_dir):
-                dub = await self._copy(dub, os.path.join(folder, "dub"))
-        else:
-            path, stream = await self.files.source_of(way.container, way.dub, way.own)
-            dub = await self._copy(path, os.path.join(folder, "dub"))
+        dubs, streams, of_dub, copied = [], [], {}, {}
+        for op in ops:
+            way = op.subject[1]
+            if way.kind == "download":
+                dub, stream = results[f"dub:{goal.slot}:{way.dub}"].file, 0
+                if not dub.startswith(self.downloads_dir):
+                    dub = await self._copy(dub, os.path.join(folder, "dub"))
+            else:  # out of a file of the library: copied once, each voice-over a name of its own (a link to the copy)
+                path, stream = await self.files.source_of(way.container, way.dub, way.own)
+                dub = os.path.join(folder, "dub", sanitize_name(way.voice) + os.path.splitext(path)[1])
+                if path in copied:
+                    await storage.call(os.link, copied[path], dub)
+                else:
+                    await storage.call(os.makedirs, os.path.dirname(dub), exist_ok=True)
+                    await storage.call(shutil.copyfile, path, dub, timeout=COPY_TIMEOUT_S, owns=(folder,))
+                    copied[path] = dub
+            dubs.append(dub)
+            streams.append(stream)
+            of_dub[os.path.basename(dub)] = op
         places = await self.m.request("conform.workspace", {"dub_folder": folder})
-        out = await self.m.job(key, "conform.submit", {
-            "ref": ref, "dubs": [dub], "dub_atracks": [stream], "out_dir": places["out_dir"],
+        found = await self.m.job(key, "conform.submit", {
+            "ref": ref, "dubs": dubs, "dub_atracks": streams, "out_dir": places["out_dir"],
             "cache_dir": places["cache_dir"], "label": label, "key": key,
             **({"ref_atrack": ref_atrack} if ref_atrack else {})})
-        if out is None:
-            return None
-        return Made(Track(way.dub, way.snapshot, goal.slot, video_of(goal, results).timeline), out)
+        if found is None:
+            return {op.id: None for op in ops}
+        job_id, ended = found
+        by_dub = {os.path.basename(result.get("dub") or ""): result for result in ended.get("results") or []}
+        timeline = video_of(goal, results).timeline
+        outcomes = {}
+        for name, op in of_dub.items():
+            way = op.subject[1]
+            result = by_dub.get(name)
+            why = (result or {}).get("error") or ended.get("error") or "сервис не дал результата"
+            try:
+                made = judged(result, cut=False)
+            except Passing:
+                self.m.log.warning("%s %s: выравнивание не сделано, повторится при следующей синхронизации: сбой "
+                                   "сервиса в задаче %s: %s", label, way.voice, job_id, why)
+                outcomes[op.id] = Passing(f"сбой сервиса в задаче {job_id}: {why}")
+                continue
+            if made is None:
+                what = "критичные замечания" if result and result.get("ok") else why
+                self.m.log.warning("%s %s: сервис выравнивания отказал в задаче %s, записано как неудача: %s", label,
+                                   way.voice, job_id, what)
+                outcomes[op.id] = None
+            else:
+                outcomes[op.id] = Made(Track(way.dub, way.snapshot, goal.slot, timeline), made)
+        return outcomes
 
     async def _cut(self, op, results):
         way = op.subject
@@ -305,10 +356,23 @@ class BusSync(SeriesSync):
         if way.ref2.kind == "asset":
             atrack = await self.files.stream_of(way.ref2.container, way.ref2.container.video.id, True)
         places = await self.m.request("conform.workspace", {"dub_folder": folder})
-        out = await self.m.job(key, "conform.reverse", {
+        found = await self.m.job(key, "conform.reverse", {
             "compilation": results[f"compilation:{way.row.id}"].file, "episodes": [{"path": episode, "atrack": atrack}],
             "out_dir": places["out_dir"], "label": label})
+        if found is None:
+            return None
+        job_id, ended = found
+        result = next(iter(ended.get("results") or []), None)
+        why = (result or {}).get("error") or ended.get("error") or "сервис не дал результата"
+        try:
+            out = judged(result, cut=True)
+        except Passing:
+            self.m.log.warning("%s: разбор не сделан, повторится при следующей синхронизации: сбой сервиса в задаче %s: %s",
+                               label, job_id, why)
+            raise Passing(f"сбой сервиса в задаче {job_id}: {why}") from None
         if out is None:
+            what = "критичные замечания" if result and result.get("ok") else why
+            self.m.log.warning("%s: сервис выравнивания отказал в задаче %s, записано как неудача: %s", label, job_id, what)
             return None
         return Made(Video(way.row.id, way.snapshot, op.slot, way.timeline, cut_of=way.row.id), out)
 
@@ -541,10 +605,11 @@ class PlannerModule(BaseModule):
         if future is not None and not future.done():
             future.set_result(env.payload)
 
-    async def job(self, key: str, topic: str, body: dict) -> str | None:
-        """A job at the alignment service: the path of its one result, None when the service judged it a failure;
-        `Passing` when it could not be asked or its answer never came. Every end but a success is written to the log with
-        its reason: the service keeps the reason of a crash, and nobody else here tells it."""
+    async def job(self, key: str, topic: str, body: dict) -> tuple[str, dict] | None:
+        """A job at the alignment service: its number and how it ended (the result of each of its files, judged by the
+        caller), None when the service refused the job; `Passing` when it could not be asked or its answer never came.
+        Every end but a success is written to the log with its reason: the service keeps the reason of a crash, and
+        nobody else here tells it."""
         label = body.get("label") or key
         try:
             return await self._job(key, topic, body)
@@ -553,7 +618,7 @@ class PlannerModule(BaseModule):
                              passing.args[0] if passing.args else "ответа сервиса нет")
             raise
 
-    async def _job(self, key: str, topic: str, body: dict) -> str | None:
+    async def _job(self, key: str, topic: str, body: dict) -> tuple[str, dict] | None:
         label = body.get("label") or key
         try:
             if topic == "conform.submit":
@@ -586,17 +651,7 @@ class PlannerModule(BaseModule):
                 self._jobs.pop(job_id, None)
         if ended.get("removed"):
             raise Passing(f"задача {job_id} снята в сервисе")
-        results = ended.get("results") or []
-        result = results[0] if results else None
-        why = (result or {}).get("error") or ended.get("error") or "сервис не дал результата"
-        try:
-            made = judged(result, cut=topic == "conform.reverse")
-        except Passing:
-            raise Passing(f"сбой сервиса в задаче {job_id}: {why}") from None
-        if made is None:
-            what = "критичные замечания" if result and result.get("ok") else why
-            self.log.warning("%s: сервис выравнивания отказал в задаче %s, записано как неудача: %s", label, job_id, what)
-        return made
+        return job_id, ended
 
     async def on_job_finished(self, env: Envelope) -> None:
         job_id = env.payload.get("job_id")

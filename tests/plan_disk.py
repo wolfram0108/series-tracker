@@ -204,7 +204,10 @@ class Daemon:
 
         @app.post("/conform/enqueue")
         def enqueue(body: EnqueueBody) -> dict:
-            return self._answer(self._align(body), body.label)
+            job = self._align(body)
+            if any(self._answer_for(body.label, dub) == "lost" for dub in body.dubs):
+                raise HTTPException(status_code=502, detail="no answer")
+            return self._answer(job, body.label)
 
         @app.post("/conform/reverse")
         def reverse(body: ReverseBody) -> list[dict]:
@@ -234,6 +237,15 @@ class Daemon:
         label = label or ""
         return self.answers.get(label, self.answers.get(re.sub(r"\s+#\S+$", "", label)))
 
+    def _answer_for(self, label: str | None, dub: str) -> str | None:
+        """The answer told for one voice-over of a job of an episode: by the label of the job and the voice-over its file
+        is named by (`Сериал s01e01 AnimeVost`), else the answer of the whole job."""
+        name, episode = os.path.basename(dub), re.sub(r"\s+#\S+$", "", label or "")
+        for told, answer in self.answers.items():
+            if told.startswith(episode + " ") and told[len(episode) + 1:] in name:
+                return answer
+        return self._answer_of(label)
+
     def client(self) -> DaemonClient:
         return DaemonClient("http://daemon.model", httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app)))
 
@@ -251,11 +263,11 @@ class Daemon:
 
     def _align(self, body: EnqueueBody) -> dict:
         os.makedirs(body.out_dir, exist_ok=True)  # the service makes the folder it writes in
-        answer = self._answer_of(body.label)
         picture = self.codec.picture(body.ref)
         tracks = body.dub_atracks or [0] * len(body.dubs)
         results = []
         for dub, stream in zip(body.dubs, tracks):
+            answer = self._answer_for(body.label, dub)
             # The voice-over is laid onto the video where its sound is the episode of the picture: the whole of an
             # episode, or its stretch of a compilation (Д-19).
             sounds = [self.codec.sound(dub, stream, second) for second in range(max(1, self.codec.seconds(dub)))]

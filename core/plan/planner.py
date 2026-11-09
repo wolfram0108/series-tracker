@@ -89,13 +89,16 @@ class Goal:
 
 @dataclass(frozen=True)
 class Op:
-    """A step of the graph. `subject` is what the step works on (a row, a way, a goal), `needs` the steps before it."""
+    """A step of the graph. `subject` is what the step works on (a row, a way, a goal), `needs` the steps before it.
+    Steps of one `batch` are done as one piece of work once each of them is ready or left behind (the alignment of an
+    episode: one job of the service for its reference and every voice-over of it that came)."""
 
     id: str
     kind: str
     slot: Slot | None
     needs: tuple[str, ...]
     subject: object
+    batch: str = ""
 
 
 @dataclass(frozen=True)
@@ -419,7 +422,7 @@ def _ops(goals: Iterable[Goal], containers) -> list[Op]:
                 needs.append(fetch)
                 mine.append(fetch)
             align = f"align:{slot}:{way.voice}"
-            ops[align] = Op(align, "align", slot, tuple(needs), (goal, way))
+            ops[align] = Op(align, "align", slot, tuple(needs), (goal, way), batch=f"align:{slot}")
             mine.append(align)
         ops[f"build:{slot}"] = Op(f"build:{slot}", "build", slot, tuple(dict.fromkeys(mine)), goal)
     return list(ops.values())
