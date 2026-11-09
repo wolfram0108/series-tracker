@@ -138,6 +138,25 @@ async def test_a_synchronization_waits_for_the_verdict_of_a_page_that_is_being_r
     assert result["sources"] == [{"source_id": rig.source_ids[0], "url": URL1, "state": "ready", "reason": None}]
 
 
+async def test_a_synchronization_stopped_while_its_page_is_read_stops_the_read_and_ends_with_nothing_done(rig):
+    """The user stops the sync while the pass waits for the read of its page: the pass stops, the read of the page is
+    stopped too, the planner is told to stop, the run closes, and no command is left to take the sync up again."""
+    rig.world.pages[URL1] = Page(TableState.READING, held=False)
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    run = rig.start_run()
+    await rig.world.asked.get()
+    stopped = await rig.probe.request("scan.run.cancel", {"series_id": rig.series_id}, timeout=STUCK_S)
+    assert stopped == {"cancelled": True}
+    assert (await asyncio.wait_for(run, STUCK_S))["cancelled"] is True
+    order = rig.world.order
+    assert f"table.cancel {URL1}" in order and f"planner.sync.cancel {rig.series_id}" in order
+    assert "composition.recompute" not in order and not any(step.startswith("planner.sync ") for step in order)
+    assert tasks_of(rig) == []
+    assert [each["active"] for each in drain(runs)] == [True, False]
+    again = await rig.probe.request("scan.run.cancel", {"series_id": rig.series_id}, timeout=STUCK_S)
+    assert again == {"cancelled": False}  # nothing goes any more
+
+
 # --- the command of a synchronization is the database's (T-28) ---------------------------------------------------------
 
 def tasks_of(rig: "Rig") -> list[dict]:

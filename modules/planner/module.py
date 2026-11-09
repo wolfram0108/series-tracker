@@ -30,6 +30,9 @@ Queries:
   planner.sync {series_id, download?} -> {accepted}: the sync of a series is recorded and starts; it is a work of the run
       of the sync (scan), told by `work.series.state` (owner `planner`). Without download no step runs: only what needs no
       work is applied (names, `.off`, removals the plan owes).
+  planner.sync.cancel {series_id} -> {cancelled}: the user stops the sync of the series: its downloads (work.withdrawn),
+      its jobs of the service (cancelled, taken out of the history), the build aside stop; nothing of it is applied and
+      it is not taken up again at the start. A journal of the library under way is not cut: the stop waits for its end.
   planner.work.get {series_id} -> WorkState.
   planner.series.get {series_id} -> PlannerView: the asset, the goal of every episode, the failures and the commands.
   planner.delete {series_id, kind: video | track, name, dub?} -> {recorded}: the command «Удалить» of a file or of a track
@@ -64,9 +67,9 @@ from dataclasses import replace
 
 from core import NO_HANDLER, BaseModule, BusRequestError, storage
 from core import container as mkv
-from core.contracts import (CompositionReply, PlanDelete, PlannerView, SeriesSource, SourceType, SubmitOutcome,
+from core.contracts import (WORK_WITHDRAWN, CompositionReply, PlanDelete, PlannerView, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
-from core.contracts.work import WORK_STATE, WorkState
+from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
 from core.envelope import Envelope
 from core.fsnames import sanitize_name
 from core.ignored import parse_memory
@@ -137,6 +140,10 @@ class BusSync(SeriesSync):
         self.flags: dict[str, int] = {}  # the steps under way by what they are, for the card of the series
         self.run_mark = ""  # when the sync under way began (plan_runs): the same after a stop, so its jobs are found again
         self.jobs: list[tuple[str, bool]] = []  # the jobs of the service this sync took the end of: (number, all ok)
+        # The keys of every job of the service this sync gave out or took up, written before it is sent: a stop finds
+        # each by its key (an answer to the sending that has not come yet is not waited for) and cancels it.
+        self.keys: set[str] = set()
+        self.committing = False  # the journal of the library is being carried out: a stop waits for its end
         # A VK video whose stream request fails may be handed to the downloader itself (as the service always did).
         self.vk_sources = {each.id for each in map(SeriesSource.model_validate, series.get("sources", []))
                            if each.source_type == SourceType.VK_VIDEO}
@@ -328,6 +335,7 @@ class BusSync(SeriesSync):
                 source = (await self.files.source_of(way.container, way.dub, way.own))[0]
                 name = sanitize_name(way.voice) + os.path.splitext(source)[1]
             of_dub[name] = op
+        self.keys.add(key)
         job_id = await self.m.find_job(key)
         found = (await self.m.attach(job_id) if job_id
                  else await self._submit_align(goal, ops, results, key, folder, places, label))
@@ -383,7 +391,7 @@ class BusSync(SeriesSync):
                     copied[path] = dub
             dubs.append(dub)
             streams.append(stream)
-        return await self.m.job(key, "conform.submit", {
+        return await self.m.job(key, "conform.submit", body={
             "ref": ref, "dubs": dubs, "dub_atracks": streams, "out_dir": places["out_dir"],
             "cache_dir": places["cache_dir"], "label": label, "key": key,
             **({"ref_atrack": ref_atrack} if ref_atrack else {})})
@@ -395,6 +403,7 @@ class BusSync(SeriesSync):
         label = f"{self.series['name']} {label_of(op.slot)}"
         folder = os.path.join(self.conform_dir, f"{label_of(op.slot)} #{key}")
         places = await self.m.request("conform.workspace", {"dub_folder": folder})
+        self.keys.add(key)
         job_id = await self.m.find_job(key)
         if job_id:
             found = await self.m.attach(job_id)
@@ -403,7 +412,7 @@ class BusSync(SeriesSync):
             atrack = 0
             if way.ref2.kind == "asset":
                 atrack = await self.files.stream_of(way.ref2.container, way.ref2.container.video.id, True)
-            found = await self.m.job(key, "conform.reverse", {
+            found = await self.m.job(key, "conform.reverse", body={
                 "compilation": results[f"compilation:{way.row.id}"].file, "episodes": [{"path": episode, "atrack": atrack}],
                 "out_dir": places["out_dir"], "label": label})
         if found is None:
@@ -438,6 +447,7 @@ class BusSync(SeriesSync):
             self._flag("packing", -1)
 
     async def commit(self, before) -> None:
+        self.committing = True
         table = [container_json(each) for each in sorted(self.containers.values(), key=lambda each: each.name)]
         if self.pending:
             steps = await storage.call(self.files.write_journal, self.pending, table)
@@ -453,6 +463,8 @@ class PlannerModule(BaseModule):
     def __init__(self, bus, db) -> None:
         self.repo = PlannerRepository(db)
         self._runs: dict[int, asyncio.Task] = {}
+        self._syncs: dict[int, BusSync] = {}  # the sync under way of each series
+        self._halting: set[int] = set()  # the series whose sync the user stops
         self._fetches: dict[str, asyncio.Future] = {}
         self._jobs: dict[str, asyncio.Future] = {}
         self._ended: dict[str, dict] = {}  # jobs that ended before anyone waited for them
@@ -468,6 +480,7 @@ class PlannerModule(BaseModule):
 
     def register(self) -> None:
         self.handle("planner.sync", self.on_sync)
+        self.handle("planner.sync.cancel", self.on_sync_cancel, concurrent=True)
         self.handle("planner.work.get", self.on_work_get)
         self.handle("planner.series.get", self.on_series_get, concurrent=True)
         self.handle("planner.delete", self.on_delete)
@@ -504,7 +517,7 @@ class PlannerModule(BaseModule):
     async def _sync(self, series_id: int, download: bool) -> None:
         try:
             series = await self.request("catalog.series.get", {"series_id": series_id})
-            sync = BusSync(self, series, download)
+            sync = self._syncs[series_id] = BusSync(self, series, download)
             sync.run_mark = await self.repo.run_started(series_id)
             await self._recover(series)
             await self._load(series_id, sync)
@@ -532,13 +545,20 @@ class PlannerModule(BaseModule):
             if sync.downloads_dir:
                 await storage.call(shutil.rmtree, sync.downloads_dir, True)
         except asyncio.CancelledError:
-            # The process stops: the sync stays written down and is taken up again at the start (system.started).
-            self._runs.pop(series_id, None)
-            raise
+            if series_id not in self._halting:
+                # The process stops: the sync stays written down and is taken up again at the start (system.started).
+                self._runs.pop(series_id, None)
+                self._syncs.pop(series_id, None)
+                raise
+            # The user stopped it: nothing of it is applied, what it made aside goes, and it ends as any sync ends.
+            asyncio.current_task().uncancel()
+            self.log.info("сериал %d: синхронизация остановлена пользователем, ничего не применено", series_id)
+            await self._discard(self._syncs.get(series_id))
         except Exception:  # noqa: BLE001 - the run ends either way: the error is in the log, the sync can be asked again
             self.log.exception("сериал %d: синхронизация плана прервана", series_id)
         await self.repo.end_run(series_id)
         self._runs.pop(series_id, None)
+        self._syncs.pop(series_id, None)
         self.contribute(series_id, {"downloading": False, "aligning": False, "packing": False})
         self._announce_work(series_id, False)
         # The end is told with the view the tables give now: a window holds the last packet it got, and the one of the
@@ -702,6 +722,61 @@ class PlannerModule(BaseModule):
             self.log.warning("%s: задача отклонена сервисом выравнивания, записано как неудача: %s", label, reason)
             return None
         return await self.attach(job_id)
+
+    async def on_sync_cancel(self, env: Envelope) -> dict:
+        """The user stops the sync of a series: every work of it stops — the downloads (work.withdrawn: the executor
+        stops them with their programs and removes what they wrote), the jobs of the service (cancelled and taken out of
+        its history), the build of the containers aside — and nothing of it is applied. A journal of the library under
+        way is not cut: the stop waits for its end. {cancelled}: false when no sync of the series went."""
+        series_id = int(env.payload["series_id"])
+        task, sync = self._runs.get(series_id), self._syncs.get(series_id)
+        if task is None or task.done():
+            return {"cancelled": False}
+        if sync is not None and sync.committing:
+            await asyncio.wait({task})
+            return {"cancelled": False}
+        self._halting.add(series_id)
+        try:
+            await self._withdraw_downloads(series_id)
+            task.cancel()
+            await asyncio.wait({task})
+            for key in sorted(sync.keys if sync is not None else ()):
+                job_id = await self.find_job(key)
+                if job_id:
+                    await self._drop_job(job_id)
+            await self.sweep({series_id})
+        finally:
+            self._halting.discard(series_id)
+        return {"cancelled": True}
+
+    async def _withdraw_downloads(self, series_id: int) -> None:
+        """The downloads of the series stop, and the stop is over only once their programs have: asked and waited for;
+        without an executor that answers, told (work.withdrawn)."""
+        try:
+            await self.request("downloads.withdraw", {"series_id": series_id})
+        except (BusRequestError, asyncio.TimeoutError) as exc:
+            if NO_HANDLER not in str(exc):
+                self.log.warning("сериал %d: загрузки не остановлены по запросу: %s", series_id, exc)
+            self.publish_event(WORK_WITHDRAWN, WorkWithdrawn(series_id=series_id).model_dump(mode="json"))
+
+    async def _drop_job(self, job_id: str) -> None:
+        """A job of a stopped sync: stopped if it waits or runs, then its record leaves the history (its folder with it)."""
+        for _ in range(2):  # the first stops a job under way, the second removes the record of a job that ended
+            try:
+                if not (await self.request("conform.cancel", {"job_id": job_id})).get("done"):
+                    return
+            except (BusRequestError, asyncio.TimeoutError):
+                self.log.warning("задача %s сервиса выравнивания не снята: сервис не ответил", job_id)
+                return
+
+    async def _discard(self, sync: "BusSync | None") -> None:
+        """What a stopped sync made aside goes: its downloads, the containers it built aside (no journal was written:
+        a sync with a journal under way is not stopped)."""
+        if sync is None:
+            return
+        if sync.downloads_dir:
+            await storage.call(shutil.rmtree, sync.downloads_dir, True)
+        await storage.call(sync.files.finish)
 
     async def find_job(self, key: str) -> str | None:
         """The job of the service a stop left behind, by its key: taken up instead of being sent again."""

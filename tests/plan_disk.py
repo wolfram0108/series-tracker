@@ -105,6 +105,10 @@ class Codec:
         return round(float(out.strip() or 0))
 
 
+# How long a file held in the middle waits for its release at most (a safeguard, not a synchronization).
+HOLD_SAFEGUARD_S = 60.0
+
+
 class Host:
     """A site: the files of its rows over HTTP. A row in `missing` answers 404 (gone for good), one in `flaky` 503."""
 
@@ -113,6 +117,11 @@ class Host:
         self.missing: set[str] = set()
         self.flaky: set[str] = set()
         self.served: list[str] = []  # the names of the files given out, in order: what was downloaded and how often
+        # A file in `hold` is given out half and held there until `released` (a download caught in its middle, its
+        # program alive); `holding` is set when such a file is being held.
+        self.hold: set[str] = set()
+        self.holding = threading.Event()
+        self.released = threading.Event()
         host = self
 
         class Handler(SimpleHTTPRequestHandler):
@@ -130,9 +139,27 @@ class Host:
                 return False
 
             def do_GET(self) -> None:
-                if not self._refuse():
-                    host.served.append(self.path.lstrip("/"))
+                if self._refuse():
+                    return
+                name = self.path.lstrip("/")
+                host.served.append(name)
+                if name not in host.hold:
                     super().do_GET()
+                    return
+                with open(os.path.join(root, name), "rb") as file:
+                    body = file.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    self.wfile.write(body[:len(body) // 2])
+                    self.wfile.flush()
+                    host.holding.set()
+                    host.released.wait(HOLD_SAFEGUARD_S)  # a safeguard: a test that forgets to release does not hang
+                    self.wfile.write(body[len(body) // 2:])
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # the downloader went away: what a stopped download does
 
             def do_HEAD(self) -> None:
                 if not self._refuse():
@@ -145,6 +172,7 @@ class Host:
         return f"http://127.0.0.1:{self.server.server_address[1]}/{name}"
 
     def close(self) -> None:
+        self.released.set()
         self.server.shutdown()
 
 

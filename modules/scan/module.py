@@ -23,6 +23,9 @@ Queries:
       signal of failure:
       the error carrier (scan_tasks.status='error') holds its reason. The wait for a table has a safeguard
       (`TABLE_WAIT_S`): when it runs out the source counts as failed, reason `table_wait_timeout`.
+  scan.run.cancel {series_id} → {cancelled}: the user stops the sync of the series: the pass of the scan stops (the
+      reads of its pages too, sources.table.cancel), then every work of its run (planner.sync.cancel). Nothing of it is
+      applied, the run closes and is not taken up again at the start. False when no sync of the series went.
   scan.series.prepare {series_id} → the summary of a torrent scan without a download: the torrent is added to
       qBittorrent, split into its files (torrent_files) and left paused — the user picks the episodes in the
       composition, the next scan starts the download.
@@ -147,6 +150,8 @@ class ScanModule(BaseModule):
         self._signals = TableSignals(announce=self._announce_reading)
         self._locks: dict[int, asyncio.Lock] = {}
         self._running: set[int] = set()
+        self._passes: dict[int, asyncio.Task] = {}  # the pass of the scan of each series, a task of its own
+        self._cancelling: set[int] = set()  # the series whose sync the user stops
         # The open runs: series -> its command in scan_tasks, the executors that still have work of it, and the
         # series whose recount an event asked for while its run was open (counted when the run ends).
         self._runs: dict[int, int] = {}
@@ -177,6 +182,7 @@ class ScanModule(BaseModule):
         # concurrent: долгий скан одного сериала не должен блокировать
         # очередь запросов к модулю (защита от гонки — set _running).
         self.handle("scan.series.run", self.on_run, concurrent=True)
+        self.handle("scan.run.cancel", self.on_run_cancel, concurrent=True)
         self.handle("scan.series.prepare", self.on_prepare, concurrent=True)
         self.handle("scan.all.start", self.on_scan_all)
         self.handle("scan.media.list", self.on_media_list)
@@ -430,10 +436,54 @@ class ScanModule(BaseModule):
 
     async def _run_series(self, series_id: int, force: bool = False,
                           download: bool = True, resume: int | None = None) -> dict:
-        """A scan of one series. The command is written down before anything is waited for, so that a restart finds
-        it: a video synchronization is a task of `scan_tasks` until it ends (`resume` is the task a restart found)."""
+        """A scan of one series, a task of its own: a stop of it by the user (scan.run.cancel) stops it alone, not the
+        pass over all series it may be a part of."""
+        # Refused or taken at once, in the handler: a second scan of the series is refused from this moment on.
         self._require_idle(series_id)
         self._running.add(series_id)
+        passing = self.spawn(self._pass_series(series_id, force, download, resume), name=f"scan.pass:{series_id}")
+        self._passes[series_id] = passing
+        try:
+            return await passing
+        finally:
+            if self._passes.get(series_id) is passing:
+                self._passes.pop(series_id, None)
+            self._running.discard(series_id)
+
+    async def on_run_cancel(self, env: Envelope) -> dict:
+        """The user stops the sync of a series: the pass of the scan (the reads of its pages stop too, failed, and are
+        not begun again at the start), then every work of its run (planner.sync.cancel: downloads, jobs of the service,
+        the build). The run closes as every run closes, and nothing of the stopped sync is applied."""
+        series_id = int(env.payload["series_id"])
+        stopped = False
+        self._cancelling.add(series_id)
+        try:
+            passing = self._passes.get(series_id)
+            if passing is not None and not passing.done():
+                series = await self.request("catalog.series.get", {"series_id": series_id})
+                passing.cancel()
+                await asyncio.wait({passing})
+                for source in _sources_of(series):
+                    try:
+                        await self.request("sources.table.cancel", {"url": source.url})
+                    except (BusRequestError, asyncio.TimeoutError) as exc:
+                        self.log.warning("сериал %d: чтение %s не остановлено: %s", series_id, source.url, exc)
+                stopped = True
+            try:
+                reply = await self.request("planner.sync.cancel", {"series_id": series_id})
+                stopped = bool(reply.get("cancelled")) or stopped
+            except BusRequestError as exc:
+                if NO_HANDLER not in str(exc):
+                    raise
+        finally:
+            self._cancelling.discard(series_id)
+        if stopped:
+            self.log.info("сериал %d: синхронизация остановлена пользователем", series_id)
+        return {"cancelled": stopped}
+
+    async def _pass_series(self, series_id: int, force: bool, download: bool, resume: int | None) -> dict:
+        """The command is written down before anything is waited for, so that a restart finds it: a video synchronization
+        is a task of `scan_tasks` until it ends (`resume` is the task a restart found)."""
         try:
             await self._edits_finished(series_id)
         except BaseException:
@@ -481,6 +531,16 @@ class ScanModule(BaseModule):
             self.send_command("metadata.seasons.recompute",
                               {"series_id": series_id})
             return result
+        except asyncio.CancelledError:
+            if series_id not in self._cancelling:
+                raise  # the process stops: the written command takes the sync up again at the start
+            asyncio.current_task().uncancel()
+            if intent is not None:
+                await self.repo.delete_task(intent)
+            if series_id not in self._runs:
+                self._announce_run(series_id, False)
+            self._contribute(series_id, scanning=series_id in self._runs, error=False)
+            return {"changed": False, "cancelled": True}
         except ScanAborted as exc:
             self.log.info("скан сериала %d прерван: %s", series_id, exc)
             if intent is not None:

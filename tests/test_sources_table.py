@@ -252,6 +252,31 @@ async def test_two_series_asking_for_one_page_make_one_read_and_both_get_the_sig
     assert (await system.get())["state"] == "ready"
 
 
+async def test_a_read_the_user_stopped_ends_failed_keeps_the_old_table_and_is_not_begun_again_at_the_start(
+        db_path, tmp_path):
+    """A stopped sync stops the read of its page: the read ends failed, the last complete table still serves, and the
+    page is not read again when the module starts (unlike a stop of the process, which leaves it `reading`)."""
+    system = await build(db_path, tmp_path / "cache")
+    await system.warm()
+    before = (await system.get(refresh=False))["table"]
+    system.clock.now += timedelta(hours=2)
+    system.site.go.clear()
+    assert (await system.get())["state"] == "reading"
+    await entry(system.site)
+    assert await system.probe.request("sources.table.cancel", {"url": PAGE}, timeout=STUCK_S) == {"cancelled": True}
+    assert parse((await system.next(system.failed))["reason"])["code"] == "read_cancelled"
+    stopped = await system.get(refresh=False)
+    assert stopped["state"] == "failed" and stopped["table"] == before
+    await system.stop()
+    again = await build(db_path, tmp_path / "cache", system.site, clock=system.clock)
+    try:
+        await assert_no_second_read(system.site)
+        assert (await again.get(refresh=False))["state"] == "failed"
+        assert await again.probe.request("sources.table.cancel", {"url": PAGE}, timeout=STUCK_S) == {"cancelled": False}
+    finally:
+        await again.stop()
+
+
 async def test_reading_now_does_not_start_a_second_read_while_one_goes(system):
     system.site.go.clear()
     await system.get()

@@ -33,6 +33,12 @@ class OkResponse(ApiModel):
     message: str | None = None
 
 
+class SyncCancelled(ApiModel):
+    """Синхронизация сериала остановлена: всё, что она делала, прервано, ничего не применено; false — она не шла."""
+    success: bool
+    cancelled: bool = False
+
+
 class FailuresReset(ApiModel):
     """Неудачные попытки сериала сброшены: сколько озвучек начато сначала (работа — со следующей синхронизацией)."""
     success: bool

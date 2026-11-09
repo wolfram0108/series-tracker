@@ -101,6 +101,8 @@ class World(BaseModule):
         h("rules.profiles.export", self.on_profiles_export)
         h("voices.settings.export", self.on_voices_export)
         h("sources.table.get", self.on_table)
+        h("sources.table.cancel", self.on_table_cancel)
+        h("planner.sync.cancel", self.on_planner_cancel)
         h("torrents.queue.get", self.on_torrent_queue)
         h("settings.value.get", self.on_setting_get)
         h("settings.value.set", self.on_setting_set)
@@ -124,6 +126,15 @@ class World(BaseModule):
         self.payloads.setdefault(env.topic, []).append(dict(env.payload))
         self.dispatched.put_nowait(env.topic)
         return {"accepted": True}
+
+    async def on_table_cancel(self, env) -> dict:
+        self.order.append(f"table.cancel {env.payload['url']}")
+        return {"cancelled": True}
+
+    async def on_planner_cancel(self, env) -> dict:
+        """The planner stops the sync it runs: its work ends, and it says so."""
+        self.order.append(f"{env.topic} {env.payload['series_id']}")
+        return {"cancelled": False}
 
     async def on_work_get(self, env) -> dict:
         owner = env.topic.split(".")[0]

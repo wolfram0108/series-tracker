@@ -13,6 +13,8 @@ Queries / commands:
       request failed (a VK video). A key already waiting or under way is not asked twice. The videos of the references
       (`whole`) and the rest (voice-overs, compilations) wait in lines of their own, each with its limit of parallel
       fetches: max_parallel_downloads and max_parallel_dub_downloads (2 by default each).
+  downloads.withdraw {series_id} -> {stopped} - the owner stops the fetches of a series and waits for them: the answer
+      comes once each has ended, its program stopped and what it wrote removed (work.withdrawn is the same, told).
   downloads.queue.get {} -> {tasks, count} - the fetches waiting (`pending`) and under way (`downloading`, with progress,
       speed, time left and size).
   downloads.queue.clear {} -> {deleted} - the waiting fetches are dropped (their owners hear them end, failed).
@@ -128,6 +130,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.cancel", self.on_cancel)
         self.handle("downloads.fetch", self.on_fetch)
         self.handle(WORK_WITHDRAWN, self.on_work_withdrawn)
+        self.handle("downloads.withdraw", self.on_withdraw, concurrent=True)
         self.handle("downloads.item.set_filename", self.on_set_filename)
         self.handle("downloads.item.set_status", self.on_set_status)
         self.handle("series.deleted", self.on_series_deleted)
@@ -168,12 +171,22 @@ class DownloadsModule(BaseModule):
         notice = WorkWithdrawn.model_validate(env.payload)
         await self._withdraw(lambda job_key, owner: owner == notice.series_id and (notice.keys is None or job_key in notice.keys))
 
-    async def _withdraw(self, wanted) -> None:
+    async def on_withdraw(self, env: Envelope) -> dict:
+        """The owner stops the fetches of a series and waits for them: the answer comes once every one has ended, its
+        program stopped and what it wrote removed."""
+        series_id = int(env.payload["series_id"])
+        return {"stopped": await self._withdraw(lambda job_key, owner: owner == series_id)}
+
+    async def _withdraw(self, wanted) -> int:
+        """The fetches wanted stop: those waiting leave the queue, those under way are cancelled and waited for (their
+        programs are stopped and what they wrote goes on their way out)."""
         self._fetch_queue = [job for job in self._fetch_queue if not wanted(job["key"], job["series_id"])]
-        for job_key, (runner, owner) in list(self._fetch_active.items()):
-            if wanted(job_key, owner):
-                runner.cancel()
+        runners = [runner for job_key, (runner, owner) in list(self._fetch_active.items()) if wanted(job_key, owner)]
+        for runner in runners:
+            runner.cancel()
         self._announce_queue()
+        await asyncio.gather(*runners, return_exceptions=True)
+        return len(runners)
 
     async def on_cancel(self, env: Envelope) -> dict:
         """One fetch stopped by the user: its owner hears it end, failed, and decides what follows."""

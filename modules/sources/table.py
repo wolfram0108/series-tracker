@@ -70,6 +70,7 @@ class TableReader:
         self._clock, self._term, self._safeguard_s, self._recent = clock, term, safeguard_s, recent
         self._log = get_logger("sources")
         self._reading: dict[str, asyncio.Task] = {}
+        self._cancelled: set[str] = set()  # the pages whose read the user stopped: a verdict, unlike a stop of the process
         # Makes "look at the stored table, then decide to read" one step with respect to the end of a read.
         self._gate = asyncio.Lock()
 
@@ -114,6 +115,18 @@ class TableReader:
         site, key = found
         if key not in self._reading:
             self._launch(site, key, fresh=True)
+
+    async def cancel(self, url: str) -> bool:
+        """Stop the read of a page the user does not want any more: the read ends failed (`read_cancelled`), so it is
+        not begun again at the start, and the last complete table still serves. False when no read of it goes."""
+        found = self._resolve(url)
+        task = self._reading.get(found[1]) if found is not None else None
+        if task is None:
+            return False
+        self._cancelled.add(found[1])
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return True
 
     def resolve(self, url: str) -> SiteResolveReply:
         """Which site reads the address and its canonical form, with no network."""
@@ -169,6 +182,12 @@ class TableReader:
         try:
             await self._repo.mark_reading(key, site.name, self._stamp())
             table = await self._read(site, key, fresh)
+        except asyncio.CancelledError:
+            if key not in self._cancelled:
+                raise  # a stop of the process: the page stays `reading` and is read again at the start
+            self._cancelled.discard(key)
+            asyncio.current_task().uncancel()
+            problem = reason("read_cancelled")
         except SiteError as exc:
             problem = exc.reason
         except Exception as exc:  # noqa: BLE001 — an unexpected failure is a failed read, not a silent task death

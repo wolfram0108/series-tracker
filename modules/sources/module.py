@@ -22,6 +22,9 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    `absent` when nothing was read; with the last complete table when there is one.
   sources.table.read {url} command: read the page now, term or not, unless a read of it is going; the read takes
                                    no raw data that an earlier read left for sharing (the listing of a VK channel)
+  sources.table.cancel {url} → {cancelled}: the read of the page going now stops (the user stopped the sync that waits
+                                   for it): it ends failed (`read_cancelled`) and is not begun again at the start; the
+                                   last complete table still serves. False when no read of it goes.
   sources.site.resolve {url} → {site, canonical_url}: which site reads the address and the canonical
                                    form of it (no network); both null when no site does
   sources.video.stream {url, max_height?} → {handled, stream_url, headers, progressive} | {handled, error,
@@ -134,6 +137,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.video.stream", self.on_video_stream)
         self.handle("sources.table.get", self.on_table_get)
         self.handle("sources.table.read", self.on_table_read)
+        self.handle("sources.table.cancel", self.on_table_cancel)
         self.handle("sources.site.resolve", self.on_site_resolve)
 
     async def on_start(self) -> None:
@@ -315,6 +319,10 @@ class SourcesModule(BaseModule):
 
     async def on_table_read(self, env: Envelope) -> None:
         await self.tables.read(TableGetRequest.model_validate(env.payload))
+
+    async def on_table_cancel(self, env: Envelope) -> dict:
+        """The read of a page stopped by the user (a sync stopped): it ends failed, the last table serves."""
+        return {"cancelled": await self.tables.cancel(str(env.payload["url"]))}
 
     async def on_site_resolve(self, env: Envelope) -> dict:
         """payload: SiteResolveRequest; reply: SiteResolveReply. No network."""

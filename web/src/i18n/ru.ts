@@ -152,6 +152,7 @@ export const ru = {
   "reason.release_off_contract": "{service}: разбор страницы не соответствует контракту провайдера",
   "reason.site_not_found": "для этого адреса нет сайта",
   "reason.read_failed": "чтение страницы не удалось",
+  "reason.read_cancelled": "чтение страницы остановлено пользователем",
   "reason.read_timeout": "чтение страницы прервано по предельному сроку ({seconds} с)",
   "reason.duplicate_key": "в таблице страницы повторяется ключ строки {key}",
   "reason.storage_failed": "запись на диск не удалась",

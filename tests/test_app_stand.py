@@ -220,3 +220,70 @@ async def test_the_voice_overs_of_an_episode_go_to_the_service_as_one_job_and_on
     view = await stand.check(series_id)
     (asset,) = view["assets"]
     assert sorted(track["group"] for track in asset["tracks"]) == ["AnimeVost", "Kansai"]
+
+
+def programs_with(name: str) -> list[str]:
+    """The programs running now whose command line names `name` (a download caught in its middle)."""
+    found = []
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as file:
+                line = file.read().replace(b"\0", b" ").decode(errors="replace")
+        except OSError:
+            continue
+        if name in line:
+            found.append(line)
+    return found
+
+
+def files_in(folder: str) -> list[str]:
+    return [os.path.join(path, name) for path, _, names in os.walk(folder) for name in names]
+
+
+async def nothing_taken_up_after_a_start(stand, series_id: int) -> None:
+    """The stopped sync is not taken up again: after a start of the process nothing of it runs, nothing is fetched."""
+    served, jobs = len(stand.host.served), len(stand.daemon.jobs)
+    await stand.restart()
+    await stand.bus.settled()
+    view = await stand.call("GET", f"/api/series/{series_id}/plan")
+    assert not view["running"] and not view["assets"]
+    assert (len(stand.host.served), len(stand.daemon.jobs)) == (served, jobs)
+
+
+async def test_a_sync_stopped_while_it_downloads_stops_the_download_with_its_program_and_applies_nothing(stand):
+    """The user stops the sync while the video of the reference is half downloaded: the download stops with its program
+    and what it wrote goes, the run closes, nothing is applied, and the sync is not taken up again after a start."""
+    series_id = await series_of(stand, (1,))
+    held = f"ref-ep1-truth{truth_of(1, 1)}-file.mp4"
+    stand.host.hold.add(held)
+    await stand.call("POST", f"/api/series/{series_id}/scan")
+    await asyncio.wait_for(asyncio.to_thread(stand.host.holding.wait), STAND_LIMIT_S)
+    stopped = await stand.call("POST", f"/api/series/{series_id}/scan/cancel")
+    assert stopped == {"success": True, "cancelled": True}
+    assert programs_with(stand.host.url(held)) == []  # the address of this stand: a neighbour's test has its own
+    view = await stand.call("GET", f"/api/series/{series_id}/plan")
+    assert not view["running"] and not view["assets"] and stand.files() == []
+    assert files_in(os.path.join(stand.root, "work")) == []
+    series = await stand.call("GET", f"/api/series/{series_id}")
+    assert not series["is_busy"]
+    stand.host.hold.clear()
+    stand.host.released.set()
+    await nothing_taken_up_after_a_start(stand, series_id)
+
+
+async def test_a_sync_stopped_while_the_service_aligns_cancels_its_job_and_applies_nothing(stand):
+    """The user stops the sync while the service aligns an episode: the job is cancelled and leaves the service's
+    history, its folder goes, nothing is applied, and the sync is not taken up again after a start."""
+    series_id = await series_of(stand, (1,))
+    stand.daemon.hold = True
+    await stand.call("POST", f"/api/series/{series_id}/scan")
+    await asyncio.wait_for(asyncio.to_thread(stand.daemon.made.wait), STAND_LIMIT_S)
+    stopped = await stand.call("POST", f"/api/series/{series_id}/scan/cancel")
+    assert stopped == {"success": True, "cancelled": True}
+    await stand.bus.settled()
+    assert stand.daemon.jobs == {}
+    view = await stand.call("GET", f"/api/series/{series_id}/plan")
+    assert not view["running"] and not view["assets"] and stand.files() == []
+    assert files_in(os.path.join(stand.root, "work")) == []
+    stand.daemon.hold = False
+    await nothing_taken_up_after_a_start(stand, series_id)

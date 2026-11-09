@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from core import BusRequestError
 from .routing import admitted
 
-from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, FailuresReset, OkResponse,
+from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, FailuresReset, OkResponse, SyncCancelled,
                       QueueTask, SeriesCreate, SeriesObject, SeriesUpdate)
 
 # Общая документация веток ошибок (отдаются через JSONResponse, на них
@@ -273,6 +273,16 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return JSONResponse({"success": False, "error": msg},
                                 status_code=code)
         return {"success": True, **result}
+
+    @r.post("/api/series/{series_id}/scan/cancel", response_model=SyncCancelled, responses={500: {"model": ErrorResponse}})
+    async def cancel_scan(series_id: int):
+        """Остановить синхронизацию сериала: чтение страниц, загрузки, задачи сервиса выравнивания, сборку файлов.
+        Из остановленной синхронизации ничего не применяется; идущий журнал библиотеки она дожидается."""
+        try:
+            done = await gw.request("scan.run.cancel", {"series_id": series_id})
+        except BusRequestError as exc:
+            return JSONResponse({"success": False, "error": str(exc).split(": ", 1)[-1]}, status_code=500)
+        return {"success": True, "cancelled": bool(done.get("cancelled"))}
 
     @r.post("/api/series/{series_id}/failures/reset", response_model=FailuresReset, responses=_ERRORS)
     async def reset_failures(series_id: int):
