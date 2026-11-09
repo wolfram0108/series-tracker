@@ -134,7 +134,7 @@ async function copyAddress(): Promise<void> {
       <div v-for="line in view.unread" :key="line" class="source-reason" :title="t('sources.unread.hint')">{{ line }}</div>
 
       <div v-if="!isTorrent && player" class="players stack">
-        <div class="st-tabs player-tabs" role="tablist" :aria-label="t('sources.player.tabs')">
+        <div class="st-tabs st-tabs-wrap" role="tablist" :aria-label="t('sources.player.tabs')">
           <button
             v-for="each in view.players" :key="each.player" type="button" class="st-tab player-tab" role="tab"
             :class="{ active: each.player === player.player, 'is-off': each.off }" :aria-selected="each.player === player.player"
@@ -228,7 +228,6 @@ async function copyAddress(): Promise<void> {
 .source-body { padding: var(--space); }
 .source-reason { color: var(--color-red-1); overflow-wrap: anywhere; }
 .muted { color: var(--text-muted); font-size: smaller; }
-.player-tabs { flex-wrap: wrap; align-self: flex-start; }
 .player-tab { padding-block: 0.3rem; font-size: 0.85rem; }
 .player-rows { color: var(--text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
 .player-tab.is-off .player-name { text-decoration: line-through; }

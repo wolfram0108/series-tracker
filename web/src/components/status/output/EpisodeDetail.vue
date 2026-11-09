@@ -64,13 +64,13 @@ const PILL: Record<EpisodeStatus, string> = {
       <button type="button" class="icon-btn" :aria-label="t('output.episode.close')" @click="emit('close')"><i class="pi pi-times" /></button>
     </header>
     <div class="detail-body">
-      <div v-if="compilations" class="st-tabs detail-tabs" role="tablist">
+      <div v-if="compilations" class="st-tabs st-tabs-wrap" role="tablist">
         <button type="button" class="st-tab" :class="{ active: tab === 'compilations' }" role="tab"
                 :aria-selected="tab === 'compilations'" @click="tab = 'compilations'">{{ t("output.tab.compilations") }}</button>
         <button type="button" class="st-tab" :class="{ active: tab === 'reference' }" role="tab"
                 :aria-selected="tab === 'reference'" @click="tab = 'reference'">{{ t("output.tab.ref2") }}</button>
       </div>
-      <div v-else class="st-tabs detail-tabs" role="tablist">
+      <div v-else class="st-tabs st-tabs-wrap" role="tablist">
         <button type="button" class="st-tab" :class="{ active: tab === 'tracks' }" role="tab" :aria-selected="tab === 'tracks'" @click="tab = 'tracks'">
           {{ t("output.tab.tracks") }}
         </button>
@@ -132,5 +132,4 @@ const PILL: Record<EpisodeStatus, string> = {
   color: var(--color-gray-600); font: inherit; padding: 0.3rem 0.6rem;
 }
 .detail-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem 1rem; }
-.detail-tabs { flex-wrap: wrap; align-self: flex-start; }
 </style>

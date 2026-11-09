@@ -86,6 +86,9 @@
   background: var(--color-gray-200);
   border-radius: 10px; padding: 3px;
 }
+/* A strip of tabs in the body of a window, as many as its data has (the voice-overs of an episode or a level, the
+   players of a source): it wraps instead of scrolling, and takes no more width than its tabs. */
+.st-tabs.st-tabs-wrap { flex-wrap: wrap; align-self: flex-start; }
 .st-tab {
   flex: 0 0 auto; min-width: 0; /* по содержимому: ширина стабильна, выбор её НЕ меняет (не пляшут) */
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;

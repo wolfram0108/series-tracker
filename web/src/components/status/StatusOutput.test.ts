@@ -417,7 +417,7 @@ describe("StatusOutput", () => {
     await w.find(".output-view-compilations").trigger("click")
     await w.find(".compilation-block .episode-card").trigger("click")
     await flushPromises()
-    expect(w.findAll(".episode-detail .detail-tabs .st-tab").map((tab) => tab.text())).toEqual(["Компиляции", "РЕФ 2"])
+    expect(w.findAll(".episode-detail .st-tabs-wrap .st-tab").map((tab) => tab.text())).toEqual(["Компиляции", "РЕФ 2"])
     expect(w.find(".compilation-table [data-compilation]").exists()).toBe(true)
     await w.find(".compilation-block .season-settings").trigger("click")
     await flushPromises()

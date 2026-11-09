@@ -69,8 +69,10 @@ const countText = (state: TrackState | "reference", count: number): string => st
   <ModalShell size="xl" fixed-height @close="emit('close')">
     <template #title>{{ compilation ? compilation.title : season === null ? t("output.settings.titleSeries")
       : t("output.settings.titleSeason", { n: season }) }}</template>
-    <template #header-extra>
-      <div class="header-tabs st-tabs" role="tablist">
+    <div class="level-settings">
+      <!-- The tabs of a level are as many as its voice-overs: they wrap in the body, as those of an episode do; the
+           header holds the few tabs of a window. -->
+      <div class="st-tabs st-tabs-wrap" role="tablist">
         <button v-if="compilation" type="button" class="st-tab" :class="{ active: tab === 'cuts' }" @click="tab = 'cuts'">
           {{ t("output.tab.cuts") }}
         </button>
@@ -87,9 +89,6 @@ const countText = (state: TrackState | "reference", count: number): string => st
           <VoiceMark :n="index + 1" :online="online[group]" />{{ group }}
         </button>
       </div>
-    </template>
-
-    <div class="level-settings">
       <div v-if="tab === 'cuts' && compilation" class="level-cuts">
         <span class="level-counts">
           <span v-for="[state, count] in cutEntries" :key="state" class="pill" :class="CUT_PILL[state]">
@@ -113,8 +112,10 @@ const countText = (state: TrackState | "reference", count: number): string => st
           <tr v-for="track in tracks" :key="track.group" :data-group="track.group">
             <td><VoiceMark :n="track.pos" :online="online[track.group]" /></td>
             <td><b>{{ track.group }}</b></td>
-            <td class="level-counts">
-              <span v-for="(count, state) in track.counts" :key="state" class="pill" :class="PILL[state]">{{ countText(state, count!) }}</span>
+            <td>
+              <span class="level-counts">
+                <span v-for="(count, state) in track.counts" :key="state" class="pill" :class="PILL[state]">{{ countText(state, count!) }}</span>
+              </span>
             </td>
             <td class="narrow">
               <button v-if="track.counts.error" type="button" class="level-action do-retry" data-lever :disabled="busy" @click="emit('retry', track.group)">
