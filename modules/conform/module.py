@@ -41,6 +41,7 @@ Query:
       record of a job that ended: the daemon then drops the files it keeps for the record (graphs, journal, time map,
       cache) and leaves the output audio. `done` is true when it is stopped or the daemon does not know it,
       false when the daemon could not be reached.
+  conform.job.keys {} -> {reachable, keys}: the keys of the jobs the daemon's history holds (the end of their labels).
   conform.plot {job_id, name} -> {found: bool, data?: base64 PNG} — the picture of a plot named in a result (`plot`); only
       a plain PNG name is asked of the daemon.
   conform.job.find {key} -> {reachable: bool, job_id: str | None} — the job sent with this key.
@@ -196,6 +197,7 @@ class ConformModule(BaseModule):
         self.handle("conform.settings.get", self.on_settings_get)
         self.handle("conform.settings.set", self.on_settings_set)
         self.handle("conform.job.find", self.on_job_find)
+        self.handle("conform.job.keys", self.on_job_keys)
         self.handle("gateway.sse.clients", self.on_clients)
 
     def snapshot(self) -> dict[str, Any]:
@@ -371,6 +373,17 @@ class ConformModule(BaseModule):
         mark = f"#{env.payload['key']}"
         found = next((job["id"] for job in jobs if str(job.get("label") or "").endswith(mark)), None)
         return {"reachable": True, "job_id": found}
+
+    async def on_job_keys(self, env: Envelope) -> dict:
+        """The keys of the jobs the daemon's history holds (`… #key` of their labels): what a caller keeps a folder of a
+        job for."""
+        if self._client is None or not self._daemon.get("up"):
+            return {"reachable": False, "keys": []}
+        try:
+            jobs = await self._client.jobs()
+        except httpx.HTTPError:
+            return {"reachable": False, "keys": []}
+        return {"reachable": True, "keys": sorted({key for job in jobs if (key := split_label(job.get("label"))[1])})}
 
     async def on_job_get(self, env: Envelope) -> dict:
         job_id = env.payload["job_id"]

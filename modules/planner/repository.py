@@ -71,6 +71,11 @@ class PlannerRepository:
             "ON CONFLICT (series_id) DO UPDATE SET download=excluded.download",
             (series_id, int(download), datetime.now(timezone.utc).isoformat()))
 
+    async def run_started(self, series_id: int) -> str:
+        """When the sync under way began: the same after a stop, so its work is known again by it."""
+        row = await self._db.fetch_one("SELECT started_at FROM plan_runs WHERE series_id=?", (series_id,))
+        return row["started_at"] if row else ""
+
     async def end_run(self, series_id: int) -> None:
         await self._db.execute("DELETE FROM plan_runs WHERE series_id=?", (series_id,))
 

@@ -60,6 +60,10 @@ class Neighbours(BaseModule):
         self.handle("conform.submit", self.on_submit, concurrent=True)
         self.handle("conform.reverse", self.on_reverse, concurrent=True)
         self.handle("conform.job.find", self.on_find)
+        self.handle("conform.job.get", self.on_job_get)
+        self.handle("conform.job.keys", self.on_job_keys)
+        self.handle("conform.settings.get", self.on_conform_settings)
+        self.handle("conform.cancel", self.on_cancel)
 
     async def on_series(self, env: Envelope) -> dict:
         return {"id": SERIES, "name": "Сериал", "kind": "video", "save_path": self.library, "ignored_seasons": "[]",
@@ -126,7 +130,27 @@ class Neighbours(BaseModule):
         return {"outcome": "accepted", "jobs": {key: jobs[0]["id"]}, "retry": False}
 
     async def on_find(self, env: Envelope) -> dict:
-        return {"reachable": True, "job_id": None}
+        mark = f"#{env.payload['key']}"
+        found = next((job["id"] for job in self.daemon.jobs.values() if str(job.get("label") or "").endswith(mark)), None)
+        return {"reachable": True, "job_id": found}
+
+    async def on_job_get(self, env: Envelope) -> dict:
+        job = self.daemon.jobs.get(env.payload["job_id"])
+        if job is None:
+            return {"job_id": env.payload["job_id"], "status": "gone", "results": []}
+        return {"job_id": job["id"], "status": job["status"], "error": job.get("error"),
+                "results": finished_view(job, {})["results"]}
+
+    async def on_job_keys(self, env: Envelope) -> dict:
+        return {"reachable": True, "keys": sorted({str(job.get("label") or "").rsplit("#", 1)[-1].strip()
+                                                   for job in self.daemon.jobs.values() if "#" in str(job.get("label"))})}
+
+    async def on_conform_settings(self, env: Envelope) -> dict:
+        return {"clear_finished": False}
+
+    async def on_cancel(self, env: Envelope) -> dict:
+        self.daemon.jobs.pop(env.payload["job_id"], None)
+        return {"done": True}
 
     # --- the site ------------------------------------------------------------------------------------------------
 

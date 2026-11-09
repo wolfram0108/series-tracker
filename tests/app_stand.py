@@ -76,11 +76,21 @@ class StreamingDaemon(Daemon):
 
     def _job(self, kind, label, dubs, results):
         job = super()._job(kind, label, dubs, results)
+        self._tell(job)
+        return job
+
+    def release(self) -> list[dict]:
+        ended = super().release()
+        for job in ended:
+            self._tell(job)
+        return ended
+
+    def _tell(self, job: dict) -> None:
+        """A job made or changed goes to the stream of events."""
         self.version += 1
         self.sent[job["id"]] = self.version
         if self.loop is not None and self.changed is not None:
             self.loop.call_soon_threadsafe(self.changed.set)
-        return job
 
 
 def _event(name: str, payload: dict) -> str:

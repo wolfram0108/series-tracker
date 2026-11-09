@@ -191,6 +191,10 @@ class Daemon:
         self.codec = codec
         self.jobs: dict[str, dict] = {}
         self.answers: dict[str, str] = {}
+        # `hold`: a job stays running until `release` (a stop of the process can come in between); `made` is set when
+        # a job is made.
+        self.hold = False
+        self.made = threading.Event()
         app = FastAPI()
         self.app = app
 
@@ -253,8 +257,20 @@ class Daemon:
         job_id = f"m{len(self.jobs) + 1:05d}"
         job = {"id": job_id, "kind": kind, "label": label, "status": "done", "progress": 1.0, "dubs": dubs,
                "results": results, "error": None}
+        if self.hold:
+            job.update(status="running", progress=0.5, results=[], held=results)
         self.jobs[job_id] = job
+        self.made.set()
         return job
+
+    def release(self) -> list[dict]:
+        """The jobs held end now, with what they made."""
+        ended = []
+        for job in self.jobs.values():
+            if "held" in job:
+                job.update(status="done", progress=1.0, results=job.pop("held"))
+                ended.append(job)
+        return ended
 
     def _answer(self, job: dict, label: str | None) -> dict:
         if self._answer_of(label) == "lost":

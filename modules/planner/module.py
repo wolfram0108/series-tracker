@@ -17,6 +17,11 @@ Steps of the graph, each through its owner:
       is still being downloaded (a voice-over that did not come holds none back); a voice-over out of a file of the library
       by its track (`dub_atracks`); its end is `conform.job.finished`. A result is taken by `ok`.
   cut: `conform.reverse` with the single video of the episode; its end is `conform.job.finished`.
+  A job is keyed by its sync (plan_runs.started_at) and what it does: a sync taken up after a stop finds its job by the
+      key (conform.job.find) and takes its end instead of sending it again. When a job ends, what it was given (copies,
+      cache) goes; its folder with what it wrote (tracks, plots) stays while its record is in the service's history
+      (conform.job.keys), and goes with the record (conform.job.removed, the end of a sync, the start). The setting
+      conform.clear_finished takes a job that ended with every result out of the history at the end of its sync.
   build and apply: here, by core/plan/files (the container with its provenance, the journal in the folder of the series).
 A failure the service judged is recorded and the plan is counted again from the same snapshot; a failure of the moment
 (the network, a service that is down, an answer that never came) is no record and is tried at the next sync.
@@ -55,7 +60,6 @@ import hashlib
 import json
 import os
 import shutil
-import uuid
 from dataclasses import replace
 
 from core import NO_HANDLER, BaseModule, BusRequestError, storage
@@ -80,6 +84,7 @@ from .view import view_of
 PLANNER = "planner"
 # A safeguard of the copy of a video into the work folder of the alignment service: a 4K episode over the network.
 COPY_TIMEOUT_S = 1800.0
+ENDED = ("done", "failed", "cancelled", "gone")  # the states of a job that ended (conform.job.get)
 WORK = "planner"  # the folder of the planner's work inside the work folder of the alignment service
 
 
@@ -130,6 +135,8 @@ class BusSync(SeriesSync):
         self.pending: list[tuple] = []  # the steps of the journal of this sync
         self.told = False  # the window was shown the plan this sync froze
         self.flags: dict[str, int] = {}  # the steps under way by what they are, for the card of the series
+        self.run_mark = ""  # when the sync under way began (plan_runs): the same after a stop, so its jobs are found again
+        self.jobs: list[tuple[str, bool]] = []  # the jobs of the service this sync took the end of: (number, all ok)
         # A VK video whose stream request fails may be handed to the downloader itself (as the service always did).
         self.vk_sources = {each.id for each in map(SeriesSource.model_validate, series.get("sources", []))
                            if each.source_type == SourceType.VK_VIDEO}
@@ -279,51 +286,56 @@ class BusSync(SeriesSync):
             return Made(row, path)
         return Made(None, path)
 
+    async def _shed(self, folder: str, keep: str) -> None:
+        """A job ended: what it was given (the copies, its cache) goes; what it wrote (the tracks, the plots) stays while
+        its record is in the service's history (PlannerModule.sweep)."""
+        def shed() -> None:
+            for name in os.listdir(folder) if os.path.isdir(folder) else ():
+                path = os.path.join(folder, name)
+                if os.path.normpath(path) == os.path.normpath(keep):
+                    continue
+                if os.path.isdir(path):
+                    shutil.rmtree(path, True)
+                else:
+                    os.remove(path)
+        await storage.call(shed)
+
     async def _copy(self, source: str, folder: str) -> str:
         await storage.call(os.makedirs, folder, exist_ok=True)
         target = os.path.join(folder, os.path.basename(source))
         await storage.call(shutil.copyfile, source, target, timeout=COPY_TIMEOUT_S, owns=(folder,))
         return target
 
+    def _job_key(self, *what) -> str:
+        """The key of a job of the service: the sync it belongs to and what it does. A stop and the start after it make
+        the same job of the same sync, which is found by its key instead of being sent again; the next sync is another."""
+        return hashlib.md5("|".join(map(str, (self.series["id"], self.run_mark, *what))).encode()).hexdigest()[:12]
+
     async def _align(self, ops, results):
         goal = ops[0].subject[0]
-        video_path = self.files.video_path(goal, results)
+        timeline = video_of(goal, results).timeline
         label = f"{self.series['name']} {label_of(goal.slot)}"
-        key = uuid.uuid4().hex[:12]
+        key = self._job_key("align", goal.slot, timeline,
+                            sorted((op.subject[1].voice, repr(op.subject[1].dub)) for op in ops))
         folder = os.path.join(self.conform_dir, key)
-        ref = await self._copy(video_path, os.path.join(folder, "ref"))
-        ref_atrack = 0
-        if goal.video.kind == "asset":
-            ref_atrack = await self.files.stream_of(goal.video.container, goal.video.container.video.id, True)
-        dubs, streams, of_dub, copied = [], [], {}, {}
-        for op in ops:
+        places = await self.m.request("conform.workspace", {"dub_folder": folder})
+        of_dub = {}
+        for op in ops:  # the name the file of each voice-over has in the job (the job taken up again has the same)
             way = op.subject[1]
             if way.kind == "download":
-                dub, stream = results[f"dub:{goal.slot}:{way.dub}"].file, 0
-                if not dub.startswith(self.downloads_dir):
-                    dub = await self._copy(dub, os.path.join(folder, "dub"))
-            else:  # out of a file of the library: copied once, each voice-over a name of its own (a link to the copy)
-                path, stream = await self.files.source_of(way.container, way.dub, way.own)
-                dub = os.path.join(folder, "dub", sanitize_name(way.voice) + os.path.splitext(path)[1])
-                if path in copied:
-                    await storage.call(os.link, copied[path], dub)
-                else:
-                    await storage.call(os.makedirs, os.path.dirname(dub), exist_ok=True)
-                    await storage.call(shutil.copyfile, path, dub, timeout=COPY_TIMEOUT_S, owns=(folder,))
-                    copied[path] = dub
-            dubs.append(dub)
-            streams.append(stream)
-            of_dub[os.path.basename(dub)] = op
-        places = await self.m.request("conform.workspace", {"dub_folder": folder})
-        found = await self.m.job(key, "conform.submit", {
-            "ref": ref, "dubs": dubs, "dub_atracks": streams, "out_dir": places["out_dir"],
-            "cache_dir": places["cache_dir"], "label": label, "key": key,
-            **({"ref_atrack": ref_atrack} if ref_atrack else {})})
+                name = os.path.basename(results[f"dub:{goal.slot}:{way.dub}"].file)
+            else:
+                source = (await self.files.source_of(way.container, way.dub, way.own))[0]
+                name = sanitize_name(way.voice) + os.path.splitext(source)[1]
+            of_dub[name] = op
+        job_id = await self.m.find_job(key)
+        found = (await self.m.attach(job_id) if job_id
+                 else await self._submit_align(goal, ops, results, key, folder, places, label))
         if found is None:
             return {op.id: None for op in ops}
         job_id, ended = found
+        await self._shed(folder, places["out_dir"])
         by_dub = {os.path.basename(result.get("dub") or ""): result for result in ended.get("results") or []}
-        timeline = video_of(goal, results).timeline
         outcomes = {}
         for name, op in of_dub.items():
             way = op.subject[1]
@@ -343,25 +355,61 @@ class BusSync(SeriesSync):
                 outcomes[op.id] = None
             else:
                 outcomes[op.id] = Made(Track(way.dub, way.snapshot, goal.slot, timeline), made)
+        clean = ended.get("status") == "done" and all(isinstance(each, Made) for each in outcomes.values())
+        self.jobs.append((job_id, clean))
         return outcomes
+
+    async def _submit_align(self, goal, ops, results, key, folder, places, label):
+        video_path = self.files.video_path(goal, results)
+        ref = await self._copy(video_path, os.path.join(folder, "ref"))
+        ref_atrack = 0
+        if goal.video.kind == "asset":
+            ref_atrack = await self.files.stream_of(goal.video.container, goal.video.container.video.id, True)
+        dubs, streams, copied = [], [], {}
+        for op in ops:
+            way = op.subject[1]
+            if way.kind == "download":
+                dub, stream = results[f"dub:{goal.slot}:{way.dub}"].file, 0
+                if not dub.startswith(self.downloads_dir):
+                    dub = await self._copy(dub, os.path.join(folder, "dub"))
+            else:  # out of a file of the library: copied once, each voice-over a name of its own (a link to the copy)
+                path, stream = await self.files.source_of(way.container, way.dub, way.own)
+                dub = os.path.join(folder, "dub", sanitize_name(way.voice) + os.path.splitext(path)[1])
+                if path in copied:
+                    await storage.call(os.link, copied[path], dub)
+                else:
+                    await storage.call(os.makedirs, os.path.dirname(dub), exist_ok=True)
+                    await storage.call(shutil.copyfile, path, dub, timeout=COPY_TIMEOUT_S, owns=(folder,))
+                    copied[path] = dub
+            dubs.append(dub)
+            streams.append(stream)
+        return await self.m.job(key, "conform.submit", {
+            "ref": ref, "dubs": dubs, "dub_atracks": streams, "out_dir": places["out_dir"],
+            "cache_dir": places["cache_dir"], "label": label, "key": key,
+            **({"ref_atrack": ref_atrack} if ref_atrack else {})})
 
     async def _cut(self, op, results):
         way = op.subject
         ref2 = (self.files.path(way.ref2.container.name) if way.ref2.kind == "asset" else results[f"ref2:{op.slot}"].file)
-        key = uuid.uuid4().hex[:12]
+        key = self._job_key("cut", op.slot, way.row.id, ref2)
         label = f"{self.series['name']} {label_of(op.slot)}"
         folder = os.path.join(self.conform_dir, f"{label_of(op.slot)} #{key}")
-        episode = await self._copy(ref2, folder)
-        atrack = 0
-        if way.ref2.kind == "asset":
-            atrack = await self.files.stream_of(way.ref2.container, way.ref2.container.video.id, True)
         places = await self.m.request("conform.workspace", {"dub_folder": folder})
-        found = await self.m.job(key, "conform.reverse", {
-            "compilation": results[f"compilation:{way.row.id}"].file, "episodes": [{"path": episode, "atrack": atrack}],
-            "out_dir": places["out_dir"], "label": label})
+        job_id = await self.m.find_job(key)
+        if job_id:
+            found = await self.m.attach(job_id)
+        else:
+            episode = await self._copy(ref2, folder)
+            atrack = 0
+            if way.ref2.kind == "asset":
+                atrack = await self.files.stream_of(way.ref2.container, way.ref2.container.video.id, True)
+            found = await self.m.job(key, "conform.reverse", {
+                "compilation": results[f"compilation:{way.row.id}"].file, "episodes": [{"path": episode, "atrack": atrack}],
+                "out_dir": places["out_dir"], "label": label})
         if found is None:
             return None
         job_id, ended = found
+        await self._shed(folder, places["out_dir"])
         result = next(iter(ended.get("results") or []), None)
         why = (result or {}).get("error") or ended.get("error") or "сервис не дал результата"
         try:
@@ -370,6 +418,7 @@ class BusSync(SeriesSync):
             self.m.log.warning("%s: разбор не сделан, повторится при следующей синхронизации: сбой сервиса в задаче %s: %s",
                                label, job_id, why)
             raise Passing(f"сбой сервиса в задаче {job_id}: {why}") from None
+        self.jobs.append((job_id, out is not None and ended.get("status") == "done"))
         if out is None:
             what = "критичные замечания" if result and result.get("ok") else why
             self.m.log.warning("%s: сервис выравнивания отказал в задаче %s, записано как неудача: %s", label, job_id, what)
@@ -456,6 +505,7 @@ class PlannerModule(BaseModule):
         try:
             series = await self.request("catalog.series.get", {"series_id": series_id})
             sync = BusSync(self, series, download)
+            sync.run_mark = await self.repo.run_started(series_id)
             await self._recover(series)
             await self._load(series_id, sync)
             online, choices = await self._inputs(series)
@@ -473,8 +523,12 @@ class PlannerModule(BaseModule):
                           len(synced.replanned))
             counts = (await self.on_downloaded_counts(env=None))["counts"]
             self.publish_event("series.downloaded.changed", {"series_id": series_id, "count": counts.get(series_id, 0)})
-            if sync.conform_dir:
-                await storage.call(shutil.rmtree, sync.conform_dir, True)
+            try:
+                await self.clear_finished(sync.jobs)
+                if sync.conform_dir:
+                    await self.sweep({series_id})
+            except Exception:  # noqa: BLE001 - the folders of the jobs wait for the next sweep; the sync is done
+                self.log.exception("сериал %d: папки задач сервиса выравнивания не разобраны", series_id)
             if sync.downloads_dir:
                 await storage.call(shutil.rmtree, sync.downloads_dir, True)
         except asyncio.CancelledError:
@@ -574,6 +628,11 @@ class PlannerModule(BaseModule):
             self.log.info("сериал %d: синхронизация плана, прерванная остановкой, продолжается", run["series_id"])
             self._start(run["series_id"], bool(run["download"]))
             resumed.add(run["series_id"])
+        # Records of jobs removed while the process was stopped take their folders now.
+        try:
+            await self.sweep()
+        except Exception:  # noqa: BLE001 - the folders wait for the next sweep; the start goes on
+            self.log.exception("папки задач сервиса выравнивания не разобраны")
         # The status of a series lives in memory (catalog): every series with files tells it again at the start.
         for series_id in await self.repo.series_with_assets():
             if series_id not in resumed:
@@ -642,16 +701,69 @@ class PlannerModule(BaseModule):
         elif outcome is SubmitOutcome.REJECTED:
             self.log.warning("%s: задача отклонена сервисом выравнивания, записано как неудача: %s", label, reason)
             return None
-        ended = self._ended.pop(job_id, None)
-        if ended is None:
-            future = self._jobs.setdefault(job_id, asyncio.get_running_loop().create_future())
-            try:
+        return await self.attach(job_id)
+
+    async def find_job(self, key: str) -> str | None:
+        """The job of the service a stop left behind, by its key: taken up instead of being sent again."""
+        try:
+            return (await self.request("conform.job.find", {"key": key})).get("job_id")
+        except (BusRequestError, asyncio.TimeoutError):
+            return None
+
+    async def attach(self, job_id: str) -> tuple[str, dict]:
+        """The end of a job: its event, or its state when it ended before anybody waited (a stop in between)."""
+        future = self._jobs.setdefault(job_id, asyncio.get_running_loop().create_future())
+        try:
+            ended = self._ended.pop(job_id, None)
+            if ended is None:
+                try:
+                    state = await self.request("conform.job.get", {"job_id": job_id})
+                except (BusRequestError, asyncio.TimeoutError):
+                    state = {}  # not told now: the end of the job comes as its event
+                if state.get("status") in ENDED:
+                    ended = state
+            if ended is None:
                 ended = await future
-            finally:
-                self._jobs.pop(job_id, None)
-        if ended.get("removed"):
+        finally:
+            self._jobs.pop(job_id, None)
+        if ended.get("removed") or ended.get("status") in ("cancelled", "gone"):
             raise Passing(f"задача {job_id} снята в сервисе")
         return job_id, ended
+
+    async def sweep(self, series_ids=None) -> None:
+        """A folder of a job stays while the record of the job is in the service's history (the plots are shown from
+        it); a record gone takes its folder. A series whose sync is under way is left to the end of its sync."""
+        root = (await self.request("conform.workspace", {})).get("conform")
+        if not root:
+            return
+        known = await self.request("conform.job.keys", {})
+        if not known.get("reachable"):
+            return
+        keys, base = set(known.get("keys") or []), os.path.join(root, WORK)
+
+        def sweep() -> None:
+            for name in os.listdir(base) if os.path.isdir(base) else ():
+                if not name.isdigit() or (series_ids is not None and int(name) not in series_ids):
+                    continue
+                if int(name) in busy:
+                    continue
+                series = os.path.join(base, name)
+                for job in os.listdir(series):
+                    if job.rsplit("#", 1)[-1].strip() not in keys:
+                        shutil.rmtree(os.path.join(series, job), True)
+                if not os.listdir(series):
+                    os.rmdir(series)
+        busy = {series_id for series_id, run in self._runs.items() if not run.done()} - set(series_ids or ())
+        await storage.call(sweep)
+
+    async def clear_finished(self, jobs: list[tuple[str, bool]]) -> None:
+        """The setting conform.clear_finished: a job that ended with every result taken leaves the service's history at
+        once (its folder goes with it); one that ended in an error stays for the owner."""
+        if not jobs or not (await self.request("conform.settings.get", {})).get("clear_finished"):
+            return
+        for job_id, clean in jobs:
+            if clean:
+                await self.request("conform.cancel", {"job_id": job_id})
 
     async def on_job_finished(self, env: Envelope) -> None:
         job_id = env.payload.get("job_id")
@@ -666,6 +778,10 @@ class PlannerModule(BaseModule):
         future = self._jobs.get(job_id)
         if future is not None and not future.done():
             future.set_result({"removed": True})
+        try:
+            await self.sweep()
+        except Exception:  # noqa: BLE001 - the folder waits for the next sweep
+            self.log.exception("папки задач сервиса выравнивания не разобраны")
 
     # --- the work of the run ---------------------------------------------------------------------------------
 

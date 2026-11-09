@@ -1,10 +1,12 @@
 """The whole application on its stand (tests/app_stand.py): the user's way through the API, every module real, the site,
 the player and the alignment service as models — the full circle of the plan of a series."""
 import asyncio
+import os
 
 import pytest
 
 from app_stand import STAND_LIMIT_S, AppStand
+from core.envelope import Envelope
 from plan_world import truth_of
 
 
@@ -101,6 +103,28 @@ async def test_a_stop_of_the_process_in_the_middle_of_a_sync_is_carried_to_the_e
     await stand.until_run_ends(series_id)
     view = await stand.check(series_id)
     assert len(view["assets"]) == 2 and not view["running"]
+
+
+async def test_a_stop_while_the_service_aligns_takes_its_job_up_again_and_sends_none_twice(stand):
+    """The process stops while the service works on the alignment of an episode: after the start the sync finds the
+    job by its key and takes its end; no job is sent twice, and the folder of the job keeps what the service wrote
+    (the plots) while its record is in the service's history."""
+    series_id = await series_of(stand, (1,))
+    stand.daemon.hold = True
+    await stand.call("POST", f"/api/series/{series_id}/scan")
+    await asyncio.wait_for(asyncio.to_thread(stand.daemon.made.wait), STAND_LIMIT_S)
+    await stand.restart()
+    stand.daemon.release()
+    await stand.until_run_ends(series_id)
+    view = await stand.check(series_id)
+    assert len(view["assets"]) == 1 and len(stand.daemon.jobs) == 1, list(stand.daemon.jobs.values())
+    (job,) = stand.daemon.jobs.values()
+    kept = [folder for folder, _, files in os.walk(os.path.join(stand.root, "work")) if files]
+    assert kept and all(job["label"].rsplit("#", 1)[1] in folder for folder in kept), kept
+    del stand.daemon.jobs[job["id"]]
+    stand.bus.publish(Envelope(topic="conform.job.removed", kind="event", payload={"job_id": job["id"]}))
+    await stand.bus.settled()
+    assert not [folder for folder, _, files in os.walk(os.path.join(stand.root, "work")) if files]
 
 
 async def test_episodes_a_higher_compilation_holds_are_cut_out_of_it_by_the_service(stand):
