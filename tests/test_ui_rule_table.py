@@ -9,7 +9,7 @@ from playwright.async_api import expect
 
 from core import container as mkv
 
-from ui_stand import SERIES, SERIES_EN, SINGLE, text, ui  # noqa: F401 - the fixture
+from ui_stand import SERIES, SERIES_EN, SINGLE, _pick, text, ui  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.ui
 
@@ -37,6 +37,10 @@ async def test_a_table_filled_from_the_pages_by_a_template_names_the_voice_overs
     await page.get_by_role("button", name=text("rules.table.add")).click()
     card = page.locator(".rule-table-card")
     await card.locator(".rule-name-input").fill("Озвучки")
+    # A new table starts as a new rule does: «ТО» excludes and «продолжать» is off.
+    await expect(card.locator(".col-then .selected-value")).to_have_text(text("rules.action.exclude"))
+    await expect(card.locator(".p-toggleswitch")).not_to_have_class(re.compile(r"p-toggleswitch-checked"))
+    await _pick(page, card.locator(".col-then .item-select"), text("rules.action.assign_voiceover"))
     for slug in VOICES:
         await page.get_by_text(text("rules.step.test")).click()
         await page.get_by_label(text("rulesTest.field.address")).fill(ui.site.releases[slug].url)
@@ -47,10 +51,17 @@ async def test_a_table_filled_from_the_pages_by_a_template_names_the_voice_overs
     await expect(card.locator("tbody td.col-if")).to_have_count(2)
     for at, voice in enumerate(["AnimeVost", "AniStar"]):
         await expect(card.locator("input.table-value").nth(at)).to_have_value(voice)
+    # The dots of the handle and the cross of the removal of a row stand in the middle of their cells.
+    for mark in ("td.row-handle svg", "td.col-remove .row-remove"):
+        for shift in await card.locator(mark).evaluate_all(
+                "marks => marks.map((mark) => [mark.closest('td').getBoundingClientRect(), mark.getBoundingClientRect()])"
+                ".map(([c, d]) => [c.x + c.width / 2 - d.x - d.width / 2, c.y + c.height / 2 - d.y - d.height / 2])"):
+            assert all(abs(each) <= 1 for each in shift), (mark, shift)
     await ui.shot("t1-table-of-voice-overs")
+    # The table lets the rule of the episodes after it work; the switch saves it, as it does an ordinary rule.
     async with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/rules")) as saved, \
             page.expect_response(lambda r: r.request.method == "GET" and r.url.endswith("/rules")):
-        await card.locator("button[title='Сохранить правило']").click()
+        await card.locator(".p-toggleswitch").click()
     assert (await saved.value).ok, "the table was not saved"
     await ui._rule({"name": "серия", "if": SINGLE, "then": [("extract_single", SINGLE)]})
     await ui.close_settings()

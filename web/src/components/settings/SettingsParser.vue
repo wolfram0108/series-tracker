@@ -215,12 +215,12 @@ async function loadRules(): Promise<void> {
   })
 }
 
-// A new rule «Таблица» assigns voice-overs and lets the rules after it work, as the rules of voice-overs do.
+// A new rule «Таблица» starts as a new ordinary rule does: «ТО» excludes, «продолжать» is off.
 function addTable(): void {
   const id = "new-" + Date.now()
   rules.value.push({
-    id, name: t("rules.table.newName"), continue_after_match: true, is_new: true, conditions: [], actions: [],
-    table: { action_type: "assign_voiceover", rows: [] },
+    id, name: t("rules.table.newName"), continue_after_match: false, is_new: true, conditions: [], actions: [],
+    table: { action_type: "exclude", rows: [] },
   })
   openRuleId.value = id
   openStep.value = "rules"

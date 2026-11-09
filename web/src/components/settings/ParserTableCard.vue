@@ -146,7 +146,10 @@ function setAction(value: string): void {
           <template #item="{ element: row, index: at }">
             <tr :class="{ 'is-fresh': fresh.has(row.key) }">
               <td class="col-handle row-handle" :title="t('rules.table.drag')">
-                <i class="pi pi-ellipsis-v" aria-hidden="true" />
+                <svg class="handle-dots" width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true">
+                  <circle cx="4" cy="4" r="1.3" /><circle cx="8" cy="4" r="1.3" /><circle cx="4" cy="8" r="1.3" />
+                  <circle cx="8" cy="8" r="1.3" /><circle cx="4" cy="12" r="1.3" /><circle cx="8" cy="12" r="1.3" />
+                </svg>
               </td>
               <td class="col-if" :class="{ 'is-selected': isSelected(row, 'if') }" @mousedown="select(row, 'if')">
                 <ParserPatternEditor :blocks="row.ifBlocks" context="if" :show-palette="false" />
@@ -197,11 +200,14 @@ function setAction(value: string): void {
 .rule-table th, .rule-table td { padding: 0.5rem 0.625rem; text-align: left; vertical-align: middle; border-top: 1px solid #e9ecef; }
 .rule-table thead th { background: #f8f9fa; border-top: 0; font-weight: 400; }
 .rule-table .col-if, .rule-table .col-then { border-left: 1px solid #e9ecef; }
-.rule-table th.col-handle { width: 1rem; }
+/* The narrow columns have no side padding: their width is all theirs, and their mark stands in its middle. */
+.rule-table th.col-handle, .rule-table th.col-remove { width: 2.25rem; }
+.rule-table .col-handle, .rule-table .col-remove { padding-left: 0; padding-right: 0; }
 .rule-table th.col-then { width: 34%; }
-.rule-table th.col-remove { width: 2.25rem; }
 .col-handle, .col-remove { text-align: center !important; color: #adb5bd; }
 .row-handle { cursor: grab; }
+/* The dots are drawn in the middle of their own box, and the box stands in the middle of the cell. */
+.handle-dots { display: block; margin: 0 auto; }
 .cells { display: flex; flex-wrap: wrap; gap: 0.375rem; align-items: center; }
 
 .table-label { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-weight: 700; font-size: 0.875rem; }
@@ -226,7 +232,7 @@ function setAction(value: string): void {
   display: block; width: 100%; box-sizing: border-box; padding: 0.35rem 0.625rem; font: inherit; font-size: 0.875rem;
   border: 1px solid #ced4da; border-radius: 4px; background: #fff;
 }
-.row-remove { border: 0; background: none; padding: 0.25rem; color: #adb5bd; cursor: pointer; }
+.row-remove { display: block; margin: 0 auto; border: 0; background: none; padding: 0.25rem; color: #adb5bd; cursor: pointer; }
 .row-remove:hover { color: var(--color-red-1); }
 .table-add { display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.125rem 0; border: 0; background: none; color: #0d6efd; font: inherit; font-size: 0.875rem; cursor: pointer; }
 </style>
