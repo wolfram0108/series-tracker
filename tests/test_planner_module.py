@@ -19,7 +19,7 @@ from core.contracts import (VOICE_TAKE, CompositionReply, CompositionRow, Effect
 from core.db import Database
 from core.envelope import Envelope
 from core.plan.files import container_json, container_of
-from modules.conform.module import finished_view
+from modules.conform.module import finished_view, job_label
 from modules.downloads import ytdlp
 from modules.planner import PlannerModule
 from plan_disk import Codec, Daemon, Host
@@ -49,6 +49,9 @@ class Neighbours(BaseModule):
         self.host = Host(os.path.join(root, "site"))
         self.daemon = Daemon(self.codec)
         self.library = os.path.join(root, "library")
+        # The service keeps a job under way and never ends it while `holding`; `submitted` tells that one was given.
+        self.holding = False
+        self.submitted = asyncio.Event()
         super().__init__(bus)
 
     def register(self) -> None:
@@ -64,6 +67,8 @@ class Neighbours(BaseModule):
         self.handle("conform.job.keys", self.on_job_keys)
         self.handle("conform.settings.get", self.on_conform_settings)
         self.handle("conform.cancel", self.on_cancel)
+        self.handle("downloads.withdraw", self.on_withdraw)
+        self.handle("rules.format_filename", self.on_format_filename)
 
     async def on_series(self, env: Envelope) -> dict:
         return {"id": SERIES, "name": "Сериал", "kind": "video", "save_path": self.library, "ignored_seasons": "[]",
@@ -104,13 +109,16 @@ class Neighbours(BaseModule):
                 if key in env.payload}
         if "ref_atrack" in env.payload:
             body["ref_atrack"] = env.payload["ref_atrack"]
+        body["label"] = job_label(body.get("label"), env.payload.get("key"))  # as the conform module labels a job
         os.makedirs(body["out_dir"], exist_ok=True)
         client = self.daemon.client()
         try:
             job = await client.enqueue(body)
         finally:
             await client.close()
-        asyncio.get_running_loop().call_soon(lambda: asyncio.ensure_future(self._finished(job)))
+        self.submitted.set()
+        if not self.holding:
+            asyncio.get_running_loop().call_soon(lambda: asyncio.ensure_future(self._finished(job)))
         return {"outcome": "accepted", "job_id": job["id"], "retry": False}
 
     async def on_reverse(self, env: Envelope) -> dict:
@@ -151,6 +159,14 @@ class Neighbours(BaseModule):
     async def on_cancel(self, env: Envelope) -> dict:
         self.daemon.jobs.pop(env.payload["job_id"], None)
         return {"done": True}
+
+    async def on_format_filename(self, env: Envelope) -> dict:
+        # The series of this model has no rule of names: the planner names its files by its own (core/plan name_of).
+        raise LookupError("правила имён у сериала нет")
+
+    async def on_withdraw(self, env: Envelope) -> dict:
+        # The downloads of this model end as they are asked: none is under way once the sync aligns.
+        return {"stopped": 0}
 
     # --- the site ------------------------------------------------------------------------------------------------
 
@@ -332,6 +348,26 @@ async def test_the_card_of_the_series_hears_what_the_sync_is_at_and_its_end(worl
     # The end: nothing under way, a file of the series in the library, no work and no error.
     assert flags[-1] == {"downloading": False, "aligning": False, "packing": False, "ready": True, "waiting": False,
                          "error": False}
+
+
+async def test_a_sync_the_user_stops_takes_its_jobs_off_the_service_before_the_series_is_free(world):
+    """«Остановить синхронизацию»: every work of the run comes off — its job of the service too — and only then the end
+    of the work of the series is told (ЭТАП_11: the stop takes off every work of the run, then the series is free)."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    neighbours.holding = neighbours.daemon.hold = True  # the job stays under way until the stop
+    assert (await planner.request("planner.sync", {"series_id": SERIES, "download": True}))["accepted"]
+    await asyncio.wait_for(neighbours.submitted.wait(), 60)
+    seen = planner.bus.subscribe("#")
+    assert (await planner.request("planner.sync.cancel", {"series_id": SERIES}, timeout=60))["cancelled"]
+    order = []
+    while not seen.queue.empty():
+        env = await seen.queue.get()
+        if env.topic == "conform.cancel" or (env.topic == "work.series.state" and not env.payload["active"]):
+            order.append(env.topic)
+    assert neighbours.daemon.jobs == {}
+    assert "conform.cancel" in order and order.index("work.series.state") > max(
+        number for number, topic in enumerate(order) if topic == "conform.cancel"), order
 
 
 async def test_a_sync_written_down_is_work_of_the_series_before_the_start_takes_it_up(world):

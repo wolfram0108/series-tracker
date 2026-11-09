@@ -558,10 +558,17 @@ class PlannerModule(BaseModule):
                 self._runs.pop(series_id, None)
                 self._syncs.pop(series_id, None)
                 raise
-            # The user stopped it: nothing of it is applied, what it made aside goes, and it ends as any sync ends.
+            # The user stopped it: its jobs of the service go and what it made aside goes, nothing of it is applied; only
+            # then it ends as any sync ends, so the series is free once every work of it is off (ЭТАП_11, the stop).
             asyncio.current_task().uncancel()
+            stopped = self._syncs.get(series_id)
+            for key in sorted(stopped.keys if stopped is not None else ()):
+                job_id = await self.find_job(key)
+                if job_id:
+                    await self._drop_job(job_id)
+            await self.sweep({series_id})
+            await self._discard(stopped)
             self.log.info("сериал %d: синхронизация остановлена пользователем, ничего не применено", series_id)
-            await self._discard(self._syncs.get(series_id))
         except Exception:  # noqa: BLE001 - the run ends either way: the error is in the log, the sync can be asked again
             self.log.exception("сериал %d: синхронизация плана прервана", series_id)
         await self.repo.end_run(series_id)
@@ -748,12 +755,7 @@ class PlannerModule(BaseModule):
         try:
             await self._withdraw_downloads(series_id)
             task.cancel()
-            await asyncio.wait({task})
-            for key in sorted(sync.keys if sync is not None else ()):
-                job_id = await self.find_job(key)
-                if job_id:
-                    await self._drop_job(job_id)
-            await self.sweep({series_id})
+            await asyncio.wait({task})  # the run takes its jobs of the service off before it tells its end
         finally:
             self._halting.discard(series_id)
         return {"cancelled": True}
