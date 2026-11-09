@@ -82,7 +82,7 @@ reply). Request/reply реализован поверх pub/sub в обвязк�
 
 ## Быстрый старт (разработка)
 
-Требуется Python 3.12, Node 20, ffmpeg, yt-dlp в PATH; для astar/anilibria_tv —
+Требуется Python 3.12, Node 20, ffmpeg в PATH (yt-dlp ставится в `.venv` из `requirements.txt`); для astar/anilibria_tv —
 Firefox для Playwright; для торрентов — доступный qBittorrent.
 
 ```bash

@@ -14,7 +14,8 @@ systemd (uvicorn :5000), фронт собирается на месте, БД �
 | ОС | Linux (systemd) |
 | Python | 3.12 |
 | Node.js | 20 (для сборки фронта) |
-| ffmpeg, yt-dlp | в `PATH` (нарезка и VK-загрузка) |
+| ffmpeg | в `PATH` (нарезка, проверка файлов) |
+| yt-dlp | ставится в `.venv` из `requirements.txt` (с pycryptodomex); отдельная копия в `PATH` не нужна |
 | Firefox | для Playwright — браузерная доставка astar/anilibria_tv |
 | qBittorrent | WebUI API доступен (на стенде — Docker-контейнер, `:8080`) |
 | NAS / хранилище | смонтировано (пути сохранения сериалов) |
