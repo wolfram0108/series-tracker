@@ -18,11 +18,11 @@ goes, what nothing carries stays hidden (`.off`). A file goes only when everythi
 said so: «Удалить», or a voice-over taken off the episode (a track cannot be hidden: switched off, it is removed). A video
 the user deleted goes only for another video of its episode: with none, nothing changes.
 
-«Удалить» names what goes and nothing more: a deleted video is no longer the picture of its episode, a deleted track is not
-taken as it is while it can be made anew. What the file holds stays a source to align from: a voice-over with no other way —
-the own sound of the deleted video, a track no source gives any more — is aligned out of it, and the file goes only when
-nothing in it is needed (a voice-over is lost only when the user switches it off). What cannot be made anew yet stays as it
-is, and the command waits."""
+«Удалить» names what goes and nothing more. A deleted track leaves its container at the next sync: its online row, still
+switched on, is downloaded again (Н-3); with no online row it is forgotten (Д-1) and is never aligned out of its own file.
+A deleted video is no longer the picture of its episode; its own sound and the other tracks of its file stay sources to
+align from onto the new video, and the file goes only when nothing in it is needed. A file that takes no new work (a
+switched-off episode, a deleted video with no other one) stays as it is, and the command waits."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -385,13 +385,15 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
         if rows:
             tracks.append(TrackWay(voice, rows[0].id, rows[0].snapshot(), "download", row=rows[0]))
             continue
-        sources = [each for each in mine if ("align", each[1].dub, video.timeline) not in inputs.failed]
+        # A track the user deleted is no source of itself: «Удалить» takes it out of the file, it is not aligned anew (Д-1).
+        usable = [each for each in mine if not (each[3] and not each[2])]
+        sources = [each for each in usable if ("align", each[1].dub, video.timeline) not in inputs.failed]
         if sources and not idle:
             container, track, is_own, _ = sorted(sources, key=lambda each: (each[2], each[0].name, each[1].dub))[0]
             tracks.append(TrackWay(voice, track.dub, track.snapshot, "realign", container=container, own=is_own))
             continue
-        # «Удалить» waits while what it names cannot be made anew: the deleted track stays as it is.
-        waiting = sorted((each for each in mine if each[1].aligned_to == video.timeline),
+        # A file that takes no new work stays as it is, a deleted track in it too; elsewhere a deleted track goes.
+        waiting = sorted((each for each in (mine if idle else usable) if each[1].aligned_to == video.timeline),
                          key=lambda each: (each[0] is not video.container, each[2], each[0].name))
         if waiting:
             container, track, is_own, _ = waiting[0]

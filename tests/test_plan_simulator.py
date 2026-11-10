@@ -196,15 +196,20 @@ def test_delete_of_a_reference_whose_sound_no_source_gives_aligns_that_sound_out
     assert container.video.id.row_key == "other1" and sorted(track.group for track in container.tracks) == [REF, "G1"]
 
 
-def test_a_track_its_source_forgot_remade_by_the_user_is_aligned_anew_out_of_its_file():
+def test_delete_of_a_track_no_source_gives_takes_it_out_of_the_file_with_no_alignment():
+    """Д-1: «Удалить» at an offline track is its removal: the container is built without it, nothing is aligned."""
     world = World()
     episode_with_dubs(world, 1, 1)
     world.drop(2, "g1e1")
     world.delete("track", container_of(world, 1).name, RowId(2, "g1e1", "g1e1"))
-    step = world.sync("пересоздать офлайн-дорожку")
+    step = world.sync("удалить офлайн-дорожку")
     world.check(step)
-    assert kinds(step, (1, 1))[1] == {"G1": "realign"}
-    assert [track.group for track in container_of(world, 1).tracks] == ["G1"]
+    assert kinds(step, (1, 1))[1] == {}
+    assert not any(op.id.startswith("align") for op in step.plan.ops)
+    assert container_of(world, 1).tracks == ()
+    step = world.sync("следующая синхронизация")
+    world.check(step)
+    assert not step.plan.ops and container_of(world, 1).tracks == ()
 
 
 def test_a_sound_that_could_not_be_aligned_out_of_a_deleted_file_keeps_the_file():
