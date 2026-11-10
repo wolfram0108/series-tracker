@@ -204,12 +204,28 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   // the file at the next sync, and a row a source still gives is downloaded again.
   const retry = (_season: number, _episode: number | null, _voiceLabel: string | null): Promise<string | null> =>
     act(() => resetFailures(seriesId), busy)
+  // «Пересоздать» of one episode is the command of its track; of a season («Пересоздать готовые»), the command of the
+  // track in every episode whose row a source still gives — a track no source gives has nothing to be made again from.
   const redo = async (season: number, episode: number | null, voiceLabel: string | null): Promise<string | null> => {
     const view = plan.forSeries(seriesId)
-    const name = episode === null ? null : fileOf(view, season, episode, null)
-    const dub = name && voiceLabel ? trackOf(view, name, voiceLabel) : null
-    if (!name || !dub) return null
-    return act(() => deleteFromPlan(seriesId, { kind: "track", name, dub }), busy)
+    if (!voiceLabel) return null
+    const episodes = episode !== null ? [episode]
+      : (view?.episodes ?? []).filter((goal) => goal.slot[0] === season && goal.slot.length === 2).map((goal) => goal.slot[1])
+    const targets = episodes.flatMap((number) => {
+      const name = fileOf(view, season, number, null)
+      const track = name ? trackOf(view, name, voiceLabel) : null
+      if (!name || !track?.row || (episode === null && track.online === false)) return []
+      return [{ name, dub: track.row }]
+    })
+    if (!targets.length) return null
+    return act(async () => {
+      let reply: Answer<unknown> = { ok: true, data: null }
+      for (const target of targets) {
+        reply = await deleteFromPlan(seriesId, { kind: "track", ...target })
+        if (!reply.ok) break
+      }
+      return reply
+    }, busy)
   }
   const refetch = async (season: number, episode: number, part: number | null): Promise<string | null> => {
     const name = fileOf(plan.forSeries(seriesId), season, episode, part)

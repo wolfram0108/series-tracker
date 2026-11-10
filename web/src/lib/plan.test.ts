@@ -185,8 +185,8 @@ describe("fileOf and trackOf", () => {
   })
 
   it("finds the row of a track of a file by the voice of its group or its label, and nothing for another", () => {
-    expect(trackOf(view, "S01E02.mp4", "AniStar")).toEqual(rowRef(8, "k1"))
-    expect(trackOf(view, "S01E02.mp4", "Студия")).toEqual(rowRef(7, "r2"))
+    expect(trackOf(view, "S01E02.mp4", "AniStar")?.row).toEqual(rowRef(8, "k1"))
+    expect(trackOf(view, "S01E02.mp4", "Студия")?.row).toEqual(rowRef(7, "r2"))
     expect(trackOf(view, "S01E02.mp4", "Nobody")).toBeNull()
     expect(trackOf(view, "S01E09.mp4", "AniStar")).toBeNull()
     expect(trackOf(undefined, "S01E02.mp4", "AniStar")).toBeNull()

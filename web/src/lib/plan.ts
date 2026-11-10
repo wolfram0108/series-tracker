@@ -207,7 +207,8 @@ export function fileOf(view: PlannerView | undefined, season: number, episode: n
   return goal?.video.file ?? null
 }
 
-export function trackOf(view: PlannerView | undefined, name: string, voice: string): PlanRowRef | null {
+/** The track of a voice-over a file holds, with its row and whether a source still gives it (`online`). */
+export function trackOf(view: PlannerView | undefined, name: string, voice: string): { row: PlanRowRef; online?: boolean | null } | null {
   const asset = (view?.assets ?? []).find((each) => each.name === name)
-  return asset?.tracks?.find((track) => track.group === voice || track.label === voice)?.row ?? null
+  return asset?.tracks?.find((track) => track.group === voice || track.label === voice) ?? null
 }

@@ -271,4 +271,20 @@ describe("useSeriesOutput", () => {
     expect(await output.redo(1, 2, "Nobody")).toBeNull()
     expect(calls.deleteFromPlan).toHaveBeenCalledTimes(2)
   })
+
+  it("«Пересоздать готовые» of a season makes the track again in every episode whose row a source still gives", async () => {
+    givePlan(planView({
+      assets: [asset("S01E01.mp4", rowRef(7, "r1"), [assetTrack("AniStar", rowRef(8, "a1"))]),
+               asset("S01E02.mp4", rowRef(7, "r2"), [assetTrack("AniStar", rowRef(8, "a2"), false)]),
+               asset("S01E03.mp4", rowRef(7, "r3"), [assetTrack("AniStar", rowRef(8, "a3"))])],
+      episodes: [1, 2, 3].map((number) => goal([1, number], goalVideo("asset", rowRef(7, `r${number}`), `S01E0${number}.mp4`),
+        [goalTrack("AniStar", "reuse", rowRef(8, `a${number}`))])),
+    }))
+    const output = setup()
+    await flushPromises()
+    expect(await output.redo(1, null, "AniStar")).toBeNull()
+    expect(vi.mocked(calls.deleteFromPlan).mock.calls).toEqual([
+      [1, { kind: "track", name: "S01E01.mp4", dub: rowRef(8, "a1") }],
+      [1, { kind: "track", name: "S01E03.mp4", dub: rowRef(8, "a3") }]])
+  })
 })
