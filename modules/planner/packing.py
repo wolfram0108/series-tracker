@@ -1,0 +1,224 @@
+"""The cards of the packing (core/contracts/packing.py): one card to one container a sync builds. Pure bookkeeping over a
+clock: the planner tells what happens, the book keeps the stages, the tracks of the container in the numbers of the
+season, what changed against the file before, the progress of the build and the steps of putting it in place."""
+from __future__ import annotations
+
+import time
+from datetime import datetime, timezone
+from typing import Callable, Iterable
+
+from core.contracts import PACK_STAGES, DownloadVariant, PackCard, PackTrack
+from core.plan.files import label_of
+
+ENDED = ("done", "failed")
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def card_id(series_id: int, slot) -> str:
+    return f"{series_id}:{label_of(slot)}"
+
+
+def tracks_of(goal, before, order: tuple[str, ...]) -> tuple[list[PackTrack], str]:
+    """The tracks of the container a goal builds, in its order, with where each comes from, the tracks of the file before
+    that it does not hold (`gone`), and why it is built when no track came or went."""
+    number = {label: place for place, label in enumerate(order, start=1)}
+    own = goal.video.snapshot.group or "—"
+    placed = [PackTrack(number=number.get(way.snapshot.group or way.voice), label=way.snapshot.group or way.voice,
+                        kind="kept" if way.kind == "reuse" else "new") for way in goal.tracks]
+    placed.insert(goal.own_at, PackTrack(number=number.get(own), label=own, kind="own"))
+    held = [track.snapshot.group or "" for track in before.tracks] if before is not None else []
+    here = {track.label for track in placed}
+    gone = [PackTrack(number=number.get(label), label=label, kind="gone") for label in held if label and label not in here]
+    if any(track.kind == "new" for track in placed) or gone or before is None:
+        return placed + gone, ""
+    if before.video.id != (goal.video.container.video.id if goal.video.container is not None else None):
+        return placed + gone, "video"
+    if [label for label in held] != [track.label for track in placed if track.kind != "own"]:
+        return placed + gone, "order"
+    return placed + gone, "names"
+
+
+class PackBook:
+    def __init__(self, clock: Callable[[], float] = time.monotonic, wall: Callable[[], str] = _now) -> None:
+        self.cards: dict[str, PackCard] = {}
+        self._clock, self._wall = clock, wall
+        self._since: dict[str, float] = {}
+        self._stage_since: dict[str, float] = {}
+        self._steps: dict[str, set[str]] = {}  # the names of the files whose steps of the journal are the card's
+
+    # --- what happens to a container ------------------------------------------------------------------------------
+
+    def planned(self, series: dict, run: str, made, before: dict, order: dict[int, tuple[str, ...]],
+                marks: dict[int, tuple[int, int]]) -> None:
+        """A plan of a sync: every container it builds is queued; a card of this sync no longer built goes."""
+        wanted = set()
+        for group in made.groups:
+            for slot in group.built:
+                goal = made.goal(slot)
+                key = card_id(series["id"], slot)
+                wanted.add(key)
+                old = self.cards.get(key)
+                if old is not None and old.sync_started == run and old.name == goal.name:
+                    continue
+                previous = goal.video.container or next(
+                    (each for each in before.values() if tuple(each.video.episode) == tuple(slot) and not each.off), None)
+                tracks, reason = tracks_of(goal, previous, order.get(slot[0], ()))
+                video = goal.video
+                rid = video.row.id if video.row is not None else video.container.video.id if video.container else video.timeline
+                n, color = marks.get(rid.source_id, (0, 0))
+                card = PackCard(
+                    id=key, series_id=series["id"], series_name=series.get("name") or "", sync_started=run,
+                    episode=label_of(slot), name=goal.name, tracks=tracks, reason=reason, queued_at=self._wall(),
+                    video=DownloadVariant(source_id=rid.source_id, source_n=n, source_color=color, place=video.snapshot.source,
+                                          player=video.snapshot.player,
+                                          player_label=(video.row.player_label if video.row is not None else "") or video.snapshot.player,
+                                          height=video.snapshot.height or None))
+                self.forget(key)
+                self.cards[key] = card
+                self._since[key] = self._clock()
+                self._steps[key] = {goal.name} | ({previous.name} if previous is not None else set())
+                self._enter(card, "queue")
+        for key, card in list(self.cards.items()):
+            if card.series_id == series["id"] and card.sync_started == run and key not in wanted and card.status == "queued":
+                self.forget(key)
+
+    def report(self, key: str, stage: str, figures: dict) -> bool:
+        """What the build tells as it goes: "build" {progress, speed_x, eta, written_mb}, "verify", "built" (made aside and
+        read back). True when the card came to another stage."""
+        card = self.cards.get(key)
+        if card is None:
+            return False
+        if stage == "built":
+            self.built(key)
+            return True
+        moved = self._active(card) != stage
+        if moved:
+            self._enter(card, stage)
+        if stage == "build":
+            for name in ("progress", "speed_x", "eta", "written_mb"):
+                setattr(card.figures, name, figures.get(name))
+        return moved
+
+    def built(self, key: str) -> None:
+        """The container is made aside and read back: it waits for the journal that puts it in place."""
+        card = self.cards.get(key)
+        if card is not None:
+            self._enter(card, "apply")
+            card.figures.progress = card.figures.speed_x = card.figures.eta = None
+
+    def waited(self, keys: Iterable[str]) -> None:
+        """Not built: a step of the plan the container needs did not succeed; the file before stays."""
+        for key in keys:
+            card = self.cards.get(key)
+            if card is not None and card.status not in ENDED:
+                card.waited = True
+        self.failed(keys)
+
+    def failed(self, keys: Iterable[str]) -> None:
+        """The build failed (its reason is in the log): the file before stays."""
+        for key in keys:
+            card = self.cards.get(key)
+            if card is None or card.status in ENDED:
+                continue
+            self._leave(card, "failed")
+            card.status = "failed"
+            card.finished_at = self._wall()
+            card.seconds = self._clock() - self._since.get(key, self._clock())
+
+    def journal(self, steps: list[tuple]) -> None:
+        """The journal of the sync is written: each card counts the steps that name its files."""
+        for key, card in self.cards.items():
+            if card.status == "apply":
+                card.figures.steps_of = sum(1 for step in steps if self._mine(key, step))
+                card.figures.steps_done = 0
+
+    def step_done(self, step: tuple) -> None:
+        for key, card in self.cards.items():
+            if card.status == "apply" and self._mine(key, step):
+                card.figures.steps_done = (card.figures.steps_done or 0) + 1
+
+    def applied(self, series_id: int, size_of: Callable[[str], float | None]) -> None:
+        """The journal is carried out: every card of the series that waited for it is done."""
+        for key, card in self.cards.items():
+            if card.series_id == series_id and card.status == "apply":
+                self._leave(card, "done")
+                card.status = "done"
+                card.figures.size_mb = size_of(card.name)
+                card.finished_at = self._wall()
+                card.seconds = self._clock() - self._since.get(key, self._clock())
+
+    # --- the life of the cards --------------------------------------------------------------------------------------
+
+    def sync_started(self, series_id: int) -> list[str]:
+        """A sync of the series begins: what the one before left goes."""
+        gone = [key for key, card in self.cards.items() if card.series_id == series_id]
+        for key in gone:
+            self.forget(key)
+        return gone
+
+    def sync_ended(self, series_id: int) -> tuple[list[PackCard], list[str]]:
+        """A sync of the series ended: a failed card stays, every other goes. Returns (the cards that stay, the keys that
+        go)."""
+        stay, gone = [], []
+        for key, card in list(self.cards.items()):
+            if card.series_id != series_id:
+                continue
+            if card.status == "failed":
+                stay.append(card)
+            else:
+                gone.append(key)
+                self.forget(key)
+        return stay, gone
+
+    def kept(self, card: PackCard) -> None:
+        self.cards[card.id] = card
+
+    def forget(self, key: str) -> None:
+        for book in (self.cards, self._since, self._stage_since, self._steps):
+            book.pop(key, None)
+
+    def running(self) -> bool:
+        return any(card.status not in ENDED for card in self.cards.values())
+
+    def view(self) -> list[PackCard]:
+        now = self._clock()
+        out = []
+        for key, card in sorted(self.cards.items(), key=lambda item: (item[1].series_id, item[1].episode)):
+            shown = card.model_copy(deep=True)
+            if card.status not in ENDED:
+                shown.seconds = now - self._since.get(key, now)
+                active = next((each for each in shown.stages if each.state == "active"), None)
+                if active is not None:
+                    active.seconds += now - self._stage_since.get(key, now)
+            out.append(shown)
+        return out
+
+    # --- the stages -------------------------------------------------------------------------------------------------
+
+    def _mine(self, key: str, step: tuple) -> bool:
+        """A step of the journal names the files it acts on (`publish` its target, `move` the name it takes away, out of
+        the way under `.moving`, `remove` and `retag` the file): it is the card's when it names its new or old file."""
+        names = self._steps.get(key, set())
+        return any(isinstance(each, str) and each.removesuffix(".moving") in names for each in step[1:])
+
+    @staticmethod
+    def _active(card: PackCard) -> str | None:
+        return next((stage.name for stage in card.stages if stage.state == "active"), None)
+
+    def _enter(self, card: PackCard, name: str) -> None:
+        if self._active(card) == name:
+            return
+        self._leave(card, "done")
+        card.stages[PACK_STAGES.index(name)].state = "active"
+        self._stage_since[card.id] = self._clock()
+        card.status = "queued" if name == "queue" else name
+
+    def _leave(self, card: PackCard, state: str) -> None:
+        stage = next((each for each in card.stages if each.state == "active"), None)
+        if stage is None:
+            return
+        stage.seconds += self._clock() - self._stage_since.pop(card.id, self._clock())
+        stage.state = state

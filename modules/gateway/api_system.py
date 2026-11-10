@@ -12,7 +12,7 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
 from core import BusRequestError
-from core.contracts import DownloadCard
+from core.contracts import DownloadCard, PackCard
 from core.reasons import reason
 
 from .schemas import ConformJobChange, ErrorOnly, ErrorResponse, OkResponse, QueueTask, ScannerStatus
@@ -83,6 +83,28 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                 status_code=500)
         return {"success": True,
                 "message": f"Удалено {reply['deleted']} задач из очереди."}
+
+    @r.get("/api/pack/queue", response_model=list[PackCard])
+    async def pack_queue():
+        """The cards of the packing (core/contracts/packing.py): every container a sync builds, its stages and tracks."""
+        try:
+            reply = await gw.request("planner.pack.get", {})
+        except BusRequestError:
+            return []
+        return reply["tasks"]
+
+    @r.delete("/api/pack/cards/{card_id}", response_model=OkResponse,
+              response_model_exclude_none=True,
+              responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
+    async def pack_card_remove(card_id: str):
+        """A card of the packing that stayed after its sync is removed."""
+        try:
+            await gw.request("planner.pack.remove", {"id": card_id})
+        except BusRequestError as exc:
+            msg = str(exc)
+            return JSONResponse({"success": False, "error": msg.split(": ", 1)[-1]},
+                                status_code=404 if "LookupError" in msg else 500)
+        return {"success": True}
 
     @r.delete("/api/downloads/cards/{card_id}", response_model=OkResponse,
               response_model_exclude_none=True,

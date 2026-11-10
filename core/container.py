@@ -13,15 +13,21 @@ build is done is told by reading the result back (`contents`), never by the code
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-from array import array
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Awaitable, Callable, Sequence
 
 from .ffprobe import film_stream, streams_of
-from .proc import LOST, program, run_capture
+from .proc import LOST, program, run_capture, run_lines
+
+# What a build tells as it goes (`build(report=…)`): the stage and its figures — "build" {progress, speed_x, eta,
+# written_mb} (ffmpeg -progress), "verify" {} (the result read back).
+Report = Callable[[str, dict], Awaitable[None]]
+
+
+async def _silent(_stage: str, _figures: dict) -> None:
+    return None
 
 # What Matroska holds for a track whose language nobody stated (ffmpeg writes it so): no language is claimed.
 UNSTATED = "und"
@@ -37,12 +43,6 @@ BUILD_TIMEOUT_S = 600.0
 READ_TIMEOUT_S = 60.0
 # The video of a container is the video it was built from: the durations differ only by the rounding of the streams.
 DURATION_SLACK_S = 1.0
-# The print of the sound of a track: this much of it, decoded the same way for every track, from the middle of the video
-# (at most this far in): two tracks with one print are one recording.
-PRINT_LENGTH_S = 20.0
-PRINT_AT_MOST_S = 300.0
-# Below this peak the stretch is silence, which says nothing of whose recording it is.
-PRINT_SILENCE = 64
 
 
 @dataclass(frozen=True)
@@ -115,7 +115,7 @@ PROVENANCE = "provenance.json"  # the attachment that says where what the contai
 
 
 async def build(output: str, video: str, video_identity: str, tracks: Sequence[AudioIn], *, publication: str = "",
-                timeout: float = BUILD_TIMEOUT_S, provenance: dict | None = None) -> str | None:
+                timeout: float = BUILD_TIMEOUT_S, provenance: dict | None = None, report: Report = _silent) -> str | None:
     """Write the container at `output` (an .mkv the caller puts in place); None when it was built and reads back as asked,
     else the reason. The video is the film of `video` (core.ffprobe.film_stream); a track of the same file is taken
     from it."""
@@ -126,11 +126,6 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     if film is None:
         return "no_video"  # the file has no film to build of (no video stream, or only a picture it carries)
     expected = await contents(video)
-    # A container never holds one recording twice: a player that gave the file of one voice-over under the names of others
-    # would put it under every one of those names.
-    twice = await same_recordings(tracks, min(PRINT_AT_MOST_S, (expected.duration if expected else 0.0) / 2))
-    if twice:
-        return "container_same_recording: " + "; ".join(f"{first} = {second}" for first, second in twice)
     sources = [video] + [path for path in dict.fromkeys(track.path for track in tracks) if path != video]
     index_of = {path: number for number, path in enumerate(sources)}
     cmd = [executable, "-y", "-hide_banner", "-loglevel", "error"]
@@ -156,9 +151,19 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
         with open(attached, "w", encoding="utf-8") as out:
             json.dump(provenance, out, ensure_ascii=False, sort_keys=True)
         cmd += ["-attach", attached, "-metadata:s:t", "mimetype=application/json", "-metadata:s:t", f"filename={PROVENANCE}"]
-    cmd += ["-f", "matroska", output]
+    cmd += ["-progress", "pipe:1", "-nostats", "-f", "matroska", output]
+    length = expected.duration if expected is not None else 0.0
+    fields: dict[str, str] = {}
+
+    async def told(line: str) -> None:
+        key, _, value = line.partition("=")
+        fields[key] = value
+        if key == "progress":
+            await report("build", progress_of(fields, length))
+            fields.clear()
+
     try:
-        code, _, err = await run_capture(cmd, timeout=timeout)
+        code, err = await run_lines(cmd, timeout=timeout, on_line=told)
     except (OSError, TimeoutError) as exc:
         return f"ffmpeg_failed: {type(exc).__name__}"
     finally:
@@ -167,44 +172,31 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     # An end whose status was lost tells nothing: the container that was written is what is judged.
     if code not in (0, LOST):
         return f"ffmpeg_failed: {err.decode(errors='replace').strip()[-300:]}"
+    await report("verify", {})
     made = await contents(output)
     if made is not None and made.publication != publication:
         return "container_publication_wrong"
     return problem_of(made, video_identity, signature_of(tracks), expected.duration if expected is not None else None)
 
 
-async def sound_print(path: str, stream: int, at: float, *, timeout: float = READ_TIMEOUT_S) -> str | None:
-    """The print of the `stream`-th audio stream of `path` from `at` on; None for silence or a stream that does not read."""
-    executable = program("ffmpeg")
-    if executable is None:
-        return None
-    cmd = [executable, "-v", "error", "-ss", f"{max(at, 0.0):.3f}", "-t", f"{PRINT_LENGTH_S}", "-i", path,
-           "-map", f"0:a:{stream}", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"]
+def progress_of(fields: dict[str, str], length: float) -> dict:
+    """The figures of a block of ffmpeg -progress: the share of the length written, the speed (×N), the time left, MB."""
     try:
-        code, out, _ = await run_capture(cmd, timeout=timeout)
-    except (OSError, TimeoutError):
-        return None
-    if code not in (0, LOST) or len(out) < 2:
-        return None
-    samples = array("h", out[: len(out) // 2 * 2])
-    if max(samples) < PRINT_SILENCE and -min(samples) < PRINT_SILENCE:
-        return None
-    return hashlib.md5(out).hexdigest()
-
-
-async def same_recordings(tracks: Sequence[AudioIn], at: float) -> list[tuple[str, str]]:
-    """The pairs of tracks (their names) that hold one recording, by the print of their sound at `at`."""
-    first_of: dict[str, str] = {}
-    twice = []
-    for track in tracks:
-        found = await sound_print(track.path, track.stream, at)
-        if found is None:
-            continue
-        if found in first_of:
-            twice.append((first_of[found], track.shown))
-        else:
-            first_of[found] = track.shown
-    return twice
+        written = int(fields.get("out_time_us") or fields.get("out_time_ms") or 0) / 1_000_000
+    except ValueError:
+        written = 0.0
+    try:
+        speed = float((fields.get("speed") or "").rstrip("x").strip() or 0)
+    except ValueError:
+        speed = 0.0
+    try:
+        size = int(fields.get("total_size") or 0)
+    except ValueError:
+        size = 0
+    share = min(100, int(written / length * 100)) if length > 0 else None
+    return {"progress": share, "speed_x": round(speed, 1) if speed else None,
+            "eta": int((length - written) / speed) if speed > 0 and length > written else None,
+            "written_mb": round(size / 1024 ** 2, 1) if size else None}
 
 
 async def provenance_of(path: str, *, timeout: float = READ_TIMEOUT_S) -> dict | None:

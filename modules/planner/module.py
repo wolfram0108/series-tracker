@@ -39,6 +39,8 @@ Queries:
       in it, carried out by the next sync (a video goes only for another video of its episode).
   planner.delete.cancel {series_id, kind, name, dub?} -> {dropped}.
   planner.failures.forget {series_id} -> {reset}: the user's reset of the failed attempts.
+  planner.pack.get {} -> {tasks}: the cards of the packing. planner.pack.remove {id} -> {removed}: the user removes a card
+      that stayed after its sync.
   planner.files.get {series_id} -> {names}: the files of the asset, relative to the folder of the series.
   planner.downloaded_counts {} -> {counts: {series_id: n}}: the episodes every series holds and shows, specials aside.
   planner.seasons {series_id} -> {seasons}: the seasons its files are of.
@@ -51,10 +53,12 @@ Events out:
   series.status.contribution {source: planner, series_id, flags: {downloading, aligning, packing}} — what the sync of the
       series is at (the card of the series), told when it changes; all false when the sync ends.
   work.series.state (owner `planner`).
-  planner.pack.changed {tasks: [{id, series_id, series_name, season, episode, part, name, status, tracks}]} — the picture
-      of the packing (SSE pack_queue_update, and again when an interface connects, gateway.sse.clients): every container
-      a sync builds — queued, building, packed, waiting (a step of it did not succeed), failed. What is packed goes with
-      the end of the sync; waiting and failed stay until the next sync of the series.
+  planner.pack.changed {tasks: [PackCard]} — the cards of the packing (core/contracts/packing.py; SSE pack_queue_update,
+      on the beat of core/clock while a container is under way, and when an interface connects): every container a sync
+      builds — its stages with their time (queue, build by ffmpeg with its progress, the result read
+      back, the journal that puts it in place), its tracks as numbers of the season with where each comes from, what
+      changed against the file before. At the end of the sync only a failed card stays (table pack_cards) until the user
+      removes it or the next sync of the series begins.
   planner.sync.trace {series_id, run, kind, download, data} — what a sync does, as it happens, for the dump of the run
       (modules/runlog): `plan` — the inputs whole (the online rows, the asset, the choices, the commands, the failures)
       and the plan made of them, every round; `step` / `done` — a step of the graph begins / ends with its outcome
@@ -75,6 +79,7 @@ from dataclasses import replace
 
 from core import NO_HANDLER, BaseModule, BusRequestError, compute, storage
 from core import container as mkv
+from core.clock import beat_while
 from core.dump import plain
 from core.contracts import (WORK_WITHDRAWN, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlannerView, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
@@ -90,6 +95,7 @@ from core.plan.planner import Plan, name_of
 from core.plan.tables import RowId, Track, Video
 from core.voice_names import Groups
 
+from .packing import PackBook, card_id
 from .repository import PlannerRepository
 from .view import view_of
 
@@ -131,6 +137,16 @@ def _failure_encoded(key: tuple) -> list:
 # Every download but the video of the reference is taken not above this height (the owner's rule, stage 10).
 OTHER_MAX_HEIGHT = 720
 
+def _sizes(files: Library, names: list[str]) -> dict[str, float]:
+    """The size (MB) of each file of the library named, as it lies after the journal."""
+    out = {}
+    for name in names:
+        path = files.path(name)
+        if os.path.isfile(path):
+            out[name] = round(os.path.getsize(path) / 1024 ** 2, 1)
+    return out
+
+
 class BusSync(SeriesSync):
     """The sync of one series with the service's workers (see the module)."""
 
@@ -168,12 +184,13 @@ class BusSync(SeriesSync):
             self.told = True
             await self.m._publish_view(self.series["id"], self, made, inputs)
         if self.download:
-            self.m.pack_planned(self.series, made)
+            self.m.packing.planned(self.series, self.run_mark, made, self.containers, self.voice_order, self.source_marks)
+            self.m.pack_going()
         return made
 
     async def left(self, made, group, missing) -> None:
-        for slot in group.built:
-            self.m.pack_set(self.series, made.goal(slot), "waiting")
+        self.m.packing.waited([card_id(self.series["id"], slot) for slot in group.built])
+        self.m.pack_publish()
 
     async def trace(self, kind: str, data: dict) -> None:
         # The tables of a plan of a big series are large: they are made plain off the loop.
@@ -490,19 +507,25 @@ class BusSync(SeriesSync):
             self.pending += await self.files.build(made, group, results)
             return
         self._flag("packing", 1)
-        goals = [made.goal(slot) for slot in group.built]
-        for goal in goals:
-            self.m.pack_set(self.series, goal, "building")
+        keys = [card_id(self.series["id"], slot) for slot in group.built]
+
+        def report_for(goal):
+            key = card_id(self.series["id"], goal.slot)
+
+            async def report(stage: str, figures: dict) -> None:
+                # A new stage is told at once; the figures of one under way go on the beat of the clock of displays.
+                if self.m.packing.report(key, stage, figures):
+                    self.m.pack_publish()
+            return report
         try:
-            self.pending += await self.files.build(made, group, results)
-        except BaseException:
-            for goal in goals:
-                self.m.pack_set(self.series, goal, "failed")
+            self.pending += await self.files.build(made, group, results, report_for)
+        except BaseException as exc:
+            self.m.packing.failed(keys)
+            self.m.pack_publish()
             raise
         finally:
             self._flag("packing", -1)
-        for goal in goals:
-            self.m.pack_set(self.series, goal, "packed")
+        self.m.pack_publish()
 
     async def commit(self, before) -> None:
         self.committing = True
@@ -510,7 +533,13 @@ class BusSync(SeriesSync):
         if self.pending:
             steps = await storage.call(self.files.write_journal, self.pending, table)
             self.pending = []
-            await self.m.carry_out(self.series["id"], self.files, steps, table)
+            self.m.packing.journal(steps)
+            await self.m.carry_out(self.series["id"], self.files, steps, table, self.m.packing.step_done)
+        names = [card.name for card in self.m.packing.cards.values()
+                 if card.series_id == self.series["id"] and card.status == "apply"]
+        sizes = await storage.call(_sizes, self.files, names)
+        self.m.packing.applied(self.series["id"], lambda name: sizes.get(name))
+        self.m.pack_publish()
         await self.m.save(self.series["id"], self)
         await storage.call(self.files.finish)
 
@@ -531,8 +560,9 @@ class PlannerModule(BaseModule):
         self._loaded: dict[int, tuple] = {}  # the failures and commands a running sync started from
         self._forgot: set[int] = set()  # series whose failures the user reset while their sync ran
         self._seq = 0
-        # The picture of the packing (pack_queue_update): the containers the syncs build, by series and episode.
-        self._pack: dict[str, dict] = {}
+        # The cards of the packing (core/contracts/packing.py): the containers the syncs build, by series and episode.
+        self.packing = PackBook()
+        self._packing_going = asyncio.Event()  # a container is under way: the queue is told on the beat of core/clock
         super().__init__(bus)
         # The flags of the status of each series: what its sync is at, and what it stands at (contribute, _stand).
         self._activity: dict[int, dict[str, bool]] = {}
@@ -559,6 +589,13 @@ class PlannerModule(BaseModule):
         self.handle("series.updated", self.on_series_updated)
         self.handle("voices.settings.changed", self.on_voice_settings_changed)
         self.handle("gateway.sse.clients", self.on_sse_clients)
+        self.handle("planner.pack.get", self.on_pack_get)
+        self.handle("planner.pack.remove", self.on_pack_remove)
+
+    async def on_start(self) -> None:
+        for card in await self.repo.pack_cards():
+            self.packing.kept(card)
+        self.spawn(self._pack_ticker(), name="planner:packing", lasting=True)
 
     # --- the sync -----------------------------------------------------------------------------------------------
 
@@ -578,6 +615,7 @@ class PlannerModule(BaseModule):
     async def _sync(self, series_id: int, download: bool) -> None:
         try:
             series = await self.request("catalog.series.get", {"series_id": series_id})
+            await self.repo.drop_pack_cards(self.packing.sync_started(series_id))
             sync = self._syncs[series_id] = BusSync(self, series, download)
             sync.run_mark = await self.repo.run_started(series_id)
             await self._recover(series)
@@ -626,7 +664,10 @@ class PlannerModule(BaseModule):
         except Exception:  # noqa: BLE001 - the run ends either way: the error is in the log, the sync can be asked again
             self.log.exception("сериал %d: синхронизация плана прервана", series_id)
         await self.repo.end_run(series_id)
-        self.pack_drop(series_id, ("queued", "building", "packed"))
+        stay, gone = self.packing.sync_ended(series_id)
+        await self.repo.keep_pack_cards(stay)
+        await self.repo.drop_pack_cards(gone)
+        self.pack_publish()
         self._runs.pop(series_id, None)
         self._syncs.pop(series_id, None)
         self.contribute(series_id, {"downloading": False, "aligning": False, "packing": False})
@@ -697,47 +738,47 @@ class PlannerModule(BaseModule):
 
     # --- the picture of the packing ------------------------------------------------------------------------------
 
-    def pack_planned(self, series: dict, made) -> None:
-        """A plan of a sync: every container it builds is queued; what an earlier sync of the series left goes."""
-        self.pack_drop(series["id"], None, publish=False)
-        for group in made.groups:
-            for slot in group.built:
-                self.pack_set(series, made.goal(slot), "queued", publish=False)
-        self._pack_publish()
+    def pack_publish(self) -> None:
+        self.publish_event("planner.pack.changed", {"tasks": [card.model_dump(mode="json") for card in self.packing.view()]})
 
-    def pack_set(self, series: dict, goal, status: str, *, publish: bool = True) -> None:
-        slot = goal.slot
-        key = f"{series['id']}:" + ":".join(map(str, slot))
-        self._pack[key] = {"id": key, "series_id": series["id"], "series_name": series.get("name") or "",
-                           "season": slot[0], "episode": slot[1] if len(slot) > 1 else None,
-                           "part": slot[2] if len(slot) > 2 else None, "name": goal.name, "status": status,
-                           "tracks": [way.voice for way in goal.tracks]}
-        if publish:
-            self._pack_publish()
+    def pack_going(self) -> None:
+        self._packing_going.set()
+        self.pack_publish()
 
-    def pack_drop(self, series_id: int, statuses: tuple[str, ...] | None, *, publish: bool = True) -> None:
-        for key in [key for key, task in self._pack.items()
-                    if task["series_id"] == series_id and (statuses is None or task["status"] in statuses)]:
-            del self._pack[key]
-        if publish:
-            self._pack_publish()
+    async def _pack_ticker(self) -> None:
+        """While a container is under way the queue is told on the beat of the clock of displays (core/clock)."""
+        while True:
+            await self._packing_going.wait()
+            await beat_while(self.packing.running, self.pack_publish)
+            self._packing_going.clear()
 
-    def _pack_publish(self) -> None:
-        tasks = sorted(self._pack.values(), key=lambda task: (task["series_id"], task["season"],
-                                                              task["episode"] or 0, task["part"] or 0))
-        self.publish_event("planner.pack.changed", {"tasks": tasks})
+    async def on_pack_get(self, env: Envelope) -> dict:
+        return {"tasks": [card.model_dump(mode="json") for card in self.packing.view()]}
+
+    async def on_pack_remove(self, env: Envelope) -> dict:
+        """The user removes a card of the packing that stayed after its sync."""
+        key = str(env.payload["id"])
+        card = self.packing.cards.get(key)
+        if card is None or card.status not in ("done", "failed"):
+            raise LookupError(f"карточка упаковки {key} не найдена или упаковка идёт")
+        self.packing.forget(key)
+        await self.repo.drop_pack_cards([key])
+        self.pack_publish()
+        return {"removed": True}
 
     async def on_sse_clients(self, env: Envelope) -> None:
         """An interface connected: it gets the packing as it is, with no question of its own."""
         if (env.payload or {}).get("count"):
-            self._pack_publish()
+            self.pack_publish()
 
     # --- the journal ---------------------------------------------------------------------------------------------
 
-    async def carry_out(self, series_id: int, files: Library, steps: list, table: list) -> None:
+    async def carry_out(self, series_id: int, files: Library, steps: list, table: list, done=None) -> None:
         by_name = {each["name"]: each for each in table}
         for step in steps:
             await files.step(step, by_name)
+            if done is not None:
+                done(step)
 
     async def _recover(self, series: dict) -> None:
         """A journal a stop cut short is carried out to the end, and the table it leads to is the asset."""

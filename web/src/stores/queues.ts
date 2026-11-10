@@ -24,12 +24,8 @@ export interface ConformPicture {
   tasks: ConformTask[]
 }
 
-/** A task of the packing of a container (pack_queue_update): a series waiting for its turn (no season), a slot, or a
- *  publication a stop cut short. */
-export interface PackTask {
-  id: string; series_id: number; series_name: string; season: number | null; episode: number | null; part: number | null
-  name: string; status: "queued" | "building" | "packed" | "unchanged" | "waiting" | "failed" | "interrupted"; tracks: string[]
-}
+/** A container a sync builds (pack_queue_update, core/contracts/packing.py). */
+export type PackCard = components["schemas"]["PackCard"]
 
 /** Очереди агентов — голые массивы (старый контракт сохранён). Наполняются
  *  push-событиями SSE; HTTP-загрузка — через настройки/агентов при открытии. */
@@ -40,14 +36,14 @@ export const useQueuesStore = defineStore("queues", () => {
   const downloads = shallowRef<DownloadCard[]>([]) // download_queue_update: the cards of the downloads (core/contracts/downloads.py)
   const slicing = shallowRef<QueueTask[]>([]) // slicing_queue_update (ffmpeg)
   const conform = shallowRef<ConformPicture | null>(null) // conform_queue_update (alignment daemon)
-  const pack = shallowRef<PackTask[]>([]) // pack_queue_update (the containers of the episodes)
+  const pack = shallowRef<PackCard[]>([]) // pack_queue_update (the containers of the episodes)
 
   const setAgent = (t: QueueTask[]) => (agent.value = t)
   const setTorrents = (t: QueueTask[]) => (torrents.value = t)
   const setDownloads = (t: DownloadCard[]) => (downloads.value = t)
   const setSlicing = (t: QueueTask[]) => (slicing.value = t)
   const setConform = (p: ConformPicture) => (conform.value = p)
-  const setPack = (t: PackTask[]) => (pack.value = t)
+  const setPack = (t: PackCard[]) => (pack.value = t)
 
   return { agent, torrents, downloads, slicing, conform, pack, setAgent, setTorrents, setDownloads, setSlicing, setConform, setPack }
 })

@@ -36,11 +36,11 @@ describe("the card of a download", () => {
     expect(text).toContain(t("download.attempt", { n: 3, of: 3 }))
     expect(text).toContain(t("download.failed.link"))
     expect(text).toContain(t("download.replan"))
-    expect(w.findAll(".download-step").map((each) => each.classes().find((name) => name.startsWith("is-"))))
+    expect(w.findAll(".work-step").map((each) => each.classes().find((name) => name.startsWith("is-"))))
       .toEqual(["is-done", "is-done", "is-active", "is-skipped", "is-pending"])
     expect(w.find(".progress-bar").text()).toBe("47%")
     expect(text).toContain(t("download.method.ranged"))
-    expect(w.find(".download-remove").exists()).toBe(false)
+    expect(w.find(".work-remove").exists()).toBe(false)
   })
 
   it("a failed card says that no variant is left and can be removed; a finished one is green", async () => {
@@ -51,7 +51,7 @@ describe("the card of a download", () => {
     expect(failed.classes()).toContain("is-failed")
     expect(failed.text()).toContain(t("download.exhausted"))
     expect(failed.text()).toContain(t("download.outcome.dub"))
-    await failed.find(".download-remove").trigger("click")
+    await failed.find(".work-remove").trigger("click")
     expect(failed.emitted("remove")).toEqual([["88:s06e08:dub:Kazoku Project"]])
     const done = mount(DownloadCard, { props: { card: card({ status: "done", finished_at: "2026-11-10T09:22:25+00:00",
       stages: stages(["done", "done", "done", "skipped", "done"]),

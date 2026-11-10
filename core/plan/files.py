@@ -118,8 +118,9 @@ class Library:
             return self.path(goal.video.container.name)
         return results[video_op(goal)].file
 
-    async def build(self, made: Plan, group: Group, results: dict[str, Made]) -> list[tuple]:
-        """The containers a group builds anew, aside, each with its provenance; the steps of the journal of the group."""
+    async def build(self, made: Plan, group: Group, results: dict[str, Made], report_for=None) -> list[tuple]:
+        """The containers a group builds anew, aside, each with its provenance; the steps of the journal of the group.
+        `report_for(goal)` gives the callable a build of that goal tells its progress to (core.container.Report)."""
         steps: list[tuple] = []
         for slot in group.built:
             goal = made.goal(slot)
@@ -154,9 +155,13 @@ class Library:
                               goal.titles, goal.languages)
             staging = self.staging(goal.name)
             os.makedirs(os.path.dirname(staging), exist_ok=True)
-            problem = await mkv.build(staging, video_path, identity, tracks, provenance=container_json(built))
+            report = report_for(goal) if report_for is not None else None
+            problem = await mkv.build(staging, video_path, identity, tracks, provenance=container_json(built),
+                                      **({"report": report} if report is not None else {}))
             if problem is not None:
                 raise RuntimeError(f"{goal.name}: {problem}")
+            if report is not None:
+                await report("built", {})
             steps.append(("publish", os.path.relpath(staging, self.root), goal.name))
             steps += [("remove", name) for name in packed]  # the file now holds the track
         for slot, name in group.kept:

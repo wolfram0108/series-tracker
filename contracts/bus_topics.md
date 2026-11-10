@@ -76,7 +76,7 @@
 | `planner.series.changed` — `PlannerView` (после синхронизации, в её начале, при изменении раскладки, настроек озвучек, команды или сброса неудач) | planner | gateway | `plan_update` |
 | `work.withdrawn {series_id, keys?}` — `WorkWithdrawn`: работа, выданная владельцем, не нужна (загрузки озвучек и файлов склейки; без `keys` — вся работа сериала) | voices | downloads | — |
 | `conform.queue.changed {daemon, tasks}` | conform | voices, gateway | `conform_queue_update` |
-| `planner.pack.changed {tasks}` — картина упаковки: каждый контейнер, который собирает синхронизация (queued, building, packed, waiting — шаг не удался, failed); собранное уходит с концом синхронизации, waiting и failed — до следующей синхронизации сериала; заново — при подключении интерфейса (`gateway.sse.clients`) | planner | gateway | `pack_queue_update` |
+| `planner.pack.changed {tasks}` — карточки упаковки `PackCard` (`core/contracts/packing.py`): каждый контейнер синхронизации — стадии со временем (очередь, сборка ffmpeg с прогрессом, проверка результата, применение журнала), дорожки номерами сезона с происхождением, что изменилось против прежнего файла; смена стадии — сразу, цифры — раз в секунду; после конца синхронизации остаются только ошибки (таблица `pack_cards`) до «Удалить» или следующей синхронизации; `planner.pack.get` → `{tasks}`, `planner.pack.remove {id}` → `{removed}` | planner | gateway | `pack_queue_update` |
 | `conform.settings.changed` — `ConformSettingsView` | conform | voices, gateway | `conform_settings_update` |
 | `conform.job.finished {job_id, status, error, results}` (у пары `ok`, `refused`: отказ самой службы отличается от её сбоя) / `conform.job.removed {job_id}` / `conform.daemon.up {}` | conform | voices | — |
 

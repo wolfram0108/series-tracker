@@ -137,10 +137,10 @@ async def test_a_download_rebuilt_on_the_next_source_is_one_card_in_the_agents_a
     await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
     await ui.close_settings()
     await ui.settings("Агенты")
-    card = page.locator(".download-card", has=page.locator(".download-replan"))
+    card = page.locator(".download-card", has=page.locator(".work-replan"))
     await expect(card).to_have_count(1)
     await expect(card).to_have_class(re.compile(r"\bis-done\b"))
-    lines = card.locator(".download-line")
+    lines = card.locator(".work-line")
     await expect(lines).to_have_count(3)
     await expect(lines.nth(0).locator(".is-failed")).to_have_count(1)
     await expect(lines.nth(1)).to_contain_text(text("download.replan"))
@@ -148,7 +148,7 @@ async def test_a_download_rebuilt_on_the_next_source_is_one_card_in_the_agents_a
     await expect(card.locator(".figure-mark").first).to_be_visible()
     await expect(page.locator(".download-card")).to_have_count(1)  # the others went with the end of the sync
     await ui.shot("25-download-rebuilt-card")
-    await card.locator(".download-remove").click()
+    await card.locator(".work-remove").click()
     await expect(page.locator(".download-card")).to_have_count(0)
 
 

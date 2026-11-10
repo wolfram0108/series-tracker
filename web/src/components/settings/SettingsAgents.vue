@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { useQueuesStore, type PackTask } from "../../stores/queues"
-import { t, type MessageKey } from "../../i18n"
+import { useQueuesStore } from "../../stores/queues"
+import { t } from "../../i18n"
 import ConformQueue from "./ConformQueue.vue"
 import DownloadCard from "./DownloadCard.vue"
+import PackCard from "./PackCard.vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 
@@ -20,22 +21,9 @@ function str(v: unknown): string {
   return v == null ? "" : String(v)
 }
 
-// The status of a task of the packing decides the colour of its pill; the reason of a failure is in the log.
-const PACK_PILL: Record<PackTask["status"], string> = {
-  queued: "pill-secondary", building: "pill-primary", packed: "pill-success", unchanged: "pill-secondary",
-  waiting: "pill-info", failed: "pill-danger", interrupted: "pill-danger",
-}
-
-const PACK_STATUS: Record<PackTask["status"], MessageKey> = {
-  queued: "agents.pack.status.queued", building: "agents.pack.status.building", packed: "agents.pack.status.packed",
-  unchanged: "agents.pack.status.unchanged", waiting: "agents.pack.status.waiting", failed: "agents.pack.status.failed",
-  interrupted: "agents.pack.status.interrupted",
-}
-
-function packPlace(task: PackTask): string {
-  if (task.episode == null) return t("agents.pack.series")
-  const place = t("agents.pack.episode", { season: task.season ?? "", episode: task.episode })
-  return task.part ? `${place}, ${t("agents.pack.part", { part: task.part })}` : place
+// A card of the packing that stayed after its sync is removed; the core tells the queue anew (pack_queue_update).
+async function removePack(id: string): Promise<void> {
+  await request(api.DELETE("/api/pack/cards/{card_id}", { params: { path: { card_id: id } } }))
 }
 </script>
 
@@ -85,17 +73,7 @@ function packPlace(task: PackTask): string {
       <h6 class="queue-title-bar"><i class="pi pi-box"></i> {{ t("agents.pack.title") }}</h6>
       <div v-if="!q.pack.length" class="queue-empty">{{ t("agents.pack.empty") }}</div>
       <div v-else class="composition-cards-container">
-        <div v-for="task in q.pack" :key="task.id" class="card-final card-queue">
-          <div class="queue-row">
-            <span class="queue-title">{{ task.series_name }}</span>
-            <div class="pill">{{ packPlace(task) }}</div>
-            <div :class="['pill', PACK_PILL[task.status]]">{{ t(PACK_STATUS[task.status]) }}</div>
-          </div>
-          <div v-if="task.name || task.tracks.length" class="queue-row queue-status">
-            <div v-if="task.name" class="pill"><i class="pi pi-file"></i> {{ task.name }}</div>
-            <div v-for="(track, index) in task.tracks" :key="index" class="pill">{{ index + 1 }}. {{ track }}</div>
-          </div>
-        </div>
+        <PackCard v-for="card in q.pack" :key="card.id" :card="card" @remove="removePack" />
       </div>
     </section>
 

@@ -312,25 +312,33 @@ async def test_delete_of_an_offline_track_builds_the_file_without_it_sends_no_al
 
 
 async def test_the_packing_is_told_container_by_container_and_what_waits_stays_in_the_picture(world):
-    """The queue of the packing (pack_queue_update): every container a sync builds — queued, building, packed; what is
-    packed goes with the end of the sync. A container whose step did not succeed is shown waiting until the next sync."""
-    neighbours, planner, _ = world
+    """The cards of the packing (pack_queue_update): every container a sync builds goes through its stages — queued, the
+    build by ffmpeg with its progress, the result read back, the journal that puts it in place — with its tracks as numbers
+    of the season; a done card goes with the end of the sync. A container whose step did not succeed is not built: its
+    card stays failed after the sync, in the store, until the next sync of the series."""
+    neighbours, planner, db_path = world
     episode(neighbours, 1, 1)
     told = planner.bus.subscribe("planner.pack.changed")
     await sync(world)
     pictures = []
     while not told.queue.empty():
         pictures.append((await told.queue.get()).payload["tasks"])
-    seen = [task["status"] for picture in pictures for task in picture if (task["season"], task["episode"]) == (1, 1)]
-    assert seen[:1] == ["queued"] and "building" in seen and seen[-1] == "packed" and pictures[-1] == []
-    assert next(task for picture in pictures for task in picture)["tracks"] == ["G1"]
+    seen = [card["status"] for picture in pictures for card in picture if card["episode"] == "s01e01"]
+    assert seen[0] == "queued" and "build" in seen and "apply" in seen and seen[-1] == "done" and pictures[-1] == []
+    done = [card for picture in pictures for card in picture if card["status"] == "done"][-1]
+    assert [stage["state"] for stage in done["stages"]] == ["done", "done", "done", "done"]
+    assert [(track["label"], track["kind"]) for track in done["tracks"]] == [(REF, "own"), ("G1", "new")]
+    assert done["figures"]["steps_of"] and done["figures"]["steps_done"] == done["figures"]["steps_of"]
+    assert any(card["figures"]["progress"] is not None for picture in pictures for card in picture if card["status"] == "build")
     episode(neighbours, 2, 1)
     neighbours.daemon.answers["Сериал s01e02 G1"] = "crash"
     await sync(world)
     last = None
     while not told.queue.empty():
         last = (await told.queue.get()).payload["tasks"]
-    assert [(task["episode"], task["status"]) for task in last] == [(2, "waiting")]
+    assert [(card["episode"], card["status"], card["waited"]) for card in last] == [("s01e02", "failed", True)]
+    assert [card.id for card in await planner.repo.pack_cards()] == [last[0]["id"]]
+
 
 
 async def test_a_cut_out_of_a_compilation_by_the_service(world):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+from core.contracts import PackCard
 from core.db import Database
 
 
@@ -100,3 +101,18 @@ class PlannerRepository:
     async def purge(self, series_id: int) -> None:
         await self._db.execute_many([(f"DELETE FROM {table} WHERE series_id=?", (series_id,)) for table in
                                      ("plan_assets", "plan_failures", "plan_commands", "plan_runs", "plan_outcomes")])
+
+    async def pack_cards(self) -> list[PackCard]:
+        return [PackCard.model_validate(json.loads(row["data"]))
+                for row in await self._db.fetch_all("SELECT data FROM pack_cards ORDER BY rowid")]
+
+    async def keep_pack_cards(self, cards: list[PackCard]) -> None:
+        if cards:
+            await self._db.execute_many([(
+                "INSERT INTO pack_cards (id, series_id, data) VALUES (?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET series_id = excluded.series_id, data = excluded.data",
+                (card.id, card.series_id, card.model_dump_json())) for card in cards])
+
+    async def drop_pack_cards(self, ids: list[str]) -> None:
+        if ids:
+            await self._db.execute_many([("DELETE FROM pack_cards WHERE id = ?", (each,)) for each in ids])

@@ -843,6 +843,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pack/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Pack Queue
+         * @description The cards of the packing (core/contracts/packing.py): every container a sync builds, its stages and tracks.
+         */
+        get: operations["pack_queue_api_pack_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pack/cards/{card_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Pack Card Remove
+         * @description A card of the packing that stayed after its sync is removed.
+         */
+        delete: operations["pack_card_remove_api_pack_cards__card_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/downloads/cards/{card_id}": {
         parameters: {
             query?: never;
@@ -2543,6 +2583,126 @@ export interface components {
             episode?: number | null;
             /** Off */
             off: boolean;
+        };
+        /** PackCard */
+        PackCard: {
+            /** Id */
+            id: string;
+            /** Series Id */
+            series_id: number;
+            /**
+             * Series Name
+             * @default
+             */
+            series_name: string;
+            /**
+             * Sync Started
+             * @default
+             */
+            sync_started: string;
+            /**
+             * Episode
+             * @default
+             */
+            episode: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            video?: components["schemas"]["DownloadVariant"] | null;
+            /**
+             * Status
+             * @default queued
+             * @enum {string}
+             */
+            status: "queued" | "build" | "verify" | "apply" | "done" | "failed";
+            /** Stages */
+            stages?: components["schemas"]["PackStageView"][];
+            /** Tracks */
+            tracks?: components["schemas"]["PackTrack"][];
+            /**
+             * Reason
+             * @default
+             * @enum {string}
+             */
+            reason: "" | "order" | "video" | "names";
+            /**
+             * Waited
+             * @default false
+             */
+            waited: boolean;
+            figures?: components["schemas"]["PackFigures"];
+            /**
+             * Queued At
+             * @default
+             */
+            queued_at: string;
+            /**
+             * Finished At
+             * @default
+             */
+            finished_at: string;
+            /**
+             * Seconds
+             * @default 0
+             */
+            seconds: number;
+        };
+        /** PackFigures */
+        PackFigures: {
+            /** Progress */
+            progress?: number | null;
+            /** Written Mb */
+            written_mb?: number | null;
+            /** Speed X */
+            speed_x?: number | null;
+            /** Eta */
+            eta?: number | null;
+            /** Seconds Video */
+            seconds_video?: number | null;
+            /** Size Mb */
+            size_mb?: number | null;
+            /** Steps Done */
+            steps_done?: number | null;
+            /** Steps Of */
+            steps_of?: number | null;
+        };
+        /** PackStageView */
+        PackStageView: {
+            /**
+             * Name
+             * @enum {string}
+             */
+            name: "queue" | "build" | "verify" | "apply";
+            /**
+             * State
+             * @default pending
+             * @enum {string}
+             */
+            state: "pending" | "active" | "done" | "failed" | "skipped";
+            /**
+             * Seconds
+             * @default 0
+             */
+            seconds: number;
+        };
+        /**
+         * PackTrack
+         * @description A track of the container in its place: the number of its voice-over in the order of the season (None for one the
+         *     order has not), its name, and where it comes from — `kept` (the file before held it), `new` (made in this sync), `own`
+         *     (the own sound of the video) — or `gone` (the file before held it, this one does not).
+         */
+        PackTrack: {
+            /** Number */
+            number?: number | null;
+            /** Label */
+            label: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "kept" | "new" | "own" | "gone";
         };
         /** ParseUrlRequest */
         ParseUrlRequest: {
@@ -6078,6 +6238,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    pack_queue_api_pack_queue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackCard"][];
+                };
+            };
+        };
+    };
+    pack_card_remove_api_pack_cards__card_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Internal Server Error */

@@ -130,20 +130,3 @@ def test_a_container_carries_its_provenance_and_gives_it_back(media):
     assert asyncio.run(container.provenance_of(again)) == newer
     assert asyncio.run(container.provenance_of(video)) is None  # a file not built here carries none
     assert sorted(os.listdir(tmp)) == sorted(set(os.listdir(tmp)) - {"first.mkv.provenance.json"})
-
-
-def test_one_recording_under_the_names_of_two_voice_overs_is_not_built_and_silence_is_no_recording(media):
-    """A player once gave the file of one voice-over under the names of eight others (Kodik's borrowed episodes): the
-    container never holds one recording twice, whatever files it comes in. Silence says nothing of whose it is."""
-    tmp, video, dubs, _ = media
-    copy = str(tmp / "copy of ruchime.flac")
-    shutil.copyfile(dubs["ruchime"], copy)
-    out = str(tmp / "ep.mkv")
-    tracks = [AudioIn("ПВА ШОУ", video, 0, "1:a"), AudioIn("ruchime", dubs["ruchime"], 0, "1:a"),
-              AudioIn("anistar", dubs["anistar"], 0, "1:a"), AudioIn("Flarrow Films", copy, 0, "1:a")]
-    assert asyncio.run(container.build(out, video, "1:a", tracks)) == "container_same_recording: ruchime = Flarrow Films"
-    assert not os.path.exists(out)
-
-    quiet = [make(tmp / f"quiet{n}.flac", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "3") for n in (1, 2)]
-    assert asyncio.run(container.build(out, video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a")] + [
-        AudioIn(f"тихая {n}", path, 0, "1:a") for n, path in enumerate(quiet)])) is None

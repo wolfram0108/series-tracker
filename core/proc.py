@@ -145,6 +145,24 @@ async def run_capture(cmd: list[str], *, timeout: float, data: bytes | None = No
     return code, out, err
 
 
+async def run_lines(cmd: list[str], *, timeout: float, on_line) -> tuple[int, bytes]:
+    """(return code, stderr) of a finished program whose standard output is told line by line as it comes (`on_line`, an
+    async callable of the decoded line); raises TimeoutError at the deadline. Its errors are read aside, so a full pipe
+    never stops it."""
+    proc = await spawn(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+
+    async def lines() -> None:
+        while line := await proc.stdout.readline():
+            await on_line(line.decode("utf-8", errors="replace").strip())
+
+    try:
+        _, err, code = await asyncio.wait_for(asyncio.gather(lines(), proc.stderr.read(), exited(proc)), timeout)
+    except BaseException:
+        await _reap(proc)
+        raise
+    return code, err
+
+
 async def _reap(proc: asyncio.subprocess.Process) -> None:
     """Stop a program whose wait was given up; its end is waited for a short while only, the caller is leaving."""
     with contextlib.suppress(asyncio.TimeoutError):
