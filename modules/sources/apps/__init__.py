@@ -8,10 +8,19 @@ environment of the process (`ST_APP_<NAME>`, JSON); without it the application i
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from typing import Mapping
+from dataclasses import dataclass, field
+from typing import Mapping, Protocol
 
 SCHEME = "app"
+
+
+class AppError(RuntimeError):
+    """The application refused or could not be asked: a coded reason; `transient` marks causes that may pass."""
+
+    def __init__(self, why: str, transient: bool = False) -> None:
+        super().__init__(why)
+        self.reason = why
+        self.transient = transient
 ENV_PREFIX = "ST_APP_"
 
 
@@ -41,3 +50,59 @@ def profiles_of(environ: Mapping[str, str]) -> list[AppProfile]:
 
 def card_address(app: str, card: str) -> str:
     return f"{SCHEME}://{app}/{card}"
+
+
+# --- what every protocol gives: the card with its lines, the stream of an episode, a page of the search ---------------
+
+@dataclass(frozen=True)
+class AppItem:
+    """An episode of a line: its place in the line, its label as the application gives it, its token."""
+    place: int
+    label: str
+    token: str
+
+
+@dataclass(frozen=True)
+class AppLine:
+    """A line of a card: its code, its name in the application, whether it lists its playlists itself (no parse), the
+    parsers it allows, its episodes."""
+    code: str
+    name: str
+    listed: bool
+    parsers: str
+    items: tuple[AppItem, ...]
+
+
+@dataclass(frozen=True)
+class AppCardData:
+    names: list[str]
+    year: str
+    lines: list[AppLine]
+
+
+@dataclass(frozen=True)
+class AppStream:
+    """The address of the stream of an episode now, with the headers its host wants."""
+    address: str
+    headers: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class AppPage:
+    """A page of the search: the cards as the application gives them ({id, name, sub, year, area, class, remarks,
+    blurb, pic}), the number of pages and of cards when the application says them."""
+    cards: list[dict]
+    pages: int | None = None
+    total: int | None = None
+
+
+class AppClient(Protocol):
+    """The client of the API of one application, whatever its protocol (app99.py, appdrama.py)."""
+    profile: AppProfile
+
+    async def card(self, card_id: str) -> AppCardData: ...
+
+    async def resolve(self, line: str, token: str) -> AppStream: ...
+
+    async def search_page(self, query: str, page: int) -> AppPage: ...
+

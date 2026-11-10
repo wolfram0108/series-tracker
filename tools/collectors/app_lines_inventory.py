@@ -22,10 +22,10 @@ sys.path.insert(0, ROOT)
 
 from core.http_limits import bounded_client  # noqa: E402
 from modules.sources.apps import profiles_of  # noqa: E402
-from modules.sources.apps.app99 import App99Client, AppError  # noqa: E402
+from modules.sources.apps import AppError  # noqa: E402
 from modules.sources.players.hls import attributes, head_of, is_playlist  # noqa: E402
 from modules.sources.players.http import USER_AGENT  # noqa: E402
-from modules.sources.sites.apps.site import lines_of  # noqa: E402
+from modules.sources.module import APP_PROTOCOLS  # noqa: E402
 
 PEEK = 4096
 
@@ -111,47 +111,36 @@ async def main(app: str, card: str) -> None:
     os.makedirs(os.path.join(ROOT, "data", "raw"), exist_ok=True)
     path = os.path.join(ROOT, "data", "raw", f"app_lines_inventory__{stamp}__{app}-{card}.jsonl")
     async with bounded_client(timeout=20.0, follow_redirects=True) as http:
-        client = App99Client(profile, lambda: http)
-        detail = await client.detail(card)
-        system = await client.system()
-        players = {str(each.get("code") or key): each for key, each in (system.get("player") or {}).items()
-                   if isinstance(each, dict)}
-        parsers = [each.get("id") for each in system.get("parser_api") or [] if isinstance(each, dict)]
+        client = APP_PROTOCOLS[profile.protocol](profile, lambda: http)
+        found_card = await client.card(card)
         with open(path, "a", encoding="utf-8") as raw:
-            for code, items in lines_of(detail):
-                player = players.get(code, {})
-                allowed = [part.strip() for part in str(player.get("parseUrl") or "").split(",") if part.strip()]
+            for line in found_card.lines:
+                items = line.items
                 picks = {"first": items[0], "central": items[len(items) // 2], "last": items[-1]} if items else {}
-                headers = json.loads(player.get("headers") or "{}") if isinstance(player.get("headers"), str) else {}
-                for which, (place, label, token) in picks.items():
-                    record = {"at": datetime.now(timezone.utc).isoformat(), "app": app, "card": card, "line": code,
-                              "line_name": player.get("name"), "line_type": player.get("type"), "allowed": allowed,
-                              "episodes": len(items), "which": which, "place": place, "label": label, "parses": []}
-                    address = token if token.startswith(("http://", "https://")) else None
-                    for parser in [each for each in parsers if not allowed or str(each) in allowed] if address is None else []:
-                        began = time.monotonic()
-                        try:
-                            address = await client.parse(parser, token)
-                            record["parses"].append({"parser": parser, "ok": True, "seconds": round(time.monotonic() - began, 2)})
-                            break
-                        except AppError as exc:
-                            record["parses"].append({"parser": parser, "ok": False, "reason": exc.reason,
-                                                     "seconds": round(time.monotonic() - began, 2)})
+                for which, item in picks.items():
+                    record = {"at": datetime.now(timezone.utc).isoformat(), "app": app, "card": card, "line": line.code,
+                              "line_name": line.name, "listed": line.listed, "allowed": line.parsers,
+                              "episodes": len(items), "which": which, "place": item.place, "label": item.label}
+                    began = time.monotonic()
+                    try:
+                        stream = await client.resolve(line.code, item.token)
+                        record["resolve"] = {"ok": True, "seconds": round(time.monotonic() - began, 2)}
+                        address, headers = stream.address, stream.headers
+                    except AppError as exc:
+                        record["resolve"] = {"ok": False, "reason": exc.reason, "seconds": round(time.monotonic() - began, 2)}
+                        address, headers = None, {}
                     record["address"] = address
                     if address:
                         record["host"] = urlsplit(address).hostname
                         got = record["head"] = await head(http, address, headers)
                         if got.get("playlist"):
                             record["hls"] = await playlist(http, got, headers)
-                            got.pop("text", None)
-                        elif got.get("status") in (200, 206):
-                            record["file"] = await ffprobe(address, "-user_agent", USER_AGENT)
                         else:
                             record["file"] = await ffprobe(address, "-user_agent", USER_AGENT)
                         got.pop("text", None)
                     raw.write(json.dumps(record, ensure_ascii=False) + "\n")
                     raw.flush()
-                    print(f"{code:<8} {which:<8} {label[:20]:<20} host={record.get('host')} "
+                    print(f"{line.code:<10} {which:<8} {item.label[:20]:<20} host={record.get('host')} "
                           f"head={record.get('head', {}).get('status') or record.get('head', {}).get('error')} "
                           f"hls={bool(record.get('hls'))} "
                           f"frame={(record.get('hls') or {}).get('frame', {}).get('height') or (record.get('file') or {}).get('height')}")

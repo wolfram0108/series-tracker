@@ -37,8 +37,9 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    a Vibix entry, an item of CDN VideoHub or of Kodik) resolves it; any other
                                    address is not handled
   sources.players.list {} → {players: [{name, label}]}: every player a row of a table can be of, as the order of sources
-                                   names it: the players of the registry and the admitted lines of the applications
-                                   (`<application>:<code>`, named by their codes; modules/sources/apps/lines.py)
+                                   names it: the players of the registry and the lines some application admits, one
+                                   player a code whichever application lists it (`line:<code>`, named by the code;
+                                   modules/sources/apps/lines.py)
   sources.apps.search {query, page?, app?} → AppSearchReply {apps: [AppResults]}: a page of the search of every video
                                    application (modules/sources/apps), or of the one named, as the application gives it,
                                    or the reason it gave none. A card picked is a source by its address
@@ -94,14 +95,15 @@ from core.http_limits import bounded_client
 from core.reasons import reason
 
 from . import anilibria, delivery, parsers
-from .apps import AppProfile, card_address
-from .apps.app99 import AppError, App99Client
+from .apps import AppError, AppProfile, card_address
+from .apps.app99 import App99Client
+from .apps.appdrama import AppDramaClient
 from .apps.lines import LineRegistry
 from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
 from .term import DEFAULT_HOURS, TERM_KEY, Term, hours_of
-from .players.app_lines import AppPlayer
+from .players.app_lines import AppLines, AppPlayer, line_player_name
 from .players.contract import StreamUnavailable
 from .players.registry import PlayerRegistry
 from .players.streams import resolve_stream
@@ -114,6 +116,9 @@ from .table import TableReader, utc_now
 REQUEST_MIN_INTERVAL = 3.0  # секунд между запросами к одному трекеру
 VK_API_BASE = "https://api.vk.com/method/"
 
+
+# The clients of the protocols of the video applications, by the `protocol` of a profile (modules/sources/apps).
+APP_PROTOCOLS = {"app99": App99Client, "appdrama": AppDramaClient}
 
 # The connections the client of the sources opens and keeps open between requests. A read of a card of an application
 # has up to ROWS_IN_FLIGHT rows going, each one request at a time: kept as many, a row asks over an open connection
@@ -154,14 +159,18 @@ class SourcesModule(BaseModule):
         # One term of what the sources answered for every reader of the module; the setting changes it for all at once.
         self.term = Term()
         for profile in apps:
-            if profile.protocol != "app99":
+            client = APP_PROTOCOLS.get(profile.protocol)
+            if client is None:
                 raise ValueError(f"application {profile.name}: unknown protocol {profile.protocol!r}")
-            player = AppPlayer(App99Client(profile, lambda: self._http),
-                               registry=LineRegistry.load(profile.name, app_lines_dir), term=self.term)
-            self.players.register(player)
-            self.apps.append(player)
+            self.apps.append(AppPlayer(client(profile, lambda: self._http),
+                                       registry=LineRegistry.load(profile.name, app_lines_dir), term=self.term))
+        # One player of the lines of every application: a line is one player whichever application lists it.
+        self.lines = AppLines(self.apps)
+        if self.apps:
+            self.players.register(self.lines)
         # The sites belong to this instance, not to the process: a site is added by registering it (builtin.py).
-        self.sites = SiteRegistry([*(builtin_sites() if sites is None else sites), *(AppSite(app) for app in self.apps)])
+        self.sites = SiteRegistry([*(builtin_sites() if sites is None else sites),
+                                   *(AppSite(app, self.lines) for app in self.apps)])
         self.sites.configure(players=self.players, vk_call=self._vk_call, term=self.term)
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
@@ -432,7 +441,7 @@ class SourcesModule(BaseModule):
         the admitted lines of the applications (`<application>:<code>`, named by their codes)."""
         players = [{"name": each.name, "label": getattr(each, "label", "") or each.name}
                    for each in self.players if not getattr(each, "lines", False)]
-        players += [{"name": line.name, "label": line.label} for app in self.apps for line in app.line_players()]
+        players += [{"name": line_player_name(code), "label": code} for code in self.lines.codes()]
         return {"players": players}
 
     async def on_apps_search(self, env: Envelope) -> dict:
@@ -445,7 +454,7 @@ class SourcesModule(BaseModule):
 
     async def _search(self, app: AppPlayer, query: str, page: int) -> AppResults:
         try:
-            answer = await app.client.search(query, page)
+            answer = await app.client.search_page(query, page)
         except AppError as exc:
             return AppResults(app=app.name, label=app.label, page=page, reason=exc.reason)
         # A card without a number the application could be asked by again is shown all the same, with no address.
@@ -455,10 +464,8 @@ class SourcesModule(BaseModule):
                          area=str(each.get("area") or ""), genres=str(each.get("class") or ""),
                          remarks=str(each.get("remarks") or ""), blurb=str(each.get("blurb") or "").strip(),
                          pic=str(each.get("pic") or ""))
-                 for each in answer.get("data") or [] if isinstance(each, dict)]
-        pages, total = answer.get("page_count"), answer.get("total_count", answer.get("count"))
-        return AppResults(app=app.name, label=app.label, page=page, cards=cards,
-                          pages=int(pages) if str(pages).isdigit() else None, total=int(total) if str(total).isdigit() else None)
+                 for each in answer.cards]
+        return AppResults(app=app.name, label=app.label, page=page, cards=cards, pages=answer.pages, total=answer.total)
 
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}

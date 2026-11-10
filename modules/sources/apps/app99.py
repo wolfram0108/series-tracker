@@ -14,6 +14,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import secrets
 import time
 import zlib
@@ -25,7 +26,7 @@ from cryptography.hazmat.primitives.padding import PKCS7
 
 from core.reasons import reason
 
-from . import AppProfile
+from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream
 
 logger = logging.getLogger("sources")
 
@@ -33,15 +34,10 @@ REQUEST_TIMEOUT_S = 20.0
 DEFAULT_AGENT = "okhttp/3.14.9"
 # The size of a page of the search, as the application asks for it.
 SEARCH_LIMIT = 50
-
-
-class AppError(RuntimeError):
-    """The application refused or could not be asked: a coded reason; `transient` marks causes that may pass."""
-
-    def __init__(self, why: str, transient: bool = False) -> None:
-        super().__init__(why)
-        self.reason = why
-        self.transient = transient
+# A card lists its lines apart by `$$$` and the episodes of a line apart by `#`.
+LIST_SEPARATOR = "$$$"
+ITEM_SEPARATOR = "#"
+_DIRECT = re.compile(r"\.(m3u8|mp4)(?:$|\?)", re.I)
 
 
 def encrypt(plain: bytes, key: bytes, iv: bytes) -> bytes:
@@ -198,7 +194,73 @@ class App99Client:
         answer = await self.call("/app/vodParser", {"id": parser, "url": link}, renew=False)
         address = answer.get("data")
         if not isinstance(address, str) or not address.startswith(("http://", "https://")):
-            # The parser answers with the code of success and its refusal in `msg` (a limit of parses for the day).
+            # The parser answers with the code of success and no address: its refusal is in `msg`, often empty.
             raise AppError(reason("app_no_stream", app=self.profile.label, parser=str(parser),
                                   message=str(answer.get("msg") or "")[:300]))
         return address
+
+    # --- what every protocol gives (apps/__init__.py) -------------------------------------------------------------
+
+    async def _line_player(self, line: str) -> dict:
+        players = (await self.system()).get("player") or {}
+        found = next((each for key, each in players.items() if str(each.get("code") or key) == line), None)
+        return found if isinstance(found, dict) else {}
+
+    async def card(self, card_id: str) -> AppCardData:
+        """The card: its names and year, its lines as `play_from` lists them (codes, apart by `$$$`) with their
+        episodes from `play_url` (`<label>$<token>#...` for each line), each line with its name, type and parsers."""
+        data = await self.detail(card_id)
+        players = {str(each.get("code") or key): each for key, each in ((await self.system()).get("player") or {}).items()
+                   if isinstance(each, dict)}
+        codes = str(data.get("play_from") or "").split(LIST_SEPARATOR)
+        lists = str(data.get("play_url") or "").split(LIST_SEPARATOR)
+        lines = []
+        for code, listed in zip(codes, lists):
+            items = []
+            for place, item in enumerate(listed.split(ITEM_SEPARATOR), start=1):
+                label, _, token = item.partition("$")
+                if token.strip():
+                    items.append(AppItem(place, label.strip(), token.strip()))
+            shown = players.get(code.strip(), {})
+            lines.append(AppLine(code.strip(), str(shown.get("name") or ""), shown.get("type") == 0,
+                                 str(shown.get("parseUrl") or ""), tuple(items)))
+        names = [str(data.get("name") or "").strip(), *(part.strip() for part in str(data.get("sub") or "").split(","))]
+        return AppCardData(list(dict.fromkeys(name for name in names if name)), str(data.get("year") or "").strip(), lines)
+
+    async def resolve(self, line: str, token: str) -> AppStream:
+        """The stream of an episode: the token itself for a line that lists its playlists, else what the parsers the
+        line allows make of it, in the order the application lists its parsers, the first that gives an address."""
+        player = await self._line_player(line)
+        headers = _headers_of(player)
+        if token.startswith(("http://", "https://")) and (player.get("type") == 0 or _DIRECT.search(token)):
+            return AppStream(token, headers)
+        parsers = [each.get("id") for each in (await self.system()).get("parser_api") or [] if isinstance(each, dict)]
+        allowed = [part.strip() for part in str(player.get("parseUrl") or "").split(",") if part.strip()]
+        refusals = []
+        for parser in [each for each in parsers if not allowed or str(each) in allowed]:
+            try:
+                return AppStream(await self.parse(parser, token), headers)
+            except AppError as exc:
+                logger.info("приложение %s, линия %s: парсер %s не дал адреса — %s", self.profile.name, line, parser,
+                            exc.reason)
+                if exc.transient:
+                    raise
+                refusals.append(str(parser))
+        raise AppError(reason("app_no_parser", app=self.profile.label, line=line, tried=", ".join(refusals) or "—"))
+
+    async def search_page(self, query: str, page: int) -> AppPage:
+        answer = await self.search(query, page)
+        pages, total = answer.get("page_count"), answer.get("total_count", answer.get("count"))
+        return AppPage([each for each in answer.get("data") or [] if isinstance(each, dict)],
+                       int(pages) if str(pages).isdigit() else None, int(total) if str(total).isdigit() else None)
+
+
+def _headers_of(player: dict) -> dict[str, str]:
+    """The headers the application's player of a line sends for its stream (its `headers`, a JSON object)."""
+    raw = player.get("headers") or "{}"
+    try:
+        found = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return {}
+    return {str(key): str(value) for key, value in found.items()} if isinstance(found, dict) else {}
+

@@ -19,7 +19,7 @@ from modules.sources.apps import AppProfile, card_address, profiles_of
 from modules.sources.apps.app99 import App99Client, seal, signature, unseal
 from modules.sources.module import SourcesModule
 from modules.sources.apps.lines import LineRegistry
-from modules.sources.players.app_lines import AppPlayer, measure_file_frame
+from modules.sources.players.app_lines import AppLines, AppPlayer, measure_file_frame
 from modules.sources.players.contract import Answer, Kind, Reading, StreamUnavailable
 from modules.sources.players.registry import PlayerRegistry
 from modules.sources.sites import ReadContext
@@ -122,8 +122,8 @@ async def test_a_card_is_a_table_of_its_admitted_lines_each_row_with_the_frame_o
     registry = admitting("ffm3u8", "CO4K", refused={"co_egg": "419: stream — no parser"})
     async with http:
         player = AppPlayer(App99Client(profile(), lambda: http), measure, registry=registry)
-        players = PlayerRegistry([player])
-        site = AppSite(player)
+        players = PlayerRegistry([AppLines([player])])
+        site = AppSite(player, AppLines([player]))
         assert site.match_url("app://banri/219017") and not site.match_url("app://other/219017")
         assert site.canonical_url("app://banri/219017/") == card_address("banri", "219017")
         with caplog.at_level("INFO", logger="sources"):
@@ -133,11 +133,11 @@ async def test_a_card_is_a_table_of_its_admitted_lines_each_row_with_the_frame_o
         # Every row of an admitted line, measured on its own episode; a line is named by its code; a line the registry
         # does not admit is no player, and the log of the read says which and why.
         assert rows == [
-            ("banri:ffm3u8:1", "banri:ffm3u8", "ffm3u8", "第01集", "playable", [720]),
-            ("banri:ffm3u8:2", "banri:ffm3u8", "ffm3u8", "第02集", "playable", [1080]),
-            ("banri:CO4K:1", "banri:CO4K", "CO4K", "1", "playable", [1080]),
-            ("banri:CO4K:2", "banri:CO4K", "CO4K", "2", "not_obtained", []),
-            ("banri:CO4K:3", "banri:CO4K", "CO4K", "《万界独尊》PV", "playable", [2160]),
+            ("banri:ffm3u8:1", "line:ffm3u8", "ffm3u8", "第01集", "playable", [720]),
+            ("banri:ffm3u8:2", "line:ffm3u8", "ffm3u8", "第02集", "playable", [1080]),
+            ("banri:CO4K:1", "line:CO4K", "CO4K", "1", "playable", [1080]),
+            ("banri:CO4K:2", "line:CO4K", "CO4K", "2", "not_obtained", []),
+            ("banri:CO4K:3", "line:CO4K", "CO4K", "《万界独尊》PV", "playable", [2160]),
         ]
         assert [row.site_fields["line_name"] for row in draft.rows] == ["非凡（备用线路）"] * 2 + ["4K"] * 3
         assert any("co_egg (419: stream — no parser)" in record.getMessage() for record in caplog.records)
@@ -149,10 +149,9 @@ async def test_a_card_is_a_table_of_its_admitted_lines_each_row_with_the_frame_o
         assert sorted(fields["url"] for path, fields in model.calls if path == "/app/vodParser") == \
             ["CO4K_pv", "CO4K_tok1", "CO4K_tok2"]
         assert [row.site_fields["stream"] for row in draft.rows] == ["playlist"] * 2 + ["parser"] * 3
-        assert players.video_of("banri:CO4K", draft.rows[2].link) == "CO4K_tok1"
-        assert players.get("banri:CO4K") is player and "banri:CO4K" in players and "other:CO4K" not in players
-        assert [(line.name, line.label) for line in player.line_players()] == [("banri:CO4K", "CO4K"),
-                                                                               ("banri:ffm3u8", "ffm3u8")]
+        assert players.video_of("line:CO4K", draft.rows[2].link) == "CO4K_tok1"
+        assert players.get("line:CO4K").apps["banri"] is player and "line:CO4K" in players and "other:CO4K" not in players
+        assert AppLines([player]).codes() == ["CO4K", "ffm3u8"]
 
         # The next read keeps every frame the last table measured on its row: only the rows without one are asked again.
         parsed = len([1 for path, _fields in model.calls if path == "/app/vodParser"])
@@ -197,7 +196,7 @@ async def test_a_card_of_many_episodes_is_measured_at_the_pace_of_twenty_to_thir
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(1080), registry=admitting("BLU"))
-        site = AppSite(player)
+        site = AppSite(player, AppLines([player]))
         began = time.monotonic()
         draft = await site.read("app://banri/1", ReadContext(http, lambda *_: None))
         rate = len(draft.rows) / (time.monotonic() - began)
@@ -214,8 +213,8 @@ async def test_what_a_parser_gave_serves_the_download_within_the_hour_and_an_add
     async with http:
         player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(1080), clock=lambda: now[0],
                            registry=admitting("CO4K"))
-        players = PlayerRegistry([player])
-        draft = await AppSite(player).read("app://banri/219017", ReadContext(http, lambda *_: None))
+        players = PlayerRegistry([AppLines([player])])
+        draft = await AppSite(player, AppLines([player])).read("app://banri/219017", ReadContext(http, lambda *_: None))
         parses = lambda: [fields["url"] for path, fields in model.calls if path == "/app/vodParser"].count("CO4K_tok1")
         assert parses() == 1 and draft.rows[0].heights == [1080]
         # The download within the hour takes the address the read parsed.
@@ -263,8 +262,8 @@ async def test_a_stream_is_what_its_host_serves_by_its_signature_and_a_row_witho
     async with http:
         player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(720), measure_file=measure_file,
                            registry=admitting("L"))
-        players = PlayerRegistry([player])
-        draft = await AppSite(player).read("app://banri/1", ReadContext(http, lambda *_: None))
+        players = PlayerRegistry([AppLines([player])])
+        draft = await AppSite(player, AppLines([player])).read("app://banri/1", ReadContext(http, lambda *_: None))
         got = {row.text: (row.state.value, row.heights, row.reason or "") for row in draft.rows}
         assert got["png"][:2] == ("playable", [720]) and got["moved"][:2] == ("playable", [720])
         assert got["jpeg"][:2] == ("playable", [1080]) and files == [f"{CDN}jpeg/2"]
@@ -297,7 +296,7 @@ async def test_the_stream_of_an_episode_comes_from_the_parsers_its_line_allows_i
     http, _asked = world(model, {f"{CDN}c/index.m3u8": PLAYLIST})
     async with http:
         player = AppPlayer(App99Client(profile(), lambda: http), registry=admitting("CO4K"))
-        players = PlayerRegistry([player])
+        players = PlayerRegistry([AppLines([player])])
         link = player.link_of("app://banri/219017", "CO4K", "CO4K_tok1")
         got = await player.stream(link, http, None, players.pacer)
         assert got == {"stream_url": f"{CDN}c/index.m3u8", "headers": {"Referer": "https://app.model/"}, "progressive": False,
@@ -375,6 +374,6 @@ async def test_the_name_a_site_gives_its_source_is_kept_with_its_table(tmp_path)
     repo = SourcesRepository(Database(str(migrated(tmp_path / "s.db"))))
     table = ReleaseTable(url="app://banri/219017", site="banri", names=["万界独尊"], title="半日 · 万界独尊 (2021)",
                          read_at="2026-11-10T10:00:00+00:00", complete=True,
-                         rows=[TableRow(key="banri:CO4K:1", player="banri:CO4K", state=RowState.PLAYABLE, text="1")])
+                         rows=[TableRow(key="banri:CO4K:1", player="line:CO4K", state=RowState.PLAYABLE, text="1")])
     await repo.save_table(table)
     assert (await repo.stored("app://banri/219017")).table.title == "半日 · 万界独尊 (2021)"

@@ -31,7 +31,7 @@ from core.http_limits import AnswerTooLarge
 from core.reasons import reason
 
 from ..apps import SCHEME
-from ..apps.app99 import AppError, App99Client
+from ..apps import AppClient, AppError, AppStream
 from ..apps.lines import LineRegistry
 from ..policy import settle
 from ..term import Term
@@ -106,19 +106,21 @@ async def measure_file_frame(address: str, headers: dict[str, str]) -> Answer:
     return Answer(200, reading=Reading(Kind.PLAYABLE, 200, (int(film["height"]),), files=((int(film["height"]), address),)))
 
 
-def line_player_name(app: str, line: str) -> str:
-    return f"{app}:{line}"
+# The player of the lines of the applications: a row of a line is of `line:<code>`, whichever application lists it.
+LINES = "line"
+
+
+def line_player_name(code: str) -> str:
+    return f"{LINES}:{code}"
 
 
 class AppPlayer:
     """The player of one application: it resolves and measures the episodes of its admitted lines."""
 
     series_scope = False
-    # A row is of a line of this player (`<name>:<line>`), not of the player itself.
-    lines = True
     stream_headers: dict[str, str] = {}
 
-    def __init__(self, client: App99Client, measure: Measure | None = None,
+    def __init__(self, client: AppClient, measure: Measure | None = None,
                  measure_file: Callable[[str, dict[str, str]], Awaitable[Answer]] | None = None, *,
                  registry: LineRegistry | None = None, clock: Callable[[], float] = time.monotonic,
                  term: Term | None = None) -> None:
@@ -130,7 +132,7 @@ class AppPlayer:
         self._clock = clock
         self.term = term if term is not None else Term()
         # (line, token) -> (address a parser gave, when): what was parsed serves the asks of the episode within the term.
-        self._parsed: dict[tuple[str, str], tuple[str, float]] = {}
+        self._parsed: dict[tuple[str, str], tuple[AppStream, float]] = {}
 
     # --- the link of a row ------------------------------------------------------------------------------------
 
@@ -158,63 +160,20 @@ class AppPlayer:
         """No page embeds the player: the site of the application makes its links from the cards."""
         return None
 
-    def line(self, code: str) -> "LinePlayer":
-        return LinePlayer(self, code)
-
-    def line_players(self) -> list["LinePlayer"]:
-        """The players of the admitted lines, by their codes."""
-        return [self.line(code) for code in sorted(self.registry.admitted)]
-
-    # --- the stream of an episode ------------------------------------------------------------------------------
-
-    async def _player_of(self, line: str) -> dict:
-        players = (await self.client.system()).get("player") or {}
-        found = next((each for key, each in players.items() if str(each.get("code") or key) == line), None)
-        return found if isinstance(found, dict) else {}
-
-    async def _parsers_of(self, player: dict) -> list:
-        """The parsers a line allows, in the order the application lists them; every one when the line names none."""
-        parsers = [each.get("id") for each in (await self.client.system()).get("parser_api") or [] if isinstance(each, dict)]
-        allowed = [part.strip() for part in str(player.get("parseUrl") or "").split(",") if part.strip()]
-        return [each for each in parsers if not allowed or str(each) in allowed]
-
-    def _kept(self, line: str, item: str) -> str | None:
+    def _kept(self, line: str, item: str) -> AppStream | None:
         found = self._parsed.get((line, item))
         if found is None or self._clock() - found[1] >= self.term.seconds:
             return None
         return found[0]
 
-    async def address(self, line: str, item: str) -> str:
-        """The address of the stream of an episode: the token itself when it is one, the address a parser gave for it
-        within the term, else what the parsers the line allows make of it now, the first that gives an address; each
-        refusal is in the log."""
-        player = await self._player_of(line)
-        if item.startswith(("http://", "https://")) and (player.get("type") == 0 or _DIRECT.search(item)):
-            return item
+    async def address(self, line: str, item: str) -> AppStream:
+        """The stream of an episode: what the application gave for it within the term, else what it gives now."""
         kept = self._kept(line, item)
         if kept is not None:
             return kept
-        refusals = []
-        for parser in await self._parsers_of(player):
-            try:
-                got = await self.client.parse(parser, item)
-                self._parsed[(line, item)] = (got, self._clock())
-                return got
-            except AppError as exc:
-                logger.info("приложение %s, линия %s: парсер %s не дал адреса — %s", self.name, line, parser, exc.reason)
-                if exc.transient:
-                    raise
-                refusals.append(str(parser))
-        raise AppError(reason("app_no_parser", app=self.label, line=line, tried=", ".join(refusals) or "—"))
-
-    async def headers_of(self, line: str) -> dict[str, str]:
-        """The headers the application's player of the line sends for its stream (its `headers`, a JSON object)."""
-        raw = (await self._player_of(line)).get("headers") or "{}"
-        try:
-            found = json.loads(raw) if isinstance(raw, str) else raw
-        except ValueError:
-            return {}
-        return {str(key): str(value) for key, value in found.items()} if isinstance(found, dict) else {}
+        got = await self.client.resolve(line, item)
+        self._parsed[(line, item)] = (got, self._clock())
+        return got
 
     async def fetch(self, ref: PlayerRef, http: httpx.AsyncClient, page_url: str, *, measure: bool = True) -> Answer:
         found = self.parts(ref.url)
@@ -223,20 +182,19 @@ class AppPlayer:
         line, item = found
         was_kept = self._kept(line, item) is not None
         try:
-            address = await self.address(line, item)
-            headers = await self.headers_of(line)
+            got = await self.address(line, item)
         except AppError as exc:
             return Answer(200, reading=Reading(Kind.NO_ANSWER if exc.transient else Kind.NO_FILE, 200, message=exc.reason))
-        answer = await self._stream_answer(http, address, headers, measure)
+        answer = await self._stream_answer(http, got.address, got.headers, measure)
         if was_kept and self.read(answer).kind is not Kind.PLAYABLE:
             # The address kept from an earlier parse is no longer served: the episode is parsed anew, once.
             self._parsed.pop((line, item), None)
             try:
-                address = await self.address(line, item)
+                got = await self.address(line, item)
             except AppError as exc:
                 return Answer(200, reading=Reading(Kind.NO_ANSWER if exc.transient else Kind.NO_FILE, 200,
                                                    message=exc.reason))
-            answer = await self._stream_answer(http, address, headers, measure)
+            answer = await self._stream_answer(http, got.address, got.headers, measure)
         return answer
 
     async def _stream_answer(self, http: httpx.AsyncClient, address: str, headers: dict[str, str],
@@ -270,7 +228,8 @@ class AppPlayer:
         if picked is None or found is None:
             raise StreamUnavailable(reason("player_failed", player=self.label, cause=verdict.reading.message
                                            or verdict.reading.kind.value), verdict.exhausted)
-        headers = await self.headers_of(found[0])
+        kept = self._kept(*found)
+        headers = kept.headers if kept is not None else {}
         served = await served_as(http, picked[1], headers)
         if isinstance(served, Answer):
             cause = self.read(served)
@@ -281,27 +240,78 @@ class AppPlayer:
 
 
 class LinePlayer:
-    """An admitted line of the application as a player of the table, named by its code: its rows are its own, asked of the
-    application's player."""
+    """A line as a player of the table, one for its code in every application (`line:<code>`, named by the code): its
+    rows are asked of the application whose card the link of the row names."""
 
     series_scope = False
 
-    def __init__(self, app: AppPlayer, code: str) -> None:
-        self.app, self.code = app, code
-        self.name, self.label = line_player_name(app.name, code), code
-        self.stream_headers = app.stream_headers
+    def __init__(self, lines: "AppLines", code: str) -> None:
+        self.lines, self.code = lines, code
+        self.name, self.label = line_player_name(code), code
+        self.stream_headers: dict[str, str] = {}
 
     def find(self, text: str, page_url: str) -> PlayerRef | None:
         return None
 
     def video_of(self, url: str) -> str:
-        return self.app.video_of(url)
+        return self.lines.video_of(url)
 
     async def fetch(self, ref: PlayerRef, http: httpx.AsyncClient, page_url: str) -> Answer:
-        return await self.app.fetch(ref, http, page_url)
+        return await self.lines.fetch(ref, http, page_url)
 
     def read(self, answer: Answer) -> Reading:
-        return self.app.read(answer)
+        return self.lines.read(answer)
+
+
+class AppLines:
+    """The player of the lines of every application (`line`): a row of `line:<code>` is the row of the application its
+    link names (`app://<application>/<card>#line=…&item=…`), asked of that application."""
+
+    name = LINES
+    label = "Линии приложений"
+    series_scope = False
+    lines = True
+    stream_headers: dict[str, str] = {}
+
+    def __init__(self, apps: "list[AppPlayer]") -> None:
+        self.apps = {app.name: app for app in apps}
+
+    def app_of(self, url: str) -> AppPlayer | None:
+        split = urlsplit(url)
+        return self.apps.get(split.hostname or "") if split.scheme == SCHEME else None
+
+    def owns(self, url: str) -> bool:
+        app = self.app_of(url)
+        return app is not None and app.owns(url)
+
+    def video_of(self, url: str) -> str:
+        app = self.app_of(url)
+        return app.video_of(url) if app is not None else ""
+
+    def find(self, text: str, page_url: str) -> PlayerRef | None:
+        return None
+
+    def line(self, code: str) -> LinePlayer:
+        return LinePlayer(self, code)
+
+    def codes(self) -> list[str]:
+        """The codes of the lines some application admits, each once."""
+        return sorted({code for app in self.apps.values() for code in app.registry.admitted})
+
+    async def fetch(self, ref: PlayerRef, http: httpx.AsyncClient, page_url: str) -> Answer:
+        app = self.app_of(ref.url)
+        if app is None:
+            return Answer(200, reading=Reading(Kind.NOT_PLAYER, 200, message="not a link of an application"))
+        return await app.fetch(ref, http, page_url)
+
+    def read(self, answer: Answer) -> Reading:
+        return next(iter(self.apps.values())).read(answer) if self.apps else Reading(Kind.NOT_PLAYER)
+
+    async def stream(self, url: str, http: httpx.AsyncClient, max_height: int | None, pacer) -> dict:
+        app = self.app_of(url)
+        if app is None:
+            raise StreamUnavailable(reason("player_failed", player=self.label, cause="not a link of an application"), False)
+        return await app.stream(url, http, max_height, pacer)
 
 
 class _Located:

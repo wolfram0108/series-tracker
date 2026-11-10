@@ -25,10 +25,10 @@ from app_lines_inventory import environment  # noqa: E402
 from core.http_limits import bounded_client  # noqa: E402
 from modules.downloads.ytdlp import download  # noqa: E402
 from modules.sources.apps import card_address, profiles_of  # noqa: E402
-from modules.sources.apps.app99 import App99Client  # noqa: E402
+from modules.sources.module import APP_PROTOCOLS  # noqa: E402
 from modules.sources.players.app_lines import AppPlayer  # noqa: E402
 from modules.sources.players.registry import PlayerRegistry  # noqa: E402
-from modules.sources.sites.apps.site import lines_of  # noqa: E402
+from modules.sources.players.app_lines import AppLines  # noqa: E402
 
 # The seconds of the start not counted: the worker starts, the playlist is read, the first connections open.
 RAMP_S = 3.0
@@ -79,10 +79,11 @@ async def main(app: str, card: str, code: str, which: str, threads: list[int], s
     raw_path = os.path.join(ROOT, "data", "raw", f"download_speed__{stamp}__{app}-{card}.jsonl")
     os.makedirs(os.path.dirname(raw_path), exist_ok=True)
     async with bounded_client(timeout=20.0, follow_redirects=True) as http:
-        player = AppPlayer(App99Client(profile, lambda: http))
-        pacer = PlayerRegistry([player]).pacer
-        items = dict(lines_of(await player.client.detail(card)))[code]
-        place, label, token = {"first": items[0], "central": items[len(items) // 2], "last": items[-1]}[which]
+        player = AppPlayer(APP_PROTOCOLS[profile.protocol](profile, lambda: http))
+        pacer = PlayerRegistry([AppLines([player])]).pacer
+        items = next(line.items for line in (await player.client.card(card)).lines if line.code == code)
+        picked = {"first": items[0], "central": items[len(items) // 2], "last": items[-1]}[which]
+        place, label, token = picked.place, picked.label, picked.token
         with open(raw_path, "a", encoding="utf-8") as raw:
             for each in threads:
                 got = await measure(player, http, pacer, card_address(app, card), code, token, each, seconds,

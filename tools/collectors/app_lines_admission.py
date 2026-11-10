@@ -25,11 +25,11 @@ from core.http_limits import bounded_client  # noqa: E402
 from modules.downloads.module import FRAGMENTS_AT_ONCE  # noqa: E402
 from modules.downloads.ytdlp import download  # noqa: E402
 from modules.sources.apps import card_address, profiles_of  # noqa: E402
-from modules.sources.apps.app99 import App99Client  # noqa: E402
+from modules.sources.module import APP_PROTOCOLS  # noqa: E402
 from modules.sources.players.app_lines import AppPlayer  # noqa: E402
 from modules.sources.players.contract import StreamUnavailable  # noqa: E402
 from modules.sources.players.registry import PlayerRegistry  # noqa: E402
-from modules.sources.sites.apps.site import lines_of  # noqa: E402
+from modules.sources.players.app_lines import AppLines  # noqa: E402
 
 sys.path.insert(0, os.path.join(ROOT, "tools", "collectors"))
 from app_lines_inventory import environment, ffprobe  # noqa: E402
@@ -46,9 +46,9 @@ async def main(app: str, card: str, only: list[str]) -> None:
     os.makedirs(os.path.dirname(raw_path), exist_ok=True)
     os.makedirs(work, exist_ok=True)
     async with bounded_client(timeout=20.0, follow_redirects=True) as http:
-        player = AppPlayer(App99Client(profile, lambda: http))
-        pacer = PlayerRegistry([player]).pacer
-        detail = await player.client.detail(card)
+        player = AppPlayer(APP_PROTOCOLS[profile.protocol](profile, lambda: http))
+        pacer = PlayerRegistry([AppLines([player])]).pacer
+        found_card = await player.client.card(card)
         url = card_address(app, card)
         failed: set[str] = set()
         gate = asyncio.Semaphore(AT_ONCE)
@@ -101,12 +101,13 @@ async def main(app: str, card: str, only: list[str]) -> None:
         began = time.monotonic()
         with open(raw_path, "a", encoding="utf-8") as raw:
             lines: dict[str, list[asyncio.Task]] = {}
-            for code, items in lines_of(detail):
+            for line in found_card.lines:
+                code, items = line.code, line.items
                 if only and code not in only or not items:
                     continue
-                for which, (place, label, token) in (("first", items[0]), ("central", items[len(items) // 2]),
-                                                     ("last", items[-1])):
-                    lines.setdefault(code, []).append(asyncio.create_task(admit(code, which, place, label, token, raw)))
+                for which, item in (("first", items[0]), ("central", items[len(items) // 2]), ("last", items[-1])):
+                    lines.setdefault(code, []).append(asyncio.create_task(
+                        admit(code, which, item.place, item.label, item.token, raw)))
             jobs = [task for tasks in lines.values() for task in tasks]
 
             async def watch(code: str) -> None:

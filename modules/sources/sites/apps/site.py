@@ -29,8 +29,8 @@ from core.reasons import reason
 from ...players.contract import PlayerRef
 from ...policy import Pacer
 from ...apps import SCHEME, card_address
-from ...apps.app99 import AppError
-from ...players.app_lines import AppPlayer
+from ...apps import AppError
+from ...players.app_lines import AppLines, AppPlayer
 from .. import PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError, TableDraft
 from ..recent import last_of_each
 
@@ -41,23 +41,6 @@ ROWS_PER_SECOND = 25
 # A row is asked, read and measured in about three seconds: four seconds of rows at that pace in flight at most, so that a
 # host that slows down holds back the asks instead of piling them up.
 ROWS_IN_FLIGHT = ROWS_PER_SECOND * 4
-LIST_SEPARATOR = "$$$"
-ITEM_SEPARATOR = "#"
-
-
-def lines_of(card: dict) -> list[tuple[str, list[tuple[int, str, str]]]]:
-    """(line, [(place, label, token)]) of a card, in the order the application gives; an item without a token is none."""
-    codes = str(card.get("play_from") or "").split(LIST_SEPARATOR)
-    lists = str(card.get("play_url") or "").split(LIST_SEPARATOR)
-    found = []
-    for code, listed in zip(codes, lists):
-        items = []
-        for place, item in enumerate(listed.split(ITEM_SEPARATOR), start=1):
-            label, _, token = item.partition("$")
-            if token.strip():
-                items.append((place, label.strip(), token.strip()))
-        found.append((code.strip(), items))
-    return found
 
 
 class AppSite:
@@ -65,8 +48,8 @@ class AppSite:
 
     source_type = "web_video"
 
-    def __init__(self, player: AppPlayer) -> None:
-        self.player = player
+    def __init__(self, player: AppPlayer, lines: AppLines) -> None:
+        self.player, self.lines = player, lines
         self.client = player.client
         self.name, self.label = player.name, player.label
         self.domains = (player.name,)
@@ -96,26 +79,21 @@ class AppSite:
         card_url = self.canonical_url(url)
         ctx.progress(PHASE_RELEASE, 0, 1)
         try:
-            data = await self.client.detail(self._card(card_url))
-            system = await self.client.system()
+            card = await self.client.card(self._card(card_url))
         except AppError as exc:
             raise SiteError(exc.reason) from exc
         ctx.progress(PHASE_RELEASE, 1, 1)
-        players = {str(each.get("code") or key): each for key, each in (system.get("player") or {}).items()
-                   if isinstance(each, dict)}
         lines, passed = [], []
-        for code, items in lines_of(data):
-            if not self.player.registry.admits(code):
-                passed.append(f"{code} ({self.player.registry.why_not(code)})")
+        for each in card.lines:
+            if not self.player.registry.admits(each.code):
+                passed.append(f"{each.code} ({self.player.registry.why_not(each.code)})")
                 continue
-            shown = players.get(code, {})
-            line = self.player.line(code)
-            fields = {"line": code, "line_name": str(shown.get("name") or ""), "line_type": shown.get("type"),
-                      "parsers": str(shown.get("parseUrl") or ""),
-                      "stream": "playlist" if shown.get("type") == 0 else "parser"}
-            listed = last_of_each(items, lambda _item: code, ctx.recent)
+            fields = {"app": self.name, "line": each.code, "line_name": each.name,
+                      "parsers": each.parsers, "stream": "playlist" if each.listed else "parser"}
+            listed = last_of_each([(item.place, item.label, item.token) for item in each.items],
+                                  lambda _item: each.code, ctx.recent)
             if listed:
-                lines.append((line, fields, listed))
+                lines.append((self.lines.line(each.code), fields, listed))
         if passed:
             logger.info("приложение %s, карточка %s: линии не признаны и не читаются — %s", self.name, self._card(card_url),
                         "; ".join(passed))
@@ -126,20 +104,21 @@ class AppSite:
                 link = self.player.link_of(card_url, line.code, token)
                 own = {**fields, "place": place}
                 heights, frame = frames[link]
+                # The key is of the application and its line: one source lists an episode of a line once.
+                key = f"{self.name}:{line.code}:{place}"
                 if heights:
-                    rows.append(TableRow(key=f"{line.name}:{place}", player=line.name, player_label=line.label,
-                                         text=label, state=RowState.PLAYABLE, heights=heights, link=link,
+                    rows.append(TableRow(key=key, player=line.name, player_label=line.label, text=label,
+                                         state=RowState.PLAYABLE, heights=heights, link=link,
                                          site_fields={**own, **frame}))
                     continue
-                rows.append(TableRow(key=f"{line.name}:{place}", player=line.name, player_label=line.label, text=label,
+                rows.append(TableRow(key=key, player=line.name, player_label=line.label, text=label,
                                      state=RowState.NOT_OBTAINED, link=link, site_fields={**own, **frame},
                                      reason=frame["frame_failed"]))
         if not rows:
             raise SiteError(reason("no_players_empty", site=self.player.label))
-        names = [str(data.get("name") or "").strip(), *(part.strip() for part in str(data.get("sub") or "").split(","))]
-        year = str(data.get("year") or "").strip()
-        title = " · ".join(part for part in (self.label, names[0] + (f" ({year})" if year and year != "0" else "")) if part)
-        return TableDraft(names=list(dict.fromkeys(name for name in names if name)), title=title, rows=rows)
+        title = " · ".join(part for part in (self.label, card.names[0] + (f" ({card.year})" if card.year else "")
+                                             if card.names else "") if part)
+        return TableDraft(names=card.names, title=title, rows=rows)
 
     async def _frames(self, card_url: str, lines, ctx: ReadContext) -> dict[str, tuple[list[int], dict]]:
         """The frame of each row measured on its own video, by its link ([height] or [] with why): the last table's of
