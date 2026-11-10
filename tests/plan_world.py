@@ -75,6 +75,7 @@ class World(SeriesSync):
     namer: object = None
     commands: frozenset = frozenset()
     passing: set = field(default_factory=set)
+    skipped: set = field(default_factory=set)
     # The downloads made in the sync under way, by the row: a row is downloaded once in a sync (Э-7).
     fetched: Counter = field(default_factory=Counter)
 

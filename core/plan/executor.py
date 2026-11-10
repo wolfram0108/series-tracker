@@ -93,8 +93,8 @@ def problems_of(made: Plan, passing: set[str], reasons: dict[str, str]) -> tuple
 
 
 def failures(made: Plan, results: dict[str, Made], failed: set[str], passing: set[str]) -> list[tuple]:
-    """The attempts that failed in a run, as the planner reads them; a step that failed because a step before it did, or
-    for this sync only, is no attempt of its own."""
+    """The attempts that failed in a run, as the planner reads them, but those named in `passing`; a step that failed
+    because a step before it did is no attempt of its own."""
     found = []
     for op in made.ops:
         if op.id not in failed or op.id in passing or any(need in failed for need in op.needs):
@@ -181,6 +181,11 @@ class SeriesSync:
         self.commands: frozenset = frozenset()
         self.passing: set[str] = set()
         self.reasons: dict[str, str] = {}  # why a step failed for the moment, by its id
+        # Downloads that failed for this sync only (a network error, a player that does not answer): passed over in the
+        # plans of this sync like the recorded ones (3.7: a row not downloaded — the next source), never written, tried
+        # again by the next sync. An alignment or a cut the service crashed on or never answered is no such failure:
+        # its episode waits for the service unchanged.
+        self.skipped: set[tuple] = set()
 
     # --- the steps: the subclass's ------------------------------------------------------------------------------
 
@@ -217,7 +222,7 @@ class SeriesSync:
 
     def inputs(self, online: tuple[OnlineRow, ...], choices: Choices) -> Inputs:
         return Inputs(online, tuple(sorted(self.containers.values(), key=lambda each: each.name)),
-                      replace(choices, delete=self.commands), frozenset(self.failed))
+                      replace(choices, delete=self.commands), frozenset(self.failed | self.skipped))
 
     async def plan_of(self, inputs: Inputs) -> Plan:
         first = plan(inputs, self.namer)
@@ -227,9 +232,11 @@ class SeriesSync:
     async def sync(self, online: tuple[OnlineRow, ...], choices: Choices) -> Synced:
         # A command is of a file: a file that is gone takes its command with it.
         self.commands = frozenset(each for each in self.commands if each[1] in self.containers)
+        self.skipped = set()  # what failed for the moment in the last sync is tried again
         inputs = self.inputs(online, choices)
         before = dict(self.containers)
         replanned: list[tuple] = []
+        problems: list[tuple] = []
         done: dict[str, tuple[object, Made]] = {}
         round_ = 0
         while True:
@@ -237,13 +244,18 @@ class SeriesSync:
             round_ += 1
             await self.trace("plan", {"round": round_, "inputs": inputs, "plan": made})
             results, failed = await self.run(made, done)
+            problems += [each for each in problems_of(made, self.passing, self.reasons) if each not in problems]
             subjects = {op.id: op.subject for op in made.ops}
             done = {key: (subjects[key], value) for key, value in results.items()}
             new = [key for key in failures(made, results, failed, self.passing) if key not in self.failed]
-            if not new:
+            moment = [key for key in failures(made, results, failed, set()) if key[0] == "download"
+                      and key not in new and key not in self.failed and key not in self.skipped]
+            if not new and not moment:
                 break
             self.failed |= set(new)
+            self.skipped |= set(moment)
             replanned += new
+            await self.trace("replan", {"recorded": new, "for_this_sync": moment})
             inputs = self.inputs(online, choices)
         applied = []
         for group in made.groups:
@@ -258,7 +270,7 @@ class SeriesSync:
             applied.append(group.slots)
         await self.commit(before)
         return Synced(inputs, tuple(sorted(before.values(), key=lambda each: each.name)), made, tuple(failed),
-                      tuple(applied), tuple(replanned), problems_of(made, self.passing, self.reasons))
+                      tuple(applied), tuple(replanned), tuple(problems))
 
     async def run(self, made: Plan, done: dict[str, tuple[object, Made]] | None = None) -> tuple[dict[str, Made], set[str]]:
         """The graph: a step starts on the signal that every step before it ended, so independent work runs at once.

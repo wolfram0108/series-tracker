@@ -355,6 +355,26 @@ def test_a_cut_out_of_a_compilation_survives_a_new_group_of_the_compilation():
     assert not any(op.startswith(("cut:", "picture:")) for op in (each.id for each in step.plan.ops))
 
 
+def test_a_download_that_failed_for_the_moment_holds_nothing_back_and_comes_next_time():
+    """3.7: a row not downloaded blocks nothing. A new voice-over whose download fails for this sync only (the player does
+    not answer) is passed over: the episode is built without it — the deleted track goes all the same — the window is told
+    the failure, nothing is recorded, and the next sync downloads it."""
+    world = World()
+    episode_with_dubs(world, 1, 1)
+    world.drop(2, "g1e1")
+    world.delete("track", container_of(world, 1).name, RowId(2, "g1e1", "g1e1"))
+    world.put(3, "g2e1", 1, group="G2", player="cvh")
+    world.transient = {RowId(3, "g2e1", "g2e1")}
+    step = world.sync("новая озвучка не скачалась на этот раз")
+    world.check(step)
+    assert step.applied and container_of(world, 1).tracks == () and len(world.containers) == 1
+    assert not world.failed and ("download", RowId(3, "g2e1", "g2e1")) in step.failed_rows
+    world.transient = set()
+    step = world.sync("следующая синхронизация")
+    world.check(step)
+    assert [track.group for track in container_of(world, 1).tracks] == ["G2"]
+
+
 def test_delete_of_a_track_takes_it_away_and_an_online_one_comes_back():
     """Н-3: «Удалить» does not switch off: the row is online and comes back by download."""
     world = World()
