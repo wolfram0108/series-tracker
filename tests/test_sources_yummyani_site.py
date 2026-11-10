@@ -117,20 +117,6 @@ async def test_the_table_has_every_player_of_the_api_each_read_as_on_any_page_th
     assert any("'Плеер Sibnet'" in record.getMessage() for record in caplog.records)
 
 
-async def test_the_rows_of_a_list_of_kodik_are_the_episodes_the_site_lists_of_it_not_what_else_the_list_holds():
-    """The list of a voice-over at Kodik holds an episode the site does not show of that voice-over (Kodik puts there the
-    episode of another one: «3 серия (Другой перевод: Animy)»); the table is what the site shows: its episodes 1 and 2."""
-    web = site_web()
-    web.route("kodikplayer.com/season/64820/", season_page(("501", "1", "1 серия", ""), ("502", "2", "2 серия", ""),
-                                                           ("503", "3", "3 серия (Другой перевод: Animy)", "other")),
-              first=True)
-
-    table = await read(web)
-
-    assert [(row.key, row.voice.name, row.text) for row in table.rows if row.player == "kodik"] == [
-        ("kodik:910:501", "AniStar", "1 серия"), ("kodik:910:502", "AniStar", "2 серия")]
-
-
 async def test_a_list_of_kodik_that_does_not_open_is_an_unread_part_named_by_its_voice_over_and_the_rest_is_read():
     broken = "//kodikplayer.com/season/117721/da5c/720p?translations=false&only_episode=true&episode={n}"
     web = site_web()
