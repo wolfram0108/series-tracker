@@ -701,19 +701,25 @@ async def test_a_record_the_daemon_drops_is_announced_once_for_each_job():
 
 
 @pytest.mark.asyncio
-async def test_a_plot_is_fetched_by_a_plain_png_name_and_by_nothing_else():
+async def test_a_plot_is_fetched_by_the_name_of_a_png_file_of_its_job_and_by_nothing_else():
+    """A plot is named after the file of its voice-over, which names it for people (spaces, Cyrillic, a dash); a name that
+    leaves the folder of the job or is no picture is not asked."""
     client = FakeClient([("conform.snapshot", {"items": []})])
     client.plots[("j1", "a__track.png")] = b"\x89PNG picture"
+    human = "JoJo s06e08 — озвучка AniLiberty__track.png"
+    client.plots[("j1", human)] = b"\x89PNG human"
     _, probe, runner = await started(client)
     try:
         await until(probe, lambda status: status["daemon"]["up"])
         got = await probe.request("conform.plot", {"job_id": "j1", "name": "a__track.png"}, timeout=5)
         assert got["found"] is True and base64.b64decode(got["data"]) == b"\x89PNG picture"
-        for name in ("../secret.png", "a__track.html", "a/b.png", "x.png.txt", ""):
+        got = await probe.request("conform.plot", {"job_id": "j1", "name": human}, timeout=5)
+        assert got["found"] is True and base64.b64decode(got["data"]) == b"\x89PNG human"
+        for name in ("../secret.png", "a__track.html", "a/b.png", "a\\b.png", "x.png.txt", "a\nb.png", ""):
             assert await probe.request("conform.plot", {"job_id": "j1", "name": name}, timeout=5) == {"found": False}
         assert await probe.request("conform.plot", {"job_id": "../j1", "name": "a__track.png"}, timeout=5) == {"found": False}
         assert await probe.request("conform.plot", {"job_id": "j1", "name": "other.png"}, timeout=5) == {"found": False}
-        assert client.asked == [("j1", "a__track.png"), ("j1", "other.png")]  # only valid names reach the daemon
+        assert client.asked == [("j1", "a__track.png"), ("j1", human), ("j1", "other.png")]  # only valid names reach the daemon
         client.refuse = httpx.ConnectError("no route")
         with pytest.raises(BusRequestError):
             await probe.request("conform.plot", {"job_id": "j1", "name": "a__track.png"}, timeout=5)
