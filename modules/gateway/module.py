@@ -181,6 +181,7 @@ SSE_MAP: dict[str, Outgoing] = {
     "composition.failed": Outgoing("composition_failed"),
     "scan.series.progress": Outgoing("series_scan_progress"),
     "conform.queue.changed": Outgoing("conform_queue_update", latest=_whole),
+    "planner.pack.changed": Outgoing("pack_queue_update", _bare_tasks, latest=_whole),
     "planner.series.changed": Outgoing("plan_update"),
     "voices.settings.changed": Outgoing("voice_settings_update"),
     "sources.settings.changed": Outgoing("sources_settings_update"),

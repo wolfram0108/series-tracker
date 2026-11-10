@@ -51,11 +51,15 @@ Events out:
   series.status.contribution {source: planner, series_id, flags: {downloading, aligning, packing}} — what the sync of the
       series is at (the card of the series), told when it changes; all false when the sync ends.
   work.series.state (owner `planner`).
+  planner.pack.changed {tasks: [{id, series_id, series_name, season, episode, part, name, status, tracks}]} — the picture
+      of the packing (SSE pack_queue_update, and again when an interface connects, gateway.sse.clients): every container
+      a sync builds — queued, building, packed, waiting (a step of it did not succeed), failed. What is packed goes with
+      the end of the sync; waiting and failed stay until the next sync of the series.
   planner.sync.trace {series_id, run, kind, download, data} — what a sync does, as it happens, for the dump of the run
       (modules/runlog): `plan` — the inputs whole (the online rows, the asset, the choices, the commands, the failures)
       and the plan made of them, every round; `step` / `done` — a step of the graph begins / ends with its outcome
       (made, failed, passing with its reason, left behind a failed step); `apply` — a group applied or left, and why.
-Events in: downloads.fetch.finished, conform.job.finished, conform.job.removed, system.started (syncs under way are taken up
+Events in: gateway.sse.clients, downloads.fetch.finished, conform.job.finished, conform.job.removed, system.started (syncs under way are taken up
   again, a journal a stop cut short is carried out), series.deleted, composition.changed, voices.settings.changed and
   series.updated with the episodes switched off (the plan is counted again from the tables and the window told: nothing on
   disk changes between syncs).
@@ -159,7 +163,13 @@ class BusSync(SeriesSync):
         if self.download and not self.told:
             self.told = True
             await self.m._publish_view(self.series["id"], self, made, inputs)
+        if self.download:
+            self.m.pack_planned(self.series, made)
         return made
+
+    async def left(self, made, group, missing) -> None:
+        for slot in group.built:
+            self.m.pack_set(self.series, made.goal(slot), "waiting")
 
     async def trace(self, kind: str, data: dict) -> None:
         # The tables of a plan of a big series are large: they are made plain off the loop.
@@ -460,10 +470,19 @@ class BusSync(SeriesSync):
             self.pending += await self.files.build(made, group, results)
             return
         self._flag("packing", 1)
+        goals = [made.goal(slot) for slot in group.built]
+        for goal in goals:
+            self.m.pack_set(self.series, goal, "building")
         try:
             self.pending += await self.files.build(made, group, results)
+        except BaseException:
+            for goal in goals:
+                self.m.pack_set(self.series, goal, "failed")
+            raise
         finally:
             self._flag("packing", -1)
+        for goal in goals:
+            self.m.pack_set(self.series, goal, "packed")
 
     async def commit(self, before) -> None:
         self.committing = True
@@ -492,6 +511,8 @@ class PlannerModule(BaseModule):
         self._loaded: dict[int, tuple] = {}  # the failures and commands a running sync started from
         self._forgot: set[int] = set()  # series whose failures the user reset while their sync ran
         self._seq = 0
+        # The picture of the packing (pack_queue_update): the containers the syncs build, by series and episode.
+        self._pack: dict[str, dict] = {}
         super().__init__(bus)
         # The flags of the status of each series: what its sync is at, and what it stands at (contribute, _stand).
         self._activity: dict[int, dict[str, bool]] = {}
@@ -517,6 +538,7 @@ class PlannerModule(BaseModule):
         self.handle("composition.changed", self.on_layout_changed)
         self.handle("series.updated", self.on_series_updated)
         self.handle("voices.settings.changed", self.on_voice_settings_changed)
+        self.handle("gateway.sse.clients", self.on_sse_clients)
 
     # --- the sync -----------------------------------------------------------------------------------------------
 
@@ -583,6 +605,7 @@ class PlannerModule(BaseModule):
         except Exception:  # noqa: BLE001 - the run ends either way: the error is in the log, the sync can be asked again
             self.log.exception("сериал %d: синхронизация плана прервана", series_id)
         await self.repo.end_run(series_id)
+        self.pack_drop(series_id, ("queued", "building", "packed"))
         self._runs.pop(series_id, None)
         self._syncs.pop(series_id, None)
         self.contribute(series_id, {"downloading": False, "aligning": False, "packing": False})
@@ -649,6 +672,43 @@ class PlannerModule(BaseModule):
                              sources=sources, voice_order=order, off_episodes=off, titles=layout.voice_titles,
                              languages=voices.get("voice_languages") or {})
         return online, choices
+
+    # --- the picture of the packing ------------------------------------------------------------------------------
+
+    def pack_planned(self, series: dict, made) -> None:
+        """A plan of a sync: every container it builds is queued; what an earlier sync of the series left goes."""
+        self.pack_drop(series["id"], None, publish=False)
+        for group in made.groups:
+            for slot in group.built:
+                self.pack_set(series, made.goal(slot), "queued", publish=False)
+        self._pack_publish()
+
+    def pack_set(self, series: dict, goal, status: str, *, publish: bool = True) -> None:
+        slot = goal.slot
+        key = f"{series['id']}:" + ":".join(map(str, slot))
+        self._pack[key] = {"id": key, "series_id": series["id"], "series_name": series.get("name") or "",
+                           "season": slot[0], "episode": slot[1] if len(slot) > 1 else None,
+                           "part": slot[2] if len(slot) > 2 else None, "name": goal.name, "status": status,
+                           "tracks": [way.voice for way in goal.tracks]}
+        if publish:
+            self._pack_publish()
+
+    def pack_drop(self, series_id: int, statuses: tuple[str, ...] | None, *, publish: bool = True) -> None:
+        for key in [key for key, task in self._pack.items()
+                    if task["series_id"] == series_id and (statuses is None or task["status"] in statuses)]:
+            del self._pack[key]
+        if publish:
+            self._pack_publish()
+
+    def _pack_publish(self) -> None:
+        tasks = sorted(self._pack.values(), key=lambda task: (task["series_id"], task["season"],
+                                                              task["episode"] or 0, task["part"] or 0))
+        self.publish_event("planner.pack.changed", {"tasks": tasks})
+
+    async def on_sse_clients(self, env: Envelope) -> None:
+        """An interface connected: it gets the packing as it is, with no question of its own."""
+        if (env.payload or {}).get("count"):
+            self._pack_publish()
 
     # --- the journal ---------------------------------------------------------------------------------------------
 

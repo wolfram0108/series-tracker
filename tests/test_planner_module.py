@@ -311,6 +311,28 @@ async def test_delete_of_an_offline_track_builds_the_file_without_it_sends_no_al
     assert [each["data"]["applied"] for each in traces if each["kind"] == "apply"] == [True]
 
 
+async def test_the_packing_is_told_container_by_container_and_what_waits_stays_in_the_picture(world):
+    """The queue of the packing (pack_queue_update): every container a sync builds — queued, building, packed; what is
+    packed goes with the end of the sync. A container whose step did not succeed is shown waiting until the next sync."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    told = planner.bus.subscribe("planner.pack.changed")
+    await sync(world)
+    pictures = []
+    while not told.queue.empty():
+        pictures.append((await told.queue.get()).payload["tasks"])
+    seen = [task["status"] for picture in pictures for task in picture if (task["season"], task["episode"]) == (1, 1)]
+    assert seen[:1] == ["queued"] and "building" in seen and seen[-1] == "packed" and pictures[-1] == []
+    assert next(task for picture in pictures for task in picture)["tracks"] == ["G1"]
+    episode(neighbours, 2, 1)
+    neighbours.daemon.answers["Сериал s01e02 G1"] = "crash"
+    await sync(world)
+    last = None
+    while not told.queue.empty():
+        last = (await told.queue.get()).payload["tasks"]
+    assert [(task["episode"], task["status"]) for task in last] == [(2, "waiting")]
+
+
 async def test_a_cut_out_of_a_compilation_by_the_service(world):
     neighbours, _, _ = world
     neighbours.put(1, "single2", 2, group=REF, player="cvh")

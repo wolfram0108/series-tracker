@@ -210,6 +210,9 @@ class SeriesSync:
     async def commit(self, before: dict[str, Container]) -> None:
         """The end of the sync: the journal of the files, the table written."""
 
+    async def left(self, made: Plan, group: Group, missing: list[str]) -> None:
+        """A group not applied: a step of it did not succeed (`missing`); its files stay as they are."""
+
     async def namer_for(self, made: Plan) -> Callable | None:
         """The rule of names for the goals of a plan (the service asks it of the rules); None: the planner's own."""
         return self.namer
@@ -260,8 +263,9 @@ class SeriesSync:
         applied = []
         for group in made.groups:
             if any(op not in results for op in group.ops):
-                await self.trace("apply", {"slots": group.slots, "applied": False,
-                                           "missing": sorted(op for op in group.ops if op not in results)})
+                missing = sorted(op for op in group.ops if op not in results)
+                await self.trace("apply", {"slots": group.slots, "applied": False, "missing": missing})
+                await self.left(made, group, missing)
                 continue
             await self.trace("apply", {"slots": group.slots, "applied": True, "group": group})
             await self.stage(made, group, results)
