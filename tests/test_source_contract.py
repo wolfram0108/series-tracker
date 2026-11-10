@@ -1,9 +1,10 @@
 """The contract of a source (contracts/source_contract.md), kept by the whole application on its stand
 (tests/app_stand.py): a table of every kind of source the stand models is read the way the windows read it, and what its
-rows give the consumers is checked — a row a player confirmed has the frame of its own video (the first criterion of the
-order of variants), never the frame of another row,
-and the player of every row, as every player of the registry, has its place and its words in the order of sources."""
+rows give the consumers is checked: every row has the frame of its own episode (the first criterion of the order of
+variants; a row without one cannot reach the constructor, and a source that leaves one is not fit), never the frame of
+another row; and the player of every row, as every player of the registry, has its place and its words in the order of sources."""
 import asyncio
+import re
 
 import pytest
 
@@ -40,32 +41,37 @@ async def tables_of(stand: AppStand, urls: list[str]) -> list[dict]:
     return tables
 
 
-async def test_every_row_of_every_kind_of_source_has_a_frame_and_a_player_the_order_of_sources_places(stand):
+async def test_every_row_of_every_kind_of_source_has_the_frame_of_its_own_episode_and_a_player_the_order_places(stand):
+    # Every kind of source the stand models, each with episodes in different frames: a frame carried from one row to
+    # another shows as a row whose frame is not the one of its own episode.
     stand.site.release("ref", "AniStar")
     stand.site.episode("ref", 1, height=720)
+    stand.site.episode("ref", 2, height=480)
     stand.site.title(4794)
     await asyncio.to_thread(stand.site.hls_episode, 4794, 1, height=1080)
-    # Episodes of one line in different frames: a frame is of the row whose video it was measured on, of no other.
+    await asyncio.to_thread(stand.site.hls_episode, 4794, 2, height=720)
     await asyncio.to_thread(stand.site.app_card, 219017, "万界独尊", {1: 1080, 2: 2160})
-    urls = [stand.site.releases["ref"].url, stand.site.titles[4794].url, "app://banri/219017"]
+    await asyncio.to_thread(stand.site.app_card, 219018, "师兄啊师兄", {1: 720, 2: 1080}, files=True)
+    truth = {stand.site.releases["ref"].url: {1: 720, 2: 480}, stand.site.titles[4794].url: {1: 1080, 2: 720},
+             "app://banri/219017": {1: 1080, 2: 2160}, "app://banri/219018": {1: 720, 2: 1080}}
 
-    tables = await tables_of(stand, urls)
+    tables = await tables_of(stand, list(truth))
     order = await stand.call("GET", "/api/voices/settings")
     placed = {fold_name(name) for name in order["priority"]}
     sources = stand.module("sources")
 
-    for url, table in zip(urls, tables):
+    for (url, frames), table in zip(truth.items(), tables):
         rows = table["rows"]
-        assert rows, url
+        got = {}
         for row in rows:
-            # Obligation 2: the frame of a confirmed row ranks the variants before anything else.
-            assert row["state"] != "playable" or row["heights"], (url, row["key"], "a confirmed row without a frame")
+            # Condition 1: a row with no frame of its own episode cannot reach the constructor: the source is not fit.
+            assert row["state"] == "playable" and row["heights"], (url, row["key"], row["state"], row.get("reason"))
+            got[int(re.search(r"\d+", row["text"]).group())] = max(row["heights"])
             # Obligation 3: the user can put the player of the row above or below the others, by its words.
             assert fold_name(row["player"]) in placed, (url, row["player"], order["priority"])
             assert order["player_labels"].get(row["player"]), (url, row["player"])
-    assert {row["player"] for row in tables[2]["rows"]} == {"banri:BLU"}
-    app = {row["text"]: (row["state"], row["heights"]) for row in tables[2]["rows"]}
-    assert app == {"第1集": ("not_obtained", []), "第2集": ("playable", [2160])}, app
+        # Condition 2: the frame of each row is the frame of its own episode, never one carried from another row.
+        assert got == frames, (url, got)
     assert order["player_labels"]["banri:BLU"] == "半日 · 蓝光"
     # Obligation 3 for every player a row can be of, whether a table of the stand holds one or not.
     for player in sources.players:

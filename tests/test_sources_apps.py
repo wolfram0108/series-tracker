@@ -77,16 +77,18 @@ def card_world() -> App99Model:
     return model
 
 
-async def test_a_card_is_a_table_of_every_line_in_its_order_a_frame_only_of_the_row_whose_video_was_measured():
+async def test_a_card_is_a_table_of_every_line_in_its_order_each_row_with_the_frame_of_its_own_episode():
     model = card_world()
     model.parses[(9, "CO4K_pv")] = f"{CDN}c/pv.m3u8"
-    http, _asked = world(model, {f"{CDN}a/index.m3u8": PLAYLIST, f"{CDN}b/index.m3u8": PLAYLIST,
-                                 f"{CDN}c/pv.m3u8": PLAYLIST})
+    model.parses[(9, "CO4K_tok1")] = f"{CDN}d/1.m3u8"
+    playlists = {f"{CDN}{name}": PLAYLIST for name in ("a/index.m3u8", "b/index.m3u8", "c/pv.m3u8", "d/1.m3u8")}
+    http, _asked = world(model, playlists)
     heads: list[str] = []
+    frames = {"a": 720, "b": 1080, "c": 2160, "d": 1080}
 
     async def measure(_http, head, _referer):
         heads.append(head.segment)
-        return 2160 if "/c/" in head.segment else 1080
+        return frames[head.segment.removeprefix(CDN).split("/")[0]]
 
     async with http:
         player = AppPlayer(App99Client(profile(), lambda: http), measure)
@@ -97,36 +99,39 @@ async def test_a_card_is_a_table_of_every_line_in_its_order_a_frame_only_of_the_
         draft = await site.read("app://banri/219017", ReadContext(http, lambda *_: None))
 
         rows = [(row.key, row.player, row.player_label, row.text, row.state.value, row.heights) for row in draft.rows]
-        # A frame is of the row whose own video was measured, never of another row: the other rows are not confirmed.
+        # Every row is measured on its own episode; a frame is never carried to another row of its line.
         assert rows == [
-            ("banri:ffm3u8:1", "banri:ffm3u8", "非凡（备用线路）", "第01集", "not_obtained", []),
+            ("banri:ffm3u8:1", "banri:ffm3u8", "非凡（备用线路）", "第01集", "playable", [720]),
             ("banri:ffm3u8:2", "banri:ffm3u8", "非凡（备用线路）", "第02集", "playable", [1080]),
-            ("banri:CO4K:1", "banri:CO4K", "4K", "1", "not_obtained", []),
+            ("banri:CO4K:1", "banri:CO4K", "4K", "1", "playable", [1080]),
             ("banri:CO4K:2", "banri:CO4K", "4K", "2", "not_obtained", []),
             ("banri:CO4K:3", "banri:CO4K", "4K", "《万界独尊》PV", "playable", [2160]),
             ("banri:co_egg:1", "banri:co_egg", "花絮", "419", "not_obtained", []),
         ]
-        assert '"code":"frame_not_measured"' in draft.rows[0].reason
         # A row whose episode gave no stream says why.
-        assert '"code":"app_no_parser"' in draft.rows[5].reason
+        assert '"code":"app_no_parser"' in draft.rows[3].reason and '"code":"app_no_parser"' in draft.rows[5].reason
         assert draft.names == ["万界独尊", "Ten Thousand Worlds"] and draft.title == "半日 · 万界独尊 (2021)"
-        # One ask a line, never repeated: the newest episode of each, not every episode of a card of thousands.
-        assert sorted(heads) == [f"{CDN}b/seg0.ts", f"{CDN}c/seg0.ts"]
-        assert [fields["url"] for path, fields in model.calls if path == "/app/vodParser"] == ["CO4K_pv"]
+        # One ask a row: each episode once.
+        assert sorted(heads) == sorted(f"{CDN}{name}/{seg}" for name, seg in
+                                       (("a", "seg0.ts"), ("b", "seg0.ts"), ("c", "seg0.ts"), ("d", "seg0.ts")))
+        assert sorted(fields["url"] for path, fields in model.calls if path == "/app/vodParser") == \
+            ["CO4K_pv", "CO4K_tok1", "CO4K_tok2"]
         assert [row.site_fields["stream"] for row in draft.rows] == ["playlist"] * 2 + ["parser"] * 4
         # The token is the application's own name of the video, found by the line's player name.
         assert players.video_of("banri:CO4K", draft.rows[2].link) == "CO4K_tok1"
         assert players.get("banri:CO4K") is player and "banri:CO4K" in players and "other:CO4K" not in players
 
-        # The next read keeps the frames the last table measured: only the line without one is asked again.
+        # The next read keeps every frame the last table measured on its row: only the rows without one are asked again.
+        parsed = len([1 for path, _fields in model.calls if path == "/app/vodParser"])
         again = await site.read("app://banri/219017", ReadContext(http, lambda *_: None, last_rows=tuple(draft.rows)))
         assert [(row.state, row.heights) for row in again.rows] == [(row.state, row.heights) for row in draft.rows]
-        assert len(heads) == 2 and [path for path, _fields in model.calls if path == "/app/vodParser"] == ["/app/vodParser"]
+        assert len(heads) == 4
+        assert [fields["url"] for path, fields in model.calls if path == "/app/vodParser"][parsed:] == ["CO4K_tok2"]
 
         # The stream of an episode of a line of playlists is its playlist, its frame not measured for the download.
         got = await player.stream(draft.rows[0].link, http, None, players.pacer)
         assert got == {"stream_url": f"{CDN}a/index.m3u8", "headers": {}, "progressive": False, "playlist": True}
-        assert len(heads) == 2
+        assert len(heads) == 4
 
 
 async def test_a_stream_is_a_file_or_a_playlist_by_what_its_host_serves_not_by_the_form_of_its_address():
@@ -161,7 +166,9 @@ async def test_a_stream_is_a_file_or_a_playlist_by_what_its_host_serves_not_by_t
         players = PlayerRegistry([player])
         draft = await AppSite(player).read("app://banri/219017", ReadContext(http, lambda *_: None))
         four = [row for row in draft.rows if row.player == "banri:CO4K"]
-        assert [row.heights for row in four] == [[], [], [1080]] and files == [f"{CDN}video/o8Sli"]
+        # Two files measured as files, the playlist of a script as a playlist: each row its own frame.
+        assert [row.heights for row in four] == [[1080], [720], [1080]]
+        assert sorted(files) == [f"{CDN}video/o8Sli", f"{CDN}whole/qq"]
         assert "/video/o8Sli bytes=0-4095" in asked  # only the head of the file was asked
 
         got = await player.stream(four[0].link, http, None, players.pacer)

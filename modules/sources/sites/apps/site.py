@@ -6,12 +6,12 @@ of every line is a row of the player of its line (`<application>:<line>`, labell
 label as the application gives it ("1", "第01集", "《万界独尊》2026新春贺岁PV"): nothing here numbers an episode, leaves an
 item out or tells one line from another. The line's name, type and parsers are visible fields of its rows.
 
-The table is the card as the application lists it, read by two requests. A row's frame is the frame of its own video,
-measured on it, and of no other row: the stream of an episode of most lines costs a parse of the application, and a read
-measures one episode of each line — its newest — so that row alone has a frame (`frame: measured`). Every other row is `not_obtained`: its player was not asked, which the row says (`frame_not_measured`); its
-frame is never carried over from another episode. A row measured by the last table keeps its frame and is not asked again;
-a row whose episode gave no stream is `not_obtained` with why (`frame_failed`) and is asked once more by the next read. The ask is single:
-the refusal of an application (no parser of the line, an empty answer) does not pass in seconds.
+The table is the card as the application lists it, read by two requests, and the frame of every row measured on its own
+video: its stream asked (a parse of the application for a line of a parser), its playlist or file read, the head of the
+picture given to ffprobe (players/app_lines.py). A frame is of the row it was measured on and of no other row. Each row
+is asked once, under the pacer every player shares; a row the last table measured on itself (`frame: measured`) keeps its
+frame and is not asked again, so a read after the first one asks only the episodes that are new. A row whose episode
+gave no stream is `not_obtained` with why (`frame_failed`) and is asked again by the next read.
 The field `stream` of a row says how its stream comes: the playlist the line lists itself, or a parser of the application.
 """
 from __future__ import annotations
@@ -23,6 +23,8 @@ from core.contracts import RowState, TableRow
 from core.reasons import reason
 
 from ...players.contract import PlayerRef
+from ...players.registry import PROBE_INTERVAL_S
+from ...policy import Pacer
 from ...apps import SCHEME, card_address
 from ...apps.app99 import AppError
 from ...players.app_lines import AppPlayer
@@ -58,9 +60,12 @@ class AppSite:
         self.client = player.client
         self.name, self.label = player.name, player.label
         self.domains = (player.name,)
+        self.pacer = Pacer(lambda: PROBE_INTERVAL_S)
 
-    def configure(self, **_wiring) -> None:
-        """The card is read through the application's API alone: the wiring of the module gives it nothing."""
+    def configure(self, *, players=None, **_wiring) -> None:
+        """The pacer of the players: the asks of the rows of a card go at the pace every player keeps."""
+        if players is not None:
+            self.pacer = players.pacer
 
     def _card(self, url: str) -> str | None:
         split = urlsplit(url)
@@ -105,15 +110,15 @@ class AppSite:
             for place, label, token in listed:
                 link = self.player.link_of(card_url, line.code, token)
                 own = {**fields, "place": place}
-                heights, frame = frames.get(link, ([], {}))
+                heights, frame = frames[link]
                 if heights:
                     rows.append(TableRow(key=f"{line.name}:{place}", player=line.name, player_label=line.label,
                                          text=label, state=RowState.PLAYABLE, heights=heights, link=link,
                                          site_fields={**own, **frame}))
                     continue
-                cause = frame.get("frame_failed") or reason("frame_not_measured", player=line.label)
                 rows.append(TableRow(key=f"{line.name}:{place}", player=line.name, player_label=line.label, text=label,
-                                     state=RowState.NOT_OBTAINED, link=link, site_fields={**own, **frame}, reason=cause))
+                                     state=RowState.NOT_OBTAINED, link=link, site_fields={**own, **frame},
+                                     reason=frame["frame_failed"]))
         if not rows:
             raise SiteError(reason("no_players_empty", site=self.player.label))
         names = [str(data.get("name") or "").strip(), *(part.strip() for part in str(data.get("sub") or "").split(","))]
@@ -123,26 +128,24 @@ class AppSite:
 
     async def _frames(self, card_url: str, lines, ctx: ReadContext) -> dict[str, tuple[list[int], dict]]:
         """The frame of each row measured on its own video, by its link ([height] or [] with why): the last table's of
-        every row it measured itself, and the newest episode of each line measured now when the last table has not
-        measured it — one ask a line, not repeated, all lines at once."""
+        every row it measured on itself, the others measured now — each once, not repeated, at the pace of the players."""
         kept = {row.link: (list(row.heights), {"frame": "measured"}) for row in ctx.last_rows
                 if self.player.owns(row.link) and row.heights and row.site_fields.get("frame") == "measured"}
-        asked = []
-        for line, _fields, listed in lines:
-            _place, _label, token = listed[-1]
-            link = self.player.link_of(card_url, line.code, token)
-            if link not in kept:
-                asked.append((line, link))
+        asked = [(line, link) for line, _fields, listed in lines
+                 for link in (self.player.link_of(card_url, line.code, token) for _place, _label, token in listed)
+                 if link not in kept]
         done = 0
         ctx.progress(PHASE_PLAYERS, 0, len(asked))
 
         async def measure(line, link) -> tuple[str, tuple[list[int], dict]]:
             nonlocal done
-            ref = PlayerRef(line.name, link)
+            await self.pacer.wait()
             try:
-                reading = line.read(await line.fetch(ref, ctx.http, card_url))
-                heights, failed = sorted(reading.resolutions)[-1:], reading.message or reading.kind.value
-            except Exception as exc:  # noqa: BLE001 - one line cannot take the others with it
+                reading = line.read(await line.fetch(PlayerRef(line.name, link), ctx.http, card_url))
+                said = reading.message or reading.kind.value
+                heights = sorted(reading.resolutions)[-1:]
+                failed = said if said.startswith('{"code"') else reason("player_failed", player=line.label, cause=said)
+            except Exception as exc:  # noqa: BLE001 - one row cannot take the others with it
                 heights, failed = [], reason("player_failed", player=line.label, cause=type(exc).__name__)
             done += 1
             ctx.progress(PHASE_PLAYERS, done, len(asked))
