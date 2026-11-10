@@ -112,7 +112,7 @@ function meta(card: AppCard): string {
         v-for="card in results.cards" :key="`${card.app}:${card.id}`" class="app-card" :class="{ 'is-added': card.url in added }"
         :data-card="card.id"
       >
-        <img v-if="card.pic" class="app-poster" :src="card.pic" :alt="t('sources.apps.poster', { name: card.name ?? '' })" loading="lazy" referrerpolicy="no-referrer" />
+        <img v-if="card.pic" class="app-poster" :src="card.pic" alt="" loading="lazy" referrerpolicy="no-referrer" />
         <div v-else class="app-poster" />
         <div class="app-body">
           <div class="app-title"><span class="app-name-text">{{ card.name }}</span><span class="app-id">№ {{ card.id }}</span></div>
@@ -124,13 +124,13 @@ function meta(card: AppCard): string {
         <div class="app-act">
           <span v-if="card.url in added" class="app-added">{{ t("sources.apps.added", { n: added[card.url] }) }}</span>
           <span v-else-if="!card.url" class="muted">{{ t("sources.apps.noAddress") }}</span>
-          <button v-else type="button" class="btn-icon btn-add btn-text-icon app-add" :disabled="busy" @click="emit('add', card.url)">
+          <button v-else type="button" class="action-btn btn-add app-add" :disabled="busy" @click="emit('add', card.url)">
             <i class="pi pi-plus" /><span>{{ t("sources.add.button") }}</span>
           </button>
         </div>
       </article>
     </section>
-    <button v-if="anyMore" type="button" class="btn-icon btn-text-icon app-more" :disabled="searching" @click="find(nextPage)">
+    <button v-if="anyMore" type="button" class="action-btn btn-search app-more" :disabled="searching" @click="find(nextPage)">
       <i class="pi pi-angle-down" /><span>{{ t("sources.apps.more") }}</span>
     </button>
   </div>
@@ -146,13 +146,18 @@ function meta(card: AppCard): string {
 .app-name.active { border-color: var(--color-blue); color: var(--color-blue); }
 .app-name small { color: var(--text-muted); margin-inline-start: 0.3rem; }
 .app-head { display: flex; flex-wrap: wrap; gap: 0.25rem 0.6rem; align-items: baseline; padding-block-end: 0.3rem; border-bottom: var(--border-width) solid var(--border-color); }
+/* The poster, the words of the card and its action in one line that wraps: the action goes under the words when the
+   card is narrow, the words never squeeze into a column. */
 .app-card {
-  display: grid; grid-template-columns: 4rem minmax(0, 1fr) auto; gap: 0.75rem; align-items: start; padding: 0.6rem;
+  display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-start; padding: 0.6rem;
   border: var(--border-width) solid var(--border-color); border-radius: var(--card-border-radius); background: var(--bg-white);
 }
 .app-card.is-added { border-color: var(--color-green-1); background: color-mix(in srgb, var(--color-green-1) 10%, var(--bg-white)); }
-.app-poster { inline-size: 4rem; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 0.375rem; background: var(--bg-light); max-inline-size: 100%; }
-.app-body { display: grid; gap: 0.2rem; min-inline-size: 0; }
+.app-poster {
+  flex: none; inline-size: 4rem; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 0.375rem; background: var(--bg-light);
+  max-inline-size: 100%; overflow: hidden;
+}
+.app-body { flex: 1 1 14rem; display: grid; gap: 0.2rem; min-inline-size: 0; }
 .app-title { display: flex; flex-wrap: wrap; gap: 0.25rem 0.6rem; align-items: baseline; }
 .app-name-text { font-weight: 700; overflow-wrap: anywhere; }
 .app-id { color: var(--text-muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
@@ -166,16 +171,13 @@ function meta(card: AppCard): string {
   margin: 0; color: var(--text-muted); font-size: 0.8rem; line-height: 1.45; overflow: hidden;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
-.app-act { display: grid; gap: 0.375rem; justify-items: end; }
+.app-act { flex: none; margin-inline-start: auto; display: grid; gap: 0.375rem; justify-items: end; }
 .app-added {
   border: var(--border-width) solid var(--color-green-1); color: var(--color-green-1); border-radius: 999px; padding: 0.05rem 0.6rem;
   font-size: 0.8rem; font-weight: 600; white-space: nowrap;
 }
 .app-reason { color: var(--color-red-1); overflow-wrap: anywhere; }
-.app-more { justify-self: start; }
-@media (pointer: coarse) {
-  .app-card { grid-template-columns: 3.25rem minmax(0, 1fr); }
-  .app-poster { inline-size: 3.25rem; }
-  .app-act { grid-column: 1 / -1; justify-items: start; }
-}
+.app-more { align-self: flex-start; }
+/* The buttons of a card are those of the head of a source: the main screen's, at the height of a line of text. */
+.app-act .action-btn, .app-more { min-block-size: 2rem; padding-block: 0.25rem; font-size: 0.85rem; white-space: nowrap; }
 </style>

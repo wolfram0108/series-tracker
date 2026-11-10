@@ -639,7 +639,6 @@ export const ru = {
   "sources.apps.noAddress": "У карточки нет номера",
   "sources.apps.card": "Карточка в приложении",
   "sources.apps.cardValue": "{app} · № {card}",
-  "sources.apps.poster": "Постер карточки {name}",
   "sources.add.button": "Добавить источник",
   "sources.add.checking": "Определяем адрес…",
   "sources.add.notSite": "Этот адрес не читает ни один сайт",

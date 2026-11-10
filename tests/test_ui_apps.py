@@ -20,6 +20,23 @@ pytestmark = pytest.mark.ui
 
 LABEL = [{"type": "text", "value": "第"}, {"type": "number"}, {"type": "text", "value": "集"}]
 ORIGINAL = "Оригинал"
+# Whether a card of the search keeps its parts apart and inside it at a width of the window: its action never over its
+# words, no part out of its frame, the page never scrolled sideways.
+CARD_LAYOUT = """() => {
+  const bad = [];
+  const box = (el) => el.getBoundingClientRect();
+  const cross = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
+  document.querySelectorAll('.app-card').forEach((card) => {
+    const frame = box(card), words = card.querySelector('.app-body'), act = card.querySelector('.app-act');
+    if (cross(box(words), box(act))) bad.push('action over words');
+    card.querySelectorAll('*').forEach((el) => {
+      const part = box(el);
+      if (part.width && (part.right > frame.right + 1 || part.left < frame.left - 1)) bad.push(`${el.className} out`);
+    });
+  });
+  if (document.documentElement.scrollWidth > window.innerWidth) bad.push('page scrolls sideways');
+  return [...new Set(bad)];
+}"""
 
 
 def frame_height(path: str) -> int:
@@ -46,6 +63,14 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
     found = page.locator(".app-card[data-card='219017']")
     await expect(found).to_contain_text("更新至第1集")
     await ui.shot("a1-search")
+    size = page.viewport_size
+    faults = {}
+    for width in range(360, 1450, 10):
+        await page.set_viewport_size({"width": width, "height": size["height"]})
+        if found_here := await page.evaluate(CARD_LAYOUT):
+            faults[width] = found_here
+    await page.set_viewport_size(size)
+    assert not faults, faults
     await found.locator(".app-add").click()
 
     source = page.locator(".source-card").first
