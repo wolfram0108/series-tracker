@@ -3086,6 +3086,11 @@ export interface components {
              * @default null
              */
             voice: string | null;
+            /**
+             * Covered
+             * @default false
+             */
+            covered: boolean;
         };
         /**
          * PlanGoalTrack

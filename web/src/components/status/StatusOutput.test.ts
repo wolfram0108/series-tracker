@@ -185,7 +185,7 @@ describe("StatusOutput", () => {
       assets: [fileOfEpisodeOne()],
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"),
         [goalTrack("AniStar", "download", rowRef(8, "k1"), { player: "kodik" })])],
-      failures: [{ kind: "download", row: rowRef(8, "k1"), video: null, voice: null }],
+      failures: [{ kind: "download", row: rowRef(8, "k1"), video: null, voice: null, covered: false }],
     }))
     const w = mountOutput()
     await flushPromises()

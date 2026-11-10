@@ -217,6 +217,9 @@ async def test_a_voice_over_the_service_refused_to_align_is_passed_over_until_th
     view = await stand.sync(series_id)
     await stand.check(series_id)
     assert view["assets"][0]["tracks"] == [] and [each["kind"] for each in view["failures"]] == ["align"]
+    # The episode lacks the voice-over the attempt was for: the series is an error.
+    assert not view["failures"][0]["covered"]
+    assert "error" in (await stand.call("GET", f"/api/series/{series_id}"))["statuses"]
     jobs = len(stand.daemon.jobs)
     await stand.sync(series_id)
     assert len(stand.daemon.jobs) == jobs  # nothing is asked of the service again
@@ -225,6 +228,7 @@ async def test_a_voice_over_the_service_refused_to_align_is_passed_over_until_th
     view = await stand.sync(series_id)
     await stand.check(series_id)
     assert [track["group"] for track in view["assets"][0]["tracks"]] == ["AnimeVost"] and not view["failures"]
+    assert "error" not in (await stand.call("GET", f"/api/series/{series_id}"))["statuses"]
 
 
 async def test_the_voice_overs_of_an_episode_go_to_the_service_as_one_job_and_one_that_did_not_come_holds_none_back(stand):

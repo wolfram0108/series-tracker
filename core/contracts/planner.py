@@ -96,6 +96,9 @@ class PlanFailure(BaseModel):
     # offline: the failure is still counted, only not placed.
     episodes: list[list[int]] = Field(default_factory=list)
     voice: str | None = None
+    # The series lacks nothing for it: every episode of its row has a file holding what the attempt was for (another
+    # source gave it). Only a failure not covered makes the series an error.
+    covered: bool = False
 
 
 class PlanProblem(BaseModel):

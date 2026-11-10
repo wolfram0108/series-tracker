@@ -20,6 +20,21 @@ def _slots(row: OnlineRow) -> list[list[int]]:
     return [[row.season, episode] for episode in range(row.start, row.end + 1)]
 
 
+def covered(failure: dict, assets: list[dict]) -> bool:
+    """A failed attempt the series does not lack: every episode of its row has a file in the library that holds what the
+    attempt was for — its voice-over, as a track or as the own sound of the video (another source gave it), or the video
+    when the row names no voice-over. A row no longer online names no episode and leaves nothing lacking."""
+    for slot in failure["episodes"]:
+        held = [each for each in assets if not each["off"] and tuple(each["episode"]) == tuple(slot)]
+        if not held:
+            return False
+        voice = failure["voice"]
+        if voice is not None and not any(each["video"].get("group") == voice
+                                         or any(track.get("group") == voice for track in each["tracks"]) for each in held):
+            return False
+    return True
+
+
 def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: bool,
             online: frozenset[RowId] | None = None, rows: Iterable[OnlineRow] = ()) -> dict:
     assets = []
@@ -52,6 +67,8 @@ def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: boo
         failures.append({"kind": key[0], "row": _row(key[1]), "video": _row(key[2]) if len(key) > 2 else None,
                          "episodes": sorted({tuple(slot) for row in found for slot in _slots(row)}),
                          "voice": next((row.group for row in found if row.group), None)})
+    for failure in failures:
+        failure["covered"] = covered(failure, assets)
     commands = [{"kind": each[0], "name": each[1], "dub": _row(each[2]) if len(each) > 2 else None}
                 for each in sorted(sync.commands, key=repr)]
     return {"series_id": series_id, "running": running, "assets": assets, "episodes": episodes,

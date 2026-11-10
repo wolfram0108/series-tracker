@@ -1052,11 +1052,13 @@ class PlannerModule(BaseModule):
 
     def _stand(self, series_id: int, view: dict) -> None:
         """What the series stands at, told by its view: ready — a file of it is in the library; waiting — the plan has
-        work for the next sync; error — an attempt failed (recorded), or work of the last sync failed for the moment."""
+        work for the next sync; error — an episode lacks what a recorded attempt was for (`covered` of the view: another
+        source that gave it leaves no error), or work of the last sync failed for the moment and nothing gave it."""
         work = any(goal["video"]["kind"] != "asset" or any(track["kind"] != "reuse" for track in goal["tracks"])
                    for goal in view["episodes"]) or bool(view["commands"])
         self._standing[series_id] = {"ready": bool(view["assets"]), "waiting": work and not view["running"],
-                                     "error": bool(view["failures"] or view["problems"])}
+                                     "error": any(not each["covered"] for each in view["failures"])
+                                     or bool(view["problems"])}
         self._tell_status(series_id)
 
     def _tell_status(self, series_id: int) -> None:
