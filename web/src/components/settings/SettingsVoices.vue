@@ -106,7 +106,7 @@ onMounted(load)
                 <i class="pi pi-bars" aria-hidden="true" />
               </button>
               <span class="priority-place">{{ index + 1 }}</span>
-              <span class="priority-name">{{ item }}</span>
+              <span class="priority-name">{{ view?.player_labels?.[item] ?? item }}</span>
             </li>
           </template>
         </OrderList>

@@ -169,6 +169,8 @@ class VoiceSettingsView(VoiceSettingsDraft):
 
     default_priority: list[str]
     rejected: list[str]
+    # The words a window names each player of the order by (`半日 · 4K` for a line of an application).
+    player_labels: dict[str, str] = Field(default_factory=dict)
     # Players the user put into one group take one place in the order; no screen edits them yet.
     player_groups: dict[str, list[str]] = Field(default_factory=dict)
     # The height the file of a compilation is downloaded at for its cuts (0: the best it has).

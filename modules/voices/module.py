@@ -12,7 +12,8 @@ Queries:
   voices.groups.resolve GroupsResolveRequest -> GroupsResolveReply: the user group of every name (None for a name no group
       holds), by the folded name or trigger of the group (core/voice_names.py); asked by `composition` for the names of the
       voice-overs of its rows. A combined credit "A / B" is one name.
-  voices.settings.get {values?} -> VoiceSettingsView: the groups of voice-overs and the order of sources as they apply, the
+  voices.settings.get {values?} -> VoiceSettingsView: the groups of voice-overs and the order of sources as they apply (the
+      order the user saved, then every other player the sources know, in their order: `sources.players.list`), the
       order to return to and the fields whose stored value was refused; with `values` (RunSnapshot.voices), what applied
       when a run took them.
   voices.settings.export {} -> {values}: the stored settings as they are, for the snapshot of a run.
@@ -63,8 +64,18 @@ class VoicesModule(BaseModule):
         groups = (await self._settings(request.values)).voices
         return GroupsResolveReply(groups={name: groups.group_of(name) for name in request.names}).model_dump(mode="json")
 
+    async def _players(self) -> list[dict]:
+        """Every player a row can be of, as the sources name them; none when the sources do not answer (the order then
+        holds the players it names itself)."""
+        try:
+            return (await self.request("sources.players.list", {})).get("players") or []
+        except Exception as exc:  # noqa: BLE001 - the order of sources is shown without the players it cannot learn
+            self.log.warning("озвучки: список плееров не получен: %s", exc)
+            return []
+
     async def on_settings_get(self, env: Envelope) -> dict:
-        return editor.view(await self._settings((env.payload or {}).get("values"))).model_dump(mode="json")
+        settings = await self._settings((env.payload or {}).get("values"))
+        return editor.view(settings, await self._players()).model_dump(mode="json")
 
     async def on_settings_export(self, env: Envelope) -> dict:
         reply = await self.request("settings.values.by_prefix", {"prefix": PREFIX})
@@ -73,10 +84,11 @@ class VoicesModule(BaseModule):
     async def on_settings_set(self, env: Envelope) -> dict:
         draft = VoiceSettingsDraft.model_validate(env.payload)
         current = await self._settings()
-        problems = editor.check(draft, current.player_groups)
+        players = await self._players()
+        problems = editor.check(draft, current.player_groups, [each["name"] for each in players])
         if not problems:
             await self.request("settings.values.set_many", {"values": editor.stored(editor.clean(draft))})
-        view = editor.view(await self._settings())
+        view = editor.view(await self._settings(), players)
         if not problems:
             self.log.info("озвучки: настройки сохранены")
             self.publish_event("voices.settings.changed", view.model_dump(mode="json"))

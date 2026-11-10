@@ -140,6 +140,11 @@ class SourcesRepository:
             " ON CONFLICT (url) DO UPDATE SET state = 'failed', reason = excluded.reason, reading_since = NULL",
             (url, site, reason))
 
+    async def line_players(self) -> list[dict]:
+        """The players of the lines of applications the stored tables hold (`<application>:<line>`), each once, by name."""
+        return await self._db.fetch_all(
+            "SELECT player, MIN(player_label) AS label FROM release_rows WHERE player LIKE '%:%' GROUP BY player ORDER BY player")
+
     async def pages_being_read(self) -> list[dict]:
         """Pages whose read was recorded as begun and never concluded: a stop interrupted it."""
         return await self._db.fetch_all(

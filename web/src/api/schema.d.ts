@@ -3915,6 +3915,10 @@ export interface components {
             default_priority: string[];
             /** Rejected */
             rejected: string[];
+            /** Player Labels */
+            player_labels?: {
+                [key: string]: string;
+            };
             /** Player Groups */
             player_groups?: {
                 [key: string]: string[];

@@ -7,7 +7,7 @@ with coded problems; a refused value is never written and never quietly replaced
 from __future__ import annotations
 
 import json
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from core.contracts import Reason, SettingProblem, VoiceSettingsDraft, VoiceSettingsView
 from core.reasons import parse as parse_reason, reason
@@ -65,10 +65,11 @@ def _group_problems(groups: Mapping[str, list[str]]) -> list[SettingProblem]:
     return problems
 
 
-def player_names(player_groups: Mapping[str, list[str]]) -> list[str]:
-    """Players the order of sources may name: the built-in kinds and every name the stored player groups mention."""
+def player_names(player_groups: Mapping[str, list[str]], system: Sequence[str] = ()) -> list[str]:
+    """Players the order of sources may name: the built-in kinds, every player the sources know (`system`) and every name
+    the stored player groups mention."""
     named: dict[str, str] = {}
-    for name in [*DEFAULT_PRIORITY, *(each for group, triggers in player_groups.items() for each in (group, *triggers))]:
+    for name in [*DEFAULT_PRIORITY, *system, *(each for group, triggers in player_groups.items() for each in (group, *triggers))]:
         if fold_name(name):
             named.setdefault(fold_name(name), name)
     return list(named.values())
@@ -83,14 +84,15 @@ def _language_problems(draft: VoiceSettingsDraft) -> list[SettingProblem]:
             for name in _cleaned(draft.voice_groups) if fold_name(name) and languages.get(name) not in (None, *LANGUAGES)]
 
 
-def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]]) -> list[SettingProblem]:
+def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]],
+          system: Sequence[str] = ()) -> list[SettingProblem]:
     """Every reason this form cannot be saved; empty when it can."""
     problems = []
     names = [name.strip() for name in draft.priority if name.strip()]
     if not names:
         problems.append(_problem("priority", reason("priority_empty")))
     seen: set[str] = set()
-    known = {fold_name(name) for name in player_names(player_groups)}
+    known = {fold_name(name) for name in player_names(player_groups, system)}
     for name in names:
         if fold_name(name) in seen:
             problems.append(_problem("priority", reason("priority_duplicate", player=name)))
@@ -116,13 +118,23 @@ def stored(draft: VoiceSettingsDraft) -> dict[str, str]:
             LANGUAGES_KEY: dump(draft.voice_languages)}
 
 
-def view(settings: VoiceSettings) -> VoiceSettingsView:
-    """What applies now, with the order to return to."""
+def effective_order(priority: Sequence[str], system: Sequence[str]) -> list[str]:
+    """The order of sources that applies: the one the user saved, then every other player the sources know, in their
+    order. A player the order does not name would rank last with every other one; here it has its place, shown and
+    taken alike."""
+    held = {fold_name(name) for name in priority}
+    return [*priority, *(name for name in system if fold_name(name) not in held)]
+
+
+def view(settings: VoiceSettings, players: Sequence[Mapping[str, str]] = ()) -> VoiceSettingsView:
+    """What applies now, with the order to return to; `players` are those the sources know ({name, label})."""
+    system = [each["name"] for each in players]
     return VoiceSettingsView(
-        priority=list(settings.priority),
+        priority=effective_order(settings.priority, system),
+        player_labels={each["name"]: each.get("label") or each["name"] for each in players},
         voice_groups={name: list(triggers) for name, triggers in settings.voice_groups.items()},
         voice_languages=dict(settings.voice_languages),
-        default_priority=list(DEFAULT_PRIORITY),
+        default_priority=effective_order(DEFAULT_PRIORITY, system),
         player_groups={name: list(triggers) for name, triggers in settings.player_groups.items()},
         rejected=[_FIELD_OF_KEY[key] for key in settings.rejected if key in _FIELD_OF_KEY],
         cut_max_height=settings.cut_max_height)

@@ -53,7 +53,7 @@ _QUICK = (
     "rules.rules.add", "rules.rules.delete", "rules.rules.list", "rules.rules.reorder", "rules.rules.update",
     "settings.paths.add", "settings.paths.list", "settings.paths.remove",
     "settings.value.set", "settings.values.by_prefix", "settings.values.set_many",
-    "sources.settings.get", "sources.site.resolve", "sources.tracker.resolve", "sources.tracker.set_mirrors",
+    "sources.players.list", "sources.settings.get", "sources.site.resolve", "sources.tracker.resolve", "sources.tracker.set_mirrors",
     "sources.trackers.list",
     "torrents.db.add", "torrents.db.files.for_series", "torrents.db.history",
     "torrents.queue.get",
@@ -103,7 +103,10 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
         "catalog.series.update", "downloads.queue.get", "composition.get", "voices.settings.get")),
     "scan.status.get": (QUICK_S, ("settings.value.get",) * 3),
     "torrents.db.progress.list": (QUICK_S, ("catalog.series.get",)),
-    "voices.settings.set": (QUICK_S, ("settings.values.set_many", "settings.values.by_prefix", "settings.values.by_prefix")),
+    "voices.settings.set": (QUICK_S, ("settings.values.set_many", "settings.values.by_prefix", "settings.values.by_prefix",
+                                       "sources.players.list")),
+    # The order of sources holds every player the sources know.
+    "voices.settings.get": (QUICK_S, ("settings.values.by_prefix", "sources.players.list")),
 }
 
 # The topics whose request has no fuse of its own (see the top).

@@ -174,6 +174,8 @@ qBittorrent — Docker, WebUI `:8080`; секреты — в `.env` (вне git,
 - [contracts/findings.md](contracts/findings.md) — находки (баги старой
   системы и решения, для справки).
 - [contracts/bus_topics.md](contracts/bus_topics.md) — карта топиков шины.
+- [contracts/source_contract.md](contracts/source_contract.md) — договор источника: что сайт, плеер или
+  приложение обязаны дать системе; новый источник сверяется с ним до экранов.
 - [contracts/series_situations.md](contracts/series_situations.md) —
   поведенческая матрица (журнал верификации).
 - `logs/runs/<сериал>/*.jsonl.gz` — дамп каждой синхронизации: вся шина,

@@ -36,6 +36,9 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    The player that owns the link (a VK player link with its key, an AllVideo embed,
                                    a Vibix entry, an item of CDN VideoHub or of Kodik) resolves it; any other
                                    address is not handled
+  sources.players.list {} → {players: [{name, label}]}: every player a row of a table can be of, as the order of sources
+                                   names it: the players of the registry and the lines of applications the stored tables
+                                   hold (`<application>:<line>`, labelled `<application> · <line>`)
   sources.apps.search {query, page?, app?} → AppSearchReply {apps: [AppResults]}: a page of the search of every video
                                    application (modules/sources/apps), or of the one named, as the application gives it,
                                    or the reason it gave none. A card picked is a source by its address
@@ -166,6 +169,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.site.resolve", self.on_site_resolve)
         self.handle("sources.settings.get", self.on_settings_get)
         self.handle("sources.apps.search", self.on_apps_search)
+        self.handle("sources.players.list", self.on_players_list)
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
@@ -368,6 +372,16 @@ class SourcesModule(BaseModule):
         """payload: SiteResolveRequest; reply: SiteResolveReply. No network."""
         request = SiteResolveRequest.model_validate(env.payload)
         return self.tables.resolve(request.url).model_dump(mode="json")
+
+    async def on_players_list(self, env: Envelope) -> dict:
+        """Every player a row of a table can be of, with the words a window names it by: the players of the registry, and
+        the lines of applications the stored tables hold (`<application>:<line>`, named `<application> · <line>`)."""
+        players = [{"name": each.name, "label": getattr(each, "label", "") or each.name}
+                   for each in self.players if not getattr(each, "lines", False)]
+        for each in await self.repo.line_players():
+            owner = self.players.get(each["player"])
+            players.append({"name": each["player"], "label": f"{owner.label} · {each['label'] or each['player']}"})
+        return {"players": players}
 
     async def on_apps_search(self, env: Envelope) -> dict:
         """payload: AppSearchRequest; reply: AppSearchReply — a page of the search of every application (or of the one
