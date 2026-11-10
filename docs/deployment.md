@@ -157,8 +157,8 @@ sudo systemctl restart series-tracker
   входы целиком (онлайн-строки, актив, выбор, команды «Удалить», неудачи) и
   план из них на каждом круге; `step`/`done` — шаг графа и его исход;
   `apply` — группа применена или нет и почему. Хранятся последние 50 дампов
-  сериала. Чтение:
-  `zcat logs/runs/88/<файл> | jq -c 'select(.topic=="planner.sync.trace") | .payload.kind'`.
+  сериала. Чтение (gzip из нескольких частей, по строке JSON):
+  `python3 -c 'import gzip,json,sys; [print(l["t"], l["e"], l.get("topic") or l.get("message")) for l in map(json.loads, gzip.open(sys.argv[1],"rt"))]' logs/runs/88/<файл>`.
 - **Перезапуск:** `sudo systemctl restart series-tracker` или `./restart.sh`.
 - **Переживание перезагрузки:** юнит `enabled` + `Restart=always`; Docker →
   qBit (`restart=unless-stopped`) → приложение поднимаются сами.
