@@ -37,8 +37,8 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    a Vibix entry, an item of CDN VideoHub or of Kodik) resolves it; any other
                                    address is not handled
   sources.players.list {} → {players: [{name, label}]}: every player a row of a table can be of, as the order of sources
-                                   names it: the players of the registry and the lines of applications the stored tables
-                                   hold (`<application>:<line>`, labelled `<application> · <line>`)
+                                   names it: the players of the registry and the admitted lines of the applications
+                                   (`<application>:<code>`, named by their codes; modules/sources/apps/lines.py)
   sources.apps.search {query, page?, app?} → AppSearchReply {apps: [AppResults]}: a page of the search of every video
                                    application (modules/sources/apps), or of the one named, as the application gives it,
                                    or the reason it gave none. A card picked is a source by its address
@@ -90,6 +90,7 @@ from core.reasons import reason
 from . import anilibria, delivery, parsers
 from .apps import AppProfile, card_address
 from .apps.app99 import AppError, App99Client
+from .apps.lines import LineRegistry
 from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
@@ -120,7 +121,7 @@ class SourcesModule(BaseModule):
                  sites: Iterable[Site] | None = None,
                  table_clock: Callable[[], datetime] = utc_now,
                  table_safeguard_s: float = TABLE_READ_S, read_recent: int | None = None,
-                 apps: Iterable[AppProfile] = ()) -> None:
+                 apps: Iterable[AppProfile] = (), app_lines_dir: str | None = None) -> None:
         self.repo = SourcesRepository(db)
         self._cache_dir = torrent_cache_dir
         self._locks: dict[str, asyncio.Lock] = {}
@@ -138,7 +139,8 @@ class SourcesModule(BaseModule):
         for profile in apps:
             if profile.protocol != "app99":
                 raise ValueError(f"application {profile.name}: unknown protocol {profile.protocol!r}")
-            player = AppPlayer(App99Client(profile, lambda: self._http))
+            player = AppPlayer(App99Client(profile, lambda: self._http),
+                               registry=LineRegistry.load(profile.name, app_lines_dir))
             self.players.register(player)
             self.apps.append(player)
         # The sites belong to this instance, not to the process: a site is added by registering it (builtin.py).
@@ -376,12 +378,10 @@ class SourcesModule(BaseModule):
 
     async def on_players_list(self, env: Envelope) -> dict:
         """Every player a row of a table can be of, with the words a window names it by: the players of the registry, and
-        the lines of applications the stored tables hold (`<application>:<line>`, named `<application> · <line>`)."""
+        the admitted lines of the applications (`<application>:<code>`, named by their codes)."""
         players = [{"name": each.name, "label": getattr(each, "label", "") or each.name}
                    for each in self.players if not getattr(each, "lines", False)]
-        for each in await self.repo.line_players():
-            owner = self.players.get(each["player"])
-            players.append({"name": each["player"], "label": f"{owner.label} · {each['label'] or each['player']}"})
+        players += [{"name": line.name, "label": line.label} for app in self.apps for line in app.line_players()]
         return {"players": players}
 
     async def on_apps_search(self, env: Envelope) -> dict:

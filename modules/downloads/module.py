@@ -116,6 +116,10 @@ def _download_budget() -> Budget:
     return Budget(attempts=MAX_DOWNLOAD_ATTEMPTS, pauses=(RETRY_DELAY_S,), limit_s=UNTIMED)
 
 
+# Parts of one file asked at once: measured on the streams of a video application (tools/collectors/download_speed.py),
+# 6 gave 62–108 Mbit/s, 16 gave 168–196 Mbit/s, 32 less than 16.
+FRAGMENTS_AT_ONCE = 16
+
 class DownloadsModule(BaseModule):
     name = "downloads"
 
@@ -126,7 +130,7 @@ class DownloadsModule(BaseModule):
         self._fetch_queue: list[dict] = []
         self._fetch_active: dict[str, tuple[asyncio.Task, int | None]] = {}
         self._fetch_jobs: dict[str, dict] = {}  # the job of every fetch under way: the window names it by its path
-        self._threads = 6             # fragments per file (yt-dlp -N)
+        self._threads = FRAGMENTS_AT_ONCE  # fragments per file (yt-dlp -N)
         self.cards = CardBook()  # the telemetry of every need under way (core/contracts/downloads.py)
         self._going = asyncio.Event()  # a card is under way: the queue is told on the beat of core/clock
         self._cancelled: set[str] = set()  # fetches the user stopped: their owners hear them end
@@ -151,7 +155,7 @@ class DownloadsModule(BaseModule):
         for card in await self.repo.cards():
             self.cards.kept(card)
         self.spawn(self._ticker(), name="downloads:cards", lasting=True)
-        self._threads = await self._read_setting("yt_dlp_concurrent_fragments", 6)
+        self._threads = await self._read_setting("yt_dlp_concurrent_fragments", FRAGMENTS_AT_ONCE)
         for line, key in LIMIT_KEYS.items():
             self._fetch_limits[line] = await self._read_setting(key, 2)
 

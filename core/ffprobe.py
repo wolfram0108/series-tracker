@@ -51,24 +51,37 @@ def film_stream(streams: list[dict]) -> dict | None:
     return next((each for each in streams if each.get("codec_type") == "video" and not is_still_picture(each)), None)
 
 
-async def streams_of(target: str, *, input_args: list[str] | None = None,
-                     timeout: float = DEFAULT_TIMEOUT_S, data: bytes | None = None) -> list[dict] | None:
-    """The streams of a file or a stream, with their kinds, heights and dispositions; None when they cannot be read.
+async def probe(target: str, *, input_args: list[str] | None = None, timeout: float = DEFAULT_TIMEOUT_S,
+                data: bytes | None = None) -> tuple[list[dict] | None, str]:
+    """The streams of a file or a stream, with their kinds, heights and dispositions, and what ffprobe said when it could
+    not read them (the last line of its errors: a refused connection, a status of the host, data that are no media).
     `input_args` go before the target (the headers of a stream); `data` is what target `pipe:0` reads (the head of a
     stream fetched by the caller)."""
     executable = program("ffprobe")
     if not executable:
-        return None
+        return None, "ffprobe is not installed"
     try:
         async with _probes():
-            code, out, _ = await run_capture([executable, "-v", "error", *(input_args or []), "-show_entries",
-                                              STREAM_ENTRIES, "-of", "json", target], timeout=timeout, data=data)
-        # A lost status says nothing: the whole answer read to its end is judged (an empty one is no answer).
-        if code == LOST and not out.strip():
-            return None
-        return json.loads(out.decode() or "{}").get("streams") or [] if code in (0, LOST) else None
-    except (OSError, TimeoutError, ValueError):
-        return None
+            code, out, err = await run_capture([executable, "-v", "error", *(input_args or []), "-show_entries",
+                                                STREAM_ENTRIES, "-of", "json", target], timeout=timeout, data=data)
+    except TimeoutError:
+        return None, f"ffprobe gave no answer in {timeout:.0f} s"
+    except OSError as exc:
+        return None, f"ffprobe did not run: {exc}"
+    said = (err.decode(errors="replace").strip().splitlines() or [""])[-1]
+    # A lost status says nothing: the whole answer read to its end is judged (an empty one is no answer).
+    if code == LOST and not out.strip() or code not in (0, LOST):
+        return None, said or f"ffprobe ended with {code}"
+    try:
+        return json.loads(out.decode() or "{}").get("streams") or [], said
+    except ValueError:
+        return None, said or "ffprobe gave no readable answer"
+
+
+async def streams_of(target: str, *, input_args: list[str] | None = None,
+                     timeout: float = DEFAULT_TIMEOUT_S, data: bytes | None = None) -> list[dict] | None:
+    """The streams of a file or a stream (`probe`); None when they cannot be read."""
+    return (await probe(target, input_args=input_args, timeout=timeout, data=data))[0]
 
 
 async def duration_of(target: str, *, input_args: list[str] | None = None,

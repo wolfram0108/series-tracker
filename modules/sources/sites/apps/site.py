@@ -1,22 +1,26 @@
-"""A card of a video application (modules/sources/apps) as a page: its table is every episode of every line of the card.
+"""A card of a video application (modules/sources/apps) as a page: its table is every episode of every admitted line.
 
 The card lists its lines as `play_from` (codes of the application's players, apart by `$$$`) and their episodes as
-`play_url` (`<label>$<token>#...` for each line, apart by `$$$`), the lines in the order the application gives. Every item
-of every line is a row of the player of its line (`<application>:<line>`, labelled with the name of the line), its text the
-label as the application gives it ("1", "第01集", "《万界独尊》2026新春贺岁PV"): nothing here numbers an episode, leaves an
-item out or tells one line from another. The line's name, type and parsers are visible fields of its rows.
+`play_url` (`<label>$<token>#...` for each line, apart by `$$$`), the lines in the order the application gives. A line is
+read only when the registry of the application admits it (apps/lines.py): a line it does not admit is no player, and the
+log of the read names it with the reason. Every item of an admitted line is a row of the player of its line
+(`<application>:<code>`, named by its code), its text the label as the application gives it ("1", "第01集", "PV"): nothing
+here numbers an episode or leaves an item of an admitted line out. The name the application gives the line, its type and
+its parsers are visible fields of its rows.
 
 The table is the card as the application lists it, read by two requests, and the frame of every row measured on its own
 video: its stream asked (a parse of the application for a line of a parser), its playlist or file read, the head of the
 picture given to ffprobe (players/app_lines.py). A frame is of the row it was measured on and of no other row. Each row
-is asked once, at the pace the read of a card keeps (`ROWS_PER_SECOND`); a row the last table measured on itself (`frame: measured`) keeps its
-frame and is not asked again, so a read after the first one asks only the episodes that are new. A row whose episode
-gave no stream is `not_obtained` with why (`frame_failed`) and is asked again by the next read.
-The field `stream` of a row says how its stream comes: the playlist the line lists itself, or a parser of the application.
+is asked once, at the pace the read of a card keeps (`ROWS_PER_SECOND`); a row the last table measured on itself
+(`frame: measured`) keeps its frame and is not asked again, so a read after the first one asks only the episodes that are
+new. A row whose episode gave no stream is `not_obtained` with the cause the host or the application gave, and is asked
+again by the next read. The field `stream` of a row says how its stream comes: the playlist the line lists itself, or a
+parser of the application.
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 from urllib.parse import urlsplit
 
 from core.contracts import RowState, TableRow
@@ -29,6 +33,8 @@ from ...apps.app99 import AppError
 from ...players.app_lines import AppPlayer
 from .. import PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError, TableDraft
 from ..recent import last_of_each
+
+logger = logging.getLogger("sources")
 
 # The pace the owner asked of the read of a card: a card of thousands of episodes is measured in minutes.
 ROWS_PER_SECOND = 25
@@ -97,16 +103,22 @@ class AppSite:
         ctx.progress(PHASE_RELEASE, 1, 1)
         players = {str(each.get("code") or key): each for key, each in (system.get("player") or {}).items()
                    if isinstance(each, dict)}
-        lines = []
+        lines, passed = [], []
         for code, items in lines_of(data):
+            if not self.player.registry.admits(code):
+                passed.append(f"{code} ({self.player.registry.why_not(code)})")
+                continue
             shown = players.get(code, {})
-            line = self.player.line(code, str(shown.get("name") or code))
-            fields = {"line": code, "line_name": line.label, "line_type": shown.get("type"),
+            line = self.player.line(code)
+            fields = {"line": code, "line_name": str(shown.get("name") or ""), "line_type": shown.get("type"),
                       "parsers": str(shown.get("parseUrl") or ""),
                       "stream": "playlist" if shown.get("type") == 0 else "parser"}
             listed = last_of_each(items, lambda _item: code, ctx.recent)
             if listed:
                 lines.append((line, fields, listed))
+        if passed:
+            logger.info("приложение %s, карточка %s: линии не признаны и не читаются — %s", self.name, self._card(card_url),
+                        "; ".join(passed))
         frames = await self._frames(card_url, lines, ctx)
         rows: list[TableRow] = []
         for line, fields, listed in lines:

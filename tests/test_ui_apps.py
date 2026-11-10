@@ -79,7 +79,7 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
     await expect(source.locator(".source-app-card input")).to_have_value("app://banri/219017")
     await _pick(page, source.locator(".item-select").first, "серии 半日")
     await expect(source.locator(".source-state")).to_have_text(text("sources.state.ready"), timeout=60_000)
-    await expect(source.locator(".player-tab")).to_have_text(["蓝光1"])
+    await expect(source.locator(".player-tab")).to_have_text(["BLU1"])  # a line is named by its code
     # The search stays at hand in the sources: the card already added is marked by its place.
     sources = page.locator(".sources")
     await sources.locator(".source-mode .st-tab", has_text=text("sources.mode.apps")).click()

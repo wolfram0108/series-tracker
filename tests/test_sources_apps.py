@@ -5,6 +5,7 @@ through the parsers its line allows, and the search — against a model of the a
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 
 import httpx
@@ -17,7 +18,8 @@ from core.http_limits import BoundedTransport
 from modules.sources.apps import AppProfile, card_address, profiles_of
 from modules.sources.apps.app99 import App99Client, seal, signature, unseal
 from modules.sources.module import SourcesModule
-from modules.sources.players.app_lines import AppPlayer
+from modules.sources.apps.lines import LineRegistry
+from modules.sources.players.app_lines import AppPlayer, measure_file_frame
 from modules.sources.players.contract import Answer, Kind, Reading, StreamUnavailable
 from modules.sources.players.registry import PlayerRegistry
 from modules.sources.sites import ReadContext
@@ -52,7 +54,14 @@ def test_an_application_is_described_by_the_environment_and_a_value_that_is_not_
         profiles_of({"ST_APP_X": '{"host": "h"}'})
 
 
-# --- a world of the model and a CDN of playlists ------------------------------------------------------------------------
+# --- a world of the model and a CDN as the real one serves --------------------------------------------------------------
+
+# What the hosts of 半日 were seen to serve (the inventory of 2026-11-10): playlists announced as images, an MP4 announced
+# as a picture, a 403 with a page of HTML, a page instead of a video, an advertisement host that refuses the connection,
+# a redirect to the playlist.
+HTML = "<!DOCTYPE html><html><head><title>403 Forbidden</title></head></html>"
+MP4_HEAD = b"\0\0\0\x20ftypisom" + b"\0" * 5000
+
 
 def world(model: App99Model, playlists: dict[str, str] | None = None) -> tuple[httpx.AsyncClient, list[str]]:
     asked: list[str] = []
@@ -62,9 +71,26 @@ def world(model: App99Model, playlists: dict[str, str] | None = None) -> tuple[h
         if url.startswith(HOST):
             return model.handle(request)
         asked.append(url)
+        path = request.url.path
+        if path.startswith("/png/"):  # a playlist announced as a picture
+            return httpx.Response(200, headers={"Content-Type": "image/png"}, text=PLAYLIST)
+        if path.startswith("/jpeg/"):  # an MP4 announced as a picture, its range honoured
+            return httpx.Response(206, headers={"Content-Type": "image/jpeg"}, content=MP4_HEAD)
+        if path.startswith("/forbidden/"):
+            return httpx.Response(403, headers={"Content-Type": "text/html"}, text=HTML)
+        if path.startswith("/page/"):  # a page instead of the stream, with a status of success
+            return httpx.Response(200, headers={"Content-Type": "text/html"}, text="<html><body>Error 1020</body></html>")
+        if path.startswith("/moved/"):
+            return httpx.Response(302, headers={"Location": url.replace("/moved/", "/png/")})
+        if request.url.host == "ad.model":  # the host of an advertisement given instead of the episode
+            raise httpx.ConnectError("All connection attempts failed", request=request)
         text = (playlists or {}).get(url)
         return httpx.Response(200, text=text) if text is not None else httpx.Response(404, text="")
-    return httpx.AsyncClient(transport=httpx.MockTransport(handle)), asked
+    return httpx.AsyncClient(transport=BoundedTransport(httpx.MockTransport(handle))), asked
+
+
+def admitting(*codes: str, refused: dict[str, str] | None = None) -> LineRegistry:
+    return LineRegistry(frozenset(codes), refused or {})
 
 
 def card_world() -> App99Model:
@@ -80,7 +106,7 @@ def card_world() -> App99Model:
     return model
 
 
-async def test_a_card_is_a_table_of_every_line_in_its_order_each_row_with_the_frame_of_its_own_episode():
+async def test_a_card_is_a_table_of_its_admitted_lines_each_row_with_the_frame_of_its_own_episode(caplog):
     model = card_world()
     model.parses[(9, "CO4K_pv")] = f"{CDN}c/pv.m3u8"
     model.parses[(9, "CO4K_tok1")] = f"{CDN}d/1.m3u8"
@@ -93,36 +119,40 @@ async def test_a_card_is_a_table_of_every_line_in_its_order_each_row_with_the_fr
         heads.append(head.segment)
         return frames[head.segment.removeprefix(CDN).split("/")[0]]
 
+    registry = admitting("ffm3u8", "CO4K", refused={"co_egg": "419: stream — no parser"})
     async with http:
-        player = AppPlayer(App99Client(profile(), lambda: http), measure)
+        player = AppPlayer(App99Client(profile(), lambda: http), measure, registry=registry)
         players = PlayerRegistry([player])
         site = AppSite(player)
         assert site.match_url("app://banri/219017") and not site.match_url("app://other/219017")
         assert site.canonical_url("app://banri/219017/") == card_address("banri", "219017")
-        draft = await site.read("app://banri/219017", ReadContext(http, lambda *_: None))
+        with caplog.at_level("INFO", logger="sources"):
+            draft = await site.read("app://banri/219017", ReadContext(http, lambda *_: None))
 
         rows = [(row.key, row.player, row.player_label, row.text, row.state.value, row.heights) for row in draft.rows]
-        # Every row is measured on its own episode; a frame is never carried to another row of its line.
+        # Every row of an admitted line, measured on its own episode; a line is named by its code; a line the registry
+        # does not admit is no player, and the log of the read says which and why.
         assert rows == [
-            ("banri:ffm3u8:1", "banri:ffm3u8", "非凡（备用线路）", "第01集", "playable", [720]),
-            ("banri:ffm3u8:2", "banri:ffm3u8", "非凡（备用线路）", "第02集", "playable", [1080]),
-            ("banri:CO4K:1", "banri:CO4K", "4K", "1", "playable", [1080]),
-            ("banri:CO4K:2", "banri:CO4K", "4K", "2", "not_obtained", []),
-            ("banri:CO4K:3", "banri:CO4K", "4K", "《万界独尊》PV", "playable", [2160]),
-            ("banri:co_egg:1", "banri:co_egg", "花絮", "419", "not_obtained", []),
+            ("banri:ffm3u8:1", "banri:ffm3u8", "ffm3u8", "第01集", "playable", [720]),
+            ("banri:ffm3u8:2", "banri:ffm3u8", "ffm3u8", "第02集", "playable", [1080]),
+            ("banri:CO4K:1", "banri:CO4K", "CO4K", "1", "playable", [1080]),
+            ("banri:CO4K:2", "banri:CO4K", "CO4K", "2", "not_obtained", []),
+            ("banri:CO4K:3", "banri:CO4K", "CO4K", "《万界独尊》PV", "playable", [2160]),
         ]
+        assert [row.site_fields["line_name"] for row in draft.rows] == ["非凡（备用线路）"] * 2 + ["4K"] * 3
+        assert any("co_egg (419: stream — no parser)" in record.getMessage() for record in caplog.records)
         # A row whose episode gave no stream says why.
-        assert '"code":"app_no_parser"' in draft.rows[3].reason and '"code":"app_no_parser"' in draft.rows[5].reason
+        assert '"code":"app_no_parser"' in draft.rows[3].reason
         assert draft.names == ["万界独尊", "Ten Thousand Worlds"] and draft.title == "半日 · 万界独尊 (2021)"
-        # One ask a row: each episode once.
-        assert sorted(heads) == sorted(f"{CDN}{name}/{seg}" for name, seg in
-                                       (("a", "seg0.ts"), ("b", "seg0.ts"), ("c", "seg0.ts"), ("d", "seg0.ts")))
+        # One ask a row: each episode once; the refused line is not asked.
+        assert sorted(heads) == sorted(f"{CDN}{name}/seg0.ts" for name in "abcd")
         assert sorted(fields["url"] for path, fields in model.calls if path == "/app/vodParser") == \
             ["CO4K_pv", "CO4K_tok1", "CO4K_tok2"]
-        assert [row.site_fields["stream"] for row in draft.rows] == ["playlist"] * 2 + ["parser"] * 4
-        # The token is the application's own name of the video, found by the line's player name.
+        assert [row.site_fields["stream"] for row in draft.rows] == ["playlist"] * 2 + ["parser"] * 3
         assert players.video_of("banri:CO4K", draft.rows[2].link) == "CO4K_tok1"
         assert players.get("banri:CO4K") is player and "banri:CO4K" in players and "other:CO4K" not in players
+        assert [(line.name, line.label) for line in player.line_players()] == [("banri:CO4K", "CO4K"),
+                                                                               ("banri:ffm3u8", "ffm3u8")]
 
         # The next read keeps every frame the last table measured on its row: only the rows without one are asked again.
         parsed = len([1 for path, _fields in model.calls if path == "/app/vodParser"])
@@ -135,6 +165,16 @@ async def test_a_card_is_a_table_of_every_line_in_its_order_each_row_with_the_fr
         got = await player.stream(draft.rows[0].link, http, None, players.pacer)
         assert got == {"stream_url": f"{CDN}a/index.m3u8", "headers": {}, "progressive": False, "playlist": True}
         assert len(heads) == 4
+
+
+def test_the_registry_of_an_application_admits_its_lines_and_says_why_it_refused_the_others(tmp_path):
+    (tmp_path / "banri.json").write_text(json.dumps({"app": "banri", "admitted": {"CO4K": {}, "NBY": {}}, "refused": {
+        "ffm3u8": {"episode": "第01集", "step": "stream", "reason": "403"}}}), encoding="utf-8")
+    registry = LineRegistry.load("banri", str(tmp_path))
+    assert registry.admits("CO4K") and registry.admits("NBY") and not registry.admits("ffm3u8")
+    assert registry.why_not("ffm3u8") == "第01集: stream — 403"
+    assert "not admitted" in registry.why_not("ZZZ")
+    assert LineRegistry.load("other", str(tmp_path)).admitted == frozenset()
 
 
 async def test_a_card_of_many_episodes_is_measured_at_the_pace_of_twenty_to_thirty_rows_a_second():
@@ -156,7 +196,7 @@ async def test_a_card_of_many_episodes_is_measured_at_the_pace_of_twenty_to_thir
         return httpx.Response(200, text=PLAYLIST)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
-        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(1080))
+        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(1080), registry=admitting("BLU"))
         site = AppSite(player)
         began = time.monotonic()
         draft = await site.read("app://banri/1", ReadContext(http, lambda *_: None))
@@ -172,68 +212,69 @@ async def test_what_a_parser_gave_serves_the_download_within_the_hour_and_an_add
     http, _asked = world(model, served)
     now = [0.0]
     async with http:
-        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(1080), clock=lambda: now[0])
+        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(1080), clock=lambda: now[0],
+                           registry=admitting("CO4K"))
         players = PlayerRegistry([player])
         draft = await AppSite(player).read("app://banri/219017", ReadContext(http, lambda *_: None))
         parses = lambda: [fields["url"] for path, fields in model.calls if path == "/app/vodParser"].count("CO4K_tok1")
-        assert parses() == 1 and draft.rows[2].heights == [1080]
+        assert parses() == 1 and draft.rows[0].heights == [1080]
         # The download within the hour takes the address the read parsed.
         now[0] = 3599.0
-        got = await player.stream(draft.rows[2].link, http, None, players.pacer)
+        got = await player.stream(draft.rows[0].link, http, None, players.pacer)
         assert got["stream_url"] == f"{CDN}d/1.m3u8" and parses() == 1
         # Past the hour the episode is parsed again.
         now[0] = 3600.0
-        await player.stream(draft.rows[2].link, http, None, players.pacer)
+        await player.stream(draft.rows[0].link, http, None, players.pacer)
         assert parses() == 2
         # The host no longer serves the kept address: the episode is parsed anew, once, and the new address serves.
         del served[f"{CDN}d/1.m3u8"]
         model.parses[(9, "CO4K_tok1")] = f"{CDN}d/2.m3u8"
         served[f"{CDN}d/2.m3u8"] = PLAYLIST
-        got = await player.stream(draft.rows[2].link, http, None, players.pacer)
+        got = await player.stream(draft.rows[0].link, http, None, players.pacer)
         assert got["stream_url"] == f"{CDN}d/2.m3u8" and parses() == 3
 
 
-async def test_a_stream_is_a_file_or_a_playlist_by_what_its_host_serves_not_by_the_form_of_its_address():
-    """A parser gives a video at an address without an extension and a playlist at a script: the start of the answer
-    tells them; a host that ignores the range and announces a video is no playlist either, and nothing of it is held."""
-    model = card_world()
-    model.parses[(9, "CO4K_pv")] = f"{CDN}video/o8Sli"
-    model.parses[(9, "CO4K_tok1")] = f"{CDN}whole/qq"
-    model.parses[(9, "CO4K_tok2")] = f"{CDN}proxy.php?file=x"
-    asked: list[str] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        if str(request.url).startswith(HOST):
-            return model.handle(request)
-        asked.append(f"{request.url.path} {request.headers.get('Range', '')}")
-        if request.url.path == "/video/o8Sli":  # an MP4 that honours the range
-            return httpx.Response(206, content=b"\0\0\0\x20ftypisom" + b"\0" * 5000)
-        if request.url.path == "/whole/qq":  # an MP4 that ignores it and announces its whole length
-            return httpx.Response(200, headers={"Content-Length": str(600 * 1024 * 1024)}, content=b"\0" * 1024)
-        if request.url.path == "/proxy.php":
-            return httpx.Response(200, text=PLAYLIST)
-        return httpx.Response(404)
-
+async def test_a_stream_is_what_its_host_serves_by_its_signature_and_a_row_without_one_says_what_the_host_served():
+    """Neither the form of the address nor the type the host announces tells a stream: playlists come as `image/png`, an
+    MP4 as `image/jpeg`; a page, a status or a refused connection is no stream, and the row says which."""
+    model = App99Model(parsers=[9])
+    model.line("L", "线", parsers="9")
+    kinds = {"png": f"{CDN}png/1", "jpeg": f"{CDN}jpeg/2", "forbidden": f"{CDN}forbidden/3", "page": f"{CDN}page/4",
+             "ad": "https://ad.model/adVideoLp/5.mp4", "moved": f"{CDN}moved/6", "whole": f"{CDN}whole/7"}
+    model.cards[1] = Card(1, "万界独尊", lines=[Line("L", [(name, f"tok-{name}") for name in kinds])])
+    for name, address in kinds.items():
+        model.parses[(9, f"tok-{name}")] = address
+    http, asked = world(model)
     files: list[str] = []
 
     async def measure_file(address, _headers):
         files.append(address)
         return Answer(200, reading=Reading(Kind.PLAYABLE, 200, (1080,), files=((1080, address),)))
 
-    async with httpx.AsyncClient(transport=BoundedTransport(httpx.MockTransport(handle))) as http:
-        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(720), measure_file=measure_file)
+    async with http:
+        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(720), measure_file=measure_file,
+                           registry=admitting("L"))
         players = PlayerRegistry([player])
-        draft = await AppSite(player).read("app://banri/219017", ReadContext(http, lambda *_: None))
-        four = [row for row in draft.rows if row.player == "banri:CO4K"]
-        # Two files measured as files, the playlist of a script as a playlist: each row its own frame.
-        assert [row.heights for row in four] == [[1080], [720], [1080]]
-        assert sorted(files) == [f"{CDN}video/o8Sli", f"{CDN}whole/qq"]
-        assert "/video/o8Sli bytes=0-4095" in asked  # only the head of the file was asked
+        draft = await AppSite(player).read("app://banri/1", ReadContext(http, lambda *_: None))
+        got = {row.text: (row.state.value, row.heights, row.reason or "") for row in draft.rows}
+        assert got["png"][:2] == ("playable", [720]) and got["moved"][:2] == ("playable", [720])
+        assert got["jpeg"][:2] == ("playable", [1080]) and files == [f"{CDN}jpeg/2"]
+        assert got["forbidden"][:2] == ("not_obtained", []) and "answered 403" in got["forbidden"][2]
+        assert "served no stream" in got["page"][2] and "Error 1020" in got["page"][2]
+        assert "ConnectError" in got["ad"][2] and "ad.model" in got["ad"][2]
+        assert got["whole"][0] == "not_obtained"
+        assert f"{CDN}jpeg/2" in asked  # only the head of the file was asked, never the whole of it
 
-        got = await player.stream(four[0].link, http, None, players.pacer)
-        assert (got["stream_url"], got["progressive"], got["playlist"]) == (f"{CDN}whole/qq", True, False)
-        got = await player.stream(four[1].link, http, None, players.pacer)
-        assert (got["stream_url"], got["progressive"], got["playlist"]) == (f"{CDN}proxy.php?file=x", False, True)
+        jpeg = next(row for row in draft.rows if row.text == "jpeg")
+        assert (await player.stream(jpeg.link, http, None, players.pacer))["progressive"] is True
+        png = next(row for row in draft.rows if row.text == "png")
+        assert (await player.stream(png.link, http, None, players.pacer))["playlist"] is True
+
+
+async def test_a_file_ffprobe_cannot_open_says_what_ffprobe_said_not_that_it_holds_no_picture():
+    refused = await measure_file_frame("http://127.0.0.1:9/adVideoLp/1.mp4", {})
+    assert refused.reading.kind is Kind.NO_FILE
+    assert "refused" in refused.reading.message.lower() and "127.0.0.1:9/adVideoLp" not in refused.reading.message
 
 
 async def _height(value):
@@ -246,7 +287,7 @@ async def test_the_stream_of_an_episode_comes_from_the_parsers_its_line_allows_i
     model.parses[(9, "CO4K_tok1")] = f"{CDN}c/index.m3u8"
     http, _asked = world(model, {f"{CDN}c/index.m3u8": PLAYLIST})
     async with http:
-        player = AppPlayer(App99Client(profile(), lambda: http))
+        player = AppPlayer(App99Client(profile(), lambda: http), registry=admitting("CO4K"))
         players = PlayerRegistry([player])
         link = player.link_of("app://banri/219017", "CO4K", "CO4K_tok1")
         got = await player.stream(link, http, None, players.pacer)

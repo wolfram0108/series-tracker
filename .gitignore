@@ -47,3 +47,6 @@ graphify-out/
 # Raw site answers of mission stages carry signed stream links and player tokens.
 docs/missions/voice-alignment/stage-10/raw/*
 !docs/missions/voice-alignment/stage-10/raw/MANIFEST.md
+
+# Raw answers of real services (collectors): not for a public repository
+data/

@@ -72,7 +72,7 @@ async def test_every_row_of_every_kind_of_source_has_the_frame_of_its_own_episod
             assert order["player_labels"].get(row["player"]), (url, row["player"])
         # Condition 2: the frame of each row is the frame of its own episode, never one carried from another row.
         assert got == frames, (url, got)
-    assert order["player_labels"]["banri:BLU"] == "半日 · 蓝光"
+    assert order["player_labels"]["banri:BLU"] == "BLU"  # a line of an application is named by its code
     # Obligation 3 for every player a row can be of, whether a table of the stand holds one or not.
     for player in sources.players:
         if not getattr(player, "lines", False):

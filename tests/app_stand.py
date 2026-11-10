@@ -183,6 +183,11 @@ class Site:
         # A video application (tests/app99_model.py): its cards list a line of a parser whose streams are on the host.
         self.app = App99Model(parsers=[9])
         self.app.line("BLU", "蓝光", parsers="9")
+        # The registry of the admitted lines of the application of the stand: its one line is a player.
+        self.app_lines = os.path.join(root, "app-lines")
+        os.makedirs(self.app_lines, exist_ok=True)
+        with open(os.path.join(self.app_lines, "banri.json"), "w", encoding="utf-8") as registry:
+            json.dump({"app": "banri", "admitted": {"BLU": {}}, "refused": {}}, registry)
 
     def title(self, number: int) -> Title:
         return self.titles.setdefault(number, Title(number))
@@ -410,7 +415,8 @@ class AppStand:
         self.db = Database(self.db_path)
         self.gateway, self.modules = assemble(self.bus, self.db, Options(
             db_path=self.db_path, auth_required=False, cookie_secure=False,
-            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now, apps=[app_profile()]))
+            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now, apps=[app_profile()],
+            app_lines_dir=self.site.app_lines))
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()
         self.module("sources")._http = self.site.web().client()

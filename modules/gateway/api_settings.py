@@ -185,7 +185,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return {"success": True}
         reply = await gw.request("settings.value.get",
                                  {"key": "yt_dlp_concurrent_fragments"})
-        return {"value": int(reply.get("value") or 6)}
+        return {"value": int(reply.get("value") or 16)}
 
     @route_per_method(r, "/api/settings/saved_paths", methods=["GET", "POST", "DELETE"],
                       response_model=DynamicObject)

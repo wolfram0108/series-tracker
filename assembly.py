@@ -51,6 +51,9 @@ class Options:
     table_clock: Callable[[], datetime] = utc_now
     # The video applications read through their APIs (modules/sources/apps), from the private environment.
     apps: list = field(default_factory=list)
+    # Where the registries of the admitted lines of the applications are (modules/sources/apps/lines.py); the package's own
+    # folder when None.
+    app_lines_dir: str | None = None
 
 
 def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, list]:
@@ -67,7 +70,8 @@ def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, l
         RulesModule(bus, db),
         TrackerauthModule(bus, db),
         SourcesModule(bus, db, read_recent=options.read_recent, torrent_cache_dir=options.torrent_cache_dir,
-                      table_clock=options.table_clock, apps=options.apps),
+                      table_clock=options.table_clock, apps=options.apps,
+                      app_lines_dir=options.app_lines_dir),
         MetadataModule(bus, db),
         LibraryModule(bus, db),
         # scan/downloads/renaming — после catalog/settings/sources/rules: их reconcile при старте шлёт запросы соседям.
