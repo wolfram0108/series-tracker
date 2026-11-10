@@ -57,6 +57,8 @@ class BoundedTransport(httpx.AsyncBaseTransport):
         await self._inner.aclose()
 
 
-def bounded_client(**options) -> httpx.AsyncClient:
-    """A client of the service whose answers are read whole: every answer under the ceiling."""
-    return httpx.AsyncClient(transport=BoundedTransport(), **options)
+def bounded_client(*, limits: httpx.Limits | None = None, **options) -> httpx.AsyncClient:
+    """A client of the service whose answers are read whole: every answer under the ceiling. `limits` are the
+    connections it opens and keeps (httpx keeps 20 by default)."""
+    inner = httpx.AsyncHTTPTransport(limits=limits) if limits is not None else None
+    return httpx.AsyncClient(transport=BoundedTransport(inner), **options)

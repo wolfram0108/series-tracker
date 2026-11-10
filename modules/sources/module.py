@@ -100,12 +100,20 @@ from .players.registry import PlayerRegistry
 from .players.streams import resolve_stream
 from .sites import Site, SiteError, SiteRegistry
 from .sites.apps import AppSite
+from .sites.apps.site import ROWS_IN_FLIGHT
 from .sites.builtin import builtin_sites
 from .table import TableReader, utc_now
 
 REQUEST_MIN_INTERVAL = 3.0  # секунд между запросами к одному трекеру
 VK_API_BASE = "https://api.vk.com/method/"
 
+
+# The connections the client of the sources opens and keeps open between requests. A read of a card of an application
+# has up to ROWS_IN_FLIGHT rows going, each one request at a time: kept as many, a row asks over an open connection
+# instead of a new TCP and TLS handshake (measured on 半日: a row 5.2 s with the 20 httpx keeps, 2.8 s with 100), and as
+# many again are left to the reads of the other sources going at the same time.
+CONNECTIONS = httpx.Limits(max_connections=2 * ROWS_IN_FLIGHT, max_keepalive_connections=2 * ROWS_IN_FLIGHT,
+                           keepalive_expiry=30.0)
 
 class SourcesModule(BaseModule):
     name = "sources"
@@ -175,7 +183,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.players.list", self.on_players_list)
 
     async def on_start(self) -> None:
-        self._http = bounded_client(timeout=20.0, follow_redirects=True)
+        self._http = bounded_client(timeout=20.0, follow_redirects=True, limits=CONNECTIONS)
         # Браузерный пул (astar/anilibria_tv) поднимается ЛЕНИВО при
         # первом обращении — на стенде без этих трекеров firefox не
         # запускается (находка 14: один браузер на модуль, а не на скан).

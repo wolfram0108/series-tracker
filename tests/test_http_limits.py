@@ -46,5 +46,8 @@ async def test_the_client_the_sources_read_their_answers_with_has_the_ceiling(tm
     await sources.on_start()
     try:
         assert isinstance(sources._http._transport, BoundedTransport)
+        # It keeps open as many connections as it has requests going, not the 20 of httpx.
+        pool = sources._http._transport._inner._pool
+        assert pool._max_keepalive_connections == pool._max_connections >= 100
     finally:
         await sources._http.aclose()
