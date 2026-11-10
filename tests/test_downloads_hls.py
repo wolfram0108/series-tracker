@@ -120,3 +120,52 @@ async def test_a_refused_segment_is_never_skipped_the_download_fails_and_leaves_
         assert os.listdir(tmp_path / "lib") == []
     finally:
         host.close()
+
+
+AD = ("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:11\n#EXT-X-MEDIA-SEQUENCE:0\n"
+      "#EXTINF:10.0,\nhttps://omts.cdn/v/abc/1.ts\n#EXTINF:10.0,\nhttps://omts.cdn/v/abc/2.ts\n"
+      "#EXT-X-DISCONTINUITY\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://ads.cdn/k.key\"\n"
+      "#EXTINF:3.0,\nhttps://ads.cdn/20260912/x/1000kb/hls/a1.ts\n#EXTINF:3.0,\nhttps://ads.cdn/20260912/x/1000kb/hls/a2.ts\n"
+      "#EXT-X-DISCONTINUITY\n#EXTINF:10.0,\nhttps://omts.cdn/v/abc/3.ts\n#EXT-X-ENDLIST\n")
+
+
+def test_a_block_a_host_put_into_the_stream_from_elsewhere_is_left_out_and_the_stream_keeps_its_own_key():
+    kept, dropped = hls_native.without_insertions(AD, "https://omts.cdn/v/abc/index.m3u8")
+    assert dropped == [hls_native.Insertion("ads.cdn/20260912/x/1000kb/hls", 2, 6.0)]
+    assert "ads.cdn" not in kept and [line for line in kept.splitlines() if line.endswith(".ts")] == \
+        ["https://omts.cdn/v/abc/1.ts", "https://omts.cdn/v/abc/2.ts", "https://omts.cdn/v/abc/3.ts"]
+    # The advertisement set a key of its own: the stream after it is told again it has none.
+    assert "#EXT-X-KEY:METHOD=NONE" in kept and kept.index("#EXT-X-KEY:METHOD=NONE") < kept.index("abc/3.ts")
+    _manifest, seconds, _longest = hls_native.absolute(kept, "https://omts.cdn/v/abc/index.m3u8")
+    assert seconds == 30.0 and kept.splitlines()[:4] == AD.splitlines()[:4] and kept.rstrip().endswith("#EXT-X-ENDLIST")
+    # A discontinuity within the stream's own segments is no insertion.
+    own = AD.replace("https://ads.cdn/20260912/x/1000kb/hls/", "https://omts.cdn/v/abc/")
+    assert hls_native.without_insertions(own, "https://omts.cdn/v/abc/index.m3u8") == (own, [])
+
+
+async def test_a_playlist_with_an_advertisement_put_into_it_is_downloaded_without_it(tmp_path):
+    host = Host(str(tmp_path / "site"))
+    try:
+        name = stream(str(tmp_path / "site"))
+        ad = os.path.join(str(tmp_path / "site"), "ad")
+        os.makedirs(ad)
+        source = os.path.join(ad, "source.mp4")
+        Codec().make(source, [9, 9])
+        _run("-i", source, "-vf", "scale=320:240", "-c:v", "libx264", "-preset", "ultrafast", "-g", "4", "-c:a", "aac",
+             "-f", "hls", "-hls_time", "1", "-hls_playlist_type", "vod", "-hls_segment_filename",
+             os.path.join(ad, "a%d.ts"), os.path.join(ad, "ad.m3u8"))
+        media = os.path.join(str(tmp_path / "site"), "show", "media.m3u8")
+        with open(media) as found:
+            lines = found.read().splitlines()
+        at = lines.index("seg2.ts") - 1  # the #EXTINF of the third segment
+        inserted = ["#EXT-X-DISCONTINUITY", "#EXTINF:1.0,", host.url("ad/a0.ts"), "#EXTINF:1.0,", host.url("ad/a1.ts"),
+                    "#EXT-X-DISCONTINUITY"]
+        with open(media, "w") as written:
+            written.write("\n".join(lines[:at] + inserted + lines[at:]) + "\n")
+        out = str(tmp_path / "lib" / "e1.mp4")
+        ok, why = await ytdlp.download(host.url(name), out, noop, playlist=True, threads=4)
+        assert ok, why
+        assert float(probe(out)["format"]["duration"]) == pytest.approx(4, abs=0.5), "the advertisement is not in the file"
+        assert not any(served.startswith("ad/") for served in host.served), "nothing of the advertisement was asked"
+    finally:
+        host.close()

@@ -3,21 +3,24 @@ the playlist (a host that refuses the requests of yt-dlp gives it to us), the va
 highest bandwidth, is taken, its addresses made absolute and the playlist saved on disk; the native HLS downloader of
 yt-dlp then fetches its segments from that file (modules/downloads/hls_worker.py) in a process of its own.
 
-The playlist must be whole (#EXT-X-ENDLIST) and its encryption one that is decrypted (none or AES-128). The length of the
-stream is the sum of the durations it states, and a file may fall short of it by up to the longest segment.
+The playlist must be whole (#EXT-X-ENDLIST) and its encryption one that is decrypted (none or AES-128). A block a host put
+into the stream from elsewhere (an advertisement) is left out of the playlist saved (`without_insertions`). The length of
+the stream is the sum of the durations it states, and a file may fall short of it by up to the longest segment.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import posixpath
 import re
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -26,6 +29,7 @@ from core.http_limits import bounded_client
 from core.proc import exited, spawn, stop
 
 ProgressCb = Callable[[dict], Awaitable[None]]
+logger = logging.getLogger("downloads")
 
 REQUEST_TIMEOUT_S = 30.0
 # A worker that prints nothing for this long is stuck (a fragment is retried well within it).
@@ -91,6 +95,77 @@ def absolute(text: str, base: str) -> tuple[str, float, float]:
     return "\n".join(out) + "\n", seconds, longest
 
 
+@dataclass(frozen=True)
+class Insertion:
+    """A block of segments the host put into the stream from elsewhere (an advertisement): where from, how many, how long."""
+    origin: str
+    segments: int
+    seconds: float
+
+
+# The tags that belong to the segment after them (a tag of the whole playlist comes before the first of them).
+_SEGMENT_TAGS = ("#EXTINF", "#EXT-X-KEY", "#EXT-X-MAP", "#EXT-X-BYTERANGE", "#EXT-X-DISCONTINUITY",
+                 "#EXT-X-PROGRAM-DATE-TIME")
+
+
+def _origin(address: str) -> str:
+    split = urlsplit(address)
+    return f"{split.hostname}{posixpath.dirname(split.path)}"
+
+
+def without_insertions(text: str, base: str) -> tuple[str, list[Insertion]]:
+    """A media playlist without the blocks a host put into it from elsewhere.
+
+    The stream is cut by #EXT-X-DISCONTINUITY into blocks; the origin of the stream (the host and folder of its segments)
+    is the one that holds most of its length; a block every segment of which comes from another origin is an insertion
+    and is not part of the episode (a CDN puts its advertisement into the playlist so, in another place at every answer).
+    A key a dropped block set is not left to the blocks after it: the key before it is set again."""
+    head, blocks, unit, started = [], [[]], [], False
+    for line in (each.strip() for each in text.splitlines()):
+        if not line:
+            continue
+        is_segment = not line.startswith("#")
+        if not started and not is_segment and not line.startswith(_SEGMENT_TAGS):
+            head.append(line)
+            continue
+        started = True
+        if line.startswith("#EXT-X-DISCONTINUITY") and not line.startswith("#EXT-X-DISCONTINUITY-SEQUENCE"):
+            blocks.append([])
+        unit.append(line)
+        if is_segment:
+            blocks[-1].append(unit)
+            unit = []
+    tail = unit
+    durations: dict[str, float] = {}
+    for block in blocks:
+        for each in block:
+            seconds = next((float(tag.split(":", 1)[1].split(",")[0] or 0) for tag in each if tag.startswith("#EXTINF:")), 0.0)
+            origin = _origin(urljoin(base, each[-1]))
+            durations[origin] = durations.get(origin, 0.0) + seconds
+    if not durations:
+        return text, []
+    own = max(durations, key=durations.get)
+    out, dropped, key, lost_key = list(head), [], None, None
+    for block in blocks:
+        origins = {_origin(urljoin(base, each[-1])) for each in block}
+        if block and own not in origins:
+            seconds = sum(float(tag.split(":", 1)[1].split(",")[0] or 0) for each in block for tag in each
+                          if tag.startswith("#EXTINF:"))
+            dropped.append(Insertion(", ".join(sorted(origins)), len(block), round(seconds, 1)))
+            if any(tag.startswith("#EXT-X-KEY:") for each in block for tag in each):
+                lost_key = key or "#EXT-X-KEY:METHOD=NONE"
+            continue
+        for index, each in enumerate(block):
+            tags = [tag for tag in each if not (tag.startswith("#EXT-X-DISCONTINUITY") and not out[len(head):])]
+            if index == 0 and lost_key is not None and not any(tag.startswith("#EXT-X-KEY:") for tag in tags):
+                tags.insert(0, lost_key)
+            lost_key = None
+            key = next((tag for tag in reversed(tags) if tag.startswith("#EXT-X-KEY:")), key)
+            out += tags
+    out += tail
+    return ("\n".join(out) + "\n", dropped) if dropped else (text, [])
+
+
 async def snapshot(url: str, headers: dict, path: str) -> Snapshot:
     """The playlist of the stream read by our client and saved next to the file it becomes (`<path>.download.m3u8`)."""
     async with bounded_client(follow_redirects=True, timeout=REQUEST_TIMEOUT_S) as http:
@@ -111,6 +186,10 @@ async def snapshot(url: str, headers: dict, path: str) -> Snapshot:
             base = max(variants)[2]
         else:
             raise PlaylistError("плейлист: вложенность вариантов глубже четырёх")
+    text, dropped = without_insertions(text, base)
+    for each in dropped:
+        logger.warning("%s: из потока вырезана вставка с %s — %d сегм., %.1f с", os.path.basename(path), each.origin,
+                       each.segments, each.seconds)
     manifest, seconds, longest = absolute(text, base)
     file = path + ".download.m3u8"
     await storage.call(_write, file, manifest, owns=file)
