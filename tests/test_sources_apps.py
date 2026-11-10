@@ -226,12 +226,21 @@ async def test_what_a_parser_gave_serves_the_download_within_the_hour_and_an_add
         now[0] = 3600.0
         await player.stream(draft.rows[0].link, http, None, players.pacer)
         assert parses() == 2
+        # The term is the module's: two hours keep the address parsed now for two hours.
+        player.term.hours = 2
+        now[0] = 3600.0 + 7199.0
+        await player.stream(draft.rows[0].link, http, None, players.pacer)
+        assert parses() == 2
+        now[0] = 3600.0 + 7200.0
+        await player.stream(draft.rows[0].link, http, None, players.pacer)
+        assert parses() == 3
+        player.term.hours = 1
         # The host no longer serves the kept address: the episode is parsed anew, once, and the new address serves.
         del served[f"{CDN}d/1.m3u8"]
         model.parses[(9, "CO4K_tok1")] = f"{CDN}d/2.m3u8"
         served[f"{CDN}d/2.m3u8"] = PLAYLIST
         got = await player.stream(draft.rows[0].link, http, None, players.pacer)
-        assert got["stream_url"] == f"{CDN}d/2.m3u8" and parses() == 3
+        assert got["stream_url"] == f"{CDN}d/2.m3u8" and parses() == 4
 
 
 async def test_a_stream_is_what_its_host_serves_by_its_signature_and_a_row_without_one_says_what_the_host_served():

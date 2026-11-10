@@ -171,6 +171,19 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                  {"key": "max_parallel_downloads"})
         return {"value": int(reply.get("value") or 2)}
 
+    @route_per_method(r, "/api/settings/sources_term", methods=["GET", "POST"], response_model=DynamicObject,
+                      responses=_ERR1)
+    async def sources_term(request: Request):
+        """The term of what the sources answered, whole hours (sources, term.py): {value} both ways; a value the sources
+        refuse is 400 with its reason."""
+        if request.method == "POST":
+            data = await request.json()
+            reply = await gw.request("sources.term.set", {"hours": data.get("value")})
+            if not reply.get("ok"):
+                return JSONResponse({"error": reply["reason"]}, status_code=400)
+            return {"success": True, "value": reply["hours"]}
+        return {"value": (await gw.request("sources.term.get", {}))["hours"]}
+
     @route_per_method(r, "/api/settings/concurrent_fragments",
                       methods=["GET", "POST"], response_model=DynamicObject)
     async def concurrent_fragments(request: Request):

@@ -1,4 +1,4 @@
-"""The tables of site pages: one table per page, one read per page at a time, a term of one hour.
+"""The tables of site pages: one table per page, one read per page at a time, within the term of the module (term.py).
 
 A page is read by exactly one task. Every other request for it is answered "reading" and waits for the event of that
 task (`ready` or `failed`); nothing waits on a clock. A table reaches consumers only when it is complete, and while a
@@ -28,13 +28,11 @@ from core.reasons import describe, reason
 from .players.registry import PlayerRegistry
 from .repository import SourcesRepository, Stored
 from .sites import ReadContext, Site, SiteError, SiteRegistry
+from .term import Term
 
 PROGRESS_TOPIC = "sources.table.progress"
 READY_TOPIC = "sources.table.ready"
 FAILED_TOPIC = "sources.table.failed"
-
-# The term of a table is a requirement (a page is not read again within the hour); it is the subject of the task.
-TABLE_TERM = timedelta(hours=1)
 
 Publish = Callable[[str, dict], None]
 
@@ -65,9 +63,10 @@ class TableReader:
 
     def __init__(self, repo: SourcesRepository, sites: SiteRegistry, publish: Publish,
                  http: Callable[[], httpx.AsyncClient], *, players: PlayerRegistry, clock: Callable[[], datetime] = utc_now,
-                 term: timedelta = TABLE_TERM, safeguard_s: float = TABLE_READ_S, recent: int | None = None) -> None:
+                 term: Term | None = None, safeguard_s: float = TABLE_READ_S, recent: int | None = None) -> None:
         self._repo, self._sites, self._publish, self._http, self._players = repo, sites, publish, http, players
-        self._clock, self._term, self._safeguard_s, self._recent = clock, term, safeguard_s, recent
+        self._clock, self._safeguard_s, self._recent = clock, safeguard_s, recent
+        self._term = term if term is not None else Term()
         self._log = get_logger("sources")
         self._reading: dict[str, asyncio.Task] = {}
         self._cancelled: set[str] = set()  # the pages whose read the user stopped: a verdict, unlike a stop of the process
@@ -164,7 +163,7 @@ class TableReader:
         except (TypeError, ValueError):
             return False
         # A table "from the future" means the clock moved back: it is not trusted.
-        return timedelta(0) <= age < self._term
+        return timedelta(0) <= age < self._term.delta
 
     def _stamp(self) -> str:
         return self._clock().astimezone(timezone.utc).isoformat()

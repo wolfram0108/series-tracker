@@ -78,6 +78,19 @@ async function saveNum(path: string, value: string, label: string) {
   if (ok !== null) toast.add({ severity: "info", summary: label, detail: String(n), life: 2000 })
 }
 
+// --- срок актуальности опроса источников (sources, term.py; GET/POST → {value}) ----
+const sourcesTerm = ref("1")
+
+async function saveSourcesTerm() {
+  const saved = (await request(
+    api.POST("/api/settings/sources_term" as never, { body: { value: sourcesTerm.value.trim() } } as never),
+  )) as { value?: number } | null
+  if (saved !== null) {
+    toast.add({ severity: "info", summary: t("debug.sourcesTerm.label"), detail: String(saved.value), life: 2000 })
+  }
+  sourcesTerm.value = await loadNum("/api/settings/sources_term", 1)
+}
+
 // сохранённые пути
 interface SavedPath { id: number; path: string }
 const paths = ref<SavedPath[]>([])
@@ -168,6 +181,7 @@ onMounted(async () => {
   conformClear.value = await loadFlag("/api/settings/conform_clear_finished")
   parallelDownloads.value = await loadNum("/api/settings/parallel_downloads", 2)
   concurrentFragments.value = await loadNum("/api/settings/concurrent_fragments", 6)
+  sourcesTerm.value = await loadNum("/api/settings/sources_term", 1)
 })
 </script>
 
@@ -234,6 +248,10 @@ onMounted(async () => {
               class="num-input"
               @change="saveNum('/api/settings/concurrent_fragments', concurrentFragments, 'Потоков на загрузку')"
             />
+          </div>
+          <div class="num-field" :title="t('debug.sourcesTerm.hint')">
+            <span>{{ t("debug.sourcesTerm.label") }}</span>
+            <InputText v-model="sourcesTerm" inputmode="numeric" class="num-input" @change="saveSourcesTerm" />
           </div>
         </div>
       </div>

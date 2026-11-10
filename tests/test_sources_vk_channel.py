@@ -16,6 +16,7 @@ from modules.sources.players.registry import PlayerRegistry
 from modules.sources.sites import PHASE_VIDEOS, ReadContext, SiteError
 from modules.sources.sites.vk_channel import VkChannelSite
 from modules.sources.sites.vk_channel import site as channel_site
+from modules.sources.term import Term
 from modules.sources.sites.vk_channel.api import (PAGE_SIZE, dedupe, error_code_of, heights_of, is_external,
                                                    keep_by_terms, parse_address)
 from schema_db import migrated
@@ -318,11 +319,25 @@ async def test_the_tables_of_one_channel_share_its_listing_within_the_hour_and_l
     run = Run(api, clock=clock)
 
     first = await run.read(f"{CHANNEL}|противостояние")
-    clock.now += channel_site.LISTING_TERM_S - 1
+    clock.now += run.site.term.seconds - 1
     other = await run.read(f"{CHANNEL}|другое аниме")
     assert len(api.asked("video.get")) == 3 and len(api.asked("utils.resolveScreenName")) == 1
     assert len(first.rows) == 83 and len(other.rows) == 167
 
+    clock.now += 1
+    await run.read(f"{CHANNEL}|противостояние")
+    assert len(api.asked("video.get")) == 6
+
+
+async def test_the_listing_of_a_channel_serves_within_the_term_the_module_gives_its_sites():
+    api, clock = Api(), Clock()
+    run = Run(api, clock=clock)
+    term = Term(5)
+    run.site.configure(term=term)
+    await run.read(f"{CHANNEL}|противостояние")
+    clock.now += 5 * 3600 - 1
+    await run.read(f"{CHANNEL}|противостояние")
+    assert len(api.asked("video.get")) == 3
     clock.now += 1
     await run.read(f"{CHANNEL}|противостояние")
     assert len(api.asked("video.get")) == 6

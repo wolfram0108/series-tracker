@@ -16,6 +16,7 @@ from core import BaseModule, Bus
 from core.contracts import ReleaseTable, RowState, RowVoice, TableGetRequest, TableRow, UnreadPart
 from core.db import Database
 from core.reasons import parse, reason
+from modules.settings import SettingsModule
 from modules.sources.module import SourcesModule
 from modules.sources.repository import SourcesRepository
 from modules.sources.sites import ReadContext, SiteError, SiteRegistry, TableDraft, on_domain
@@ -209,6 +210,35 @@ async def test_a_page_asked_after_the_hour_is_read_again_and_the_old_table_serve
     assert fresh["state"] == "ready"
     assert [each["text"] for each in fresh["table"]["rows"]] == ["Серия 1 (чтение 2)", "Серия 2 (чтение 2)"]
     assert len(system.site.reads) == 2
+
+
+async def test_the_term_of_a_table_is_the_setting_of_the_owner_kept_over_a_start_and_a_value_out_of_it_is_refused(
+        db_path, tmp_path):
+    """The term is the setting `sources_term_hours` (whole hours from one, an hour by default): a table within it serves
+    as it is, past it the page is read again; the stored setting is the term after a start."""
+    bus = Bus()
+    settings = SettingsModule(bus, Database(str(db_path)))
+    await settings.start()
+    system = await build(db_path, tmp_path / "cache", bus=bus)
+    try:
+        assert await system.probe.request("sources.term.get", {}) == {"hours": 1}
+        for wrong in ("0", "1.5", "час", None):
+            refused = await system.probe.request("sources.term.set", {"hours": wrong})
+            assert (refused["ok"], refused["hours"], parse(refused["reason"])["code"]) == (False, 1, "sources_term_invalid")
+        assert await system.probe.request("sources.term.set", {"hours": "3"}) == {"ok": True, "hours": 3}
+        await system.get()
+        await system.next(system.ready)
+        system.clock.advance(hours=2, minutes=59)
+        assert (await system.get())["state"] == "ready" and len(system.site.reads) == 1
+        system.clock.advance(minutes=1)
+        assert (await system.get())["state"] == "reading"
+        await system.next(system.ready)
+        await system.stop()
+        system = await build(db_path, tmp_path / "cache", system.site, clock=system.clock, bus=bus)
+        assert await system.probe.request("sources.term.get", {}) == {"hours": 3}
+    finally:
+        await system.stop()
+        await settings.stop()
 
 
 async def test_each_page_has_its_own_term(system):

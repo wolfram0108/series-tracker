@@ -9,7 +9,7 @@ and last episode were downloaded whole and read back. Its player is `<applicatio
 the name the application gives the line is a field of its rows.
 
 The link of a row is the card with the line and the token in its fragment; the token is the application's own name of the
-video. The address a parser gave serves the asks of the episode for an hour (`PARSE_TERM_S`); an address no longer served
+video. The address a parser gave serves the asks of the episode within the term of the module (term.py); an address no longer served
 is parsed anew, once. What an address serves is told by the start of the answer, not by the form of the address nor by
 the type the host announces (hosts serve playlists as `image/png` and MP4 as `image/jpeg`): `#EXTM3U` is a playlist, the
 signature of a container (MP4, MPEG transport stream, Matroska, FLV) is a file, anything else is no stream, and the row
@@ -34,6 +34,7 @@ from ..apps import SCHEME
 from ..apps.app99 import AppError, App99Client
 from ..apps.lines import LineRegistry
 from ..policy import settle
+from ..term import Term
 from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
 from .hls import MEASURE_TIMEOUT_S, Measure, is_playlist, measure_head, measured
 from .http import USER_AGENT
@@ -41,9 +42,6 @@ from .vk_files import pick_file
 
 logger = logging.getLogger("sources")
 
-# What a parser gave serves the asks of the episode for an hour (the owner's term): the download of an episode the read
-# of its card measured takes the same address instead of a parse of its own.
-PARSE_TERM_S = 3600.0
 # Enough of the start of an answer to tell a playlist from a file by its signature.
 PEEK_BYTES = 4096
 _DIRECT = re.compile(r"\.(m3u8|mp4)(?:$|\?)", re.I)
@@ -122,14 +120,16 @@ class AppPlayer:
 
     def __init__(self, client: App99Client, measure: Measure | None = None,
                  measure_file: Callable[[str, dict[str, str]], Awaitable[Answer]] | None = None, *,
-                 registry: LineRegistry | None = None, clock: Callable[[], float] = time.monotonic) -> None:
+                 registry: LineRegistry | None = None, clock: Callable[[], float] = time.monotonic,
+                 term: Term | None = None) -> None:
         self.client = client
         self.name, self.label = client.profile.name, client.profile.label
         self.registry = registry if registry is not None else LineRegistry.load(self.name)
         self._measure = measure or measure_head
         self._measure_file = measure_file or measure_file_frame
         self._clock = clock
-        # (line, token) -> (address a parser gave, when): what was parsed serves the asks of the episode within the hour.
+        self.term = term if term is not None else Term()
+        # (line, token) -> (address a parser gave, when): what was parsed serves the asks of the episode within the term.
         self._parsed: dict[tuple[str, str], tuple[str, float]] = {}
 
     # --- the link of a row ------------------------------------------------------------------------------------
@@ -180,13 +180,13 @@ class AppPlayer:
 
     def _kept(self, line: str, item: str) -> str | None:
         found = self._parsed.get((line, item))
-        if found is None or self._clock() - found[1] >= PARSE_TERM_S:
+        if found is None or self._clock() - found[1] >= self.term.seconds:
             return None
         return found[0]
 
     async def address(self, line: str, item: str) -> str:
         """The address of the stream of an episode: the token itself when it is one, the address a parser gave for it
-        within the hour, else what the parsers the line allows make of it now, the first that gives an address; each
+        within the term, else what the parsers the line allows make of it now, the first that gives an address; each
         refusal is in the log."""
         player = await self._player_of(line)
         if item.startswith(("http://", "https://")) and (player.get("type") == 0 or _DIRECT.search(item)):

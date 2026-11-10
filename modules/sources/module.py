@@ -11,7 +11,7 @@ Queries:
 
 Tables of site pages (the one way to read a site page; sites are registered in `sites`, the core is `table.py`):
   sources.table.get {url, refresh?} → TableGetReply {url, state: ready | reading | failed | absent,
-                                   table?, reason?}. A complete table younger than an hour is `ready`. Otherwise the page is read — by one
+                                   table?, reason?}. A complete table within the term (term.py) is `ready`. Otherwise the page is read — by one
                                    task however many ask — and the reply is `reading` at once, with the last
                                    complete table when there is one; the end comes as the events below.
                                    `failed` in the reply means no read began (`site_not_found`: no site for the
@@ -44,12 +44,18 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    or the reason it gave none. A card picked is a source by its address
                                    `app://<application>/<card>`; its table is every episode of every line of the card,
                                    a row of the player `<application>:<line>` (players/app_lines.py)
+  sources.term.get {} → {hours}: the term of what the sources answered (term.py), whole hours
+  sources.term.set {hours} → {ok, hours, reason?}: a whole number of hours from one is stored (`sources_term_hours` of the
+                                   settings) and is the term of every reader of the module at once; any other value is
+                                   refused (`sources_term_invalid`) and the term stays
 Events (owner: sources):
   sources.table.progress {url, phase, current, total}   how far a read is
   sources.table.ready {url, read_at}                    a complete table is stored and served
   sources.settings.changed SourcesSettingsView          the mirrors of a tracker were saved: every open settings
                                                         screen shows them without asking back
   sources.table.failed {url, reason}                    the read failed; the last complete table still serves
+Events in: settings.changed {key: sources_term_hours} — the term of what the sources answered (term.py): the tables of
+pages, the listings of VK channels and the addresses parsers of applications gave are current for that many hours.
 A failed read is not retried by itself and a consumer does not ask again on `failed`: the next request after a
 failure begins a new read. Only a complete table is ever published. A stop in the middle of a read is no verdict:
 the state `reading` is stored and `on_start` begins the read again.
@@ -94,6 +100,7 @@ from .apps.lines import LineRegistry
 from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
+from .term import DEFAULT_HOURS, TERM_KEY, Term, hours_of
 from .players.app_lines import AppPlayer
 from .players.contract import StreamUnavailable
 from .players.registry import PlayerRegistry
@@ -144,19 +151,21 @@ class SourcesModule(BaseModule):
         self.players = PlayerRegistry.standard(**wiring)
         # The video applications the environment describes: each a player of its lines and a site of its cards.
         self.apps: list[AppPlayer] = []
+        # One term of what the sources answered for every reader of the module; the setting changes it for all at once.
+        self.term = Term()
         for profile in apps:
             if profile.protocol != "app99":
                 raise ValueError(f"application {profile.name}: unknown protocol {profile.protocol!r}")
             player = AppPlayer(App99Client(profile, lambda: self._http),
-                               registry=LineRegistry.load(profile.name, app_lines_dir))
+                               registry=LineRegistry.load(profile.name, app_lines_dir), term=self.term)
             self.players.register(player)
             self.apps.append(player)
         # The sites belong to this instance, not to the process: a site is added by registering it (builtin.py).
         self.sites = SiteRegistry([*(builtin_sites() if sites is None else sites), *(AppSite(app) for app in self.apps)])
-        self.sites.configure(players=self.players, vk_call=self._vk_call)
+        self.sites.configure(players=self.players, vk_call=self._vk_call, term=self.term)
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
-            players=self.players, clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent)
+            players=self.players, clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent, term=self.term)
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(
@@ -181,6 +190,9 @@ class SourcesModule(BaseModule):
         self.handle("sources.settings.get", self.on_settings_get)
         self.handle("sources.apps.search", self.on_apps_search)
         self.handle("sources.players.list", self.on_players_list)
+        self.handle("sources.term.get", self.on_term_get)
+        self.handle("sources.term.set", self.on_term_set)
+        self.handle("settings.changed", self.on_settings_changed)
 
     async def on_start(self) -> None:
         self._http = bounded_client(timeout=20.0, follow_redirects=True, limits=CONNECTIONS)
@@ -189,6 +201,11 @@ class SourcesModule(BaseModule):
         # запускается (находка 14: один браузер на модуль, а не на скан).
         self._pw = None
         self._browser = None
+        try:
+            stored = (await self.request("settings.value.get", {"key": TERM_KEY})).get("value")
+        except Exception:  # noqa: BLE001 - a setting that cannot be read leaves the term at its default
+            stored = None
+        self._set_term(stored)
         try:
             await self.tables.resume()
         except Exception:  # noqa: BLE001 — the other duties of the module do not wait for the table reads
@@ -202,6 +219,32 @@ class SourcesModule(BaseModule):
             await self._browser.close()
         if self._pw is not None:
             await self._pw.stop()
+
+    async def on_term_get(self, env: Envelope) -> dict:
+        return {"hours": self.term.hours}
+
+    async def on_term_set(self, env: Envelope) -> dict:
+        hours = hours_of(env.payload.get("hours"))
+        if hours is None:
+            return {"ok": False, "hours": self.term.hours,
+                    "reason": reason("sources_term_invalid", value=str(env.payload.get("hours")))}
+        await self.request("settings.value.set", {"key": TERM_KEY, "value": str(hours)})
+        self._set_term(hours)
+        return {"ok": True, "hours": hours}
+
+    async def on_settings_changed(self, env: Envelope) -> None:
+        if env.payload.get("key") == TERM_KEY:
+            self._set_term(env.payload.get("value"))
+
+    def _set_term(self, value) -> None:
+        hours = hours_of(value) if value not in (None, "") else DEFAULT_HOURS
+        if hours is None:
+            self.log.warning("срок актуальности опроса источников «%s» не число часов от 1: остаётся %d ч", value,
+                             self.term.hours)
+            return
+        if hours != self.term.hours:
+            self.log.info("срок актуальности опроса источников: %d ч", hours)
+        self.term.hours = hours
 
     # --- бережный доступ к трекеру ------------------------------------------------
 

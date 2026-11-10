@@ -11,7 +11,8 @@ states stayed the same from the first page to the last: an upload or a removal d
 count that moved reads the listing again. A malformed or repeated answer, more videos than the count, or a listing past
 the limit of pages end the read with a reason: a part is never given as the whole.
 
-One listing of a channel serves the tables of every series that looks for something in it, for an hour (`LISTING_TERM_S`):
+One listing of a channel serves the tables of every series that looks for something in it within the term of the module
+(term.py):
 a channel holds thousands of videos and several series share one. Reads of one channel at the same time share one
 listing, and each of them is told its progress. A read the user asked for (`ReadContext.fresh`) lists the channel anew.
 
@@ -36,6 +37,7 @@ from ...players.contract import PlayerRef
 from ...players.registry import PlayerRegistry
 from ...players.vk_files import embed_parts
 from ...policy import Pacer
+from ...term import Term
 from .. import PHASE_PLAYERS, PHASE_VIDEOS, Progress, ReadContext, SiteError, TableDraft
 from .api import (PAGE_SIZE, dedupe, error_code_of, heights_of, is_external, keep_by_terms, key_of, link_of,
                   owner_id_from_resolve, parse_address, published_of)
@@ -49,8 +51,6 @@ VK_PAGE_INTERVAL_S = 0.5
 LISTING_PAGES = 1000
 # A channel whose count moves during each of this many listings is not given as a whole.
 LISTING_READS = 3
-# The term of the listing of a channel is a requirement of the owner: it is the subject of the task, not a wait.
-LISTING_TERM_S = 3600.0
 # VK answers codes that a repeat of the same page mends: no code, a flood (6) and a failure of its own (10).
 RETRY_CODES = (None, 6, 10)
 
@@ -76,18 +76,23 @@ class VkChannelSite:
     source_type = "vk_video"
 
     def __init__(self, players: PlayerRegistry | None = None, vk_call=None,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic, term: Term | None = None) -> None:
         self.players = players or PlayerRegistry.standard()
+        self.term = term if term is not None else Term()
         self._call = vk_call
         self._pacer = Pacer(lambda: VK_PAGE_INTERVAL_S)
         self._clock = clock
         self._listings: dict[str, Listing] = {}
         self._flights: dict[str, _Flight] = {}
 
-    def configure(self, *, players: PlayerRegistry | None = None, vk_call=None, **_wiring) -> None:
-        """The players of the module and the way to the VK API (the token lives with the module that owns the sessions)."""
+    def configure(self, *, players: PlayerRegistry | None = None, vk_call=None, term: Term | None = None,
+                  **_wiring) -> None:
+        """The players of the module, the way to the VK API (the token lives with the module that owns the sessions) and
+        the term of what the sources answered."""
         if players is not None:
             self.players = players
+        if term is not None:
+            self.term = term
         if vk_call is not None:
             self._call = vk_call
 
@@ -125,7 +130,7 @@ class VkChannelSite:
         """The listing of the channel: the one kept, while it is in its term and the user did not ask for a new one, else
         the one in progress, else a new one. A read that stops waiting does not stop the listing the others wait for."""
         kept = self._listings.get(name)
-        if kept is not None and not ctx.fresh and self._clock() - kept.at < LISTING_TERM_S:
+        if kept is not None and not ctx.fresh and self._clock() - kept.at < self.term.seconds:
             return kept
         flight = self._flights.get(name)
         if flight is None:
