@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
+import AppSearch from "./AppSearch.vue"
 import SourceCard from "./SourceCard.vue"
 import StGroup from "./StGroup.vue"
 import StIcon from "./StIcon.vue"
@@ -21,13 +22,45 @@ const props = withDefaults(defineProps<{
   editable?: boolean
   /** Takes the typed address and says whether a source was made of it; the field is cleared only then. */
   adder: (address: string) => Promise<boolean>
-}>(), { error: "", busy: false, editable: true })
+  /** The names of the series the search of the video applications offers (its own, the original one of TMDB). */
+  names?: { text: string; mark?: string }[]
+  /** Names that cost a request (the original name of TMDB): asked once, when the search is first opened. */
+  loadNames?: () => Promise<{ text: string; mark?: string }[]>
+}>(), { error: "", busy: false, editable: true, names: () => [], loadNames: undefined })
 
 const emit = defineEmits<{
   (e: "remove", id: string | number): void
   (e: "change", id: string | number, patch: DraftPatch): void
   (e: "reread", id: string | number): void
 }>()
+
+// How a source is added: by the address of a page, or by a card the search of a video application found.
+const mode = ref<"address" | "apps">("address")
+const added = computed(() => Object.fromEntries(props.items.map((item, index) => [item.url, index + 1])))
+const loaded = ref<{ text: string; mark?: string }[]>([])
+let loading = false
+watch(mode, async (now) => {
+  if (now !== "apps" || loading || !props.loadNames) return
+  loading = true
+  loaded.value = await props.loadNames()
+})
+// The names a window gives, then those the pages of the sources write, each once.
+const searchNames = computed(() => {
+  const seen = new Set<string>()
+  return [...loaded.value, ...props.names, ...props.items.flatMap((item) => (item.names ?? []).map((text) => ({ text })))]
+    .map((name) => ({ ...name, text: name.text.trim() }))
+    .filter((name) => name.text && !seen.has(name.text) && seen.add(name.text))
+})
+
+async function addCard(url: string): Promise<void> {
+  if (adding.value) return
+  adding.value = true
+  try {
+    await props.adder(url)
+  } finally {
+    adding.value = false
+  }
+}
 
 const address = ref("")
 const query = ref("")
@@ -92,8 +125,23 @@ function clear(): void {
       @reread="emit('reread', item.id)"
     />
     <div v-if="editable" class="stack">
+      <div class="st-tabs st-tabs-wrap source-mode" role="tablist" :aria-label="t('sources.mode.label')">
+        <button
+          type="button" class="st-tab" role="tab" :class="{ active: mode === 'address' }" :aria-selected="mode === 'address'"
+          @click="mode = 'address'"
+        >
+          <i class="pi pi-link tab-icon" /><span>{{ t("sources.mode.address") }}</span>
+        </button>
+        <button
+          type="button" class="st-tab" role="tab" :class="{ active: mode === 'apps' }" :aria-selected="mode === 'apps'"
+          @click="mode = 'apps'"
+        >
+          <i class="pi pi-search tab-icon" /><span>{{ t("sources.mode.apps") }}</span>
+        </button>
+      </div>
+      <AppSearch v-if="mode === 'apps'" :names="searchNames" :added="added" :busy="busy || adding" @add="addCard" />
       <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->
-      <StGroup class="source-add">
+      <StGroup v-if="mode === 'address'" class="source-add">
         <StIcon icon="pi pi-link" />
         <StInput v-model="address" :label="t('sources.add.label')" @keyup.enter="add" />
         <template v-if="channel">
@@ -106,7 +154,7 @@ function clear(): void {
           </button>
         </div>
       </StGroup>
-      <small v-if="channel" class="source-hint">{{ t("sources.vk.hint") }}</small>
+      <small v-if="mode === 'address' && channel" class="source-hint">{{ t("sources.vk.hint") }}</small>
     </div>
     <div v-if="error" class="source-error">{{ error }}</div>
   </div>

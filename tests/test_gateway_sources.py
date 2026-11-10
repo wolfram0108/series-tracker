@@ -166,12 +166,23 @@ async def test_a_preview_refused_by_composition_carries_the_reason(tmp_path):
     assert "success" not in response.json()
 
 
+async def test_the_search_of_the_applications_is_asked_of_sources_and_the_cards_are_theirs(tmp_path):
+    found = {"apps": [{"app": "banri", "label": "半日", "page": 1, "pages": 2, "total": 51, "reason": None, "cards": [
+        {"app": "banri", "id": "219017", "url": "app://banri/219017", "name": "万界独尊", "sub": "", "year": "2021", "area": "",
+         "genres": "", "remarks": "", "blurb": "", "pic": ""}]}]}
+    async with serving(tmp_path, {"sources.apps.search": found}) as (client, owners, _, _):
+        response = await client.post("/api/sources/search", json={"query": "万界独尊"})
+    assert response.json() == found
+    assert owners.asked("sources.apps.search") == [{"query": "万界独尊", "page": 1, "app": ""}]
+
+
 async def test_an_address_is_resolved_by_sources_and_the_answer_is_theirs(tmp_path):
     answers = {"sources.site.resolve": {"site": "somesite", "canonical_url": "https://x.test/p",
                                         "source_type": "web_video"}}
     async with serving(tmp_path, answers) as (client, owners, _, spy):
         response = await client.post("/api/sources/resolve", json={"url": "https://x.test/p?a=1"})
-    assert response.json() == {"site": "somesite", "canonical_url": "https://x.test/p", "source_type": "web_video"}
+    assert response.json() == {"site": "somesite", "canonical_url": "https://x.test/p", "source_type": "web_video",
+                               "label": None}
     assert owners.asked("sources.site.resolve") == [{"url": "https://x.test/p?a=1"}]
     assert [t for t in topics(spy) if t != "sources.site.resolve"] == []
 
@@ -180,7 +191,7 @@ async def test_an_address_no_site_reads_is_resolved_to_nothing(tmp_path):
     async with serving(tmp_path, {"sources.site.resolve": {"site": None, "canonical_url": None}}
                        ) as (client, _, _, _):
         response = await client.post("/api/sources/resolve", json={"url": "http://kinozal.tv/details.php?id=1"})
-    assert response.json() == {"site": None, "canonical_url": None, "source_type": None}
+    assert response.json() == {"site": None, "canonical_url": None, "source_type": None, "label": None}
 
 
 async def test_a_page_is_read_now_by_one_command_to_sources(tmp_path):

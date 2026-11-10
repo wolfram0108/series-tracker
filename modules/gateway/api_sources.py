@@ -9,8 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from core import BusRequestError
-from core.contracts import (CompositionPreviewReply, CompositionPreviewRequest, SeriesSource, SourcesSettingsView,
-                            SiteResolveReply, SiteResolveRequest)
+from core.contracts import (AppSearchReply, AppSearchRequest, CompositionPreviewReply, CompositionPreviewRequest,
+                            SeriesSource, SourcesSettingsView, SiteResolveReply, SiteResolveRequest)
 
 from .routing import admitted, refusal
 from .schemas import (ChangedSource, CreatedSource, ErrorOnly, ErrorResponse, OkResponse, RulesTestRequest,
@@ -90,6 +90,15 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """Which site reads an address, and the address in its canonical form; no network."""
         try:
             return await gw.request("sources.site.resolve", body.model_dump(mode="json"))
+        except BusRequestError as exc:
+            return refusal(exc, with_success=False)
+
+    @r.post("/api/sources/search", response_model=AppSearchReply, responses=_ERR1)
+    async def search_apps(body: AppSearchRequest):
+        """The search of the video applications: a page of the cards of each, as it gives them; a card is a source by its
+        address."""
+        try:
+            return await gw.request("sources.apps.search", body.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 

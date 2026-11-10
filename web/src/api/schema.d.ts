@@ -466,6 +466,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sources/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search Apps
+         * @description The search of the video applications: a page of the cards of each, as it gives them; a card is a source by its
+         *     address.
+         */
+        post: operations["search_apps_api_sources_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sources/read": {
         parameters: {
             query?: never;
@@ -1835,6 +1856,102 @@ export interface components {
          * @enum {string}
          */
         Absence: "elsewhere" | "not_better" | "no_single" | "own" | "off";
+        /**
+         * AppCard
+         * @description A card of a title as the search of its application gives it; `url` is the address it is a source by (empty when
+         *     the application gave the card no number to be asked by again).
+         */
+        AppCard: {
+            /** App */
+            app: string;
+            /** Id */
+            id: string;
+            /** Url */
+            url: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Sub
+             * @default
+             */
+            sub: string;
+            /**
+             * Year
+             * @default
+             */
+            year: string;
+            /**
+             * Area
+             * @default
+             */
+            area: string;
+            /**
+             * Genres
+             * @default
+             */
+            genres: string;
+            /**
+             * Remarks
+             * @default
+             */
+            remarks: string;
+            /**
+             * Blurb
+             * @default
+             */
+            blurb: string;
+            /**
+             * Pic
+             * @default
+             */
+            pic: string;
+        };
+        /**
+         * AppResults
+         * @description One application's answer to the search: a page of its cards, or the reason it gave none.
+         */
+        AppResults: {
+            /** App */
+            app: string;
+            /** Label */
+            label: string;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /** Pages */
+            pages?: number | null;
+            /** Total */
+            total?: number | null;
+            /** Cards */
+            cards?: components["schemas"]["AppCard"][];
+            /** Reason */
+            reason?: string | null;
+        };
+        /** AppSearchReply */
+        AppSearchReply: {
+            /** Apps */
+            apps?: components["schemas"]["AppResults"][];
+        };
+        /** AppSearchRequest */
+        AppSearchRequest: {
+            /** Query */
+            query: string;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * App
+             * @default
+             */
+            app: string;
+        };
         /**
          * AttemptLine
          * @description One line of the log: the last attempt of a variant (`attempt` of `of`, how it went and how long the variant took),
@@ -3545,6 +3662,8 @@ export interface components {
             canonical_url?: string | null;
             /** Source Type */
             source_type?: string | null;
+            /** Label */
+            label?: string | null;
         };
         /** SiteResolveRequest */
         SiteResolveRequest: {
@@ -5254,6 +5373,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SiteResolveReply"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    search_apps_api_sources_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppSearchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppSearchReply"];
                 };
             };
             /** @description Bad Request */

@@ -133,7 +133,8 @@ class TableReader:
         found = self._resolve(url)
         if not found:
             return SiteResolveReply()
-        return SiteResolveReply(site=found[0].name, canonical_url=found[1], source_type=found[0].source_type)
+        return SiteResolveReply(site=found[0].name, canonical_url=found[1], source_type=found[0].source_type,
+                                label=getattr(found[0], "label", None) or found[0].name)
 
     async def resume(self) -> None:
         """Begin again the reads that a stop interrupted; their consumers ask again by themselves when they start."""

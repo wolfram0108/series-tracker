@@ -15,6 +15,9 @@
   ST_QBIT_URL / ST_QBIT_USER / ST_QBIT_PASS
                qBittorrent; без ST_QBIT_URL модуль torrents не стартует
                (удобно для разработки без qBit)
+  ST_APP_<NAME>
+               a video application read through its API (modules/sources/apps): a JSON object with `label`,
+               `protocol` and the private settings of the protocol; without it the application is not read
 
 Все модули живут в одном asyncio-процессе (ТЗ, раздел 2.1); жизненным
 циклом управляет lifespan FastAPI.
@@ -28,6 +31,7 @@ from assembly import Options, assemble
 from core import Bus, Envelope, Runner
 from core.db import Database
 from core.logging import configure, get_logger
+from modules.sources.apps import profiles_of
 
 configure()
 log = get_logger("run")
@@ -64,7 +68,7 @@ gateway, modules = assemble(bus, db, Options(
     docs_enabled=docs_enabled, allowed_hosts=allowed_hosts, read_recent=read_recent,
     conform_url=os.environ.get("ST_CONFORM_URL", ""),
     qbit_url=os.environ.get("ST_QBIT_URL", ""), qbit_username=os.environ.get("ST_QBIT_USER", "admin"),
-    qbit_password=os.environ.get("ST_QBIT_PASS", "")))
+    qbit_password=os.environ.get("ST_QBIT_PASS", ""), apps=profiles_of(os.environ)))
 
 runner = Runner(bus, modules)
 

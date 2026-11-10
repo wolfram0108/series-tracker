@@ -46,14 +46,25 @@ class PlayerRegistry:
         self._players[player.name] = player
 
     def get(self, name: str) -> Player:
-        return self._players[name]
+        """The player of a name; a line of a player with lines (`<player>:<line>`, players/app_lines.py) is its player."""
+        found = self._players.get(name)
+        if found is not None:
+            return found
+        owner = self._players.get(name.split(":", 1)[0]) if ":" in name else None
+        if owner is not None and getattr(owner, "lines", False):
+            return owner
+        raise KeyError(name)
 
     def video_of(self, player: str, link: str) -> str:
         """Which video a row is, as the player of the row reads its link."""
-        return self._players[player].video_of(link)
+        return self.get(player).video_of(link)
 
     def __contains__(self, name: str) -> bool:
-        return name in self._players
+        try:
+            self.get(name)
+        except KeyError:
+            return False
+        return True
 
     def __iter__(self):
         return iter(self._players.values())

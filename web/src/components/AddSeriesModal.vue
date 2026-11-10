@@ -9,6 +9,7 @@ import StInput from "./StInput.vue"
 import StSelect from "./StSelect.vue"
 import SavedPathDropdown from "./SavedPathDropdown.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
+import AppSearch from "./AppSearch.vue"
 import SourcesEditor from "./SourcesEditor.vue"
 import { api } from "../api/client"
 import { t } from "../i18n"
@@ -73,6 +74,8 @@ const candidate = ref("")
 const candidateChannel = ref(false)
 const candidateQuery = ref("")
 const kind = computed<"video" | "torrent">(() => (sourceItems.value.length ? "video" : "torrent"))
+// How the first source is added: by an address (a page of a site or of a tracker), or by a card a video application found.
+const firstMode = ref<"address" | "apps">("address")
 const trackerInfo = ref<TrackerInfo | null>(null)
 const profiles = ref<{ id: number; name: string }[]>([])
 const saving = ref(false)
@@ -142,6 +145,12 @@ function tmdbName(r: TmdbResult): string {
   if (en && en !== orig) return en
   return ru || en || orig
 }
+
+// The names the search of the video applications offers: the original one of the TMDB card chosen, then those typed.
+const seriesNames = computed(() => [
+  ...(tmdbSelected.value?.original_name ? [{ text: tmdbSelected.value.original_name, mark: t("sources.apps.tmdb") }] : []),
+  ...[...(newSeries.name || "").split("/"), newSeries.name_en || ""].map((text) => ({ text })),
+].map((name) => ({ ...name, text: name.text.trim() })).filter((name) => name.text))
 
 // «Имя (год) [tmdbid-XXXX]» (шаблон Jellyfin/Plex); год опускается, если его нет
 const tmdbCatalogName = computed(() => {
@@ -506,9 +515,24 @@ onBeforeUnmount(() => {
 
     <div v-show="activeTab === 'add'">
     <!-- URL -->
-    <div v-if="kind === 'torrent'" class="field-group add-url-row">
+    <div v-if="kind === 'torrent'" class="field-group add-url-row stack">
+      <div class="st-tabs st-tabs-wrap source-mode" role="tablist" :aria-label="t('sources.mode.label')">
+        <button
+          type="button" class="st-tab" role="tab" :class="{ active: firstMode === 'address' }"
+          :aria-selected="firstMode === 'address'" @click="firstMode = 'address'"
+        >
+          <i class="pi pi-link tab-icon" /><span>{{ t("sources.mode.address") }}</span>
+        </button>
+        <button
+          type="button" class="st-tab" role="tab" :class="{ active: firstMode === 'apps' }"
+          :aria-selected="firstMode === 'apps'" @click="firstMode = 'apps'"
+        >
+          <i class="pi pi-search tab-icon" /><span>{{ t("sources.mode.apps") }}</span>
+        </button>
+      </div>
+      <AppSearch v-if="firstMode === 'apps'" :names="seriesNames" :added="{}" :busy="sourcesBusy" @add="addSource" />
       <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->
-      <StGroup :state="urlState">
+      <StGroup v-if="firstMode === 'address'" :state="urlState">
         <StIcon icon="pi pi-link" />
         <StInput v-model="newSeries.url" label="URL для парсинга" />
         <template v-if="candidate && candidateChannel">
@@ -589,6 +613,7 @@ onBeforeUnmount(() => {
         <div class="fieldset-content">
           <SourcesEditor
             :items="sourceItems" :profiles="profiles" :error="sourcesError" :busy="sourcesBusy" :adder="addSource"
+            :names="seriesNames"
             @remove="removeDraft" @change="changeDraft" @reread="rereadDraft"
           />
         </div>

@@ -36,6 +36,11 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    The player that owns the link (a VK player link with its key, an AllVideo embed,
                                    a Vibix entry, an item of CDN VideoHub or of Kodik) resolves it; any other
                                    address is not handled
+  sources.apps.search {query, page?, app?} → AppSearchReply {apps: [AppResults]}: a page of the search of every video
+                                   application (modules/sources/apps), or of the one named, as the application gives it,
+                                   or the reason it gave none. A card picked is a source by its address
+                                   `app://<application>/<card>`; its table is every episode of every line of the card,
+                                   a row of the player `<application>:<line>` (players/app_lines.py)
 Events (owner: sources):
   sources.table.progress {url, phase, current, total}   how far a read is
   sources.table.ready {url, read_at}                    a complete table is stored and served
@@ -71,20 +76,25 @@ import httpx
 
 from core import BaseModule, compute, ids
 from core import storage
-from core.contracts import ParsedDomains, SiteResolveRequest, SourcesSettingsView, TableGetRequest, TrackerMirrors
+from core.contracts import (AppCard, AppResults, AppSearchReply, AppSearchRequest, ParsedDomains, SiteResolveRequest,
+                            SourcesSettingsView, TableGetRequest, TrackerMirrors)
 from core.deadlines import TABLE_READ_S
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
 
 from . import anilibria, delivery, parsers
+from .apps import AppProfile, card_address
+from .apps.app99 import AppError, App99Client
 from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
+from .players.app_lines import AppPlayer
 from .players.contract import StreamUnavailable
 from .players.registry import PlayerRegistry
 from .players.streams import resolve_stream
 from .sites import Site, SiteError, SiteRegistry
+from .sites.apps import AppSite
 from .sites.builtin import builtin_sites
 from .table import TableReader, utc_now
 
@@ -105,7 +115,8 @@ class SourcesModule(BaseModule):
                  torrent_cache_dir: str = "torrent_cache",
                  sites: Iterable[Site] | None = None,
                  table_clock: Callable[[], datetime] = utc_now,
-                 table_safeguard_s: float = TABLE_READ_S, read_recent: int | None = None) -> None:
+                 table_safeguard_s: float = TABLE_READ_S, read_recent: int | None = None,
+                 apps: Iterable[AppProfile] = ()) -> None:
         self.repo = SourcesRepository(db)
         self._cache_dir = torrent_cache_dir
         self._locks: dict[str, asyncio.Lock] = {}
@@ -118,8 +129,16 @@ class SourcesModule(BaseModule):
                                                       "manifests")))
         # One object per player for the whole module: the sites read with them and the streams are resolved by them.
         self.players = PlayerRegistry.standard(**wiring)
+        # The video applications the environment describes: each a player of its lines and a site of its cards.
+        self.apps: list[AppPlayer] = []
+        for profile in apps:
+            if profile.protocol != "app99":
+                raise ValueError(f"application {profile.name}: unknown protocol {profile.protocol!r}")
+            player = AppPlayer(App99Client(profile, lambda: self._http))
+            self.players.register(player)
+            self.apps.append(player)
         # The sites belong to this instance, not to the process: a site is added by registering it (builtin.py).
-        self.sites = SiteRegistry(builtin_sites() if sites is None else sites)
+        self.sites = SiteRegistry([*(builtin_sites() if sites is None else sites), *(AppSite(app) for app in self.apps)])
         self.sites.configure(players=self.players, vk_call=self._vk_call)
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
@@ -146,6 +165,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.table.cancel", self.on_table_cancel)
         self.handle("sources.site.resolve", self.on_site_resolve)
         self.handle("sources.settings.get", self.on_settings_get)
+        self.handle("sources.apps.search", self.on_apps_search)
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
@@ -348,6 +368,31 @@ class SourcesModule(BaseModule):
         """payload: SiteResolveRequest; reply: SiteResolveReply. No network."""
         request = SiteResolveRequest.model_validate(env.payload)
         return self.tables.resolve(request.url).model_dump(mode="json")
+
+    async def on_apps_search(self, env: Envelope) -> dict:
+        """payload: AppSearchRequest; reply: AppSearchReply — a page of the search of every application (or of the one
+        named), each as the application gives it, or the reason it gave none."""
+        request = AppSearchRequest.model_validate(env.payload)
+        asked = [app for app in self.apps if not request.app or app.name == request.app]
+        found = await asyncio.gather(*(self._search(app, request.query, request.page) for app in asked))
+        return AppSearchReply(apps=list(found)).model_dump(mode="json")
+
+    async def _search(self, app: AppPlayer, query: str, page: int) -> AppResults:
+        try:
+            answer = await app.client.search(query, page)
+        except AppError as exc:
+            return AppResults(app=app.name, label=app.label, page=page, reason=exc.reason)
+        # A card without a number the application could be asked by again is shown all the same, with no address.
+        cards = [AppCard(app=app.name, id=str(each.get("id", "")),
+                         url=card_address(app.name, str(each["id"])) if str(each.get("id", "")).isdigit() else "",
+                         name=str(each.get("name") or ""), sub=str(each.get("sub") or ""), year=str(each.get("year") or ""),
+                         area=str(each.get("area") or ""), genres=str(each.get("class") or ""),
+                         remarks=str(each.get("remarks") or ""), blurb=str(each.get("blurb") or "").strip(),
+                         pic=str(each.get("pic") or ""))
+                 for each in answer.get("data") or [] if isinstance(each, dict)]
+        pages, total = answer.get("page_count"), answer.get("total_count", answer.get("count"))
+        return AppResults(app=app.name, label=app.label, page=page, cards=cards,
+                          pages=int(pages) if str(pages).isdigit() else None, total=int(total) if str(total).isdigit() else None)
 
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}

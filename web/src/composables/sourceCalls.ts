@@ -1,7 +1,7 @@
 import { api } from "../api/client"
 import { t, type MessageKey } from "../i18n"
 import { reasonText } from "../lib/reason"
-import type { LayoutRow, PreviewReply, ResolveReply, SeriesSource, SourceDraft, SourceSummary } from "../lib/sources"
+import type { AppSearchReply, LayoutRow, PreviewReply, ResolveReply, SeriesSource, SourceDraft, SourceSummary } from "../lib/sources"
 
 /** The answer of a call to the core: the data, or the words for the refusal (the reason worded by the catalog). */
 export type Answer<T> = { ok: true; data: T } | { ok: false; text: string }
@@ -37,6 +37,11 @@ export async function call<T>(
 /** Which site reads an address and its canonical form; the core answers without the network. */
 export function resolveAddress(url: string): Promise<Answer<ResolveReply>> {
   return call(() => api.POST("/api/sources/resolve", { body: { url } }))
+}
+
+/** A page of the search of the video applications: the cards of each as it gives them, or the reason it gave none. */
+export function searchApps(query: string, page = 1): Promise<Answer<AppSearchReply>> {
+  return call(() => api.POST("/api/sources/search", { body: { query, page, app: "" } }))
 }
 
 /** What the window shows of an address: the state of its table, the summary and the lines. `refresh: false` reads nothing. */

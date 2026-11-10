@@ -2,7 +2,7 @@
 of the whole application (tests/app_stand.py) are built by this one function, so that what a stand runs is the service."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
 
@@ -49,6 +49,8 @@ class Options:
     torrent_cache_dir: str = "torrent_cache"
     # The clock the age of a table of a page is told by (a stand moves it; the service runs on the time of day).
     table_clock: Callable[[], datetime] = utc_now
+    # The video applications read through their APIs (modules/sources/apps), from the private environment.
+    apps: list = field(default_factory=list)
 
 
 def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, list]:
@@ -65,7 +67,7 @@ def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, l
         RulesModule(bus, db),
         TrackerauthModule(bus, db),
         SourcesModule(bus, db, read_recent=options.read_recent, torrent_cache_dir=options.torrent_cache_dir,
-                      table_clock=options.table_clock),
+                      table_clock=options.table_clock, apps=options.apps),
         MetadataModule(bus, db),
         LibraryModule(bus, db),
         # scan/downloads/renaming — после catalog/settings/sources/rules: их reconcile при старте шлёт запросы соседям.

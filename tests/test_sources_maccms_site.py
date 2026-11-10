@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from core.contracts import RowState
 from core.reasons import parse
-from modules.sources.players import maccms
+from modules.sources.players import hls, maccms
 from modules.sources.players.maccms import HOST_GATE, MaccmsPlayer, head_of
 from modules.sources.players.registry import PlayerRegistry
 from modules.sources.players.streams import resolve_stream
@@ -67,7 +67,7 @@ def media(segment_name: str, key: str = "", iv: str = "", sequence: int = 0) -> 
 
 
 def ts(data: bytes) -> httpx.Response:
-    return httpx.Response(206, content=data[: maccms.HEAD_BYTES])
+    return httpx.Response(206, content=data[: hls.HEAD_BYTES])
 
 
 def jisu_web(pictures) -> Web:
@@ -146,7 +146,7 @@ async def test_a_title_is_a_row_for_every_item_of_its_hls_list_with_the_frame_re
     assert draft.rows[0].site_fields == {"site": "Jisu", "list": "jsm3u8", "place": 1}
     # Only the head of a segment is asked for: the frame is in its first bytes.
     segments = [request for request in web.requests if request.url.path.endswith(".ts")]
-    assert segments and all(request.headers["Range"] == f"bytes=0-{maccms.HEAD_BYTES - 1}" for request in segments)
+    assert segments and all(request.headers["Range"] == f"bytes=0-{hls.HEAD_BYTES - 1}" for request in segments)
     assert web.count("next.ts") == 0
 
 

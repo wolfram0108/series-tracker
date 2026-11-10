@@ -199,6 +199,8 @@ class SiteResolveReply(BaseModel):
     canonical_url: str | None = None
     # What kind of source a page of this site makes (`vk_video` or `web_video`); the window does not guess it.
     source_type: str | None = None
+    # The name of the site as a window shows it (a video application: its own name, `半日`).
+    label: str | None = None
 
 
 class TableProgress(BaseModel):

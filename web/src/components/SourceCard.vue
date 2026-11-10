@@ -9,8 +9,9 @@ import PowerSwitch from "./status/output/PowerSwitch.vue"
 import SourceMark from "./status/output/SourceMark.vue"
 import { t, type MessageKey } from "../i18n"
 import { reasonText } from "../lib/reason"
+import { siteLabel } from "../composables/siteLabel"
 import {
-  joinVkAddress, vkQuery, placeOf, profileOptions, progressText, seasonPositions, sourceCaption, spanText, splitVkAddress,
+  appCardOf, joinVkAddress, vkQuery, placeOf, profileOptions, progressText, seasonPositions, sourceCaption, spanText, splitVkAddress,
   stepsLines, togglePlayer, type SourceItem,
 } from "../lib/sources"
 import type { DraftPatch } from "../composables/useSourceDrafts"
@@ -25,6 +26,10 @@ const toast = useToast()
 
 const isTorrent = computed(() => props.item.sourceType === "torrent")
 const isChannel = computed(() => props.item.sourceType === "vk_video")
+// A card of a video application has no page to open: it is shown by the application's name and the number of the card.
+const appCard = computed(() => appCardOf(props.item.url))
+const label = computed(() => (appCard.value ? siteLabel(props.item.url).value : ""))
+const where = computed(() => placeOf(props.item.url, label.value))
 const view = computed(() => props.item.view)
 const options = computed(() => profileOptions(props.profiles))
 const seasonOptions = (groups: number) => [
@@ -74,7 +79,8 @@ async function copyAddress(): Promise<void> {
     <header class="source-head">
       <span class="source-title">
         <SourceMark v-if="place !== undefined && item.color !== null" :mark="{ n: place, color: item.color, place: '' }" />
-        <span class="source-place">{{ placeOf(item.url) }}</span>
+        <span class="source-place">{{ where }}</span>
+        <span v-if="appCard && item.names?.length" class="source-names">{{ item.names[0] }}</span>
       </span>
       <template v-if="!isTorrent">
         <span class="source-state" :class="`is-${view.state}`">
@@ -107,6 +113,18 @@ async function copyAddress(): Promise<void> {
         </div>
         <small v-if="!vkQuery(query)" class="source-reason">{{ t("sources.vk.queryMissing") }}</small>
       </div>
+      <StGroup v-else-if="appCard" class="source-app-card">
+        <StIcon icon="pi pi-video" />
+        <div class="constructor-item item-floating-label">
+          <input :id="`app-card-${item.id}`" class="item-input" :value="where" readonly placeholder=" " />
+          <label :for="`app-card-${item.id}`">{{ t("sources.apps.card") }}</label>
+        </div>
+        <div class="constructor-item url-actions">
+          <button type="button" class="url-action-btn" :title="t('sources.address.copy')" @click="copyAddress">
+            <i class="pi pi-clipboard" />
+          </button>
+        </div>
+      </StGroup>
       <StGroup v-else>
         <StIcon icon="pi pi-link" />
         <div class="constructor-item item-floating-label"><input class="item-input" :value="item.url" readonly /></div>
@@ -219,6 +237,7 @@ async function copyAddress(): Promise<void> {
 }
 .source-title { display: inline-flex; align-items: center; gap: 0.5rem; min-inline-size: 0; font-weight: 600; color: #2c3e50; }
 .source-place { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-names { font-weight: 500; color: var(--color-gray-600); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .source-state { display: inline-flex; align-items: center; gap: var(--space); color: var(--text-muted); }
 .source-state.is-ready { color: var(--color-green-1); }
 .source-state.is-failed { color: var(--color-red-1); }

@@ -33,6 +33,7 @@ from assembly import Options, assemble
 from core import Bus, Envelope, Runner
 from core import container as mkv
 from core.db import Database
+from app99_model import HOST as APP_HOST, App99Model, Card, Line, profile as app_profile
 from plan_disk import Codec, Daemon, Host, _run
 from plan_world import truth_of
 from schema_db import migrated
@@ -179,6 +180,9 @@ class Site:
         self.ids: dict[tuple[str, int], int] = {}
         self.titles: dict[int, Title] = {}
         self.heads: list[str] = []  # the heads of segments the player asked for: what measuring a frame cost
+        # A video application (tests/app99_model.py): its cards list a line of a parser whose streams are on the host.
+        self.app = App99Model(parsers=[9])
+        self.app.line("BLU", "蓝光", parsers="9")
 
     def title(self, number: int) -> Title:
         return self.titles.setdefault(number, Title(number))
@@ -187,7 +191,23 @@ class Site:
         """An episode of a title: its video in a picture of this height, cut into encrypted segments on the host."""
         truth = truth_of(1, episode)
         self.titles[number].episodes[episode] = truth
-        folder = os.path.join(self.root, self._hls_folder(number, episode))
+        self._hls(self._hls_folder(number, episode), truth, height)
+
+    def app_card(self, number: int, name: str, episodes: dict[int, int]) -> None:
+        """A card of the application with its line of a parser: an episode (number → height) is a playlist on the host the
+        parser gives for its token; the search of the application gives the card."""
+        items = []
+        for episode, height in sorted(episodes.items()):
+            folder, token = f"app-{number}-ep{episode}", f"tok-{number}-{episode}"
+            self._hls(folder, truth_of(1, episode), height)
+            self.app.parses[(9, token)] = self.host.url(folder + "/index.m3u8")
+            items.append((f"第{episode}集", token))
+        self.app.cards[number] = Card(number, name, [Line("BLU", items)], sub="Model Title")
+        self.app.found = [{"id": number, "name": name, "sub": "Model Title", "year": "2021", "area": "大陆",
+                           "class": "动画", "remarks": f"更新至第{len(items)}集", "blurb": "", "pic": ""}]
+
+    def _hls(self, name: str, truth: int, height: int) -> None:
+        folder = os.path.join(self.root, name)
         if os.path.exists(os.path.join(folder, "index.m3u8")):
             return
         os.makedirs(folder)
@@ -327,6 +347,8 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
     def web(self) -> Web:
         def answer(request: httpx.Request):
             path = request.url.path.strip("/")
+            if str(request.url).startswith(APP_HOST):
+                return self.app.handle(request)
             if request.url.host == "127.0.0.1":
                 return self._host_file(request)
             if request.url.host == "jszyapi.com" and path == "api.php/provide/vod":
@@ -348,7 +370,7 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
                 known = number in release.episodes or any(first == number - 1000 for first, _ in release.compilations)
                 return (200, self._episode_page(release, number)) if known else (404, "")
             return 404, ""
-        return Web().route("", answer)
+        return Web().route("", answer).route("", answer, method="POST")
 
 
 class AppStand:
@@ -373,7 +395,7 @@ class AppStand:
         self.db = Database(self.db_path)
         self.gateway, self.modules = assemble(self.bus, self.db, Options(
             db_path=self.db_path, auth_required=False, cookie_secure=False,
-            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now))
+            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now, apps=[app_profile()]))
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()
         self.module("sources")._http = self.site.web().client()

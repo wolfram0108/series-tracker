@@ -57,6 +57,7 @@ export function useSourceDrafts() {
       summary: draft.summary, playersOff: draft.playersOff, rows: draft.rows, live: tables.forUrl(draft.canonical),
       asked: draft.asked,
     }),
+    names: draft.names,
   })))
 
   function find(key: string | number): Draft | undefined {

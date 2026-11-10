@@ -196,6 +196,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | POST | `/api/sources/read` | Прочитать страницу сейчас, не дожидаясь срока таблицы (команда `sources.table.read`; тело `{url, options?}`) | `SourceCard.vue` |
 | POST | `/api/sources/read` | Прочитать страницу сейчас, не дожидаясь срока таблицы (команда `sources.table.read`; тело `{url, options?}`) | `SourceCard.vue` |
 | POST | `/api/sources/resolve` | Какой сайт читает адрес и его канонический вид, без сети (`sources.site.resolve`) | — |
+| POST | `/api/sources/search` | Поиск видеоприложений: страница карточек каждого приложения, как оно её отдало (`sources.apps.search`) | — |
 
 ### 3.8 Выход — `api_output.py`
 

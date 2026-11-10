@@ -17,6 +17,9 @@ export type SourceType = Schemas["SourceType"]
 export type PreviewReply = Schemas["CompositionPreviewReply"]
 export type TableState = Schemas["TableState"]
 export type ResolveReply = Schemas["SiteResolveReply"]
+export type AppSearchReply = Schemas["AppSearchReply"]
+export type AppResults = Schemas["AppResults"]
+export type AppCard = Schemas["AppCard"]
 export type LayoutRow = Schemas["CompositionRow"]
 
 /** The player whose list holds several seasons of a catalog; the user picks the one that belongs to the source. */
@@ -65,6 +68,8 @@ export interface SourceItem {
   /** The colour the catalog gave the source in its series (0–15 of the palette); none for a draft not saved yet. */
   color: number | null
   view: SourceView
+  /** The names of the release as its page writes them, when the window has them (a draft after its first table). */
+  names?: string[]
 }
 
 // --- the view of one source ------------------------------------------------------------------------------------------
@@ -271,8 +276,17 @@ export function pageHost(url: string): string {
   }
 }
 
-/** Where a source is, as every tab names it: the site, and the channel of a VK channel (`vkvideo.ru @name`). */
-export function placeOf(url: string): string {
+/** The card of a video application a source address names (`app://<application>/<card>`); null for any other address. */
+export function appCardOf(url: string): { app: string; card: string } | null {
+  const found = /^app:\/\/([^/?#]+)\/(\d+)$/.exec(url.trim())
+  return found ? { app: found[1], card: found[2] } : null
+}
+
+/** Where a source is, as every tab names it: the site, and the channel of a VK channel (`vkvideo.ru @name`); a card of a
+ *  video application by the application's name (`label`, as the core gives it) and the number of the card. */
+export function placeOf(url: string, label = ""): string {
+  const card = appCardOf(url)
+  if (card) return t("sources.apps.cardValue", { app: label || card.app, card: card.card })
   try {
     const link = new URL(url.split("|")[0])
     return link.pathname.startsWith("/@") ? `${link.host} ${link.pathname.slice(1)}` : link.host

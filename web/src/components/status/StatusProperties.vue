@@ -166,6 +166,16 @@ if (info && info.tmdb_id) {
   tmdbEpisodeCount.value = Number(info.total_episodes ?? 0)
 }
 
+// The names the search of the video applications offers: those of the series, then the original one of TMDB, asked
+// only when the search is opened.
+const seriesNames = computed(() => [...form.name.split("/"), form.name_en].map((text) => ({ text: text.trim() })).filter((name) => name.text))
+async function tmdbOriginal(): Promise<{ text: string; mark?: string }[]> {
+  if (!tmdbSelected.value?.id) return []
+  const { data } = await api.GET("/api/tmdb/details/{tmdb_id}", { params: { path: { tmdb_id: tmdbSelected.value.id } } })
+  const original = String((data as Record<string, unknown> | undefined)?.original_name ?? "").trim()
+  return original ? [{ text: original, mark: t("sources.apps.tmdb") }] : []
+}
+
 const tmdbSeasonNumber = computed(() => {
   if (isSeasonless.value) return 1
   const m = form.season.match(/^s(\d+)$/i)
@@ -377,7 +387,8 @@ onMounted(() => {
       <div class="fieldset-content">
         <SourcesEditor
           :items="sources.items.value" :profiles="profiles" :error="sources.error.value || sources.layoutFailure.value" :busy="sources.busy.value || seriesBusy"
-          :editable="isVideo" :adder="sources.add" @remove="sources.remove" @change="sources.change" @reread="sources.reread"
+          :editable="isVideo" :adder="sources.add" :names="seriesNames" :load-names="tmdbOriginal"
+          @remove="sources.remove" @change="sources.change" @reread="sources.reread"
         />
       </div>
     </div>

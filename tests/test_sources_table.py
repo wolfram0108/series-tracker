@@ -777,8 +777,8 @@ async def test_the_site_of_an_address_and_its_canonical_form_are_told_with_no_re
     found = await system.probe.request("sources.site.resolve", {"url": PAGE + "?utm=1#top"}, timeout=STUCK_S)
     nowhere = await system.probe.request("sources.site.resolve", {"url": "https://nowhere.test/p/1"}, timeout=STUCK_S)
 
-    assert found == {"site": "fake", "canonical_url": PAGE, "source_type": "web_video"}
-    assert nowhere == {"site": None, "canonical_url": None, "source_type": None}
+    assert found == {"site": "fake", "canonical_url": PAGE, "source_type": "web_video", "label": "fake"}
+    assert nowhere == {"site": None, "canonical_url": None, "source_type": None, "label": None}
     assert system.site.reads == []
 
 
