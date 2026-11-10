@@ -63,3 +63,48 @@ def test_a_built_container_waits_for_the_journal_in_no_stage_and_the_put_in_plac
     now[0] = 157.0
     book.applied(1, lambda name: 10.0)
     assert {stage.name: stage.seconds for stage in card.stages} == {"queue": 0.0, "build": 10.0, "verify": 0.0, "apply": 2.0}
+
+
+def test_the_journal_of_a_series_is_shown_step_by_step_whichever_episode_its_files_are_and_goes_after_the_last():
+    now = [0.0]
+    book = PackBook(clock=lambda: now[0], wall=lambda: "2026-11-11T02:50:00+00:00")
+    steps = [("move", "e331.mkv", "e331.mkv.moving"), ("move", "e331.mkv.moving", "e331.mkv.off"),
+             ("publish", ".plan-staging/e330.mkv", "e330.mkv"), ("retag", "e331.mkv.off")]
+    book.journal_begins({"id": 40, "name": "Владыка"}, "run-1", steps)
+    assert book.running()
+    for done, step in enumerate(steps):
+        book.journal_step(40, step)
+        now[0] += 30
+        (shown,) = book.journals_view()
+        assert (shown.series_id, shown.series_name, shown.kind, shown.steps_of, shown.steps_done) == (40, "Владыка", "sync", 4, done)
+        assert shown.step == step[0] and shown.seconds == now[0]
+        assert shown.file == {0: "e331.mkv", 1: "e331.mkv.off", 2: "e330.mkv", 3: "e331.mkv.off"}[done]
+        book.journal_step_done(40)
+    assert [each.file for each in [book.journals_view()[0]]] == ["e331.mkv.off"]
+    book.journal_ends(40)
+    assert book.journals_view() == [] and not book.running()
+
+
+async def test_the_planner_tells_each_step_of_a_journal_as_it_carries_it_out_and_that_the_journal_ended(tmp_path):
+    from core import Bus
+    from core.db import Database
+    from modules.planner.module import PlannerModule
+    from schema_db import migrated
+
+    bus = Bus()
+    planner = PlannerModule(bus, Database(str(migrated(tmp_path / "p.db"))))
+    told = bus.subscribe("planner.journal.changed")
+    seen = []
+
+    class Files:
+        async def step(self, step, _table):
+            seen.append([(each.step, each.file, each.steps_done) for each in planner.packing.journals_view()])
+
+    steps = [("move", "e331.mkv", "e331.mkv.moving"), ("retag", "e331.mkv.off")]
+    planner.packing.journal_begins({"id": 40, "name": "Владыка"}, "run-1", steps)
+    await planner.carry_out(40, Files(), steps, [])
+    assert seen == [[("move", "e331.mkv", 0)], [("retag", "e331.mkv.off", 1)]]
+    packets = []
+    while not told.queue.empty():
+        packets.append(told.queue.get_nowait().payload["journals"])
+    assert packets[-1] == []

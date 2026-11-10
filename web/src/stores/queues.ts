@@ -26,6 +26,8 @@ export interface ConformPicture {
 
 /** A container a sync builds (pack_queue_update, core/contracts/packing.py). */
 export type PackCard = components["schemas"]["PackCard"]
+/** The journal of a series being carried out (pack_journal_update, core/contracts/packing.py). */
+export type PackJournal = components["schemas"]["PackJournal"]
 
 /** Очереди агентов — голые массивы (старый контракт сохранён). Наполняются
  *  push-событиями SSE; HTTP-загрузка — через настройки/агентов при открытии. */
@@ -37,6 +39,7 @@ export const useQueuesStore = defineStore("queues", () => {
   const slicing = shallowRef<QueueTask[]>([]) // slicing_queue_update (ffmpeg)
   const conform = shallowRef<ConformPicture | null>(null) // conform_queue_update (alignment daemon)
   const pack = shallowRef<PackCard[]>([]) // pack_queue_update (the containers of the episodes)
+  const journals = shallowRef<PackJournal[]>([]) // pack_journal_update (the journals being carried out)
 
   const setAgent = (t: QueueTask[]) => (agent.value = t)
   const setTorrents = (t: QueueTask[]) => (torrents.value = t)
@@ -44,6 +47,8 @@ export const useQueuesStore = defineStore("queues", () => {
   const setSlicing = (t: QueueTask[]) => (slicing.value = t)
   const setConform = (p: ConformPicture) => (conform.value = p)
   const setPack = (t: PackCard[]) => (pack.value = t)
+  const setJournals = (t: PackJournal[]) => (journals.value = t)
 
-  return { agent, torrents, downloads, slicing, conform, pack, setAgent, setTorrents, setDownloads, setSlicing, setConform, setPack }
+  return { agent, torrents, downloads, slicing, conform, pack, journals, setAgent, setTorrents, setDownloads, setSlicing,
+    setConform, setPack, setJournals }
 })

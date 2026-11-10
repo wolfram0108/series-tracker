@@ -39,7 +39,7 @@ Queries:
       in it, carried out by the next sync (a video goes only for another video of its episode).
   planner.delete.cancel {series_id, kind, name, dub?} -> {dropped}.
   planner.failures.forget {series_id} -> {reset}: the user's reset of the failed attempts.
-  planner.pack.get {} -> {tasks}: the cards of the packing. planner.pack.remove {id} -> {removed}: the user removes a card
+  planner.pack.get {} -> {tasks, journals}: the cards of the packing and the journals being carried out. planner.pack.remove {id} -> {removed}: the user removes a card
       that stayed after its sync.
   planner.files.get {series_id} -> {names}: the files of the asset, relative to the folder of the series.
   planner.downloaded_counts {} -> {counts: {series_id: n}}: the episodes every series holds and shows, specials aside.
@@ -59,6 +59,9 @@ Events out:
       back, the journal that puts it in place), its tracks as numbers of the season with where each comes from, what
       changed against the file before. At the end of the sync only a failed card stays (table pack_cards) until the user
       removes it or the next sync of the series begins.
+  planner.journal.changed {journals: [PackJournal]} — the journal of each series being carried out: how many steps, how many
+      done, the step under way and its file, whichever episode's file it is (SSE pack_journal_update); a journal goes
+      when its last step is done.
   planner.sync.trace {series_id, run, kind, download, data} — what a sync does, as it happens, for the dump of the run
       (modules/runlog): `plan` — the inputs whole (the online rows, the asset, the choices, the commands, the failures)
       and the plan made of them, every round; `step` / `done` — a step of the graph begins / ends with its outcome
@@ -534,7 +537,8 @@ class BusSync(SeriesSync):
             steps = await storage.call(self.files.write_journal, self.pending, table)
             self.pending = []
             self.m.packing.journal(self.series["id"], steps)
-            self.m.pack_publish()
+            self.m.packing.journal_begins(self.series, self.run_mark, steps)
+            self.m.pack_going()
             await self.m.carry_out(self.series["id"], self.files, steps, table, self.m.packing.step_done)
         names = [card.name for card in self.m.packing.cards.values()
                  if card.series_id == self.series["id"] and card.status == "apply"]
@@ -741,6 +745,8 @@ class PlannerModule(BaseModule):
 
     def pack_publish(self) -> None:
         self.publish_event("planner.pack.changed", {"tasks": [card.model_dump(mode="json") for card in self.packing.view()]})
+        self.publish_event("planner.journal.changed",
+                           {"journals": [each.model_dump(mode="json") for each in self.packing.journals_view()]})
 
     def pack_going(self) -> None:
         self._packing_going.set()
@@ -754,7 +760,8 @@ class PlannerModule(BaseModule):
             self._packing_going.clear()
 
     async def on_pack_get(self, env: Envelope) -> dict:
-        return {"tasks": [card.model_dump(mode="json") for card in self.packing.view()]}
+        return {"tasks": [card.model_dump(mode="json") for card in self.packing.view()],
+                "journals": [each.model_dump(mode="json") for each in self.packing.journals_view()]}
 
     async def on_pack_remove(self, env: Envelope) -> dict:
         """The user removes a card of the packing that stayed after its sync."""
@@ -775,11 +782,19 @@ class PlannerModule(BaseModule):
     # --- the journal ---------------------------------------------------------------------------------------------
 
     async def carry_out(self, series_id: int, files: Library, steps: list, table: list, done=None) -> None:
+        """The steps of a journal, one after another; the journal of the series in the packing shows the step under way
+        (the rewrite of a container of 2160p takes minutes) and how many are done, and goes when the last one is."""
         by_name = {each["name"]: each for each in table}
-        for step in steps:
-            await files.step(step, by_name)
-            if done is not None:
-                done(step)
+        try:
+            for step in steps:
+                self.packing.journal_step(series_id, step)
+                await files.step(step, by_name)
+                self.packing.journal_step_done(series_id)
+                if done is not None:
+                    done(step)
+        finally:
+            self.packing.journal_ends(series_id)
+            self.pack_publish()
 
     async def _recover(self, series: dict) -> None:
         """A journal a stop cut short is carried out to the end, and the table it leads to is the asset."""
@@ -788,6 +803,8 @@ class PlannerModule(BaseModule):
         if journal is None:
             return
         self.log.info("сериал %d: журнал применения, прерванный остановкой, доводится до конца", series["id"])
+        self.packing.journal_begins(series, "", journal["steps"], kind="recover")
+        self.pack_going()
         await self.carry_out(series["id"], files, journal["steps"], journal["table"])
         failures = await self.repo.failures(series["id"])
         commands = await self.repo.commands(series["id"])

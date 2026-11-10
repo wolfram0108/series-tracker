@@ -26,7 +26,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import BaseModule, BusRequestError
-from core.contracts import (CompositionChanged, CompositionFailed, PlannerView,
+from core.contracts import (CompositionChanged, CompositionFailed, PackJournal, PlannerView,
                             SeriesReadProgress, SourceChanged, TableFailed, TableProgress, TableReady)
 
 
@@ -182,6 +182,7 @@ SSE_MAP: dict[str, Outgoing] = {
     "scan.series.progress": Outgoing("series_scan_progress"),
     "conform.queue.changed": Outgoing("conform_queue_update", latest=_whole),
     "planner.pack.changed": Outgoing("pack_queue_update", _bare_tasks, latest=_whole),
+    "planner.journal.changed": Outgoing("pack_journal_update", lambda payload: payload["journals"], latest=_whole),
     "planner.series.changed": Outgoing("plan_update"),
     "voices.settings.changed": Outgoing("voice_settings_update"),
     "sources.settings.changed": Outgoing("sources_settings_update"),
@@ -211,7 +212,7 @@ def latest_only(batch: list) -> list:
 
 
 # The packets of the event stream that the interface types: their models go into the schema of the API.
-EVENT_PACKETS = (PlannerView, TableProgress, TableReady, TableFailed, CompositionChanged,
+EVENT_PACKETS = (PlannerView, PackJournal, TableProgress, TableReady, TableFailed, CompositionChanged,
                  CompositionFailed, SourceChanged, SeriesReadProgress)
 
 _KEEPALIVE_SECONDS = 15.0

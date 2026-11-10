@@ -4,6 +4,7 @@ import { t } from "../../i18n"
 import ConformQueue from "./ConformQueue.vue"
 import DownloadCard from "./DownloadCard.vue"
 import PackCard from "./PackCard.vue"
+import PackJournal from "./PackJournal.vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 
@@ -71,8 +72,9 @@ async function removePack(id: string): Promise<void> {
     <!-- Packing queue: the containers of the episodes, pushed by the core -->
     <section class="queue-section">
       <h6 class="queue-title-bar"><i class="pi pi-box"></i> {{ t("agents.pack.title") }}</h6>
-      <div v-if="!q.pack.length" class="queue-empty">{{ t("agents.pack.empty") }}</div>
+      <div v-if="!q.pack.length && !q.journals.length" class="queue-empty">{{ t("agents.pack.empty") }}</div>
       <div v-else class="composition-cards-container">
+        <PackJournal v-for="journal in q.journals" :key="`journal-${journal.series_id}`" :journal="journal" />
         <PackCard v-for="card in q.pack" :key="card.id" :card="card" @remove="removePack" />
       </div>
     </section>

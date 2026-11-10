@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 from typing import Callable, Iterable
 
-from core.contracts import PACK_STAGES, DownloadVariant, PackCard, PackTrack
+from core.contracts import PACK_STAGES, DownloadVariant, PackCard, PackJournal, PackTrack
 from core.plan.files import label_of
 
 ENDED = ("done", "failed")
@@ -49,6 +49,38 @@ class PackBook:
         self._stage_since: dict[str, float] = {}
         self._steps: dict[str, set[str]] = {}  # the names of the files whose steps of the journal are the card's
         self._wait_since: dict[str, float] = {}
+        self.journals: dict[int, PackJournal] = {}  # the journal of each series being carried out
+        self._journal_since: dict[int, float] = {}
+
+    # --- the journal of a series ----------------------------------------------------------------------------------
+
+    def journal_begins(self, series: dict, run: str, steps: list[tuple], kind: str = "sync") -> None:
+        """A journal of the series is carried out: every step of it is counted, whichever file it acts on."""
+        self.journals[series["id"]] = PackJournal(series_id=series["id"], series_name=series.get("name") or "",
+                                                  sync_started=run, kind=kind, steps_of=len(steps),
+                                                  started_at=self._wall())
+        self._journal_since[series["id"]] = self._clock()
+
+    def journal_step(self, series_id: int, step: tuple) -> None:
+        """A step of the journal begins: its kind and the file it acts on (the name it takes, for a move or a publish)."""
+        journal = self.journals.get(series_id)
+        if journal is not None:
+            journal.step = step[0]
+            journal.file = str(step[2] if step[0] in ("move", "publish") else step[1]).removesuffix(".moving")
+
+    def journal_step_done(self, series_id: int) -> None:
+        journal = self.journals.get(series_id)
+        if journal is not None:
+            journal.steps_done += 1
+
+    def journal_ends(self, series_id: int) -> None:
+        self.journals.pop(series_id, None)
+        self._journal_since.pop(series_id, None)
+
+    def journals_view(self) -> list[PackJournal]:
+        now = self._clock()
+        return [journal.model_copy(update={"seconds": now - self._journal_since.get(series_id, now)})
+                for series_id, journal in sorted(self.journals.items())]
 
     # --- what happens to a container ------------------------------------------------------------------------------
 
@@ -188,7 +220,7 @@ class PackBook:
             book.pop(key, None)
 
     def running(self) -> bool:
-        return any(card.status not in ENDED for card in self.cards.values())
+        return bool(self.journals) or any(card.status not in ENDED for card in self.cards.values())
 
     def view(self) -> list[PackCard]:
         now = self._clock()

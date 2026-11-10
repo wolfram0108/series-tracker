@@ -69,3 +69,25 @@ class PackCard(BaseModel):
     queued_at: str = ""
     finished_at: str = ""
     seconds: float = 0.0
+
+
+JournalStep = Literal["move", "remove", "publish", "retag"]
+
+
+class PackJournal(BaseModel):
+    """The journal of a series being carried out: every file a sync puts in place, takes away, renames or rewrites
+    (`retag` rewrites the container for its new name or state), one step after another, whichever episode's it is. `kind`
+    is `sync` (the end of a sync) or `recover` (a journal a stop cut short, carried out at the start). `step` and `file`
+    are the step under way and the file it acts on."""
+
+    series_id: int
+    series_name: str = ""
+    sync_started: str = ""
+    kind: Literal["sync", "recover"] = "sync"
+    steps_of: int = 0
+    steps_done: int = 0
+    step: JournalStep | None = None
+    file: str = ""
+    started_at: str = ""
+    seconds: float = 0.0
+

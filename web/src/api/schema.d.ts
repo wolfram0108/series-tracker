@@ -3987,6 +3987,63 @@ export interface components {
             title: string;
         };
         /**
+         * PackJournal
+         * @description The journal of a series being carried out: every file a sync puts in place, takes away, renames or rewrites
+         *     (`retag` rewrites the container for its new name or state), one step after another, whichever episode's it is. `kind`
+         *     is `sync` (the end of a sync) or `recover` (a journal a stop cut short, carried out at the start). `step` and `file`
+         *     are the step under way and the file it acts on.
+         */
+        PackJournal: {
+            /** Series Id */
+            series_id: number;
+            /**
+             * Series Name
+             * @default
+             */
+            series_name: string;
+            /**
+             * Sync Started
+             * @default
+             */
+            sync_started: string;
+            /**
+             * Kind
+             * @default sync
+             * @enum {string}
+             */
+            kind: "sync" | "recover";
+            /**
+             * Steps Of
+             * @default 0
+             */
+            steps_of: number;
+            /**
+             * Steps Done
+             * @default 0
+             */
+            steps_done: number;
+            /**
+             * Step
+             * @default null
+             */
+            step: ("move" | "remove" | "publish" | "retag") | null;
+            /**
+             * File
+             * @default
+             */
+            file: string;
+            /**
+             * Started At
+             * @default
+             */
+            started_at: string;
+            /**
+             * Seconds
+             * @default 0
+             */
+            seconds: number;
+        };
+        /**
          * TableProgress
          * @description How far a read of a page is; `rate` is the steps of the phase per second since the phase began (None before the
          *     first step).
@@ -4111,7 +4168,7 @@ export interface components {
         /** StreamEvent */
         StreamEvent: {
             /** @enum {string} */
-            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_scan_progress" | "conform_queue_update" | "pack_queue_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
+            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_scan_progress" | "conform_queue_update" | "pack_queue_update" | "pack_journal_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
             data: unknown;
         };
     };

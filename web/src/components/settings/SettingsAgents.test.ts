@@ -76,4 +76,22 @@ describe("the queue of the packing in the window of agents", () => {
     await nextTick()
     expect(found.text()).toContain(t("agents.pack.empty"))
   })
+
+  it("shows the journal of a sync step by step with the file under way, whichever episode's it is", async () => {
+    const queues = useQueuesStore()
+    const found = section()
+    queues.setJournals([{ series_id: 40, series_name: "Владыка множества миров", sync_started: "2026-11-11T02:44:35+00:00",
+                          kind: "sync", steps_of: 507, steps_done: 230, step: "retag",
+                          file: "Ten Thousand Worlds s01e394 [ruchime] VK-DL 2160p.mkv.off",
+                          started_at: "2026-11-11T02:49:13+00:00", seconds: 341 }])
+    await nextTick()
+    const journal = found.find(".pack-journal")
+    expect(journal.text()).toContain(t("pack.journal.steps", { done: 230, of: 507 }))
+    expect(journal.text()).toContain(`${t("pack.journal.step.retag")}: Ten Thousand Worlds s01e394`)
+    expect(journal.text()).toContain(t("pack.journal.kind.sync"))
+    expect(found.text()).not.toContain(t("agents.pack.empty"))
+    queues.setJournals([])
+    await nextTick()
+    expect(found.find(".pack-journal").exists()).toBe(false)
+  })
 })
