@@ -2337,7 +2337,7 @@ export interface components {
              * @default
              * @enum {string}
              */
-            method: "" | "ranged" | "ffmpeg" | "ytdlp_hls" | "ytdlp_dash";
+            method: "" | "ranged" | "ffmpeg" | "hls" | "ytdlp_hls" | "ytdlp_dash";
             /** Stages */
             stages?: components["schemas"]["StageView"][];
             /** Log */

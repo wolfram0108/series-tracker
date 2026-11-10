@@ -181,7 +181,9 @@ class AppPlayer:
         if picked is None or found is None:
             raise StreamUnavailable(reason("player_failed", player=self.label, cause=verdict.reading.message
                                            or verdict.reading.kind.value), verdict.exhausted)
-        return {"stream_url": picked[1], "headers": await self.headers_of(found[0]), "progressive": is_file(picked[1])}
+        progressive = is_file(picked[1])
+        return {"stream_url": picked[1], "headers": await self.headers_of(found[0]), "progressive": progressive,
+                "playlist": not progressive}
 
 
 class LinePlayer:

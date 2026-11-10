@@ -30,7 +30,7 @@ from core.ffprobe import duration_of, readable_length
 from core.proc import LOST, REAP_TIMEOUT_S, exited, program, run_capture, spawn, stop
 from core.retry import UNTIMED, Budget, retrying
 
-from . import ranged
+from . import hls_native, ranged
 
 ProgressCb = Callable[[dict], Awaitable[None]]
 
@@ -401,7 +401,8 @@ async def download(video_url: str, full_output_path: str,
                    headers: dict | None = None,
                    threads: int = 6,
                    progressive: bool = False,
-                   max_height: int | None = None) -> tuple[bool, str]:
+                   max_height: int | None = None,
+                   playlist: bool = False) -> tuple[bool, str]:
     """Two-phase video download. Supports parts of a ready file, direct ffmpeg copy and yt-dlp.
 
     A download that says it is done is taken only at the length its source announced: a stream copy short of it fails (the
@@ -409,11 +410,15 @@ async def download(video_url: str, full_output_path: str,
 
     `progressive` marks one ready file address: it is asked for in parts at once, and by one stream when the server
     cannot serve parts. `max_height` caps a page the downloader reads itself (a resolved stream is one file already).
-    The name is owned from the first step to the last: the programs, their leftovers and the publication."""
+    The name is owned from the first step to the last: the programs, their leftovers and the publication.
+
+    `playlist` marks an HLS playlist a player resolved: it is downloaded by its segments (modules/downloads/hls_native.py)."""
     if not os.path.isabs(full_output_path):
         return False, "путь сохранения должен быть абсолютным"
     try:
         with storage.hold(full_output_path):
+            if playlist:
+                return await _download_playlist(video_url, full_output_path, on_progress, headers or {}, threads)
             announced = await _announced_length(video_url, headers, progressive)
             await on_progress({"phase": "link", "source_seconds": announced or None})
             done = await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive,
@@ -441,8 +446,34 @@ async def _announced_length(video_url: str, headers: dict | None, progressive: b
     return await _probe_duration(video_url)
 
 
+async def _download_playlist(video_url: str, full_output_path: str, on_progress: ProgressCb, headers: dict,
+                             threads: int) -> tuple[bool, str]:
+    """The playlist read by our client and saved, its segments by the native downloader of yt-dlp, the stream copied into
+    the container by ffmpeg; the file is taken at the length the playlist states, short of it by up to its longest
+    segment."""
+    await storage.call(os.makedirs, os.path.dirname(full_output_path), exist_ok=True)
+    if await storage.call(os.path.exists, full_output_path):
+        return True, "файл уже существует"
+    await on_progress({"method": "hls"})
+    try:
+        try:
+            snap = await hls_native.snapshot(video_url, headers, full_output_path)
+        except hls_native.PlaylistError as exc:
+            return False, str(exc)
+        await on_progress({"phase": "link", "source_seconds": snap.seconds or None})
+        raw = full_output_path + ".download.ts"
+        done = await hls_native.fetch(snap, headers, raw, threads, on_progress)
+        if done[0]:
+            done = await _phase_remux(raw, full_output_path, on_progress, snap.seconds)
+    finally:
+        # The playlist, the stream and the leftovers of the downloader go, whatever the end.
+        await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
+    return await _as_long_as_announced(done, full_output_path, snap.seconds, on_progress,
+                                       tolerance=max(HOLE_S, snap.tolerance))
+
+
 async def _as_long_as_announced(done: tuple[bool, str], path: str, announced: float,
-                                on_progress: ProgressCb | None = None) -> tuple[bool, str]:
+                                on_progress: ProgressCb | None = None, *, tolerance: float = HOLE_S) -> tuple[bool, str]:
     """A download that says it is done is taken only at the length its source announced: a program that stopped early
     (a killed run continued, a playlist cut short) still says it is done. A file shorter than that is not kept; a length
     the source does not state proves nothing, so the file is kept and the download is not finished."""
@@ -458,7 +489,7 @@ async def _as_long_as_announced(done: tuple[bool, str], path: str, announced: fl
         return False, "обрыв: скачанный файл не читается — неполная загрузка"
     if announced <= 0:
         return False, "обрыв: источник не сообщил длину видео, полнота не проверена — загрузка повторится"
-    if short_of(got, announced):
+    if announced > 0 and got < announced - tolerance:
         await storage.discard(path)
         return False, f"обрыв: скачано {got:.0f} с из ожидаемых ~{announced:.0f} с — неполная загрузка"
     return done

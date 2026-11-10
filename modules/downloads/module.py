@@ -305,8 +305,8 @@ class DownloadsModule(BaseModule):
     # --- the fetches ------------------------------------------------------------------
 
     async def _resolve_stream(self, url: str, *, max_height: int | None = None,
-                              ytdlp_fallback) -> tuple[str, dict | None, tuple[str, bool] | None, bool]:
-        """(stream url, headers, (error, transient), progressive) of a link, via the provider that owns it.
+                              ytdlp_fallback) -> tuple[str, dict | None, tuple[str, bool] | None, bool, bool]:
+        """(stream url, headers, (error, transient), progressive, playlist) of a link, via the provider that owns it.
 
         `ytdlp_fallback` is an async callable asked only when the request fails: True hands the link to
         the downloader as it is, False makes the failure the error of the job, since a page of a web
@@ -315,14 +315,15 @@ class DownloadsModule(BaseModule):
         try:
             reply = await self.request("sources.video.stream", payload)
             if reply.get("error"):
-                return url, None, (reply["error"], bool(reply.get("transient"))), False
+                return url, None, (reply["error"], bool(reply.get("transient"))), False, False
             if reply.get("handled"):
-                return reply["stream_url"], reply.get("headers"), None, bool(reply.get("progressive"))
+                return (reply["stream_url"], reply.get("headers"), None, bool(reply.get("progressive")),
+                        bool(reply.get("playlist")))
         except Exception as exc:
             if not await ytdlp_fallback():
-                return url, None, (f"поток не получен: {exc}", True), False
+                return url, None, (f"поток не получен: {exc}", True), False, False
             self.log.debug("sources.video.stream не обработан для %s: %s", url, exc)
-        return url, None, None, False
+        return url, None, None, False, False
 
     async def on_fetch(self, env: Envelope) -> None:
         job = {k: env.payload.get(k) for k in ("key", "url", "path", "max_height", "series_id", "whole", "ytdlp")}
@@ -385,7 +386,7 @@ class DownloadsModule(BaseModule):
             nonlocal tries
             tries += 1
             self.cards.attempt(need_key, tries, budget.attempts)
-            stream_url, headers, stream_error, progressive = await self._resolve_stream(
+            stream_url, headers, stream_error, progressive, playlist = await self._resolve_stream(
                 job["url"], max_height=job.get("max_height"), ytdlp_fallback=_always if job.get("ytdlp") else _never)
             if stream_error is not None:
                 return (False, *stream_error)
@@ -396,6 +397,8 @@ class DownloadsModule(BaseModule):
                 kw["headers"] = headers
             if progressive:
                 kw["progressive"] = True
+            if playlist:
+                kw["playlist"] = True
             done, failure = await self._watched(key, stream_url, path, on_progress, **kw)
             return done, failure, not done and _transient_download_error(failure)
 

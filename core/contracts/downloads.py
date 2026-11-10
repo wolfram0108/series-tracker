@@ -20,7 +20,7 @@ STAGES: tuple[Stage, ...] = ("queue", "link", "download", "remux", "check")
 StageState = Literal["pending", "active", "done", "failed", "skipped"]
 CardStatus = Literal["queued", "link", "download", "remux", "check", "done", "failed"]
 NeedKind = Literal["video", "dub", "picture"]
-Method = Literal["", "ranged", "ffmpeg", "ytdlp_hls", "ytdlp_dash"]
+Method = Literal["", "ranged", "ffmpeg", "hls", "ytdlp_hls", "ytdlp_dash"]
 
 
 class DownloadVariant(BaseModel):

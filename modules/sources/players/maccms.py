@@ -6,8 +6,8 @@ others say nothing at all. So the frame is read from the picture: the head of th
 playlist names an AES-128 key, is given to ffprobe. The address of a playlist names its video for good, so the site hands
 over what the last table said of it and a frame is measured once.
 
-The link of a row is the page of the title with the playlist in its fragment; the stream is the playlist itself, which
-yt-dlp downloads in parallel segments (no headers: the hosts ask for none).
+The link of a row is the page of the title with the playlist in its fragment; the stream is the playlist itself, downloaded
+by its segments (modules/downloads/hls_native.py; no headers: the hosts ask for none).
 """
 from __future__ import annotations
 
@@ -61,7 +61,8 @@ class MaccmsPlayer:
         return cls.playlist_of(url) is not None
 
     async def stream(self, url: str, http: httpx.AsyncClient, max_height: int | None, pacer) -> dict:
-        return await listed_stream(self, url, http, max_height, pacer)
+        # The stream is an HLS playlist: it is downloaded by its segments (modules/downloads/hls_native.py).
+        return {**(await listed_stream(self, url, http, max_height, pacer)), "playlist": True}
 
     def capped(self, max_height: int | None) -> "_Located":
         """An episode has one rendition, its frame measured on the table: there is nothing to choose under a cap, and the

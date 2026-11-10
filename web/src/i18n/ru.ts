@@ -42,6 +42,7 @@ export const ru = {
   "download.value.x": "×{value}",
   "download.method.ranged": "загрузка частями",
   "download.method.ffmpeg": "поток ffmpeg",
+  "download.method.hls": "плейлист HLS по сегментам, перепаковка ffmpeg",
   "download.method.ytdlp_hls": "yt-dlp HLS, перепаковка ffmpeg",
   "download.method.ytdlp_dash": "yt-dlp DASH, перепаковка ffmpeg",
   "download.attempt": "попытка {n} из {of}",

@@ -31,7 +31,7 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    tracker | site, domains}]}: the settings screen of the sources whole — the mirrors of
                                    each tracker, and the domains the service reads pages of now: every tracker with its
                                    domains and mirrors, every site of the registry with its own (no network)
-  sources.video.stream {url, max_height?} → {handled, stream_url, headers, progressive} | {handled, error,
+  sources.video.stream {url, max_height?} → {handled, stream_url, headers, progressive, playlist} | {handled, error,
                                    transient}: the stream of a candidate link, asked for right before the download.
                                    The player that owns the link (a VK player link with its key, an AllVideo embed,
                                    a Vibix entry, an item of CDN VideoHub or of Kodik) resolves it; any other
@@ -396,8 +396,9 @@ class SourcesModule(BaseModule):
 
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}
-        reply: {handled, stream_url, headers, progressive} | {handled, error, transient}.
-        `progressive` marks one ready file that a server may be asked for in parts.
+        reply: {handled, stream_url, headers, progressive, playlist} | {handled, error, transient}.
+        `progressive` marks one ready file that a server may be asked for in parts; `playlist` an HLS playlist that is
+        downloaded by its segments.
 
         `error` means the URL belongs to a player that has no stream for it:
         the caller must not hand the page to a generic downloader."""
@@ -413,6 +414,7 @@ class SourcesModule(BaseModule):
                 "stream_url": stream_info["stream_url"],
                 "headers": stream_info.get("headers", {}),
                 "progressive": bool(stream_info.get("progressive")),
+                "playlist": bool(stream_info.get("playlist")),
             }
         return {"handled": False}
 

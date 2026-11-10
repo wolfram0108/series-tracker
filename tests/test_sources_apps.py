@@ -106,7 +106,7 @@ async def test_a_card_is_a_table_of_every_line_in_its_order_read_by_two_requests
 
         # The stream of an episode of a line of playlists is its playlist, its frame not measured for the download.
         got = await player.stream(draft.rows[0].link, http, None, players.pacer)
-        assert got == {"stream_url": f"{CDN}a/index.m3u8", "headers": {}, "progressive": False}
+        assert got == {"stream_url": f"{CDN}a/index.m3u8", "headers": {}, "progressive": False, "playlist": True}
 
 
 async def test_the_stream_of_an_episode_comes_from_the_parsers_its_line_allows_in_the_order_of_the_application():
@@ -119,7 +119,8 @@ async def test_the_stream_of_an_episode_comes_from_the_parsers_its_line_allows_i
         players = PlayerRegistry([player])
         link = player.link_of("app://banri/219017", "CO4K", "CO4K_tok1")
         got = await player.stream(link, http, None, players.pacer)
-        assert got == {"stream_url": f"{CDN}c/index.m3u8", "headers": {"Referer": "https://app.model/"}, "progressive": False}
+        assert got == {"stream_url": f"{CDN}c/index.m3u8", "headers": {"Referer": "https://app.model/"}, "progressive": False,
+                       "playlist": True}
         # Parser 5 comes before 9 in the application's list: its refusal (the limit of the day) is passed, 9 gives the stream.
         assert [int(fields["id"]) for path, fields in model.calls if path == "/app/vodParser"] == [5, 9]
 
