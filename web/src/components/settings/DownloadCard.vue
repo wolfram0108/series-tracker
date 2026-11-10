@@ -112,6 +112,7 @@ const lineText = (line: Line): string => line.outcome === "done" ? t("download.d
       </div>
     </template>
     <div v-else-if="card.status === 'done'" class="download-facts">
+      <span v-if="figures.got_height">{{ t("download.label.quality") }} <b>{{ t("download.value.cap", { height: figures.got_height }) }}</b></span>
       <span v-if="figures.got_seconds">{{ t("download.label.length") }} <b>{{ duration(figures.got_seconds) }}</b></span>
       <span v-if="figures.size_mb">{{ t("download.label.size") }} <b>{{ t("download.value.mb", { value: figures.size_mb }) }}</b></span>
     </div>

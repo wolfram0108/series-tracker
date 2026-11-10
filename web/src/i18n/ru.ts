@@ -26,6 +26,7 @@ export const ru = {
   "download.label.left": "Осталось",
   "download.label.sourceLength": "Длительность по источнику",
   "download.label.length": "Длительность",
+  "download.label.quality": "Качество",
   "download.label.size": "Размер",
   "download.label.queuedAt": "В очереди с",
   "download.label.finishedAt": "Завершено",

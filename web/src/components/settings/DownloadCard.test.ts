@@ -53,8 +53,11 @@ describe("the card of a download", () => {
     expect(failed.text()).toContain(t("download.outcome.dub"))
     await failed.find(".download-remove").trigger("click")
     expect(failed.emitted("remove")).toEqual([["88:s06e08:dub:Kazoku Project"]])
-    const done = mount(DownloadCard, { props: { card: card({ status: "done", finished_at: "2026-11-10T09:22:25+00:00" }) } })
+    const done = mount(DownloadCard, { props: { card: card({ status: "done", finished_at: "2026-11-10T09:22:25+00:00",
+      stages: stages(["done", "done", "done", "skipped", "done"]),
+      figures: { got_height: 720, got_seconds: 1452, size_mb: 664 } }) } })
     expect(done.classes()).toContain("is-done")
     expect(done.text()).toContain(t("download.label.got"))
+    expect(done.text()).toContain(`${t("download.label.quality")} ${t("download.value.cap", { height: 720 })}`)
   })
 })

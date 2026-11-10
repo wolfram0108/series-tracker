@@ -43,6 +43,7 @@ import traceback
 
 from core import BaseModule, storage
 from core.clock import beat_while
+from core.ffprobe import film_stream, streams_of
 from core.contracts import RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, WorkWithdrawn
 from core.db import Database
 from core.envelope import Envelope
@@ -427,7 +428,10 @@ class DownloadsModule(BaseModule):
             self._cancelled.discard(key)
             if not stopped:
                 size = await storage.call(os.path.getsize, path) if ok and await storage.call(os.path.isfile, path) else None
-                self.cards.finished(need_key, ok, size_mb=round(size / 1024 ** 2, 1) if size else None)
+                # The height of what came, read from the header of the file (no frame is decoded).
+                film = film_stream(await streams_of(path) or []) if size else None
+                self.cards.finished(need_key, ok, size_mb=round(size / 1024 ** 2, 1) if size else None,
+                                    height=(film or {}).get("height"))
                 self._finished(job, ok, error, transient)
             self._fetch_pump()
             self._announce_queue()
