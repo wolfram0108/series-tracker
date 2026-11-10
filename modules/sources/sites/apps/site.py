@@ -6,28 +6,23 @@ of every line is a row of the player of its line (`<application>:<line>`, labell
 label as the application gives it ("1", "第01集", "《万界独尊》2026新春贺岁PV"): nothing here numbers an episode, leaves an
 item out or tells one line from another. The line's name, type and parsers are visible fields of its rows.
 
-Every episode is asked of the application's player in the read, its frame measured (players/app_lines.py): the lines of
-a card are asked all at once, each episode by the gates of its parser and of the host of its files. An episode the last
-table measured is not asked again: the token names its video for good. The field `stream` of a row says how its stream
-comes: the playlist the line lists itself, or a parser of the application.
+The table is the card as the application lists it, read by two requests: no episode is asked. A card holds thousands of
+episodes, and asking each one costs a request to a parser of the application, which allows a limited number of parses a
+day (it answers "今日解析次数已达上限" when they are spent), or a playlist and the head of its segment: the read would take
+minutes. The stream of an episode and its frame are asked right before its download (players/app_lines.py). The field
+`stream` of a row says how its stream comes: the playlist the line lists itself, or a parser of the application.
 """
 from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-import asyncio
-
 from core.contracts import RowState, TableRow
 from core.reasons import reason
 
-from ...players.asking import catalog_rows
-from ...players.catalog import Entry
-from ...players.contract import Kind, PlayerRef, Reading
 from ...apps import SCHEME, card_address
 from ...apps.app99 import AppError
 from ...players.app_lines import AppPlayer
-from .. import PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError, TableDraft
-from ..catalogs import AskCount
+from .. import PHASE_RELEASE, ReadContext, SiteError, TableDraft
 from ..recent import last_of_each
 
 LIST_SEPARATOR = "$$$"
@@ -90,29 +85,20 @@ class AppSite:
         ctx.progress(PHASE_RELEASE, 1, 1)
         players = {str(each.get("code") or key): each for key, each in (system.get("player") or {}).items()
                    if isinstance(each, dict)}
-        # What the last table measured of each episode: the token names its video for good.
-        known = {PlayerRef(row.player, row.link): Reading(Kind.PLAYABLE, 200, tuple(row.heights))
-                 for row in ctx.last_rows if self.player.owns(row.link) and row.state is RowState.PLAYABLE and row.heights}
-        asked = []
+        rows: list[TableRow] = []
         for code, items in lines_of(data):
             shown = players.get(code, {})
             line = self.player.line(code, str(shown.get("name") or code))
             fields = {"line": code, "line_name": line.label, "line_type": shown.get("type"),
                       "parsers": str(shown.get("parseUrl") or ""),
                       "stream": "playlist" if shown.get("type") == 0 else "parser"}
-            entries = [Entry(key=str(place), ref=PlayerRef(line.name, self.player.link_of(card_url, code, token)),
-                             text=label, site_fields={**fields, "place": place})
-                       for place, label, token in last_of_each(items, lambda _item: code, ctx.recent)]
-            if entries:
-                asked.append((line, entries))
-        if not asked:
+            listed = last_of_each(items, lambda _item: code, ctx.recent)
+            rows += [TableRow(key=f"{line.name}:{place}", player=line.name, player_label=line.label, text=label,
+                              state=RowState.PLAYABLE, link=self.player.link_of(card_url, code, token),
+                              site_fields={**fields, "place": place})
+                     for place, label, token in listed]
+        if not rows:
             raise SiteError(reason("no_players_empty", site=self.player.label))
-        count = AskCount(ctx, sum(len(entries) for _line, entries in asked))
-        ctx.progress(PHASE_PLAYERS, 0, count.total)
-        # Every line at once: the gates of the parsers and of the hosts of the files bound what is asked together.
-        bodies = await asyncio.gather(*(catalog_rows(line, entries, ctx.http, card_url, None, on_asked=count, known=known)
-                                        for line, entries in asked))
-        rows = [row for body in bodies for row in body]
         names = [str(data.get("name") or "").strip(), *(part.strip() for part in str(data.get("sub") or "").split(","))]
         year = str(data.get("year") or "").strip()
         title = " · ".join(part for part in (self.label, names[0] + (f" ({year})" if year and year != "0" else "")) if part)

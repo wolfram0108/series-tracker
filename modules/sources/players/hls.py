@@ -6,9 +6,7 @@ the players whose streams are playlists measure it here, one way for all of them
 """
 from __future__ import annotations
 
-import asyncio
 import re
-import weakref
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 from urllib.parse import urljoin
@@ -25,18 +23,6 @@ REQUEST_TIMEOUT_S = 20.0
 # Enough of a segment to hold its first key frame with the parameters of the picture; the rest of it is not fetched.
 HEAD_BYTES = 256 * 1024
 MEASURE_TIMEOUT_S = 30.0
-# The pictures read by ffprobe at once in the whole process, whichever player asks: each is a program of tens of megabytes,
-# and a card of thousands of episodes asked at once would run them by the hundred on a server of 4 GB.
-MEASURE_GATE = 6
-_gates: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
-
-
-def ffprobe_gate() -> asyncio.Semaphore:
-    """The gate of the pictures read at once in this process (one to the loop that runs it)."""
-    loop = asyncio.get_running_loop()
-    if loop not in _gates:
-        _gates[loop] = asyncio.Semaphore(MEASURE_GATE)
-    return _gates[loop]
 
 _ATTRIBUTE = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
 
@@ -129,9 +115,8 @@ async def measure_head(http: httpx.AsyncClient, head: Head, referer: str) -> int
         data = decrypted(data, key, head.iv if head.iv is not None else head.sequence.to_bytes(16, "big"))
     if head.init:
         data = await _bytes(http, head.init, referer) + data
-    async with ffprobe_gate():
-        streams = await streams_of("pipe:0", input_args=[] if head.init else ["-f", "mpegts"], data=data,
-                                   timeout=MEASURE_TIMEOUT_S)
+    streams = await streams_of("pipe:0", input_args=[] if head.init else ["-f", "mpegts"], data=data,
+                               timeout=MEASURE_TIMEOUT_S)
     film = film_stream(streams or [])
     try:
         return int(film["height"]) if film is not None else None

@@ -5,12 +5,8 @@ A card of an application lists its episodes in lines (`4K`, `专线`, `蓝光①
 with its way to the stream: a line of type 0 lists the playlists themselves, any other gives a token that a parser of the
 application turns into the address of the stream (`parseUrl` of the line names the parsers it allows, in the order the
 application lists its parsers). The link of a row is the card with the line and the token in its fragment; the token is
-the application's own name of the video.
-
-The frame of every episode is measured in the read of its card, as the frame of every row of every source is: its stream
-now, its playlist, the head of its first segment (players/hls.py). A card holds thousands of episodes, so they are asked
-by many at once: a gate for each parser of the application and for each host of its files, apart from the pace of the
-other sites.
+the application's own name of the video. The table of a card asks no episode (sites/apps): the stream is resolved here
+right before its download.
 
 A row of a line is of the player `<application>:<line>` (its label the name of the line): the composition switches a line
 off, ranks it and keeps its variants as it does any player. The registry finds the application by the part before `:`.
@@ -29,18 +25,18 @@ from core.reasons import reason
 
 from ..apps import SCHEME
 from ..apps.app99 import AppError, App99Client
-from core.ffprobe import film_stream, streams_of
-
 from ..policy import settle
 from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
-from .hls import MEASURE_TIMEOUT_S, Measure, ffprobe_gate, measure_head, measured
+from core.ffprobe import film_stream, streams_of
+
+from .hls import MEASURE_TIMEOUT_S, Measure, measure_head, measured
 from .vk_files import pick_file
 
 logger = logging.getLogger("sources")
 
-# The parses asked of one parser of an application at once, and the asks in flight to one host of its files.
-PARSER_GATE = 16
-HOST_GATE = 16
+# The parses asked of an application at once, and the asks in flight to one host of its files.
+APP_GATE = 4
+HOST_GATE = 8
 _DIRECT = re.compile(r"\.(m3u8|mp4)(?:$|\?)", re.I)
 
 
@@ -51,8 +47,7 @@ def is_file(address: str) -> bool:
 
 async def measure_file(address: str, headers: dict[str, str]) -> Answer:
     sent = "".join(f"{key}: {value}\r\n" for key, value in headers.items())
-    async with ffprobe_gate():
-        streams = await streams_of(address, input_args=["-headers", sent] if sent else [], timeout=MEASURE_TIMEOUT_S)
+    streams = await streams_of(address, input_args=["-headers", sent] if sent else [], timeout=MEASURE_TIMEOUT_S)
     film = film_stream(streams or [])
     if film is None or not film.get("height"):
         return Answer(200, reading=Reading(Kind.NO_FILE, 200, message="no picture in the file"))
@@ -75,7 +70,7 @@ class AppPlayer:
         self.client = client
         self.name, self.label = client.profile.name, client.profile.label
         self._measure = measure or measure_head
-        self._parsers: dict[str, asyncio.Semaphore] = {}
+        self._api = asyncio.Semaphore(APP_GATE)
         self._hosts: dict[str, asyncio.Semaphore] = {}
 
     # --- the link of a row ------------------------------------------------------------------------------------
@@ -129,7 +124,7 @@ class AppPlayer:
         refusals = []
         for parser in await self._parsers_of(player):
             try:
-                async with self._parsers.setdefault(str(parser), asyncio.Semaphore(PARSER_GATE)):
+                async with self._api:
                     return await self.client.parse(parser, item)
             except AppError as exc:
                 logger.info("приложение %s, линия %s: парсер %s не дал адреса — %s", self.name, line, parser, exc.reason)
