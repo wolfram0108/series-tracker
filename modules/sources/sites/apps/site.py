@@ -6,14 +6,12 @@ of every line is a row of the player of its line (`<application>:<line>`, labell
 label as the application gives it ("1", "第01集", "《万界独尊》2026新春贺岁PV"): nothing here numbers an episode, leaves an
 item out or tells one line from another. The line's name, type and parsers are visible fields of its rows.
 
-The table is the card as the application lists it, read by two requests, and the frame of each line: a line serves its
-episodes one way (one host, one parser), so its newest episode is measured — its stream asked, its playlist read, the head
-of a segment given to ffprobe (players/app_lines.py) — and its frame is the frame of the rows of the line. Each row says
-it: `frame_of` names the episode the frame was measured on. Asking every one of thousands of episodes costs a parse a
-day each and loads the hosts with thousands of requests; a line costs one. A line measured by the last table keeps its
-frame and is not asked again; a line whose episode gave no stream has rows without a frame and says why (`frame_failed`),
-and is asked once more by the next read. The ask is single: a parse of the application is spent on each, and the refusal of
-an application (the limit of the day, no parser of the line) does not pass in seconds.
+The table is the card as the application lists it, read by two requests. A row's frame is the frame of its own video,
+measured on it, and of no other row: the stream of an episode of most lines costs a parse of the application, and a read
+measures one episode of each line — its newest — so that row alone has a frame (`frame: measured`). Every other row is `not_obtained`: its player was not asked, which the row says (`frame_not_measured`); its
+frame is never carried over from another episode. A row measured by the last table keeps its frame and is not asked again;
+a row whose episode gave no stream is `not_obtained` with why (`frame_failed`) and is asked once more by the next read. The ask is single:
+the refusal of an application (no parser of the line, an empty answer) does not pass in seconds.
 The field `stream` of a row says how its stream comes: the playlist the line lists itself, or a parser of the application.
 """
 from __future__ import annotations
@@ -104,11 +102,18 @@ class AppSite:
         frames = await self._frames(card_url, lines, ctx)
         rows: list[TableRow] = []
         for line, fields, listed in lines:
-            heights, frame = frames[line.name]
-            rows += [TableRow(key=f"{line.name}:{place}", player=line.name, player_label=line.label, text=label,
-                              state=RowState.PLAYABLE, heights=heights, link=self.player.link_of(card_url, line.code, token),
-                              site_fields={**fields, "place": place, **frame})
-                     for place, label, token in listed]
+            for place, label, token in listed:
+                link = self.player.link_of(card_url, line.code, token)
+                own = {**fields, "place": place}
+                heights, frame = frames.get(link, ([], {}))
+                if heights:
+                    rows.append(TableRow(key=f"{line.name}:{place}", player=line.name, player_label=line.label,
+                                         text=label, state=RowState.PLAYABLE, heights=heights, link=link,
+                                         site_fields={**own, **frame}))
+                    continue
+                cause = frame.get("frame_failed") or reason("frame_not_measured", player=line.label)
+                rows.append(TableRow(key=f"{line.name}:{place}", player=line.name, player_label=line.label, text=label,
+                                     state=RowState.NOT_OBTAINED, link=link, site_fields={**own, **frame}, reason=cause))
         if not rows:
             raise SiteError(reason("no_players_empty", site=self.player.label))
         names = [str(data.get("name") or "").strip(), *(part.strip() for part in str(data.get("sub") or "").split(","))]
@@ -117,21 +122,23 @@ class AppSite:
         return TableDraft(names=list(dict.fromkeys(name for name in names if name)), title=title, rows=rows)
 
     async def _frames(self, card_url: str, lines, ctx: ReadContext) -> dict[str, tuple[list[int], dict]]:
-        """The frame of each line ([height] or [], and the fields that say on what): the last table's when it measured the
-        line, else the frame of the newest episode of the line, measured now — one ask a line, not repeated, all lines at
-        once."""
-        kept = {}
-        for row in ctx.last_rows:
-            if self.player.owns(row.link) and row.heights and row.site_fields.get("frame_of"):
-                kept.setdefault(row.player, (list(row.heights), {"frame_of": row.site_fields["frame_of"]}))
-        asked = [(line, listed[-1]) for line, _fields, listed in lines if line.name not in kept]
+        """The frame of each row measured on its own video, by its link ([height] or [] with why): the last table's of
+        every row it measured itself, and the newest episode of each line measured now when the last table has not
+        measured it — one ask a line, not repeated, all lines at once."""
+        kept = {row.link: (list(row.heights), {"frame": "measured"}) for row in ctx.last_rows
+                if self.player.owns(row.link) and row.heights and row.site_fields.get("frame") == "measured"}
+        asked = []
+        for line, _fields, listed in lines:
+            _place, _label, token = listed[-1]
+            link = self.player.link_of(card_url, line.code, token)
+            if link not in kept:
+                asked.append((line, link))
         done = 0
         ctx.progress(PHASE_PLAYERS, 0, len(asked))
 
-        async def measure(line, newest) -> tuple[str, tuple[list[int], dict]]:
+        async def measure(line, link) -> tuple[str, tuple[list[int], dict]]:
             nonlocal done
-            _place, label, token = newest
-            ref = PlayerRef(line.name, self.player.link_of(card_url, line.code, token))
+            ref = PlayerRef(line.name, link)
             try:
                 reading = line.read(await line.fetch(ref, ctx.http, card_url))
                 heights, failed = sorted(reading.resolutions)[-1:], reading.message or reading.kind.value
@@ -140,8 +147,8 @@ class AppSite:
             done += 1
             ctx.progress(PHASE_PLAYERS, done, len(asked))
             if heights:
-                return line.name, (heights, {"frame_of": label})
-            return line.name, ([], {"frame_tried": label, "frame_failed": failed})
+                return link, (heights, {"frame": "measured"})
+            return link, ([], {"frame_failed": failed})
 
-        measured = dict(await asyncio.gather(*(measure(line, newest) for line, newest in asked)))
+        measured = dict(await asyncio.gather(*(measure(line, link) for line, link in asked)))
         return {**kept, **measured}

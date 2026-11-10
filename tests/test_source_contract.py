@@ -1,6 +1,7 @@
 """The contract of a source (contracts/source_contract.md), kept by the whole application on its stand
 (tests/app_stand.py): a table of every kind of source the stand models is read the way the windows read it, and what its
-rows give the consumers is checked — a row a player confirmed has a frame (the first criterion of the order of variants),
+rows give the consumers is checked — a row a player confirmed has the frame of its own video (the first criterion of the
+order of variants), never the frame of another row,
 and the player of every row, as every player of the registry, has its place and its words in the order of sources."""
 import asyncio
 
@@ -44,7 +45,8 @@ async def test_every_row_of_every_kind_of_source_has_a_frame_and_a_player_the_or
     stand.site.episode("ref", 1, height=720)
     stand.site.title(4794)
     await asyncio.to_thread(stand.site.hls_episode, 4794, 1, height=1080)
-    await asyncio.to_thread(stand.site.app_card, 219017, "万界独尊", {1: 2160, 2: 2160})
+    # Episodes of one line in different frames: a frame is of the row whose video it was measured on, of no other.
+    await asyncio.to_thread(stand.site.app_card, 219017, "万界独尊", {1: 1080, 2: 2160})
     urls = [stand.site.releases["ref"].url, stand.site.titles[4794].url, "app://banri/219017"]
 
     tables = await tables_of(stand, urls)
@@ -62,6 +64,8 @@ async def test_every_row_of_every_kind_of_source_has_a_frame_and_a_player_the_or
             assert fold_name(row["player"]) in placed, (url, row["player"], order["priority"])
             assert order["player_labels"].get(row["player"]), (url, row["player"])
     assert {row["player"] for row in tables[2]["rows"]} == {"banri:BLU"}
+    app = {row["text"]: (row["state"], row["heights"]) for row in tables[2]["rows"]}
+    assert app == {"第1集": ("not_obtained", []), "第2集": ("playable", [2160])}, app
     assert order["player_labels"]["banri:BLU"] == "半日 · 蓝光"
     # Obligation 3 for every player a row can be of, whether a table of the stand holds one or not.
     for player in sources.players:

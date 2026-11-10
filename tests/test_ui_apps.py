@@ -1,8 +1,7 @@
 """A card of a video application (tests/app99_model.py) as the source of the reference, in a browser (tests/ui_stand.py):
 the user finds the title by the search of the application in the window of a new series, adds the card it gave, makes the
 rule of its labels («第N集») beside a source of a voice-over, and syncs. The read of the card measures the frame of its line
-on its newest episode — one parse of the application for the line, not one for each episode (a parser allows a limited
-number of parses a day) — so its rows rank by their frame like the rows of any source: the application's 1080 is the
+on its newest episode — so its rows rank by their frame like the rows of any source: the application's 1080 is the
 reference before the voice-over's 480. The user puts the voice-over first in the queue of the reference of the episode:
 the next sync takes its picture. A stream is parsed again right before each download (its address expires)."""
 import json

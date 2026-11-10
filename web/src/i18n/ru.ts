@@ -211,6 +211,7 @@ export const ru = {
   "reason.stream_unreachable": "поток плеера не открывается с сервера: хост {host}, {error}",
   "reason.player_video_missing": "{player}: видео не найдено",
   "reason.player_unconfirmed": "{player} не подтвердил источник",
+  "reason.frame_not_measured": "{player}: разрешение серии не измерено",
   "reason.player_no_qualities": "{player} не отдал качеств",
   "reason.video_private": "видео закрыто настройками приватности",
   "reason.page_unreachable": "страница недоступна",

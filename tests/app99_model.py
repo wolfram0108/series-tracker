@@ -49,7 +49,8 @@ class App99Model:
     players: dict[str, dict] = field(default_factory=dict)
     parsers: list[int] = field(default_factory=list)
     cards: dict[int, Card] = field(default_factory=dict)
-    # (parser, token) -> the address it gives; a parser asked for a token it has none for answers the limit of the day
+    # (parser, token) -> the address it gives; a parser asked for a token it has none for gives none, as the real one
+    # does (code 0, no message, no address)
     parses: dict[tuple[int, str], str] = field(default_factory=dict)
     # the cards the search gives, in its order, for any words
     found: list[dict] = field(default_factory=list)
@@ -110,6 +111,6 @@ class App99Model:
         if path == "/app/vodParser":
             address = self.parses.get((int(fields["id"]), fields["url"]))
             if address is None:
-                return self._answer({"code": 0, "msg": "今日解析次数已达上限，请明日 0 点后再试", "data": ""})
+                return self._answer({"code": 0, "msg": "", "data": ""})
             return self._answer({"code": 0, "msg": "", "data": address})
         return httpx.Response(404, text="")

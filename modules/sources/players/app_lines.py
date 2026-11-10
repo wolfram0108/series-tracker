@@ -5,7 +5,7 @@ A card of an application lists its episodes in lines (`4K`, `专线`, `蓝光①
 with its way to the stream: a line of type 0 lists the playlists themselves, any other gives a token that a parser of the
 application turns into the address of the stream (`parseUrl` of the line names the parsers it allows, in the order the
 application lists its parsers). The link of a row is the card with the line and the token in its fragment; the token is
-the application's own name of the video. The table of a card measures the frame of a line on its newest episode
+the application's own name of the video. The table of a card measures the newest episode of each line, that row alone
 (sites/apps); the stream is resolved here again right before its download (its address expires). Whether a stream is a
 playlist or a file is what its host serves (`served_as`), not the form of its address.
 
