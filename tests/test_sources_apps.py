@@ -169,6 +169,13 @@ async def test_the_search_gives_the_cards_of_each_application_as_it_gives_them_e
         assert (resolved.site, resolved.canonical_url) == ("banri", "app://banri/219017")
 
 
+        # The address of a source of the application, given to the search, is that card: one writing of it everywhere.
+        model.cards[219017] = Card(219017, "万界独尊", sub="Ten Thousand Worlds", lines=[Line("CO4K", [("1", "t")])])
+        named = (await sources.on_apps_search(Envelope(topic="sources.apps.search", kind="query",
+                                                       payload={"query": " app://banri/219017 "})))["apps"][0]
+        assert [(card["id"], card["url"], card["name"]) for card in named["cards"]] == [
+            ("219017", "app://banri/219017", "万界独尊")] and named["total"] == 1
+
         # An application that cannot be asked gives its reason instead of cards; the search does not fail for it.
         down = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(503, text="")))
         sources.apps[0].client = App99Client(profile(), lambda: down)

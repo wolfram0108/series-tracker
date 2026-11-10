@@ -71,6 +71,7 @@ import os
 import time
 from datetime import datetime
 from typing import Callable, Iterable
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -377,19 +378,29 @@ class SourcesModule(BaseModule):
         found = await asyncio.gather(*(self._search(app, request.query, request.page) for app in asked))
         return AppSearchReply(apps=list(found)).model_dump(mode="json")
 
+    @staticmethod
+    def _card(app: AppPlayer, number: str, each: dict) -> AppCard:
+        # A card without a number the application could be asked by again is shown all the same, with no address.
+        return AppCard(app=app.name, id=number, url=card_address(app.name, number) if number.isdigit() else "",
+                       name=str(each.get("name") or ""), sub=str(each.get("sub") or ""), year=str(each.get("year") or ""),
+                       area=str(each.get("area") or ""), genres=str(each.get("class") or each.get("type_name") or ""),
+                       remarks=str(each.get("remarks") or ""),
+                       blurb=str(each.get("blurb") or each.get("content") or "").strip(), pic=str(each.get("pic") or ""))
+
     async def _search(self, app: AppPlayer, query: str, page: int) -> AppResults:
+        # The address of a source of the application is the one writing of its card: given to the search, it is that card,
+        # asked of the application by its number (the search of the application knows titles only).
+        site = self.sites.find(query.strip())
+        number = urlsplit(query.strip()).path.strip("/") if site is not None and site.name == app.name else None
         try:
+            if number is not None:
+                card = await app.client.detail(number)
+                return AppResults(app=app.name, label=app.label, page=1, pages=1, total=1,
+                                  cards=[self._card(app, number, card)])
             answer = await app.client.search(query, page)
         except AppError as exc:
             return AppResults(app=app.name, label=app.label, page=page, reason=exc.reason)
-        # A card without a number the application could be asked by again is shown all the same, with no address.
-        cards = [AppCard(app=app.name, id=str(each.get("id", "")),
-                         url=card_address(app.name, str(each["id"])) if str(each.get("id", "")).isdigit() else "",
-                         name=str(each.get("name") or ""), sub=str(each.get("sub") or ""), year=str(each.get("year") or ""),
-                         area=str(each.get("area") or ""), genres=str(each.get("class") or ""),
-                         remarks=str(each.get("remarks") or ""), blurb=str(each.get("blurb") or "").strip(),
-                         pic=str(each.get("pic") or ""))
-                 for each in answer.get("data") or [] if isinstance(each, dict)]
+        cards = [self._card(app, str(each.get("id", "")), each) for each in answer.get("data") or [] if isinstance(each, dict)]
         pages, total = answer.get("page_count"), answer.get("total_count", answer.get("count"))
         return AppResults(app=app.name, label=app.label, page=page, cards=cards,
                           pages=int(pages) if str(pages).isdigit() else None, total=int(total) if str(total).isdigit() else None)
