@@ -252,7 +252,7 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
                                                       group_rank, own_place)) is not None]
     ops = _ops(goals, containers)
     groups = _groups(goals, ops, containers, deleted_videos, video_slot, track_slot,
-                     lambda track, slot: switched_off(choices, track, slot))
+                     lambda track, slot: switched_off(choices, track, slot), deleted_tracks)
     return Plan(tuple(goals), tuple(ops), tuple(groups))
 
 
@@ -563,7 +563,7 @@ def _fetch(ops: dict[str, Op], row: OnlineRow, slot: Slot) -> str:
     return key
 
 
-def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, taken_off) -> list[Group]:
+def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, taken_off, deleted_tracks) -> list[Group]:
     parent: dict[str, str] = {}
     slot_of: dict[str, Slot] = {}
 
@@ -625,8 +625,9 @@ def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, take
             replaced = goal is not None and (voice_of(goal.video.snapshot.group, goal.video.timeline) == voice or any(
                 way.voice == voice and not (way.container is container and way.dub == track.dub and way.own == is_own)
                 for way in goal.tracks))
-            # Only a voice-over the user took off goes with nothing in its place; «Удалить» does not take a sound away.
-            if not (used or replaced or taken_off(track, here)):
+            # A sound goes with nothing in its place only by the user: a voice-over taken off, or «Удалить» at that track.
+            deleted = not is_own and (container.name, track.dub) in deleted_tracks
+            if not (used or replaced or deleted or taken_off(track, here)):
                 tracks_ok = False
         if video_ok and tracks_ok:
             remove.add(container.name)

@@ -270,8 +270,8 @@ class World(SeriesSync):
             assert own not in voices, f"{container.name}: the own sound is also a track"
             for track in container.tracks:
                 assert track.aligned_to == container.video.timeline, f"{container.name}: a track out of sync"
-        # Nothing goes but what the goal holds anew or what the user took off the episode: «Удалить» takes the video it
-        # names away, never a sound — a voice-over of a deleted file or a deleted track lives on, made anew.
+        # Nothing goes but what the goal holds anew or what the user said: a voice-over taken off the episode, or the
+        # track «Удалить» names (Д-1). A deleted video takes only itself: the sounds of its file live on, made anew.
         standing = {_slot_of_video(each.video, online) for each in step.after}
         deleted = step.choices.delete
         for container in step.before:
@@ -281,7 +281,7 @@ class World(SeriesSync):
                     f"the video of {container.name} went with nothing in its place"
             for track in container.tracks:
                 voice, here = voice_of(track.group, track.dub), slot_of_track(track)
-                if switched_off(step.choices, track, here):
+                if switched_off(step.choices, track, here) or ("track", container.name, track.dub) in deleted:
                     continue
                 # It lives on: the same track anywhere, or its voice-over in the container of its episode — as a track
                 # or as the own sound of the video.
@@ -315,6 +315,12 @@ class World(SeriesSync):
             if video.kind == "cut":
                 ref2 = online.get(video.timeline)
                 assert ref2 is None or video.row.height > ref2.height, f"{goal.name}: a cut no higher than its timeline"
+        # A deleted track is never a source of itself: «Удалить» is its removal, not an alignment anew.
+        for goal in step.plan.goals:
+            for way in goal.tracks:
+                assert not (way.container is not None and not way.own
+                            and ("track", way.container.name, way.dub) in deleted and way.kind != "reuse"), \
+                    f"{goal.name}: the deleted track {way.voice} is made anew out of its own file"
         for op in step.plan.ops:
             if op.kind == "align":
                 goal, way = op.subject

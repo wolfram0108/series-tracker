@@ -205,8 +205,8 @@ def test_delete_of_a_track_no_source_gives_takes_it_out_of_the_file_with_no_alig
     step = world.sync("удалить офлайн-дорожку")
     world.check(step)
     assert kinds(step, (1, 1))[1] == {}
-    assert not any(op.id.startswith("align") for op in step.plan.ops)
-    assert container_of(world, 1).tracks == ()
+    assert not any(op.kind == "align" for op in step.plan.ops)
+    assert container_of(world, 1).tracks == () and len(world.containers) == 1  # the old file goes, it is not hidden
     step = world.sync("следующая синхронизация")
     world.check(step)
     assert not step.plan.ops and container_of(world, 1).tracks == ()
