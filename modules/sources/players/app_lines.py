@@ -5,8 +5,8 @@ A card of an application lists its episodes in lines (`4K`, `专线`, `蓝光①
 with its way to the stream: a line of type 0 lists the playlists themselves, any other gives a token that a parser of the
 application turns into the address of the stream (`parseUrl` of the line names the parsers it allows, in the order the
 application lists its parsers). The link of a row is the card with the line and the token in its fragment; the token is
-the application's own name of the video. The frame is measured on the picture (players/hls.py) and kept by the token:
-the next read does not measure it again.
+the application's own name of the video. The table of a card asks no episode (sites/apps): the stream is resolved here
+right before its download.
 
 A row of a line is of the player `<application>:<line>` (its label the name of the line): the composition switches a line
 off, ranks it and keeps its variants as it does any player. The registry finds the application by the part before `:`.

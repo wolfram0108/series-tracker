@@ -76,44 +76,37 @@ def card_world() -> App99Model:
     return model
 
 
-async def test_a_card_is_a_table_of_every_line_in_its_order_and_only_the_lines_of_playlists_are_asked():
+async def test_a_card_is_a_table_of_every_line_in_its_order_read_by_two_requests_with_no_episode_asked():
     model = card_world()
     http, asked = world(model, {f"{CDN}a/index.m3u8": PLAYLIST, f"{CDN}b/index.m3u8": PLAYLIST})
-    heads: list[str] = []
-
-    async def measure(_http, head, _referer):
-        heads.append(head.segment)
-        return 1080
-
     async with http:
-        player = AppPlayer(App99Client(profile(), lambda: http), measure)
+        player = AppPlayer(App99Client(profile(), lambda: http))
         players = PlayerRegistry([player])
-        site = AppSite(player, players)
+        site = AppSite(player)
         assert site.match_url("app://banri/219017") and not site.match_url("app://other/219017")
         assert site.canonical_url("app://banri/219017/") == card_address("banri", "219017")
         draft = await site.read("app://banri/219017", ReadContext(http, lambda *_: None))
 
         rows = [(row.key, row.player, row.player_label, row.text, row.state.value, row.heights) for row in draft.rows]
         assert rows == [
-            ("banri:ffm3u8:1", "banri:ffm3u8", "非凡（备用线路）", "第01集", "playable", [1080]),
-            ("banri:ffm3u8:2", "banri:ffm3u8", "非凡（备用线路）", "第02集", "playable", [1080]),
+            ("banri:ffm3u8:1", "banri:ffm3u8", "非凡（备用线路）", "第01集", "playable", []),
+            ("banri:ffm3u8:2", "banri:ffm3u8", "非凡（备用线路）", "第02集", "playable", []),
             ("banri:CO4K:1", "banri:CO4K", "4K", "1", "playable", []),
             ("banri:CO4K:2", "banri:CO4K", "4K", "2", "playable", []),
             ("banri:CO4K:3", "banri:CO4K", "4K", "《万界独尊》PV", "playable", []),
             ("banri:co_egg:1", "banri:co_egg", "花絮", "419", "playable", []),
         ]
         assert draft.names == ["万界独尊", "Ten Thousand Worlds"]
-        # A parser allows a limited number of parses a day: the read asks none; the way of each line is a field of its rows.
-        assert "/app/vodParser" not in model.paths()
+        # A card of thousands of episodes is read at once: the card and the players of its lines, nothing of an episode.
+        assert model.paths() == ["/app/systemInit", "/app/userInfo", "/vod/detail"] and asked == []
         assert [row.site_fields["stream"] for row in draft.rows] == ["playlist"] * 2 + ["parser"] * 4
-        assert sorted(heads) == [f"{CDN}a/seg0.ts", f"{CDN}b/seg0.ts"]
         # The token is the application's own name of the video, found by the line's player name.
         assert players.video_of("banri:CO4K", draft.rows[2].link) == "CO4K_tok1"
         assert players.get("banri:CO4K") is player and "banri:CO4K" in players and "other:CO4K" not in players
 
-        again = await site.read("app://banri/219017", ReadContext(http, lambda *_: None, last_rows=tuple(draft.rows)))
-        assert [row.heights for row in again.rows] == [row.heights for row in draft.rows]
-        assert len(heads) == 2, "a playlist the last table measured is not measured again"
+        # The stream of an episode of a line of playlists is its playlist, its frame not measured for the download.
+        got = await player.stream(draft.rows[0].link, http, None, players.pacer)
+        assert got == {"stream_url": f"{CDN}a/index.m3u8", "headers": {}, "progressive": False}
 
 
 async def test_the_stream_of_an_episode_comes_from_the_parsers_its_line_allows_in_the_order_of_the_application():
@@ -171,9 +164,9 @@ async def test_the_search_gives_the_cards_of_each_application_as_it_gives_them_e
             ("819312", "app://banri/819312", "我身为剑"), ("219017", "app://banri/219017", "Ten Thousand Worlds"), ("", "", "")]
         assert results["cards"][0]["genres"] == "动画,国漫" and results["cards"][0]["blurb"] == "《我是大医生》"
         assert [fields for path, fields in model.calls if path == "/vod/search"][0]["kw"] == "万界独尊"
-        # The card picked is a source of the site of the application, and the core names the application by its own name.
+        # The card picked is a source of the site of the application, by its address.
         resolved = sources.tables.resolve("app://banri/219017")
-        assert (resolved.site, resolved.canonical_url, resolved.label) == ("banri", "app://banri/219017", "半日")
+        assert (resolved.site, resolved.canonical_url) == ("banri", "app://banri/219017")
 
 
         # An application that cannot be asked gives its reason instead of cards; the search does not fail for it.

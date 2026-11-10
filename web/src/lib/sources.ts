@@ -276,17 +276,10 @@ export function pageHost(url: string): string {
   }
 }
 
-/** The card of a video application a source address names (`app://<application>/<card>`); null for any other address. */
-export function appCardOf(url: string): { app: string; card: string } | null {
-  const found = /^app:\/\/([^/?#]+)\/(\d+)$/.exec(url.trim())
-  return found ? { app: found[1], card: found[2] } : null
-}
-
 /** Where a source is, as every tab names it: the site, and the channel of a VK channel (`vkvideo.ru @name`); a card of a
- *  video application by the application's name (`label`, as the core gives it) and the number of the card. */
-export function placeOf(url: string, label = ""): string {
-  const card = appCardOf(url)
-  if (card) return t("sources.apps.cardValue", { app: label || card.app, card: card.card })
+ *  video application is its address itself (`app://banri/219017`), the one written everywhere the source is. */
+export function placeOf(url: string): string {
+  if (url.startsWith("app://")) return url
   try {
     const link = new URL(url.split("|")[0])
     return link.pathname.startsWith("/@") ? `${link.host} ${link.pathname.slice(1)}` : link.host

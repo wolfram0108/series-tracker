@@ -3662,8 +3662,6 @@ export interface components {
             canonical_url?: string | null;
             /** Source Type */
             source_type?: string | null;
-            /** Label */
-            label?: string | null;
         };
         /** SiteResolveRequest */
         SiteResolveRequest: {

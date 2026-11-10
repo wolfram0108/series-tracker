@@ -181,8 +181,7 @@ async def test_an_address_is_resolved_by_sources_and_the_answer_is_theirs(tmp_pa
                                         "source_type": "web_video"}}
     async with serving(tmp_path, answers) as (client, owners, _, spy):
         response = await client.post("/api/sources/resolve", json={"url": "https://x.test/p?a=1"})
-    assert response.json() == {"site": "somesite", "canonical_url": "https://x.test/p", "source_type": "web_video",
-                               "label": None}
+    assert response.json() == {"site": "somesite", "canonical_url": "https://x.test/p", "source_type": "web_video"}
     assert owners.asked("sources.site.resolve") == [{"url": "https://x.test/p?a=1"}]
     assert [t for t in topics(spy) if t != "sources.site.resolve"] == []
 
@@ -191,7 +190,7 @@ async def test_an_address_no_site_reads_is_resolved_to_nothing(tmp_path):
     async with serving(tmp_path, {"sources.site.resolve": {"site": None, "canonical_url": None}}
                        ) as (client, _, _, _):
         response = await client.post("/api/sources/resolve", json={"url": "http://kinozal.tv/details.php?id=1"})
-    assert response.json() == {"site": None, "canonical_url": None, "source_type": None, "label": None}
+    assert response.json() == {"site": None, "canonical_url": None, "source_type": None}
 
 
 async def test_a_page_is_read_now_by_one_command_to_sources(tmp_path):

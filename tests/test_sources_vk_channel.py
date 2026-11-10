@@ -522,12 +522,10 @@ async def test_the_module_tells_the_site_and_the_canonical_address_of_a_channel_
     release = await probe.request("sources.site.resolve", {"url": "https://1.ruchime.org/release/x/episode-3?off=vk"},
                                   timeout=5)
 
-    assert channel == {"site": "vk_channel", "canonical_url": "https://vkvideo.ru/@chan|q", "source_type": "vk_video",
-                       "label": "vk_channel"}
-    assert bare == {"site": "vk_channel", "canonical_url": "https://vkvideo.ru/@chan|", "source_type": "vk_video",
-                    "label": "vk_channel"}
+    assert channel == {"site": "vk_channel", "canonical_url": "https://vkvideo.ru/@chan|q", "source_type": "vk_video"}
+    assert bare == {"site": "vk_channel", "canonical_url": "https://vkvideo.ru/@chan|", "source_type": "vk_video"}
     assert release == {"site": "ruchime", "canonical_url": "https://1.ruchime.org/release/x",
-                       "source_type": "web_video", "label": "ruchime"}
+                       "source_type": "web_video"}
 
 
 def test_the_api_of_vk_is_not_asked_with_the_user_agent_of_a_browser():

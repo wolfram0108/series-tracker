@@ -12,7 +12,6 @@ vi.mock("../composables/sourceAddress")
 vi.mock("../composables/sourceCalls", async (original) => ({
   ...(await original<typeof import("../composables/sourceCalls")>()),
   searchApps: vi.fn(),
-  resolveAddress: vi.fn(),
 }))
 
 const card = (over: Partial<AppCard>): AppCard => ({
@@ -30,8 +29,6 @@ const stored = (over: Partial<SeriesSource> = {}): SeriesSource => ({
 beforeEach(() => {
   vi.mocked(address.kindOf).mockReset().mockResolvedValue({ kind: "site", sourceType: "web_video" })
   vi.mocked(calls.searchApps).mockReset()
-  vi.mocked(calls.resolveAddress).mockReset().mockResolvedValue(
-    { ok: true, data: { site: "banri", canonical_url: "app://banri/219017", source_type: "web_video", label: "半日" } })
 })
 
 const mountEditor = (props: Record<string, unknown> = {}) => mount(SourcesEditor, {
@@ -100,10 +97,10 @@ describe("the search of the video applications in the sources", () => {
     expect(w.find(".app-reason").text()).toBe(t("reason.app_unreachable", { app: "半日", error: "ConnectTimeout" }))
   })
 
-  it("a source of an application is shown by the application's name and the number of its card, with no page to open", async () => {
+  it("a source of an application is its address, the same in its head and its field, with no page to open", async () => {
     const w = mountEditor()
     await flushPromises()
-    expect(w.find(".source-place").text()).toBe(t("sources.apps.cardValue", { app: "半日", card: "219017" }))
+    expect(w.find(".source-place").text()).toBe("app://banri/219017")
     // The field holds the address of the source: the one any field of an address takes.
     expect((w.find(".source-app-card input").element as HTMLInputElement).value).toBe("app://banri/219017")
     expect(w.find(".source-app-card a").exists()).toBe(false)
