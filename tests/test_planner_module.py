@@ -324,7 +324,8 @@ async def test_the_packing_is_told_container_by_container_and_what_waits_stays_i
     while not told.queue.empty():
         pictures.append((await told.queue.get()).payload["tasks"])
     seen = [card["status"] for picture in pictures for card in picture if card["episode"] == "s01e01"]
-    assert seen[0] == "queued" and "build" in seen and "apply" in seen and seen[-1] == "done" and pictures[-1] == []
+    assert seen[0] == "queued" and "build" in seen and seen[-1] == "done" and pictures[-1] == []
+    assert seen.index("built") < seen.index("apply"), "a built container waits for the journal before it is put in place"
     done = [card for picture in pictures for card in picture if card["status"] == "done"][-1]
     assert [stage["state"] for stage in done["stages"]] == ["done", "done", "done", "done"]
     assert [(track["label"], track["kind"]) for track in done["tracks"]] == [(REF, "own"), ("G1", "new")]

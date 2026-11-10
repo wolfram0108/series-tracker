@@ -3,7 +3,8 @@ season, where each comes from, the tracks of the file before it does not hold, a
 came or went."""
 from types import SimpleNamespace as N
 
-from modules.planner.packing import tracks_of
+from core.contracts import PackCard
+from modules.planner.packing import PackBook, tracks_of
 
 ORDER = ("Ref", "A", "B", "C")
 
@@ -39,3 +40,26 @@ def test_a_container_with_the_same_tracks_is_built_for_the_order_the_video_or_th
 def test_a_voice_over_the_order_of_the_season_has_not_has_no_number():
     tracks, _ = tracks_of(goal([way("Z", "download")], own_at=1), None, ORDER)
     assert kinds(tracks) == [(None, "Z", "new"), (1, "Ref", "own")]
+
+
+def test_a_built_container_waits_for_the_journal_in_no_stage_and_the_put_in_place_counts_from_the_journal():
+    now = [0.0]
+    book = PackBook(clock=lambda: now[0], wall=lambda: "t")
+    for series_id in (1, 2):
+        book.cards[f"{series_id}:s01e01"] = PackCard(id=f"{series_id}:s01e01", series_id=series_id, name=f"{series_id}.mkv")
+        book._since[f"{series_id}:s01e01"] = 0.0
+        book._steps[f"{series_id}:s01e01"] = {f"{series_id}.mkv"}
+        book._enter(book.cards[f"{series_id}:s01e01"], "build")
+    now[0] = 10.0
+    book.built("1:s01e01")
+    book.built("2:s01e01")
+    card = book.cards["1:s01e01"]
+    assert card.status == "built" and not [stage for stage in card.stages if stage.state == "active"]
+    now[0] = 155.0
+    assert book.view()[0].figures.wait_s == 145.0
+    book.journal(1, [("publish", "1.mkv")])
+    assert card.status == "apply" and card.figures.wait_s == 145.0 and card.figures.steps_of == 1
+    assert book.cards["2:s01e01"].status == "built", "the journal of one series does not move the cards of another"
+    now[0] = 157.0
+    book.applied(1, lambda name: 10.0)
+    assert {stage.name: stage.seconds for stage in card.stages} == {"queue": 0.0, "build": 10.0, "verify": 0.0, "apply": 2.0}

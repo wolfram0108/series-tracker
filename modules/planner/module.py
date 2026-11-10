@@ -533,7 +533,8 @@ class BusSync(SeriesSync):
         if self.pending:
             steps = await storage.call(self.files.write_journal, self.pending, table)
             self.pending = []
-            self.m.packing.journal(steps)
+            self.m.packing.journal(self.series["id"], steps)
+            self.m.pack_publish()
             await self.m.carry_out(self.series["id"], self.files, steps, table, self.m.packing.step_done)
         names = [card.name for card in self.m.packing.cards.values()
                  if card.series_id == self.series["id"] and card.status == "apply"]

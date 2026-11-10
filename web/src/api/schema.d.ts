@@ -2616,7 +2616,7 @@ export interface components {
              * @default queued
              * @enum {string}
              */
-            status: "queued" | "build" | "verify" | "apply" | "done" | "failed";
+            status: "queued" | "build" | "verify" | "built" | "apply" | "done" | "failed";
             /** Stages */
             stages?: components["schemas"]["PackStageView"][];
             /** Tracks */
@@ -2667,6 +2667,8 @@ export interface components {
             steps_done?: number | null;
             /** Steps Of */
             steps_of?: number | null;
+            /** Wait S */
+            wait_s?: number | null;
         };
         /** PackStageView */
         PackStageView: {

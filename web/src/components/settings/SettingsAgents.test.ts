@@ -53,6 +53,18 @@ describe("the queue of the packing in the window of agents", () => {
     expect(cards[1].find(".pack-gone").text()).toContain("Old")
   })
 
+  it("a built container waits for the journal in no stage and says how long and why", async () => {
+    const queues = useQueuesStore()
+    const found = section()
+    queues.setPack([task({ status: "built", stages: stages(["done", "done", "done", "pending"]), figures: { wait_s: 145 } })])
+    await nextTick()
+    const card = found.find(".pack-card")
+    expect(card.text()).toContain(t("pack.status.built"))
+    expect(card.find(".pack-waits").text()).toContain(t("pack.value.waits", { time: "2:25" }))
+    expect(card.findAll(".work-step.is-active")).toHaveLength(0)
+    expect(card.find(".progress-bar").exists()).toBe(false)
+  })
+
   it("follows every packet it is pushed, with no question of its own", async () => {
     const queues = useQueuesStore()
     const found = section()

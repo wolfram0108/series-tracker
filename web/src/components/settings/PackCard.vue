@@ -90,12 +90,16 @@ const title = (track: Track): string => t(`pack.track.${track.kind}` as MessageK
         <span v-if="figures.eta != null">{{ t("download.label.left") }} <b>{{ duration(figures.eta) }}</b></span>
       </div>
     </template>
+    <div v-if="card.status === 'built'" class="work-facts pack-waits">
+      <span>{{ t("pack.label.waits") }} <b>{{ t("pack.value.waits", { time: duration(figures.wait_s) }) }}</b></span>
+    </div>
     <div v-if="card.status === 'apply' && figures.steps_of" class="work-facts">
       <span>{{ t("pack.label.steps") }} <b>{{ t("download.value.of", { done: figures.steps_done ?? 0, all: figures.steps_of }) }}</b></span>
     </div>
     <div v-if="card.status === 'done' && figures.size_mb" class="work-facts">
       <span>{{ t("download.label.size") }} <b>{{ t("download.value.mb", { value: figures.size_mb }) }}</b></span>
       <span>{{ t("pack.label.tracks") }} <b>{{ placed.length }}</b></span>
+      <span v-if="(figures.wait_s ?? 0) >= 0.5">{{ t("pack.label.waited") }} <b>{{ duration(figures.wait_s) }}</b></span>
     </div>
     <div v-if="card.status === 'failed'" class="work-facts">
       <span>{{ t("download.label.outcome") }} <b>{{ t(card.waited ? "pack.outcome.waited" : "pack.outcome.failed") }}</b></span>

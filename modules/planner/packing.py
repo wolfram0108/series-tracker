@@ -48,6 +48,7 @@ class PackBook:
         self._since: dict[str, float] = {}
         self._stage_since: dict[str, float] = {}
         self._steps: dict[str, set[str]] = {}  # the names of the files whose steps of the journal are the card's
+        self._wait_since: dict[str, float] = {}
 
     # --- what happens to a container ------------------------------------------------------------------------------
 
@@ -103,11 +104,14 @@ class PackBook:
         return moved
 
     def built(self, key: str) -> None:
-        """The container is made aside and read back: it waits for the journal that puts it in place."""
+        """The container is made aside and read back: it waits, in no stage, for the journal of the sync, which puts every
+        file of the sync in place at once after the rest of its work."""
         card = self.cards.get(key)
-        if card is not None:
-            self._enter(card, "apply")
+        if card is not None and card.status not in ENDED:
+            self._leave(card, "done")
+            card.status = "built"
             card.figures.progress = card.figures.speed_x = card.figures.eta = None
+            self._wait_since[key] = self._clock()
 
     def waited(self, keys: Iterable[str]) -> None:
         """Not built: a step of the plan the container needs did not succeed; the file before stays."""
@@ -128,10 +132,13 @@ class PackBook:
             card.finished_at = self._wall()
             card.seconds = self._clock() - self._since.get(key, self._clock())
 
-    def journal(self, steps: list[tuple]) -> None:
-        """The journal of the sync is written: each card counts the steps that name its files."""
+    def journal(self, series_id: int, steps: list[tuple]) -> None:
+        """The journal of the sync is written: every built card of the series enters its stage of putting in place and
+        counts the steps that name its files."""
         for key, card in self.cards.items():
-            if card.status == "apply":
+            if card.series_id == series_id and card.status == "built":
+                card.figures.wait_s = self._clock() - self._wait_since.pop(key, self._clock())
+                self._enter(card, "apply")
                 card.figures.steps_of = sum(1 for step in steps if self._mine(key, step))
                 card.figures.steps_done = 0
 
@@ -177,7 +184,7 @@ class PackBook:
         self.cards[card.id] = card
 
     def forget(self, key: str) -> None:
-        for book in (self.cards, self._since, self._stage_since, self._steps):
+        for book in (self.cards, self._since, self._stage_since, self._steps, self._wait_since):
             book.pop(key, None)
 
     def running(self) -> bool:
@@ -193,6 +200,8 @@ class PackBook:
                 active = next((each for each in shown.stages if each.state == "active"), None)
                 if active is not None:
                     active.seconds += now - self._stage_since.get(key, now)
+                if card.status == "built":
+                    shown.figures.wait_s = now - self._wait_since.get(key, now)
             out.append(shown)
         return out
 
