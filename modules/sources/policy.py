@@ -6,6 +6,7 @@ between attempts on its own account. How many times and how long to wait is the 
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -16,6 +17,8 @@ from core.reasons import reason
 from core.retry import Budget, retrying
 
 from .players.contract import Answer, Kind, Player, PlayerRef, Reading
+
+logger = logging.getLogger("sources")
 
 # A refusal that can pass: the host is asked again, unlike a final "no".
 TRANSIENT_STATUSES = frozenset({403, 408, 425, 429})
@@ -126,11 +129,21 @@ async def settle(player: Player, ref: PlayerRef, http: httpx.AsyncClient, page_u
                  clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> Verdict:
     """Ask a player until its answer is final or the budget is spent."""
+    tries = 0
+
     async def ask() -> tuple[Answer, Reading]:
+        nonlocal tries
         if pacer is not None:
             await pacer.wait()
+        tries += 1
+        began = clock()
         answer = await player.fetch(ref, http, page_url)
-        return answer, player.read(answer)
+        reading = player.read(answer)
+        # Every answer of a player, with what it said, is in the log: a verdict alone hides why it was unsure.
+        logger.info("плеер %s, %s: попытка %d — %s, статус %s, %s (%.1f с)", player.name, ref.url, tries,
+                    reading.kind.value, reading.status or answer.status, reading.message or answer.error or "—",
+                    clock() - began)
+        return answer, reading
 
     (_answer, reading), attempts, exhausted = await retrying(
         ask, final=lambda asked: not is_retryable(asked[1]), budget=budget or DEFAULT,
