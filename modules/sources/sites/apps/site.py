@@ -9,7 +9,7 @@ item out or tells one line from another. The line's name, type and parsers are v
 The table is the card as the application lists it, read by two requests, and the frame of every row measured on its own
 video: its stream asked (a parse of the application for a line of a parser), its playlist or file read, the head of the
 picture given to ffprobe (players/app_lines.py). A frame is of the row it was measured on and of no other row. Each row
-is asked once, under the pacer every player shares; a row the last table measured on itself (`frame: measured`) keeps its
+is asked once, at the pace the read of a card keeps (`ROWS_PER_SECOND`); a row the last table measured on itself (`frame: measured`) keeps its
 frame and is not asked again, so a read after the first one asks only the episodes that are new. A row whose episode
 gave no stream is `not_obtained` with why (`frame_failed`) and is asked again by the next read.
 The field `stream` of a row says how its stream comes: the playlist the line lists itself, or a parser of the application.
@@ -23,7 +23,6 @@ from core.contracts import RowState, TableRow
 from core.reasons import reason
 
 from ...players.contract import PlayerRef
-from ...players.registry import PROBE_INTERVAL_S
 from ...policy import Pacer
 from ...apps import SCHEME, card_address
 from ...apps.app99 import AppError
@@ -31,6 +30,11 @@ from ...players.app_lines import AppPlayer
 from .. import PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError, TableDraft
 from ..recent import last_of_each
 
+# The pace the owner asked of the read of a card: a card of thousands of episodes is measured in minutes.
+ROWS_PER_SECOND = 25
+# A row is asked, read and measured in about three seconds: four seconds of rows at that pace in flight at most, so that a
+# host that slows down holds back the asks instead of piling them up.
+ROWS_IN_FLIGHT = ROWS_PER_SECOND * 4
 LIST_SEPARATOR = "$$$"
 ITEM_SEPARATOR = "#"
 
@@ -60,12 +64,11 @@ class AppSite:
         self.client = player.client
         self.name, self.label = player.name, player.label
         self.domains = (player.name,)
-        self.pacer = Pacer(lambda: PROBE_INTERVAL_S)
+        self.pacer = Pacer(1 / ROWS_PER_SECOND)
+        self.in_flight = asyncio.Semaphore(ROWS_IN_FLIGHT)
 
-    def configure(self, *, players=None, **_wiring) -> None:
-        """The pacer of the players: the asks of the rows of a card go at the pace every player keeps."""
-        if players is not None:
-            self.pacer = players.pacer
+    def configure(self, **_wiring) -> None:
+        """The card is read through the application's API alone: the wiring of the module gives it nothing."""
 
     def _card(self, url: str) -> str | None:
         split = urlsplit(url)
@@ -139,9 +142,10 @@ class AppSite:
 
         async def measure(line, link) -> tuple[str, tuple[list[int], dict]]:
             nonlocal done
-            await self.pacer.wait()
             try:
-                reading = line.read(await line.fetch(PlayerRef(line.name, link), ctx.http, card_url))
+                async with self.in_flight:
+                    await self.pacer.wait()
+                    reading = line.read(await line.fetch(PlayerRef(line.name, link), ctx.http, card_url))
                 said = reading.message or reading.kind.value
                 heights = sorted(reading.resolutions)[-1:]
                 failed = said if said.startswith('{"code"') else reason("player_failed", player=line.label, cause=said)

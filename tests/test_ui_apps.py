@@ -3,7 +3,7 @@ the user finds the title by the search of the application in the window of a new
 rule of its labels («第N集») beside a source of a voice-over, and syncs. The read of the card measures the frame of its line
 on its newest episode — so its rows rank by their frame like the rows of any source: the application's 1080 is the
 reference before the voice-over's 480. The user puts the voice-over first in the queue of the reference of the episode:
-the next sync takes its picture. A stream is parsed again right before each download (its address expires)."""
+the next sync takes its picture. The address a parser gave serves the downloads of the episode within the hour."""
 import json
 import os
 import subprocess
@@ -111,8 +111,8 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
     assert frame_height(os.path.join(ui.library, asset["name"])) == 1080, "the frame of the line ranks the reference"
     held = await mkv.contents(os.path.join(ui.library, asset["name"]))
     assert {track.label: track.language for track in held.audio} == {ORIGINAL: "chi", "AnimeVost": "rus"}
-    # One parse more, right before the download of the stream (its address expires): the picture and the sound in one.
-    assert [fields["url"] for path, fields in ui.site.app.calls if path == "/app/vodParser"] == ["tok-219017-1"] * 2
+    # The download takes the address the read parsed within the hour: no parse of its own.
+    assert [fields["url"] for path, fields in ui.site.app.calls if path == "/app/vodParser"] == ["tok-219017-1"]
 
     await page.locator(".episode-card").first.click()
     detail = page.locator(".episode-detail")
@@ -136,5 +136,5 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
     assert "[AnimeVost]" in asset["name"] and frame_height(os.path.join(ui.library, asset["name"])) != 1080
     held = await mkv.contents(os.path.join(ui.library, asset["name"]))
     assert {track.label: track.language for track in held.audio} == {ORIGINAL: "chi", "AnimeVost": "rus"}
-    # The original sound goes to the new reference from a download of its own: one parse right before it.
-    assert [fields["url"] for path, fields in ui.site.app.calls if path == "/app/vodParser"] == ["tok-219017-1"] * 3
+    # The original sound goes to the new reference from a download of its own, by the address parsed within the hour.
+    assert [fields["url"] for path, fields in ui.site.app.calls if path == "/app/vodParser"] == ["tok-219017-1"]

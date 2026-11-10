@@ -4,11 +4,27 @@ The duration a file states is a word of its header: a file cut short keeps a who
 front, a Matroska written to the end once), so what a file holds is told by the packets it has (`readable_length`)."""
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import weakref
 
 from .proc import LOST, program, run_capture
 
 DEFAULT_TIMEOUT_S = 30.0
+# ffprobe is work of a processor and some tens of megabytes each: at most one a core runs at once in the process, however
+# many readers ask, so that a burst of measures neither starves the service nor runs the machine out of memory.
+PROBES_AT_ONCE = os.cpu_count() or 2
+_GATES: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+
+
+def _probes() -> asyncio.Semaphore:
+    """The gate of the ffprobe runs of the running loop (a semaphore belongs to the loop it waits in)."""
+    loop = asyncio.get_running_loop()
+    gate = _GATES.get(loop)
+    if gate is None:
+        gate = _GATES[loop] = asyncio.Semaphore(PROBES_AT_ONCE)
+    return gate
 # The tail of a file read for the end of its data: long against the interval between two key frames of a video (a few
 # seconds), so that a seek to it lands on data that is there, short against a file, so that the read is a small one.
 TAIL_S = 30.0
@@ -44,8 +60,9 @@ async def streams_of(target: str, *, input_args: list[str] | None = None,
     if not executable:
         return None
     try:
-        code, out, _ = await run_capture([executable, "-v", "error", *(input_args or []), "-show_entries", STREAM_ENTRIES,
-                                          "-of", "json", target], timeout=timeout, data=data)
+        async with _probes():
+            code, out, _ = await run_capture([executable, "-v", "error", *(input_args or []), "-show_entries",
+                                              STREAM_ENTRIES, "-of", "json", target], timeout=timeout, data=data)
         # A lost status says nothing: the whole answer read to its end is judged (an empty one is no answer).
         if code == LOST and not out.strip():
             return None
@@ -65,7 +82,8 @@ async def duration_of(target: str, *, input_args: list[str] | None = None,
     cmd = [executable, "-v", "error", *(input_args or []), "-show_entries", "format=duration",
            "-of", "default=noprint_wrappers=1:nokey=1", target]
     try:
-        code, out, _ = await run_capture(cmd, timeout=timeout)
+        async with _probes():
+            code, out, _ = await run_capture(cmd, timeout=timeout)
         return float(out.decode().strip()) if code == 0 and out else 0.0
     except (OSError, ValueError):
         return 0.0
@@ -84,8 +102,9 @@ async def readable_length(path: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> f
     try:
         entries = ("format=format_name,duration,start_time:stream=index,codec_type,start_time,duration"
                    f":stream_disposition={','.join(STILL_PICTURE)}:stream_tags=DURATION")
-        code, out, _ = await run_capture([executable, "-v", "error", "-show_entries", entries, "-of", "json", path],
-                                         timeout=timeout)
+        async with _probes():
+            code, out, _ = await run_capture([executable, "-v", "error", "-show_entries", entries, "-of", "json", path],
+                                             timeout=timeout)
         stated = json.loads(out.decode() or "{}") if code == 0 else {}
         declared = _number((stated.get("format") or {}).get("duration"))
         start = _number((stated.get("format") or {}).get("start_time")) or 0.0
@@ -96,9 +115,10 @@ async def readable_length(path: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> f
                 if each.get("codec_type") in MEDIA_KINDS and not is_still_picture(each)}
         known = [end for end in ends.values() if end is not None]
         from_s = max(0.0, min(known or [start + declared]) - TAIL_S)
-        code, out, _ = await run_capture([executable, "-v", "error", "-read_intervals", f"{from_s}%", "-show_entries",
-                                          "packet=stream_index,pts_time,duration_time", "-of", "csv=p=0", path],
-                                         timeout=timeout)
+        async with _probes():
+            code, out, _ = await run_capture([executable, "-v", "error", "-read_intervals", f"{from_s}%",
+                                              "-show_entries", "packet=stream_index,pts_time,duration_time", "-of",
+                                              "csv=p=0", path], timeout=timeout)
     except (OSError, TimeoutError, ValueError):
         return 0.0
     if code != 0:

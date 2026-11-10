@@ -6,7 +6,8 @@ with its way to the stream: a line of type 0 lists the playlists themselves, any
 application turns into the address of the stream (`parseUrl` of the line names the parsers it allows, in the order the
 application lists its parsers). The link of a row is the card with the line and the token in its fragment; the token is
 the application's own name of the video. The table of a card measures the newest episode of each line, that row alone
-(sites/apps); the stream is resolved here again right before its download (its address expires). Whether a stream is a
+(sites/apps); the address a parser gave serves the download of the episode within the hour (`PARSE_TERM_S`), and an
+address no longer served is parsed anew. Whether a stream is a
 playlist or a file is what its host serves (`served_as`), not the form of its address.
 
 A row of a line is of the player `<application>:<line>` (its label the name of the line): the composition switches a line
@@ -18,6 +19,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from typing import Awaitable, Callable
 from urllib.parse import parse_qs, quote, urldefrag, urlsplit
 
@@ -38,9 +40,9 @@ from .vk_files import pick_file
 
 logger = logging.getLogger("sources")
 
-# The parses asked of an application at once, and the asks in flight to one host of its files.
-APP_GATE = 4
-HOST_GATE = 8
+# What a parser gave serves the asks of the episode for an hour (the owner's term): the download of an episode the read
+# of its card measured takes the same address instead of a parse of its own.
+PARSE_TERM_S = 3600.0
 _DIRECT = re.compile(r"\.(m3u8|mp4)(?:$|\?)", re.I)
 
 
@@ -98,13 +100,15 @@ class AppPlayer:
     stream_headers: dict[str, str] = {}
 
     def __init__(self, client: App99Client, measure: Measure | None = None,
-                 measure_file: Callable[[str, dict[str, str]], Awaitable[Answer]] | None = None) -> None:
+                 measure_file: Callable[[str, dict[str, str]], Awaitable[Answer]] | None = None, *,
+                 clock: Callable[[], float] = time.monotonic) -> None:
         self.client = client
         self.name, self.label = client.profile.name, client.profile.label
         self._measure = measure or measure_head
         self._measure_file = measure_file or measure_file_frame
-        self._api = asyncio.Semaphore(APP_GATE)
-        self._hosts: dict[str, asyncio.Semaphore] = {}
+        self._clock = clock
+        # (line, token) -> (address a parser gave, when): what the read parsed serves the download within the hour.
+        self._parsed: dict[tuple[str, str], tuple[str, float]] = {}
 
     # --- the link of a row ------------------------------------------------------------------------------------
 
@@ -148,17 +152,28 @@ class AppPlayer:
         allowed = [part.strip() for part in str(player.get("parseUrl") or "").split(",") if part.strip()]
         return [each for each in parsers if not allowed or str(each) in allowed]
 
+    def _kept(self, line: str, item: str) -> str | None:
+        found = self._parsed.get((line, item))
+        if found is None or self._clock() - found[1] >= PARSE_TERM_S:
+            return None
+        return found[0]
+
     async def address(self, line: str, item: str) -> str:
-        """The address of the stream of an episode now: the token itself when it is one, else what the parsers the line
-        allows make of it, the first that gives an address; each refusal is in the log."""
+        """The address of the stream of an episode: the token itself when it is one, the address a parser gave for it
+        within the hour, else what the parsers the line allows make of it now, the first that gives an address; each
+        refusal is in the log."""
         player = await self._player_of(line)
         if item.startswith(("http://", "https://")) and (player.get("type") == 0 or _DIRECT.search(item)):
             return item
+        kept = self._kept(line, item)
+        if kept is not None:
+            return kept
         refusals = []
         for parser in await self._parsers_of(player):
             try:
-                async with self._api:
-                    return await self.client.parse(parser, item)
+                got = await self.client.parse(parser, item)
+                self._parsed[(line, item)] = (got, self._clock())
+                return got
             except AppError as exc:
                 logger.info("приложение %s, линия %s: парсер %s не дал адреса — %s", self.name, line, parser, exc.reason)
                 if exc.transient:
@@ -180,22 +195,36 @@ class AppPlayer:
         if found is None:
             return Answer(200, reading=Reading(Kind.NOT_PLAYER, 200, message="not a link of the application"))
         line, item = found
+        was_kept = self._kept(line, item) is not None
         try:
             address = await self.address(line, item)
             headers = await self.headers_of(line)
         except AppError as exc:
             kind = Kind.NO_ANSWER if exc.transient else Kind.NO_FILE
             return Answer(200, reading=Reading(kind, 200, message=exc.reason))
-        host = urlsplit(address).hostname or ""
-        async with self._hosts.setdefault(host, asyncio.Semaphore(HOST_GATE)):
-            served = await served_as(http, address, headers)
-            if isinstance(served, Answer):
-                return served
-            if served == "file":
-                if not measure:
-                    return Answer(200, reading=Reading(Kind.PLAYABLE, 200, files=((0, address),)))
-                return await self._measure_file(address, headers)
-            return await measured(http, address, "", self._measure if measure else None, headers)
+        answer = await self._stream_answer(http, address, headers, measure)
+        if was_kept and self.read(answer).kind is not Kind.PLAYABLE:
+            # The address kept from an earlier parse is no longer served: the episode is parsed anew, once.
+            self._parsed.pop((line, item), None)
+            try:
+                address = await self.address(line, item)
+            except AppError as exc:
+                return Answer(200, reading=Reading(Kind.NO_ANSWER if exc.transient else Kind.NO_FILE, 200,
+                                                   message=exc.reason))
+            answer = await self._stream_answer(http, address, headers, measure)
+        return answer
+
+    async def _stream_answer(self, http: httpx.AsyncClient, address: str, headers: dict[str, str],
+                             measure: bool) -> Answer:
+        """What the host serves at the address of a stream: a file or a playlist, measured or only seen to be there."""
+        served = await served_as(http, address, headers)
+        if isinstance(served, Answer):
+            return served
+        if served == "file":
+            if not measure:
+                return Answer(200, reading=Reading(Kind.PLAYABLE, 200, files=((0, address),)))
+            return await self._measure_file(address, headers)
+        return await measured(http, address, "", self._measure if measure else None, headers)
 
     def read(self, answer: Answer) -> Reading:
         if answer.reading is not None:

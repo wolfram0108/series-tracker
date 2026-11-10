@@ -4,6 +4,9 @@ through the parsers its line allows, and the search — against a model of the a
 (tests/app99_model.py)."""
 from __future__ import annotations
 
+import asyncio
+import time
+
 import httpx
 import pytest
 
@@ -132,6 +135,62 @@ async def test_a_card_is_a_table_of_every_line_in_its_order_each_row_with_the_fr
         got = await player.stream(draft.rows[0].link, http, None, players.pacer)
         assert got == {"stream_url": f"{CDN}a/index.m3u8", "headers": {}, "progressive": False, "playlist": True}
         assert len(heads) == 4
+
+
+async def test_a_card_of_many_episodes_is_measured_at_the_pace_of_twenty_to_thirty_rows_a_second():
+    """Every answer of the application and of its CDN takes half a second, as the live ones do: the rows of a card are
+    asked side by side at the pace of the read, not one after another."""
+    model = App99Model(parsers=[9])
+    model.line("BLU", "蓝光", parsers="9")
+    items = [(f"第{n}集", f"tok{n}") for n in range(1, 201)]
+    model.cards[1] = Card(1, "万界独尊", lines=[Line("BLU", items)])
+    for n in range(1, 201):
+        model.parses[(9, f"tok{n}")] = f"{CDN}e{n}/index.m3u8"
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        if str(request.url).startswith(HOST):
+            if request.url.path.endswith("/app/vodParser"):
+                await asyncio.sleep(0.5)
+            return model.handle(request)
+        await asyncio.sleep(0.5)
+        return httpx.Response(200, text=PLAYLIST)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(1080))
+        site = AppSite(player)
+        began = time.monotonic()
+        draft = await site.read("app://banri/1", ReadContext(http, lambda *_: None))
+        rate = len(draft.rows) / (time.monotonic() - began)
+    assert [row.heights for row in draft.rows] == [[1080]] * 200
+    assert 20 <= rate <= 30, rate
+
+
+async def test_what_a_parser_gave_serves_the_download_within_the_hour_and_an_address_no_longer_served_is_parsed_anew():
+    model = card_world()
+    model.parses[(9, "CO4K_tok1")] = f"{CDN}d/1.m3u8"
+    served = {f"{CDN}d/1.m3u8": PLAYLIST}
+    http, _asked = world(model, served)
+    now = [0.0]
+    async with http:
+        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(1080), clock=lambda: now[0])
+        players = PlayerRegistry([player])
+        draft = await AppSite(player).read("app://banri/219017", ReadContext(http, lambda *_: None))
+        parses = lambda: [fields["url"] for path, fields in model.calls if path == "/app/vodParser"].count("CO4K_tok1")
+        assert parses() == 1 and draft.rows[2].heights == [1080]
+        # The download within the hour takes the address the read parsed.
+        now[0] = 3599.0
+        got = await player.stream(draft.rows[2].link, http, None, players.pacer)
+        assert got["stream_url"] == f"{CDN}d/1.m3u8" and parses() == 1
+        # Past the hour the episode is parsed again.
+        now[0] = 3600.0
+        await player.stream(draft.rows[2].link, http, None, players.pacer)
+        assert parses() == 2
+        # The host no longer serves the kept address: the episode is parsed anew, once, and the new address serves.
+        del served[f"{CDN}d/1.m3u8"]
+        model.parses[(9, "CO4K_tok1")] = f"{CDN}d/2.m3u8"
+        served[f"{CDN}d/2.m3u8"] = PLAYLIST
+        got = await player.stream(draft.rows[2].link, http, None, players.pacer)
+        assert got["stream_url"] == f"{CDN}d/2.m3u8" and parses() == 3
 
 
 async def test_a_stream_is_a_file_or_a_playlist_by_what_its_host_serves_not_by_the_form_of_its_address():
