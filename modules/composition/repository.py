@@ -15,7 +15,7 @@ from core.db import Database
 
 _ROW_COLUMNS = ("series_id", "source_id", "row_key", "seq", "excluded", "exclusion", "season", "episode_start",
                 "episode_end", "part", "voice_group", "voice_label", "voice_name", "voice_unknown", "player",
-                "player_label", "grp", "text", "heights", "state", "published", "link", "video")
+                "player_label", "grp", "text", "heights", "state", "published", "link", "video", "stale")
 
 
 @dataclass(frozen=True)
@@ -105,8 +105,8 @@ def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
 
 
 def _row_of(row: sqlite3.Row) -> CompositionRow:
-    fields = {name: row[name] for name in _ROW_COLUMNS if name not in ("seq", "grp", "excluded", "heights")}
-    return CompositionRow(**fields, group=row["grp"], excluded=bool(row["excluded"]),
+    fields = {name: row[name] for name in _ROW_COLUMNS if name not in ("seq", "grp", "excluded", "heights", "stale")}
+    return CompositionRow(**fields, group=row["grp"], excluded=bool(row["excluded"]), stale=bool(row["stale"]),
                           heights=json.loads(row["heights"]))
 
 

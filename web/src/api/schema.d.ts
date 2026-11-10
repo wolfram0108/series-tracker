@@ -2005,6 +2005,11 @@ export interface components {
              */
             video: string;
             /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /**
              * In Output
              * @description The row is a row of the output (the window «Выход», its plan and the planner): the rules gave it its numbers and
              *     the voice-over groups took it. The one way into the output: table, rules, groups (ЭТАП_10:107); a row of an
@@ -2768,6 +2773,11 @@ export interface components {
              */
             episodes: string;
             /**
+             * Stale
+             * @default
+             */
+            stale: string;
+            /**
              * Allowed
              * @default true
              */
@@ -3242,8 +3252,6 @@ export interface components {
             players?: components["schemas"]["PlayerSummary"][];
             /** Place */
             place?: string[];
-            /** Unread */
-            unread?: components["schemas"]["UnreadPart"][];
         };
         /**
          * SourceType
@@ -3316,24 +3324,6 @@ export interface components {
             display_name: string;
             /** Mirrors */
             mirrors?: string[];
-        };
-        /**
-         * UnreadPart
-         * @description A part of a page the read could not get: its rows are the ones it gave the last read that got it, if any.
-         *     `names` are what the site calls its content (the voice-overs of a catalog, the title of an episode).
-         */
-        UnreadPart: {
-            /** Part */
-            part: string;
-            /**
-             * Player Label
-             * @default
-             */
-            player_label: string;
-            /** Names */
-            names?: string[];
-            /** Reason */
-            reason: string;
         };
         /** ValidationError */
         ValidationError: {

@@ -131,13 +131,12 @@ async function copyAddress(): Promise<void> {
       </StGroup>
       <small v-if="item.profileId === null && !isTorrent" class="muted">{{ t("sources.profile.hint") }}</small>
       <div v-if="view.reason" class="source-reason">{{ reasonText(view.reason) }}</div>
-      <div v-for="line in view.unread" :key="line" class="source-reason" :title="t('sources.unread.hint')">{{ line }}</div>
 
       <div v-if="!isTorrent && player" class="players stack">
         <div class="st-tabs st-tabs-wrap" role="tablist" :aria-label="t('sources.player.tabs')">
           <button
             v-for="each in view.players" :key="each.player" type="button" class="st-tab player-tab" role="tab"
-            :class="{ active: each.player === player.player, 'is-off': each.off }" :aria-selected="each.player === player.player"
+            :class="{ active: each.player === player.player, 'is-off': each.off, 'is-stale': each.allStale }" :aria-selected="each.player === player.player"
             @click="picked = each.player"
           >
             <span class="player-name">{{ each.title }}</span><small class="player-rows">{{ each.rows }}</small>
@@ -179,7 +178,9 @@ async function copyAddress(): Promise<void> {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="voice in player.voices" :key="`${voice.name}\u0000${voice.group ?? ''}`">
+                <tr v-for="voice in player.voices" :key="`${voice.name}\u0000${voice.group ?? ''}`"
+                    :class="{ 'is-stale': voice.allStale }"
+                    :title="voice.stale.length ? t('sources.stale', { episodes: voice.stale.join(', ') }) : undefined">
                   <td>{{ voice.group ?? t("sources.voice.noGroup") }}</td>
                   <td>{{ voice.name }}</td>
                   <td>
@@ -187,6 +188,7 @@ async function copyAddress(): Promise<void> {
                       {{ spanText(line) }}
                       <span v-if="line.gaps" class="player-gaps voice-gaps">{{ t("sources.range.gaps", { gaps: line.gaps }) }}</span>
                     </div>
+                    <div v-if="voice.stale.length && !voice.allStale"><span class="stale-episodes">{{ voice.stale.join(", ") }}</span></div>
                   </td>
                   <td><div v-for="line in stepsLines(voice.coverage)" :key="line" class="voice-steps">{{ line }}</div></td>
                   <td class="voice-rows">{{ voice.rows }}</td>
@@ -231,6 +233,7 @@ async function copyAddress(): Promise<void> {
 .player-tab { padding-block: 0.3rem; font-size: 0.85rem; }
 .player-rows { color: var(--text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
 .player-tab.is-off .player-name { text-decoration: line-through; }
+.player-tab.is-stale { background: var(--stale-ground); border-bottom: 2px solid var(--stale-mark); }
 .player-top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.9rem; font-size: 0.875rem; color: var(--color-gray-600); }
 .player-top b { color: #2c3e50; }
 /* The switch of a player stands in the corner, as every switch of the window does. */

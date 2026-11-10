@@ -772,7 +772,9 @@ async def test_two_series_on_one_page_share_one_read_and_each_has_its_own_layout
 # --- C-10: a read that failed ---------------------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_a_read_that_failed_leaves_the_layout_and_names_the_reason_until_the_page_is_read(system):
+async def test_a_read_that_failed_leaves_the_layout_not_current_and_names_the_reason_until_the_page_is_read(system):
+    """The rows of the read before stand, every one of them marked not current (the source gave none of them now); the
+    next read that gets the page makes them current again."""
     s = system
     series_id = await laid_out(s, page(*season_rows(1, range(1, 3))))
     before = await s.get(series_id)
@@ -780,8 +782,8 @@ async def test_a_read_that_failed_leaves_the_layout_and_names_the_reason_until_t
     await s.counted(lambda: s.sources.fail(PAGE, why))
     [event] = s.taken(s.changed)
     failed = await s.get(series_id)
-    assert event["rev"] == before.rev + 1 and event["summary_only"] is True and event["episodes"] == []
-    assert failed.rows == before.rows
+    assert event["rev"] == before.rev + 1 and event["summary_only"] is False
+    assert failed.rows == [each.model_copy(update={"stale": True}) for each in before.rows]
     assert (failed.sources[0].status, failed.sources[0].reason) == (SourceStatus.FAILED, why)
     assert s.sources.requests[-1].refresh is False and s.sources.reads_begun == [PAGE]  # the verdict is read, not retried
 
@@ -789,7 +791,7 @@ async def test_a_read_that_failed_leaves_the_layout_and_names_the_reason_until_t
     await s.counted(lambda: s.sources.finish(PAGE, page(*season_rows(1, range(1, 3))), read_at=later))
     [event] = s.taken(s.changed)
     healed = await s.get(series_id)
-    assert event["summary_only"] is True and event["rev"] == before.rev + 2
+    assert event["rev"] == before.rev + 2
     assert (healed.sources[0].status, healed.sources[0].reason, healed.sources[0].read_at) == (
         SourceStatus.READY, None, later)
     assert healed.rows == before.rows

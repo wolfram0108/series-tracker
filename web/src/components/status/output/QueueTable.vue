@@ -49,7 +49,8 @@ const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" 
     </thead>
     <OrderList tag="tbody" :items="rows" :item-key="keyOf" :busy="busy" handle=".order-handle" @order="emit('order', $event)">
       <template #item="{ item: row, items, step }">
-        <tr class="variant-row" data-lever :class="{ 'is-first': isFirst(row, items), 'is-skipped': !row.allowed }">
+        <tr class="variant-row" data-lever :title="row.stale ? t('output.queue.stale', { episodes: row.stale }) : undefined"
+            :class="{ 'is-first': isFirst(row, items), 'is-skipped': !row.allowed, 'is-stale': row.stale !== '' && row.stale === row.episodes }">
           <td class="queue-take">
             <input type="checkbox" :checked="row.allowed" :disabled="busy" :aria-label="t('output.queue.take')"
                    @change="emit('allow', row, ($event.target as HTMLInputElement).checked)" />
@@ -63,7 +64,7 @@ const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" 
           <td class="queue-player">{{ row.player_label }}</td>
           <td>{{ height(row) }}</td>
           <td v-if="queue !== 'voice'">{{ row.group }}</td>
-          <td v-if="level">{{ row.episodes }}</td>
+          <td v-if="level">{{ row.episodes }}<template v-if="row.stale && row.stale !== row.episodes"> · <span class="stale-episodes">{{ row.stale }}</span></template></td>
           <td class="queue-mark-cell"><span class="queue-mark">
             <span v-if="markOf(row, items)" class="pill" :class="row.allowed ? (queue !== 'voice' ? 'pill-primary' : 'pill-success') : 'pill-secondary'">{{ markOf(row, items) }}</span>
             <span v-if="levelOf(row)" class="queue-level">{{ levelOf(row) }}</span>

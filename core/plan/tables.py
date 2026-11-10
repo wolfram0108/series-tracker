@@ -67,6 +67,9 @@ class OnlineRow:
     # The player answered that it plays the video. A row that is not (no video, an answer that stayed unsure) is online
     # all the same — the read gave it — but no work is made of it.
     playable: bool = True
+    # The source gave the row in its last read; one that stands from an earlier read is planned all the same, and the
+    # window shows what the file holds of it as not online now.
+    current: bool = True
 
     @property
     def source_id(self) -> int:

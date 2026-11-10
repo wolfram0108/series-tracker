@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   coverageOf, draftBody, itemOfSource, joinVkAddress, pageHost, phaseText, placeOf, profileOptions, progressText,
   readEnded, seasonPositions, siteOf, sourceCaption, sourceTypeOf, spanText, splitVkAddress, stepsLines, summaryOf, togglePlayer,
-  titlesOf, unreadLines, viewOf, voicesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
+  titlesOf, viewOf, voicesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
 } from "./sources"
 import type { PageStatus } from "../stores/sourceTables"
 
@@ -93,7 +93,22 @@ describe("viewOf", () => {
 const layoutRow = (over: Partial<LayoutRow> = {}): LayoutRow => ({
   series_id: 1, source_id: 7, in_output: true, row_key: "r", excluded: false, season: 1, episode_start: 1, episode_end: 1,
   voice_label: "Ruchime", voice_name: "Ruchime", voice_group: null, player: "vk", player_label: "VK", group: "", text: "",
-  heights: [720, 1080], state: "playable", link: "", video: "", ...over,
+  heights: [720, 1080], state: "playable", link: "", video: "", stale: false, ...over,
+})
+
+describe("what the source did not give in its last read", () => {
+  it("is named by episode in the line of its voice-over, and a voice-over or a player with no current episode is stale whole", () => {
+    const rows = [1, 2, 3, 4].map((episode) => layoutRow({ row_key: `e${episode}`, episode_start: episode, episode_end: episode,
+      player: "cvh", player_label: "CVH", stale: episode > 2 }))
+    const [voice] = voicesOf(rows)
+    expect([voice.stale, voice.allStale]).toEqual([["3–4"], false])
+    const [gone] = voicesOf(rows.map((row) => ({ ...row, stale: true })))
+    expect([gone.stale, gone.allStale]).toEqual([["1–4"], true])
+    const summary = { player: "cvh", player_label: "CVH", rows: 4, groups: 0, group_names: [] }
+    expect(viewOf({ summary: { ...release, players: [summary] }, playersOff: [], rows: rows.map((row) => ({ ...row, stale: true })) })
+      .players[0].allStale).toBe(true)
+    expect(viewOf({ summary: { ...release, players: [summary] }, playersOff: [], rows }).players[0].allStale).toBe(false)
+  })
 })
 
 describe("the lines of a player from the rows of the constructor", () => {
@@ -248,26 +263,6 @@ describe("readEnded", () => {
     expect(readEnded({ state: "reading" }, null, null)).toBe(false)
     expect(readEnded({ state: "ready" }, done, null)).toBe(false)
     expect(readEnded(null, done, null)).toBe(false)
-  })
-})
-
-describe("unreadLines", () => {
-  const status = '{"code":"player_status","params":{"player":"Kodik","status":500}}'
-  it("names the parts a player could not give by what the site calls them, one line per player, without the reason", () => {
-    const lines = unreadLines([
-      { part: "kodik:season/1/a?", player_label: "Kodik", names: ["Комната Диди"], reason: status },
-      { part: "kodik:season/2/b?", player_label: "Kodik", names: ["Flowers Media", "Комната Диди"], reason: status },
-      { part: "https://1.ruchime.org/release/x/episode-2", player_label: "", names: ["Серия 2"], reason: status },
-    ])
-    expect(lines).toEqual(["Kodik: не прочитано — Комната Диди, Flowers Media", "Не прочитаны страницы: Серия 2"])
-  })
-
-  it("counts the parts of a player the site does not name, and the view of the source carries the lines", () => {
-    const unread = [{ part: "cvh:1", player_label: "CDN VideoHub", names: [], reason: status },
-      { part: "cvh:2", player_label: "CDN VideoHub", names: ["AniStar"], reason: status }]
-    expect(unreadLines(unread)).toEqual(["CDN VideoHub: не прочитано — 2 части"])
-    expect(viewOf({ summary: { ...release, unread }, playersOff: [] }).unread).toEqual(["CDN VideoHub: не прочитано — 2 части"])
-    expect(viewOf({ summary: release, playersOff: [] }).unread).toEqual([])
   })
 })
 

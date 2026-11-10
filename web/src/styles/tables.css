@@ -81,3 +81,7 @@
 .div-table.table-media-item-history .div-table-row {
   grid-template-columns: 1.5fr 3fr 1.5fr 1fr 3fr 1fr 1.5fr;
 }
+
+/* An episode its source did not give in its last read (it stands from an earlier read): the same mark in every table. */
+.stale-episodes { background: var(--stale-ground); border-bottom: 2px solid var(--stale-mark); padding: 0 0.2rem; }
+tr.is-stale > td { background: var(--stale-ground); }

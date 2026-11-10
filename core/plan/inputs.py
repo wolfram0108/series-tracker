@@ -26,7 +26,7 @@ def online_of(rows: Sequence[CompositionRow], places: Mapping[int, str] | None =
         online.append(OnlineRow(RowId(row.source_id, row.row_key, row.video or ""), row.season, row.episode_start,
                                 row.episode_end or row.episode_start, row.player, row.voice_group, max(row.heights or [0]),
                                 places.get(row.source_id, ""), row.link, row.voice_label, position, row.part,
-                                row.state == RowState.PLAYABLE))
+                                row.state == RowState.PLAYABLE, not row.stale))
     return tuple(online)
 
 

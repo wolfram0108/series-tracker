@@ -72,6 +72,9 @@
 /* An episode put together in part (the output tab): a ground, and stripes of a share of their colour over it. The card
    lays the stripes over the ground, the tile mixes them in; the page /#card-colors tunes these four. */
 :root {
+  /* An episode its source did not give in its last read: it stands from an earlier read. */
+  --stale-ground: #fff3cd;
+  --stale-mark: #fd7e14;
   --partial-ground: #e9ecef;
   --partial-ground-end: #d9dbde;
   --partial-stripe: #4caf50;

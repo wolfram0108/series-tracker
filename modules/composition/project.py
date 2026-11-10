@@ -95,9 +95,11 @@ def project(inputs: Sequence[SourceInput], groups: Mapping[str, str | None],
     summaries: list[SourceSummary] = []
     for item in _ordered(inputs):
         summaries.append(_summary(item))
+        given = _given_now(item)
         for row, result in _answered_rows(item):
-            rows.append(_row_of(item.source, row, result, voice_name_of(row, result), groups, numbering))
-        rows.extend(_left_by_source(item))
+            rows.append(_row_of(item.source, row, result, voice_name_of(row, result), groups, numbering)
+                        .model_copy(update={"stale": not given(row)}))
+        rows.extend(each.model_copy(update={"stale": not given(row)}) for each, row in _left_by_source(item))
     return Projection(rows, summaries, numbering)
 
 
@@ -164,9 +166,17 @@ def _answered_rows(item: SourceInput) -> Iterator[tuple[TableRow, RuleResult]]:
         yield row, result if result is not None else RuleResult()
 
 
-def _left_by_source(item: SourceInput) -> Iterator[CompositionRow]:
-    """The rows the source's own choice leaves out, as excluded rows: the layout says the video is there and is not
-    wanted, which a row a read did not bring cannot say. They are asked nothing and name no voice-over group."""
+def _given_now(item: SourceInput):
+    """Whether the source gave a row of its table in its last read: not when that read failed (the table is an earlier
+    one), nor when the row is of a part of the page the read did not get (it stands from the read before)."""
+    unread = {each.part for each in item.table.unread} if item.table is not None else set()
+    return lambda row: item.failure is None and row.part not in unread
+
+
+def _left_by_source(item: SourceInput) -> Iterator[tuple[CompositionRow, TableRow]]:
+    """The rows the source's own choice leaves out, as excluded rows (with the row of the table each is): the layout says
+    the video is there and is not wanted, which a row a read did not bring cannot say. They are asked nothing and name no
+    voice-over group."""
     if item.table is None or item.reply is None or item.source.parser_profile_id is None:
         return
     kept = {row.key for row in selected_rows(item.source, item.table)}
@@ -176,7 +186,7 @@ def _left_by_source(item: SourceInput) -> Iterator[CompositionRow]:
                 series_id=item.source.series_id, source_id=item.source.id, row_key=row.key, excluded=True,
                 exclusion=Exclusion.SOURCE, player=row.player, player_label=row.player_label,
                 group=row.group, text=row.text, heights=list(row.heights), state=row.state, published=row.published,
-                link=row.link, video=row.video)
+                link=row.link, video=row.video), row
 
 
 def _row_of(source: SeriesSource, row: TableRow, result: RuleResult, name: str, groups: Mapping[str, str | None],
@@ -222,8 +232,7 @@ def _summary(item: SourceInput) -> SourceSummary:
         source_id=item.source.id, url=item.source.url, canonical_url=table.url if table else item.table_url,
         status=_status_of(item),
         reason=item.failure or None, read_at=table.read_at if table else None,
-        players=_players_of(table) if table else [], place=list(place_of(table)) if table else [],
-        unread=list(table.unread) if table else [])
+        players=_players_of(table) if table else [], place=list(place_of(table)) if table else [])
 
 
 def _status_of(item: SourceInput) -> SourceStatus:

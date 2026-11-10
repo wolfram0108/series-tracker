@@ -230,6 +230,8 @@ class QueueRow(BaseModel):
     player_label: str
     height: int | None = None
     episodes: str = ""
+    # The episodes of `episodes` its source did not give in its last read: they stand from an earlier read (`1–8`).
+    stale: str = ""
     allowed: bool = True
     allowed_level: Level = Level.DEFAULT
 

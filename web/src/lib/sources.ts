@@ -10,7 +10,6 @@ import type { PageProgress, PageStatus } from "../stores/sourceTables"
 type Schemas = components["schemas"]
 
 export type SourceSummary = Schemas["SourceSummary"]
-export type UnreadPart = Schemas["UnreadPart"]
 export type PlayerSummary = Schemas["PlayerSummary"]
 export type SeriesSource = Schemas["SeriesSource"]
 export type SourceDraft = Schemas["SourceDraft"]
@@ -43,6 +42,8 @@ export interface PlayerView {
   off: boolean
   /** The player shows a catalog of several seasons, so the source may name the one it takes. */
   chooseSeason: boolean
+  /** Not one row of the player in the layout is current: the source did not give it in its last read. */
+  allStale: boolean
 }
 
 export interface SourceView {
@@ -51,8 +52,6 @@ export interface SourceView {
   reason: string | null
   progress: PageProgress | null
   players: PlayerView[]
-  /** The parts of the page the last read could not get, one line per player; their rows are those of the read before. */
-  unread: string[]
 }
 
 /** What a source window item is, whether it is a draft of the add window or a source of a stored series. */
@@ -173,6 +172,10 @@ export interface VoiceRow {
   name: string
   coverage: Coverage[]
   rows: number
+  /** The episodes the source did not give in its last read (they stand from an earlier read), as the window writes them. */
+  stale: string[]
+  /** Not one episode of the voice-over is current. */
+  allStale: boolean
 }
 
 export function voicesOf(rows: LayoutRow[]): VoiceRow[] {
@@ -187,7 +190,11 @@ export function voicesOf(rows: LayoutRow[]): VoiceRow[] {
   return [...voices.values()]
     .map((voice) => ({ voice, first: Math.min(...voice.rows.map((row) => row.episode_start as number)) }))
     .sort((a, b) => a.first - b.first || a.voice.name.localeCompare(b.voice.name))
-    .map(({ voice }) => ({ group: voice.group, name: voice.name, coverage: coverageOf(voice.rows), rows: voice.rows.length }))
+    .map(({ voice }) => {
+      const stale = voice.rows.filter((row) => row.stale)
+      return { group: voice.group, name: voice.name, coverage: coverageOf(voice.rows), rows: voice.rows.length,
+        stale: coverageOf(stale).map(spanText), allStale: stale.length === voice.rows.length }
+    })
 }
 
 function playerView(player: PlayerSummary, playersOff: string[], layout: LayoutRow[]): PlayerView {
@@ -204,6 +211,7 @@ function playerView(player: PlayerSummary, playersOff: string[], layout: LayoutR
     steps: stepsOf(rows),
     voices: voicesOf(rows),
     off: playersOff.includes(player.player),
+    allStale: rows.length > 0 && rows.every((row) => row.stale),
     chooseSeason: player.player === CATALOG_PLAYER && player.groups > 1,
   }
 }
@@ -223,10 +231,9 @@ export interface ViewInput {
 export function viewOf(input: ViewInput): SourceView {
   const { summary, live, asked } = input
   const players = (summary?.players ?? []).map((player) => playerView(player, input.playersOff, input.rows ?? []))
-  const unread = unreadLines(summary?.unread ?? [])
   const settled = (state: SourceState, reason: string | null = null): SourceView =>
-    ({ state, reason, progress: null, players, unread })
-  if (live?.state === "reading") return { state: "reading", reason: null, progress: live.progress, players, unread }
+    ({ state, reason, progress: null, players })
+  if (live?.state === "reading") return { state: "reading", reason: null, progress: live.progress, players }
   if (live?.state === "failed") return settled("failed", live.reason)
   if (asked?.state === "reading") return settled("reading")
   if (asked?.state === "failed") return settled("failed", asked.reason ?? summary?.reason ?? null)
@@ -248,19 +255,6 @@ export function titlesOf(names: string[]): { ru: string; en: string } {
   const ru = names.find((name) => cyrillic.test(name)) ?? ""
   const en = names.find((name) => /[A-Za-z]/.test(name) && !cyrillic.test(name)) ?? ""
   return { ru: ru.trim(), en: en.trim() }
-}
-
-/** One line per player of the parts it could not give, by what the site calls them (a part with no player is the page
- * of an episode); a player whose parts the site does not name is told by their count. Reasons stay in the log. */
-export function unreadLines(unread: UnreadPart[]): string[] {
-  const byPlayer = new Map<string, UnreadPart[]>()
-  for (const part of unread) byPlayer.set(part.player_label ?? "", [...(byPlayer.get(part.player_label ?? "") ?? []), part])
-  return [...byPlayer.entries()].map(([player, parts]) => {
-    const named = parts.every((part) => (part.names ?? []).some(Boolean))
-    const what = named ? [...new Set(parts.flatMap((part) => (part.names ?? []).filter(Boolean)))].join(", ")
-      : tn("sources.count.parts", parts.length)
-    return player ? t("sources.unread.player", { player, what }) : t("sources.unread.pages", { what })
-  })
 }
 
 export function phaseText(phase: string): string {

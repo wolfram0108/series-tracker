@@ -105,3 +105,16 @@ def test_a_season_queue_names_the_episodes_each_variant_plays_in_and_its_best_he
     shown, _ = queues.build(availability.lines_of_level(rows, 4, None), [], ORDER, GROUPS)
     assert [(each.group, each.height, each.episodes) for each in shown.rows] == [
         ("HORIZON", 2160, "1–10"), ("AniStar", 2160, "11–18")]
+
+
+def test_the_episodes_of_a_variant_its_source_did_not_give_in_its_last_read_are_named_in_the_queue():
+    """A variant is listed as it stands, with the episodes its source did not give now: all of them for the episode, the
+    stale ones of a season."""
+    stale = [each.model_copy(update={"stale": each.row_key == "a-cvh"}) for each in EPISODE]
+    shown, _ = build(stale, [])
+    by_variant = {(each.group, each.source_id, each.player): each.stale for each in shown.rows}
+    assert by_variant[("AniStar", 33, "cvh")] == "11" and by_variant[("AniStar", 33, "kodik")] == ""
+    season = [row(1, 33, f"s{number}", 4, number, player="cvh", height=1080, voice="AniStar") for number in (1, 2, 3)]
+    season = [each.model_copy(update={"stale": each.episode_start > 1}) for each in season]
+    shown = queues.build(season, [], ORDER, GROUPS)[0]
+    assert [(each.episodes, each.stale) for each in shown.rows] == [("1–3", "2–3")]

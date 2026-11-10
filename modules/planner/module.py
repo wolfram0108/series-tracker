@@ -1017,7 +1017,8 @@ class PlannerModule(BaseModule):
                 except (BusRequestError, asyncio.TimeoutError) as exc:
                     self.log.warning("сериал %d: план для окна не посчитан: %s", series_id, exc)
             sync = sync or fresh
-        online = frozenset(row.id for row in inputs.online) if inputs is not None else None
+        # Online is what the sources give now: a row that stands from an earlier read is not.
+        online = frozenset(row.id for row in inputs.online if row.current) if inputs is not None else None
         references = references_of(inputs, made, self._members.get(series_id, {})) \
             if inputs is not None and made is not None else []
         return {**view_of(series_id, sync, made, running=running, online=online,

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, computed_field, field_validator, model_va
 
 from .compilation import CompilationView
 from .output_settings import EpisodeSettings, LeverSpec, LevelSettings
-from .release_table import RowState, TableState, UnreadPart
+from .release_table import RowState, TableState
 from .rules import RuleResult
 
 
@@ -57,6 +57,9 @@ class CompositionRow(BaseModel):
     # Which video the row is, as its host numbers it (release players' `video_of` of the link): two rows of one player with
     # one video are the same video whatever page shows them. Empty when the link names no video of its host's own.
     video: str = ""
+    # The source did not give this episode of this player in its last read (a part of the page that did not answer, or a
+    # read that failed): the row stands from an earlier read, and every window shows it as not current.
+    stale: bool = False
 
     @property
     def grouped(self) -> bool:
@@ -126,8 +129,6 @@ class SourceSummary(BaseModel):
     players: list[PlayerSummary] = Field(default_factory=list)
     # Where the rows of its table come from (release_table.place_of); empty before a table was read.
     place: list[str] = Field(default_factory=list)
-    # The parts of the page the last read could not get: their rows are those of the read before.
-    unread: list[UnreadPart] = Field(default_factory=list)
 
 
 class CompositionGetRequest(BaseModel):

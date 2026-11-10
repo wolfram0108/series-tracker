@@ -52,11 +52,13 @@ class _Level:
         key = (candidate.row.voice_label, candidate.row.source_id, candidate.row.player)
         playing = [row for _, row in self.by_variant[key] if row.state == RowState.PLAYABLE]
         allowed, level = self.value(allow, variant_target(*key), True)
+        current = {number for row in playing if not row.stale for number in _episodes(row, self.episode)}
+        stale = {number for row in playing if row.stale for number in _episodes(row, self.episode)} - current
         return QueueRow(group=key[0], source_id=key[1], player=key[2],
                         player_label=next((row.player_label for _, row in self.by_variant[key] if row.player_label), key[2]),
                         height=max((row.height or 0 for row in playing), default=0) or None,
                         episodes=spans(number for row in playing for number in _episodes(row, self.episode)),
-                        allowed=allowed is not False, allowed_level=level)
+                        stale=spans(stale), allowed=allowed is not False, allowed_level=level)
 
     def single_queue(self, order: Order, order_lever: str, allow_lever: str) -> QueueView:
         """A queue of single videos (the reference, the markup reference) by its order and its flags."""

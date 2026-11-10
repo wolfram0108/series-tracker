@@ -171,12 +171,19 @@ def test_a_ready_source_has_no_reason():
     assert (out.sources[0].status, out.sources[0].reason) == (SourceStatus.READY, None)
 
 
-def test_the_parts_of_the_page_its_last_read_could_not_get_are_in_the_summary_and_the_source_is_ready():
-    gap = UnreadPart(part="kodik:season/1/a?", player_label="Kodik", names=["Комната Диди"], reason='{"code":"player_status"}')
-    tbl = table(row("a")).model_copy(update={"unread": [gap]})
-    out = project([item(source(), tbl, {"a": {"episode": 1}})], {}, {})
-    assert (out.sources[0].status, out.sources[0].unread) == (SourceStatus.READY, [gap])
-    assert [r.row_key for r in out.rows] == ["a"]
+def test_an_episode_the_source_did_not_give_in_its_last_read_stands_and_is_marked_not_current():
+    """The unit is an episode of a player of a source: one of a part of the page the last read did not get (it stands
+    from an earlier read) is not current, the others are; a read that failed leaves every one of them not current."""
+    gap = UnreadPart(part="cvh:page", player_label="CVH", reason='{"code":"player_unreachable"}')
+    tbl = table(row("a", player="kodik").model_copy(update={"part": "kodik:list"}),
+                row("b", player="cvh").model_copy(update={"part": "cvh:page"}),
+                row("c", player="cvh").model_copy(update={"part": "cvh:page"})).model_copy(update={"unread": [gap]})
+    results = {"a": {"episode": 1}, "b": {"episode": 1}, "c": {"excluded": True}}
+    out = project([item(source(), tbl, results)], {}, {})
+    assert out.sources[0].status == SourceStatus.READY
+    assert {r.row_key: r.stale for r in out.rows} == {"a": False, "b": True, "c": True}
+    failed = project([item(source(), tbl, results, failure='{"code":"read_failed"}')], {}, {})
+    assert {r.row_key: r.stale for r in failed.rows} == {"a": True, "b": True, "c": True}
 
 
 def test_the_summary_counts_players_rows_and_seasons_without_a_number():
