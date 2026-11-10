@@ -103,6 +103,7 @@ const title = (track: Track): string => t(`pack.track.${track.kind}` as MessageK
     </div>
     <div v-if="card.status === 'failed'" class="work-facts">
       <span>{{ t("download.label.outcome") }} <b>{{ t(card.waited ? "pack.outcome.waited" : "pack.outcome.failed") }}</b></span>
+      <span v-if="card.failure">{{ t("pack.label.reason") }} <b>{{ t(`pack.failure.${card.failure}` as MessageKey) }}</b></span>
       <span>{{ t("download.label.repeat") }} <b>{{ t("download.outcome.repeat") }}</b></span>
     </div>
 

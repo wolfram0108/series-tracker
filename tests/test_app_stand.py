@@ -156,6 +156,29 @@ async def test_a_video_deleted_is_downloaded_anew_while_its_row_is_online(stand)
     assert view["assets"][0]["video"]["row"] == asset["video"]["row"] and not view["commands"]
 
 
+@pytest.mark.parametrize("seconds, aligned", [(3, 1), (1, 0)])
+async def test_a_video_downloaded_anew_to_another_length_has_its_voice_overs_aligned_to_it_again(stand, seconds, aligned):
+    """The host recut the video of a row (the same row, another length): «Удалить» the video downloads it anew, its
+    length is known only then, and the voice-over aligned to the file before is aligned to it again; a video of the same
+    length keeps the voice-over as it is."""
+    series_id = await series_of(stand, (1,))
+    (asset,) = (await stand.sync(series_id))["assets"]
+    path = os.path.join(stand.site.root, f"ref-ep1-truth{truth_of(1, 1)}-file.mp4")
+    os.remove(path)
+    await asyncio.to_thread(stand.codec.make, path, [truth_of(1, 1)] * seconds)
+    jobs = len(stand.daemon.jobs)
+    await stand.call("POST", f"/api/series/{series_id}/plan/delete", {"kind": "video", "name": asset["name"]})
+    await stand.sync(series_id)
+    view = await stand.check(series_id)
+    assert len(stand.daemon.jobs) - jobs == aligned, list(stand.daemon.jobs.values())
+    (built,) = view["assets"]
+    assert built["video"]["row"] == asset["video"]["row"] and [each["group"] for each in built["tracks"]] == ["AnimeVost"]
+    assert await asyncio.to_thread(stand.codec.seconds, os.path.join(stand.library, built["name"])) == seconds
+    again = await stand.sync(series_id)
+    assert {track["kind"] for episode in again["episodes"] for track in episode["tracks"]} == {"reuse"}
+    assert len(stand.daemon.jobs) - jobs == aligned
+
+
 async def test_a_video_deleted_whose_row_the_source_forgot_gives_its_place_to_another_source(stand):
     """The source forgot the row of the video (a page read whole, with episode 2 on it), «Удалить» the video: the deleted
     video is the last candidate, the video of the other source gives the picture, every sound on the new picture."""

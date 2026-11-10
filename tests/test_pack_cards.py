@@ -65,6 +65,19 @@ def test_a_built_container_waits_for_the_journal_in_no_stage_and_the_put_in_plac
     assert {stage.name: stage.seconds for stage in card.stages} == {"queue": 0.0, "build": 10.0, "verify": 0.0, "apply": 2.0}
 
 
+def test_a_build_that_failed_gives_its_card_the_code_of_the_problem_and_one_that_waited_gives_none():
+    book = PackBook(clock=lambda: 0.0, wall=lambda: "t")
+    for key in ("1:s01e01", "1:s01e02"):
+        book.cards[key] = PackCard(id=key, series_id=1, name=f"{key}.mkv")
+        book._since[key] = 0.0
+        book._enter(book.cards[key], "build")
+    book.failed(["1:s01e01"], "container_length_wrong")
+    book.waited(["1:s01e02"])
+    first, second = book.cards["1:s01e01"], book.cards["1:s01e02"]
+    assert (first.status, first.failure, first.waited) == ("failed", "container_length_wrong", False)
+    assert (second.status, second.failure, second.waited) == ("failed", "", True)
+
+
 def test_the_journal_of_a_series_is_shown_step_by_step_whichever_episode_its_files_are_and_goes_after_the_last():
     now = [0.0]
     book = PackBook(clock=lambda: now[0], wall=lambda: "2026-11-11T02:50:00+00:00")

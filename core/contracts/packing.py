@@ -65,6 +65,9 @@ class PackCard(BaseModel):
     reason: Literal["", "order", "video", "names"] = ""
     # Not built: a step of the plan it needs did not succeed (a download, an alignment); the file before stays.
     waited: bool = False
+    # Why the build failed: the code of the problem of the build (core/container.py: container_length_wrong and the others);
+    # "" when it did not fail or failed for another error (its words are in the log).
+    failure: str = ""
     figures: PackFigures = Field(default_factory=PackFigures)
     queued_at: str = ""
     finished_at: str = ""

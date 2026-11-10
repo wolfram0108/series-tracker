@@ -2770,6 +2770,11 @@ export interface components {
              * @default false
              */
             waited: boolean;
+            /**
+             * Failure
+             * @default
+             */
+            failure: string;
             figures?: components["schemas"]["PackFigures"];
             /**
              * Queued At

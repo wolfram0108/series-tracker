@@ -80,6 +80,15 @@ async def as_in_file(files: "Library", container: Container) -> Container:
                    own_at=own_at)
 
 
+
+class BuildFailed(RuntimeError):
+    """A container that could not be built or read back as built: the file and the problem (core/container.py); `code` is
+    the problem without the words of the program that come after its colon."""
+
+    def __init__(self, name: str, problem: str) -> None:
+        super().__init__(f"{name}: {problem}")
+        self.name, self.code = name, problem.split(":", 1)[0]
+
 class Library:
     """The folder of a series: its containers under their names, the staging folder and the journal."""
 
@@ -159,7 +168,7 @@ class Library:
             problem = await mkv.build(staging, video_path, identity, tracks, provenance=container_json(built),
                                       **({"report": report} if report is not None else {}))
             if problem is not None:
-                raise RuntimeError(f"{goal.name}: {problem}")
+                raise BuildFailed(goal.name, problem)
             if report is not None:
                 await report("built", {})
             steps.append(("publish", os.path.relpath(staging, self.root), goal.name))
@@ -221,7 +230,7 @@ class Library:
                           for each in held.audio]
                 problem = await mkv.build(again, path, held.video, tracks, provenance=table[step[1]])
                 if problem is not None:
-                    raise RuntimeError(f"{step[1]}: {problem}")
+                    raise BuildFailed(step[1], problem)
                 os.replace(again, path)
 
     def finish(self) -> None:

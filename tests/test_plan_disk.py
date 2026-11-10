@@ -10,7 +10,7 @@ from dataclasses import replace
 import pytest
 
 from core import container as mkv
-from core.plan.files import dub_key
+from core.plan.files import BuildFailed, dub_key
 from core.plan.tables import RowId
 from plan_disk import Crash, DiskWorld
 from plan_world import Chaos
@@ -231,3 +231,24 @@ def test_delete_of_the_only_video_leaves_the_file_as_it_is(disk):
     step = disk.sync("удалить единственное видео")
     disk.check(step)
     assert not step.plan.ops and sorted(disk.containers) == [name]
+
+
+def test_a_container_that_fails_to_build_leaves_its_episode_and_the_sync_applies_the_others(disk):
+    """A build that fails (the check of the container read back) is of its group: the file of that episode stays as it
+    was, the other episodes are applied, and the next sync builds it."""
+    episode(disk, 1, 1)
+    episode(disk, 2, 1)
+    build = disk.files.build
+
+    async def failing(made, group, results, report_for=None):
+        if (1, 1) in group.built:
+            raise BuildFailed(made.goal((1, 1)).name, "container_length_wrong")
+        return await build(made, group, results, report_for)
+
+    disk.files.build = failing
+    step = disk.sync("сборка первой серии не удалась")
+    disk.check(step)
+    assert [each.video.episode for each in disk.containers.values()] == [(1, 2)]
+    disk.files.build = build
+    disk.check(disk.sync("снова"))
+    assert visible(disk, 1).tracks and visible(disk, 2).tracks

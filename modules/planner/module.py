@@ -88,6 +88,7 @@ from core.contracts import (WORK_WITHDRAWN, CompositionReply, DownloadNeed, Down
                             SubmitReply)
 from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
 from core.envelope import Envelope
+from core.ffprobe import END_SLACK_S, duration_of
 from core.fsnames import sanitize_name
 from core.ignored import parse_memory
 from core.plan.executor import DOWNLOADS, Made, Passing, SeriesSync, judged, video_of
@@ -350,10 +351,27 @@ class BusSync(SeriesSync):
                                finished.get("error"))
             return None
         if op.kind == "download_video":
-            return Made(Video(row.id, row.snapshot(), row.slot, row.id), path)
+            return Made(Video(row.id, row.snapshot(), row.slot, row.id), path, retimed=await self._retimed(row.id, path))
         if op.kind == "download_dub":
             return Made(row, path)
         return Made(None, path)
+
+    async def _retimed(self, row_id, path: str) -> bool:
+        """The length of a row's video is known only once it is downloaded: a video the library holds of the same row
+        whose length is another one is another timeline (the host cut or recut it), and what is aligned to it before is
+        not in step with what came."""
+        held = [each for each in self.containers.values() if each.video.id == row_id and each.video.cut_of is None]
+        if not held:
+            return False
+        now = await duration_of(path)
+        for each in held:
+            before = await duration_of(self.files.path(each.name))
+            if now and before and abs(now - before) > END_SLACK_S:
+                self.m.log.warning("сериал %d: видео строки %s скачано длиной %.1f с, в файле %s было %.1f с — "
+                                   "задача перепланирована на новую длину", self.series["id"], row_id.row_key, now,
+                                   each.name, before)
+                return True
+        return False
 
     async def _shed(self, folder: str, keep: str) -> None:
         """A job ended: what it was given (the copies, its cache) goes; what it wrote (the tracks, the plots) stays while
@@ -523,7 +541,10 @@ class BusSync(SeriesSync):
         try:
             self.pending += await self.files.build(made, group, results, report_for)
         except BaseException as exc:
-            self.m.packing.failed(keys)
+            # The card gives the code of a build that failed (BuildFailed); the words of the error are the log's.
+            if isinstance(exc, Exception):
+                self.m.log.warning("сериал %d: сборка не удалась: %s", self.series["id"], exc)
+            self.m.packing.failed(keys, getattr(exc, "code", ""))
             self.m.pack_publish()
             raise
         finally:

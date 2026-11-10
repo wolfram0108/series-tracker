@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from typing import Callable
 
 from .planner import Goal, Group, Op, Plan, plan, video_op
-from .tables import Choices, Container, Inputs, OnlineRow, Slot, Track, Video
+from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
 
 DOWNLOADS = ("download_video", "download_dub", "download_picture")
 
@@ -23,10 +23,13 @@ class Passing(Exception):
 
 @dataclass(frozen=True)
 class Made:
-    """What a step made: `value` (a Video, a Track, the row of a voice-over, None for a compilation) and its file."""
+    """What a step made: `value` (a Video, a Track, the row of a voice-over, None for a compilation) and its file.
+    `retimed`: the video downloaded is of another length than the file of its row the library holds — its timeline is
+    another one, and what the library holds aligned to that row is no longer in step with it."""
 
     value: object
     file: object = None
+    retimed: bool = False
 
 
 @dataclass(frozen=True)
@@ -200,6 +203,9 @@ class SeriesSync:
         # again by the next sync. An alignment or a cut the service crashed on or never answered is no such failure:
         # its episode waits for the service unchanged.
         self.skipped: set[tuple] = set()
+        # The rows whose video this sync downloaded anew to another length (`Made.retimed`): the tracks the library holds
+        # aligned to them are given to the plans of the sync as aligned to the file before, which is no longer the video.
+        self.retimed: set[RowId] = set()
 
     # --- the steps: the subclass's ------------------------------------------------------------------------------
 
@@ -238,8 +244,23 @@ class SeriesSync:
     # --- the sync -----------------------------------------------------------------------------------------------
 
     def inputs(self, online: tuple[OnlineRow, ...], choices: Choices) -> Inputs:
-        return Inputs(online, tuple(sorted(self.containers.values(), key=lambda each: each.name)),
+        return Inputs(online, tuple(sorted((self._as_held(each) for each in self.containers.values()),
+                                           key=lambda each: each.name)),
                       replace(choices, delete=self.commands), frozenset(self.failed | self.skipped))
+
+    def _as_held(self, container: Container) -> Container:
+        """A file as the plans of this sync see it: a track aligned to a row whose video came anew to another length is
+        aligned to the file before (`<video>@before`), not to that row; so is a video cut onto the timeline of that row."""
+        def before(row: RowId) -> RowId:
+            return replace(row, video=f"{row.video}@before")
+
+        video = container.video
+        moved = video.cut_of is not None and video.timeline in self.retimed
+        if not moved and not any(track.aligned_to in self.retimed for track in container.tracks):
+            return container
+        return replace(container, video=replace(video, timeline=before(video.timeline)) if moved else video,
+                       tracks=tuple(replace(track, aligned_to=before(track.aligned_to))
+                                    if track.aligned_to in self.retimed else track for track in container.tracks))
 
     async def plan_of(self, inputs: Inputs) -> Plan:
         first = plan(inputs, self.namer)
@@ -250,6 +271,7 @@ class SeriesSync:
         # A command is of a file: a file that is gone takes its command with it.
         self.commands = frozenset(each for each in self.commands if each[1] in self.containers)
         self.skipped = set()  # what failed for the moment in the last sync is tried again
+        self.retimed = set()
         inputs = self.inputs(online, choices)
         before = dict(self.containers)
         replanned: list[tuple] = []
@@ -267,12 +289,16 @@ class SeriesSync:
             new = [key for key in failures(made, results, failed, self.passing) if key not in self.failed]
             moment = [key for key in failures(made, results, failed, set()) if key[0] == "download"
                       and key not in new and key not in self.failed and key not in self.skipped]
-            if not new and not moment:
+            # A video that came to another length: the plan is made again on the file as it is now (the step of the
+            # download tells it; the planner has no rule for it — the tracks before are simply not aligned to it).
+            retimed = sorted({value.value.id for value in results.values() if value.retimed} - self.retimed, key=repr)
+            if not new and not moment and not retimed:
                 break
             self.failed |= set(new)
             self.skipped |= set(moment)
+            self.retimed |= set(retimed)
             replanned += new
-            await self.trace("replan", {"recorded": new, "for_this_sync": moment})
+            await self.trace("replan", {"recorded": new, "for_this_sync": moment, "retimed": retimed})
             inputs = self.inputs(online, choices)
         applied = []
         for group in made.groups:
@@ -281,8 +307,17 @@ class SeriesSync:
                 await self.trace("apply", {"slots": group.slots, "applied": False, "missing": missing})
                 await self.left(made, group, missing)
                 continue
+            try:
+                await self.stage(made, group, results)
+            except Exception as exc:  # noqa: BLE001 - a container that cannot be built leaves its group, not the sync
+                # Its build is a step that failed for the moment: the next sync builds it again.
+                failed |= {f"build:{slot}" for slot in group.built}
+                problems += [(slot, "build", None, getattr(exc, "code", "") or str(exc)) for slot in group.built]
+                await self.trace("apply", {"slots": group.slots, "applied": False, "missing": ["build"],
+                                           "error": str(exc)})
+                await self.left(made, group, [f"build: {exc}"])
+                continue
             await self.trace("apply", {"slots": group.slots, "applied": True, "group": group})
-            await self.stage(made, group, results)
             self.containers = table_after(self.containers, made, group, results)
             self.commands = commands_after(self.commands, made, group)
             applied.append(group.slots)

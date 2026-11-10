@@ -153,12 +153,14 @@ class PackBook:
                 card.waited = True
         self.failed(keys)
 
-    def failed(self, keys: Iterable[str]) -> None:
-        """The build failed (its reason is in the log): the file before stays."""
+    def failed(self, keys: Iterable[str], failure: str = "") -> None:
+        """The build failed, for `failure` (the code of a build that failed, core/container.py; "" for another error): the
+        file before stays."""
         for key in keys:
             card = self.cards.get(key)
             if card is None or card.status in ENDED:
                 continue
+            card.failure = failure
             self._leave(card, "failed")
             card.status = "failed"
             card.finished_at = self._wall()
