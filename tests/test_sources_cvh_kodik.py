@@ -15,6 +15,9 @@ from modules.sources.players import cdnvideohub, kodik
 from modules.sources.players.catalog import CatalogError, read_catalog
 from modules.sources.players.cdnvideohub import CdnVideoHubError, CdnVideoHubPlayer, Rung
 from modules.sources.players.contract import Kind, PlayerRef
+from modules.sources.players.registry import PlayerRegistry
+from modules.sources.sites import ReadContext
+from modules.sources.sites.catalogs import read_catalogs
 from sources_support import STEP_LIMIT_S, Web, within
 
 PAGE = "https://dunhuatv.ru/28-x-smotret-onlajn.html"
@@ -48,10 +51,14 @@ def seasons(*triples: tuple[str, str, str, bool]) -> str:
 
 
 def items(*triples: tuple[str, str, str, str]) -> str:
-    """Items of a list: (id, value, text, mark); the mark "other" is an item Kodik borrowed from another voice-over."""
-    options = "".join(f'<option value="{value}" data-id="{item}" data-hash="h{item}" data-title="{text}"'
-                      f' data-other-translation="{"true" if mark == "other" else "false"}">{text}</option>'
-                      for item, value, text, mark in triples)
+    """Items of a list: (id, value, text, mark); the mark "other:<voice-over>" is the video of that voice-over, which Kodik
+    shows in this list for an episode this voice-over lacks."""
+    def option(item: str, value: str, text: str, mark: str) -> str:
+        other = mark.startswith("other:")
+        owner = f' data-translation-title="{mark.removeprefix("other:")}"' if other else ""
+        return (f'<option value="{value}" data-id="{item}" data-hash="h{item}" data-title="{text}"'
+                f' data-other-translation="{"true" if other else "false"}"{owner}>{text}</option>')
+    options = "".join(option(*each) for each in triples)
     return f'<div class="serial-series-box"><select>{options}</select></div>'
 
 
@@ -223,15 +230,52 @@ async def test_an_iframe_that_does_not_open_is_a_catalog_that_cannot_be_read(pag
     assert parse(refused.value.reason)["code"] == code
 
 
-async def test_an_episode_kodik_borrowed_from_another_voice_is_a_row_with_the_text_the_list_shows_it_with():
-    """Kodik puts the episode of another voice-over into the list of one that has none of its own and says so in the text
-    of the item: the row is there, as the list shows it, and the rules of the constructor decide on it."""
-    page = (signed() + voices(ANIMY, ANISTAR) + seasons(("1 сезон", "50228", "7bbb4c6b", True))
-            + items(("101", "1", "1 серия", ""), ("301", "2", "2 серия (Другой перевод: AniStar)", "other")))
-    found, _web = await entries_of("https://kodikplayer.com/serial/50228/7bbb4c6b/720p", kodik_web({**IFRAMES, "50228": page}))
+def seria_page(translation_id: str, title: str) -> str:
+    """The page of one video of Kodik: it names the voice-over the video is of."""
+    return f'<script>var translationId = {translation_id}; var translationTitle = "{title}";</script>'
 
-    assert [(e.key, e.voice.name, e.text) for e in found if e.voice.name == "Animy"] == [
-        ("1043:101", "Animy", "1 серия"), ("1043:301", "Animy", "2 серия (Другой перевод: AniStar)")]
+
+async def test_a_video_a_list_shows_for_another_voice_is_that_voice_overs_video_and_one_video_is_one_row():
+    """Kodik fills an episode a voice-over lacks with the video of another: «2 серия (Другой перевод: AniStar)» in the list
+    of Animy is the video 301 of AniStar. It is AniStar's row, the one its own list gives; its page is asked once."""
+    page = (signed() + voices(ANIMY, ANISTAR) + seasons(("1 сезон", "50228", "7bbb4c6b", True))
+            + items(("101", "1", "1 серия", ""), ("301", "2", "2 серия (Другой перевод: AniStar)", "other:AniStar")))
+    web = kodik_web({**IFRAMES, "50228": page})
+    web.route("kodikplayer.com/seria/301/", seria_page("910", "AniStar"))
+    found, _web = await entries_of("https://kodikplayer.com/serial/50228/7bbb4c6b/720p", web)
+
+    assert [(e.key, e.voice.name, e.text, e.borrowed) for e in found] == [
+        ("1043:101", "Animy", "1 серия", False),
+        ("910:301", "AniStar", "2 серия (Другой перевод: AniStar)", True),
+        ("910:301", "AniStar", "1 серия", False), ("910:302", "AniStar", "2 серия", False)]
+    assert web.count("/seria/301/") == 1
+
+    # The table: one video, one row — the one of the list that lists it as its own.
+    async with web.client() as http:
+        read = await within(read_catalogs(PlayerRegistry([kodik.KodikPlayer()]),
+                                          [(PAGE, {"kodik": PlayerRef("kodik", "https://kodikplayer.com/serial/50228/7bbb4c6b/720p")})],
+                                          ReadContext(http, lambda *step: None)), STEP_LIMIT_S, "the catalogs")
+    assert [(e.key, e.voice.name, e.text) for catalog in read.read for e in catalog.entries] == [
+        ("1043:101", "Animy", "1 серия"), ("910:301", "AniStar", "1 серия"), ("910:302", "AniStar", "2 серия")]
+
+
+async def test_a_list_that_shows_another_voice_overs_video_reads_it_with_that_voice_and_a_video_whose_page_names_none_is_unread():
+    page = season_page(("501", "1", "1 серия", ""), ("777", "2", "2 серия (Другой перевод: Animy)", "other:Animy"))
+    source = PlayerRef("kodik", "https://kodikplayer.com/season/64820/8cc4/720p?translations=false&episode=1")
+    player, web = kodik.KodikPlayer(), Web()
+    web.route("kodikplayer.com/season/64820/", page)
+    web.route("kodikplayer.com/seria/777/", seria_page("1043", "Animy"))
+    async with web.client() as http:
+        found = await within(read_catalog(player, source, http, PAGE), STEP_LIMIT_S, "the catalog of the season")
+    assert [(e.key, e.voice.name, e.borrowed) for e in found] == [("910:501", "AniStar", False), ("1043:777", "Animy", True)]
+
+    silent = Web()
+    silent.route("kodikplayer.com/season/64820/", page)
+    silent.route("kodikplayer.com/seria/777/", "<html></html>")
+    async with silent.client() as http:
+        with pytest.raises(CatalogError) as refused:
+            await within(read_catalog(kodik.KodikPlayer(), source, http, PAGE), STEP_LIMIT_S, "the catalog of the season")
+    assert parse(refused.value.reason)["code"] == "kodik_owner_unread"
 
 
 # --- Kodik: one item ----------------------------------------------------------------------------------------------------------

@@ -92,7 +92,8 @@ async def read_catalogs(players: PlayerRegistry, pages: Iterable[tuple[str, Mapp
     """The catalog of each source the pages show; `pages` are (address, refs by player name), `names` what the site calls
     the content of a ref (its voice-overs), for a catalog that cannot be read. A player lists a series once: the first
     page that shows a catalog is the one it is read through. Two catalogs of one player may list one video (two lists of a
-    voice-over that overlap): it is one row, of the catalog that listed it first."""
+    voice-over that overlap): it is one row, of the catalog that listed it first. A video a catalog shows for another
+    voice-over (`Entry.borrowed`) is the row of the catalog that lists it as its own, when one does."""
     chosen: dict[str, tuple[object, PlayerRef, str]] = {}
     named: dict[str, list[str]] = {}
     for page_url, refs in pages:
@@ -103,24 +104,31 @@ async def read_catalogs(players: PlayerRegistry, pages: Iterable[tuple[str, Mapp
             part = catalog_part(player, ref)
             chosen.setdefault(part, (player, ref, page_url))
             named.setdefault(part, []).extend((names or {}).get(ref, ()))
-    catalogs: list[Catalog] = []
+    read: list[tuple[object, str, str, list[Entry]]] = []
     unread: list[UnreadPart] = []
-    listed: set[tuple[str, str]] = set()
     ctx.progress(PHASE_CATALOG, 0, len(chosen))
     for done, (part, (player, ref, page_url)) in enumerate(chosen.items(), start=1):
         try:
-            entries = await read_catalog(player, ref, ctx.http, page_url)
+            read.append((player, page_url, part, await read_catalog(player, ref, ctx.http, page_url)))
         except CatalogError as exc:
             unread.append(UnreadPart(part=part, player_label=getattr(player, "label", player.name),
                                      names=list(dict.fromkeys(named[part])), reason=exc.reason))
-            ctx.progress(PHASE_CATALOG, done, len(chosen))
-            continue
-        fresh = [entry for entry in entries if (player.name, entry.key) not in listed]
-        listed.update((player.name, entry.key) for entry in fresh)
+        ctx.progress(PHASE_CATALOG, done, len(chosen))
+    # One video, one row: a video its own catalog lists is that entry, wherever else it is shown.
+    owned = {(player.name, entry.key) for player, _url, _part, entries in read for entry in entries if not entry.borrowed}
+    catalogs: list[Catalog] = []
+    listed: set[tuple[str, str]] = set()
+    for player, page_url, part, entries in read:
+        fresh = []
+        for entry in entries:
+            known = (player.name, entry.key)
+            if known in listed or (entry.borrowed and known in owned):
+                continue
+            listed.add(known)
+            fresh.append(entry)
         catalogs.append(Catalog(player, page_url,
                                 last_of_each(fresh, lambda each: (each.voice.name, each.voice.kind, each.group), ctx.recent),
                                 part))
-        ctx.progress(PHASE_CATALOG, done, len(chosen))
     return Catalogs(catalogs, unread)
 
 

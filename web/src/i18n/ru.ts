@@ -93,6 +93,7 @@ export const ru = {
   "reason.vk_no_known_resolution": "у VK-видео нет ссылки с известным разрешением",
   "reason.kodik_params_missing": "в iframe Kodik нет параметров {missing}: разметка изменилась",
   "reason.kodik_no_episode_list": "в iframe Kodik нет списка серий",
+  "reason.kodik_owner_unread": "страница записи Kodik {item} не назвала свой перевод",
   "reason.kodik_no_episode": "у озвучки Kodik нет серии {episode}",
   "reason.kodik_no_links": "Kodik не отдал ссылок на серию",
   "reason.bad_link": "непонятная ссылка {link}",

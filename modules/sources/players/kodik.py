@@ -97,6 +97,9 @@ class KodikItem:
     hash: str
     text: str
     value: str
+    # The voice-over the item is of, when the list shows it for another one (`data-translation-title`): Kodik fills an
+    # episode a voice-over lacks with the video of another voice-over; empty for the list's own item.
+    owner: str = ""
 
 
 @dataclass
@@ -169,7 +172,9 @@ def parse_items(page: str) -> dict[str, KodikItem]:
         option = dict(_ATTR.findall(attrs))
         if option.get("data-id") and option.get("data-hash"):
             text = " ".join(html.unescape(_TEXT.sub("", inner)).split()) or html.unescape(option.get("data-title", "")).strip()
-            items[option["data-id"]] = KodikItem(option["data-id"], option["data-hash"], text, option.get("value", ""))
+            borrowed = option.get("data-other-translation") == "true"
+            owner = (html.unescape(option.get("data-translation-title", "")).strip() or "?") if borrowed else ""
+            items[option["data-id"]] = KodikItem(option["data-id"], option["data-hash"], text, option.get("value", ""), owner)
     return items
 
 
@@ -268,6 +273,8 @@ class KodikPlayer:
     def __init__(self) -> None:
         # A session belongs to the client that asked for it: the signatures are issued for that visitor.
         self._sessions: "WeakKeyDictionary[httpx.AsyncClient, dict[str, tuple[float, KodikSession]]]" = WeakKeyDictionary()
+        # The voice-over each video belongs to, as its own page says (translation id, name), by the id of the video.
+        self._owners: "WeakKeyDictionary[httpx.AsyncClient, dict[str, tuple[str, str]]]" = WeakKeyDictionary()
 
     def find(self, text: str, page_url: str) -> PlayerRef | None:
         """The iframe a page embeds, or the button that switches the page to it; it opens a voice-over of the title."""
@@ -337,12 +344,34 @@ class KodikPlayer:
                 listed = iframe_url(season.media_id, season.media_hash, season.media_kind)
                 session = opened if season.selected or not opened.seasons else await self._open(http, listed, referer)
                 self.remember(http, session, listed)
-                found += [Entry(
-                    key=f"{voice.translation_id}:{item.id}",
-                    ref=self.ref_of(page_url, season.media_id, season.media_hash, item.id, season.media_kind),
-                    text=item.text, group=season.title, voice=RowVoice(name=voice.studio, kind=voice.kind),
-                    site_fields={"value": item.value, "translation_id": voice.translation_id}) for item in session.items.values()]
+                for item in session.items.values():
+                    # An item of another voice-over is that voice-over's video: its key and its voice are its own.
+                    owner_id, owner = (await self._owner_of(http, item, referer)) if item.owner else (voice.translation_id,
+                                                                                                    voice.studio)
+                    found.append(Entry(
+                        key=f"{owner_id}:{item.id}",
+                        ref=self.ref_of(page_url, season.media_id, season.media_hash, item.id, season.media_kind),
+                        text=item.text, group=season.title, voice=RowVoice(name=owner, kind="" if item.owner else voice.kind),
+                        site_fields={"value": item.value, "translation_id": owner_id,
+                                     **({"listed_for": voice.translation_id} if item.owner else {})},
+                        borrowed=bool(item.owner)))
         return found
+
+    async def _owner_of(self, http: httpx.AsyncClient, item: KodikItem, referer: str) -> tuple[str, str]:
+        """The voice-over a video belongs to, as the page of the video itself names it; asked once for a video."""
+        known = self._owners.setdefault(http, {})
+        if item.id not in known:
+            url = f"{ORIGIN}/seria/{item.id}/{item.hash}/720p"
+            answer = await ask(lambda: self.open_page(http, url, referer))
+            found_id = _TRANSLATION_ID.search(answer.text or "") if answer.status == 200 else None
+            if found_id is None:
+                why = describe(reason("kodik_owner_unread", item=item.id))
+                logger.warning("Kodik video %s: its page names no voice-over (%s)", item.id, why)
+                raise CatalogError(reason("kodik_owner_unread", item=item.id), answer.status is None or answer.status >= 500)
+            found_title = _TRANSLATION_TITLE.search(answer.text)
+            known[item.id] = (found_id.group(1),
+                              html.unescape(found_title.group(1)).strip() if found_title else item.owner)
+        return known[item.id]
 
     async def _open(self, http: httpx.AsyncClient, url: str, referer: str) -> KodikSession:
         """An iframe opened under the one policy."""

@@ -45,6 +45,10 @@ class Entry:
     group: str = ""
     voice: RowVoice = field(default_factory=RowVoice)
     site_fields: dict[str, Any] = field(default_factory=dict)
+    # The catalog shows here a video of another voice-over (Kodik fills an episode a voice-over lacks with the video of
+    # another): `key` and `voice` are those of the video's own voice-over, and where its own catalog lists it too, that
+    # entry is the row — one video, one row.
+    borrowed: bool = False
 
 
 class CatalogPlayer(Protocol):
