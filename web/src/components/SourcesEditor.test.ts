@@ -15,7 +15,7 @@ const stored = (over: Partial<SeriesSource> = {}): SeriesSource => ({
   vibix_season: null, players_off: [], color: 0, ...over,
 })
 const summary: SourceSummary = {
-  source_id: 7, url: PAGE, status: "no_profile", read_at: "2026-11-01T10:00:00Z", players: [
+  source_id: 7, url: PAGE, status: "no_profile", title: "", read_at: "2026-11-01T10:00:00Z", players: [
     { player: "vk", player_label: "VK", rows: 13, groups: 0 },
     { player: "vibix", player_label: "Vibix", rows: 23, groups: 2 },
     { player: "kodik", player_label: "", rows: 5, groups: 1 },

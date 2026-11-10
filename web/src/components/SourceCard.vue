@@ -76,7 +76,7 @@ async function copyAddress(): Promise<void> {
     <header class="source-head">
       <span class="source-title">
         <SourceMark v-if="place !== undefined && item.color !== null" :mark="{ n: place, color: item.color, place: '' }" />
-        <span class="source-place">{{ placeOf(item.url) }}</span>
+        <span class="source-place">{{ view.title || placeOf(item.url) }}</span>
       </span>
       <template v-if="!isTorrent">
         <span class="source-state" :class="`is-${view.state}`">

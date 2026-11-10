@@ -229,7 +229,7 @@ class TableReader:
         rows = [row.model_copy(update={"video": self._players.video_of(row.player, row.link)}) for row in draft.rows]
         if draft.unread:
             rows = rows + await self._kept(key, rows, draft.unread)
-        return ReleaseTable(url=key, site=site.name, names=draft.names, site_voice=draft.site_voice, channel=draft.channel,
+        return ReleaseTable(url=key, site=site.name, names=draft.names, title=draft.title, site_voice=draft.site_voice, channel=draft.channel,
                             read_at=self._stamp(), complete=True, rows=rows, unread=draft.unread)
 
     async def _kept(self, key: str, rows: list[TableRow], unread: list[UnreadPart]) -> list[TableRow]:

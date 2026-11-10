@@ -17,7 +17,7 @@ const source = (over: Partial<SeriesSource> = {}): SeriesSource => ({
   vibix_season: null, players_off: [], color: 0, ...over,
 })
 const summary: SourceSummary = {
-  source_id: 7, url: PAGE, status: "no_profile",
+  source_id: 7, url: PAGE, status: "no_profile", title: "",
   players: [{ player: "vk", player_label: "VK", rows: 3, groups: 0 }],
 }
 const ok = <T>(data: T) => ({ ok: true as const, data })

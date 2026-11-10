@@ -19,7 +19,7 @@ const page = (over: Partial<PreviewReply> = {}) => ({
   data: { url: PAGE, state: "reading", lines: [], ...over } as PreviewReply,
 })
 const summary = {
-  source_id: 0, url: PAGE, status: "no_profile" as const, players: [
+  source_id: 0, url: PAGE, status: "no_profile" as const, title: "", players: [
     { player: "vibix", player_label: "Vibix", rows: 23, groups: 2 },
   ],
 }

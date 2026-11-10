@@ -31,7 +31,7 @@ const reference = (over: Partial<Reference> = {}): Reference => ({
   voice_group: "Ruchime", height: 1080, reason: null, compilation: null, picture: null, markup: false, ...over,
 })
 const summary: SourceSummary = {
-  source_id: 7, url: PAGE, status: "no_profile",
+  source_id: 7, url: PAGE, status: "no_profile", title: "",
   players: [{ player: "vk", player_label: "VK", rows: 3, groups: 0 }],
 }
 const composition = (over: Partial<Composition> = {}): Composition => ({

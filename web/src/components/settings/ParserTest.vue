@@ -4,7 +4,6 @@ import Button from "primevue/button"
 import StGroup from "../StGroup.vue"
 import StIcon from "../StIcon.vue"
 import StInput from "../StInput.vue"
-import AppSearch from "../AppSearch.vue"
 import { useRulesTest } from "../../composables/useRulesTest"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
@@ -23,8 +22,6 @@ const emit = defineEmits<{ lines: [lines: string[]] }>()
 const test = useRulesTest(() => props.profileId)
 
 const address = ref("")
-// Where the rows come from: an address typed, or a card the search of a video application found.
-const mode = ref<"address" | "apps">("address")
 const query = ref("")
 const titles = ref("")
 watch(titles, (text) => emit("lines", text.split("\n").map((row) => row.trim()).filter((row) => row !== "")), { immediate: true })
@@ -63,14 +60,6 @@ async function fetchRows(): Promise<void> {
   await test.readPage(address.value, query.value)
 }
 
-// A card found is read as a page: its address stands in the field, so that the test can be asked again by it.
-async function takeCard(url: string): Promise<void> {
-  address.value = url
-  query.value = ""
-  mode.value = "address"
-  await fetchRows()
-}
-
 function runTest(): Promise<void> {
   return test.runLines(titles.value.split("\n").map((row) => row.trim()).filter((row) => row !== ""))
 }
@@ -86,25 +75,7 @@ function runTest(): Promise<void> {
           <b>{{ t("rulesTest.channel") }}:</b> {{ t("rulesTest.channelHint") }}<br />
           <b>{{ t("rulesTest.sites") }}:</b> {{ t("rulesTest.sitesHint") }}
         </small>
-        <div class="st-tabs st-tabs-wrap source-mode mt-3" role="tablist" :aria-label="t('sources.mode.label')">
-          <button
-            type="button" class="st-tab" role="tab" :class="{ active: mode === 'address' }" :aria-selected="mode === 'address'"
-            @click="mode = 'address'"
-          >
-            <i class="pi pi-link tab-icon" /><span>{{ t("sources.mode.address") }}</span>
-          </button>
-          <button
-            type="button" class="st-tab" role="tab" :class="{ active: mode === 'apps' }" :aria-selected="mode === 'apps'"
-            @click="mode = 'apps'"
-          >
-            <i class="pi pi-search tab-icon" /><span>{{ t("sources.mode.apps") }}</span>
-          </button>
-        </div>
-        <AppSearch
-          v-if="mode === 'apps'" class="mt-3" :names="[]" :added="{}" :busy="working" :action="t('rulesTest.fetch.card')"
-          @add="takeCard"
-        />
-        <div v-if="mode === 'address'" class="field-group mt-3">
+        <div class="field-group mt-3">
           <StGroup>
             <StIcon :icon="dbId ? 'pi pi-database' : 'pi pi-globe'" />
             <StInput v-model="address" :label="t('rulesTest.field.address')" />

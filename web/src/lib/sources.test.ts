@@ -12,7 +12,7 @@ const vk: PlayerSummary = { player: "vk", player_label: "VK", rows: 13, groups: 
 const vibix: PlayerSummary = { player: "vibix", player_label: "Vibix", rows: 23, groups: 2 }
 const kodik: PlayerSummary = { player: "kodik", player_label: "", rows: 5, groups: 1 }
 const release: SourceSummary = {
-  source_id: 7, url: "https://1.ruchime.org/release/test", status: "no_profile", reason: null,
+  source_id: 7, url: "https://1.ruchime.org/release/test", status: "no_profile", title: "", reason: null,
   read_at: "2026-11-01T10:00:00Z", players: [vk, vibix, kodik],
 }
 const idle: PageStatus = { state: "ready", progress: null, reason: null, readAt: null }

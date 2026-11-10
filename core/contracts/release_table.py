@@ -83,6 +83,9 @@ class ReleaseTable(BaseModel):
     url: str
     site: str
     names: list[str] = Field(default_factory=list)
+    # The name of the source a window shows in its head, when its site gives one (a card of a video application: the
+    # application and the title, `半日 · 万界独尊 (2021)`); empty when the place of the address is the name.
+    title: str = ""
     site_voice: str = ""
     # The channel the page belongs to (the community of a VK channel), so that rules tell apart two channels of one site.
     channel: str = ""

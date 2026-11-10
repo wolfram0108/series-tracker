@@ -3744,6 +3744,11 @@ export interface components {
             players?: components["schemas"]["PlayerSummary"][];
             /** Place */
             place?: string[];
+            /**
+             * Title
+             * @default
+             */
+            title: string;
         };
         /**
          * SourceType

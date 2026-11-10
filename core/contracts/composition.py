@@ -129,6 +129,8 @@ class SourceSummary(BaseModel):
     players: list[PlayerSummary] = Field(default_factory=list)
     # Where the rows of its table come from (release_table.place_of); empty before a table was read.
     place: list[str] = Field(default_factory=list)
+    # The name its site gives the source for the head of a window (ReleaseTable.title); empty when it gives none.
+    title: str = ""
 
 
 class CompositionGetRequest(BaseModel):

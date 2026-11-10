@@ -50,6 +50,8 @@ export interface PlayerView {
 }
 
 export interface SourceView {
+  /** The name the site gives the source for the head (a card of an application); empty when the place is the name. */
+  title: string
   state: SourceState
   /** Coded reason of a failure; worded by `reasonText`. */
   reason: string | null
@@ -236,9 +238,10 @@ export interface ViewInput {
 export function viewOf(input: ViewInput): SourceView {
   const { summary, live, asked } = input
   const players = (summary?.players ?? []).map((player) => playerView(player, input.playersOff, input.rows ?? []))
+  const title = summary?.title ?? ""
   const settled = (state: SourceState, reason: string | null = null): SourceView =>
-    ({ state, reason, progress: null, players })
-  if (live?.state === "reading") return { state: "reading", reason: null, progress: live.progress, players }
+    ({ title, state, reason, progress: null, players })
+  if (live?.state === "reading") return { title, state: "reading", reason: null, progress: live.progress, players }
   if (live?.state === "failed") return settled("failed", live.reason)
   if (asked?.state === "reading") return settled("reading")
   if (asked?.state === "failed") return settled("failed", asked.reason ?? summary?.reason ?? null)

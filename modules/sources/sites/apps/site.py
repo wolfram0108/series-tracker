@@ -52,7 +52,7 @@ class AppSite:
     def __init__(self, player: AppPlayer) -> None:
         self.player = player
         self.client = player.client
-        self.name = player.name
+        self.name, self.label = player.name, player.label
         self.domains = (player.name,)
 
     def configure(self, **_wiring) -> None:
@@ -100,4 +100,6 @@ class AppSite:
         if not rows:
             raise SiteError(reason("no_players_empty", site=self.player.label))
         names = [str(data.get("name") or "").strip(), *(part.strip() for part in str(data.get("sub") or "").split(","))]
-        return TableDraft(names=list(dict.fromkeys(name for name in names if name)), rows=rows)
+        year = str(data.get("year") or "").strip()
+        title = " · ".join(part for part in (self.label, names[0] + (f" ({year})" if year and year != "0" else "")) if part)
+        return TableDraft(names=list(dict.fromkeys(name for name in names if name)), title=title, rows=rows)

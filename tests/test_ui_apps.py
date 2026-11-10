@@ -74,8 +74,9 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
     await found.locator(".app-add").click()
 
     source = page.locator(".source-card").first
-    # One writing of the source everywhere: its address, in the head, in the field and in what is copied.
-    await expect(source.locator(".source-place")).to_have_text("app://banri/219017")
+    # The head names the source as its site does (the application and the title); its field is its address, the one writing
+    # a field of an address takes.
+    await expect(source.locator(".source-place")).to_have_text("半日 · 万界独尊 (2021)")
     await expect(source.locator(".source-app-card input")).to_have_value("app://banri/219017")
     await _pick(page, source.locator(".item-select").first, "серии 半日")
     await expect(source.locator(".source-state")).to_have_text(text("sources.state.ready"), timeout=60_000)

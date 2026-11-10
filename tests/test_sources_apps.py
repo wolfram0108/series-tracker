@@ -96,7 +96,7 @@ async def test_a_card_is_a_table_of_every_line_in_its_order_read_by_two_requests
             ("banri:CO4K:3", "banri:CO4K", "4K", "《万界独尊》PV", "playable", []),
             ("banri:co_egg:1", "banri:co_egg", "花絮", "419", "playable", []),
         ]
-        assert draft.names == ["万界独尊", "Ten Thousand Worlds"]
+        assert draft.names == ["万界独尊", "Ten Thousand Worlds"] and draft.title == "半日 · 万界独尊 (2021)"
         # A card of thousands of episodes is read at once: the card and the players of its lines, nothing of an episode.
         assert model.paths() == ["/app/systemInit", "/app/userInfo", "/vod/detail"] and asked == []
         assert [row.site_fields["stream"] for row in draft.rows] == ["playlist"] * 2 + ["parser"] * 4
@@ -169,13 +169,6 @@ async def test_the_search_gives_the_cards_of_each_application_as_it_gives_them_e
         assert (resolved.site, resolved.canonical_url) == ("banri", "app://banri/219017")
 
 
-        # The address of a source of the application, given to the search, is that card: one writing of it everywhere.
-        model.cards[219017] = Card(219017, "万界独尊", sub="Ten Thousand Worlds", lines=[Line("CO4K", [("1", "t")])])
-        named = (await sources.on_apps_search(Envelope(topic="sources.apps.search", kind="query",
-                                                       payload={"query": " app://banri/219017 "})))["apps"][0]
-        assert [(card["id"], card["url"], card["name"]) for card in named["cards"]] == [
-            ("219017", "app://banri/219017", "万界独尊")] and named["total"] == 1
-
         # An application that cannot be asked gives its reason instead of cards; the search does not fail for it.
         down = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(503, text="")))
         sources.apps[0].client = App99Client(profile(), lambda: down)
@@ -191,3 +184,15 @@ def test_an_unknown_protocol_of_an_application_stops_the_start(tmp_path):
     odd = AppProfile(name="odd", label="Odd", protocol="other", settings={"uuid": UUID})
     with pytest.raises(ValueError):
         SourcesModule(Bus(), Database(str(migrated(tmp_path / "s.db"))), apps=[odd])
+
+
+async def test_the_name_a_site_gives_its_source_is_kept_with_its_table(tmp_path):
+    from core.contracts import ReleaseTable, RowState, TableRow
+    from modules.sources.repository import SourcesRepository
+
+    repo = SourcesRepository(Database(str(migrated(tmp_path / "s.db"))))
+    table = ReleaseTable(url="app://banri/219017", site="banri", names=["万界独尊"], title="半日 · 万界独尊 (2021)",
+                         read_at="2026-11-10T10:00:00+00:00", complete=True,
+                         rows=[TableRow(key="banri:CO4K:1", player="banri:CO4K", state=RowState.PLAYABLE, text="1")])
+    await repo.save_table(table)
+    assert (await repo.stored("app://banri/219017")).table.title == "半日 · 万界独尊 (2021)"

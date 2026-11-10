@@ -58,6 +58,8 @@ class TableDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     names: list[str] = Field(default_factory=list)
+    # The name of the source a window shows in its head; empty when the place of the address is the name.
+    title: str = ""
     site_voice: str = ""
     # The channel of the site the page belongs to (the community of a VK channel); a site of one publisher gives none.
     channel: str = ""

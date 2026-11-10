@@ -97,11 +97,11 @@ describe("the search of the video applications in the sources", () => {
     expect(w.find(".app-reason").text()).toBe(t("reason.app_unreachable", { app: "半日", error: "ConnectTimeout" }))
   })
 
-  it("a source of an application is its address, the same in its head and its field, with no page to open", async () => {
-    const w = mountEditor()
+  it("a source of an application is headed by the name its site gives it; its field is its address, with no page to open", async () => {
+    const summary = { source_id: 7, url: "app://banri/219017", status: "no_profile" as const, title: "半日 · 万界独尊 (2021)", players: [] }
+    const w = mountEditor({ items: [itemOfSource(stored(), summary, null)] })
     await flushPromises()
-    expect(w.find(".source-place").text()).toBe("app://banri/219017")
-    // The field holds the address of the source: the one any field of an address takes.
+    expect(w.find(".source-place").text()).toBe("半日 · 万界独尊 (2021)")
     expect((w.find(".source-app-card input").element as HTMLInputElement).value).toBe("app://banri/219017")
     expect(w.find(".source-app-card a").exists()).toBe(false)
   })

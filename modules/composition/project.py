@@ -232,7 +232,8 @@ def _summary(item: SourceInput) -> SourceSummary:
         source_id=item.source.id, url=item.source.url, canonical_url=table.url if table else item.table_url,
         status=_status_of(item),
         reason=item.failure or None, read_at=table.read_at if table else None,
-        players=_players_of(table) if table else [], place=list(place_of(table)) if table else [])
+        players=_players_of(table) if table else [], place=list(place_of(table)) if table else [],
+        title=table.title if table else "")
 
 
 def _status_of(item: SourceInput) -> SourceStatus:

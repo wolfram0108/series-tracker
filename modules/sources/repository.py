@@ -17,15 +17,16 @@ from . import hosts
 
 # One statement is one snapshot: the head and the rows of a page cannot come from two different tables.
 _LAST_TABLE = (
-    'SELECT t.site, t.names, t.site_voice, t.channel, t.read_at, t.complete, t.unread, t.state AS read_state, t.reason AS read_reason, r.seq, r."key" AS row_key, r.player, r.player_label,'
+    'SELECT t.site, t.names, t.title, t.site_voice, t.channel, t.read_at, t.complete, t.unread, t.state AS read_state, t.reason AS read_reason, r.seq, r."key" AS row_key, r.player, r.player_label,'
     " r.grp, r.text, r.voice_name, r.voice_kind, r.heights, r.state AS row_state, r.reason AS row_reason,"
     " r.duration_s, r.published, r.link, r.video, r.site_fields, r.part"
     " FROM release_tables t LEFT JOIN release_rows r ON r.url = t.url WHERE t.url = ? ORDER BY r.seq")
 
 _SAVE_HEAD = (
-    "INSERT INTO release_tables (url, site, names, site_voice, channel, read_at, unread, complete, state, reason,"
-    " reading_since) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'ready', NULL, NULL)"
-    " ON CONFLICT (url) DO UPDATE SET site = excluded.site, names = excluded.names, site_voice = excluded.site_voice,"
+    "INSERT INTO release_tables (url, site, names, title, site_voice, channel, read_at, unread, complete, state, reason,"
+    " reading_since) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'ready', NULL, NULL)"
+    " ON CONFLICT (url) DO UPDATE SET site = excluded.site, names = excluded.names, title = excluded.title,"
+    " site_voice = excluded.site_voice,"
     " channel = excluded.channel, unread = excluded.unread,"
     " read_at = excluded.read_at, complete = 1, state = 'ready', reason = NULL, reading_since = NULL")
 
@@ -61,7 +62,7 @@ def _stored(conn, url: str) -> Stored:
         return Stored(None, None, None)
     head = records[0]
     table = ReleaseTable(
-        url=url, site=head["site"], names=json.loads(head["names"]), site_voice=head["site_voice"],
+        url=url, site=head["site"], names=json.loads(head["names"]), title=head["title"], site_voice=head["site_voice"],
         channel=head["channel"],
         read_at=head["read_at"], complete=True,
         rows=[_row_of(record) for record in records if record["seq"] is not None],
@@ -114,7 +115,7 @@ class SourcesRepository:
         if not table.complete or not table.read_at:
             raise ValueError("only a complete table is stored")
         statements: list[tuple[str, tuple]] = [
-            (_SAVE_HEAD, (table.url, table.site, json.dumps(table.names, ensure_ascii=False), table.site_voice,
+            (_SAVE_HEAD, (table.url, table.site, json.dumps(table.names, ensure_ascii=False), table.title, table.site_voice,
                           table.channel, table.read_at,
                           json.dumps([each.model_dump(mode="json") for each in table.unread], ensure_ascii=False))),
             ("DELETE FROM release_rows WHERE url = ?", (table.url,))]

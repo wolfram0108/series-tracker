@@ -17,9 +17,7 @@ const props = withDefaults(defineProps<{
   /** The addresses already sources of the series, with their place in the list. */
   added: Record<string, number>
   busy?: boolean
-  /** The word of the action on a card: a source is added in the windows of a series, the rows are taken in a test. */
-  action?: string
-}>(), { busy: false, action: "" })
+}>(), { busy: false })
 const emit = defineEmits<{ (e: "add", url: string): void }>()
 
 const query = ref(props.names[0]?.text ?? "")
@@ -127,7 +125,7 @@ function meta(card: AppCard): string {
           <span v-if="card.url in added" class="app-added">{{ t("sources.apps.added", { n: added[card.url] }) }}</span>
           <span v-else-if="!card.url" class="muted">{{ t("sources.apps.noAddress") }}</span>
           <button v-else type="button" class="action-btn btn-add app-add" :disabled="busy" @click="emit('add', card.url)">
-            <i class="pi pi-plus" /><span>{{ action || t("sources.add.button") }}</span>
+            <i class="pi pi-plus" /><span>{{ t("sources.add.button") }}</span>
           </button>
         </div>
       </article>
