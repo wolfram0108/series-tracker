@@ -24,6 +24,7 @@ import asyncio
 import itertools
 import logging
 from dataclasses import dataclass, field
+from typing import Callable
 
 from .envelope import Envelope, topic_matches
 
@@ -58,6 +59,13 @@ class Bus:
         self._quiet = asyncio.Event()
         self._quiet.set()
         self._step = asyncio.Event()  # set with every envelope published and every envelope taken apart
+        # Observers of every envelope published (the dump of a run): they only look, take nothing apart, change nothing.
+        self._taps: list[Callable[[Envelope], None]] = []
+
+    def tap(self, observer: Callable[[Envelope], None]) -> Callable[[], None]:
+        """`observer` is told every envelope published, at once and in order; it must not block. Returns the way to stop."""
+        self._taps.append(observer)
+        return lambda: self._taps.remove(observer) if observer in self._taps else None
 
     def subscribe(self, *patterns: str, tracked: bool = False) -> Subscription:
         if not patterns:
@@ -99,6 +107,11 @@ class Bus:
     def publish(self, env: Envelope) -> int:
         """Кладёт конверт всем подходящим подписчикам. Возвращает их число."""
         self._tick()
+        for observer in tuple(self._taps):
+            try:
+                observer(env)
+            except Exception:  # noqa: BLE001 — an observer never stops a message
+                _log.exception("наблюдатель шины упал на конверте %s", env.topic)
         delivered = 0
         for sub in self._subs.values():
             if env.topic in sub.topics or any(topic_matches(each, env.topic) for each in sub.wild):

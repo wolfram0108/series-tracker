@@ -147,6 +147,18 @@ sudo systemctl restart series-tracker
 - **Логи:** JSON в `logs/*.log` (error/warning/info/debug, ротация
   RotatingFileHandler). В UI — модалка «Логи» (фильтр групп динамический).
   Каталог логов переопределяется `ST_LOG_DIR`.
+- **Дамп синхронизации:** каждая синхронизация сериала (от `scan.run.changed`
+  active=true до active=false) пишет файл
+  `logs/runs/<номер сериала>/<начало, UTC>-<pid>.jsonl.gz` (модуль `runlog`):
+  по строке JSON на каждый конверт шины целиком (`e: bus` — топик, вид,
+  correlation id, payload: страницы и их таблицы, раскладка, загрузки со
+  ссылками, задачи выравнивания) и на каждую строку журнала любого уровня
+  (`e: log`). Планировщик кладёт в шину `planner.sync.trace`: `plan` —
+  входы целиком (онлайн-строки, актив, выбор, команды «Удалить», неудачи) и
+  план из них на каждом круге; `step`/`done` — шаг графа и его исход;
+  `apply` — группа применена или нет и почему. Хранятся последние 50 дампов
+  сериала. Чтение:
+  `zcat logs/runs/88/<файл> | jq -c 'select(.topic=="planner.sync.trace") | .payload.kind'`.
 - **Перезапуск:** `sudo systemctl restart series-tracker` или `./restart.sh`.
 - **Переживание перезагрузки:** юнит `enabled` + `Restart=always`; Docker →
   qBit (`restart=unless-stopped`) → приложение поднимаются сами.

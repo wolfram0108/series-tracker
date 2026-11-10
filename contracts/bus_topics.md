@@ -72,6 +72,7 @@
 | `library.relocation.planned {series_id, new_path \| null}` — сохранение карточки записало или сняло план переноса | library | — | — |
 | `voices.settings.changed` — `VoiceSettingsView` | voices | composition, scan, planner, gateway | `voice_settings_update` |
 | `sources.settings.changed` — `SourcesSettingsView`: зеркала трекера сохранены | sources | gateway | `sources_settings_update` |
+| `planner.sync.trace {series_id, run, kind, download, data}` — что делает синхронизация, по ходу: `plan` (входы целиком и план из них, каждый круг), `step`/`done` (шаг графа и исход: made, failed, passing с причиной, left), `apply` (группа применена или нет) | planner | — (дамп прогона `runlog` видит всю шину через `Bus.tap`) | — |
 | `planner.series.changed` — `PlannerView` (после синхронизации, в её начале, при изменении раскладки, настроек озвучек, команды или сброса неудач) | planner | gateway | `plan_update` |
 | `work.withdrawn {series_id, keys?}` — `WorkWithdrawn`: работа, выданная владельцем, не нужна (загрузки озвучек и файлов склейки; без `keys` — вся работа сериала) | voices | downloads | — |
 | `conform.queue.changed {daemon, tasks}` | conform | voices, gateway | `conform_queue_update` |

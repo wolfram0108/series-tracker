@@ -209,6 +209,10 @@ class SeriesSync:
         """The rule of names for the goals of a plan (the service asks it of the rules); None: the planner's own."""
         return self.namer
 
+    async def trace(self, kind: str, data: dict) -> None:
+        """What the sync does, told as it happens for the dump of the run: `plan` (the inputs and the plan made of them),
+        `step` and `done` (a step of the graph begins and ends, with its outcome), `apply` (a group applied or left)."""
+
     # --- the sync -----------------------------------------------------------------------------------------------
 
     def inputs(self, online: tuple[OnlineRow, ...], choices: Choices) -> Inputs:
@@ -227,8 +231,11 @@ class SeriesSync:
         before = dict(self.containers)
         replanned: list[tuple] = []
         done: dict[str, tuple[object, Made]] = {}
+        round_ = 0
         while True:
             made = await self.plan_of(inputs)
+            round_ += 1
+            await self.trace("plan", {"round": round_, "inputs": inputs, "plan": made})
             results, failed = await self.run(made, done)
             subjects = {op.id: op.subject for op in made.ops}
             done = {key: (subjects[key], value) for key, value in results.items()}
@@ -241,7 +248,10 @@ class SeriesSync:
         applied = []
         for group in made.groups:
             if any(op not in results for op in group.ops):
+                await self.trace("apply", {"slots": group.slots, "applied": False,
+                                           "missing": sorted(op for op in group.ops if op not in results)})
                 continue
+            await self.trace("apply", {"slots": group.slots, "applied": True, "group": group})
             await self.stage(made, group, results)
             self.containers = table_after(self.containers, made, group, results)
             self.commands = commands_after(self.commands, made, group)
@@ -290,10 +300,12 @@ class SeriesSync:
                 for need in op.needs:
                     await ended[need].wait()
                 ready = not any(need in failed for need in op.needs)
+                await self.trace("step", {"op": op.id, "kind": op.kind, "slot": op.slot, "ready": ready})
                 if op.batch:
                     await batch_of(op, ready)
                 if not ready:
                     failed.add(op.id)
+                    await self.trace("done", {"op": op.id, "outcome": "left", "why": sorted(need for need in op.needs if need in failed)})
                     return
                 if op.batch:
                     outcome = outcomes.get(op.id, Passing("партия не выполнена"))
@@ -310,8 +322,11 @@ class SeriesSync:
                     outcome = None
                 if outcome is None:
                     failed.add(op.id)
+                    await self.trace("done", {"op": op.id, "outcome": "passing" if op.id in self.passing else "failed",
+                                              "why": self.reasons.get(op.id, "")})
                 else:
                     results[op.id] = outcome
+                    await self.trace("done", {"op": op.id, "outcome": "made", "made": outcome})
             finally:
                 ended[op.id].set()
         await asyncio.gather(*(one(op) for op in made.ops))

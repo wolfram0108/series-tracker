@@ -169,6 +169,10 @@ qBittorrent — Docker, WebUI `:8080`; секреты — в `.env` (вне git,
 - [contracts/bus_topics.md](contracts/bus_topics.md) — карта топиков шины.
 - [contracts/series_situations.md](contracts/series_situations.md) —
   поведенческая матрица (журнал верификации).
+- `logs/runs/<сериал>/*.jsonl.gz` — дамп каждой синхронизации: вся шина,
+  весь журнал, входы и план планировщика (модуль `runlog`; чтение —
+  [docs/deployment.md](docs/deployment.md), «Эксплуатация»). Разбор
+  синхронизации начинается с дампа, а не с догадок.
 
 ## Язык
 

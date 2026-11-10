@@ -8,6 +8,7 @@ from typing import Callable
 
 from core import Bus
 from core.db import Database
+from core.logging import log_file
 from modules.auth import AuthModule
 from modules.catalog import CatalogModule
 from modules.composition import CompositionModule
@@ -19,6 +20,7 @@ from modules.metadata import MetadataModule
 from modules.planner import PlannerModule
 from modules.renaming import RenamingModule
 from modules.rules import RulesModule
+from modules.runlog import RunlogModule
 from modules.scan import ScanModule
 from modules.settings import SettingsModule
 from modules.slicing import SlicingModule
@@ -54,6 +56,8 @@ def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, l
                             cookie_secure=options.cookie_secure, auth_required=options.auth_required,
                             docs_enabled=options.docs_enabled, allowed_hosts=options.allowed_hosts)
     modules = [
+        # The dump of every sync (modules/runlog): first, so that it sees the bus from the first envelope of a start.
+        RunlogModule(bus, log_file("runs")),
         gateway,
         CatalogModule(bus, db),
         SettingsModule(bus, db),

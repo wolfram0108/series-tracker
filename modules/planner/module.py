@@ -51,6 +51,10 @@ Events out:
   series.status.contribution {source: planner, series_id, flags: {downloading, aligning, packing}} — what the sync of the
       series is at (the card of the series), told when it changes; all false when the sync ends.
   work.series.state (owner `planner`).
+  planner.sync.trace {series_id, run, kind, download, data} — what a sync does, as it happens, for the dump of the run
+      (modules/runlog): `plan` — the inputs whole (the online rows, the asset, the choices, the commands, the failures)
+      and the plan made of them, every round; `step` / `done` — a step of the graph begins / ends with its outcome
+      (made, failed, passing with its reason, left behind a failed step); `apply` — a group applied or left, and why.
 Events in: downloads.fetch.finished, conform.job.finished, conform.job.removed, system.started (syncs under way are taken up
   again, a journal a stop cut short is carried out), series.deleted, composition.changed, voices.settings.changed and
   series.updated with the episodes switched off (the plan is counted again from the tables and the window told: nothing on
@@ -67,6 +71,7 @@ from dataclasses import replace
 
 from core import NO_HANDLER, BaseModule, BusRequestError, compute, storage
 from core import container as mkv
+from core.dump import plain
 from core.contracts import (WORK_WITHDRAWN, CompositionReply, PlanDelete, PlannerView, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
 from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
@@ -155,6 +160,12 @@ class BusSync(SeriesSync):
             self.told = True
             await self.m._publish_view(self.series["id"], self, made, inputs)
         return made
+
+    async def trace(self, kind: str, data: dict) -> None:
+        # The tables of a plan of a big series are large: they are made plain off the loop.
+        body = await compute.run(plain, data) if kind == "plan" else plain(data)
+        self.m.publish_event("planner.sync.trace", {"series_id": self.series["id"], "run": self.run_mark, "kind": kind,
+                                                    "download": self.download, "data": body})
 
     async def prepare(self) -> None:
         folders = await self.m.request("conform.workspace", {})

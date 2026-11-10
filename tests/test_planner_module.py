@@ -281,6 +281,36 @@ async def test_a_better_reference_realigns_the_offline_voice_out_of_the_old_file
     assert next(iter(stored.values()))["tracks"][1]["dub"]["row_key"] == "g2e1"
 
 
+async def test_delete_of_an_offline_track_builds_the_file_without_it_sends_no_alignment_and_the_sync_is_traced(world):
+    """Д-1 on real files: «Удалить» at a track no source gives any more takes it out of the container; the alignment
+    service gets no job. The sync tells its plan with the inputs it was made of and every step with its outcome."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 2)
+    await sync(world)
+    name = next(iter(table(world[2])))
+    neighbours.drop(2, "g2e1")
+    dub = next(track["dub"] for track in table(world[2])[name]["tracks"] if track["dub"]["row_key"] == "g2e1")
+    await planner.request("planner.delete", {"series_id": SERIES, "kind": "track", "name": name, "dub": dub})
+    seen: list[Envelope] = []
+    untap = planner.bus.tap(seen.append)
+    try:
+        await sync(world)
+    finally:
+        untap()
+    stored = await check(world)
+    assert len(stored) == 1, "the old file goes, it is not hidden"
+    assert [track["snapshot"]["group"] for track in next(iter(stored.values()))["tracks"]] == ["G1"]
+    assert not [each for each in seen if each.topic in ("conform.submit", "downloads.fetch")]
+    traces = [each.payload for each in seen if each.topic == "planner.sync.trace"]
+    json.dumps(traces)  # the dump takes them as they are
+    (made,) = [each["data"] for each in traces if each["kind"] == "plan"]
+    assert made["inputs"]["@"] == "Inputs" and {row["id"]["row_key"] for row in made["inputs"]["online"]} == {"ref1", "g1e1"}
+    assert made["inputs"]["choices"]["delete"] and [each["name"] for each in made["inputs"]["containers"]] == [name]
+    ops = {op["id"] for op in made["plan"]["ops"]}
+    assert {each["data"]["op"] for each in traces if each["kind"] == "done"} == ops
+    assert [each["data"]["applied"] for each in traces if each["kind"] == "apply"] == [True]
+
+
 async def test_a_cut_out_of_a_compilation_by_the_service(world):
     neighbours, _, _ = world
     neighbours.put(1, "single2", 2, group=REF, player="cvh")
