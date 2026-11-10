@@ -162,13 +162,11 @@ def parse_seasons(page: str) -> list[KodikSeason]:
 
 def parse_items(page: str) -> dict[str, KodikItem]:
     """The items of the list in the order of the list, by the id of the item: the one thing about it that is its own.
-    An item the list marks as of another voice-over (`data-other-translation`) is not this voice-over's: Kodik puts the
-    item of another voice-over into the list of one that has no episode of its own, and its sound is the other one."""
+    The text is the one the list shows: an episode Kodik borrowed from another voice-over says so in it
+    («4 серия (Другой перевод: Amazing Dubbing)»), and the rules of the constructor decide what to do with it."""
     items: dict[str, KodikItem] = {}
     for attrs, inner in _OPTION.findall(_section(page, 'class="serial-series-box"')):
         option = dict(_ATTR.findall(attrs))
-        if option.get("data-other-translation") == "true":
-            continue
         if option.get("data-id") and option.get("data-hash"):
             text = " ".join(html.unescape(_TEXT.sub("", inner)).split()) or html.unescape(option.get("data-title", "")).strip()
             items[option["data-id"]] = KodikItem(option["data-id"], option["data-hash"], text, option.get("value", ""))

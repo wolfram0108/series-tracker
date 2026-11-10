@@ -223,20 +223,15 @@ async def test_an_iframe_that_does_not_open_is_a_catalog_that_cannot_be_read(pag
     assert parse(refused.value.reason)["code"] == code
 
 
-async def test_an_item_the_list_borrowed_from_another_voice_is_not_an_entry_of_this_voice_and_cannot_be_asked():
-    """Kodik puts the episode of another voice-over into the list of one that has none of its own (data-other-translation):
-    its sound is the other studio's, so it is no row of this one, and asked by its link it is not found."""
+async def test_an_episode_kodik_borrowed_from_another_voice_is_a_row_with_the_text_the_list_shows_it_with():
+    """Kodik puts the episode of another voice-over into the list of one that has none of its own and says so in the text
+    of the item: the row is there, as the list shows it, and the rules of the constructor decide on it."""
     page = (signed() + voices(ANIMY, ANISTAR) + seasons(("1 сезон", "50228", "7bbb4c6b", True))
-            + items(("101", "1", "1 серия", ""), ("301", "2", "2 серия", "other"), ("302", "3", "3 серия", "other")))
-    pages = {**IFRAMES, "50228": page}
-    found, _web = await entries_of("https://kodikplayer.com/serial/50228/7bbb4c6b/720p", kodik_web(pages))
+            + items(("101", "1", "1 серия", ""), ("301", "2", "2 серия (Другой перевод: AniStar)", "other")))
+    found, _web = await entries_of("https://kodikplayer.com/serial/50228/7bbb4c6b/720p", kodik_web({**IFRAMES, "50228": page}))
 
-    assert [(e.key, e.voice.name, e.text) for e in found] == [
-        ("1043:101", "Animy", "1 серия"), ("910:301", "AniStar", "1 серия"), ("910:302", "AniStar", "2 серия")]
-    player, web = kodik.KodikPlayer(), kodik_web(pages)
-    async with web.client() as http:
-        borrowed = await ask(player, player.ref_of(PAGE, "50228", "7bbb4c6b", "301"), http)
-    assert borrowed.kind is Kind.NOT_FOUND and web.count("/ftor") == 0
+    assert [(e.key, e.voice.name, e.text) for e in found if e.voice.name == "Animy"] == [
+        ("1043:101", "Animy", "1 серия"), ("1043:301", "Animy", "2 серия (Другой перевод: AniStar)")]
 
 
 # --- Kodik: one item ----------------------------------------------------------------------------------------------------------
