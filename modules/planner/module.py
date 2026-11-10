@@ -630,13 +630,14 @@ class PlannerModule(BaseModule):
         self._runs.pop(series_id, None)
         self._syncs.pop(series_id, None)
         self.contribute(series_id, {"downloading": False, "aligning": False, "packing": False})
-        self._announce_work(series_id, False)
-        # The end is told with the view the tables give now: a window holds the last packet it got, and the one of the
-        # run is the frozen plan the sync worked by.
+        # The end is told with the view the tables give now, before the work is said to be over: a window holds the last
+        # packet it got, the one of the run is the frozen plan the sync worked by, and whoever waits for the end of the
+        # run (scan.run.changed) finds the window told its outcome already.
         try:
             await self._publish_view(series_id)
         except Exception:  # noqa: BLE001 - the sync is over either way; the window reads the view when it opens again
             self.log.exception("сериал %d: вид плана после синхронизации не разослан", series_id)
+        self._announce_work(series_id, False)
 
     async def _load(self, series_id: int, sync: SeriesSync) -> None:
         """The asset of the series as the table holds it; a file the disk has not any more is gone from the table."""
