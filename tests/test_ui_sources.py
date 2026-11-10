@@ -102,8 +102,8 @@ async def test_a_page_that_does_not_open_changes_nothing(ui):
 
 async def test_the_source_of_the_reference_taken_out_keeps_the_file_until_the_user_takes_another_video(ui):
     """The source of the reference no longer works and the user takes it out of the series: the file keeps its video
-    (offline: no source gives it); «Скачать заново» takes the video of the other source, and the voice-over of the old
-    video is aligned out of the old file onto the new one."""
+    (offline: no source gives it); its button is «Удалить» (nothing can come again from no source): the plan takes the video
+    of the other source, and the voice-over of the old video is aligned out of the old file onto the new one."""
     series_id = await synced(ui, ["ref", "dub"], (1,))
     await ui.remove_source("ref")
     await ui.tab(text("output.tab"))
@@ -114,7 +114,8 @@ async def test_the_source_of_the_reference_taken_out_keeps_the_file_until_the_us
     await opened(ui, 1)
     await expect(row(ui, 1, "AniStar").locator(".track-offline")).to_have_text(text("output.plan.offline"))
     await ui.shot("s4a-source-taken-out")
-    await row(ui, 1, "AniStar").locator(".track-action.do-refetch").click()
+    await expect(row(ui, 1, "AniStar").locator(".track-action")).to_have_text(text("output.action.delete"))
+    await row(ui, 1, "AniStar").locator(".track-action.do-delete").click()
     await ui.press_sync(series_id)
     await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(1)
     view = await ui.check(series_id)
@@ -188,24 +189,23 @@ async def test_a_voice_over_that_was_only_in_a_gone_compilation_is_aligned_anew_
     await ui.shot("s6-compilation-voice-on-new-reference")
 
 
-async def test_a_forgotten_voice_over_remade_by_the_user_is_aligned_anew_out_of_its_file(ui):
-    """«Пересоздать» a voice-over its source forgot: the file is its only source, it is aligned anew out of it."""
+async def test_a_voice_over_its_source_forgot_is_deleted_by_its_button_with_no_alignment(ui):
+    """A voice-over its source forgot is offline: its button is «Удалить», and the sync takes it out of the file — no job
+    of the service, nothing downloaded (Д-1)."""
     series_id = await synced(ui, ["ref", "dub"], (1, 2))
     ui.site.drop("dub", 1)
     ui.later()
     await ui.press_sync(series_id)
     await opened(ui, 1)
     await expect(row(ui, 1, "AnimeVost").locator(".track-offline")).to_have_count(1)
-    await row(ui, 1, "AnimeVost").locator(".track-action.do-redo").click()
+    await expect(row(ui, 1, "AnimeVost").locator(".track-action")).to_have_text(text("output.action.delete"))
+    await row(ui, 1, "AnimeVost").locator(".track-action.do-delete").click()
     jobs, served = len(ui.daemon.jobs), len(ui.host.served)
     await ui.press_sync(series_id)
-    assert len(ui.daemon.jobs) == jobs + 1 and len(ui.host.served) == served  # aligned anew, nothing downloaded
+    assert len(ui.daemon.jobs) == jobs and len(ui.host.served) == served  # removed: nothing aligned, nothing downloaded
     view = await ui.check(series_id)
-    (track,) = next(each for each in view["assets"] if each["episode"] == [1, 1])["tracks"]
-    assert track["group"] == "AnimeVost" and track["online"] is False
-    await expect(row(ui, 1, "AnimeVost").locator(".pill")).to_have_text(text("output.track.state.done"))
-    await expect(row(ui, 1, "AnimeVost").locator(".track-offline")).to_have_count(1)
-    await ui.shot("s7-remade-out-of-its-file")
+    assert next(each for each in view["assets"] if each["episode"] == [1, 1])["tracks"] == []
+    await ui.shot("s7-deleted-offline-voice-over")
 
 
 async def test_a_player_that_stopped_giving_the_video_changes_nothing_in_the_files(ui):

@@ -377,6 +377,7 @@ export const ru = {
   "output.tracks.episodes": "Серии",
   "output.action.refetch": "Скачать заново",
   "output.action.redo": "Пересоздать",
+  "output.action.delete": "Удалить",
   "output.action.retry": "Повторить",
   "output.action.retryAll": "Повторить ошибки ({n})",
   "output.action.redoAll": "Пересоздать готовые",

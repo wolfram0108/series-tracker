@@ -27,7 +27,7 @@ const PILL: Record<TrackState, string> = {
   absent: "pill-warning", off: "pill-secondary", none: "pill-secondary",
 }
 
-type Action = "refetch" | "retry" | "redo" | null
+type Action = "refetch" | "retry" | "redo" | "delete" | null
 
 const rows = computed(() => {
   const lines = outputLines(props.view)
@@ -38,9 +38,11 @@ const rows = computed(() => {
       : line?.dub?.source_id ?? null
     const height = line?.height == null ? "" : ` ${t("output.height", { height: line.height })}`
     const detail = line?.dub?.detail ?? null
-    const action: Action = cell.isReference ? (cell.state === "done" ? "refetch" : null)
-      : cell.state === "done" ? "redo"
-      : cell.state === "error" ? "retry" : null
+    // The button names what its command does (planner.delete): a row a source still gives is fetched or made again; a
+    // row no source gives any more has nothing to come again from, so the command takes it out of the file.
+    const gone = line?.online === false
+    const action: Action = cell.state === "done" ? (gone ? "delete" : cell.isReference ? "refetch" : "redo")
+      : !cell.isReference && cell.state === "error" ? "retry" : null
     // A placed track the service did not vouch for is done, and marked so.
     const pill = cell.state === "done" && detail?.code === "align_unsure" ? "pill-warning" : PILL[cell.state]
     return {
@@ -55,9 +57,11 @@ const rows = computed(() => {
 })
 
 function act(row: (typeof rows.value)[number]): void {
-  if (row.action === "refetch") emit("refetch", row.part)
-  else if (row.action === "retry") emit("retry", row.cell.group)
-  else if (row.action === "redo") emit("redo", row.cell.group)
+  // «Скачать заново», «Пересоздать» and «Удалить» are one command of the plan («Удалить» of the file or the track); the
+  // button says what it comes to for this row.
+  if (row.action === "retry") emit("retry", row.cell.group)
+  else if (row.action && row.cell.isReference) emit("refetch", row.part)
+  else if (row.action) emit("redo", row.cell.group)
 }
 </script>
 
