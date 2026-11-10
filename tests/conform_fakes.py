@@ -19,6 +19,7 @@ class FakeClient:
         self.reversed = []
         self.cancelled = []
         self.refuse = False
+        self.drop_then_fail = False  # the daemon drops the record and then answers 500 (it did so on 10.11)
         self.lose_answers = 0
         self.known = {}
         self.plots = {}  # (job id, name) -> the picture the daemon holds
@@ -82,6 +83,10 @@ class FakeClient:
         self.cancelled.append(job_id)
         if isinstance(self.refuse, Exception):
             raise self.refuse
+        if self.drop_then_fail:
+            self.known.pop(job_id, None)
+            request = httpx.Request("DELETE", f"{self.base_url}/conform/jobs/{job_id}")
+            raise httpx.HTTPStatusError("500", request=request, response=httpx.Response(500, request=request))
         return job_id in self.known
 
     async def plot(self, job_id, name):

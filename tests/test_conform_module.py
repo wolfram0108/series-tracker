@@ -460,6 +460,25 @@ async def test_cancel_reaches_the_daemon_and_says_whether_it_was_done():
 
 
 @pytest.mark.asyncio
+async def test_a_cancel_the_daemon_answered_with_a_failure_is_judged_by_what_the_daemon_holds_after_it():
+    """The daemon dropped the record of an ended job and then answered 500: the job is gone, so it is done; a failure that
+    left the job as it was is not."""
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    client.known["j1"] = job("j1")
+    client.known["j2"] = job("j2")
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        client.drop_then_fail = True
+        assert await probe.request("conform.cancel", {"job_id": "j1"}, timeout=5) == {"done": True}
+        client.drop_then_fail = False
+        client.refuse = httpx.ConnectError("lost")
+        assert await probe.request("conform.cancel", {"job_id": "j2"}, timeout=5) == {"done": False}
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
 async def test_cancel_without_a_reachable_daemon_is_not_done():
     client = FakeClient([ConnectionError("down")])
     _, probe, runner = await started(client)

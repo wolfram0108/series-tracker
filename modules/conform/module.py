@@ -42,7 +42,8 @@ Query:
   conform.cancel {job_id} -> {done: bool} — stop a job that waits or runs (its record stays as `cancelled`), or delete the
       record of a job that ended: the daemon then drops the files it keeps for the record (graphs, journal, time map,
       cache) and leaves the output audio. `done` is true when it is stopped or the daemon does not know it,
-      false when the daemon could not be reached.
+      false when the daemon could not be reached. An answer of failure is checked against what the daemon holds after
+      it: a record that is gone, or is `cancelled`, is done.
   conform.job.keys {} -> {reachable, keys}: the keys of the jobs the daemon's history holds (the end of their labels).
   conform.plot {job_id, name} -> {found: bool, data?: base64 PNG} — the picture of a plot named in a result (`plot`); only
       a plain PNG name is asked of the daemon.
@@ -346,8 +347,16 @@ class ConformModule(BaseModule):
         try:
             known = await self._client.cancel(job_id)
         except httpx.HTTPError as exc:
-            self.log.warning("conform: задача %s не отменена: %s", job_id, exc)
-            return {"done": False}
+            # The answer is not the outcome: the daemon may drop the record and fail after it (10.11: cf00079 gone, 500).
+            # What it holds now says whether the job was stopped or deleted.
+            try:
+                left = await self._client.job(job_id)
+            except httpx.HTTPError:
+                left = {"status": "unknown"}
+            done = left is None or left.get("status") == "cancelled"
+            self.log.warning("conform: на отмену задачи %s демон ответил ошибкой (%s); задача %s", job_id, exc,
+                             "удалена" if left is None else "отменена" if done else f"осталась в состоянии {left.get('status')}")
+            return {"done": done}
         self.log.info("conform: задача %s %s", job_id, "отменена" if known else "демону неизвестна")
         return {"done": True}
 
