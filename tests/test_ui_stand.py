@@ -119,6 +119,39 @@ async def test_a_download_that_failed_is_shown_and_tried_again_after_the_failure
     await ui.check(series_id)
 
 
+async def test_a_download_rebuilt_on_the_next_source_is_one_card_in_the_agents_and_stays_after_the_sync(ui):
+    """The voice-over is at two sources and the file of the first is gone: the plan takes the second. The window of agents
+    shows one card of the need — the attempt of the first variant, «План перестроен на» the second, its attempt done —
+    and the card stays once the sync has ended, until «Удалить»."""
+    ui.site.release("ref", "AniStar")
+    ui.site.release("dub", "AnimeVost")
+    ui.site.release("dub2", "AnimeVost")
+    ui.site.episode("ref", 1, height=720)
+    ui.site.episode("dub", 1, height=480)
+    ui.site.episode("dub2", 1, height=480)
+    series_id = await ui.make_series(["ref", "dub", "dub2"])
+    ui.site.gone("dub", 1)
+    page = ui.page
+    await ui.open_output(SERIES)
+    await ui.press_sync(series_id)
+    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
+    await ui.close_settings()
+    await ui.settings("Агенты")
+    card = page.locator(".download-card", has=page.locator(".download-replan"))
+    await expect(card).to_have_count(1)
+    await expect(card).to_have_class(re.compile(r"\bis-done\b"))
+    lines = card.locator(".download-line")
+    await expect(lines).to_have_count(3)
+    await expect(lines.nth(0).locator(".is-failed")).to_have_count(1)
+    await expect(lines.nth(1)).to_contain_text(text("download.replan"))
+    await expect(lines.nth(2)).to_contain_text(text("download.done"))
+    await expect(card.locator(".figure-mark").first).to_be_visible()
+    await expect(page.locator(".download-card")).to_have_count(1)  # the others went with the end of the sync
+    await ui.shot("25-download-rebuilt-card")
+    await card.locator(".download-remove").click()
+    await expect(page.locator(".download-card")).to_have_count(0)
+
+
 async def test_a_voice_over_the_service_refused_is_shown_and_aligned_again_by_its_retry(ui):
     series_id = await series_in_browser(ui, (1,))
     ui.daemon.answers["Сериал s01e01 AnimeVost"] = "mismatch"
