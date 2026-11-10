@@ -22,6 +22,7 @@ from urllib.parse import urljoin
 import httpx
 
 from core import storage
+from core.http_limits import bounded_client
 from core.proc import exited, spawn, stop
 
 ProgressCb = Callable[[dict], Awaitable[None]]
@@ -92,7 +93,7 @@ def absolute(text: str, base: str) -> tuple[str, float, float]:
 
 async def snapshot(url: str, headers: dict, path: str) -> Snapshot:
     """The playlist of the stream read by our client and saved next to the file it becomes (`<path>.download.m3u8`)."""
-    async with httpx.AsyncClient(follow_redirects=True, timeout=REQUEST_TIMEOUT_S) as http:
+    async with bounded_client(follow_redirects=True, timeout=REQUEST_TIMEOUT_S) as http:
         base = url
         for _ in range(4):
             try:

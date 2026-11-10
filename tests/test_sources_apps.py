@@ -10,6 +10,7 @@ import pytest
 from core import Bus
 from core.db import Database
 from core.envelope import Envelope
+from core.http_limits import BoundedTransport
 from modules.sources.apps import AppProfile, card_address, profiles_of
 from modules.sources.apps.app99 import App99Client, seal, signature, unseal
 from modules.sources.module import SourcesModule
@@ -127,6 +128,25 @@ async def test_a_card_is_a_table_of_every_line_in_its_order_the_frame_of_a_line_
         got = await player.stream(draft.rows[0].link, http, None, players.pacer)
         assert got == {"stream_url": f"{CDN}a/index.m3u8", "headers": {}, "progressive": False, "playlist": True}
         assert len(heads) == 2
+
+
+async def test_a_stream_that_is_no_playlist_but_a_file_of_any_size_ends_at_the_ceiling_and_the_line_says_so():
+    """A parser may give the address of a video with no extension: taken for a playlist, its body is not held whole."""
+    model = card_world()
+    model.parses[(9, "CO4K_pv")] = f"{CDN}video/o8Sli"
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if str(request.url).startswith(HOST):
+            return model.handle(request)
+        if request.url.path.startswith("/video/"):
+            return httpx.Response(200, headers={"Content-Length": str(600 * 1024 * 1024)}, content=b"\0" * 1024)
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=BoundedTransport(httpx.MockTransport(handle))) as http:
+        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: None)
+        draft = await AppSite(player).read("app://banri/219017", ReadContext(http, lambda *_: None))
+        four = next(row for row in draft.rows if row.player == "banri:CO4K")
+        assert four.heights == [] and four.site_fields["frame_failed"] == "AnswerTooLarge"
 
 
 async def test_the_stream_of_an_episode_comes_from_the_parsers_its_line_allows_in_the_order_of_the_application():

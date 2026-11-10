@@ -84,6 +84,7 @@ from core.contracts import (AppCard, AppResults, AppSearchReply, AppSearchReques
 from core.deadlines import TABLE_READ_S
 from core.db import Database
 from core.envelope import Envelope
+from core.http_limits import bounded_client
 from core.reasons import reason
 
 from . import anilibria, delivery, parsers
@@ -172,7 +173,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.players.list", self.on_players_list)
 
     async def on_start(self) -> None:
-        self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
+        self._http = bounded_client(timeout=20.0, follow_redirects=True)
         # Браузерный пул (astar/anilibria_tv) поднимается ЛЕНИВО при
         # первом обращении — на стенде без этих трекеров firefox не
         # запускается (находка 14: один браузер на модуль, а не на скан).
