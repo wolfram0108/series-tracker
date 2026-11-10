@@ -193,18 +193,33 @@ class Site:
         self.titles[number].episodes[episode] = truth
         self._hls(self._hls_folder(number, episode), truth, height)
 
-    def app_card(self, number: int, name: str, episodes: dict[int, int]) -> None:
+    def app_card(self, number: int, name: str, episodes: dict[int, int], *, files: bool = False) -> None:
         """A card of the application with its line of a parser: an episode (number → height) is a playlist on the host the
-        parser gives for its token; the search of the application gives the card."""
+        parser gives for its token — or, with `files`, an MP4 at an address without an extension, as a parser gives one;
+        the search of the application gives the card."""
         items = []
         for episode, height in sorted(episodes.items()):
             folder, token = f"app-{number}-ep{episode}", f"tok-{number}-{episode}"
-            self._hls(folder, truth_of(1, episode), height)
-            self.app.parses[(9, token)] = self.host.url(folder + "/index.m3u8")
+            if files:
+                self.app.parses[(9, token)] = self.host.url(self._mp4(folder, truth_of(1, episode), height))
+            else:
+                self._hls(folder, truth_of(1, episode), height)
+                self.app.parses[(9, token)] = self.host.url(folder + "/index.m3u8")
             items.append((f"第{episode}集", token))
         self.app.cards[number] = Card(number, name, [Line("BLU", items)], sub="Model Title")
         self.app.found = [{"id": number, "name": name, "sub": "Model Title", "year": "2021", "area": "大陆",
                            "class": "动画", "remarks": f"更新至第{len(items)}集", "blurb": "", "pic": ""}]
+
+    def _mp4(self, name: str, truth: int, height: int) -> str:
+        """A video in a picture of this height as one MP4 on the host, its name with no extension; the name."""
+        path = os.path.join(self.root, name + "-video")
+        if not os.path.exists(path):
+            source = path + ".source.mp4"
+            self.codec.make(source, [truth])
+            _run("-i", source, "-vf", f"scale={height * 16 // 9 // 2 * 2}:{height}", "-c:v", "libx264", "-preset",
+                 "ultrafast", "-c:a", "copy", "-movflags", "+faststart", "-f", "mp4", path)
+            os.remove(source)
+        return name + "-video"
 
     def _hls(self, name: str, truth: int, height: int) -> None:
         folder = os.path.join(self.root, name)

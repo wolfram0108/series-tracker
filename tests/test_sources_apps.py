@@ -15,7 +15,7 @@ from modules.sources.apps import AppProfile, card_address, profiles_of
 from modules.sources.apps.app99 import App99Client, seal, signature, unseal
 from modules.sources.module import SourcesModule
 from modules.sources.players.app_lines import AppPlayer
-from modules.sources.players.contract import StreamUnavailable
+from modules.sources.players.contract import Answer, Kind, Reading, StreamUnavailable
 from modules.sources.players.registry import PlayerRegistry
 from modules.sources.sites import ReadContext
 from modules.sources.sites.apps import AppSite
@@ -130,23 +130,49 @@ async def test_a_card_is_a_table_of_every_line_in_its_order_the_frame_of_a_line_
         assert len(heads) == 2
 
 
-async def test_a_stream_that_is_no_playlist_but_a_file_of_any_size_ends_at_the_ceiling_and_the_line_says_so():
-    """A parser may give the address of a video with no extension: taken for a playlist, its body is not held whole."""
+async def test_a_stream_is_a_file_or_a_playlist_by_what_its_host_serves_not_by_the_form_of_its_address():
+    """A parser gives a video at an address without an extension and a playlist at a script: the start of the answer
+    tells them; a host that ignores the range and announces a video is no playlist either, and nothing of it is held."""
     model = card_world()
     model.parses[(9, "CO4K_pv")] = f"{CDN}video/o8Sli"
+    model.parses[(9, "CO4K_tok1")] = f"{CDN}whole/qq"
+    model.parses[(9, "CO4K_tok2")] = f"{CDN}proxy.php?file=x"
+    asked: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
         if str(request.url).startswith(HOST):
             return model.handle(request)
-        if request.url.path.startswith("/video/"):
+        asked.append(f"{request.url.path} {request.headers.get('Range', '')}")
+        if request.url.path == "/video/o8Sli":  # an MP4 that honours the range
+            return httpx.Response(206, content=b"\0\0\0\x20ftypisom" + b"\0" * 5000)
+        if request.url.path == "/whole/qq":  # an MP4 that ignores it and announces its whole length
             return httpx.Response(200, headers={"Content-Length": str(600 * 1024 * 1024)}, content=b"\0" * 1024)
+        if request.url.path == "/proxy.php":
+            return httpx.Response(200, text=PLAYLIST)
         return httpx.Response(404)
 
+    files: list[str] = []
+
+    async def measure_file(address, _headers):
+        files.append(address)
+        return Answer(200, reading=Reading(Kind.PLAYABLE, 200, (1080,), files=((1080, address),)))
+
     async with httpx.AsyncClient(transport=BoundedTransport(httpx.MockTransport(handle))) as http:
-        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: None)
+        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(720), measure_file=measure_file)
+        players = PlayerRegistry([player])
         draft = await AppSite(player).read("app://banri/219017", ReadContext(http, lambda *_: None))
-        four = next(row for row in draft.rows if row.player == "banri:CO4K")
-        assert four.heights == [] and four.site_fields["frame_failed"] == "AnswerTooLarge"
+        four = [row for row in draft.rows if row.player == "banri:CO4K"]
+        assert {tuple(row.heights) for row in four} == {(1080,)} and files == [f"{CDN}video/o8Sli"]
+        assert "/video/o8Sli bytes=0-4095" in asked  # only the head of the file was asked
+
+        got = await player.stream(four[0].link, http, None, players.pacer)
+        assert (got["stream_url"], got["progressive"], got["playlist"]) == (f"{CDN}whole/qq", True, False)
+        got = await player.stream(four[1].link, http, None, players.pacer)
+        assert (got["stream_url"], got["progressive"], got["playlist"]) == (f"{CDN}proxy.php?file=x", False, True)
+
+
+async def _height(value):
+    return value
 
 
 async def test_the_stream_of_an_episode_comes_from_the_parsers_its_line_allows_in_the_order_of_the_application():

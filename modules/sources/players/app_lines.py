@@ -5,8 +5,9 @@ A card of an application lists its episodes in lines (`4K`, `专线`, `蓝光①
 with its way to the stream: a line of type 0 lists the playlists themselves, any other gives a token that a parser of the
 application turns into the address of the stream (`parseUrl` of the line names the parsers it allows, in the order the
 application lists its parsers). The link of a row is the card with the line and the token in its fragment; the token is
-the application's own name of the video. The table of a card asks no episode (sites/apps): the stream is resolved here
-right before its download.
+the application's own name of the video. The table of a card measures the frame of a line on its newest episode
+(sites/apps); the stream is resolved here again right before its download (its address expires). Whether a stream is a
+playlist or a file is what its host serves (`served_as`), not the form of its address.
 
 A row of a line is of the player `<application>:<line>` (its label the name of the line): the composition switches a line
 off, ranks it and keeps its variants as it does any player. The registry finds the application by the part before `:`.
@@ -17,10 +18,12 @@ import asyncio
 import json
 import logging
 import re
+from typing import Awaitable, Callable
 from urllib.parse import parse_qs, quote, urldefrag, urlsplit
 
 import httpx
 
+from core.http_limits import AnswerTooLarge
 from core.reasons import reason
 
 from ..apps import SCHEME
@@ -29,7 +32,8 @@ from ..policy import settle
 from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
 from core.ffprobe import film_stream, streams_of
 
-from .hls import MEASURE_TIMEOUT_S, Measure, measure_head, measured
+from .hls import MEASURE_TIMEOUT_S, Measure, is_playlist, measure_head, measured
+from .http import USER_AGENT
 from .vk_files import pick_file
 
 logger = logging.getLogger("sources")
@@ -40,12 +44,39 @@ HOST_GATE = 8
 _DIRECT = re.compile(r"\.(m3u8|mp4)(?:$|\?)", re.I)
 
 
-def is_file(address: str) -> bool:
-    """A stream that is one file (an MP4), not a playlist: its frame is read from the file, a server serves it in parts."""
-    return urlsplit(address).path.lower().endswith(".mp4")
+# Enough of the start of an answer to tell a playlist (text from `#EXTM3U`) from a file.
+PEEK_BYTES = 4096
 
 
-async def measure_file(address: str, headers: dict[str, str]) -> Answer:
+async def served_as(http: httpx.AsyncClient, address: str, headers: dict[str, str]) -> str | Answer:
+    """What an address serves: "file" or "playlist", told by its name when it has one, else by the start of the answer
+    (a parser gives a video at an address without an extension, a playlist at a script of its host); the answer when it
+    is none. Only the head is asked; a host that ignores the range and announces a body over the ceiling serves no
+    playlist (core/http_limits.py)."""
+    path = urlsplit(address).path.lower()
+    if path.endswith(".mp4"):
+        return "file"
+    if path.endswith(".m3u8"):
+        return "playlist"
+    try:
+        asked = {"User-Agent": USER_AGENT, **headers, "Range": f"bytes=0-{PEEK_BYTES - 1}"}
+        async with http.stream("GET", address, headers=asked, follow_redirects=True,
+                               timeout=MEASURE_TIMEOUT_S) as response:
+            if response.status_code not in (200, 206):
+                return Answer(response.status_code, "", final_url=str(response.url))
+            head = b""
+            async for chunk in response.aiter_bytes():
+                head += chunk
+                if len(head) >= PEEK_BYTES:
+                    break
+    except AnswerTooLarge:
+        return "file"
+    except httpx.HTTPError as exc:
+        return Answer(None, error=type(exc).__name__)
+    return "playlist" if is_playlist(head[:PEEK_BYTES].decode("utf-8", "replace")) else "file"
+
+
+async def measure_file_frame(address: str, headers: dict[str, str]) -> Answer:
     sent = "".join(f"{key}: {value}\r\n" for key, value in headers.items())
     streams = await streams_of(address, input_args=["-headers", sent] if sent else [], timeout=MEASURE_TIMEOUT_S)
     film = film_stream(streams or [])
@@ -66,10 +97,12 @@ class AppPlayer:
     lines = True
     stream_headers: dict[str, str] = {}
 
-    def __init__(self, client: App99Client, measure: Measure | None = None) -> None:
+    def __init__(self, client: App99Client, measure: Measure | None = None,
+                 measure_file: Callable[[str, dict[str, str]], Awaitable[Answer]] | None = None) -> None:
         self.client = client
         self.name, self.label = client.profile.name, client.profile.label
         self._measure = measure or measure_head
+        self._measure_file = measure_file or measure_file_frame
         self._api = asyncio.Semaphore(APP_GATE)
         self._hosts: dict[str, asyncio.Semaphore] = {}
 
@@ -155,10 +188,13 @@ class AppPlayer:
             return Answer(200, reading=Reading(kind, 200, message=exc.reason))
         host = urlsplit(address).hostname or ""
         async with self._hosts.setdefault(host, asyncio.Semaphore(HOST_GATE)):
-            if is_file(address):
+            served = await served_as(http, address, headers)
+            if isinstance(served, Answer):
+                return served
+            if served == "file":
                 if not measure:
                     return Answer(200, reading=Reading(Kind.PLAYABLE, 200, files=((0, address),)))
-                return await measure_file(address, headers)
+                return await self._measure_file(address, headers)
             return await measured(http, address, "", self._measure if measure else None, headers)
 
     def read(self, answer: Answer) -> Reading:
@@ -173,7 +209,7 @@ class AppPlayer:
         return Reading(Kind.HTTP_ERROR, answer.status)
 
     async def stream(self, url: str, http: httpx.AsyncClient, max_height: int | None, pacer) -> dict:
-        """The playlist of the episode now (its frame was measured on the table), with the headers of its line."""
+        """The stream of the episode now — a playlist or a file, as its host serves it — with the headers of its line."""
         found = self.parts(url)
         located = _Located(self)
         verdict = await settle(located, PlayerRef(self.name, url), http, urldefrag(url).url, pacer=pacer)
@@ -181,7 +217,11 @@ class AppPlayer:
         if picked is None or found is None:
             raise StreamUnavailable(reason("player_failed", player=self.label, cause=verdict.reading.message
                                            or verdict.reading.kind.value), verdict.exhausted)
-        progressive = is_file(picked[1])
+        served = await served_as(http, picked[1], await self.headers_of(found[0]))
+        if isinstance(served, Answer):
+            raise StreamUnavailable(reason("player_failed", player=self.label, cause=self.read(served).message
+                                           or self.read(served).kind.value), True)
+        progressive = served == "file"
         return {"stream_url": picked[1], "headers": await self.headers_of(found[0]), "progressive": progressive,
                 "playlist": not progressive}
 

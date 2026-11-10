@@ -1,11 +1,13 @@
 """The whole application on its stand (tests/app_stand.py): the user's way through the API, every module real, the site,
 the player and the alignment service as models — the full circle of the plan of a series."""
 import asyncio
+import json
 import os
 
 import pytest
 
 from app_stand import STAND_LIMIT_S, AppStand
+from core import container as mkv
 from core.envelope import Envelope
 from plan_world import truth_of
 
@@ -287,3 +289,27 @@ async def test_a_sync_stopped_while_the_service_aligns_cancels_its_job_and_appli
     assert files_in(os.path.join(stand.root, "work")) == []
     stand.daemon.hold = False
     await nothing_taken_up_after_a_start(stand, series_id)
+
+
+async def test_a_card_whose_parser_gives_a_video_at_an_address_without_an_extension_is_measured_downloaded_and_built(stand):
+    """A parser of an application gives the address of an MP4 with no extension: the start of what its host serves tells
+    a file from a playlist, its frame is the one ffprobe reads of it, and the download takes it as the file it is."""
+    stand.site.app_card(219017, "万界独尊", {1: 1080}, files=True)
+    await stand.configure(["Оригинал"], {"Оригинал": "chi"})
+    made = await stand.call("POST", "/api/parser-profiles", {"name": "серии 半日"})
+    label = json.dumps([{"type": "text", "value": "第"}, {"type": "number"}, {"type": "text", "value": "集"}],
+                       ensure_ascii=False)
+    await stand.call("POST", f"/api/parser-profiles/{made['id']}/rules", {
+        "name": "серия", "continue_after_match": False,
+        "action_pattern": json.dumps([{"action_type": "extract_single", "action_pattern": label},
+                                      {"action_type": "assign_voiceover", "action_pattern": "Оригинал"}]),
+        "conditions": [{"condition_type": "contains", "pattern": label, "logical_operator": "AND"}]})
+    series = await stand.call("POST", "/api/series", {
+        "name": "Сериал", "name_en": "Serial", "site": "banri", "save_path": stand.library,
+        "sources": [{"url": "app://banri/219017", "source_type": "web_video", "parser_profile_id": made["id"]}]})
+    await stand.sync(series["series_id"])
+    view = await stand.check(series["series_id"])
+    (asset,) = view["assets"]
+    assert "1080p" in asset["name"], asset["name"]
+    held = await mkv.contents(os.path.join(stand.library, asset["name"]))
+    assert [track.language for track in held.audio] == ["chi"]
