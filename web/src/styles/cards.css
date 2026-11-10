@@ -71,13 +71,17 @@
 .card-final .pill.pill-link { cursor: pointer; }
 
 /* ── Единая статусная палитра (пастель 135° + бордер в тон) ───────────── */
-.card-final.status-success  { background: linear-gradient(135deg, #e7f4e8, #d1e7dd); border-color: #a3cfbb; }
+/* A card of a queue takes the same grounds by the state of its work: under way, done, failed (the silver one waits). */
+.card-final.status-success,
+.card-final.card-queue.is-done { background: linear-gradient(135deg, #e7f4e8, #d1e7dd); border-color: #a3cfbb; }
 .card-final.status-pending  { background: linear-gradient(135deg, #fff9e6, #ffecb3); border-color: #ffe69c; }
-.card-final.status-excluded { background: linear-gradient(135deg, #fbe9ea, #f8d7da); border-color: #f5c6cb; }
+.card-final.status-excluded,
+.card-final.card-queue.is-failed { background: linear-gradient(135deg, #fbe9ea, #f8d7da); border-color: #f5c6cb; }
 .card-final.status-archived,
 .card-final.status-no-match { background: linear-gradient(135deg, #f8f9fa, #e9ecef); border-color: #dee2e6; }
 .card-final.card-sliced,
-.card-final.status-sliced   { background: linear-gradient(135deg, #cfe2ff, #b8daff); border-color: #a9c7fe; }
+.card-final.status-sliced,
+.card-final.card-queue.is-running { background: linear-gradient(135deg, #cfe2ff, #b8daff); border-color: #a9c7fe; }
 
 /* ── Раскладки grid по видам (как в оригинале compact-card.css) ──────── */
 /* Нарезанный: нет 3-й колонки, пилюли в 1 колонку */

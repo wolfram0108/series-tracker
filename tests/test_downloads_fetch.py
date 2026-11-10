@@ -67,7 +67,7 @@ class FakeDownloader:
                 self.silent[url] -= 1
                 # A lost end of a program looks like this from the outside: nothing ever comes back.
                 await asyncio.get_running_loop().create_future()
-            await on_progress({"progress": 50, "dlspeed": 1024, "eta": 5, "total_size_mb": 10.0})
+            await on_progress({"phase": "download", "progress": 50, "dlspeed": 3 * 1024 ** 2, "eta": 5, "total_size_mb": 10.0})
             if self.gate:
                 await self.gate.wait()
             if url in self.fail_urls:
@@ -78,7 +78,7 @@ class FakeDownloader:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "wb") as f:
                 f.write(b"video")
-            await on_progress({"progress": 100, "dlspeed": 0, "eta": 0})
+            await on_progress({"phase": "download", "progress": 100, "dlspeed": 0, "eta": 0})
             return True, ""
         finally:
             self.concurrent -= 1
@@ -279,6 +279,8 @@ async def test_fetch_has_its_own_limit_and_ignores_repeated_keys(system, tmp_pat
 
 @pytest.mark.asyncio
 async def test_the_fetches_of_voice_overs_are_in_the_queue_of_the_window_while_they_wait_and_run(system, tmp_path):
+    """A card to a fetch: the one under way at its stage with its figures, the one that waits with its place in its line;
+    a finished card stays while the sync of its series runs."""
     bus, fake, dl, probe = system
     dl.gate = asyncio.Event()
     changed = bus.subscribe("downloads.queue.changed")
@@ -289,19 +291,66 @@ async def test_the_fetches_of_voice_overs_are_in_the_queue_of_the_window_while_t
     await _running.bus.settled()
     queue = await probe.request("downloads.queue.get", {}, timeout=5)
     assert queue["count"] == 3
-    assert sorted((each["task_key"], each["status"], each["task_type"]) for each in queue["tasks"]) == [
-        ("dub:0", "downloading", "fetch"), ("dub:1", "downloading", "fetch"), ("dub:2", "pending", "fetch")]
-    assert {each["save_path"] for each in queue["tasks"]} == {str(tmp_path / f"{i}.mp4") for i in range(3)}
-    # A running fetch shows how far it is; one that waits has no progress yet.
-    progress = {each["task_key"]: (each["progress"], each["dlspeed"], each["eta"], each["total_size_mb"])
-                for each in queue["tasks"]}
-    assert progress == {"dub:0": (50, 1024, 5, 10.0), "dub:1": (50, 1024, 5, 10.0), "dub:2": (None, None, None, None)}
+    cards = {each["id"]: each for each in queue["tasks"]}
+    assert {key: card["status"] for key, card in cards.items()} == {"dub:0": "download", "dub:1": "download", "dub:2": "queued"}
+    assert [stage["state"] for stage in cards["dub:0"]["stages"]] == ["done", "done", "active", "pending", "pending"]
+    figures = cards["dub:0"]["figures"]
+    assert (figures["progress"], figures["speed"], figures["eta"], figures["total_mb"], figures["done_mb"]) == (50, 3.0, 5, 10.0, 5.0)
+    assert (cards["dub:2"]["position"], cards["dub:2"]["running"], cards["dub:2"]["limit"]) == (1, 2, 2)
+    assert [(line["kind"], line["attempt"], line["of"]) for line in cards["dub:0"]["log"]] == [("attempt", 1, 3)]
     # The window is told by an event published after it reads the queue.
     assert (await asyncio.wait_for(changed.queue.get(), 5)).payload["count"] >= 1
     dl.gate.set()
     assert await _wait(lambda: os.path.isfile(tmp_path / "2.mp4"))
     await _quiet()
-    assert (await probe.request("downloads.queue.get", {}, timeout=5))["count"] == 0
+    queue = await probe.request("downloads.queue.get", {}, timeout=5)
+    assert queue["count"] == 0 and {each["status"] for each in queue["tasks"]} == {"done"}
+
+
+@pytest.mark.asyncio
+async def test_a_need_is_one_card_through_the_variants_and_its_sync_leaves_only_what_failed_or_was_rebuilt(system, tmp_path):
+    """The plan takes another variant of a need: the same card, the line of the old variant, «План перестроен на» the new
+    one. At the end of the sync a finished card stays only when its plan was rebuilt, a failed one always; they stay in
+    the store until the user removes them or the next sync of the series begins."""
+    bus, fake, dl, probe = system
+
+    def fetch(key, url, need_key, player, ok=True):
+        if not ok:
+            dl.fail_urls.add(url)
+        probe.send_command("downloads.fetch", {
+            "key": key, "url": url, "path": str(tmp_path / f"{key}.mp4"), "series_id": 88,
+            "need": {"key": need_key, "series_id": 88, "series_name": "ДжоДжо", "sync_started": "t1", "episode": "s06e08",
+                     "kind": "dub", "group": "Kazoku Project", "voice_number": 15, "cap": 720},
+            "variant": {"source_id": 55, "source_n": 1, "source_color": 0, "place": "old.yummyani.me", "player": player,
+                        "player_label": player.upper(), "height": 1080 if player == "cvh" else 720}})
+
+    probe.publish_event("scan.run.changed", {"series_id": 88, "active": True, "seq": 1})
+    fetch("k1", "https://site/#cvh=1", "need:kazoku", "cvh", ok=False)
+    await _wait(lambda: "https://site/#cvh=1" in dl.started)
+    await _quiet()
+    fetch("k2", "https://site/#kodik=1", "need:kazoku", "kodik")
+    fetch("k3", "https://site/#kodik=2", "need:plain", "kodik")
+    fetch("k4", "https://site/#cvh=4", "need:lost", "cvh", ok=False)
+    await _wait(lambda: os.path.isfile(tmp_path / "k3.mp4"))
+    await _quiet()
+    cards = {each["id"]: each for each in (await probe.request("downloads.queue.get", {}, timeout=5))["tasks"]}
+    kazoku = cards["need:kazoku"]
+    assert [(line["kind"], line["variant"]["player"] if line["variant"] else None, line["outcome"])
+            for line in kazoku["log"]] == [("attempt", "cvh", "failed"), ("replan", "kodik", "running"),
+                                           ("attempt", "kodik", "done")]
+    assert kazoku["status"] == "done" and kazoku["replanned"] and kazoku["need"]["voice_number"] == 15
+
+    probe.publish_event("scan.run.changed", {"series_id": 88, "active": False, "seq": 2})
+    await _quiet()
+    left = {each["id"]: each for each in (await probe.request("downloads.queue.get", {}, timeout=5))["tasks"]}
+    assert set(left) == {"need:kazoku", "need:lost"} and left["need:lost"]["log"][-1]["kind"] == "exhausted"
+    assert {card.id for card in await _running.downloads.repo.cards()} == {"need:kazoku", "need:lost"}
+
+    assert (await probe.request("downloads.card.remove", {"id": "need:lost"}, timeout=5))["removed"]
+    probe.publish_event("scan.run.changed", {"series_id": 88, "active": True, "seq": 3})
+    await _quiet()
+    assert (await probe.request("downloads.queue.get", {}, timeout=5))["tasks"] == []
+    assert await _running.downloads.repo.cards() == []
 
 
 @pytest.mark.asyncio

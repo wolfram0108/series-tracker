@@ -39,8 +39,8 @@ class Queues(BaseModule):
                 {"torrent_hash": "h1", "series_id": 1, "stage": "renaming"}]}
 
         async def dl_queue(env):
-            return {"tasks": [{"id": 5, "task_key": "uid", "progress": 40}],
-                    "count": 1}
+            return {"tasks": [{"id": "88:s06e08:dub:A", "need": {"key": "88:s06e08:dub:A", "series_id": 88, "kind": "dub"},
+                               "status": "download"}], "count": 1}
 
         async def dl_clear(env):
             return {"deleted": 3}
@@ -138,7 +138,8 @@ async def test_queue_endpoints(system):
     assert resp.json()[0]["hash"] == "h1"
 
     resp = await client.get("/api/downloads/queue")
-    assert resp.json() == [{"id": 5, "task_key": "uid", "progress": 40}]
+    [card] = resp.json()
+    assert (card["id"], card["status"], card["need"]["series_id"]) == ("88:s06e08:dub:A", "download", 88)
 
     resp = await client.post("/api/downloads/queue/clear")
     assert resp.json() == {"success": True,

@@ -70,6 +70,7 @@ class OnlineRow:
     # The source gave the row in its last read; one that stands from an earlier read is planned all the same, and the
     # window shows what the file holds of it as not online now.
     current: bool = True
+    player_label: str = ""  # the player as the layout names it (the window «Выход» shows this)
 
     @property
     def source_id(self) -> int:

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { mount, type VueWrapper } from "@vue/test-utils"
+import ToastService from "primevue/toastservice"
 import { createPinia, setActivePinia } from "pinia"
 import { nextTick } from "vue"
 import SettingsAgents from "./SettingsAgents.vue"
@@ -14,7 +15,7 @@ const task = (over: Partial<PackTask> = {}): PackTask => ({
 
 let mounted: VueWrapper | null = null
 const section = () => {
-  mounted = mount(SettingsAgents, { global: { stubs: { ConformQueue: true } } })
+  mounted = mount(SettingsAgents, { global: { plugins: [ToastService], stubs: { ConformQueue: true } } })
   return mounted.findAll(".queue-section").find((each) => each.text().includes(t("agents.pack.title")))!
 }
 

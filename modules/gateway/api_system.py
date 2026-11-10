@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
 from core import BusRequestError
+from core.contracts import DownloadCard
 from core.reasons import reason
 
 from .schemas import ConformJobChange, ErrorOnly, ErrorResponse, OkResponse, QueueTask, ScannerStatus
@@ -62,8 +63,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return []  # модуль не поднят — как старый «нет агента»
         return [{"hash": t.get("torrent_hash"), **t} for t in reply["tasks"]]
 
-    @r.get("/api/downloads/queue", response_model=list[QueueTask])
+    @r.get("/api/downloads/queue", response_model=list[DownloadCard])
     async def downloads_queue():
+        """The cards of the downloads (core/contracts/downloads.py): one to a need of a plan, its stages and attempts."""
         try:
             reply = await gw.request("downloads.queue.get", {})
         except BusRequestError:
@@ -81,6 +83,19 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                 status_code=500)
         return {"success": True,
                 "message": f"Удалено {reply['deleted']} задач из очереди."}
+
+    @r.delete("/api/downloads/cards/{card_id}", response_model=OkResponse,
+              response_model_exclude_none=True,
+              responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
+    async def downloads_card_remove(card_id: str):
+        """A card that stayed after its sync is removed."""
+        try:
+            await gw.request("downloads.card.remove", {"id": card_id})
+        except BusRequestError as exc:
+            msg = str(exc)
+            return JSONResponse({"success": False, "error": msg.split(": ", 1)[-1]},
+                                status_code=404 if "LookupError" in msg else 500)
+        return {"success": True}
 
     @r.post("/api/downloads/{task_id}/cancel", response_model=OkResponse,
             response_model_exclude_none=True,

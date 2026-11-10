@@ -2,10 +2,19 @@
 import { useQueuesStore, type PackTask } from "../../stores/queues"
 import { t, type MessageKey } from "../../i18n"
 import ConformQueue from "./ConformQueue.vue"
+import DownloadCard from "./DownloadCard.vue"
+import { api } from "../../api/client"
+import { useApi } from "../../composables/useApi"
 
 // Вкладка «Агенты»: 4 очереди карточками (вместо таблиц). Данные — из
 // queuesStore (наполняются SSE-событиями очередей). Пустые очереди — empty.
 const q = useQueuesStore()
+const { request } = useApi()
+
+// A card that stayed after its sync is removed; the core tells the queue anew (download_queue_update).
+async function removeCard(id: string): Promise<void> {
+  await request(api.DELETE("/api/downloads/cards/{card_id}", { params: { path: { card_id: id } } }))
+}
 
 function str(v: unknown): string {
   return v == null ? "" : String(v)
@@ -48,22 +57,12 @@ function packPlace(task: PackTask): string {
       </div>
     </section>
 
-    <!-- Очередь Агента Загрузки (yt-dlp) -->
+    <!-- The downloads: a card to a need of a plan (core/contracts/downloads.py) -->
     <section class="queue-section">
-      <h6 class="queue-title-bar"><i class="pi pi-download"></i> Очередь Агента Загрузки (yt-dlp)</h6>
-      <div v-if="!q.downloads.length" class="queue-empty">Очередь загрузок пуста</div>
+      <h6 class="queue-title-bar"><i class="pi pi-download"></i> {{ t("download.title") }}</h6>
+      <div v-if="!q.downloads.length" class="queue-empty">{{ t("download.empty") }}</div>
       <div v-else class="composition-cards-container">
-        <div v-for="(t, i) in q.downloads" :key="str(t.id) || i" class="card-final card-queue">
-          <div class="queue-row">
-            <span class="queue-title">{{ str(t.save_path).split(/[\\/]/).pop() }}</span>
-            <div class="pill pill-primary">{{ str(t.status) }}</div>
-          </div>
-          <div v-if="['downloading', 'processing', 'completed'].includes(str(t.status)) && t.progress != null" class="queue-row">
-            <div class="progress">
-              <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: str(t.progress) + '%' }">{{ str(t.progress) }}%</div>
-            </div>
-          </div>
-        </div>
+        <DownloadCard v-for="card in q.downloads" :key="card.id" :card="card" @remove="removeCard" />
       </div>
     </section>
 

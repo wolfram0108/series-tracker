@@ -8,24 +8,29 @@ record of a fetch: the owner of the work asks again after a stop.
 Owns the columns media_items.status and final_filename that the torrent pipeline writes through it (slicing).
 
 Queries / commands:
-  downloads.fetch {key, url, path, max_height?, series_id?, whole?, ytdlp?} - the stream behind the link into an absolute
-      path. `whole`: a video that must come whole (a reference); `ytdlp`: the downloader may take over a link whose stream
+  downloads.fetch {key, url, path, max_height?, series_id?, whole?, ytdlp?, need?, variant?} - the stream behind the link
+      into an absolute path. `need` (DownloadNeed) names what the fetch is for and `variant` (DownloadVariant) which row it
+      takes, in the marks of the window «Выход»: fetches of one need are one card. `whole`: the video of a reference; `ytdlp`: the downloader may take over a link whose stream
       request failed (a VK video). A key already waiting or under way is not asked twice. The videos of the references
       (`whole`) and the rest (voice-overs, compilations) wait in lines of their own, each with its limit of parallel
       fetches: max_parallel_downloads and max_parallel_dub_downloads (2 by default each).
   downloads.withdraw {series_id} -> {stopped} - the owner stops the fetches of a series and waits for them: the answer
       comes once each has ended, its program stopped and what it wrote removed (work.withdrawn is the same, told).
-  downloads.queue.get {} -> {tasks, count} - the fetches waiting (`pending`) and under way (`downloading`, with progress,
-      speed, time left and size).
+  downloads.queue.get {} -> {tasks, count} - `count`: the downloads that wait or go; `tasks`: the cards of the downloads (core/contracts/downloads.py DownloadCard): one to
+      a need of a plan, through every fetch the plan gives it — the stages with their time, a line of attempts per variant,
+      the plan rebuilt on another variant, the figures of the stage under way.
   downloads.queue.clear {} -> {deleted} - the waiting fetches are dropped (their owners hear them end, failed).
   downloads.cancel {task_id} -> {cancelled} - one fetch (`fetch:<key>`) stops; its owner hears it end, failed.
+  downloads.card.remove {id} -> {removed} - the user removes a card that stayed after its sync.
   downloads.item.set_filename, downloads.item.set_status - slicing reports a name and a status of a file it made or took over.
 
 Events out:
   downloads.fetch.started {key, series_id, path}, downloads.fetch.finished {key, ok, error, transient, path, series_id}.
-  downloads.queue.changed {tasks, count} - the queue changed (throttled on progress), and when an interface connects
-      (gateway.sse.clients): SSE download_queue_update.
-Events in: settings.changed (yt_dlp_concurrent_fragments, max_parallel_downloads, max_parallel_dub_downloads),
+  downloads.queue.changed {tasks, count} - the cards changed, on the beat of core/clock while a download goes, and when an
+      interface connects (gateway.sse.clients): SSE download_queue_update. The cards live with the sync of their series
+      (scan.run.changed): while it runs every card is kept; at its end only a failed card and a finished one whose plan
+      was rebuilt stay, in the table download_cards, until the user removes them or the next sync of the series begins.
+Events in: scan.run.changed, settings.changed (yt_dlp_concurrent_fragments, max_parallel_downloads, max_parallel_dub_downloads),
   work.withdrawn {series_id, keys?},
   series.deleted (the fetches of the series stop).
 """
@@ -34,25 +39,23 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 import os
-import time
 import traceback
 
 from core import BaseModule, storage
-from core.contracts import WORK_WITHDRAWN, WorkWithdrawn
+from core.clock import beat_while
+from core.contracts import RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, WorkWithdrawn
 from core.db import Database
 from core.envelope import Envelope
 from core.retry import UNTIMED, Budget, retrying
 
 from . import ytdlp
+from .cards import CardBook
 from .repository import DownloadsRepository
 
-PROGRESS_EVENT_THROTTLE = 1.0  # seconds between queue events on progress
 # A download says it is alive by its progress; its silent steps (a probe of the length, a check of the file) end well within
 # this. A download silent for longer waits for what will not come: it is taken off, the log shows what it waited for, and
 # it is tried again.
 SILENCE_FUSE_S = 900.0
-# What the queue tells of a fetch as it goes.
-FETCH_PROGRESS = ("progress", "dlspeed", "eta", "total_size_mb")
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
 # The setting of the limit of each line of fetches: the videos of the references, and the rest.
@@ -92,6 +95,11 @@ def awaited(task: asyncio.Task) -> str:
         or repr(task)
 
 
+def _under_way(cards: list[dict]) -> int:
+    """The downloads that wait or go: a card of an ended one is no work."""
+    return sum(card["status"] not in ("done", "failed") for card in cards)
+
+
 def remove_download(path: str) -> bool:
     """The file of a download with the pieces of its download: names built on its own name, nobody else's. True when none
     is left."""
@@ -118,7 +126,8 @@ class DownloadsModule(BaseModule):
         self._fetch_active: dict[str, tuple[asyncio.Task, int | None]] = {}
         self._fetch_jobs: dict[str, dict] = {}  # the job of every fetch under way: the window names it by its path
         self._threads = 6             # fragments per file (yt-dlp -N)
-        self._last_event = 0.0
+        self.cards = CardBook()  # the telemetry of every need under way (core/contracts/downloads.py)
+        self._going = asyncio.Event()  # a card is under way: the queue is told on the beat of core/clock
         self._cancelled: set[str] = set()  # fetches the user stopped: their owners hear them end
         super().__init__(bus)
 
@@ -134,8 +143,13 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.item.set_filename", self.on_set_filename)
         self.handle("downloads.item.set_status", self.on_set_status)
         self.handle("series.deleted", self.on_series_deleted)
+        self.handle(RUN_CHANGED, self.on_run_changed)
+        self.handle("downloads.card.remove", self.on_card_remove)
 
     async def on_start(self) -> None:
+        for card in await self.repo.cards():
+            self.cards.kept(card)
+        self.spawn(self._ticker(), name="downloads:cards", lasting=True)
         self._threads = await self._read_setting("yt_dlp_concurrent_fragments", 6)
         for line, key in LIMIT_KEYS.items():
             self._fetch_limits[line] = await self._read_setting(key, 2)
@@ -180,6 +194,9 @@ class DownloadsModule(BaseModule):
     async def _withdraw(self, wanted) -> int:
         """The fetches wanted stop: those waiting leave the queue, those under way are cancelled and waited for (their
         programs are stopped and what they wrote goes on their way out)."""
+        for job in [*self._fetch_queue, *self._fetch_jobs.values()]:
+            if wanted(job["key"], job["series_id"]):
+                self.cards.withdrawn(job["need_key"])
         self._fetch_queue = [job for job in self._fetch_queue if not wanted(job["key"], job["series_id"])]
         runners = [runner for job_key, (runner, owner) in list(self._fetch_active.items()) if wanted(job_key, owner)]
         for runner in runners:
@@ -195,6 +212,7 @@ class DownloadsModule(BaseModule):
         if waiting:
             self._fetch_queue = [job for job in self._fetch_queue if job["key"] != key]
             for job in waiting:
+                self.cards.finished(job["need_key"], False)
                 self._finished(job, False, "отменено пользователем", False)
         elif key in self._fetch_active:
             self._cancelled.add(key)
@@ -207,6 +225,7 @@ class DownloadsModule(BaseModule):
     async def on_queue_clear(self, env: Envelope) -> dict:
         waiting, self._fetch_queue = self._fetch_queue, []
         for job in waiting:
+            self.cards.finished(job["need_key"], False)
             self._finished(job, False, "очередь очищена пользователем", False)
         self._announce_queue()
         return {"deleted": len(waiting)}
@@ -221,14 +240,53 @@ class DownloadsModule(BaseModule):
 
     async def on_queue_get(self, env: Envelope) -> dict:
         tasks = self._queue()
-        return {"tasks": tasks, "count": len(tasks)}
+        return {"tasks": tasks, "count": _under_way(tasks)}
 
     def _queue(self) -> list[dict]:
-        fetches = [(self._fetch_jobs[key], "downloading") for key in self._fetch_active if key in self._fetch_jobs]
-        fetches += [(job, "pending") for job in self._fetch_queue]
-        return [{"id": f"fetch:{job['key']}", "task_key": job["key"], "task_type": "fetch", "series_id": job["series_id"],
-                 "save_path": job["path"], "status": status,
-                 **{name: (job.get("progress") or {}).get(name) for name in FETCH_PROGRESS}} for job, status in fetches]
+        """The cards, with the place of each waiting one in its line and how many of the line go of its limit."""
+        busy = Counter(self._line(job) for job in self._fetch_jobs.values())
+        places: dict[str, tuple[int, int, int]] = {}
+        seen: Counter = Counter()
+        for job in self._fetch_queue:
+            line = self._line(job)
+            seen[line] += 1
+            places[job["need_key"]] = (seen[line], busy[line], self._fetch_limits[line])
+        out = []
+        for card in self.cards.view():
+            if card.id in places:
+                card.position, card.running, card.limit = places[card.id]
+            out.append(card.model_dump(mode="json"))
+        return out
+
+    async def on_run_changed(self, env: Envelope) -> None:
+        """The cards live with the sync of their series: a new one takes away what the one before left; at its end only a
+        failed card and a finished one whose plan was rebuilt stay, kept in the store."""
+        series_id, active = int(env.payload["series_id"]), bool(env.payload.get("active"))
+        if active:
+            await self.repo.drop_cards(self.cards.run_started(series_id))
+        else:
+            stay, gone = self.cards.run_ended(series_id)
+            await self.repo.keep_cards(stay)
+            await self.repo.drop_cards(gone)
+        self._announce_queue()
+
+    async def on_card_remove(self, env: Envelope) -> dict:
+        """The user removes a card that stayed after its sync."""
+        key = str(env.payload["id"])
+        if key not in self.cards.cards or key in {job["need_key"] for job in [*self._fetch_queue, *self._fetch_jobs.values()]}:
+            raise LookupError(f"карточка загрузки {key} не найдена или загрузка идёт")
+        self.cards.forget(key)
+        await self.repo.drop_cards([key])
+        self._announce_queue()
+        return {"removed": True}
+
+    async def _ticker(self) -> None:
+        """While a download goes the queue is told on the beat of the clock of displays (core/clock): its cards show the
+        time of each stage."""
+        while True:
+            await self._going.wait()
+            await beat_while(self.cards.running, self._announce_queue)
+            self._going.clear()
 
     async def on_sse_clients(self, env: Envelope) -> None:
         """An interface connected: it gets the queue as it is, with no question of its own."""
@@ -237,7 +295,7 @@ class DownloadsModule(BaseModule):
 
     def _broadcast_queue(self) -> None:
         tasks = self._queue()
-        self.publish_event("downloads.queue.changed", {"tasks": tasks, "count": len(tasks)})
+        self.publish_event("downloads.queue.changed", {"tasks": tasks, "count": _under_way(tasks)})
 
     def _announce_queue(self) -> None:
         """A fetch began, waits or ended: the window sees it."""
@@ -272,6 +330,14 @@ class DownloadsModule(BaseModule):
             return
         if job["key"] in self._fetch_active or any(queued["key"] == job["key"] for queued in self._fetch_queue):
             return
+        # What the fetch is for and which variant it takes, as its owner tells it; a fetch that names no need is one.
+        need = DownloadNeed.model_validate(env.payload["need"]) if env.payload.get("need") else DownloadNeed(
+            key=job["key"], series_id=job["series_id"] or 0, kind="video" if job.get("whole") else "dub",
+            cap=job.get("max_height"))
+        variant = DownloadVariant.model_validate(env.payload["variant"]) if env.payload.get("variant") else None
+        job["need_key"] = need.key
+        self.cards.queued(need, variant)
+        self._going.set()
         self._fetch_queue.append(job)
         self._fetch_pump()
         self._announce_queue()
@@ -308,22 +374,21 @@ class DownloadsModule(BaseModule):
         key, path = job["key"], job["path"]
         ok, error, transient = False, "", False
 
+        need_key = job["need_key"]
+        tries = 0
+
         async def on_progress(data: dict) -> None:
-            # A fetch has no record of its own: what the window shows of it is kept with the job.
-            job["progress"] = {name: data.get(name) for name in FETCH_PROGRESS if data.get(name) is not None}
-            now = time.monotonic()
-            if now - self._last_event > PROGRESS_EVENT_THROTTLE:
-                self._last_event = now
-                self._announce_queue()
+            self.cards.progress(need_key, data)
 
         async def attempt_once() -> tuple[bool, str, bool]:
+            nonlocal tries
+            tries += 1
+            self.cards.attempt(need_key, tries, budget.attempts)
             stream_url, headers, stream_error, progressive = await self._resolve_stream(
                 job["url"], max_height=job.get("max_height"), ytdlp_fallback=_always if job.get("ytdlp") else _never)
             if stream_error is not None:
                 return (False, *stream_error)
             kw: dict = {"threads": self._threads}
-            if job.get("whole"):
-                kw["whole_video"] = True  # a reference with a hole would skew every voice-over aligned to it
             if job.get("max_height"):
                 kw["max_height"] = job["max_height"]  # a page the downloader reads itself keeps the cap of the job
             if headers:
@@ -336,6 +401,7 @@ class DownloadsModule(BaseModule):
         budget = _download_budget()
 
         def report(result: tuple[bool, str, bool], attempt: int, pause: float) -> None:
+            self.cards.attempt_failed(need_key)
             self.log.warning("загрузка %s: %s — повтор %d/%d через %.0f с", key, result[1], attempt, budget.attempts, pause)
 
         stopped = False
@@ -360,6 +426,8 @@ class DownloadsModule(BaseModule):
             self._fetch_jobs.pop(key, None)
             self._cancelled.discard(key)
             if not stopped:
+                size = await storage.call(os.path.getsize, path) if ok and await storage.call(os.path.isfile, path) else None
+                self.cards.finished(need_key, ok, size_mb=round(size / 1024 ** 2, 1) if size else None)
                 self._finished(job, ok, error, transient)
             self._fetch_pump()
             self._announce_queue()

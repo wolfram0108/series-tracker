@@ -813,7 +813,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Downloads Queue */
+        /**
+         * Downloads Queue
+         * @description The cards of the downloads (core/contracts/downloads.py): one to a need of a plan, its stages and attempts.
+         */
         get: operations["downloads_queue_api_downloads_queue_get"];
         put?: never;
         post?: never;
@@ -835,6 +838,26 @@ export interface paths {
         /** Downloads Queue Clear */
         post: operations["downloads_queue_clear_api_downloads_queue_clear_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/downloads/cards/{card_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Downloads Card Remove
+         * @description A card that stayed after its sync is removed.
+         */
+        delete: operations["downloads_card_remove_api_downloads_cards__card_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1773,6 +1796,42 @@ export interface components {
          */
         Absence: "elsewhere" | "not_better" | "no_single" | "own" | "off";
         /**
+         * AttemptLine
+         * @description One line of the log: the last attempt of a variant (`attempt` of `of`, how it went and how long the variant took),
+         *     or the plan rebuilt on a variant (`replan`), or no variant left (`exhausted`).
+         */
+        AttemptLine: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "attempt" | "replan" | "exhausted";
+            variant?: components["schemas"]["DownloadVariant"] | null;
+            /**
+             * Attempt
+             * @default 0
+             */
+            attempt: number;
+            /**
+             * Of
+             * @default 0
+             */
+            of: number;
+            /**
+             * Outcome
+             * @default running
+             * @enum {string}
+             */
+            outcome: "running" | "failed" | "done";
+            /** Stage */
+            stage?: ("queue" | "link" | "download" | "remux" | "check") | null;
+            /**
+             * Seconds
+             * @default 0
+             */
+            seconds: number;
+        };
+        /**
          * ChangedSource
          * @description `applied` holds the fields that differed from the stored ones; nothing applied is no change and no event.
          */
@@ -2104,6 +2163,133 @@ export interface components {
              */
             voice_group: string | null;
         };
+        /** DownloadCard */
+        DownloadCard: {
+            /** Id */
+            id: string;
+            need: components["schemas"]["DownloadNeed"];
+            variant?: components["schemas"]["DownloadVariant"] | null;
+            /**
+             * Status
+             * @default queued
+             * @enum {string}
+             */
+            status: "queued" | "link" | "download" | "remux" | "check" | "done" | "failed";
+            /**
+             * Method
+             * @default
+             * @enum {string}
+             */
+            method: "" | "ranged" | "ffmpeg" | "ytdlp_hls" | "ytdlp_dash";
+            /** Stages */
+            stages?: components["schemas"]["StageView"][];
+            /** Log */
+            log?: components["schemas"]["AttemptLine"][];
+            figures?: components["schemas"]["Figures"];
+            /**
+             * Replanned
+             * @default false
+             */
+            replanned: boolean;
+            /** Position */
+            position?: number | null;
+            /**
+             * Running
+             * @default 0
+             */
+            running: number;
+            /**
+             * Limit
+             * @default 0
+             */
+            limit: number;
+            /**
+             * Queued At
+             * @default
+             */
+            queued_at: string;
+            /**
+             * Finished At
+             * @default
+             */
+            finished_at: string;
+            /**
+             * Seconds
+             * @default 0
+             */
+            seconds: number;
+        };
+        /**
+         * DownloadNeed
+         * @description What the plan needs: `key` names the need across every variant the plan takes for it; `episode` is the label of the
+         *     episode or the range of a compilation (`s06e08`, `s01e09-e12`); `voice_number` is the place of the voice-over in the
+         *     order of its season; `cap` the highest the download takes (None: the video whole).
+         */
+        DownloadNeed: {
+            /** Key */
+            key: string;
+            /** Series Id */
+            series_id: number;
+            /**
+             * Series Name
+             * @default
+             */
+            series_name: string;
+            /**
+             * Sync Started
+             * @default
+             */
+            sync_started: string;
+            /**
+             * Episode
+             * @default
+             */
+            episode: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "video" | "dub" | "picture";
+            /** Group */
+            group?: string | null;
+            /** Voice Number */
+            voice_number?: number | null;
+            /** Cap */
+            cap?: number | null;
+        };
+        /**
+         * DownloadVariant
+         * @description A row of a source as the window «Выход» marks it: the figure of the source in its series and its colour, the place,
+         *     the player, the height of the row.
+         */
+        DownloadVariant: {
+            /** Source Id */
+            source_id: number;
+            /**
+             * Source N
+             * @default 0
+             */
+            source_n: number;
+            /**
+             * Source Color
+             * @default 0
+             */
+            source_color: number;
+            /**
+             * Place
+             * @default
+             */
+            place: string;
+            /** Player */
+            player: string;
+            /**
+             * Player Label
+             * @default
+             */
+            player_label: string;
+            /** Height */
+            height?: number | null;
+        };
         /**
          * DynamicObject
          * @description Динамический ответ (форма зависит от данных/типа серии): главы,
@@ -2186,6 +2372,33 @@ export interface components {
             reset: number;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * Figures
+         * @description What the stage under way and the end tell: the share, the megabytes, the speed (MB/s, or ×N of ffmpeg), the time
+         *     left; the length the source told; what was got.
+         */
+        Figures: {
+            /** Progress */
+            progress?: number | null;
+            /** Done Mb */
+            done_mb?: number | null;
+            /** Total Mb */
+            total_mb?: number | null;
+            /** Speed */
+            speed?: number | null;
+            /** Speed X */
+            speed_x?: number | null;
+            /** Eta */
+            eta?: number | null;
+            /** Source Seconds */
+            source_seconds?: number | null;
+            /** Got Seconds */
+            got_seconds?: number | null;
+            /** Got Height */
+            got_height?: number | null;
+            /** Size Mb */
+            size_mb?: number | null;
         };
         /**
          * GroupQueue
@@ -3269,6 +3482,25 @@ export interface components {
             trackers?: components["schemas"]["TrackerMirrors"][];
             /** Readers */
             readers?: components["schemas"]["ParsedDomains"][];
+        };
+        /** StageView */
+        StageView: {
+            /**
+             * Name
+             * @enum {string}
+             */
+            name: "queue" | "link" | "download" | "remux" | "check";
+            /**
+             * State
+             * @default pending
+             * @enum {string}
+             */
+            state: "pending" | "active" | "done" | "failed" | "skipped";
+            /**
+             * Seconds
+             * @default 0
+             */
+            seconds: number;
         };
         /**
          * SyncCancelled
@@ -5825,7 +6057,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["QueueTask"][];
+                    "application/json": components["schemas"]["DownloadCard"][];
                 };
             };
         };
@@ -5846,6 +6078,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    downloads_card_remove_api_downloads_cards__card_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Internal Server Error */

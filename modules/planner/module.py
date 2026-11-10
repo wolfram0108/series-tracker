@@ -76,7 +76,7 @@ from dataclasses import replace
 from core import NO_HANDLER, BaseModule, BusRequestError, compute, storage
 from core import container as mkv
 from core.dump import plain
-from core.contracts import (WORK_WITHDRAWN, CompositionReply, PlanDelete, PlannerView, SeriesSource, SourceType, SubmitOutcome,
+from core.contracts import (WORK_WITHDRAWN, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlannerView, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
 from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
 from core.envelope import Envelope
@@ -156,6 +156,10 @@ class BusSync(SeriesSync):
         # A VK video whose stream request fails may be handed to the downloader itself (as the service always did).
         self.vk_sources = {each.id for each in map(SeriesSource.model_validate, series.get("sources", []))
                            if each.source_type == SourceType.VK_VIDEO}
+        # The marks of the sources as the window «Выход» shows them: the place in the list and the colour of each.
+        ordered = sorted(map(SeriesSource.model_validate, series.get("sources", [])), key=lambda each: (each.position, each.id))
+        self.source_marks = {each.id: (place, each.color) for place, each in enumerate(ordered, start=1)}
+        self.voice_order: dict[int, tuple[str, ...]] = {}  # the order of the voice-overs of each season (choices.groups)
 
     async def plan_of(self, inputs):
         """The plan of the sync; the first one of it is the plan the window shows while the sync runs."""
@@ -279,6 +283,21 @@ class BusSync(SeriesSync):
             name = f"{name} {key.split(':')[-1]}"
         return name + ".mp4"
 
+    def _telemetry(self, op, row, cap: int | None) -> dict:
+        """What a download is for and which variant it takes (core/contracts/downloads.py): every variant the plan takes
+        for one need is one card of the queue, in the marks of the window «Выход»."""
+        kind = {"download_video": "video", "download_dub": "dub"}.get(op.kind, "picture")
+        episode = label_of(op.slot) if op.slot else f"s{row.season:02d}e{row.start:02d}-e{row.end:02d}"
+        order = self.voice_order.get(row.season, ())
+        group = row.group if kind == "dub" else None
+        need = DownloadNeed(key=f"{self.series['id']}:{episode}:{kind}:{group or ''}", series_id=self.series["id"],
+                            series_name=self.series.get("name") or "", sync_started=self.run_mark, episode=episode,
+                            kind=kind, group=group, voice_number=order.index(group) + 1 if group in order else None, cap=cap)
+        place, color = self.source_marks.get(row.id.source_id, (0, 0))
+        variant = DownloadVariant(source_id=row.id.source_id, source_n=place, source_color=color, place=row.source,
+                                  player=row.player, player_label=row.player_label or row.player, height=row.height or None)
+        return {"need": need.model_dump(mode="json"), "variant": variant.model_dump(mode="json")}
+
     async def _height_cap(self, op) -> int | None:
         """The highest a download may be: a single video is taken whole — the video of the reference, and the timeline a
         cut is laid on, which gives the cut its edges and its sound (stage 14); a voice-over not above 720p (the owner's
@@ -300,7 +319,8 @@ class BusSync(SeriesSync):
         finished = await self.m.fetch(key, {"key": key, "url": row.link, "path": path, "series_id": self.series["id"],
                                             "whole": op.kind == "download_video",
                                             "ytdlp": row.id.source_id in self.vk_sources,
-                                            **({"max_height": cap} if cap else {})})
+                                            **({"max_height": cap} if cap else {}),
+                                            **self._telemetry(op, row, cap)})
         if not finished.get("ok"):
             if finished.get("transient"):
                 self.m.log.warning("сериал %d: загрузка %s не удалась, повторится при следующей синхронизации: %s",
@@ -563,6 +583,7 @@ class PlannerModule(BaseModule):
             await self._recover(series)
             await self._load(series_id, sync)
             online, choices = await self._inputs(series)
+            sync.voice_order = dict(choices.groups)
             sync.containers = {each.name: each for each in assets_against(sync.containers.values(), online)}
             await sync.prepare()
             synced = await sync.sync(online, choices)

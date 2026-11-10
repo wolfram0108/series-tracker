@@ -1,5 +1,9 @@
 import { defineStore } from "pinia"
 import { shallowRef } from "vue"
+import type { components } from "../api/schema"
+
+/** A download as the core keeps it: one need of a plan through every variant it took (core/contracts/downloads.py). */
+export type DownloadCard = components["schemas"]["DownloadCard"]
 
 /** Задача очереди — динамический объект контракта (DynamicObject), поля
  *  зависят от конкретной очереди. */
@@ -33,14 +37,14 @@ export interface PackTask {
 export const useQueuesStore = defineStore("queues", () => {
   const agent = shallowRef<QueueTask[]>([]) // agent_queue_update (у задач есть hash)
   const torrents = shallowRef<QueueTask[]>([]) // torrent_progress_update (мониторинг)
-  const downloads = shallowRef<QueueTask[]>([]) // download_queue_update (yt-dlp)
+  const downloads = shallowRef<DownloadCard[]>([]) // download_queue_update: the cards of the downloads (core/contracts/downloads.py)
   const slicing = shallowRef<QueueTask[]>([]) // slicing_queue_update (ffmpeg)
   const conform = shallowRef<ConformPicture | null>(null) // conform_queue_update (alignment daemon)
   const pack = shallowRef<PackTask[]>([]) // pack_queue_update (the containers of the episodes)
 
   const setAgent = (t: QueueTask[]) => (agent.value = t)
   const setTorrents = (t: QueueTask[]) => (torrents.value = t)
-  const setDownloads = (t: QueueTask[]) => (downloads.value = t)
+  const setDownloads = (t: DownloadCard[]) => (downloads.value = t)
   const setSlicing = (t: QueueTask[]) => (slicing.value = t)
   const setConform = (p: ConformPicture) => (conform.value = p)
   const setPack = (t: PackTask[]) => (pack.value = t)

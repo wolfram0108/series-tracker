@@ -26,7 +26,7 @@ from typing import Awaitable, Callable
 from urllib.parse import urlsplit
 
 from core import storage
-from core.ffprobe import duration_of, readable_length, video_gaps
+from core.ffprobe import duration_of, readable_length
 from core.proc import LOST, REAP_TIMEOUT_S, exited, program, run_capture, spawn, stop
 from core.retry import UNTIMED, Budget, retrying
 
@@ -43,8 +43,8 @@ RECONNECT_ARGS = ["-reconnect", "1", "-reconnect_streamed", "1",
 # A refused segment is asked for again by the HLS demuxer (by default it skips it); one still refused after these looks ends the
 # stream there and ffmpeg exits 0 with a file that stops short. The count is that of the looks the CDN gets elsewhere here.
 SEGMENT_RETRIES = 3
-# A pause between two frames longer than this is a piece of the video the download lost, not the pace of the picture; a file
-# shorter than the stream announces by more than this lacks a piece the same way (the service refuses a voice-over short of one).
+# A file shorter than the stream announces by more than this lacks a piece (the service refuses a voice-over short of one);
+# a frame or an audio packet less is the end of a whole file.
 HOLE_S = 1.0
 # ffmpeg prints this line at every refusal of a segment, also of one the next look took: it explains an incomplete file and
 # does not make one, which is judged by what the file holds.
@@ -401,13 +401,11 @@ async def download(video_url: str, full_output_path: str,
                    headers: dict | None = None,
                    threads: int = 6,
                    progressive: bool = False,
-                   whole_video: bool = False,
                    max_height: int | None = None) -> tuple[bool, str]:
     """Two-phase video download. Supports parts of a ready file, direct ffmpeg copy and yt-dlp.
 
-    `whole_video` asks for a video with no hole: the file is a file of the library, which stays as it was fetched. A voice-over
-    is not asked for the pause check (its picture only guides the service), but a stream copy short of the announced length
-    fails: the service refused each voice-over short of segments (1 % of frames matched) and took each whole one.
+    A download that says it is done is taken only at the length its source announced: a stream copy short of it fails (the
+    service refused each voice-over short of segments and took each whole one).
 
     `progressive` marks one ready file address: it is asked for in parts at once, and by one stream when the server
     cannot serve parts. `max_height` caps a page the downloader reads itself (a resolved stream is one file already).
@@ -417,10 +415,10 @@ async def download(video_url: str, full_output_path: str,
     try:
         with storage.hold(full_output_path):
             announced = await _announced_length(video_url, headers, progressive)
+            await on_progress({"phase": "link", "source_seconds": announced or None})
             done = await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive,
                                          announced=announced, max_height=max_height)
-            done = await _as_long_as_announced(done, full_output_path, announced)
-            return await _whole_or_discarded(done, full_output_path) if whole_video else done
+            return await _as_long_as_announced(done, full_output_path, announced, on_progress)
     except storage.StorageBusy:  # an operation on this name has not ended: a file written now could be lost
         return False, "путь занят незавершённой файловой операцией (timeout)"
 
@@ -443,13 +441,18 @@ async def _announced_length(video_url: str, headers: dict | None, progressive: b
     return await _probe_duration(video_url)
 
 
-async def _as_long_as_announced(done: tuple[bool, str], path: str, announced: float) -> tuple[bool, str]:
+async def _as_long_as_announced(done: tuple[bool, str], path: str, announced: float,
+                                on_progress: ProgressCb | None = None) -> tuple[bool, str]:
     """A download that says it is done is taken only at the length its source announced: a program that stopped early
     (a killed run continued, a playlist cut short) still says it is done. A file shorter than that is not kept; a length
     the source does not state proves nothing, so the file is kept and the download is not finished."""
     if not done[0]:
         return done
+    if on_progress is not None:
+        await on_progress({"phase": "check"})
     got = await _local_duration(path)
+    if on_progress is not None:
+        await on_progress({"phase": "check", "got_seconds": got})
     if got <= 0:
         await storage.discard(path)
         return False, "обрыв: скачанный файл не читается — неполная загрузка"
@@ -459,22 +462,6 @@ async def _as_long_as_announced(done: tuple[bool, str], path: str, announced: fl
         await storage.discard(path)
         return False, f"обрыв: скачано {got:.0f} с из ожидаемых ~{announced:.0f} с — неполная загрузка"
     return done
-
-
-async def _whole_or_discarded(done: tuple[bool, str], path: str) -> tuple[bool, str]:
-    """A download that says it is done is checked for pieces it lost. A file with a hole is not kept; a look that could not
-    be made proves nothing, so the file is kept and the download is not finished. Both are failures the queue tries again."""
-    if not done[0]:
-        return done
-    seen = await video_gaps(path, longer_than=HOLE_S)
-    if not seen.checked:
-        return False, f"обрыв: проверка целостности видео не выполнена ({seen.reason}) — загрузка повторится"
-    if not seen.holes:
-        return done
-    await storage.discard(path)
-    lost = sum(length for _, length in seen.holes)
-    return False, (f"обрыв: в видео нет кадров {lost:.0f} с (кусков {len(seen.holes)}, первый на {seen.holes[0][0]:.0f}-й "
-                   "секунде) — неполная загрузка")
 
 
 async def _download_ranged_file(video_url: str, headers: dict, full_output_path: str, on_progress: ProgressCb,
@@ -503,22 +490,28 @@ async def _download_owned(video_url: str, full_output_path: str, on_progress: Pr
         return True, "файл уже существует"
 
     if progressive:
+        await on_progress({"method": "ranged"})
         done = await _download_ranged_file(video_url, headers or {}, full_output_path, on_progress, threads)
-        return done if done is not None else await _download_direct_ffmpeg(video_url, headers or {}, full_output_path,
-                                                                           on_progress, announced)
+        if done is not None:
+            return done
+        await on_progress({"method": "ffmpeg"})
+        return await _download_direct_ffmpeg(video_url, headers or {}, full_output_path, on_progress, announced)
 
     # A resolved stream carries the headers its player asked for; a bare mp4 link is read as it is.
     if _is_stream(video_url, headers, progressive):
+        await on_progress({"method": "ffmpeg"})
         return await _download_direct_ffmpeg(video_url, headers or {}, full_output_path, on_progress, announced)
 
     # длительность для процента remux — из yt-dlp (метаданные источника),
     # НЕ из промежуточного TS (находка 52)
     duration = announced if announced is not None else await _probe_duration(video_url)
+    await on_progress({"method": "ytdlp_hls"})
     raw = await _phase_download(video_url, full_output_path, on_progress,
                                 threads, capped(HLS_FORMAT, max_height))
     if not isinstance(raw, str) and not _unavailable_error(raw[1]):
         # VK HLS fragments are fragile; progressive/DASH retry is reliable.
         await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
+        await on_progress({"method": "ytdlp_dash"})
         raw = await _phase_download(video_url, full_output_path, on_progress,
                                     threads, capped(DASH_FALLBACK_FORMAT, max_height))
     if not isinstance(raw, str):
