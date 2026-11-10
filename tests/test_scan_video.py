@@ -138,6 +138,15 @@ async def test_a_synchronization_waits_for_the_verdict_of_a_page_that_is_being_r
     assert result["sources"] == [{"source_id": rig.source_ids[0], "url": URL1, "state": "ready", "reason": None}]
 
 
+async def test_the_stop_of_a_series_stops_a_read_of_its_page_that_no_synchronization_waits_for(rig):
+    """A read taken up again at the start of the process belongs to no pass: «Остановить» of the series stops it too."""
+    rig.world.pages[URL1] = Page(TableState.READING, held=True)
+    stopped = await rig.probe.request("scan.run.cancel", {"series_id": rig.series_id}, timeout=STUCK_S)
+    assert stopped == {"cancelled": True} and f"table.cancel {URL1}" in rig.world.order
+    again = await rig.probe.request("scan.run.cancel", {"series_id": rig.series_id}, timeout=STUCK_S)
+    assert again == {"cancelled": False}
+
+
 async def test_a_synchronization_stopped_while_its_page_is_read_stops_the_read_and_ends_with_nothing_done(rig):
     """The user stops the sync while the pass waits for the read of its page: the pass stops, the read of the page is
     stopped too, the planner is told to stop, the run closes, and no command is left to take the sync up again."""

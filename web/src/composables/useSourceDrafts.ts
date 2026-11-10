@@ -5,7 +5,7 @@ import {
   type LayoutRow, type PreviewReply, type SourceDraft, type SourceItem, type SourceSummary, type SourceType,
 } from "../lib/sources"
 import { useSourceTablesStore, type PageStatus } from "../stores/sourceTables"
-import { previewAddress, readPageNow } from "./sourceCalls"
+import { previewAddress, readPageNow, stopReading } from "./sourceCalls"
 import { typeAddress } from "./sourceAddress"
 import { useSSE } from "./useSSE"
 
@@ -167,6 +167,15 @@ export function useSourceDrafts() {
     }
   }
 
+  /** The read of the page of a draft going now is stopped; its end comes as an event. */
+  async function stop(key: string | number): Promise<void> {
+    const draft = find(key)
+    if (!draft) return
+    error.value = ""
+    const answer = await stopReading(draft.canonical || draft.url)
+    if (!answer.ok) error.value = answer.text
+  }
+
   function reset(): void {
     drafts.value = []
     error.value = ""
@@ -178,5 +187,5 @@ export function useSourceDrafts() {
   /** The names of the release by the first source whose page gave any. */
   const names = computed(() => drafts.value.find((draft) => draft.names.length)?.names ?? [])
 
-  return { items, bodies, failed, names, error, busy, add, remove, change, reread, reset }
+  return { items, bodies, failed, names, error, busy, add, remove, change, reread, stop, reset }
 }

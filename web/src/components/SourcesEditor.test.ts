@@ -105,12 +105,16 @@ describe("SourcesEditor", () => {
     expect(w.emitted("remove")?.[0]).toEqual([7])
   })
 
-  it("asks to read a source again by its id, and not while it is being read", async () => {
+  it("asks to read a source again by its id, and to stop it while it is being read", async () => {
     const w = mountEditor()
     await w.find("button.source-reread").trigger("click")
     expect(w.emitted("reread")?.[0]).toEqual([7])
+    expect(w.find("button.source-stop").exists()).toBe(false)
     const reading = itemOfSource(stored(), summary, { state: "reading", progress: null, reason: null, readAt: null })
-    expect(mountEditor([reading]).find("button.source-reread").attributes("disabled")).toBeDefined()
+    const busy = mountEditor([reading])
+    expect(busy.find("button.source-reread").exists()).toBe(false)
+    await busy.find("button.source-stop").trigger("click")
+    expect(busy.emitted("stop")?.[0]).toEqual([7])
   })
 
   it("shows the progress of a read and the words of a failure", () => {

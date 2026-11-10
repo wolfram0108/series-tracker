@@ -60,7 +60,7 @@ const showValidation = ref(false)
 // Sources of a video series pile up here until "Add"; a torrent series has the one address of the field above.
 const {
   items: sourceItems, bodies: sourceBodies, failed: sourcesFailed, names: sourceNames, error: sourcesError, busy: sourcesBusy,
-  add: addDraft, remove: removeDraft, change: changeDraft, reread: rereadDraft,
+  add: addDraft, remove: removeDraft, change: changeDraft, reread: rereadDraft, stop: stopDraft,
 } = useSourceDrafts()
 // The names the page of a source gives fill the fields the user left empty, as the names of a tracker page do.
 watch(sourceNames, (names) => {
@@ -614,7 +614,7 @@ onBeforeUnmount(() => {
           <SourcesEditor
             :items="sourceItems" :profiles="profiles" :error="sourcesError" :busy="sourcesBusy" :adder="addSource"
             :names="seriesNames"
-            @remove="removeDraft" @change="changeDraft" @reread="rereadDraft"
+            @remove="removeDraft" @change="changeDraft" @reread="rereadDraft" @stop="stopDraft"
           />
         </div>
       </div>

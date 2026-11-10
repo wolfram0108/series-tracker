@@ -507,6 +507,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sources/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Read
+         * @description Stop the read of the page going now (the user stopped it on the card of the source): it ends failed, the last
+         *     table serves, and it is not begun again at the start.
+         */
+        post: operations["cancel_read_api_sources_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/parser-profiles/test": {
         parameters: {
             query?: never;
@@ -3320,6 +3341,21 @@ export interface components {
             markup_follows: boolean;
         };
         /**
+         * ReadCancelled
+         * @description Чтение страницы остановлено: оно кончается неудачей «чтение остановлено», служит прежняя таблица; false — оно не шло.
+         */
+        ReadCancelled: {
+            /** Success */
+            success: boolean;
+            /**
+             * Cancelled
+             * @default false
+             */
+            cancelled: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * Reason
          * @description Why a voice-over is in its state: a code and the facts that fill its text in the interface.
          */
@@ -5500,6 +5536,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    cancel_read_api_sources_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TableReadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadCancelled"];
                 };
             };
             /** @description Bad Request */

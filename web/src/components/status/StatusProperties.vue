@@ -388,7 +388,7 @@ onMounted(() => {
         <SourcesEditor
           :items="sources.items.value" :profiles="profiles" :error="sources.error.value || sources.layoutFailure.value" :busy="sources.busy.value || seriesBusy"
           :editable="isVideo" :adder="sources.add" :names="seriesNames" :load-names="tmdbOriginal"
-          @remove="sources.remove" @change="sources.change" @reread="sources.reread"
+          @remove="sources.remove" @change="sources.change" @reread="sources.reread" @stop="sources.stop"
         />
       </div>
     </div>

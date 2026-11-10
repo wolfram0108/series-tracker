@@ -451,8 +451,8 @@ class ScanModule(BaseModule):
             self._running.discard(series_id)
 
     async def on_run_cancel(self, env: Envelope) -> dict:
-        """The user stops the sync of a series: the pass of the scan (the reads of its pages stop too, failed, and are
-        not begun again at the start), then every work of its run (planner.sync.cancel: downloads, jobs of the service,
+        """The user stops the sync of a series: the pass of the scan, the reads of its pages (failed, and not begun again
+        at the start; a read the start took up again stops too, though no pass waits for it), then every work of its run (planner.sync.cancel: downloads, jobs of the service,
         the build). The run closes as every run closes, and nothing of the stopped sync is applied."""
         series_id = int(env.payload["series_id"])
         stopped = False
@@ -460,15 +460,18 @@ class ScanModule(BaseModule):
         try:
             passing = self._passes.get(series_id)
             if passing is not None and not passing.done():
-                series = await self.request("catalog.series.get", {"series_id": series_id})
                 passing.cancel()
                 await asyncio.wait({passing})
-                for source in _sources_of(series):
-                    try:
-                        await self.request("sources.table.cancel", {"url": source.url})
-                    except (BusRequestError, asyncio.TimeoutError) as exc:
-                        self.log.warning("сериал %d: чтение %s не остановлено: %s", series_id, source.url, exc)
                 stopped = True
+            # A read of a page of the series stops whether a pass waits for it or not: one taken up again at the start
+            # of the process belongs to no pass, and the button stops it all the same.
+            series = await self.request("catalog.series.get", {"series_id": series_id})
+            for source in _sources_of(series):
+                try:
+                    reply = await self.request("sources.table.cancel", {"url": source.url})
+                    stopped = bool((reply or {}).get("cancelled")) or stopped
+                except (BusRequestError, asyncio.TimeoutError) as exc:
+                    self.log.warning("сериал %d: чтение %s не остановлено: %s", series_id, source.url, exc)
             try:
                 reply = await self.request("planner.sync.cancel", {"series_id": series_id})
                 stopped = bool(reply.get("cancelled")) or stopped

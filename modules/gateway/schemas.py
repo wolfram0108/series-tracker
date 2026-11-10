@@ -33,6 +33,12 @@ class OkResponse(ApiModel):
     message: str | None = None
 
 
+class ReadCancelled(ApiModel):
+    """Чтение страницы остановлено: оно кончается неудачей «чтение остановлено», служит прежняя таблица; false — оно не шло."""
+    success: bool
+    cancelled: bool = False
+
+
 class SyncCancelled(ApiModel):
     """Синхронизация сериала остановлена: всё, что она делала, прервано, ничего не применено; false — она не шла."""
     success: bool

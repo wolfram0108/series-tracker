@@ -128,7 +128,13 @@ class World(BaseModule):
         return {"accepted": True}
 
     async def on_table_cancel(self, env) -> dict:
-        self.order.append(f"table.cancel {env.payload['url']}")
+        """A read of the page that goes stops, failed; with none going there is nothing to stop."""
+        url = env.payload["url"]
+        self.order.append(f"table.cancel {url}")
+        page = self.pages.get(url)
+        if page is None or page.state is not TableState.READING:
+            return {"cancelled": False}
+        self.pages[url] = Page(TableState.FAILED, held=page.held, why='{"code":"read_cancelled"}')
         return {"cancelled": True}
 
     async def on_planner_cancel(self, env) -> dict:

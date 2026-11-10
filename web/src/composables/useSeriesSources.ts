@@ -9,7 +9,7 @@ import { useCompositionStore } from "../stores/composition"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import { useSSE } from "./useSSE"
 import {
-  changeSource, createSource, fetchLayout, fetchSources, readPageNow, removeSource, resolveAddress,
+  changeSource, createSource, fetchLayout, fetchSources, readPageNow, removeSource, resolveAddress, stopReading,
 } from "./sourceCalls"
 import { typeAddress } from "./sourceAddress"
 import type { DraftPatch } from "./useSourceDrafts"
@@ -128,6 +128,15 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (!answer.ok) error.value = answer.text
   }
 
+  /** The read of the page of a source going now is stopped; its end comes as an event. */
+  async function stop(id: string | number): Promise<void> {
+    const source = sources.value.find((each) => each.id === Number(id))
+    if (!source) return
+    error.value = ""
+    const answer = await stopReading(source.url)
+    if (!answer.ok) error.value = answer.text
+  }
+
   onMounted(() => void load())
   // The layout of the series changed (a summary of a source too): the sources are read again.
   watch(() => composition.layoutChanged[seriesId]?.rev, () => void load())
@@ -138,5 +147,5 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (up) void load()
   })
 
-  return { items, error, layoutFailure, busy, add, remove, change, reread, reload: load }
+  return { items, error, layoutFailure, busy, add, remove, change, reread, stop, reload: load }
 }

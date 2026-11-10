@@ -60,6 +60,11 @@ export function readPageNow(url: string): Promise<Answer<unknown>> {
   return call(() => api.POST("/api/sources/read", { body: { url } }))
 }
 
+/** Stops the read of the page going now: it ends failed, the last table serves; the end comes as an event. */
+export function stopReading(url: string): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/sources/cancel", { body: { url } }))
+}
+
 export async function fetchProfiles(): Promise<{ id: number; name: string }[]> {
   const { data } = await api.GET("/api/parser-profiles")
   return Array.isArray(data) ? (data as { id: number; name: string }[]) : []

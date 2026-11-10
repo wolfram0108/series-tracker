@@ -649,6 +649,7 @@ export const ru = {
   "sources.change.failed": "Источник не изменён",
   "sources.remove": "Удалить",
   "sources.reread": "Перечитать",
+  "sources.stopRead": "Остановить",
   "sources.remove.failed": "Источник не удалён",
   "sources.address.copy": "Скопировать",
   "sources.address.copied": "Ссылка в буфере",

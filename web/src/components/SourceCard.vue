@@ -20,7 +20,9 @@ import type { DraftPatch } from "../composables/useSourceDrafts"
 // The numbers of episodes exist only as the constructor's answer; a group is made in the settings, nowhere else.
 // `place` is the place of the source in the list of its series: with its colour, the mark the output tab shows it by.
 const props = defineProps<{ item: SourceItem; profiles: { id: number; name: string }[]; busy?: boolean; place?: number }>()
-const emit = defineEmits<{ (e: "change", patch: DraftPatch): void; (e: "remove"): void; (e: "reread"): void }>()
+const emit = defineEmits<{
+  (e: "change", patch: DraftPatch): void; (e: "remove"): void; (e: "reread"): void; (e: "stop"): void
+}>()
 const toast = useToast()
 
 const isTorrent = computed(() => props.item.sourceType === "torrent")
@@ -84,7 +86,10 @@ async function copyAddress(): Promise<void> {
         </span>
         <span v-if="view.players.length" class="muted">{{ sourceCaption(view.players) }}</span>
         <span class="source-actions">
-          <button type="button" class="action-btn btn-scan source-reread" :disabled="busy || view.state === 'reading'" @click="emit('reread')">
+          <button v-if="view.state === 'reading'" type="button" class="action-btn btn-scan source-stop" @click="emit('stop')">
+            <i class="pi pi-stop-circle" />{{ t("sources.stopRead") }}
+          </button>
+          <button v-else type="button" class="action-btn btn-scan source-reread" :disabled="busy" @click="emit('reread')">
             <i class="pi pi-refresh" />{{ t("sources.reread") }}
           </button>
           <button type="button" class="action-btn btn-delete source-remove" :disabled="busy" @click="emit('remove')">

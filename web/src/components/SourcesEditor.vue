@@ -32,6 +32,7 @@ const emit = defineEmits<{
   (e: "remove", id: string | number): void
   (e: "change", id: string | number, patch: DraftPatch): void
   (e: "reread", id: string | number): void
+  (e: "stop", id: string | number): void
 }>()
 
 // How a source is added: by the address of a page, or by a card the search of a video application found.
@@ -122,7 +123,7 @@ function clear(): void {
     <SourceCard
       v-for="(item, index) in items" :key="item.id" :item="item" :profiles="profiles" :busy="busy" :place="index + 1"
       @change="emit('change', item.id, $event)" @remove="editable && emit('remove', item.id)"
-      @reread="emit('reread', item.id)"
+      @reread="emit('reread', item.id)" @stop="emit('stop', item.id)"
     />
     <div v-if="editable" class="stack">
       <div class="st-tabs st-tabs-wrap source-mode" role="tablist" :aria-label="t('sources.mode.label')">

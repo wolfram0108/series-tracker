@@ -202,6 +202,13 @@ async def test_a_page_is_read_now_by_one_command_to_sources(tmp_path):
     assert [env.payload for env in sent] == [{"url": "https://x.test/p"}]
 
 
+
+async def test_a_read_going_now_is_stopped_by_one_request_to_sources_and_the_answer_says_whether_one_went(tmp_path):
+    async with serving(tmp_path, {"sources.table.cancel": {"cancelled": True}}) as (client, owners, _, _):
+        response = await client.post("/api/sources/cancel", json={"url": "https://x.test/p"})
+    assert response.json() == {"success": True, "cancelled": True}
+    assert owners.asked("sources.table.cancel") == [{"url": "https://x.test/p"}]
+
 # --- the test of rules ---------------------------------------------------------------------------
 
 
