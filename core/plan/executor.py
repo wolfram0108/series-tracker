@@ -92,6 +92,20 @@ def problems_of(made: Plan, passing: set[str], reasons: dict[str, str]) -> tuple
     return tuple(found)
 
 
+def outstanding(found: list[tuple], made: Plan, applied: list) -> tuple[tuple, ...]:
+    """What the outcome of a sync still lacks: a step that failed for the moment is no problem once another way gave what
+    it was for — its episode was applied, holding the voice-over the step was for (the next source of 3.7)."""
+    done = {slot for slots in applied for slot in slots}
+    kept = []
+    for slot, kind, voice, reason in found:
+        goal = made.goal(slot) if slot is not None else None
+        given = goal is not None and slot in done and (
+            voice is None or voice == goal.video.snapshot.group or voice in {way.voice for way in goal.tracks})
+        if not given:
+            kept.append((slot, kind, voice, reason))
+    return tuple(kept)
+
+
 def failures(made: Plan, results: dict[str, Made], failed: set[str], passing: set[str]) -> list[tuple]:
     """The attempts that failed in a run, as the planner reads them, but those named in `passing`; a step that failed
     because a step before it did is no attempt of its own."""
@@ -274,7 +288,7 @@ class SeriesSync:
             applied.append(group.slots)
         await self.commit(before)
         return Synced(inputs, tuple(sorted(before.values(), key=lambda each: each.name)), made, tuple(failed),
-                      tuple(applied), tuple(replanned), tuple(problems))
+                      tuple(applied), tuple(replanned), outstanding(problems, made, applied))
 
     async def run(self, made: Plan, done: dict[str, tuple[object, Made]] | None = None) -> tuple[dict[str, Made], set[str]]:
         """The graph: a step starts on the signal that every step before it ended, so independent work runs at once.

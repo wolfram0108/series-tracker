@@ -51,6 +51,8 @@ class Step:
     # The downloads that failed, as the final plan of the sync knew them, and the rows passed over by replanning.
     failed_rows: frozenset[tuple] = frozenset()
     replanned: tuple[tuple, ...] = ()
+    # What the outcome of the sync still lacks (the window and the card of the series show it as an error).
+    problems: tuple[tuple, ...] = ()
 
 
 @dataclass
@@ -159,7 +161,7 @@ class World(SeriesSync):
         self.choose(delete=self.commands)
         step = Step(title, inputs.online, synced.before, synced.plan, tuple(sorted(synced.failed)), synced.applied,
                     tuple(sorted(self.containers.values(), key=lambda each: each.name)), inputs.choices, self.choices,
-                    inputs.failed, synced.replanned)
+                    inputs.failed, synced.replanned, synced.problems)
         self.history.append(step)
         return step
 

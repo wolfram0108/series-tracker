@@ -375,6 +375,26 @@ def test_a_download_that_failed_for_the_moment_holds_nothing_back_and_comes_next
     assert [track.group for track in container_of(world, 1).tracks] == ["G2"]
 
 
+def test_a_download_that_failed_for_the_moment_and_was_made_by_the_next_source_is_no_problem():
+    """3.7: the first row of a voice-over does not answer this time and the next source gives it: the episode is applied
+    with that voice-over, and the outcome owes nothing — the series shows no error. With no next source the voice-over is
+    left out and the outcome says so."""
+    world = World()
+    episode_with_dubs(world, 1, 0)
+    world.put(3, "g1cvh", 1, group="G1", player="cvh")
+    world.put(2, "g1kodik", 1, group="G1", player="kodik")
+    world.transient = {RowId(3, "g1cvh", "g1cvh")}
+    step = world.sync("первая строка не ответила, следующая есть")
+    world.check(step)
+    assert [track.dub.row_key for track in container_of(world, 1).tracks] == ["g1kodik"]
+    assert world.history[-1].problems == ()
+    world.put(3, "g2cvh", 1, group="G2", player="cvh")
+    world.transient = {RowId(3, "g2cvh", "g2cvh")}
+    step = world.sync("строка не ответила, другой нет")
+    world.check(step)
+    assert [(problem[1], problem[2]) for problem in step.problems] == [("download_dub", "G2")]
+
+
 def test_delete_of_a_track_takes_it_away_and_an_online_one_comes_back():
     """Н-3: «Удалить» does not switch off: the row is online and comes back by download."""
     world = World()
