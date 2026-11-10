@@ -3,7 +3,9 @@
 The API of the site gives the title (`/api/anime/<address>`: its number and names) and every video of it
 (`/api/anime/<number>/videos`): one element for each episode of each voice-over of each player, with the iframe that
 plays it. A player that lists a whole title (Kodik, CDN VideoHub) is read through its own list, as on any page that
-embeds it; a player of one video an iframe (VK, Alloha) gives a row for each element. The site wraps two players in pages
+embeds it; a player of one video an iframe (VK, Alloha) gives a row for each element. The rows of a list of Kodik are the
+episodes the site lists for that list: the list of a voice-over holds more than the site shows of it (an episode Kodik
+borrowed from another voice-over), and the table is what the site shows. The site wraps two players in pages
 of its own: CDN VideoHub is its widget by the number of the title at MyAnimeList (with the publisher of the site), VK is a
 video by its number. A player no player here knows is not read, and the log says so. Nothing here numbers an episode.
 """
@@ -21,11 +23,12 @@ from core.reasons import reason
 
 from ...players.catalog import Entry
 from ...players.cdnvideohub import CdnVideoHubPlayer
+from ...players.kodik import KodikPlayer
 from ...players.contract import PlayerRef
 from ...players.registry import PlayerRegistry
 from ...players.vk import VkPlayer
 from .. import PHASE_RELEASE, ReadContext, SiteError, TableDraft
-from ..catalogs import Listed, read_page, table_rows
+from ..catalogs import Listed, catalog_part, read_page, table_rows
 from ..recent import last_of_each
 
 logger = logging.getLogger("sources")
@@ -114,6 +117,8 @@ class YummyAniSite:
 
         catalogs: list[PlayerRef] = []
         voices: dict[PlayerRef, list[str]] = {}
+        # The episodes the site lists of each list of Kodik (the part of the catalog), by the number the site gives.
+        episodes: dict[str, set[str]] = {}
         entries: dict[str, list[Entry]] = {}
         unknown: Counter = Counter()
         for item in listed:
@@ -127,6 +132,8 @@ class YummyAniSite:
             if player.series_scope:
                 catalogs.append(ref)
                 voices.setdefault(ref, []).append(voice_of(data.get("dubbing", "")).name)
+                if ref.name == KodikPlayer.name:
+                    episodes.setdefault(catalog_part(player, ref), set()).add(str(item.get("number") or "").strip())
                 continue
             number_text = str(item.get("number") or "").strip()
             entries.setdefault(ref.name, []).append(Entry(
@@ -139,7 +146,11 @@ class YummyAniSite:
             raise SiteError(reason("no_players_empty", site=SITE_NAME))
         own = [Listed(self.players.get(name), url, last_of_each(_once(found), lambda each: (each.voice.name, each.voice.kind), ctx.recent))
                for name, found in entries.items()]
-        body = await table_rows(self.players, [(url, {ref.name: ref}) for ref in catalogs], ctx, own, names=voices)
+        def shown(part: str, entry: Entry) -> bool:
+            return part not in episodes or str(entry.site_fields.get("value", "")) in episodes[part]
+
+        body = await table_rows(self.players, [(url, {ref.name: ref}) for ref in catalogs], ctx, own, names=voices,
+                                shown=shown)
         return TableDraft(names=title_names(title), rows=body.rows, unread=body.unread)
 
     def _ref(self, url: str, iframe: str) -> PlayerRef | None:

@@ -9,7 +9,7 @@ site gives its content) and the rest of the page is read; the core keeps the row
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 from core.contracts import TableRow, UnreadPart
 from core.reasons import reason
@@ -88,11 +88,13 @@ def catalog_part(player, ref: PlayerRef) -> str:
 
 
 async def read_catalogs(players: PlayerRegistry, pages: Iterable[tuple[str, Mapping[str, PlayerRef]]],
-                        ctx: ReadContext, names: Mapping[PlayerRef, Sequence[str]] | None = None) -> Catalogs:
+                        ctx: ReadContext, names: Mapping[PlayerRef, Sequence[str]] | None = None,
+                        shown: Callable[[str, Entry], bool] | None = None) -> Catalogs:
     """The catalog of each source the pages show; `pages` are (address, refs by player name), `names` what the site calls
     the content of a ref (its voice-overs), for a catalog that cannot be read. A player lists a series once: the first
     page that shows a catalog is the one it is read through. Two catalogs of one player may list one video (two lists of a
-    voice-over that overlap): it is one row, of the catalog that listed it first."""
+    voice-over that overlap): it is one row, of the catalog that listed it first. `shown` is the site's own list of what
+    a catalog shows on it (the part of the catalog, an entry): a site that lists its videos itself is read as it lists."""
     chosen: dict[str, tuple[object, PlayerRef, str]] = {}
     named: dict[str, list[str]] = {}
     for page_url, refs in pages:
@@ -115,7 +117,7 @@ async def read_catalogs(players: PlayerRegistry, pages: Iterable[tuple[str, Mapp
                                      names=list(dict.fromkeys(named[part])), reason=exc.reason))
             ctx.progress(PHASE_CATALOG, done, len(chosen))
             continue
-        fresh = [entry for entry in entries if (player.name, entry.key) not in listed]
+        fresh = [entry for entry in entries if (player.name, entry.key) not in listed and (shown is None or shown(part, entry))]
         listed.update((player.name, entry.key) for entry in fresh)
         catalogs.append(Catalog(player, page_url,
                                 last_of_each(fresh, lambda each: (each.voice.name, each.voice.kind, each.group), ctx.recent),
@@ -135,10 +137,11 @@ async def rows_of_catalogs(catalogs: Sequence[Catalog | Listed], ctx: ReadContex
 
 
 async def table_rows(players: PlayerRegistry, pages: Iterable[tuple[str, Mapping[str, PlayerRef]]], ctx: ReadContext,
-                     listed: Sequence[Listed] = (), names: Mapping[PlayerRef, Sequence[str]] | None = None) -> Body:
+                     listed: Sequence[Listed] = (), names: Mapping[PlayerRef, Sequence[str]] | None = None,
+                     shown: Callable[[str, Entry], bool] | None = None) -> Body:
     """The rows of a site: of every catalog its pages show, then of the videos it lists itself; each video asked of its
     player. The catalogs that cannot be read are the unread parts of the page."""
-    catalogs = await read_catalogs(players, pages, ctx, names)
+    catalogs = await read_catalogs(players, pages, ctx, names, shown)
     every: list[Catalog | Listed] = [*catalogs.read, *(each for each in listed if each.entries)]
     asked = AskCount(ctx, sum(len(each.entries) for each in every))
     ctx.progress(PHASE_PLAYERS, 0, asked.total)
