@@ -104,7 +104,8 @@ describe("the search of the video applications in the sources", () => {
     const w = mountEditor()
     await flushPromises()
     expect(w.find(".source-place").text()).toBe(t("sources.apps.cardValue", { app: "半日", card: "219017" }))
-    expect((w.find(".source-app-card input").element as HTMLInputElement).value).toBe("半日 · № 219017")
+    // The field holds the address of the source: the one any field of an address takes.
+    expect((w.find(".source-app-card input").element as HTMLInputElement).value).toBe("app://banri/219017")
     expect(w.find(".source-app-card a").exists()).toBe(false)
   })
 })

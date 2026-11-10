@@ -116,7 +116,7 @@ async function copyAddress(): Promise<void> {
       <StGroup v-else-if="appCard" class="source-app-card">
         <StIcon icon="pi pi-video" />
         <div class="constructor-item item-floating-label">
-          <input :id="`app-card-${item.id}`" class="item-input" :value="where" readonly placeholder=" " />
+          <input :id="`app-card-${item.id}`" class="item-input" :value="item.url" readonly placeholder=" " />
           <label :for="`app-card-${item.id}`">{{ t("sources.apps.card") }}</label>
         </div>
         <div class="constructor-item url-actions">
