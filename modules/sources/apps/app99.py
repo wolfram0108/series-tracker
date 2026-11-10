@@ -175,6 +175,10 @@ class App99Client:
         self._refused(answer, path)
         return answer
 
+    def http(self) -> httpx.AsyncClient:
+        """The client the requests of the application and of its streams go through (the module's)."""
+        return self._http()
+
     # --- what the application answers -------------------------------------------------------------------------
 
     async def system(self) -> dict:

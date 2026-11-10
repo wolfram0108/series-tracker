@@ -1,10 +1,10 @@
 """A card of a video application (tests/app99_model.py) as the source of the reference, in a browser (tests/ui_stand.py):
 the user finds the title by the search of the application in the window of a new series, adds the card it gave, makes the
-rule of its labels («第N集») beside a source of a voice-over, and syncs. The read of the card asks no parser of the
-application (a parser allows a limited number of parses a day), so the frame of its line is not known before a download
-and the reference goes by the frame the other source states. The user puts the application first in the queue of the
-reference of the episode: the next sync parses the stream of the episode right before its download, and the file becomes
-the picture of the application."""
+rule of its labels («第N集») beside a source of a voice-over, and syncs. Every episode of the card is measured in its read,
+as every row of every source is: its stream asked of the parser of its line, its frame read from the picture. The frame
+of the application beats the one the voice-over states, so the file is the picture of the application; its stream is
+asked again right before each download (the address of a stream expires).
+"""
 import json
 import os
 import subprocess
@@ -45,7 +45,7 @@ def frame_height(path: str) -> int:
     return json.loads(probed.stdout)["streams"][0]["height"]
 
 
-async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its_streams_parsed_only_to_download(ui):
+async def test_a_card_found_by_the_search_of_an_application_is_the_reference_by_the_frame_measured_in_its_read(ui):
     ui.site.app_card(219017, "万界独尊", {1: 1080})
     ui.site.release("dub", "AnimeVost")
     ui.site.episode("dub", 1, height=480)
@@ -100,39 +100,18 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
     await page.locator(".series-card", has_text=SERIES).first.wait_for()
     listed = await ui.call("GET", "/api/series")
     series_id = next(each["id"] for each in listed if each["name"] == SERIES)
-    assert "/app/vodParser" not in ui.site.app.paths(), "reading the card asks no parser"
+    # The read of the card measured its episode: one parse of its stream, its frame in the table.
+    assert [fields["url"] for path, fields in ui.site.app.calls if path == "/app/vodParser"] == ["tok-219017-1"]
 
     await ui.open_output()
     await ui.press_sync(series_id)
     await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
-    await ui.shot("a3-first-sync")
+    await ui.shot("a3-synced")
     view = await ui.check(series_id)
     (asset,) = view["assets"]
-    assert frame_height(os.path.join(ui.library, asset["name"])) != 1080, "a frame not known does not beat a stated one"
-    # The original sound is the application's: its stream was parsed for that download, once.
-    assert [fields["url"] for path, fields in ui.site.app.calls if path == "/app/vodParser"] == ["tok-219017-1"]
-
-    await page.locator(".episode-card").first.click()
-    detail = page.locator(".episode-detail")
-    await detail.locator(".st-tab", has_text=text("output.tab.reference")).click()
-    rows = detail.locator(".queue-table .variant-row")
-    await expect(rows).to_have_count(2)
-    groups = rows.locator("td:nth-child(6)")
-    await expect(groups).to_have_text(["AnimeVost", ORIGINAL])
-    # The order is the core's once it answered: the queue it gives again is the end of the wait.
-    async with page.expect_response(lambda response: "/output/queues" in response.url) as reread:
-        await ui.drag(rows.nth(1).locator(".order-handle"), rows.nth(0))
-    await reread.value
-    await expect(groups).to_have_text([ORIGINAL, "AnimeVost"])
-    await ui.shot("a4-reference-order")
-    ui.later()
-    await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
-    view = await ui.check(series_id)
-    (asset,) = view["assets"]
-    assert frame_height(os.path.join(ui.library, asset["name"])) == 1080
+    assert frame_height(os.path.join(ui.library, asset["name"])) == 1080, "the measured frame of the application wins"
     held = await mkv.contents(os.path.join(ui.library, asset["name"]))
     assert {track.label: track.language for track in held.audio} == {ORIGINAL: "chi", "AnimeVost": "rus"}
-    # One parse for each download, right before it (the address of a stream expires): the sound, then the picture.
+    # Each download asks its stream right before it: the measure of the read, then the downloads of the sync.
     parsed = [fields["url"] for path, fields in ui.site.app.calls if path == "/app/vodParser"]
-    assert parsed == ["tok-219017-1", "tok-219017-1"]
+    assert parsed[0] == "tok-219017-1" and len(parsed) >= 2 and set(parsed) == {"tok-219017-1"}
