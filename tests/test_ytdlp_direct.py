@@ -37,6 +37,8 @@ last="${@: -1}"
 case "$last" in
   http*) cat "$FAKE_DIR/remote_duration"; exit 0 ;;
 esac
+# A file that is not there is no file of any length, as the real ffprobe says.
+if [ ! -e "$last" ]; then echo "$last: No such file or directory" >&2; exit 1; fi
 local=$(cat "$FAKE_DIR/local_duration")
 case "$*" in
   *format=format_name,duration,start_time*) printf '{"format": {"duration": "%s", "start_time": "0.000000"}, "streams": [{"index": 0, "codec_type": "video", "start_time": "0.000000", "duration": "%s"}]}\\n' "$local" "$local" ;;
