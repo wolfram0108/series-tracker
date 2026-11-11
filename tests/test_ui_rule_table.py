@@ -146,3 +146,51 @@ async def test_a_season_assigned_by_a_table_and_by_a_rule_is_saved_as_typed_and_
     await expect(page.locator(".rule-card").last.locator(".then-block input.item-input")).to_have_value("9")
     await test_step.click()
     assert await _season_of_the_first_line(page) == ["Сезон: 7", "Серия: 1"]
+
+
+async def test_cells_joined_in_the_table_are_saved_joined_and_give_their_one_value_to_each_row(ui):
+    """«ТО» of two rows joined into one cell: both conditions give its value; the table is read back with the cell joined."""
+    for slug, (voice, height) in VOICES.items():
+        ui.site.release(slug, voice)
+        ui.site.episode(slug, 1, height=height)
+    await ui.first_run()
+    await ui.set_up([voice for voice, _height in VOICES.values()])
+    page = ui.page
+    await ui.settings("Фильтры VK")
+    if not await page.locator("#new-profile-name").is_visible():
+        await page.locator("button.accordion-button").first.click()
+    await page.locator("#new-profile-name").fill(PROFILE)
+    await page.locator("button.btn-add[title='Создать']").click()
+    rules_step = page.get_by_text(text("rules.step.rules", profile=PROFILE))
+    test_step = page.get_by_text(text("rules.step.test"))
+    await rules_step.wait_for()
+    await page.get_by_role("button", name=text("rules.table.add")).click()
+    table = page.locator(".rule-table-card")
+    await table.locator(".rule-name-input").fill("Озвучки")
+    await _pick(page, table.locator(".col-then .item-select"), text("rules.action.assign_voiceover"))
+    for slug in VOICES:
+        await test_step.click()
+        await page.get_by_label(text("rulesTest.field.address")).fill(ui.site.releases[slug].url)
+        await page.get_by_role("button", name=text("rulesTest.fetch.page")).click()
+        await expect(page.locator(".parser-test-textarea")).to_have_value(re.compile(r"V:"), timeout=60_000)
+        await rules_step.click()
+        await table.locator(".template-chip", has_text="V:").click()
+    await expect(table.locator("tbody td.col-then")).to_have_count(2)
+
+    await table.locator("tbody td.col-then").first.dispatch_event("mousedown")
+    await ui.shot("t3-cell-tools")
+    await table.locator("td.col-then .cell-join").click()
+    await expect(table.locator("tbody td.col-then")).to_have_count(1)
+    await expect(table.locator("tbody td.col-then")).to_have_attribute("rowspan", "2")
+    async with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/rules")) as saved, \
+            page.expect_response(lambda r: r.request.method == "GET" and r.url.endswith("/rules")):
+        await table.locator(f"button[title='{text('rules.rule.save')}']").click()
+    assert (await saved.value).ok, "the table with a joined cell was not saved"
+    # Read back from the core: the cell is still one of two rows, with the value of the upper one.
+    await expect(page.locator(".rule-table-card tbody td.col-then")).to_have_attribute("rowspan", "2")
+    await expect(page.locator(".rule-table-card input.table-value")).to_have_value("AnimeVost")
+    await ui.shot("t3-joined-cell")
+    # The page of the second voice-over is still in the test: its line is given the value of the joined cell.
+    await test_step.click()
+    assert await _season_of_the_first_line(page) == ["Сезон: 1", "Тег: AnimeVost"]
+    await expect(page.locator(".card-test-result .fired-rules").first).to_have_text(re.compile("Озвучки · 2"))

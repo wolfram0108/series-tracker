@@ -5,7 +5,9 @@ import ToggleSwitch from "primevue/toggleswitch"
 import StSelect from "../StSelect.vue"
 import { t } from "../../i18n"
 import { normalizeAttachments, type PatternBlock } from "../../lib/patternBlocks"
-import { emptyRow, fieldValues, rowOf, textsOf, type TableRow } from "../../lib/ruleTable"
+import {
+  canJoin, emptyRow, fieldValues, join, joined, rowOf, settle, spanOf, split, textsOf, type Side, type TableRow,
+} from "../../lib/ruleTable"
 import { actionLabel, actionOptions, fieldText, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
 import type { EditableRule } from "./ParserRuleCard.vue"
 import ParserPatternEditor from "./ParserPatternEditor.vue"
@@ -16,7 +18,7 @@ import PatternPalette from "./PatternPalette.vue"
 // the rule. One palette serves the cell being edited; the header of «ЕСЛИ» adds a row for each value of a coded field of
 // the lines of the test that the table does not hold yet.
 type Table = NonNullable<EditableRule["table"]>
-type Cell = { key: number; side: "if" | "then" }
+type Cell = { key: number; side: Side }
 
 const props = defineProps<{
   /** A rule whose `table` is set (the list shows this card only for such a rule). */
@@ -53,8 +55,8 @@ const target = computed<{ blocks: PatternBlock[]; context: "if" | "then" } | nul
   const cell = selected.value
   const row = cell && table.value.rows.find((each) => each.key === cell.key)
   if (!row) return null
-  if (cell.side === "if") return { blocks: row.ifBlocks, context: "if" }
-  return extracts.value ? { blocks: row.thenBlocks, context: "then" } : null
+  if (cell.side === "if") return { blocks: row.if.blocks, context: "if" }
+  return extracts.value ? { blocks: row.then.blocks, context: "then" } : null
 })
 
 const isSelected = (row: TableRow, side: Cell["side"]) => selected.value?.key === row.key && selected.value.side === side
@@ -79,6 +81,24 @@ function addRow(): void {
 function removeRow(at: number): void {
   const [gone] = table.value.rows.splice(at, 1)
   if (gone && selected.value?.key === gone.key) selected.value = null
+  settle(table.value.rows)
+}
+// Joined cells: a cell spans the rows that hold it; it is joined with the one below and split from where it is selected.
+const rowsOfCell = (at: number, side: Side): number => {
+  const [first, end] = spanOf(table.value.rows, at, side)
+  return end - first
+}
+const isJoined = (at: number, side: Side): boolean => joined(table.value.rows, at, side)
+const mayJoin = (at: number, side: Side): boolean => canJoin(table.value.rows, at, side)
+function joinBelow(at: number, side: Side): void {
+  join(table.value.rows, at, side)
+}
+function splitCell(at: number, side: Side): void {
+  split(table.value.rows, at, side)
+}
+function moved(): void {
+  settle(table.value.rows)
+  selected.value = null
 }
 function setAction(value: string): void {
   table.value.action_type = value
@@ -143,7 +163,7 @@ function setAction(value: string): void {
             <th class="col-remove" />
           </tr>
         </thead>
-        <draggable :list="table.rows" item-key="key" tag="tbody" handle=".row-handle" :animation="150">
+        <draggable :list="table.rows" item-key="key" tag="tbody" handle=".row-handle" :animation="150" @end="moved">
           <template #item="{ element: row, index: at }">
             <tr :class="{ 'is-fresh': fresh.has(row.key) }">
               <td class="col-handle row-handle" :title="t('rules.table.drag')">
@@ -152,17 +172,44 @@ function setAction(value: string): void {
                   <circle cx="8" cy="8" r="1.3" /><circle cx="4" cy="12" r="1.3" /><circle cx="8" cy="12" r="1.3" />
                 </svg>
               </td>
-              <td class="col-if" :class="{ 'is-selected': isSelected(row, 'if') }" @mousedown="select(row, 'if')">
-                <ParserPatternEditor :blocks="row.ifBlocks" context="if" :show-palette="false" />
+              <td
+                v-if="!isJoined(at, 'if')" class="col-if" :rowspan="rowsOfCell(at, 'if')"
+                :class="{ 'is-selected': isSelected(row, 'if'), 'is-joined': rowsOfCell(at, 'if') > 1 }" @mousedown="select(row, 'if')"
+              >
+                <ParserPatternEditor :blocks="row.if.blocks" context="if" :show-palette="false" />
+                <div v-if="isSelected(row, 'if')" class="cell-tools">
+                  <button
+                    type="button" class="cell-tool cell-join" :disabled="!mayJoin(at, 'if')"
+                    :title="t('rules.table.join')" :aria-label="t('rules.table.join')" @click.stop="joinBelow(at, 'if')"
+                  ><i class="pi pi-arrow-down" /></button>
+                  <button
+                    v-if="rowsOfCell(at, 'if') > 1" type="button" class="cell-tool cell-split"
+                    :title="t('rules.table.split')" :aria-label="t('rules.table.split')" @click.stop="splitCell(at, 'if')"
+                  ><i class="pi pi-arrows-v" /></button>
+                </div>
               </td>
-              <td class="col-then" :class="{ 'is-selected': extracts && isSelected(row, 'then') }" @mousedown="select(row, 'then')">
-                <ParserPatternEditor v-if="extracts" :blocks="row.thenBlocks" context="then" :show-palette="false" />
+              <td
+                v-if="!isJoined(at, 'then')" class="col-then" :rowspan="rowsOfCell(at, 'then')"
+                :class="{ 'is-selected': extracts && isSelected(row, 'then'), 'is-joined': rowsOfCell(at, 'then') > 1 }"
+                @mousedown="select(row, 'then')"
+              >
+                <ParserPatternEditor v-if="extracts" :blocks="row.then.blocks" context="then" :show-palette="false" />
                 <input
-                  v-else-if="assigns" :value="row.thenValue" class="table-value" :type="isNumberAssign(table.action_type) ? 'number' : 'text'"
-                  @input="row.thenValue = fieldText($event)"
+                  v-else-if="assigns" :value="row.then.value" class="table-value" :type="isNumberAssign(table.action_type) ? 'number' : 'text'"
                   :placeholder="table.action_type === 'assign_range' ? t('rules.action.assign_range.hint') : t('rules.action.valuePlaceholder')"
                   :aria-label="actionLabel(table.action_type)"
+                  @input="row.then.value = fieldText($event)"
                 />
+                <div v-if="isSelected(row, 'then')" class="cell-tools">
+                  <button
+                    type="button" class="cell-tool cell-join" :disabled="!mayJoin(at, 'then')"
+                    :title="t('rules.table.join')" :aria-label="t('rules.table.join')" @click.stop="joinBelow(at, 'then')"
+                  ><i class="pi pi-arrow-down" /></button>
+                  <button
+                    v-if="rowsOfCell(at, 'then') > 1" type="button" class="cell-tool cell-split"
+                    :title="t('rules.table.split')" :aria-label="t('rules.table.split')" @click.stop="splitCell(at, 'then')"
+                  ><i class="pi pi-arrows-v" /></button>
+                </div>
               </td>
               <td class="col-remove">
                 <button type="button" class="row-remove" :title="t('rules.table.removeRow')" :aria-label="t('rules.table.removeRow')" @click="removeRow(at)">
@@ -231,6 +278,16 @@ function setAction(value: string): void {
 
 .rule-table tr.is-fresh td { background: #f1f7ff; }
 .rule-table td.is-selected { box-shadow: inset 0 0 0 2px #0d6efd; }
+/* A cell joined of several rows stands at the top of its rows. */
+.rule-table td.is-joined { vertical-align: top; background: #fcfcfd; }
+/* The tools stand under what the cell holds, never over it. */
+.cell-tools { display: flex; justify-content: flex-end; gap: 0.25rem; margin-top: 0.375rem; }
+.cell-tool {
+  display: inline-flex; align-items: center; justify-content: center; inline-size: 1.5rem; block-size: 1.5rem; padding: 0;
+  border: 1px solid #ced4da; border-radius: 4px; background: #fff; color: #0d6efd; font-size: 0.75rem; cursor: pointer;
+}
+.cell-tool:hover:not(:disabled) { border-color: #0d6efd; }
+.cell-tool:disabled { color: #adb5bd; cursor: default; }
 /* The template of a cell is the plain row of its blocks: the frame is the cell's. */
 .rule-table td :deep(.pattern-constructor) { padding: 0; background: transparent; }
 .rule-table td :deep(.pattern-blocks-container) { min-height: 2rem; padding: 0; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { emptyRow, fieldValues, rowOf, rowsOf, storedOf, textsOf } from "./ruleTable"
+import { canJoin, emptyRow, fieldValues, join, joined, rowOf, rowsOf, settle, spanOf, split, storedOf, textsOf } from "./ruleTable"
 
 const LINES = [
   "PID:1.ruchime.org | P:Kodik | Вечная воля | Серия 1 | V:AniStar | VT:voice | R:1080",
@@ -17,15 +17,15 @@ describe("a rule table", () => {
 
   it("counts a value taken when any row holds its text, a row written by hand too", () => {
     const hand = emptyRow()
-    hand.ifBlocks = [{ id: 1, type: "text", value: "V:HORIZON" }, { id: 2, type: "or" }, { id: 3, type: "text", value: "mir.donghua" }]
+    hand.if.blocks = [{ id: 1, type: "text", value: "V:HORIZON" }, { id: 2, type: "or" }, { id: 3, type: "text", value: "mir.donghua" }]
     expect(textsOf([rowOf("V", "AniStar"), hand])).toEqual(new Set(["V:AniStar", "V:HORIZON", "mir.donghua"]))
-    expect(rowOf("V", "AniStar").thenValue).toBe("AniStar")
+    expect(rowOf("V", "AniStar").then.value).toBe("AniStar")
   })
 
   it("is stored as the core takes it and read back the same, whatever the action of its column", () => {
     const episode = emptyRow()
-    episode.ifBlocks = [{ id: 1, type: "text", value: "Серия" }, { id: 2, type: "number" }]
-    episode.thenBlocks = [{ id: 3, type: "number" }]
+    episode.if.blocks = [{ id: 1, type: "text", value: "Серия" }, { id: 2, type: "number" }]
+    episode.then.blocks = [{ id: 3, type: "number" }]
     const voices = storedOf("assign_voiceover", [rowOf("V", "AniStar")], false)
     expect(voices).toEqual({ action_type: "assign_voiceover", rows: [{ if: [{ type: "text", value: "V:AniStar" }], then: "AniStar" }] })
     const episodes = storedOf("extract_single", [episode], true)
@@ -38,7 +38,68 @@ describe("a rule table", () => {
 
   it("reads a number a table was stored with as the text of its value", () => {
     const stored = { action_type: "assign_season", rows: [{ if: [{ type: "text", value: "PID:site" }], then: 4 as unknown as string }] }
-    expect(rowsOf(stored)[0].thenValue).toBe("4")
+    expect(rowsOf(stored)[0].then.value).toBe("4")
     expect(storedOf("assign_season", rowsOf(stored), false).rows[0].then).toBe("4")
+  })
+
+  // --- joined cells -------------------------------------------------------------------------------------------------
+
+  const voices = () => [rowOf("V", "ChinaTown"), rowOf("V", "ChineTown"), rowOf("V", "AniStar")]
+
+  it("joins a cell with the one below: the rows hold one cell, and what is typed into it is typed for each", () => {
+    const rows = voices()
+    join(rows, 0, "then")
+    expect([joined(rows, 1, "then"), joined(rows, 2, "then"), joined(rows, 1, "if")]).toEqual([true, false, false])
+    expect(spanOf(rows, 1, "then")).toEqual([0, 2])
+    rows[0].then.value = "ChinaTown (оба написания)"
+    // For the core each row is whole: both rows carry the value of the joined cell, the second marked as joined.
+    expect(storedOf("assign_voiceover", rows, false).rows.map((row) => [row.if[0].value, row.then, row.then_joined ?? false])).toEqual([
+      ["V:ChinaTown", "ChinaTown (оба написания)", false], ["V:ChineTown", "ChinaTown (оба написания)", true],
+      ["V:AniStar", "AniStar", false]])
+    // Joined again from any of its rows, the cell takes the next one below.
+    join(rows, 1, "then")
+    expect(spanOf(rows, 0, "then")).toEqual([0, 3])
+  })
+
+  it("does not join rows that are one cell on the other side already, nor the last cell with nothing", () => {
+    const rows = voices()
+    join(rows, 0, "if")
+    expect(canJoin(rows, 0, "then")).toBe(false)  // the two rows would be one rule written twice
+    expect(canJoin(rows, 2, "if")).toBe(false)
+    expect(canJoin(rows, 1, "if")).toBe(true)
+    join(rows, 0, "then")
+    expect(joined(rows, 1, "then")).toBe(false)
+  })
+
+  it("splits a joined cell into the cells of its rows, each with what it held", () => {
+    const rows = voices()
+    join(rows, 0, "if")
+    join(rows, 0, "if")
+    split(rows, 2, "if")
+    expect([1, 2].map((at) => joined(rows, at, "if"))).toEqual([false, false])
+    expect(rows.map((row) => row.if.blocks[0].value)).toEqual(["V:ChinaTown", "V:ChinaTown", "V:ChinaTown"])
+    rows[1].if.blocks[0].value = "V:другая"
+    expect(rows[0].if.blocks[0].value).toBe("V:ChinaTown")
+  })
+
+  it("keeps a cell a run of neighbouring rows when rows are moved or removed", () => {
+    const rows = voices()
+    join(rows, 0, "then")
+    // The second row of the joined cell dragged to the end: it has a cell of its own with the same value.
+    rows.push(rows.splice(1, 1)[0])
+    settle(rows)
+    expect(rows.map((row) => row.then.value)).toEqual(["ChinaTown", "AniStar", "ChinaTown"])
+    expect(rows.map((_row, at) => joined(rows, at, "then"))).toEqual([false, false, false])
+    rows[2].then.value = "отдельно"
+    expect(rows[0].then.value).toBe("ChinaTown")
+  })
+
+  it("is read back with its joined cells as it was stored", () => {
+    const rows = voices()
+    join(rows, 0, "then")
+    const stored = storedOf("assign_voiceover", rows, false)
+    const read = rowsOf(stored)
+    expect(read.map((_row, at) => joined(read, at, "then"))).toEqual([false, true, false])
+    expect(storedOf("assign_voiceover", read, false)).toEqual(stored)
   })
 })
