@@ -55,6 +55,9 @@ Events (owner: sources):
   sources.settings.changed SourcesSettingsView          the mirrors of a tracker were saved: every open settings
                                                         screen shows them without asking back
   sources.table.failed {url, reason}                    the read failed; the last complete table still serves
+  sources.table.trace {url, site, kind: begin | end, …}  what a read does, for its dump (modules/runlog): `end` carries
+                                                        the seconds of the read and what every player of the page gave
+                                                        (rows by state, frames, the causes of the rows without a video)
 Events in: settings.changed {key: sources_term_hours} — the term of what the sources answered (term.py): the tables of
 pages, the listings of VK channels and the addresses parsers of applications gave are current for that many hours.
 A failed read is not retried by itself and a consumer does not ask again on `failed`: the next request after a

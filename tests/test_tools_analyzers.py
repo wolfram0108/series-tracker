@@ -83,9 +83,22 @@ def test_the_dump_of_a_sync_is_told_step_by_step_with_the_times_the_speeds_and_t
             "log": [{"kind": "attempt"}]}
     records = [
         {"t": "2026-01-01T00:00:00+00:00", "e": "open"},
-        bus("00:01", "sources.table.progress", {"url": "https://site/a"}),
+        bus("00:01", "sources.table.progress", {"url": "https://site/a", "phase": "release", "current": 1, "total": 1}),
         bus("00:05", "sources.table.ready", {"url": "https://site/a"}),
         bus("00:05", "sources.table.ready", {"url": "app://app/7"}),
+        bus("00:02", "sources.table.progress", {"url": "https://site/a", "phase": "players", "current": 0, "total": 40}),
+        bus("00:04", "sources.table.progress", {"url": "https://site/a", "phase": "players", "current": 40, "total": 40}),
+        bus("00:05", "sources.table.trace", {"url": "https://site/a", "site": "site", "kind": "end", "ok": True, "reason": None,
+                                             "seconds": 4.0, "rows": 40, "unread": [], "players": [
+            {"player": "kodik", "label": "Kodik", "rows": 40, "states": {"playable": 38, "not_obtained": 2},
+             "heights": {"720": 30, "1080": 8}}],
+            "causes": [{"player": "kodik", "state": "not_obtained", "reason": "status 500", "rows": 2}]}),
+        {"t": "2026-01-01T00:00:03+00:00", "e": "log", "level": "INFO", "group": "sources",
+         "message": "плеер kodik, https://site/a#kodik=1: попытка 1 — playable, статус 200, — (0.2 с)"},
+        {"t": "2026-01-01T00:00:03+00:00", "e": "log", "level": "INFO", "group": "sources",
+         "message": "плеер kodik, https://site/a#kodik=2: попытка 1 — http_error, статус 500, — (0.4 с)"},
+        {"t": "2026-01-01T00:00:04+00:00", "e": "log", "level": "INFO", "group": "sources",
+         "message": "плеер kodik, Kodik: «http_error 500» — отказ дан ответом хоста, спрашиваются снова все 2"},
         trace("00:06", "plan", {"round": 1, "inputs": {"online": [{}, {}], "containers": [], "failed": []}, "plan": {"goals": [goal]}}),
         trace("00:06", "step", {"op": row, "kind": "download_video", "slot": [1, 1], "ready": True}),
         bus("00:06", "downloads.fetch", {"key": "k", "need": {"key": "1:s01e01:video:", "episode": "s01e01", "kind": "video"},
@@ -109,7 +122,14 @@ def test_the_dump_of_a_sync_is_told_step_by_step_with_the_times_the_speeds_and_t
 
     made.main(str(path), False)
     told = capsys.readouterr().out
-    assert "00:00:00 — 00:00:51 UTC, 51 с, строк 17" in told
+    assert "00:00:00 — 00:00:51 UTC, 51 с, строк 23" in told
+    # A read: its phases with their times, what each player gave, the causes, and the asks counted from the log.
+    assert "фаза players   00:00:02→00:00:04     2 с  40 из 40  20.0 строк/с" in told
+    assert "https://site/a: прочитана за 4.0 с, строк 40" in told
+    assert "Kodik          строк    40: not_obtained 2, playable 38; кадр: 1080p×8, 720p×30" in told
+    assert "причина ×2    kodik            not_obtained status 500" in told
+    assert "kodik              запросов     2, медиана 0.4 с, наибольший 0.4 с: playable ×1, http_error 500 (попытка 1) ×1" in told
+    assert "отказ дан ответом хоста, спрашиваются снова все 2" in told
     assert "https://site/a — читалась 4 с" in told and "app://app/7 — из базы" in told
     assert "план, круг 1 (00:00:06): онлайн-строк 2, файлов в активе 0, неудач 0, целей 1" in told
     assert "s01e01: видео download app line:x 2160p; озвучки: G1←kodik" in told

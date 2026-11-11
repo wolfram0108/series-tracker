@@ -181,6 +181,36 @@ async def test_each_row_of_a_table_says_which_video_it_is_as_its_player_reads_th
     assert [record["video"] for record in records] == ["-1_2", "777", ""]
 
 
+async def test_a_read_tells_its_beginning_and_its_end_with_what_every_player_gave(system):
+    """For the dump of a read (modules/runlog): `begin` when the page is taken, `end` with the time of the read and,
+    player by player, the rows by state, the frames and every cause a row was left without a video with. A read that
+    failed tells its reason and no table."""
+    told = system.bus.subscribe("sources.table.trace")
+    system.site.rows = lambda _read: [
+        row("a1", "Серия 1"), row("a2", "Серия 2", heights=[720]),
+        row("a3", "Серия 3", heights=[], state=RowState.ABSENT, reason="the host answered 404"),
+        row("k1", "Серия 1", player="kodik", player_label="Kodik", heights=[], state=RowState.NOT_OBTAINED, reason="500"),
+        row("k2", "Серия 2", player="kodik", player_label="Kodik", heights=[], state=RowState.NOT_OBTAINED, reason="500")]
+    await system.get()
+    await system.next(system.ready)
+    begin, end = await system.next(told), await system.next(told)
+    assert begin == {"url": PAGE, "site": "fake", "kind": "begin", "fresh": False}
+    assert (end["kind"], end["ok"], end["reason"], end["rows"]) == ("end", True, None, 5) and end["seconds"] >= 0
+    assert end["players"] == [
+        {"player": "vk", "label": "VK", "rows": 3, "states": {"playable": 2, "absent": 1}, "heights": {"1080": 1, "720": 1}},
+        {"player": "kodik", "label": "Kodik", "rows": 2, "states": {"not_obtained": 2}, "heights": {}}]
+    assert end["causes"] == [{"player": "kodik", "state": "not_obtained", "reason": "500", "rows": 2},
+                             {"player": "vk", "state": "absent", "reason": "the host answered 404", "rows": 1}]
+
+    system.site.failure = SiteError(reason("no_players_empty", site="fake"))
+    system.clock.advance(hours=2)
+    await system.get()
+    await system.next(system.failed)
+    begin, end = await system.next(told), await system.next(told)
+    assert begin["kind"] == "begin" and (end["kind"], end["ok"]) == ("end", False) and "no_players_empty" in end["reason"]
+    assert "players" not in end
+
+
 async def test_a_page_asked_again_within_the_hour_is_not_read_again(system):
     first = await system.get()
     assert first["state"] == "reading" and first["table"] is None

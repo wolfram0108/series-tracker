@@ -1,4 +1,7 @@
-"""What a sync of a series did, read from its dump (`logs/runs/<series>/<start>-<pid>.jsonl.gz`, module `runlog`): the tables
+"""What a sync of a series did, read from its dump (`logs/runs/<series>/<start>-<pid>.jsonl.gz`, module `runlog`), and what
+a read of a page outside a sync did, from its own (`logs/runs/reads/<page>/…`): the pages read with what each player of a
+page gave (rows by state, frames, every cause a row was left without a video with), the phases of each read with their
+times, the asks of the players counted from the log (attempts, outcomes, seconds), the tables
 read, the plan of each round by episode (which row is the video, which the voice-overs; a plan made again shows the
 episodes it changed and what made it), every step of the graph with its
 start, its end and its outcome, every download with its variant, its time, the size of its file, the seconds of its stages
@@ -18,6 +21,10 @@ import os
 import re
 import sys
 from datetime import datetime
+
+
+# A line of the log of an ask of a player (modules/sources/policy.py, `settle`).
+ASK = re.compile(r"^плеер (\S+), .*: попытка (\d+) — (\w+), статус (\S+), .* \(([0-9.]+) с\)$", re.S)
 
 
 def stamp(text: str) -> datetime:
@@ -41,18 +48,74 @@ def main(path: str, logs: bool) -> None:
     print(f"дамп {os.path.basename(path)}: {clock(rows[0]['t'])} — {clock(rows[-1]['t'])} UTC, "
           f"{(ended - began).total_seconds():.0f} с, строк {len(rows)}")
 
+    subject = rows[0].get("url") or (f"сериал {rows[0]['series_id']}" if rows[0].get("series_id") is not None else "")
+    if subject:
+        print(f"предмет: {subject}")
+
     print("\n== таблицы источников")
-    progress: dict[str, list[str]] = {}
+    progress: dict[str, list[dict]] = {}
     for row in bus:
         if row["topic"] == "sources.table.progress":
-            progress.setdefault(row["payload"]["url"], []).append(row["t"])
+            progress.setdefault(row["payload"]["url"], []).append(row)
     for row in bus:
         if row["topic"] in ("sources.table.ready", "sources.table.failed"):
             url = row["payload"]["url"]
             asked = progress.get(url)
-            read = f"читалась {(stamp(row['t']) - stamp(asked[0])).total_seconds():.0f} с" if asked else "из базы"
+            read = f"читалась {(stamp(row['t']) - stamp(asked[0]['t'])).total_seconds():.0f} с" if asked else "из базы"
             print(f"  {clock(row['t'])} {row['topic'].rsplit('.', 1)[1]:<6} {url[:90]} — {read}"
                   f"{' — ' + str(row['payload'].get('reason')) if row['payload'].get('reason') else ''}")
+
+    reads = [row for row in bus if row["topic"] == "sources.table.trace" and row["payload"].get("kind") == "end"]
+    if reads or progress:
+        print("\n== чтение страниц: фазы и итог по плеерам")
+    for url, steps in progress.items():
+        print(f"  {url[:100]}")
+        phases: dict[str, list[dict]] = {}
+        for step in steps:
+            phases.setdefault(step["payload"]["phase"], []).append(step)
+        for phase, found in phases.items():
+            last = found[-1]["payload"]
+            seconds = (stamp(found[-1]["t"]) - stamp(found[0]["t"])).total_seconds()
+            print(f"    фаза {phase:<9} {clock(found[0]['t'])}→{clock(found[-1]['t'])} {seconds:5.0f} с  "
+                  f"{last['current']} из {last['total']}" + (f"  {last['current'] / seconds:.1f} строк/с" if seconds >= 1 else ""))
+    for row in reads:
+        data = row["payload"]
+        print(f"  {clock(row['t'])} {data['url'][:90]}: {'прочитана' if data.get('ok') else 'НЕ ПРОЧИТАНА'} за {data.get('seconds')} с"
+              f"{', строк ' + str(data['rows']) if data.get('rows') is not None else ''}"
+              f"{' — ' + str(data.get('reason')) if data.get('reason') else ''}")
+        for each in data.get("players") or []:
+            states = ", ".join(f"{name} {count}" for name, count in sorted(each["states"].items()))
+            heights = ", ".join(f"{height}p×{count}" for height, count in sorted(each["heights"].items(), key=lambda item: -int(item[0])))
+            print(f"      {each['label']:<14} строк {each['rows']:>5}: {states}{'; кадр: ' + heights if heights else ''}")
+        for each in data.get("causes") or []:
+            print(f"      причина ×{each['rows']:<4} {each['player']:<16} {each['state']:<12} {str(each['reason'])[:170]}")
+        for each in data.get("unread") or []:
+            print(f"      не прочитана часть {each.get('part')}: {str(each.get('reason'))[:150]}")
+
+    asks: dict[str, list[tuple[int, str, str, float]]] = {}
+    rechecks = []
+    for row in rows:
+        if row["e"] != "log" or row.get("group") != "sources":
+            continue
+        message = row.get("message") or ""
+        found = ASK.match(message)
+        if found:
+            asks.setdefault(found.group(1), []).append((int(found.group(2)), found.group(3), found.group(4), float(found.group(5))))
+        elif "без окончательного ответа" in message or "подтвердилось" in message or "ответом хоста" in message:
+            rechecks.append((row["t"], message))
+    if asks:
+        print("\n== опрос плееров (по журналу)")
+    for player, found in asks.items():
+        spent = sorted(each[3] for each in found)
+        outcomes: dict[str, int] = {}
+        for attempt, kind, status, _seconds in found:
+            key = f"{kind}{'' if status in ('200', 'None', '0') else ' ' + status} (попытка {attempt})" if kind != "playable" or attempt > 1 \
+                else "playable"
+            outcomes[key] = outcomes.get(key, 0) + 1
+        print(f"  {player:<18} запросов {len(found):>5}, медиана {spent[len(spent) // 2]:.1f} с, наибольший {spent[-1]:.1f} с: "
+              + ", ".join(f"{name} ×{count}" for name, count in sorted(outcomes.items(), key=lambda item: -item[1])))
+    for at, message in rechecks:
+        print(f"  {clock(at)} {message[:260]}")
 
     trace = [row for row in bus if row["topic"] == "planner.sync.trace"]
     online, shown = 0, {}

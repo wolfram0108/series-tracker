@@ -21,6 +21,7 @@ import httpx
 
 from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress,
                             TableReady, TableRow, TableState, UnreadPart)
+from core.contracts.release_table import TABLE_TRACE
 from core.deadlines import TABLE_READ_S
 from core.logging import get_logger
 from core.reasons import describe, reason
@@ -33,6 +34,30 @@ from .term import Term
 PROGRESS_TOPIC = "sources.table.progress"
 READY_TOPIC = "sources.table.ready"
 FAILED_TOPIC = "sources.table.failed"
+# What a read does, told as it happens for its dump (modules/runlog): `begin` when a page is taken for a read, `end`
+# with what the read came to — how long it took and what every player of the page gave.
+TRACE_TOPIC = TABLE_TRACE
+
+
+def read_summary(table: ReleaseTable) -> dict:
+    """What a read gave, player by player: its rows by state, the frames of the rows that play, and every cause a row
+    was left without a video with, counted. The debugging of a source begins here, not at the rows one by one."""
+    players: dict[str, dict] = {}
+    causes: dict[tuple[str, str, str], int] = {}
+    for row in table.rows:
+        held = players.setdefault(row.player, {"player": row.player, "label": row.player_label or row.player, "rows": 0,
+                                               "states": {}, "heights": {}})
+        held["rows"] += 1
+        held["states"][row.state.value] = held["states"].get(row.state.value, 0) + 1
+        if row.height:
+            held["heights"][str(row.height)] = held["heights"].get(str(row.height), 0) + 1
+        if row.state.value != "playable":
+            key = (row.player, row.state.value, row.reason or "")
+            causes[key] = causes.get(key, 0) + 1
+    return {"rows": len(table.rows), "players": list(players.values()),
+            "causes": [{"player": player, "state": state, "reason": why, "rows": count}
+                       for (player, state, why), count in sorted(causes.items(), key=lambda item: -item[1])],
+            "unread": [part.model_dump(mode="json") for part in table.unread]}
 
 Publish = Callable[[str, dict], None]
 
@@ -178,6 +203,8 @@ class TableReader:
     async def _run(self, site: Site, key: str, fresh: bool) -> None:
         table: ReleaseTable | None = None
         problem: str | None = None
+        began = time.monotonic()
+        self._publish(TRACE_TOPIC, {"url": key, "site": site.name, "kind": "begin", "fresh": fresh})
         try:
             await self._repo.mark_reading(key, site.name, self._stamp())
             table = await self._read(site, key, fresh)
@@ -195,6 +222,9 @@ class TableReader:
         async with self._gate:
             problem = await self._settle(site, key, table, problem)
             self._reading.pop(key, None)
+        self._publish(TRACE_TOPIC, {"url": key, "site": site.name, "kind": "end", "ok": problem is None,
+                                    "reason": problem, "seconds": round(time.monotonic() - began, 1),
+                                    **(read_summary(table) if problem is None and table is not None else {})})
         if problem is None and table is not None:
             self._publish(READY_TOPIC, TableReady(url=key, read_at=table.read_at or "").model_dump(mode="json"))
         else:

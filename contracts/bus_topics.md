@@ -53,6 +53,7 @@
 | `scan.series.progress {series_id, source_id, url, phase, current, total, rate, active}` — прогресс чтения страницы, которую ждёт скан сериала; `active: false` — ожидание закончено | scan | gateway | `series_scan_progress` |
 | `sources.table.ready {url, read_at}` — полная таблица сохранена; части страницы, которые чтение не получило, названы в `ReleaseTable.unread`, их строки — из прошлого чтения (Р-78) | sources | composition, scan, gateway | `sources_table_ready` |
 | `sources.table.failed {url, reason}` — чтение не удалось, действует прежняя полная таблица | sources | composition, scan, gateway | `sources_table_failed` |
+| `sources.table.trace {url, site, kind, …}` — что делает чтение страницы, для его дампа: `begin {fresh}` — страница взята на чтение; `end {ok, reason, seconds, rows, players: [{player, label, rows, states, heights}], causes: [{player, state, reason, rows}], unread}` — чем чтение кончилось: строки каждого плеера по состояниям, кадры, каждая причина строки без видео со счётом | sources | runlog (дамп чтения) | — |
 | `rules.profile.changed {profile_id}` | rules | composition | — |
 | `composition.changed {series_id, rev, episodes, summary_only}` — `CompositionChanged`; `episodes` пусто — весь сериал; `summary_only` — изменились только сводки источников | composition | scan, voices, gateway | `composition_changed` |
 | `composition.failed {series_id, reason}` — пересчёт не удался, действует прежняя раскладка | composition | gateway | `composition_failed` |

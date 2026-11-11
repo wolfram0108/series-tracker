@@ -95,7 +95,7 @@ export const ru = {
   "pack.journal.since": "Начало",
   "pack.journal.time": "Общее время",
   "pack.label.waits": "Ждёт применения",
-  "pack.value.waits": "{time} — файлы синхронизации применяются вместе, после остальной её работы",
+  "pack.value.waits": "{time} — файлы на место кладутся по одной серии за раз",
   "pack.label.waited": "Ждал применения",
   "pack.label.tracks": "Дорожек",
   "pack.reason.order": "порядок дорожек сезона изменён",

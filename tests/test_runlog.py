@@ -1,5 +1,6 @@
 """The dump of a run (modules/runlog): every envelope and every line of the log between the opening and the closing of a
-run of a series, in order, in a file of its own; nothing outside a run; old dumps go past the number kept."""
+run of a series, in order, in a file of its own; nothing outside a run; old dumps go past the number kept. A read of a
+page outside the run of a series is a run of its own."""
 import asyncio
 import gzip
 import json
@@ -7,6 +8,7 @@ import logging
 import os
 
 from core import Bus, Runner
+from core.contracts.release_table import TABLE_TRACE
 from core.contracts.work import RUN_CHANGED
 from core.envelope import Envelope
 from modules.runlog import RunlogModule
@@ -85,3 +87,53 @@ async def test_without_a_folder_nothing_is_written_and_the_bus_is_not_looked_at(
         assert module.runs == {} and not bus._taps
     finally:
         await runner.stop()
+
+
+def traced(url: str, kind: str, **more) -> Envelope:
+    return Envelope(topic=TABLE_TRACE, kind="event", payload={"url": url, "site": "fake", "kind": kind, **more})
+
+
+async def test_a_read_of_a_page_outside_a_sync_is_dumped_whole_in_a_file_of_its_page(tmp_path):
+    """A source added in a window, «Перечитать»: the read is a run of its own — every envelope and every line of the
+    log from its beginning to its end, the end with what the read came to. Nothing outside it."""
+    bus = Bus()
+    module = RunlogModule(bus, str(tmp_path))
+    runner = Runner(bus, [module])
+    await runner.start()
+    url = "app://juzi/164312"
+    try:
+        bus.publish(Envelope(topic="before.read", kind="event", payload={}))
+        bus.publish(traced(url, "begin", fresh=True))
+        bus.publish(Envelope(topic="sources.table.progress", kind="event", payload={"url": url, "phase": "players"}))
+        logging.getLogger("sources").info("плеер line:x, %s: попытка 1 — playable, статус 200, — (0.4 с)", url)
+        bus.publish(traced(url, "end", ok=True, reason=None, seconds=1.5, rows=499))
+        bus.publish(Envelope(topic="after.read", kind="event", payload={}))
+        await module.written()
+    finally:
+        await runner.stop()
+    folder = os.path.join(tmp_path, "reads", "juzi_164312")
+    (name,) = os.listdir(folder)
+    got = lines(os.path.join(folder, name))
+    assert [(each["e"], each.get("topic") or each.get("message", "")[:13]) for each in got] == [
+        ("open", ""), ("bus", TABLE_TRACE), ("bus", "sources.table.progress"), ("log", "плеер line:x,"),
+        ("bus", TABLE_TRACE), ("close", "")]
+    assert got[0]["url"] == url and got[-1] == {"t": got[-1]["t"], "e": "close", "url": url, "stopped": False}
+    assert got[4]["payload"]["rows"] == 499
+
+
+async def test_a_read_inside_the_sync_of_a_series_is_in_the_dump_of_that_sync_and_has_none_of_its_own(tmp_path):
+    bus = Bus()
+    module = RunlogModule(bus, str(tmp_path))
+    runner = Runner(bus, [module])
+    await runner.start()
+    try:
+        bus.publish(run_changed(5, True))
+        bus.publish(traced("https://site.test/p/1", "begin", fresh=False))
+        bus.publish(traced("https://site.test/p/1", "end", ok=True, reason=None, seconds=1.0, rows=3))
+        bus.publish(run_changed(5, False))
+        await module.written()
+    finally:
+        await runner.stop()
+    (path,) = dumps(tmp_path, 5)
+    assert [each.get("topic") for each in lines(path) if each["e"] == "bus"] == [RUN_CHANGED, TABLE_TRACE, TABLE_TRACE, RUN_CHANGED]
+    assert not os.path.exists(os.path.join(tmp_path, "reads"))
