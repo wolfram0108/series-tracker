@@ -66,7 +66,9 @@ class Places:
         return self._busy[multi]
 
     def turn(self) -> int:
+        """The turn of a fetch that leaves the queue: from now on later fetches wait for it to learn its way."""
         self._turns += 1
+        self._asking[self._turns] = None
         return self._turns
 
     def asking(self, turn: int) -> None:

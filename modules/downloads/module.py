@@ -468,6 +468,7 @@ class DownloadsModule(BaseModule):
             self.log.exception("сбой загрузки %s", key)
             ok, error, said = False, f"внутренняя ошибка: {exc}", Failed.UNASKED
         finally:
+            await self.places.leave(turn)  # a fetch stopped before it asked its stream holds no later one
             # The place of the fetch is given back whatever happens to what it wrote: a place kept by a fetch that ended
             # would show it under way for ever and stop its owner from asking for it again.
             if not ok:
