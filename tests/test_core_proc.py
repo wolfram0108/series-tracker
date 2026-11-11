@@ -149,9 +149,28 @@ def test_under_uvloop_the_end_of_a_child_reaped_elsewhere_is_known_to_exited_tho
             told = True
         except asyncio.TimeoutError:
             told = False
-        return told, await asyncio.wait_for(proc.exited(process), 5)
+        return told, await asyncio.wait_for(proc.exited(process), proc.REAP_TIMEOUT_S + 5)
 
     assert uvloop.run(scenario()) == (False, proc.LOST)
+
+
+@pytest.mark.parametrize("loop", ["asyncio", "uvloop"])
+def test_a_child_the_loop_reaped_before_its_report_ran_gives_its_code_not_an_unknown_one(loop):
+    """The loop reaps a child and reports it by a callback still to run: in between, the number of the child is gone from
+    the kernel. The code is the one the loop reports, not «unknown» — a program killed by a signal is not taken for one
+    whose end said nothing."""
+    runner = asyncio.run if loop == "asyncio" else pytest.importorskip("uvloop").run
+
+    async def scenario() -> int:
+        process = await proc.spawn(sys.executable, "-c", "import sys; sys.exit(3)")
+
+        def gone(_pid):
+            raise ProcessLookupError
+
+        with patch.object(proc.os, "pidfd_open", gone):
+            return await asyncio.wait_for(proc.exited(process), 10)
+
+    assert runner(scenario()) == 3
 
 
 def test_the_code_of_a_program_comes_from_the_kernel_when_the_wait_of_the_loop_does_not_end():
@@ -181,7 +200,7 @@ def test_a_hold_attached_to_a_program_ends_with_the_program_though_the_loop_neve
         with storage.hold(path):
             process = await proc.spawn(sys.executable, "-c", "pass")
         os.waitpid(process.pid, 0)
-        await path_free(path, seconds=5)
+        await path_free(path, seconds=proc.REAP_TIMEOUT_S + 5)
         return storage.busy(path)
 
     assert uvloop.run(scenario()) is False

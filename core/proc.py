@@ -73,12 +73,14 @@ async def _ended(proc: asyncio.subprocess.Process) -> int:
     try:
         pidfd = os.pidfd_open(proc.pid)
     except ProcessLookupError:
-        if proc.returncode is not None:
+        # The child is gone already: the loop reaped it and reports it at once (its report is a callback still to run),
+        # or another wait took it, of which the loop is never told.
+        try:
+            return await asyncio.wait_for(asyncio.shield(reported), REAP_TIMEOUT_S)
+        except asyncio.TimeoutError:
             reported.cancel()
-            return proc.returncode
-        reported.cancel()
-        _log.warning("программа pid %d завершилась, но цикл событий не сообщил об этом: код выхода неизвестен", proc.pid)
-        return LOST
+            _log.warning("программа pid %d завершилась, но цикл событий не сообщил об этом: код выхода неизвестен", proc.pid)
+            return LOST
     except OSError:  # a kernel without pidfd: the loop is the only witness
         return await reported
     loop = asyncio.get_running_loop()
