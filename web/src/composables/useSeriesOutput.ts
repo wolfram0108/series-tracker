@@ -1,10 +1,11 @@
-import { computed, onMounted, ref, watch, type Ref } from "vue"
+import { computed, onMounted, ref, shallowRef, watch, type Ref } from "vue"
 import { t } from "../i18n"
 import {
   bySeason, groupTarget, joinEpisodes, orderValue, queueLevers, resetBody, setBody, sourceMarks, variantTarget,
   type QueueName, type QueueRow, type Reference, type Scope,
 } from "../lib/output"
 import { nextAnswer, type ChangeAnswer } from "../lib/changeAnswer"
+import { sharing } from "../lib/sharing"
 import { reasonText } from "../lib/reason"
 import { useCompositionStore } from "../stores/composition"
 import { useSeriesStore } from "../stores/series"
@@ -27,11 +28,13 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const store = useCompositionStore()
   const plan = usePlanStore()
   const seriesStore = useSeriesStore()
-  const composition = ref<Composition | null>(null)
+  // The layout is replaced whole by every read and never changed in place: it is kept as it came (thousands of rows made
+  // deeply reactive cost every read of them).
+  const composition = shallowRef<Composition | null>(null)
   // The reference of every episode, and why, is the plan's: it comes with every packet of the plan of the series.
   const references = computed<Reference[]>(() => plan.forSeries(seriesId)?.references ?? [])
   // The files of the plan: the status of the video of a reference is read from them; the plan comes with every push.
-  const files = computed<MediaFile[]>(() => planFiles(plan.forSeries(seriesId), compilationKey.value))
+  const files = sharing<MediaFile[]>(() => planFiles(plan.forSeries(seriesId), compilationKey.value))
   // The compilations of the layout by their row: the plan names a compilation by its row, the window by its key.
   const compilationKey = computed<CompilationKey>(() => {
     const keys = new Map((composition.value?.compilations ?? []).map((each) =>
@@ -40,7 +43,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   })
   // The order of the voice-overs of every season: a voice-over of it the plan cannot get for an episode is absent there.
   // The order of the tracks of every season: the layout's, and the voice-overs the files hold that no source gives any more.
-  const voiceOrders = computed(() => seasonVoiceOrders(composition.value?.voice_orders ?? [], plan.forSeries(seriesId),
+  const voiceOrders = sharing(() => seasonVoiceOrders(composition.value?.voice_orders ?? [], plan.forSeries(seriesId),
     composition.value?.voice_titles ?? {}))
   const seasonVoices = computed<Record<number, string[]>>(() => Object.fromEntries(
     voiceOrders.value.map((each) => [each.season, (each.voices ?? []).map((voice) => voice.label)] as const)))
@@ -54,7 +57,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   // The answer of the core to every change the window sent: a list that shows a dragged order waits on it (OrderList).
   const answer = ref<ChangeAnswer>({ n: 0, ok: true })
   // The name of the file of every episode is the plan's: it comes with every packet of the plan of the series.
-  const names = computed(() => planNames(plan.forSeries(seriesId)))
+  const names = sharing(() => planNames(plan.forSeries(seriesId)))
 
   // The label of a player is a fact of the table of its source, so a voice-over of a player the episode has no line for is named too.
   const labels = computed<Record<string, string>>(() => Object.fromEntries(
@@ -62,7 +65,9 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
       .filter((player) => player.player_label)
       .map((player) => [`${source.source_id}:${player.player}`, player.player_label] as const))))
 
-  const views = computed(() => joinEpisodes(
+  // A packet of the plan is the whole plan: the episodes it left as they were stay the objects they were, and their cards
+  // are not drawn again (lib/sharing.ts).
+  const views = sharing(() => joinEpisodes(
     composition.value?.rows ?? [],
     references.value,
     composition.value?.settings ?? [],
@@ -79,7 +84,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     const failed = store.layoutFailed[seriesId]
     return failed ? t("output.layoutFailed", { reason: reasonText(failed.reason) }) : ""
   })
-  const seasons = computed(() => bySeason(views.value))
+  const seasons = sharing(() => bySeason(views.value))
 
   // Of several reads in flight only the one asked last may write: a late reply to an older ask must not roll back.
   let asked = 0

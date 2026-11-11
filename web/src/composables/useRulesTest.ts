@@ -71,7 +71,7 @@ export function useRulesTest(profileId: () => number) {
     }
   }
 
-  watch(() => tables.pages, () => {
+  watch(tables.pages, () => {
     if (page) void settle(page)
   })
 

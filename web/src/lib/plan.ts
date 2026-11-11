@@ -77,11 +77,17 @@ export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: Pla
   const last = new Map<number, Set<string>>()
   for (const goal of view?.episodes ?? []) {
     const [season, episode] = goal.slot
-    if (goal.markup) last.set(season, new Set([...(last.get(season) ?? []), goal.markup]))
+    if (goal.markup) {
+      const marked = last.get(season) ?? new Set<string>()
+      last.set(season, marked.add(goal.markup))
+    }
     const voices = held.get(season) ?? new Map<string, number[]>()
     held.set(season, voices)
     for (const voice of [goal.video.group ?? "", ...(goal.tracks ?? []).map((track) => track.voice)]) {
-      if (voice) voices.set(voice, [...(voices.get(voice) ?? []), episode])
+      if (!voice) continue
+      const episodes = voices.get(voice)
+      if (episodes) episodes.push(episode)
+      else voices.set(voice, [episode])
     }
   }
   const seasons = [...new Set([...orders.map((each) => each.season), ...held.keys()])].sort((a, b) => a - b)

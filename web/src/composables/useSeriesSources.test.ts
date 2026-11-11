@@ -48,6 +48,19 @@ describe("useSeriesSources", () => {
     expect(sources.items.value[0].view).toMatchObject({ state: "reading", progress: { current: 2, total: 9 } })
   })
 
+  it("counts the players of a source from the layout once: the news of a page changes its state and recounts no row", async () => {
+    const sources = setup()
+    await flushPromises()
+    const players = sources.items.value[0].view.players
+    useSourceTablesStore().applyProgress({ url: PAGE, phase: "episodes", current: 2, total: 9 })
+    expect(sources.items.value[0].view.state).toBe("reading")
+    expect(sources.items.value[0].view.players).toBe(players)
+    // The news of a page of another series is not the window's: its sources stay the objects they were.
+    const items = sources.items.value
+    useSourceTablesStore().applyProgress({ url: "https://other.site/page", phase: "episodes", current: 1, total: 2 })
+    expect(sources.items.value).toBe(items)
+  })
+
   it("keeps the newer reading when an older one answers late", async () => {
     let release!: (value: ReturnType<typeof ok<SeriesSource[]>>) => void
     vi.mocked(calls.fetchSources).mockReset()

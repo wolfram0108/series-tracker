@@ -150,7 +150,11 @@ function seasonCoverage(rows: LayoutRow[], season: number | null): Coverage {
 /** The episodes of the rows, an entry to a season (a season is named only when there are several). */
 export function coverageOf(rows: LayoutRow[]): Coverage[] {
   const seasons = new Map<number, LayoutRow[]>()
-  for (const row of numbered(rows)) seasons.set(row.season ?? 0, [...(seasons.get(row.season ?? 0) ?? []), row])
+  for (const row of numbered(rows)) {
+    const season = seasons.get(row.season ?? 0)
+    if (season) season.push(row)
+    else seasons.set(row.season ?? 0, [row])
+  }
   const ordered = [...seasons.entries()].sort(([a], [b]) => a - b)
   return ordered.map(([season, group]) => seasonCoverage(group, ordered.length > 1 && season > 0 ? season : null))
 }
@@ -223,9 +227,17 @@ function playerView(player: PlayerSummary, playersOff: string[], layout: LayoutR
   }
 }
 
+/** The players of a source with their episodes, steps and voice-overs: made of the summary and of the rows of the layout
+ *  alone, so the news of a read under way (its progress) leaves them as they are. */
+export function playersOf(summary: SourceSummary | null, playersOff: string[], rows: LayoutRow[]): PlayerView[] {
+  return (summary?.players ?? []).map((player) => playerView(player, playersOff, rows))
+}
+
 export interface ViewInput {
   summary: SourceSummary | null
   playersOff: string[]
+  /** The players already made of the rows (`playersOf`); without them they are made of `rows` here. */
+  players?: PlayerView[]
   /** The rows of the layout that belong to this source: the numbers come from the constructor's answer only. */
   rows?: LayoutRow[]
   /** The page as the core's events last said (progress, ready, failed); wins over the stored summary. */
@@ -237,7 +249,7 @@ export interface ViewInput {
 /** One state for the source: the newest news of its page, else what the request or the summary said. */
 export function viewOf(input: ViewInput): SourceView {
   const { summary, live, asked } = input
-  const players = (summary?.players ?? []).map((player) => playerView(player, input.playersOff, input.rows ?? []))
+  const players = input.players ?? playersOf(summary, input.playersOff, input.rows ?? [])
   const title = summary?.title ?? ""
   const settled = (state: SourceState, reason: string | null = null): SourceView =>
     ({ title, state, reason, progress: null, players })
@@ -378,6 +390,7 @@ export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profile
 
 export function itemOfSource(
   source: SeriesSource, summary: SourceSummary | null, live: PageStatus | null, layout: LayoutRow[] = [],
+  players?: PlayerView[],
 ): SourceItem {
   const playersOff = source.players_off ?? []
   return {
@@ -388,7 +401,10 @@ export function itemOfSource(
     vibixSeason: source.vibix_season ?? null,
     playersOff,
     color: source.color ?? null,
-    view: viewOf({ summary, playersOff, live, rows: layout.filter((row) => row.source_id === source.id) }),
+    view: viewOf({
+      summary, playersOff, live,
+      players: players ?? playersOf(summary, playersOff, layout.filter((row) => row.source_id === source.id)),
+    }),
   }
 }
 

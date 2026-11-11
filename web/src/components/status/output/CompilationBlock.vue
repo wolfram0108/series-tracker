@@ -2,6 +2,7 @@
 import { computed } from "vue"
 import type { Queues } from "../../../composables/outputCalls"
 import { useCardGrid } from "../../../composables/useCardGrid"
+import { sharing } from "../../../lib/sharing"
 import { t } from "../../../i18n"
 import {
   badgeOf, cardStatus, cutOf, cutState, heldCut, shareOf, takes, type CompilationView, type CutItem, type CutState,
@@ -56,7 +57,8 @@ const height = (_season: number, episode: number) => {
   return view && isOff(view) ? "off" as const : view?.references.find((each) => each.source_id != null)?.height ?? null
 }
 
-const items = computed(() => (props.view.episodes ?? []).flatMap((each) => {
+// The card of an episode the news left as it was is given the same props and is not drawn again (lib/sharing.ts).
+const items = sharing(() => (props.view.episodes ?? []).flatMap((each) => {
   const view = byEpisode.value.get(each.episode)
   if (!view) return []
   const member = takes(props.view, each.episode, height)

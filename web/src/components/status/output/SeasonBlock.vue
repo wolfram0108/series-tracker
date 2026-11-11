@@ -8,6 +8,7 @@ import {
   type SourceMark as Mark,
 } from "../../../lib/output"
 import { useCardGrid } from "../../../composables/useCardGrid"
+import { sharing } from "../../../lib/sharing"
 import VoiceOrder from "../VoiceOrder.vue"
 import { badgeOf, cutOf, cutOverride, membersOf, memberOf, takes, type CompilationView, type CutItem } from "../../../lib/compilations"
 import CompilationOutline from "./CompilationOutline.vue"
@@ -53,7 +54,8 @@ const emit = defineEmits<{
 }>()
 
 const order = computed(() => props.voices.map((voice) => voice.label))
-const items = computed(() => props.episodes.map((view) => {
+// The card of an episode the news left as it was is given the same props and is not drawn again (lib/sharing.ts).
+const items = sharing(() => props.episodes.map((view) => {
   const cells = trackCells(view, order.value)
   const status = cutOverride(cutOf(props.cuts, view.season, view.episode)) ?? episodeStatus(view, cells)
   const source = view.references.find((each) => each.source_id != null)?.source_id

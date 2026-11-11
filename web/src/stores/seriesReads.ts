@@ -1,5 +1,5 @@
 import { defineStore } from "pinia"
-import { ref } from "vue"
+import { keyed } from "./keyed"
 import type { components } from "../api/schema"
 import type { PageProgress } from "./sourceTables"
 
@@ -14,27 +14,25 @@ export interface SeriesRead extends PageProgress {
 /** The reads the scans wait for, as the core reports them (series_scan_progress), by series and source. A packet with
  *  `active` false ends the read of its source; nothing is cleared on a clock. */
 export const useSeriesReadsStore = defineStore("seriesReads", () => {
-  const reads = ref<Record<number, Record<number, SeriesRead>>>({})
+  const { all: reads, put, drop, clear } = keyed<Record<number, SeriesRead>>()
 
   // The core sends every field; a packet without the ones that have defaults is read with them.
   type Packet = Pick<Schemas["SeriesReadProgress"], "series_id" | "source_id" | "url"> & Partial<Schemas["SeriesReadProgress"]>
 
   function apply(packet: Packet): void {
-    const mine = { ...(reads.value[packet.series_id] ?? {}) }
+    const mine = { ...(reads[packet.series_id] ?? {}) }
     if (packet.active === false) delete mine[packet.source_id]
     else
       mine[packet.source_id] = {
         sourceId: packet.source_id, url: packet.url, phase: packet.phase ?? "", current: packet.current ?? 0,
         total: packet.total ?? 0, rate: packet.rate ?? null,
       }
-    const next = { ...reads.value }
-    if (Object.keys(mine).length) next[packet.series_id] = mine
-    else delete next[packet.series_id]
-    reads.value = next
+    if (Object.keys(mine).length) put(packet.series_id, mine)
+    else drop(packet.series_id)
   }
 
   function forSeries(seriesId: number): SeriesRead[] {
-    return Object.values(reads.value[seriesId] ?? {})
+    return Object.values(reads[seriesId] ?? {})
   }
 
   /** The read furthest from its end: what the card of the series shows while the scan waits. */
@@ -46,7 +44,7 @@ export const useSeriesReadsStore = defineStore("seriesReads", () => {
 
   /** A connection that came back may have missed the end of a read: the reads start again from the next packet. */
   function reset(): void {
-    reads.value = {}
+    clear()
   }
 
   return { reads, apply, forSeries, lead, reset }

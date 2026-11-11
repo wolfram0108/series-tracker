@@ -92,7 +92,7 @@ export function useSourceDrafts() {
     if (readEnded(draft.asked, tables.forUrl(draft.canonical), draft.handled)) await ask(draft, false)
   }
 
-  watch(() => tables.pages, () => {
+  watch(tables.pages, () => {
     for (const draft of drafts.value) void settle(draft)
   })
 

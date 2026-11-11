@@ -1,8 +1,8 @@
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onMounted, ref, shallowRef, watch } from "vue"
 import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
-  draftBody, itemOfSource, summaryOf,
+  draftBody, itemOfSource, playersOf, summaryOf,
   type LayoutRow, type SeriesSource, type SourceItem, type SourceSummary,
 } from "../lib/sources"
 import { useCompositionStore } from "../stores/composition"
@@ -23,9 +23,11 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
   const tables = useSourceTablesStore()
   const composition = useCompositionStore()
   const sources = ref<SeriesSource[]>(initial)
-  const summaries = ref<SourceSummary[]>([])
+  // The answer of the constructor is replaced whole and never changed in place: it is kept as it came (thousands of rows
+  // made deeply reactive cost every read of them).
+  const summaries = shallowRef<SourceSummary[]>([])
   // The rows the constructor made by the rules of the profiles: the episodes of a player and of its voice-overs are read from them.
-  const layout = ref<LayoutRow[]>([])
+  const layout = shallowRef<LayoutRow[]>([])
   // The address the core names the page of a source with in its events, by source id.
   const canonical = ref<Record<number, string>>({})
   const error = ref("")
@@ -37,8 +39,22 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     return failed ? t("output.layoutFailed", { reason: reasonText(failed.reason) }) : ""
   })
 
+  // The players of every source are made of the layout and of the choices of the source, not of the news of its page:
+  // a packet of a read under way changes the state of its source and recounts no row.
+  const players = computed(() => {
+    const rows = new Map<number, LayoutRow[]>()
+    for (const row of layout.value) {
+      const known = rows.get(row.source_id)
+      if (known) known.push(row)
+      else rows.set(row.source_id, [row])
+    }
+    return new Map(sources.value.map((source) => [source.id, playersOf(
+      summaryOf(summaries.value, source.id), source.players_off ?? [], rows.get(source.id) ?? [])] as const))
+  })
+
   const items = computed<SourceItem[]>(() => sources.value.map((source) => itemOfSource(
-    source, summaryOf(summaries.value, source.id), tables.forUrl(canonical.value[source.id] ?? ""), layout.value)))
+    source, summaryOf(summaries.value, source.id), tables.forUrl(canonical.value[source.id] ?? ""), [],
+    players.value.get(source.id))))
 
   async function nameThePage(source: SeriesSource): Promise<void> {
     const answer = await resolveAddress(source.url)

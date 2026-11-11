@@ -71,7 +71,8 @@ export interface EpisodeView {
   rows: Row[]
   levers: Lever[]
   dubs: VoiceDub[]
-  /** The files of the plan of the series: the status of the video of a reference is read from them. */
+  /** The files of the plan that hold the videos of the references of this episode: the status of the video of a
+   *  reference is read from them. Only its own: an episode is the same picture while its own files stand as they were. */
   files?: MediaFile[]
   /** The labels of the players of the sources, by `source:player`: a player the episode has no line for is still named. */
   labels?: Record<string, string>
@@ -165,16 +166,21 @@ export function joinEpisodes(
     addTo(dubsBy, slotKey(dub), dub)
   }
 
+  const filesBy = new Map<string, MediaFile[]>()
+  for (const file of files) addTo(filesBy, keyOf(file.source_id ?? "", file.row_key ?? ""), file)
+
   return [...slots.values()].sort(bySlot).map(({ season, episode }) => {
     const key = slotKey({ season, episode })
+    const own = (referencesBy.get(key) ?? []).sort(byPart)
     return {
       season,
       episode,
-      references: (referencesBy.get(key) ?? []).sort(byPart),
+      references: own,
       rows: rowsBy.get(key) ?? [],
       levers: settingsBy.get(key)?.levers ?? [],
       dubs: dubsBy.get(key) ?? [],
-      files,
+      files: [...new Set(own.flatMap((reference) => (reference.source_id ?? null) === null ? []
+        : filesBy.get(keyOf(reference.source_id as number, reference.row_key ?? "")) ?? []))],
       labels,
       availability,
     }
@@ -358,6 +364,16 @@ export interface OutputLine {
  *  height of that variant, as the layout has it for this episode. A reference with no source names no variant, so it has
  *  no line: its mark says why. */
 export function outputLines(view: EpisodeView): OutputLine[] {
+  let lines = linesOf.get(view)
+  if (!lines) linesOf.set(view, lines = countLines(view))
+  return lines
+}
+
+// A view is never changed in place (a packet makes new views, and the ones it left alike stay the objects they were:
+// lib/sharing.ts), and its lines are asked for by every card, filter and meter of the window: counted once a view.
+const linesOf = new WeakMap<EpisodeView, OutputLine[]>()
+
+function countLines(view: EpisodeView): OutputLine[] {
   const variants = voiceColumns(view).flatMap((column) => column.variants)
   const labelOf = (sourceId: number | null, player: string | null): string | null =>
     player === null ? null : (view.labels?.[`${sourceId}:${player}`]

@@ -1,5 +1,5 @@
 import { defineStore } from "pinia"
-import { ref } from "vue"
+import { keyed } from "./keyed"
 import type { components } from "../api/schema"
 
 type Schemas = components["schemas"]
@@ -26,14 +26,10 @@ export interface PageStatus {
 /** The reading of site pages as the core reports it (sources_table_progress / _ready / _failed), keyed by the
  *  canonical address of the page: the address the user typed is not the key. */
 export const useSourceTablesStore = defineStore("sourceTables", () => {
-  const pages = ref<Record<string, PageStatus>>({})
+  const { all: pages, put: keep, clear } = keyed<PageStatus>()
 
   function put(url: string, next: Partial<PageStatus> & { state: PageState }): void {
-    const before = pages.value[url]
-    pages.value = {
-      ...pages.value,
-      [url]: { progress: null, reason: null, readAt: before?.readAt ?? null, ...next },
-    }
+    keep(url, { progress: null, reason: null, readAt: pages[url]?.readAt ?? null, ...next })
   }
 
   function applyProgress(packet: Omit<Schemas["TableProgress"], "rate"> & { rate?: number | null }): void {
@@ -52,12 +48,12 @@ export const useSourceTablesStore = defineStore("sourceTables", () => {
   }
 
   function forUrl(url: string): PageStatus | null {
-    return pages.value[url] ?? null
+    return pages[url] ?? null
   }
 
   /** After a break of the connection the news of the pages may be incomplete: the screens ask their API again. */
   function reset(): void {
-    pages.value = {}
+    clear()
   }
 
   return { pages, applyProgress, applyReady, applyFailed, forUrl, reset }

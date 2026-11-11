@@ -51,6 +51,19 @@ describe("joinEpisodes", () => {
     expect(views[2].rows).toEqual([compilation])
   })
 
+  it("gives an episode the files of its own references and no file of another episode", () => {
+    const refs = [ref(1, 1, { source_id: 7, row_key: "a" }), ref(1, 2, { source_id: 7, row_key: "b" }), ref(1, 3)]
+    const files = [{ unique_id: "u", source_id: 7, row_key: "a", status: "completed" },
+                   { unique_id: "v", source_id: 7, row_key: "b", status: "pending" },
+                   { unique_id: "w", source_id: 8, row_key: "a", status: "pending" }]
+    const views = joinEpisodes(lines, refs, [], [], {}, files)
+    expect(views.map((view) => (view.files ?? []).map((file) => file.unique_id))).toEqual([["u"], ["v"], []])
+    // A packet that moves the file of one episode leaves the pictures of the others as they were.
+    const moved = joinEpisodes(lines, refs, [], [], {}, [files[0], { ...files[1], status: "completed" }, files[2]])
+    expect(moved[0]).toEqual(views[0])
+    expect(moved[1]).not.toEqual(views[1])
+  })
+
   it("leaves out every line that is no row of the output, a line no voice-over group took among them", () => {
     const numbers = joinEpisodes(lines, [], [], []).map((view) => view.episode)
     expect(numbers).toEqual([1, 2, 3])
