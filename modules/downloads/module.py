@@ -315,8 +315,8 @@ class DownloadsModule(BaseModule):
     # --- the fetches ------------------------------------------------------------------
 
     async def _resolve_stream(self, url: str, *, max_height: int | None = None,
-                              ytdlp_fallback) -> tuple[str, dict | None, tuple[str, Failed] | None, bool, bool, float | None]:
-        """(stream url, headers, (error, what it says of the source), progressive, playlist, lead) of a link, via the provider
+                              ytdlp_fallback) -> tuple[str, dict | None, tuple[str, Failed] | None, bool, bool]:
+        """(stream url, headers, (error, what it says of the source), progressive, playlist) of a link, via the provider
         that owns it. The provider says itself whether its refusal is its last word; a provider that did not answer said
         nothing of the source.
 
@@ -328,15 +328,15 @@ class DownloadsModule(BaseModule):
             reply = await self.request("sources.video.stream", payload)
             if reply.get("error"):
                 return (url, None, (reply["error"], Failed.BROKEN if reply.get("transient") else Failed.FINAL),
-                        False, False, None)
+                        False, False)
             if reply.get("handled"):
                 return (reply["stream_url"], reply.get("headers"), None, bool(reply.get("progressive")),
-                        bool(reply.get("playlist")), reply.get("lead"))
+                        bool(reply.get("playlist")))
         except Exception as exc:
             if not await ytdlp_fallback():
-                return url, None, (f"поток не получен: {exc}", Failed.UNASKED), False, False, None
+                return url, None, (f"поток не получен: {exc}", Failed.UNASKED), False, False
             self.log.debug("sources.video.stream не обработан для %s: %s", url, exc)
-        return url, None, None, False, False, None
+        return url, None, None, False, False
 
     async def on_fetch(self, env: Envelope) -> None:
         job = {k: env.payload.get(k) for k in ("key", "url", "path", "max_height", "series_id", "whole", "ytdlp")}
@@ -405,10 +405,10 @@ class DownloadsModule(BaseModule):
             self.cards.attempt(need_key, tries, budget.attempts)
             self.places.asking(turn)
             try:
-                stream_url, headers, stream_error, progressive, playlist, lead = await resolve()
+                stream_url, headers, stream_error, progressive, playlist = await resolve()
                 if stream_error is not None:
                     return (False, *stream_error)
-                multi = ytdlp.multithreaded(stream_url, headers, progressive, playlist, lead)
+                multi = ytdlp.multithreaded(stream_url, headers, progressive, playlist)
 
                 def wait() -> None:
                     # The way of the file is full: the fetch waits in the queue.
@@ -427,15 +427,14 @@ class DownloadsModule(BaseModule):
                 if waited:
                     # An address a host signed may not outlive the wait: the stream is asked anew.
                     self.cards.attempt(need_key, tries, budget.attempts)
-                    stream_url, headers, stream_error, progressive, playlist, lead = await resolve()
+                    stream_url, headers, stream_error, progressive, playlist = await resolve()
                     if stream_error is not None:
                         return (False, *stream_error)
-                return await fetched(stream_url, headers, progressive, playlist, lead)
+                return await fetched(stream_url, headers, progressive, playlist)
             finally:
                 await self.places.give(multi)
 
-        async def fetched(stream_url: str, headers, progressive: bool, playlist: bool,
-                          lead: float | None) -> tuple[bool, str, Failed | None]:
+        async def fetched(stream_url: str, headers, progressive: bool, playlist: bool) -> tuple[bool, str, Failed | None]:
             kw: dict = {"threads": self.places.limits.threads_per_file}
             if job.get("max_height"):
                 kw["max_height"] = job["max_height"]  # a page the downloader reads itself keeps the cap of the job
@@ -445,8 +444,6 @@ class DownloadsModule(BaseModule):
                 kw["progressive"] = True
             if playlist:
                 kw["playlist"] = kw["resumable"] = True  # what an attempt got is dropped at the end of the fetch
-            if lead:
-                kw["lead"] = lead
             done, failure = await self._watched(key, stream_url, path, on_progress, **kw)
             return done, failure, None if done else kind_of(failure)
 

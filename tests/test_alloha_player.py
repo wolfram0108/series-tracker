@@ -262,8 +262,6 @@ async def test_a_stream_is_the_best_file_within_the_cap_with_the_headers_of_the_
         got = await stream_of(player, http)
 
     assert got["stream_url"] == "https://cdn1.vkvideo.test/720.m3u8"
-    # The files are playlists, downloaded no faster than playing with a lead: their CDN refuses a client that runs ahead.
-    assert got["playlist"] is True and got["lead"] > 0
     assert got["headers"] == {"authorizations": "token-200", "accepts-controls": "control",
                               "user-agent": "Mozilla/5.0 Firefox", "origin": "https://alloha.yani.tv"}
     assert browser.clicks == 1 and browser.closed == browser.opened == 1

@@ -88,8 +88,7 @@ class StreamPlayer(Protocol):
         """{stream_url, headers, progressive?, playlist?} of the best file within `max_height` (the best of all without
         it). What the file is decides how it is downloaded (modules/downloads/limits.py): `progressive` a ready file, asked
         in parts; `playlist` an HLS playlist, by its segments; a stream that is neither is read by ffmpeg over one
-        connection; `lead`: the playlist is downloaded no further ahead of playing than that many seconds of the film.
-        Raises StreamUnavailable when the player owns the link but has no stream for it now."""
+        connection. Raises StreamUnavailable when the player owns the link but has no stream for it now."""
         ...
 
 

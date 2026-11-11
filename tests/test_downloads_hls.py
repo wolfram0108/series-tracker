@@ -8,7 +8,6 @@ import asyncio
 import json
 import os
 import subprocess
-import time
 
 import pytest
 
@@ -161,32 +160,6 @@ async def test_the_parts_of_a_broken_transfer_go_unless_the_caller_asks_again(tm
         host.cut["show/seg2.ts"] = 100
         ok, _why = await ytdlp.download(host.url(name), str(tmp_path / "lib" / "e1.mp4"), noop, playlist=True, threads=1)
         assert not ok and os.listdir(tmp_path / "lib") == []
-    finally:
-        host.close()
-
-
-async def test_a_playlist_kept_to_the_pace_of_playing_asks_no_segment_before_its_time(tmp_path):
-    """A host that refuses a client faster than playing (Alloha) gets the segments one at a time, none further ahead of
-    the time since the start than the lead: four segments of a second with a lead of one second take two seconds at
-    least, and their times of asking say so."""
-    host = Host(str(tmp_path / "site"))
-    asked: dict[str, float] = {}
-    try:
-        name = stream(str(tmp_path / "site"))
-        began = time.monotonic()
-        served = host.served
-        out = str(tmp_path / "lib" / "e1.mp4")
-
-        async def progress(_data: dict) -> None:
-            for each in served:
-                asked.setdefault(each, time.monotonic() - began)
-
-        ok, why = await ytdlp.download(host.url(name), out, progress, playlist=True, threads=16, lead=1.0)
-        assert ok, why
-        assert time.monotonic() - began >= 1.9
-        assert asked["show/seg3.ts"] >= 1.9 and asked["show/seg2.ts"] >= 0.9
-        assert float(probe(out)["format"]["duration"]) == pytest.approx(4, abs=0.5)
-        assert not ytdlp.multithreaded(host.url(name), {}, False, True, 1.0), "a paced playlist takes one connection"
     finally:
         host.close()
 
