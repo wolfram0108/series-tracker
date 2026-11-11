@@ -36,7 +36,7 @@ from ..apps.lines import LineRegistry
 from ..policy import settle
 from ..term import Term
 from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
-from .hls import MEASURE_TIMEOUT_S, Measure, is_playlist, measure_head, measured, waiting
+from .hls import MEASURE_TIMEOUT_S, Measure, container_of, is_playlist, measure_head, measured, waiting
 from .http import USER_AGENT, retry_after
 from .vk_files import pick_file
 
@@ -47,20 +47,6 @@ PEEK_BYTES = 4096
 # The range asked of the address of a stream: a playlist of thousands of segments fits whole, a file is not taken.
 PLAYLIST_BYTES = 8 * 1024 * 1024
 _DIRECT = re.compile(r"\.(m3u8|mp4)(?:$|\?)", re.I)
-TS_PACKET = 188
-
-
-def container_of(head: bytes) -> str | None:
-    """The container a file starts with, by its signature; None when the bytes start no media file."""
-    if head[4:8] == b"ftyp":
-        return "mp4"
-    if head[:1] == b"\x47" and (len(head) <= TS_PACKET or head[TS_PACKET:TS_PACKET + 1] == b"\x47"):
-        return "mpegts"
-    if head[:4] == b"\x1a\x45\xdf\xa3":
-        return "matroska"
-    if head[:3] == b"FLV":
-        return "flv"
-    return None
 
 
 def _excerpt(head: bytes) -> str:

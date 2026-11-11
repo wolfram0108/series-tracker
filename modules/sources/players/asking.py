@@ -5,7 +5,8 @@ one player and turns each verdict into the state of a row: playable (with its st
 
 An answer that stayed unsure while a whole page was being asked (nothing came, a host too busy, a status that passes) is
 not yet the answer about the video: a host asked for hundreds of videos at once refuses some of them. When the rest is
-done such videos are looked at again (`look_again`), cause by cause, and the read shows it as a phase of its own.
+done such videos are asked again (`look_again`), and the read shows it as a phase of its own; only for a host nothing
+comes of at all one video answers for the others of its cause.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from core.reasons import reason
 
 from ..policy import Pacer, Verdict, probe_from, settle
 from .catalog import Entry
-from .contract import Player, PlayerRef, Reading
+from .contract import Kind, Player, PlayerRef, Reading
 
 logger = logging.getLogger("sources")
 
@@ -43,23 +44,31 @@ def cause_of(said: "Verdict | Exception") -> str:
     return reading.message or f"{reading.kind.value} {reading.status or ''}".strip()
 
 
+def silent(said: "Verdict | Exception") -> bool:
+    """Nothing came of the ask: no connection, no answer in time, an ask that raised. A host that takes no connection
+    costs every ask of it the whole wait; a host that answered with a refusal (a status, words) answered at once."""
+    return isinstance(said, Exception) or said.reading.kind is Kind.NO_ANSWER
+
+
 async def look_again(said: dict, ask: Callable, kind_of: Callable, *, told: Callable[[int, int], None] | None = None,
                      what: str = "") -> None:
     """The videos of `said` (key -> verdict or exception) left unsure, looked at again when the rest is done; `said` is
-    updated. The videos of one kind (`kind_of(key)`: a player, a line) left with one cause are one question — was it the
-    load of the read, or is the way to them down — answered by asking one of them again (`ask(key)`): the same answer
-    says the way is down, and the others keep it unasked (a host that takes no connection is not asked for each of its
-    hundred videos again); another answer says it was the load, and every one of them is asked again, a few at a time.
-    `told(current, total)` is told how far it is, by videos."""
+    updated. A refusal the host answered with (a status that passes, words) is asked again for every such video, a few
+    at a time: the host answers at once, and it refuses some requests and not others. The videos of one kind
+    (`kind_of(key)`: a player, a line) nothing came of, with one cause, are one question — was it the load of the read,
+    or is the way to them down — answered by asking one of them again (`ask(key)`): the same silence says the way is
+    down, and the others keep it unasked (a host that takes no connection is not waited for at each of its hundred
+    videos again); an answer says it was the load, and every one of them is asked again. `told(current, total)` is told
+    how far it is, by videos."""
     groups: dict[tuple, list] = {}
     for key, verdict in said.items():
         if unsure(verdict):
-            groups.setdefault((kind_of(key), cause_of(verdict)), []).append(key)
+            groups.setdefault((kind_of(key), cause_of(verdict), silent(verdict)), []).append(key)
     if not groups:
         return
     total, checked = sum(len(keys) for keys in groups.values()), 0
     calm = asyncio.Semaphore(CALM_IN_FLIGHT)
-    logger.info("%s: %d без окончательного ответа, причин %d — каждая причина проверяется повторным запросом одного",
+    logger.info("%s: %d без окончательного ответа, причин %d — спрашиваются снова после основного прохода",
                 what, total, len(groups))
     if told is not None:
         told(0, total)
@@ -72,8 +81,12 @@ async def look_again(said: dict, ask: Callable, kind_of: Callable, *, told: Call
         if told is not None:
             told(checked, total)
 
-    async def group(kind, cause: str, keys: list) -> None:
+    async def group(kind, cause: str, quiet: bool, keys: list) -> None:
         nonlocal checked
+        if not quiet:
+            logger.info("%s, %s: «%s» — отказ дан ответом хоста, спрашиваются снова все %d", what, kind, cause[:160], len(keys))
+            await asyncio.gather(*(one(key) for key in keys))
+            return
         first, rest = keys[0], keys[1:]
         async with calm:
             said[first] = await ask(first)
@@ -87,7 +100,7 @@ async def look_again(said: dict, ask: Callable, kind_of: Callable, *, told: Call
         if not down:
             await asyncio.gather(*(one(key) for key in rest))
 
-    await asyncio.gather(*(group(kind, cause, keys) for (kind, cause), keys in groups.items()))
+    await asyncio.gather(*(group(kind, cause, quiet, keys) for (kind, cause, quiet), keys in groups.items()))
 
 
 @dataclass(frozen=True)

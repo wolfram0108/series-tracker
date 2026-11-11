@@ -128,13 +128,18 @@ async def settle(player: Player, ref: PlayerRef, http: httpx.AsyncClient, page_u
                  budget: Budget | None = None, *, pacer: Pacer | None = None,
                  clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> Verdict:
-    """Ask a player until its answer is final or the budget is spent."""
+    """Ask a player until its answer is final or the budget is spent. The time of the budget is the time of the asking —
+    the answers of the host and the pauses between them; the turn a video waits for at the pacer among the hundreds of
+    a page is no part of it, or the videos asked late in a read would never be asked again."""
     tries = 0
+    queued = 0.0  # the time spent waiting for the turn at the pacer
 
     async def ask() -> tuple[Answer, Reading]:
-        nonlocal tries
+        nonlocal tries, queued
         if pacer is not None:
+            before = clock()
             await pacer.wait()
+            queued += clock() - before
         tries += 1
         began = clock()
         answer = await player.fetch(ref, http, page_url)
@@ -147,5 +152,5 @@ async def settle(player: Player, ref: PlayerRef, http: httpx.AsyncClient, page_u
 
     (_answer, reading), attempts, exhausted = await retrying(
         ask, final=lambda asked: not is_retryable(asked[1]), budget=budget or DEFAULT,
-        retry_after=lambda asked: asked[0].retry_after, clock=clock, sleep=sleep)
+        retry_after=lambda asked: asked[0].retry_after, clock=lambda: clock() - queued, sleep=sleep)
     return Verdict(reading, attempts, exhausted)

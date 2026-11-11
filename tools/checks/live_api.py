@@ -16,7 +16,7 @@ heads of segments it fetched, the cost of measuring frames. `sync` presses «С�
 its sources does: the table of the address is read as the window reads it, then the address becomes a source of the
 series (`POST /api/series/<id>/sources`), and the sources of the series are printed. `read` only asks for the read of a
 page now (`POST /api/sources/read`, the button «Перечитать») and does not wait for it: a read longer than the run of a
-check is joined afterwards by `preview` (without `--now`), which waits for the end of the read under way. The last line
+check is joined afterwards by `preview --join`, which asks for nothing and waits for the end of the read under way. The last line
 is `LIVE_API_DONE`.
 """
 from __future__ import annotations
@@ -92,7 +92,7 @@ async def table_end(http: httpx.AsyncClient, canonical: str, listening: asyncio.
     return "stream closed"
 
 
-async def preview(url: str, now: bool) -> None:
+async def preview(url: str, now: bool, join: bool = False) -> None:
     async with httpx.AsyncClient(base_url=BASE, timeout=30) as http:
         await signed_in(http)
         resolved = (await http.post("/api/sources/resolve", json={"url": url})).json()
@@ -107,6 +107,9 @@ async def preview(url: str, now: bool) -> None:
         if now:
             asked = await http.post("/api/sources/read", json={"url": url})
             state = "reading" if asked.status_code == 200 else f"refused {asked.status_code}"
+        elif join:
+            # The read under way (asked before, by `read` or by the service itself) is waited for; nothing is asked.
+            state = (await http.post("/api/sources/preview", json={"url": url, "refresh": False})).json().get("state")
         else:
             state = (await http.post("/api/sources/preview", json={"url": url, "refresh": True})).json().get("state")
         outcome = await ending if state == "reading" else state
@@ -184,6 +187,7 @@ def main() -> None:
     shown = commands.add_parser("preview", help="the table of a page, as the window reads it")
     shown.add_argument("url")
     shown.add_argument("--now", action="store_true", help="read it now, whatever the age of its table")
+    shown.add_argument("--join", action="store_true", help="wait for the end of the read under way, ask for none")
     synced = commands.add_parser("sync", help="a sync of a series to its end, and the files of its plan")
     synced.add_argument("series_id", type=int)
     added = commands.add_parser("source", help="a source added to a series, as the area of its sources adds it")
@@ -192,7 +196,7 @@ def main() -> None:
     asked = commands.add_parser("read", help="the read of a page asked now and not waited for")
     asked.add_argument("url")
     args = parser.parse_args()
-    asyncio.run(preview(args.url, args.now) if args.command == "preview"
+    asyncio.run(preview(args.url, args.now, args.join) if args.command == "preview"
                 else source(args.series_id, args.url) if args.command == "source"
                 else read(args.url) if args.command == "read" else sync(args.series_id))
     print("LIVE_API_DONE")

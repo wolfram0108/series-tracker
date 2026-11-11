@@ -253,9 +253,8 @@ async def test_an_answer_that_is_not_final_is_asked_again_and_a_row_ends_with_it
 
 async def test_a_row_the_way_to_which_failed_under_the_load_of_the_read_is_asked_again_when_the_rest_is_done(caplog):
     """A host too busy for every ask the policy allows while the whole card is being asked is not the answer about the
-    episode. When the rest is done one row of the cause is asked again: it answers, so it was the load, and the other
-    rows of the cause are asked again too and get the frames of their own episodes. The read shows it as a phase of
-    its own."""
+    episode. When the rest is done every row it refused is asked again (the host answers at once, and refuses some
+    requests and not others) and gets the frame of its own episode. The read shows it as a phase of its own."""
     model = card_world()
     model.parses[(9, "CO4K_tok1")] = f"{CDN}busy/1.m3u8"
     model.parses[(9, "CO4K_pv")] = f"{CDN}busier/pv.m3u8"
@@ -273,9 +272,9 @@ async def test_a_row_the_way_to_which_failed_under_the_load_of_the_read_is_asked
                 "app://banri/219017", ReadContext(http, lambda *step: progress.append(step)))
     heights = {row.key: row.heights for row in draft.rows}
     assert heights["banri:CO4K:1"] == [2160] and heights["banri:CO4K:3"] == [1440]
-    # Three asks of the read and two more of the row asked first; three and three of the other row of the cause.
+    # Three asks of the read and two more of the one row; three and three of the other.
     assert asked.count(f"{CDN}busy/1.m3u8") == 5 and asked.count(f"{CDN}busier/pv.m3u8") == 6
-    assert any("не подтвердилось, спрашиваются остальные 1" in record.getMessage() for record in caplog.records)
+    assert any("отказ дан ответом хоста, спрашиваются снова все 2" in record.getMessage() for record in caplog.records)
     # The rows of the read are counted once; what is looked at again is a phase of its own with its own count.
     assert [step[1:] for step in progress if step[0] == PHASE_PLAYERS][-1] == (5, 5)
     # Three rows were left unsure: the two of the busy host (one cause) and the episode no parser gave a stream of.
@@ -460,6 +459,25 @@ async def test_a_stream_is_what_its_host_serves_by_its_signature_and_a_row_witho
         assert (await player.stream(jpeg.link, http, None, players.pacer))["progressive"] is True
         png = next(row for row in draft.rows if row.text == "png")
         assert (await player.stream(png.link, http, None, players.pacer))["playlist"] is True
+
+
+async def test_a_playlist_whose_segment_is_a_whole_mp4_is_measured_as_a_file_by_its_address(monkeypatch):
+    """A line gives a playlist of one segment that is a whole MP4 (its index at its end): the head of it is no transport
+    stream and shows nothing to a reader of one. The frame is read from the file by its address."""
+    probed: list[tuple[str, list[str]]] = []
+
+    async def probe(address, *, input_args=None, timeout=0, data=None):
+        probed.append((address, list(input_args or [])))
+        return [{"codec_type": "video", "height": 2160}, {"codec_type": "audio"}], ""
+
+    monkeypatch.setattr(hls, "probe", probe)
+
+    def handle(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(206, headers={"Content-Type": "binary/octet-stream"}, content=MP4_HEAD)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        height = await hls.measure_head(http, hls.Head("https://store.model/v/film.mp4?sign=1", 0), "")
+    assert height == 2160 and probed[0][0] == "https://store.model/v/film.mp4?sign=1"
 
 
 async def test_a_file_ffprobe_cannot_open_says_what_ffprobe_said_not_that_it_holds_no_picture():

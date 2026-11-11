@@ -37,8 +37,9 @@ def refs_of(player: Hosted) -> list[PlayerRef]:
 
 
 async def test_a_refusal_under_the_load_of_the_read_is_not_the_answer_the_video_is_asked_again_when_the_rest_is_done():
-    """A host asked for every video of a page at once answers 500 to some of them for as long as the read goes on. One
-    of them asked again when the rest is done plays: it was the load, and every video of that cause is asked again."""
+    """A host asked for every video of a page at once answers 500 to some of them for as long as the read goes on.
+    Asked again when the rest is done, each of them plays: a refusal the host answers with is asked again for every
+    video it was given to."""
     attempts = policy.DEFAULT.attempts
     busy = [500] * attempts + [200]
     player = Hosted({"https://h/1": [200], "https://h/2": list(busy), "https://h/3": list(busy), "https://h/4": [200]})
@@ -67,8 +68,8 @@ async def test_a_way_that_is_down_is_asked_again_for_one_video_and_the_others_ke
 
 
 async def test_two_causes_are_two_questions_each_answered_by_one_video():
-    """The videos a host refused with 500 and the ones another host did not answer are looked at apart: the first were
-    the load and are all asked again, the second are down and keep their answer."""
+    """The videos a host refused with 500 and the ones another host did not answer are looked at apart: the first are
+    all asked again, of the second one is, and the others keep the answer."""
     attempts = policy.DEFAULT.attempts
     player = Hosted({"https://h/1": [500] * attempts + [200], "https://h/2": [500] * attempts + [200],
                      "https://dead/1": [None], "https://dead/2": [None]})

@@ -1,7 +1,8 @@
 """The frame of an HLS stream, read from its picture: the playlist (the variant of the highest bandwidth when it is a master
 one), the head of the first segment of its film (a block a host put before it from elsewhere is no part of the film, as
-the downloader has it: core/hls_playlist.py), decrypted when the playlist names an AES-128 key, given to ffprobe. A film
-whose first segment shows no picture is a file its store has damaged: the answer says what the host served for it.
+the downloader has it: core/hls_playlist.py), decrypted when the playlist names an AES-128 key, given to ffprobe. A
+segment that is a whole file (a playlist of one MP4) is read as a file, by its address. A film whose first segment shows
+no picture is a file its store has damaged: the answer says what the host served for it.
 
 A host may say nothing true of the frame of what it serves (the label of a list, the name of a line of an application), so
 the players whose streams are playlists measure it here, one way for all of them.
@@ -16,7 +17,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from core.ffprobe import film_stream, streams_of
+from core.ffprobe import film_stream, probe, streams_of
 from core.hls_playlist import without_insertions
 
 from .contract import Answer, Kind, Reading
@@ -36,6 +37,23 @@ def waiting(seconds: float) -> httpx.Timeout:
 # Enough of a segment to hold its first key frame with the parameters of the picture; the rest of it is not fetched.
 HEAD_BYTES = 256 * 1024
 MEASURE_TIMEOUT_S = 30.0
+
+TS_PACKET = 188
+
+
+def container_of(head: bytes) -> str | None:
+    """The container a file starts with, by its signature; None when the bytes start no media file."""
+    if head[4:8] == b"ftyp":
+        return "mp4"
+    if head[:1] == b"\x47" and (len(head) <= TS_PACKET or head[TS_PACKET:TS_PACKET + 1] == b"\x47"):
+        return "mpegts"
+    if head[:4] == b"\x1a\x45\xdf\xa3":
+        return "matroska"
+    if head[:3] == b"FLV":
+        return "flv"
+    return None
+
+
 
 _ATTRIBUTE = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
 
@@ -136,6 +154,15 @@ async def measure_head(http: httpx.AsyncClient, head: Head, referer: str) -> int
     the host served."""
     data, kind = await _served(http, head.segment, referer, HEAD_BYTES)
     size = len(data)
+    if not head.init and container_of(data) not in (None, "mpegts"):
+        # A playlist may list a whole file as its segment (an MP4, its index at its end): its picture is read as a
+        # file's, by its address, not from the head of a transport stream.
+        streams, _said = await probe(head.segment, input_args=[
+            "-user_agent", USER_AGENT, *(["-headers", f"Referer: {referer}\r\n"] if referer else [])],
+            timeout=MEASURE_TIMEOUT_S)
+        film = film_stream(streams or [])
+        if film is not None and film.get("height"):
+            return int(film["height"])
     if head.method == "AES-128":
         key = await _bytes(http, head.key, referer)
         data = decrypted(data, key, head.iv if head.iv is not None else head.sequence.to_bytes(16, "big"))

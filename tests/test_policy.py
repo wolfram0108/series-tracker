@@ -57,6 +57,23 @@ async def run(player: FakePlayer, budget: Budget | None = None, pacer: Pacer | N
     return verdict, time
 
 
+@pytest.mark.asyncio
+async def test_the_turn_a_video_waits_for_at_the_pacer_is_no_part_of_the_time_of_its_budget():
+    """A page of a thousand videos: one asked late waits minutes for its turn, and so does each of its asks after a
+    refusal. That wait is not the asking: the video is asked again as many times as the budget says."""
+    time = FakeTime()
+
+    class Queue:
+        async def wait(self) -> None:
+            time.now += 100.0  # the turn among the videos of the page
+
+    player = FakePlayer(said("", 500), said("", 500), said("video"))
+    verdict = await settle(player, REF, None, "https://page.test", Budget(), pacer=Queue(), clock=time.clock,
+                           sleep=time.sleep)
+    assert (verdict.reading.kind, verdict.attempts, verdict.exhausted) == (Kind.PLAYABLE, 3, False)
+    assert time.slept == [2.0, 6.0]
+
+
 @pytest.mark.parametrize("text,kind", [("video", Kind.PLAYABLE), ("gone", Kind.NOT_FOUND), ("closed", Kind.RESTRICTED)])
 @pytest.mark.asyncio
 async def test_a_final_answer_is_taken_at_once(text, kind):
