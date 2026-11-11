@@ -136,7 +136,7 @@ async def test_a_line_of_two_applications_is_one_player_and_each_row_is_asked_of
     app99.host_prefix = "https://app99.model"
     playlists = {f"{CDN}{name}/index.m3u8": PLAYLIST for name in ("z1", "q1", "a1")}
 
-    async def measure(_http, head, _referer):
+    async def measure(_http, head, _referer, _headers=None):
         return {"z1": 2160, "q1": 1080, "a1": 720}[head.segment.removeprefix(CDN).split("/")[0]]
 
     async with world(drama, app99, playlists=playlists) as http:

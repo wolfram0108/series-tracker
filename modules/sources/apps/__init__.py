@@ -87,6 +87,27 @@ class AppStream:
     headers: dict[str, str] = field(default_factory=dict)
 
 
+# The codes by which a parser says it made the address of the episode (the clients the applications are read by state
+# one of these on success; a number of an HTTP refusal or a word of failure in its place is the parser saying no).
+_PARSED = frozenset({"0", "1", "200", "true", "ok", "success"})
+
+
+def parsed_address(answer: object, key: str = "url") -> tuple[str, str]:
+    """(the address of the stream a parser's JSON answer names, what the parser says in words). A parser that states a
+    code states whether it parsed, and its refusal may name an address as well — a quota spent comes with one that leads
+    nowhere: the address of a refusal is no stream, and the words of the refusal are the answer."""
+    if not isinstance(answer, dict):
+        return "", ""
+    inner = answer.get("data") if isinstance(answer.get("data"), dict) else {}
+    words = str(answer.get("msg") or answer.get("message") or inner.get("msg") or inner.get("message") or "")
+    for said in (answer, inner):
+        code = said.get("code")
+        if said.get("success") in (False, "false") or (code is not None and str(code).lower() not in _PARSED):
+            return "", words or f"code {code}"
+    target = answer.get(key) or inner.get(key)
+    return (target, words) if isinstance(target, str) and target.startswith(("http://", "https://")) else ("", words)
+
+
 @dataclass(frozen=True)
 class AppPage:
     """A page of the search: the cards as the application gives them ({id, name, sub, year, area, class, remarks,

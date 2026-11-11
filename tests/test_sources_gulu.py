@@ -69,7 +69,10 @@ class Server:
                 return httpx.Response(200, json={"code": 200, "url": f"https://cdn.model/x/{token}.m3u8"})
             if url.startswith(PARSER_B):
                 return httpx.Response(200, json={"main_url": f"https://tos.model/{token}.mp4"})
-            return httpx.Response(200, json={"code": 403, "msg": "访问受限：IP 未授权"})
+            # A refusal as the parser of a line gives it: HTTP 200, its own code, its words — and an address all the
+            # same, which leads nowhere.
+            return httpx.Response(200, json={"code": 403, "message": "访问受限：已达到今日最大请求点数限制 (50000点)。",
+                                             "url": f"https://gone.model/{token}.m3u8", "From": "model"})
         if "X-Handshake-Key" in request.headers:
             wrap = request.headers["X-Handshake-Key"].encode()
             raw = base64.b64decode(request.content)
@@ -137,7 +140,8 @@ async def test_a_refusal_of_every_parser_of_a_line_is_the_answer_about_the_episo
     client._boot = field(4, player(9, "咖啡", "covip", [22])) + field(7, parser(22, "咖啡", PARSER_C))
     with pytest.raises(AppError) as refused:
         await client.resolve("covip", "covip_1")
-    assert "访问受限" in refused.value.reason and not refused.value.transient
+    # The address a refusal names is no stream: the answer about the episode is what the parser said.
+    assert "访问受限" in refused.value.reason and "50000" in refused.value.reason and not refused.value.transient
     with pytest.raises(AppError) as unknown:
         await client.resolve("nowhere", "token")
     assert "app_no_parser" in unknown.value.reason

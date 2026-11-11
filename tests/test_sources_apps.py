@@ -131,7 +131,7 @@ async def test_a_card_is_a_table_of_its_admitted_lines_each_row_with_the_frame_o
     heads: list[str] = []
     frames = {"a": 720, "b": 1080, "c": 2160, "d": 1080}
 
-    async def measure(_http, head, _referer):
+    async def measure(_http, head, _referer, _headers=None):
         heads.append(head.segment)
         return frames[head.segment.removeprefix(CDN).split("/")[0]]
 
@@ -237,7 +237,7 @@ async def test_an_answer_that_is_not_final_is_asked_again_and_a_row_ends_with_it
                                                        "flaky/2.m3u8")}
     http, _asked = world(model, playlists)
 
-    async def measure(_http, head, _referer):
+    async def measure(_http, head, _referer, _headers=None):
         return {"a": 720, "once-525": 2160, "once-down": 1080, "flaky": 1440}[head.segment.removeprefix(CDN).split("/")[0]]
 
     async with http:
@@ -261,7 +261,7 @@ async def test_a_row_the_way_to_which_failed_under_the_load_of_the_read_is_asked
     playlists = {f"{CDN}{name}": PLAYLIST for name in ("a/index.m3u8", "b/index.m3u8", "busy/1.m3u8", "busier/pv.m3u8")}
     http, asked = world(model, playlists)
 
-    async def measure(_http, head, _referer):
+    async def measure(_http, head, _referer, _headers=None):
         return {"a": 720, "b": 1080, "busy": 2160, "busier": 1440}[head.segment.removeprefix(CDN).split("/")[0]]
 
     progress: list[tuple] = []
@@ -318,7 +318,7 @@ async def test_the_frame_of_a_playlist_is_of_its_film_and_a_stub_served_for_its_
     asked: list[str] = []
 
     def measuring(frames: dict[str, int]):
-        async def measure(_http, head, _referer):
+        async def measure(_http, head, _referer, _headers=None):
             asked.append(head.segment)
             if head.segment not in frames:
                 raise hls.MeasureError(Answer(200, reading=Reading(Kind.NOT_FOUND, 200, message=(
@@ -352,6 +352,25 @@ async def test_the_frame_of_a_playlist_is_of_its_film_and_a_stub_served_for_its_
     assert said.kind is Kind.NOT_FOUND and "store.model served no picture in the segment: image/jpeg, 629 bytes" in said.message
 
 
+async def test_the_segment_and_the_key_are_asked_with_the_headers_of_the_stream():
+    """A host that wants the headers of the application for the playlist wants them for the rest of the stream: the
+    measure asks every part of it as the download does. A name is one header whatever its case."""
+    asked: dict[str, httpx.Headers] = {}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        asked[request.url.path] = request.headers
+        return httpx.Response(200, content=b"k" * 16) if request.url.path == "/k.key" else httpx.Response(403)
+
+    line = {"user-agent": "line/1.0", "X-Line": "wanted"}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        with pytest.raises(hls.MeasureError):
+            await hls.measure_head(http, hls.Head("https://store.model/s0.ts", 0), "", line)
+        assert await hls._bytes(http, "https://store.model/k.key", "", headers=line) == b"k" * 16
+    for path in ("/s0.ts", "/k.key"):
+        assert asked[path].get_list("user-agent") == ["line/1.0"] and asked[path]["x-line"] == "wanted", path
+    assert asked["/s0.ts"]["range"].startswith("bytes=0-")
+
+
 async def test_a_failure_of_the_way_out_of_a_measure_is_no_answer_and_the_row_is_asked_again(monkeypatch):
     """A transport error while the frame is measured, and what ffprobe says of a broken connection, are no answer
     about the episode: asked again. What ffprobe says of the file itself stays the answer."""
@@ -362,7 +381,7 @@ async def test_a_failure_of_the_way_out_of_a_measure_is_no_answer_and_the_row_is
     http, _asked = world(model, playlists)
     timed_out: list[str] = []
 
-    async def measure(_http, head, _referer):
+    async def measure(_http, head, _referer, _headers=None):
         folder = head.segment.removeprefix(CDN).split("/")[0]
         if folder == "d" and not timed_out:
             timed_out.append(folder)

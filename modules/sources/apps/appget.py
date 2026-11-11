@@ -36,7 +36,7 @@ from cryptography.hazmat.primitives.padding import PKCS7
 
 from core.reasons import reason
 
-from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream
+from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream, parsed_address
 
 logger = logging.getLogger("sources")
 
@@ -221,9 +221,11 @@ class AppGetClient:
             answer = json.loads(answer) if isinstance(answer, str) else answer
         except ValueError:
             answer = None
-        target = answer.get("url") if isinstance(answer, dict) else None
-        if not isinstance(target, str) or not target.startswith(("http://", "https://")):
-            raise AppError(reason("app_no_stream", app=self.profile.label, parser=line, message=""), transient=True)
+        target, words = parsed_address(answer)
+        if not target:
+            # No address and no words is a failure of the way; a refusal in words is the parser's answer about the episode.
+            raise AppError(reason("app_no_stream", app=self.profile.label, parser=line, message=words[:300]),
+                           transient=not words.strip())
         return AppStream(target, {})
 
     async def _parsed(self, line: str, address: str, agent: dict[str, str]) -> AppStream:
@@ -244,15 +246,11 @@ class AppGetClient:
             said = response.json()
         except ValueError:
             said = None
-        target = None
-        if isinstance(said, dict):
-            inner = said.get("data") if isinstance(said.get("data"), dict) else {}
-            target = said.get("url") or inner.get("url")
-        if isinstance(target, str) and target.startswith(("http://", "https://")):
+        target, message = parsed_address(said) if response.status_code == 200 else ("", "")
+        if target:
             # The stream a parser names is asked as any player asks it: the agent of the application is of its API
             # (a CDN of a stream refuses it for the segments: 403).
             return AppStream(target, {})
-        message = str(said.get("msg") or said.get("message") or "") if isinstance(said, dict) else ""
         if response.status_code != 200:
             raise AppError(reason("app_status", app=self.profile.label, status=response.status_code),
                            response.status_code >= 500 or response.status_code == 429)

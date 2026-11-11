@@ -77,7 +77,8 @@ class MeasureError(RuntimeError):
         self.answer = answer
 
 
-Measure = Callable[[httpx.AsyncClient, Head, str], Awaitable[int | None]]
+# The measure of a head of a segment: (client, head, referer, the headers of the stream) -> the height of its frame.
+Measure = Callable[[httpx.AsyncClient, Head, str, "dict[str, str] | None"], Awaitable[int | None]]
 
 
 def attributes(line: str) -> dict[str, str]:
@@ -122,14 +123,21 @@ def head_of(text: str, base: str) -> Head | None:
 
 
 def _headers(referer: str, extra: dict[str, str] | None = None) -> dict[str, str]:
-    return {"User-Agent": USER_AGENT, **({"Referer": referer} if referer else {}), **(extra or {})}
+    """Ours, and over them those of the stream: a name is one header whatever its case."""
+    sent = {"User-Agent": USER_AGENT, **({"Referer": referer} if referer else {})}
+    for name, value in (extra or {}).items():
+        sent = {held: each for held, each in sent.items() if held.lower() != name.lower()}
+        sent[name] = value
+    return sent
 
 
-async def _served(http: httpx.AsyncClient, url: str, referer: str, limit: int | None = None) -> tuple[bytes, str]:
-    """The body a host serves at an address (its head when `limit` is given) and the type it announces."""
-    headers = _headers(referer, {"Range": f"bytes=0-{limit - 1}"} if limit else None)
+async def _served(http: httpx.AsyncClient, url: str, referer: str, limit: int | None = None,
+                  headers: dict[str, str] | None = None) -> tuple[bytes, str]:
+    """The body a host serves at an address (its head when `limit` is given) and the type it announces. `headers` are
+    those of the stream: its segments, its key and its initialisation are asked as its playlist is."""
+    sent = _headers(referer, {**(headers or {}), **({"Range": f"bytes=0-{limit - 1}"} if limit else {})})
     try:
-        response = await http.get(url, headers=headers, follow_redirects=True, timeout=waiting(REQUEST_TIMEOUT_S))
+        response = await http.get(url, headers=sent, follow_redirects=True, timeout=waiting(REQUEST_TIMEOUT_S))
     except httpx.HTTPError as exc:
         raise MeasureError(Answer(None, error=f"{type(exc).__name__}: {urlsplit(url).hostname}")) from exc
     if response.status_code not in (200, 206):
@@ -137,8 +145,9 @@ async def _served(http: httpx.AsyncClient, url: str, referer: str, limit: int | 
     return (response.content[:limit] if limit else response.content), response.headers.get("content-type", "")
 
 
-async def _bytes(http: httpx.AsyncClient, url: str, referer: str, limit: int | None = None) -> bytes:
-    return (await _served(http, url, referer, limit))[0]
+async def _bytes(http: httpx.AsyncClient, url: str, referer: str, limit: int | None = None,
+                 headers: dict[str, str] | None = None) -> bytes:
+    return (await _served(http, url, referer, limit, headers))[0]
 
 
 def decrypted(data: bytes, key: bytes, iv: bytes) -> bytes:
@@ -148,26 +157,30 @@ def decrypted(data: bytes, key: bytes, iv: bytes) -> bytes:
     return decryptor.update(whole) + decryptor.finalize()
 
 
-async def measure_head(http: httpx.AsyncClient, head: Head, referer: str) -> int | None:
+async def measure_head(http: httpx.AsyncClient, head: Head, referer: str,
+                       headers: dict[str, str] | None = None) -> int | None:
     """The frame height of the film in the head of a segment. A segment that holds no picture is the host's answer about
     the video (a store that took a part of a file away serves a stub of a few hundred bytes for it): the error says what
-    the host served."""
-    data, kind = await _served(http, head.segment, referer, HEAD_BYTES)
+    the host served. Every request of the measure carries the headers of the stream, as the download of it does: a host
+    that wants them for the playlist wants them for the segment."""
+    data, kind = await _served(http, head.segment, referer, HEAD_BYTES, headers)
     size = len(data)
     if not head.init and container_of(data) not in (None, "mpegts"):
         # A playlist may list a whole file as its segment (an MP4, its index at its end): its picture is read as a
         # file's, by its address, not from the head of a transport stream.
+        sent = _headers(referer, headers)
+        agent = next(value for name, value in sent.items() if name.lower() == "user-agent")
+        lines = "".join(f"{name}: {value}\r\n" for name, value in sent.items() if name.lower() != "user-agent")
         streams, _said = await probe(head.segment, input_args=[
-            "-user_agent", USER_AGENT, *(["-headers", f"Referer: {referer}\r\n"] if referer else [])],
-            timeout=MEASURE_TIMEOUT_S)
+            "-user_agent", agent, *(["-headers", lines] if lines else [])], timeout=MEASURE_TIMEOUT_S)
         film = film_stream(streams or [])
         if film is not None and film.get("height"):
             return int(film["height"])
     if head.method == "AES-128":
-        key = await _bytes(http, head.key, referer)
+        key = await _bytes(http, head.key, referer, headers=headers)
         data = decrypted(data, key, head.iv if head.iv is not None else head.sequence.to_bytes(16, "big"))
     if head.init:
-        data = await _bytes(http, head.init, referer) + data
+        data = await _bytes(http, head.init, referer, headers=headers) + data
     streams = await streams_of("pipe:0", input_args=[] if head.init else ["-f", "mpegts"], data=data,
                                timeout=MEASURE_TIMEOUT_S)
     film = film_stream(streams or [])
@@ -209,7 +222,7 @@ async def measured(http: httpx.AsyncClient, playlist: str, referer: str, measure
     if measure is None:
         return Answer(200, reading=Reading(Kind.PLAYABLE, 200, files=((0, playlist),)))
     try:
-        height = await measure(http, found[0], referer)
+        height = await measure(http, found[0], referer, headers)
     except MeasureError as exc:
         return exc.answer
     if not height:

@@ -198,7 +198,7 @@ async def test_an_episode_without_its_playlist_is_a_row_that_says_why(pictures, 
 async def test_the_asks_in_flight_to_one_host_are_bounded():
     active, most = 0, 0
 
-    async def measure(_http, _head, _referer):
+    async def measure(_http, _head, _referer, _headers=None):
         nonlocal active, most
         active += 1
         most = max(most, active)

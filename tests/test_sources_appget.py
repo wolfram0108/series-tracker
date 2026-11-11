@@ -50,7 +50,9 @@ class Model:
         self.parsed: list[str] = []
         self.answers = {"NBY-x1": httpx.Response(200, text=PLAYLIST),
                         "NBY-x2": httpx.Response(200, json={"code": 200, "url": "https://cdn.model/n/2.m3u8"}),
-                        "https://cdn.model/f/1/index.m3u8": httpx.Response(200, json={"code": 404, "msg": "解析失败"})}
+                        # A refusal names an address too, as the parsers of the applications do.
+                        "https://cdn.model/f/1/index.m3u8": httpx.Response(200, json={
+                            "code": 404, "msg": "解析失败", "url": "https://gone.model/f/1.m3u8"})}
         self.parse_answer: dict = {"json": json.dumps({"url": "https://cdn.model/jd/1.m3u8"})}
 
     def sealed(self, payload: dict) -> httpx.Response:
@@ -131,6 +133,11 @@ async def test_an_episode_without_an_address_of_a_parser_is_parsed_by_the_applic
     with pytest.raises(AppError) as failed:
         await client.resolve("JD4K", "JD-2", "4307")
     assert failed.value.transient
+    # A refusal of the application's own parser, with an address in it: the words are the answer, the address no stream.
+    model.parse_answer = {"json": json.dumps({"code": 403, "msg": "今日次数已达上限", "url": "https://gone.model/jd/3.m3u8"})}
+    with pytest.raises(AppError) as refused:
+        await client.resolve("JD4K", "JD-3", "4307")
+    assert "今日次数已达上限" in refused.value.reason and not refused.value.transient
 
 
 async def test_the_card_is_asked_again_for_the_parser_of_an_episode_the_client_no_longer_holds(world):

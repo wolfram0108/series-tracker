@@ -41,7 +41,7 @@ from cryptography.hazmat.primitives.padding import PKCS7
 
 from core.reasons import reason
 
-from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream
+from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream, parsed_address
 from .appdrama import field, fields
 
 logger = logging.getLogger("sources")
@@ -288,13 +288,12 @@ class GuluClient:
                 continue
             except ValueError:
                 answer = None
-            target = answer.get(parser["key"]) if isinstance(answer, dict) else None
+            target, words = parsed_address(answer, parser["key"])
             logger.info("приложение %s, линия %s: парсер %s — статус %s, %s (%.1f с)", self.profile.name, line, number,
-                        response.status_code, "адрес" if isinstance(target, str) and target else "без адреса",
+                        response.status_code, "адрес" if target else f"без адреса: {words[:120] or '—'}",
                         time.monotonic() - began)
-            if isinstance(target, str) and target.startswith(("http://", "https://")):
+            if target:
                 return AppStream(target, {})
-            words = str(answer.get("msg") or answer.get("message") or "") if isinstance(answer, dict) else ""
             said = words or f"status {response.status_code}"
             passing = passing or response.status_code >= 500 or response.status_code == 429 or not words.strip()
         if not allowed:
