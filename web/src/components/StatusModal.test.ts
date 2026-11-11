@@ -29,4 +29,22 @@ describe("the status window", () => {
     await tab!.trigger("click")
     expect(mounted.find("settings-parser-stub").exists()).toBe(true)
   })
+
+  it("builds a tab when it is first shown and keeps it: the window opened on its properties builds no other tab", async () => {
+    client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", kind: "video" } }))
+    mounted = mount(StatusModal, { props: { seriesId: 40 }, global: { stubs: Object.fromEntries(STUBS.map((name) => [name, true])) } })
+    await flushPromises()
+    const built = () => ["status-properties", "status-output", "status-slicing", "status-history"]
+      .filter((name) => mounted!.find(`${name}-stub`).exists())
+    expect(built()).toEqual(["status-properties"])
+    const open = async (title: string) => {
+      await mounted!.findAll(".st-tab").find((each) => each.attributes("title") === title)!.trigger("click")
+    }
+    await open(t("output.tab"))
+    expect(built()).toEqual(["status-properties", "status-output"])
+    await open("История")
+    await open("Свойства")
+    // A tab once built stays as it was left: going back to it reads nothing anew.
+    expect(built()).toEqual(["status-properties", "status-output", "status-history"])
+  })
 })

@@ -1,4 +1,4 @@
-import { computed, onMounted, ref, shallowRef, watch } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
@@ -6,10 +6,11 @@ import {
   type LayoutRow, type SeriesSource, type SourceItem, type SourceSummary,
 } from "../lib/sources"
 import { useCompositionStore } from "../stores/composition"
+import { useLayoutStore } from "../stores/layout"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import { useSSE } from "./useSSE"
 import {
-  changeSource, createSource, fetchLayout, fetchSources, readPageNow, removeSource, resolveAddress, stopReading,
+  changeSource, createSource, fetchSources, readPageNow, removeSource, resolveAddress, stopReading,
 } from "./sourceCalls"
 import { typeAddress } from "./sourceAddress"
 import type { DraftPatch } from "./useSourceDrafts"
@@ -23,11 +24,11 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
   const tables = useSourceTablesStore()
   const composition = useCompositionStore()
   const sources = ref<SeriesSource[]>(initial)
-  // The answer of the constructor is replaced whole and never changed in place: it is kept as it came (thousands of rows
-  // made deeply reactive cost every read of them).
-  const summaries = shallowRef<SourceSummary[]>([])
+  // The layout is the window's one copy (stores/layout.ts): the output of the window reads the same one.
+  const layouts = useLayoutStore()
+  const summaries = computed<SourceSummary[]>(() => layouts.forSeries(seriesId)?.sources ?? [])
   // The rows the constructor made by the rules of the profiles: the episodes of a player and of its voice-overs are read from them.
-  const layout = shallowRef<LayoutRow[]>([])
+  const layout = computed<LayoutRow[]>(() => layouts.forSeries(seriesId)?.rows ?? [])
   // The address the core names the page of a source with in its events, by source id.
   const canonical = ref<Record<number, string>>({})
   const error = ref("")
@@ -63,18 +64,16 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
 
   // Only the newest read may write: an older reply that comes late would show sources the core already changed.
   let asked = 0
-  async function load(): Promise<void> {
+  async function load(fresh = true): Promise<void> {
     const ask = ++asked
+    // The layout is asked for together with the sources: an ask of the output made by the same news is the same read.
+    const read = kind === "video" ? (fresh ? layouts.refresh(seriesId) : layouts.ensure(seriesId)) : null
     const listed = await fetchSources(seriesId)
     if (ask !== asked) return
     if (listed.ok) sources.value = listed.data
-    if (kind !== "video") return
-    const answer = await fetchLayout(seriesId)
+    if (read === null) return
+    await read
     if (ask !== asked) return
-    if (answer.ok) {
-      summaries.value = answer.data.sources
-      layout.value = answer.data.rows
-    }
     await Promise.all(sources.value.filter((source) => !(source.id in canonical.value)).map(nameThePage))
   }
 
@@ -153,7 +152,9 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (!answer.ok) error.value = answer.text
   }
 
-  onMounted(() => void load())
+  if (kind === "video") onUnmounted(layouts.hold(seriesId))
+  // What the window already read is shown as it is; the news since then come as events.
+  onMounted(() => void load(false))
   // The layout of the series changed (a summary of a source too): the sources are read again.
   watch(() => composition.layoutChanged[seriesId]?.rev, () => void load())
   // The sources themselves changed (a profile, a disabled player, a season of a catalog): the other window sees it too.

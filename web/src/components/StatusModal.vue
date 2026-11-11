@@ -34,6 +34,9 @@ const isVideo = computed(() => series.value?.kind === "video")
 
 type TabKey = "properties" | "composition" | "slicing" | "parser" | "history"
 const tab = ref<TabKey>("properties")
+// A tab is built when it is first shown and kept from then on: a window opened on one tab neither builds the others
+// (the output of a long series is thousands of elements) nor asks the core for what they show.
+const built = ref(new Set<TabKey>([tab.value]))
 const tabs = computed(() => {
   const list = [{ value: "properties" as TabKey, label: "Свойства", icon: "pi-info-circle" }]
   list.push({ value: "composition", label: isVideo.value ? t("output.tab") : "Композиция", icon: "pi-sitemap" })
@@ -71,6 +74,7 @@ async function save() {
 // видны старые данные до закрытия/открытия модалки.
 watch(tab, (next) => {
   if (next === "composition" && !isVideo.value) compRef.value?.reload?.()
+  built.value = new Set([...built.value, next])
 })
 
 onMounted(load)
@@ -99,26 +103,26 @@ onMounted(load)
     <template v-else>
       <StatusProperties v-show="tab === 'properties'" ref="propsRef" :series="series" @saving="saving = $event" />
       <StatusComposition
-        v-if="!isVideo"
+        v-if="!isVideo && built.has('composition')"
         ref="compRef"
         v-show="tab === 'composition'"
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
       />
       <StatusOutput
-        v-else
+        v-else-if="isVideo && built.has('composition')"
         v-show="tab === 'composition'"
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
       />
       <StatusSlicing
-        v-if="isVideo"
+        v-if="isVideo && built.has('slicing')"
         v-show="tab === 'slicing'"
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
       />
       <SettingsParser v-if="tab === 'parser'" />
-      <StatusHistory v-show="tab === 'history'" :series-id="seriesId" :kind="series.kind ?? 'torrent'" />
+      <StatusHistory v-if="built.has('history')" v-show="tab === 'history'" :series-id="seriesId" :kind="series.kind ?? 'torrent'" />
     </template>
 
     <template #footer>

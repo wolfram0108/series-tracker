@@ -5,11 +5,13 @@ import { flushPromises, mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import { useSeriesSources } from "./useSeriesSources"
 import * as calls from "./sourceCalls"
+import * as output from "./outputCalls"
 import { useCompositionStore } from "../stores/composition"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import type { SeriesSource, SourceSummary } from "../lib/sources"
 
 vi.mock("./sourceCalls")
+vi.mock("./outputCalls")
 
 const PAGE = "https://1.ruchime.org/release/test"
 const source = (over: Partial<SeriesSource> = {}): SeriesSource => ({
@@ -31,7 +33,7 @@ function setup(kind: "torrent" | "video" = "video", initial: SeriesSource[] = [s
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.mocked(calls.fetchSources).mockReset().mockResolvedValue(ok([source()]))
-  vi.mocked(calls.fetchLayout).mockReset().mockResolvedValue(ok({ sources: [summary], rows: [] }))
+  vi.mocked(output.fetchComposition).mockReset().mockResolvedValue(ok({ sources: [summary], rows: [] }) as never)
   vi.mocked(calls.resolveAddress).mockReset().mockResolvedValue(ok({ site: "ruchime", canonical_url: PAGE }))
   vi.mocked(calls.createSource).mockReset().mockResolvedValue(ok({ id: 8 }))
   vi.mocked(calls.changeSource).mockReset().mockResolvedValue(ok({ success: true }))
@@ -79,7 +81,7 @@ describe("useSeriesSources", () => {
     setup("torrent", [source({ source_type: "torrent", url: "https://kinozal.tv/details.php?id=1" })])
     await flushPromises()
     expect(calls.fetchSources).toHaveBeenCalledTimes(1)
-    expect(calls.fetchLayout).not.toHaveBeenCalled()
+    expect(output.fetchComposition).not.toHaveBeenCalled()
   })
 
   it("reads the sources again when the layout of the series changes, and not for another series", async () => {

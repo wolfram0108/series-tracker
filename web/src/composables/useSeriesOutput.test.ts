@@ -152,17 +152,20 @@ describe("useSeriesOutput", () => {
     expect(calls.fetchPlan).toHaveBeenCalledTimes(plansBefore + 2)
   })
 
-  it("keeps the newest reply when an older read arrives late", async () => {
+  it("shows what a read begun after the news brought, not the older answer of the read that was under way", async () => {
     let late!: (answer: Answer<Composition>) => void
     vi.mocked(calls.fetchComposition)
       .mockImplementationOnce(() => new Promise<Answer<Composition>>((resolve) => { late = resolve }))
       .mockResolvedValueOnce(ok(composition({ rev: 2 })))
     const output = setup()
+    await flushPromises()
     useCompositionStore().applyChanged({ series_id: 1, rev: 2, episodes: [], summary_only: false })
     await flushPromises()
-    expect(output.composition.value?.rev).toBe(2)
+    // The news came while the first read was under way: one more read follows it, and its answer is the last word.
+    expect(calls.fetchComposition).toHaveBeenCalledTimes(1)
     late(ok(composition({ rev: 1 })))
     await flushPromises()
+    expect(calls.fetchComposition).toHaveBeenCalledTimes(2)
     expect(output.composition.value?.rev).toBe(2)
   })
 

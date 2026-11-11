@@ -1,4 +1,4 @@
-import { computed, onMounted, ref, shallowRef, watch, type Ref } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch, type Ref } from "vue"
 import { t } from "../i18n"
 import {
   bySeason, groupTarget, joinEpisodes, orderValue, queueLevers, resetBody, setBody, sourceMarks, variantTarget,
@@ -10,9 +10,10 @@ import { reasonText } from "../lib/reason"
 import { useCompositionStore } from "../stores/composition"
 import { useSeriesStore } from "../stores/series"
 import { usePlanStore } from "../stores/plan"
+import { useLayoutStore } from "../stores/layout"
 import { fileOf, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, trackOf, type CompilationKey } from "../lib/plan"
 import {
-  deleteFromPlan, fetchComposition, fetchPlan, fetchQueues, resetFailures,
+  deleteFromPlan, fetchPlan, fetchQueues, resetFailures,
   cancelSync, resetLever, setLever, setVoiceOrder, setVoiceTitle, switchOutput, syncSeries, type Composition, type MediaFile,
   type Queues,
 } from "./outputCalls"
@@ -28,9 +29,9 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const store = useCompositionStore()
   const plan = usePlanStore()
   const seriesStore = useSeriesStore()
-  // The layout is replaced whole by every read and never changed in place: it is kept as it came (thousands of rows made
-  // deeply reactive cost every read of them).
-  const composition = shallowRef<Composition | null>(null)
+  // The layout is the window's one copy (stores/layout.ts): the sources of the window read the same one.
+  const layouts = useLayoutStore()
+  const composition = computed<Composition | null>(() => layouts.forSeries(seriesId) ?? null)
   // The reference of every episode, and why, is the plan's: it comes with every packet of the plan of the series.
   const references = computed<Reference[]>(() => plan.forSeries(seriesId)?.references ?? [])
   // The files of the plan: the status of the video of a reference is read from them; the plan comes with every push.
@@ -88,13 +89,13 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
 
   // Of several reads in flight only the one asked last may write: a late reply to an older ask must not roll back.
   let asked = 0
-  async function load(): Promise<void> {
+  async function load(fresh = true): Promise<void> {
     const ask = ++asked
     loading.value = true
-    const [layout, planned] = await Promise.all([fetchComposition(seriesId), fetchPlan(seriesId)])
+    const [layout, planned] = await Promise.all([
+      fresh ? layouts.refresh(seriesId) : layouts.ensure(seriesId), fetchPlan(seriesId)])
     if (ask !== asked) return
     loading.value = false
-    if (layout.ok) composition.value = layout.data
     if (planned.ok) plan.apply(planned.data)
     const broken = [layout, planned].find((answer) => !answer.ok)
     failure.value = broken && !broken.ok ? broken.text : null
@@ -238,7 +239,9 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
 
   if (kind === "video") {
-    onMounted(() => void load())
+    onUnmounted(layouts.hold(seriesId))
+    // What the window already read is shown as it is; the news since then come as events.
+    onMounted(() => void load(false))
     // The layout moved to a newer revision: the output is read again. The same or an older revision changes nothing.
     watch(() => store.layoutChanged[seriesId]?.rev, () => {
       void load()

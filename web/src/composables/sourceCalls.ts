@@ -1,7 +1,7 @@
 import { api } from "../api/client"
 import { t, type MessageKey } from "../i18n"
 import { reasonText } from "../lib/reason"
-import type { AppSearchReply, LayoutRow, PreviewReply, ResolveReply, SeriesSource, SourceDraft, SourceSummary } from "../lib/sources"
+import type { AppSearchReply, PreviewReply, ResolveReply, SeriesSource, SourceDraft } from "../lib/sources"
 
 /** The answer of a call to the core: the data, or the words for the refusal (the reason worded by the catalog). */
 export type Answer<T> = { ok: true; data: T } | { ok: false; text: string }
@@ -72,13 +72,6 @@ export async function fetchProfiles(): Promise<{ id: number; name: string }[]> {
 
 export function fetchSources(seriesId: number): Promise<Answer<SeriesSource[]>> {
   return call(() => api.GET("/api/series/{series_id}/sources", { params: { path: { series_id: seriesId } } }))
-}
-
-/** The part of the layout a window of the sources needs: the summaries of the sources and the rows the constructor numbered. */
-export async function fetchLayout(seriesId: number): Promise<Answer<{ sources: SourceSummary[]; rows: LayoutRow[] }>> {
-  const answer = await call<{ sources?: SourceSummary[]; rows?: LayoutRow[] }>(() =>
-    api.GET("/api/series/{series_id}/composition", { params: { path: { series_id: seriesId } } }))
-  return answer.ok ? { ok: true, data: { sources: answer.data.sources ?? [], rows: answer.data.rows ?? [] } } : answer
 }
 
 export function createSource(seriesId: number, draft: SourceDraft): Promise<Answer<{ id: number }>> {
