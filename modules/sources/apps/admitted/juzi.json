@@ -73,6 +73,42 @@
     }
    ]
   },
+  "vod_1080": {
+   "card": "543690",
+   "at": "2026-11-11T06:41:43.482219+00:00",
+   "episodes": [
+    {
+     "which": "first",
+     "label": "1",
+     "width": 1920,
+     "height": 1080,
+     "audio": 1,
+     "duration": "1203.815329",
+     "size": 381039627,
+     "mbit_s": 58.8
+    },
+    {
+     "which": "central",
+     "label": "84",
+     "width": 1920,
+     "height": 1080,
+     "audio": 1,
+     "duration": "1239.341859",
+     "size": 351780047,
+     "mbit_s": 50.3
+    },
+    {
+     "which": "last",
+     "label": "167",
+     "width": 1920,
+     "height": 1080,
+     "audio": 1,
+     "duration": "1293.026395",
+     "size": 502217744,
+     "mbit_s": 108.9
+    }
+   ]
+  },
   "youku": {
    "card": "543690",
    "at": "2026-11-11T07:00:11.043731+00:00",
@@ -119,9 +155,9 @@
   },
   "PAN1": {
    "card": "543690",
-   "episode": "1",
+   "episode": "84",
    "step": "download",
-   "reason": "по адресу потока не плейлист HLS: application/json, 60 байт, начало «{\"code\":201,\"msg\":\"\\u89e3\\u6790\\u5931\\u8d25\\u4e86\",\"url\":\"\"}»"
+   "reason": "обрыв: скачано 1239 с из ожидаемых ~1250 с — неполная загрузка"
   },
   "SH4K": {
    "card": "543690",
@@ -146,12 +182,6 @@
    "episode": "1",
    "step": "stream",
    "reason": "{\"code\":\"player_failed\",\"player\":\"Juzi\",\"cause\":\"the host answered 413\"}"
-  },
-  "vod_1080": {
-   "card": "543690",
-   "episode": "158",
-   "step": "table",
-   "reason": "10 rows of the table without the frame of their episode, as {\"code\":\"player_failed\",\"player\":\"vod_1080\",\"cause\":\"RemoteProtocolError: yun2.jiexicn.top\"}"
   },
   "zy1080_01": {
    "card": "543690",

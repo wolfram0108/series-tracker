@@ -7,10 +7,12 @@ read and the rows per second.
 One JSON line per row and one for the read, appended to `data/raw/app_table_rate__<stamp>__<app>-<card>.jsonl` (out of
 git). The requests are the card, a parse and a head of each row read.
 
-    .venv/bin/python tools/collectors/app_table_rate.py <app> <card> [recent] [after]   (recent 0: the whole card)
+    .venv/bin/python tools/collectors/app_table_rate.py <app> <card> [recent] [after] [lines=a,b]   (recent 0: the whole card)
 
 With `after` the read follows the table the service stored of the card (app.db, read only), as its next read would: the
-rows that table measured keep their frames and only the others are asked.
+rows that table measured keep their frames and only the others are asked. With `lines=` only the named lines are read,
+whatever the registry says of them: the table part of the admission of a line (requirement 4а) is checked so before the
+registry admits it.
 """
 from __future__ import annotations
 
@@ -48,13 +50,14 @@ def stored_rows(url: str) -> tuple[TableRow, ...]:
                  for key, player, text, heights, state, why, link, fields in found)
 
 
-async def main(app: str, card: str, recent: int | None, after: bool) -> None:
+async def main(app: str, card: str, recent: int | None, after: bool, lines: list[str]) -> None:
     (profile,) = [each for each in profiles_of(environment()) if each.name == app]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     raw_path = os.path.join(ROOT, "data", "raw", f"app_table_rate__{stamp}__{app}-{card}.jsonl")
     os.makedirs(os.path.dirname(raw_path), exist_ok=True)
     async with bounded_client(timeout=20.0, follow_redirects=True, limits=CONNECTIONS) as http:
-        player = AppPlayer(APP_PROTOCOLS[profile.protocol](profile, lambda: http), registry=LineRegistry.load(app))
+        registry = LineRegistry(frozenset(lines), {}) if lines else LineRegistry.load(app)
+        player = AppPlayer(APP_PROTOCOLS[profile.protocol](profile, lambda: http), registry=registry)
         site = AppSite(player, AppLines([player]))
         measures: list[dict] = []
 
@@ -118,5 +121,6 @@ async def main(app: str, card: str, recent: int | None, after: bool) -> None:
 
 if __name__ == "__main__":
     asyncio.run(main(sys.argv[1], sys.argv[2], (int(sys.argv[3]) or None) if len(sys.argv) > 3 else 10,
-                     "after" in sys.argv[4:]))
+                     "after" in sys.argv[4:],
+                     next((each[6:].split(",") for each in sys.argv[4:] if each.startswith("lines=")), [])))
     print("RATE_DONE")

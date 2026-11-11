@@ -2,8 +2,8 @@
 (tools/collectors/app_lines_admission.py, `data/raw/app_lines_admission__*__<app>-*.jsonl`).
 
 A line is admitted when the last record of each of its first, central and last episode says its file came whole and was
-read back, and the last read of its card by the service's own code (`data/raw/app_table_rate__*__<app>-*.jsonl`) gave
-every row of it the frame of its episode; any other line is refused, with the reason of the episode or the rows that
+read back, and the last read of the last ten episodes of it by the service's own code
+(`data/raw/app_table_rate__*__<app>-*.jsonl`, the reads of `recent` 10) gave every row of it the frame of its episode; any other line is refused, with the reason of the episode or the rows that
 failed. The registry holds no
 address of a stream: the episodes, their frames, sound, length, size and the speed of their download.
 
@@ -18,6 +18,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WHICH = ("first", "central", "last")
+# The table part of the admission is the read of the last episodes of each line (requirement 4а): a read of a whole card,
+# made for another measure, is no part of it (old episodes of an admitted line may be gone from their host).
+ADMISSION_RECENT = 10
 
 
 def table_misses(app: str) -> dict[str, list[dict]]:
@@ -26,6 +29,8 @@ def table_misses(app: str) -> dict[str, list[dict]]:
     last: dict[str, list[dict]] = {}
     for path in sorted(glob.glob(os.path.join(ROOT, "data", "raw", f"app_table_rate__*__{app}-*.jsonl"))):
         rows = [json.loads(line) for line in open(path, encoding="utf-8")]
+        if not any(row.get("recent") == ADMISSION_RECENT for row in rows if "rows_per_s" in row):
+            continue
         read = [row for row in rows if "heights" in row]
         for code in {row["player"].removeprefix("line:") for row in read}:
             last[code] = [row for row in read if row["player"] == f"line:{code}"]
