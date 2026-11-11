@@ -404,7 +404,8 @@ async def download(video_url: str, full_output_path: str,
                    progressive: bool = False,
                    max_height: int | None = None,
                    playlist: bool = False,
-                   resumable: bool = False) -> tuple[bool, str]:
+                   resumable: bool = False,
+                   lead: float | None = None) -> tuple[bool, str]:
     """Two-phase video download. Supports parts of a ready file, direct ffmpeg copy and yt-dlp.
 
     A download that says it is done is taken only at the length its source announced: a stream copy short of it fails (the
@@ -417,7 +418,7 @@ async def download(video_url: str, full_output_path: str,
     `playlist` marks an HLS playlist a player resolved: it is downloaded by its segments (modules/downloads/hls_native.py).
     `resumable`: the caller asks for this file again after a failure of the way to it — the segments a broken transfer
     took stay next to the name (`download_artifacts`) and the next ask continues them; the caller removes them when it
-    gives the file up.
+    gives the file up. `lead`: the playlist is downloaded no further ahead of playing than that many seconds of the film.
 
     The words of a failure tell what it says of the source (modules/downloads/failure.py)."""
     if not os.path.isabs(full_output_path):
@@ -426,7 +427,7 @@ async def download(video_url: str, full_output_path: str,
         with storage.hold(full_output_path):
             if playlist:
                 return await _download_playlist(video_url, full_output_path, on_progress, headers or {}, threads,
-                                                resumable)
+                                                resumable, lead)
             announced = await _announced_length(video_url, headers, progressive)
             await on_progress({"phase": "link", "source_seconds": announced or None})
             done = await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive,
@@ -447,9 +448,12 @@ def _is_stream(video_url: str, headers: dict | None, progressive: bool) -> bool:
                                            and "vk.com" not in video_url and "vkvideo.ru" not in video_url))
 
 
-def multithreaded(video_url: str, headers: dict | None, progressive: bool, playlist: bool) -> bool:
+def multithreaded(video_url: str, headers: dict | None, progressive: bool, playlist: bool, lead: float | None = None) -> bool:
     """Whether the download of a link takes its file by many connections at once (modules/downloads/limits.py): the
-    segments of a playlist, the parts of a ready file, a page yt-dlp reads; a stream ffmpeg reads takes one."""
+    segments of a playlist, the parts of a ready file, a page yt-dlp reads; a stream ffmpeg reads takes one, and so does
+    a playlist kept to the pace of playing (`lead`)."""
+    if lead:
+        return False
     return playlist or progressive or not _is_stream(video_url, headers, progressive)
 
 
@@ -461,7 +465,7 @@ async def _announced_length(video_url: str, headers: dict | None, progressive: b
 
 
 async def _download_playlist(video_url: str, full_output_path: str, on_progress: ProgressCb, headers: dict,
-                             threads: int, resumable: bool = False) -> tuple[bool, str]:
+                             threads: int, resumable: bool = False, lead: float | None = None) -> tuple[bool, str]:
     """The playlist read by our client and saved, its segments by the native downloader of yt-dlp, the stream copied into
     the container by ffmpeg; the file is taken at the length the playlist states, short of it by up to its longest
     segment. The parts of a transfer that broke stay for a `resumable` download, and are continued by its next ask under
@@ -483,7 +487,7 @@ async def _download_playlist(video_url: str, full_output_path: str, on_progress:
         if await storage.call(hls_native.continued, raw, snap.listing, owns=full_output_path):
             hls_native.logger.info("%s: загрузка продолжается с полученных сегментов",
                                    os.path.basename(full_output_path))
-        done = await hls_native.fetch(snap, headers, raw, threads, on_progress)
+        done = await hls_native.fetch(snap, headers, raw, threads, on_progress, lead)
         if done[0]:
             done = await _phase_remux(raw, full_output_path, on_progress, seconds)
     finally:

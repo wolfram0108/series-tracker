@@ -74,6 +74,8 @@ SWITCH_TIMEOUT_S = 10.0
 MANIFEST_TIMEOUT_S = 20.0
 # Browser pages at once: each is a whole player, the asks of a table come in a burst.
 PARALLEL_PAGES = 2
+# How far the download of a stream may run ahead of playing, in seconds of the film: below the lead the CDN allows.
+LEAD_S = 90.0
 # The host answers two asks of files a second, whatever page they come from (measured 11.11: 49 episodes at one every
 # 0.5 s were all answered; at one every 0.35 s it refused some with the 404 of a video it has not). The asks of every
 # page of the player go at that pace, so a refusal by rate is the exception, not the way the read finds its limit.
@@ -362,7 +364,10 @@ class AllohaPlayer:
             cause = reason("stream_unreachable", host=urlsplit(picked[1]).hostname or "",
                            error=opened.error or str(opened.status))
             raise StreamUnavailable(reason("player_failed", player=self.label, cause=cause), True)
-        return {"stream_url": picked[1], "headers": dict(playing.headers)}
+        # The files are HLS playlists. Their CDN refuses a client that runs ahead of playing: past about three minutes
+        # of the film ahead of the time since the player started (measured 2026-11-11: the 32nd segment in 4 s), every
+        # request of the access is refused from then on. The download keeps to playing with a lead below that.
+        return {"stream_url": picked[1], "headers": dict(playing.headers), "playlist": True, "lead": LEAD_S}
 
     async def _open(self, link: str, *, play: bool, files: str | None = None) -> tuple[Any, dict[str, str]]:
         """(the answer of the player, the access headers of its CDN when `play`) of one open of the iframe; `files` is

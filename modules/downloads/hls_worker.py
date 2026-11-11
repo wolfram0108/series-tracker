@@ -6,16 +6,23 @@ put the head of a picture before it.
 A segment the host says is not there (404, 410) is told apart from every other failure (`gone`): it is the host's last
 word on the file, and nothing else the downloader gives up on is.
 
-stdin: one JSON line {url, target, headers, fragments}; stdout: JSON lines {type: progress | transferred | failed | error |
+With `pace` ({lead, durations}) a segment is not asked before the film ahead of it, less the lead, has had the time to
+play since the start: a host that refuses a client faster than playing gets one that is not.
+
+stdin: one JSON line {url, target, headers, fragments, pace?}; stdout: JSON lines {type: progress | transferred | failed | error |
 gone, ...}.
 """
 from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 from .failure import GONE
+
+# When the worker began: the pace of a playlist kept to playing counts from here.
+STARTED = time.monotonic()
 
 TS_PACKET = 188
 SYNC = 0x47
@@ -41,6 +48,16 @@ def run() -> int:
     class CleanHlsFD(HlsFD):
         def _append_fragment(self, ctx, frag_content):
             return super()._append_fragment(ctx, transport_stream(frag_content))
+
+        def _download_fragment(self, ctx, frag_url, info_dict, headers=None, request_data=None):
+            pace = spec.get("pace")
+            if pace:
+                # The film before this segment may run ahead of the time since the start by the lead, no more.
+                ahead = sum(pace["durations"][:max(0, ctx["fragment_index"] - 1)]) - pace["lead"]
+                wait = ahead - (time.monotonic() - STARTED)
+                if wait > 0:
+                    time.sleep(wait)
+            return super()._download_fragment(ctx, frag_url, info_dict, headers, request_data)
 
         def report_retry(self, err, count, retries, *args, **kwargs):
             # A refusal of a fragment by its status comes here as the error itself (downloader/fragment.py); what the

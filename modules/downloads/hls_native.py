@@ -66,6 +66,7 @@ class Snapshot:
     seconds: float  # the length the playlist states
     tolerance: float  # the longest segment: what a whole file may fall short of the length by
     listing: str    # what the playlist says of the film (`listing_of`)
+    durations: tuple[float, ...] = ()  # of the segments in their order
 
 
 def _attributes(line: str) -> dict[str, str]:
@@ -87,13 +88,17 @@ def _variants(text: str, base: str) -> list[tuple[int, int, str]]:
 
 def absolute(text: str, base: str) -> tuple[str, float, float]:
     """A media playlist with every address absolute, the length it states and its longest segment."""
-    out, seconds, longest, methods, segments = [], 0.0, 0.0, set(), 0
+    manifest, durations = absolute_with_durations(text, base)
+    return manifest, sum(durations), max(durations, default=0.0)
+
+
+def absolute_with_durations(text: str, base: str) -> tuple[str, list[float]]:
+    """A media playlist with every address absolute, and the duration of each of its segments in their order."""
+    out, durations, methods, segments = [], [], set(), 0
     for line in text.splitlines():
         line = line.strip()
         if line.startswith("#EXTINF:"):
-            duration = float(line.split(":", 1)[1].split(",")[0] or 0)
-            seconds += duration
-            longest = max(longest, duration)
+            durations.append(float(line.split(":", 1)[1].split(",")[0] or 0))
         elif line.startswith("#EXT-X-KEY:"):
             methods.add(_attributes(line).get("METHOD", "NONE"))
         if line.startswith(("#EXT-X-KEY:", "#EXT-X-MAP:")):
@@ -109,7 +114,7 @@ def absolute(text: str, base: str) -> tuple[str, float, float]:
     unsupported = methods - {"NONE", "AES-128"}
     if unsupported:
         raise PlaylistError(f"плейлист: шифрование {', '.join(sorted(unsupported))} не расшифровывается", final=True)
-    return "\n".join(out) + "\n", seconds, longest
+    return "\n".join(out) + "\n", durations
 
 
 def _unsigned(address: str) -> str:
@@ -175,10 +180,11 @@ async def snapshot(url: str, headers: dict, path: str) -> Snapshot:
     for each in dropped:
         logger.warning("%s: из потока вырезана вставка с %s — %d сегм., %.1f с", os.path.basename(path), each.origin,
                        each.segments, each.seconds)
-    manifest, seconds, longest = absolute(text, base)
+    manifest, durations = absolute_with_durations(text, base)
+    seconds, longest = sum(durations), max(durations, default=0.0)
     file = path + ".download.m3u8"
     await storage.call(_write, file, manifest, owns=file)
-    return Snapshot(Path(file).as_uri(), seconds, longest, listing_of(manifest))
+    return Snapshot(Path(file).as_uri(), seconds, longest, listing_of(manifest), tuple(durations))
 
 
 def _write(path: str, text: str) -> None:
@@ -186,14 +192,18 @@ def _write(path: str, text: str) -> None:
         written.write(text)
 
 
-async def fetch(snap: Snapshot, headers: dict, target: str, fragments: int, on_progress: ProgressCb) -> tuple[bool, str]:
+async def fetch(snap: Snapshot, headers: dict, target: str, fragments: int, on_progress: ProgressCb,
+                lead: float | None = None) -> tuple[bool, str]:
     """The segments of the saved playlist into `target` by the worker; (False, why) when it did not take them all. What
     it took stays next to `target` and is continued by the next transfer into it (`continued`). The failure is final when
-    the host said of a segment that it is not there."""
+    the host said of a segment that it is not there. With `lead` the segments are asked one at a time, none further
+    ahead of the time since the transfer began than that many seconds of the film (a host that refuses a client faster
+    than playing)."""
     proc = await spawn(sys.executable, "-m", "modules.downloads.hls_worker", cwd=ROOT,
                        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+    paced = {"pace": {"lead": lead, "durations": list(snap.durations)}} if lead else {}
     proc.stdin.write((json.dumps({"url": snap.manifest, "target": target, "headers": headers,
-                                  "fragments": fragments}) + "\n").encode())
+                                  "fragments": 1 if lead else fragments, **paced}) + "\n").encode())
     await proc.stdin.drain()
     proc.stdin.close()
     failure, errors, code, transferred, gone = "", [], None, False, False
