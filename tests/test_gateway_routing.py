@@ -13,8 +13,7 @@ MULTI_METHOD = {
     "/api/settings/force_replace": {"get", "post"},
     "/api/settings/less_strict_scan": {"get", "post"},
     "/api/settings/slicing_delete_source": {"get", "post"},
-    "/api/settings/parallel_downloads": {"get", "post"},
-    "/api/settings/concurrent_fragments": {"get", "post"},
+    "/api/settings/download_limits": {"get", "post"},
     "/api/settings/saved_paths": {"get", "post", "delete"},
     "/api/settings/debug_flags": {"get", "post"},
 }

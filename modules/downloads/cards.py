@@ -63,6 +63,12 @@ class CardBook:
             stage.state = "pending"
         self._enter(card, "link")
 
+    def waiting(self, key: str) -> None:
+        """The attempt waits for a place of the way its file comes (limits.py): the card is in the queue again."""
+        card = self.cards.get(key)
+        if card is not None:
+            self._enter(card, "queue")
+
     def progress(self, key: str, data: dict) -> None:
         """What the download tells as it goes: its phase, the way the file comes, the figures."""
         card = self.cards.get(key)

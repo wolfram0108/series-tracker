@@ -11,9 +11,13 @@ Queries / commands:
   downloads.fetch {key, url, path, max_height?, series_id?, whole?, ytdlp?, need?, variant?} - the stream behind the link
       into an absolute path. `need` (DownloadNeed) names what the fetch is for and `variant` (DownloadVariant) which row it
       takes, in the marks of the window «Выход»: fetches of one need are one card. `whole`: the video of a reference; `ytdlp`: the downloader may take over a link whose stream
-      request failed (a VK video). A key already waiting or under way is not asked twice. The videos of the references
-      (`whole`) and the rest (voice-overs, compilations) wait in lines of their own, each with its limit of parallel
-      fetches: max_parallel_downloads and max_parallel_dub_downloads (2 by default each).
+      request failed (a VK video). A key already waiting or under way is not asked twice. The fetches wait in one queue in
+      the order asked; how many go at once is by the way each file comes (limits.py): a download by many connections takes
+      `threads_per_file` of the `threads_total` (2 at once with 16 and 32), one by a single connection a place of
+      `single_at_once` (4).
+  downloads.limits.get {} -> {threads_total, threads_per_file, single_at_once, multi_at_once} - the limits now.
+  downloads.limits.set {threads_total?, threads_per_file?, single_at_once?} -> {ok, limits} | {ok: false, reason} - the
+      limits are changed and kept as settings; a value that is no whole number from 1 up is refused with its reason.
   downloads.withdraw {series_id} -> {stopped} - the owner stops the fetches of a series and waits for them: the answer
       comes once each has ended, its program stopped and what it wrote removed (work.withdrawn is the same, told).
   downloads.queue.get {} -> {tasks, count} - `count`: the downloads that wait or go; `tasks`: the cards of the downloads (core/contracts/downloads.py DownloadCard): one to
@@ -34,14 +38,13 @@ Events out:
       interface connects (gateway.sse.clients): SSE download_queue_update. The cards live with the sync of their series
       (scan.run.changed): while it runs every card is kept; at its end only a failed card and a finished one whose plan
       was rebuilt stay, in the table download_cards, until the user removes them or the next sync of the series begins.
-Events in: scan.run.changed, settings.changed (yt_dlp_concurrent_fragments, max_parallel_downloads, max_parallel_dub_downloads),
+Events in: scan.run.changed, settings.changed (download_threads_total, download_threads_per_file, download_single_at_once),
   work.withdrawn {series_id, keys?},
   series.deleted (the fetches of the series stop).
 """
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 import os
 import traceback
 
@@ -51,10 +54,12 @@ from core.ffprobe import film_stream, streams_of
 from core.contracts import RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, WorkWithdrawn
 from core.db import Database
 from core.envelope import Envelope
+from core.reasons import reason
 from core.retry import UNTIMED, Budget, retrying
 
 from . import ytdlp
 from .failure import Failed, kind_of
+from .limits import KEYS, Limits, Places, whole
 from .cards import CardBook
 from .repository import DownloadsRepository
 
@@ -64,8 +69,6 @@ from .repository import DownloadsRepository
 SILENCE_FUSE_S = 900.0
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
-# The setting of the limit of each line of fetches: the videos of the references, and the rest.
-LIMIT_KEYS = {"video": "max_parallel_downloads", "other": "max_parallel_dub_downloads"}
 async def _always() -> bool:
     return True
 
@@ -108,21 +111,17 @@ def _download_budget() -> Budget:
     return Budget(attempts=MAX_DOWNLOAD_ATTEMPTS, pauses=(RETRY_DELAY_S,), limit_s=UNTIMED)
 
 
-# Parts of one file asked at once: measured on the streams of a video application (tools/collectors/download_speed.py),
-# 6 gave 62–108 Mbit/s, 16 gave 168–196 Mbit/s, 32 less than 16.
-FRAGMENTS_AT_ONCE = 16
-
 class DownloadsModule(BaseModule):
     name = "downloads"
 
     def __init__(self, bus, db: Database, *, downloader=ytdlp.download) -> None:
         self.repo = DownloadsRepository(db)
         self._download = downloader  # replaced in tests
-        self._fetch_limits = {"video": 2, "other": 2}  # parallel fetches of each line (LIMIT_KEYS)
+        self.places = Places(Limits())  # how many fetches go at once, by the way a file comes
+        self._placing: dict[str, bool] = {}  # fetches that asked their stream and wait for a place of its way (multi)
         self._fetch_queue: list[dict] = []
         self._fetch_active: dict[str, tuple[asyncio.Task, int | None]] = {}
         self._fetch_jobs: dict[str, dict] = {}  # the job of every fetch under way: the window names it by its path
-        self._threads = FRAGMENTS_AT_ONCE  # fragments per file (yt-dlp -N)
         self.cards = CardBook()  # the telemetry of every need under way (core/contracts/downloads.py)
         self._going = asyncio.Event()  # a card is under way: the queue is told on the beat of core/clock
         self._cancelled: set[str] = set()  # fetches the user stopped: their owners hear them end
@@ -132,6 +131,8 @@ class DownloadsModule(BaseModule):
         self.handle("gateway.sse.clients", self.on_sse_clients)
         self.handle("settings.changed", self.on_settings_changed)
         self.handle("downloads.queue.get", self.on_queue_get)
+        self.handle("downloads.limits.get", self.on_limits_get)
+        self.handle("downloads.limits.set", self.on_limits_set)
         self.handle("downloads.queue.clear", self.on_queue_clear)
         self.handle("downloads.cancel", self.on_cancel)
         self.handle("downloads.fetch", self.on_fetch)
@@ -147,31 +148,43 @@ class DownloadsModule(BaseModule):
         for card in await self.repo.cards():
             self.cards.kept(card)
         self.spawn(self._ticker(), name="downloads:cards", lasting=True)
-        self._threads = await self._read_setting("yt_dlp_concurrent_fragments", FRAGMENTS_AT_ONCE)
-        for line, key in LIMIT_KEYS.items():
-            self._fetch_limits[line] = await self._read_setting(key, 2)
+        default = Limits()
+        await self.places.set(Limits(**{name: await self._read_setting(key, getattr(default, name)) for name, key in KEYS.items()}))
+        self.log.info("пределы загрузок: %s", self.places.limits.as_dict())
 
     async def _read_setting(self, key: str, default: int) -> int:
         try:
             reply = await self.request("settings.value.get", {"key": key})
-            return max(1, int(reply.get("value") or default))
         except (Exception,):  # noqa: BLE001 - a setting that cannot be read takes its default
             return default
+        return whole(reply.get("value")) or default
+
+    async def on_limits_get(self, env: Envelope) -> dict:
+        return self.places.limits.as_dict()
+
+    async def on_limits_set(self, env: Envelope) -> dict:
+        asked = {name: env.payload[name] for name in KEYS if name in env.payload}
+        wrong = next((name for name, value in asked.items() if whole(value) is None), None)
+        if wrong is not None:
+            return {"ok": False, "reason": reason("download_limit_invalid", name=wrong, value=str(asked[wrong]))}
+        for name, value in asked.items():
+            await self.request("settings.value.set", {"key": KEYS[name], "value": str(whole(value))})
+        await self._apply(Limits(**{**vars(self.places.limits), **{name: whole(value) for name, value in asked.items()}}))
+        return {"ok": True, "limits": self.places.limits.as_dict()}
+
+    async def _apply(self, limits: Limits) -> None:
+        if limits != self.places.limits:
+            await self.places.set(limits)
+            self.log.info("пределы загрузок: %s", limits.as_dict())
+            self._fetch_pump()
 
     # --- events -------------------------------------------------------------------
 
     async def on_settings_changed(self, env: Envelope) -> None:
-        key = env.payload.get("key")
-        try:
-            value = max(1, int(env.payload.get("value")))
-        except (ValueError, TypeError):
-            return
-        if key == "yt_dlp_concurrent_fragments":
-            self._threads = value
-            self.log.info("параллельных фрагментов (-N): %d", self._threads)
-        elif key in LIMIT_KEYS.values():
-            self._fetch_limits[next(line for line, each in LIMIT_KEYS.items() if each == key)] = value
-            self._fetch_pump()
+        name = next((name for name, key in KEYS.items() if key == env.payload.get("key")), None)
+        value = whole(env.payload.get("value"))
+        if name is not None and value is not None:
+            await self._apply(Limits(**{**vars(self.places.limits), name: value}))
 
     async def on_series_deleted(self, env: Envelope) -> None:
         await self._withdraw(lambda job_key, owner: owner == env.payload["series_id"])
@@ -240,14 +253,15 @@ class DownloadsModule(BaseModule):
         return {"tasks": tasks, "count": _under_way(tasks)}
 
     def _queue(self) -> list[dict]:
-        """The cards, with the place of each waiting one in its line and how many of the line go of its limit."""
-        busy = Counter(self._line(job) for job in self._fetch_jobs.values())
+        """The cards, with the place of each waiting one: those waiting for a place of their way first, with how many of
+        their way go of how many may; then the queue, with how many fetches go of how many may whatever their way."""
+        need_of = {job["key"]: job["need_key"] for job in [*self._fetch_jobs.values(), *self._fetch_queue]}
         places: dict[str, tuple[int, int, int]] = {}
-        seen: Counter = Counter()
-        for job in self._fetch_queue:
-            line = self._line(job)
-            seen[line] += 1
-            places[job["need_key"]] = (seen[line], busy[line], self._fetch_limits[line])
+        for number, (key, multi) in enumerate(self._placing.items(), start=1):
+            places[need_of[key]] = (number, self.places.busy(multi), self.places.room(multi))
+        going = len(self._fetch_active) - len(self._placing)
+        for number, job in enumerate(self._fetch_queue, start=len(places) + 1):
+            places[job["need_key"]] = (number, going, self.places.total)
         out = []
         for card in self.cards.view():
             if card.id in places:
@@ -347,19 +361,14 @@ class DownloadsModule(BaseModule):
         """The workers of the fetches belong to what a waiter for quiet waits for."""
         return super().background() | {runner for runner, _ in self._fetch_active.values()}
 
-    @staticmethod
-    def _line(job: dict) -> str:
-        return "video" if job.get("whole") else "other"
-
     def _fetch_pump(self) -> None:
-        """Each line starts what waits in it, in the order asked, up to its limit."""
-        busy = Counter(self._line(self._fetch_jobs[key]) for key in self._fetch_active if key in self._fetch_jobs)
-        for job in list(self._fetch_queue):
-            line = self._line(job)
-            if busy[line] >= self._fetch_limits[line]:
-                continue
-            busy[line] += 1
-            self._fetch_queue.remove(job)
+        """What waits starts in the order asked: a fetch asks its stream, learns its way and takes the place of its way or
+        waits for it. As many start as may go at once whatever their way (`Places.total`), not counting those waiting for a
+        place, and no more wait than that: a full way does not hold the queue from the other, and the links of the whole
+        queue are not asked at once."""
+        while (self._fetch_queue and len(self._fetch_active) - len(self._placing) < self.places.total
+               and len(self._placing) < self.places.total):
+            job = self._fetch_queue.pop(0)
             runner = self.spawn(self._fetch_one(job))
             self._fetch_active[job["key"]] = (runner, job["series_id"])
             self._fetch_jobs[job["key"]] = job
@@ -385,15 +394,47 @@ class DownloadsModule(BaseModule):
         async def on_progress(data: dict) -> None:
             self.cards.progress(need_key, data)
 
+        def resolve():
+            return self._resolve_stream(job["url"], max_height=job.get("max_height"),
+                                        ytdlp_fallback=_always if job.get("ytdlp") else _never)
+
         async def attempt_once() -> tuple[bool, str, Failed | None]:
             nonlocal tries
             tries += 1
             self.cards.attempt(need_key, tries, budget.attempts)
-            stream_url, headers, stream_error, progressive, playlist = await self._resolve_stream(
-                job["url"], max_height=job.get("max_height"), ytdlp_fallback=_always if job.get("ytdlp") else _never)
+            stream_url, headers, stream_error, progressive, playlist = await resolve()
             if stream_error is not None:
                 return (False, *stream_error)
-            kw: dict = {"threads": self._threads}
+            multi = ytdlp.multithreaded(stream_url, headers, progressive, playlist)
+            if not self.places.free(multi):
+                # The way of the file is full: the fetch waits in the queue, and asks its stream anew when its turn comes
+                # (an address a host signed may not outlive the wait).
+                self.cards.waiting(need_key)
+                self._placing[key] = multi
+                self._fetch_pump()
+                self._announce_queue()
+                try:
+                    await self.places.take(multi)
+                finally:
+                    self._placing.pop(key, None)
+                try:
+                    self.cards.attempt(need_key, tries, budget.attempts)
+                    stream_url, headers, stream_error, progressive, playlist = await resolve()
+                except BaseException:
+                    await self.places.give(multi)
+                    raise
+                if stream_error is not None:
+                    await self.places.give(multi)
+                    return (False, *stream_error)
+            else:
+                await self.places.take(multi)
+            try:
+                return await fetched(stream_url, headers, progressive, playlist)
+            finally:
+                await self.places.give(multi)
+
+        async def fetched(stream_url: str, headers, progressive: bool, playlist: bool) -> tuple[bool, str, Failed | None]:
+            kw: dict = {"threads": self.places.limits.threads_per_file}
             if job.get("max_height"):
                 kw["max_height"] = job["max_height"]  # a page the downloader reads itself keeps the cap of the job
             if headers:

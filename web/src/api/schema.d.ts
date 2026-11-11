@@ -1354,18 +1354,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/settings/parallel_downloads": {
+    "/api/settings/download_limits": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Parallel Downloads */
-        get: operations["parallel_downloads_api_settings_parallel_downloads_get"];
+        /**
+         * Download Limits
+         * @description How many downloads go at once, by the way a file comes (downloads, limits.py): {threads_total,
+         *     threads_per_file, single_at_once, multi_at_once} both ways; a value the module refuses is 400 with its reason.
+         */
+        get: operations["download_limits_api_settings_download_limits_get"];
         put?: never;
-        /** Parallel Downloads */
-        post: operations["parallel_downloads_api_settings_parallel_downloads_post"];
+        /**
+         * Download Limits
+         * @description How many downloads go at once, by the way a file comes (downloads, limits.py): {threads_total,
+         *     threads_per_file, single_at_once, multi_at_once} both ways; a value the module refuses is 400 with its reason.
+         */
+        post: operations["download_limits_api_settings_download_limits_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1392,32 +1400,6 @@ export interface paths {
          *     refuse is 400 with its reason.
          */
         post: operations["sources_term_api_settings_sources_term_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/concurrent_fragments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Concurrent Fragments
-         * @description Число параллельных фрагментов yt-dlp (-N) — ускорение одной
-         *     загрузки на hls-потоках.
-         */
-        get: operations["concurrent_fragments_api_settings_concurrent_fragments_get"];
-        put?: never;
-        /**
-         * Concurrent Fragments
-         * @description Число параллельных фрагментов yt-dlp (-N) — ускорение одной
-         *     загрузки на hls-потоках.
-         */
-        post: operations["concurrent_fragments_api_settings_concurrent_fragments_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7829,7 +7811,7 @@ export interface operations {
             };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_get: {
+    download_limits_api_settings_download_limits_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -7847,9 +7829,45 @@ export interface operations {
                     "application/json": components["schemas"]["DynamicObject"];
                 };
             };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_post: {
+    download_limits_api_settings_download_limits_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -7865,6 +7883,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DynamicObject"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
                 };
             };
         };
@@ -7977,46 +8031,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-        };
-    };
-    concurrent_fragments_api_settings_concurrent_fragments_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"];
-                };
-            };
-        };
-    };
-    concurrent_fragments_api_settings_concurrent_fragments_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"];
                 };
             };
         };

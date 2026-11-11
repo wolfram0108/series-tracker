@@ -29,7 +29,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, ROOT)
 
 from core.http_limits import bounded_client  # noqa: E402
-from modules.downloads.module import FRAGMENTS_AT_ONCE  # noqa: E402
+from modules.downloads.limits import THREADS_PER_FILE  # noqa: E402
 from modules.downloads import ytdlp  # noqa: E402
 from modules.downloads.ytdlp import download  # noqa: E402
 from modules.sources.apps import card_address, profiles_of  # noqa: E402
@@ -91,7 +91,7 @@ async def main(app: str, card: str, only: list[str], which_only: list[str]) -> N
                     try:
                         done, failure = await asyncio.wait_for(
                             download(stream["stream_url"], path, progress, headers=stream["headers"],
-                                     threads=FRAGMENTS_AT_ONCE, progressive=stream["progressive"],
+                                     threads=THREADS_PER_FILE, progressive=stream["progressive"],
                                      playlist=stream["playlist"]), FILE_LIMIT_S)
                     except TimeoutError:
                         done, failure = False, f"файл не получен целиком за {FILE_LIMIT_S:.0f} с"

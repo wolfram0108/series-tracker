@@ -157,19 +157,17 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def conform_clear_finished(request: Request):
         return await _setting_flag("conform.clear_finished", request)
 
-    @route_per_method(r, "/api/settings/parallel_downloads", methods=["GET", "POST"],
-                      response_model=DynamicObject)
-    async def parallel_downloads(request: Request):
+    @route_per_method(r, "/api/settings/download_limits", methods=["GET", "POST"], response_model=DynamicObject,
+                      responses=_ERR1)
+    async def download_limits(request: Request):
+        """How many downloads go at once, by the way a file comes (downloads, limits.py): {threads_total,
+        threads_per_file, single_at_once, multi_at_once} both ways; a value the module refuses is 400 with its reason."""
         if request.method == "POST":
-            data = await request.json()
-            if "value" in data:
-                await gw.request("settings.value.set", {
-                    "key": "max_parallel_downloads",
-                    "value": str(data["value"])})
-            return {"success": True}
-        reply = await gw.request("settings.value.get",
-                                 {"key": "max_parallel_downloads"})
-        return {"value": int(reply.get("value") or 2)}
+            reply = await gw.request("downloads.limits.set", await request.json())
+            if not reply.get("ok"):
+                return JSONResponse({"error": reply["reason"]}, status_code=400)
+            return reply["limits"]
+        return await gw.request("downloads.limits.get", {})
 
     @route_per_method(r, "/api/settings/sources_term", methods=["GET", "POST"], response_model=DynamicObject,
                       responses=_ERR1)
@@ -183,22 +181,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 return JSONResponse({"error": reply["reason"]}, status_code=400)
             return {"success": True, "value": reply["hours"]}
         return {"value": (await gw.request("sources.term.get", {}))["hours"]}
-
-    @route_per_method(r, "/api/settings/concurrent_fragments",
-                      methods=["GET", "POST"], response_model=DynamicObject)
-    async def concurrent_fragments(request: Request):
-        """Число параллельных фрагментов yt-dlp (-N) — ускорение одной
-        загрузки на hls-потоках."""
-        if request.method == "POST":
-            data = await request.json()
-            if "value" in data:
-                await gw.request("settings.value.set", {
-                    "key": "yt_dlp_concurrent_fragments",
-                    "value": str(data["value"])})
-            return {"success": True}
-        reply = await gw.request("settings.value.get",
-                                 {"key": "yt_dlp_concurrent_fragments"})
-        return {"value": int(reply.get("value") or 16)}
 
     @route_per_method(r, "/api/settings/saved_paths", methods=["GET", "POST", "DELETE"],
                       response_model=DynamicObject)

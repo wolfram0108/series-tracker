@@ -175,13 +175,6 @@ async def test_settings_flags_and_debug_groups(system):
     resp = await client.get("/api/settings/force_replace")
     assert resp.json() == {"enabled": True}
 
-    resp = await client.get("/api/settings/parallel_downloads")
-    assert resp.json() == {"value": 2}
-    await client.post("/api/settings/parallel_downloads",
-                      json={"value": 4})
-    resp = await client.get("/api/settings/parallel_downloads")
-    assert resp.json() == {"value": 4}
-
     # debug-флаги: структура с бэкенда + включение группы (принцип 6)
     resp = await client.get("/api/settings/debug_flags")
     body = resp.json()

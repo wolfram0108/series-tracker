@@ -30,7 +30,12 @@ class FakeNeighbours(BaseModule):
 
     def register(self):
         self.handle("settings.value.get", self.on_get)
+        self.handle("settings.value.set", self.on_set)
         self.handle("sources.video.stream", self.on_stream)
+
+    async def on_set(self, env):
+        self.settings[env.payload["key"]] = env.payload["value"]
+        return {"ok": True}
 
     async def on_stream(self, env):
         url = env.payload["url"]
@@ -420,24 +425,34 @@ async def test_fetch_rejects_a_relative_path(system):
 
 
 @pytest.mark.asyncio
-async def test_videos_of_references_and_the_rest_wait_in_lines_of_their_own_each_with_its_limit(system, tmp_path):
-    """The videos of the references (`whole`) take no place of the voice-overs and the other way round: each line runs
-    up to its own setting (max_parallel_downloads, max_parallel_dub_downloads)."""
+async def test_how_many_go_at_once_is_by_the_way_the_file_comes(system, tmp_path):
+    """Downloads by many connections share the threads of all of them (32 by 16 a file: two at once); downloads by one
+    connection have places of their own. A full way holds neither the queue nor the other way, and a fetch that waited
+    for its place asks its stream anew."""
     bus, fake, dl, probe = system
+    assert await probe.request("downloads.limits.get", {}) == {
+        "threads_total": 32, "threads_per_file": 16, "single_at_once": 4, "multi_at_once": 2}
+    said = await probe.request("downloads.limits.set", {"single_at_once": "1"})
+    assert said["ok"] and said["limits"]["single_at_once"] == 1
+    refused = await probe.request("downloads.limits.set", {"threads_total": "0"})
+    assert not refused["ok"] and "download_limit_invalid" in refused["reason"]
+    assert fake.settings == {"download_single_at_once": "1"}, "a limit is kept as a setting; a refused one is not"
     dl.gate = asyncio.Event()
-    probe.publish_event("settings.changed", {"key": "max_parallel_downloads", "value": "3"})
-    probe.publish_event("settings.changed", {"key": "max_parallel_dub_downloads", "value": "1"})
-    await _quiet()
-    for i in range(4):
-        probe.send_command("downloads.fetch", {"key": f"video:{i}", "url": f"https://site/#vk={i}", "whole": True,
-                                               "path": str(tmp_path / f"v{i}.mp4"), "series_id": 3})
-        probe.send_command("downloads.fetch", {"key": f"dub:{i}", "url": f"https://site/#cvh={i}",
-                                               "path": str(tmp_path / f"d{i}.mp4"), "series_id": 3})
-    assert await _wait(lambda: dl.concurrent == 4)
+    # A page yt-dlp reads takes many connections; a stream ffmpeg reads (a link with the headers of its host) takes one.
+    for i in range(2):
+        fake.stream_replies[f"https://site/#cvh={i}"] = {"handled": True, "stream_url": f"https://cdn/{i}.mp4",
+                                                         "headers": {"Referer": "https://site/"}}
+    for key, url in [("v0", "https://site/#vk=0"), ("v1", "https://site/#vk=1"), ("v2", "https://site/#vk=2"),
+                     ("s0", "https://site/#cvh=0"), ("s1", "https://site/#cvh=1")]:
+        probe.send_command("downloads.fetch", {"key": key, "url": url, "path": str(tmp_path / f"{key}.mp4"), "series_id": 3})
+    assert await _wait(lambda: dl.concurrent == 3)
     await _running.bus.settled()
-    assert sorted(url.split("#")[1].split("=")[0] for url in dl.started) == ["cvh", "vk", "vk", "vk"]
+    assert sorted(dl.started) == ["https://cdn/0.mp4", "https://site/#vk=0", "https://site/#vk=1"]
+    assert dl.threads == 16
     dl.gate.set()
-    assert await _wait(lambda: len(dl.started) == 8)
+    assert await _wait(lambda: len(dl.started) == 5)
+    # The third page waited for a place of its way: its stream was asked once more before it went.
+    assert [each["url"] for each in fake.stream_payloads].count("https://site/#vk=2") == 2
 
 
 @pytest.mark.asyncio
@@ -448,7 +463,7 @@ async def test_a_fetch_is_announced_when_it_leaves_the_queue_and_starts(system, 
     started = bus.subscribe("downloads.fetch.started")
     finished = bus.subscribe("downloads.fetch.finished")
     # One fetch at a time: the setting is read by the module when it changes.
-    probe.publish_event("settings.changed", {"key": "max_parallel_dub_downloads", "value": "1"})
+    probe.publish_event("settings.changed", {"key": "download_single_at_once", "value": "1"})
     await _quiet()
     probe.send_command("downloads.fetch", {"key": "dub:1", "url": "https://site/#cvh=1",
                                            "path": str(tmp_path / "t" / "1.mp4"), "series_id": 3})

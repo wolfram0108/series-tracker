@@ -447,6 +447,12 @@ def _is_stream(video_url: str, headers: dict | None, progressive: bool) -> bool:
                                            and "vk.com" not in video_url and "vkvideo.ru" not in video_url))
 
 
+def multithreaded(video_url: str, headers: dict | None, progressive: bool, playlist: bool) -> bool:
+    """Whether the download of a link takes its file by many connections at once (modules/downloads/limits.py): the
+    segments of a playlist, the parts of a ready file, a page yt-dlp reads; a stream ffmpeg reads takes one."""
+    return playlist or progressive or not _is_stream(video_url, headers, progressive)
+
+
 async def _announced_length(video_url: str, headers: dict | None, progressive: bool) -> float:
     """The length the source states, asked the way its file is downloaded; 0 when it states none."""
     if _is_stream(video_url, headers, progressive):

@@ -63,19 +63,35 @@ async function saveFlag(path: string, value: boolean, label: string) {
 }
 
 // --- числовые параметры yt-dlp (GET/POST → {value}) -------------------
-const parallelDownloads = ref("2")
-const concurrentFragments = ref("6")
+// --- пределы загрузок по способу (downloads, limits.py; GET/POST /api/settings/download_limits) ----
+interface DownloadLimits { threads_total: number; threads_per_file: number; single_at_once: number; multi_at_once: number }
+const limits = ref({ threads_total: "32", threads_per_file: "16", single_at_once: "4" })
+const multiAtOnce = ref(2)
+
+function showLimits(got: DownloadLimits) {
+  limits.value = { threads_total: String(got.threads_total), threads_per_file: String(got.threads_per_file),
+                   single_at_once: String(got.single_at_once) }
+  multiAtOnce.value = got.multi_at_once
+}
+async function loadLimits() {
+  const got = (await request(api.GET("/api/settings/download_limits" as never))) as DownloadLimits | null
+  if (got) showLimits(got)
+}
+async function saveLimits() {
+  const body = { threads_total: limits.value.threads_total.trim(), threads_per_file: limits.value.threads_per_file.trim(),
+                 single_at_once: limits.value.single_at_once.trim() }
+  const saved = (await request(api.POST("/api/settings/download_limits" as never, { body } as never))) as DownloadLimits | null
+  if (saved !== null) {
+    showLimits(saved)
+    toast.add({ severity: "info", summary: t("debug.downloads.saved"), life: 2000 })
+  } else {
+    await loadLimits()
+  }
+}
 
 async function loadNum(path: string, fallback: number): Promise<string> {
   const d = (await request(api.GET(path as never))) as { value?: number } | null
   return String(d?.value ?? fallback)
-}
-async function saveNum(path: string, value: string, label: string) {
-  const n = Number(String(value).replace(/[^0-9]/g, "")) || 0
-  const ok = await request(api.POST(path as never, { body: { value: n } } as never), {
-    errorMessage: "Ошибка сохранения параметра",
-  })
-  if (ok !== null) toast.add({ severity: "info", summary: label, detail: String(n), life: 2000 })
 }
 
 // --- срок актуальности опроса источников (sources, term.py; GET/POST → {value}) ----
@@ -179,8 +195,7 @@ onMounted(async () => {
   lessStrict.value = await loadFlag("/api/settings/less_strict_scan")
   slicingDelete.value = await loadFlag("/api/settings/slicing_delete_source")
   conformClear.value = await loadFlag("/api/settings/conform_clear_finished")
-  parallelDownloads.value = await loadNum("/api/settings/parallel_downloads", 2)
-  concurrentFragments.value = await loadNum("/api/settings/concurrent_fragments", 6)
+  void loadLimits()
   sourcesTerm.value = await loadNum("/api/settings/sources_term", 1)
 })
 </script>
@@ -231,24 +246,19 @@ onMounted(async () => {
           </label>
         </div>
         <div class="nums-row">
-          <div class="num-field">
-            <span>Максимум параллельных загрузок (yt-dlp)</span>
-            <InputText
-              v-model="parallelDownloads"
-              inputmode="numeric"
-              class="num-input"
-              @change="saveNum('/api/settings/parallel_downloads', parallelDownloads, 'Параллельных загрузок')"
-            />
+          <div class="num-field" :title="t('debug.downloads.threadsTotalHint')">
+            <span>{{ t("debug.downloads.threadsTotal") }}</span>
+            <InputText v-model="limits.threads_total" inputmode="numeric" class="num-input" @change="saveLimits" />
           </div>
           <div class="num-field">
-            <span>Потоков на одну загрузку (yt-dlp -N)</span>
-            <InputText
-              v-model="concurrentFragments"
-              inputmode="numeric"
-              class="num-input"
-              @change="saveNum('/api/settings/concurrent_fragments', concurrentFragments, 'Потоков на загрузку')"
-            />
+            <span>{{ t("debug.downloads.threadsPerFile") }}</span>
+            <InputText v-model="limits.threads_per_file" inputmode="numeric" class="num-input" @change="saveLimits" />
           </div>
+          <div class="num-field" :title="t('debug.downloads.singleAtOnceHint')">
+            <span>{{ t("debug.downloads.singleAtOnce") }}</span>
+            <InputText v-model="limits.single_at_once" inputmode="numeric" class="num-input" @change="saveLimits" />
+          </div>
+          <div class="num-field muted-hint">{{ t("debug.downloads.multiAtOnce", { count: multiAtOnce }) }}</div>
           <div class="num-field" :title="t('debug.sourcesTerm.hint')">
             <span>{{ t("debug.sourcesTerm.label") }}</span>
             <InputText v-model="sourcesTerm" inputmode="numeric" class="num-input" @change="saveSourcesTerm" />
