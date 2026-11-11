@@ -87,6 +87,24 @@ class AppStream:
     headers: dict[str, str] = field(default_factory=dict)
 
 
+def listed_lines(codes: str, lists: str) -> list[tuple[str, str, tuple[AppItem, ...]]]:
+    """(the name of a line on its card, its code, its episodes) of a card that lists its lines as a catalogue of films
+    does: the codes apart by `$$$`, and for each code `<label>$<token>#...`. A code a card gives twice names its second
+    line `<code>.2` (and so on): a line is one of its card by its name. A line without an episode is not listed."""
+    found, seen = [], {}
+    for code, listed in zip(codes.split("$$$"), lists.split("$$$")):
+        code, items = code.strip(), []
+        for item in listed.split("#"):
+            label, apart, token = item.partition("$")
+            if apart and token.strip():
+                items.append(AppItem(len(items) + 1, label.strip(), token.strip()))
+        if not code or not items:
+            continue
+        seen[code] = seen.get(code, 0) + 1
+        found.append((code if seen[code] == 1 else f"{code}.{seen[code]}", code, tuple(items)))
+    return found
+
+
 # The codes by which a parser says it made the address of the episode (the clients the applications are read by state
 # one of these on success; a number of an HTTP refusal or a word of failure in its place is the parser saying no).
 _PARSED = frozenset({"0", "1", "200", "true", "ok", "success"})
