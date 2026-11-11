@@ -21,7 +21,6 @@ sourcekit/yunduo.py); the vector of its signature is in the tests.
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import secrets
@@ -39,10 +38,6 @@ from .appdrama import field, fields
 logger = logging.getLogger("sources")
 
 REQUEST_TIMEOUT_S = 30.0
-# The requests of a client to the API, one at a time, no closer than this. The host answered 403 to every request of this
-# machine, its root too, after about 80 requests in five minutes, some twenty in a second (2026-11-11, a read whose rows
-# failed and were asked again); how much it takes is not known, one a second is far below that.
-REQUEST_INTERVAL_S = 1.0
 AGENT = "Mozilla/5.0"
 PARSED = 1
 
@@ -77,8 +72,6 @@ class YunDuoClient:
         self._clock, self._nonce = clock, nonce
         # The name of a line on its card -> the code the application knows it by, as the cards read gave them.
         self._codes: dict[str, str] = {}
-        self._turn = asyncio.Lock()
-        self._next_at = 0.0
 
     def _base(self) -> str:
         return (self._settings.get("api") or self._settings["host"].rstrip("/") + "/api.php/web").rstrip("/")
@@ -88,11 +81,6 @@ class YunDuoClient:
                 "web-sign": self._settings["web_sign"]}
 
     async def _asked(self, method: str, path: str, **sent) -> httpx.Response:
-        async with self._turn:
-            wait = self._next_at - time.monotonic()
-            if wait > 0:
-                await asyncio.sleep(wait)
-            self._next_at = time.monotonic() + REQUEST_INTERVAL_S
         began = time.monotonic()
         try:
             response = await self._http().request(method, self._base() + path, timeout=REQUEST_TIMEOUT_S,
