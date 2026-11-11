@@ -49,6 +49,7 @@ class FakeDownloader:
     def __init__(self):
         self.fail_urls: set[str] = set()
         self.timeouts: dict[str, int] = {}   # url -> how many more attempts end in a network timeout
+        self.failures: dict[str, list[str]] = {}  # url -> the words its next attempts fail with, in order
         self.silent: dict[str, int] = {}     # url -> how many more attempts wait for ever with no sign of life
         self.started: list[str] = []
         self.kwargs: dict[str, dict] = {}
@@ -75,6 +76,8 @@ class FakeDownloader:
             if self.timeouts.get(url, 0):
                 self.timeouts[url] -= 1
                 return False, "ffmpeg direct download: Connection timed out"
+            if self.failures.get(url):
+                return False, self.failures[url].pop(0)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "wb") as f:
                 f.write(b"video")
@@ -195,6 +198,8 @@ async def test_fetch_unreachable_sources_is_an_error_not_a_blind_download(system
     (done,) = await _fetch(probe, bus, 1, jobs=[
         {"key": "dub:3", "url": "https://site/#cvh=3", "path": str(tmp_path / "b.mp4"), "series_id": 3}])
     assert done["ok"] is False and "поток не получен" in done["error"] and dl.started == []
+    # Our own module did not answer: nothing was learnt of the source, and its owner asks it again at the next round.
+    assert done["transient"] is True
 
 
 @pytest.mark.asyncio
@@ -214,8 +219,22 @@ async def test_fetch_gives_up_after_the_attempt_limit(system, tmp_path, monkeypa
     dl.timeouts["https://site/#cvh=5"] = 99
     (done,) = await _fetch(probe, bus, 1, jobs=[
         {"key": "dub:5", "url": "https://site/#cvh=5", "path": str(tmp_path / "d.mp4"), "series_id": 3}])
-    assert done["ok"] is False and done["transient"] is True
+    # The attempts spent, the failure is the source's: the owner of the fetch goes to the next one.
+    assert done["ok"] is False and done["transient"] is False
     assert dl.started.count("https://site/#cvh=5") == 3 and not os.path.exists(tmp_path / "d.mp4")
+
+
+@pytest.mark.asyncio
+async def test_a_failure_nobody_recognises_is_asked_again(system, tmp_path, monkeypatch):
+    """The words of a downloader for a segment a host cut in its middle name no network and no status: a failure that is
+    not known to be the last word of the source is of the way to it."""
+    monkeypatch.setattr("modules.downloads.module.RETRY_DELAY_S", 0.0)
+    bus, _, dl, probe = system
+    url = "https://site/#cvh=6"
+    dl.failures[url] = ["загрузчик сегментов: ERROR: [download] Got error: 7254016 bytes read, 9647799 more expected. "
+                        "Giving up after 3 retries"]
+    (done,) = await _fetch(probe, bus, 1, jobs=[{"key": "dub:6", "url": url, "path": str(tmp_path / "e.mp4"), "series_id": 3}])
+    assert done["ok"] is True and dl.started.count(url) == 2
 
 
 @pytest.mark.asyncio

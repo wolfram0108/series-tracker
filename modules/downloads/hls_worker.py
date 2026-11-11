@@ -3,13 +3,19 @@ stopped as one: the native HLS downloader of yt-dlp over the playlist saved on d
 decrypted, an unavailable fragment never skipped. A fragment is taken from where its transport stream begins: some hosts
 put the head of a picture before it.
 
-stdin: one JSON line {url, target, headers, fragments}; stdout: JSON lines {type: progress | transferred | failed, ...}.
+A segment the host says is not there (404, 410) is told apart from every other failure (`gone`): it is the host's last
+word on the file, and nothing else the downloader gives up on is.
+
+stdin: one JSON line {url, target, headers, fragments}; stdout: JSON lines {type: progress | transferred | failed | error |
+gone, ...}.
 """
 from __future__ import annotations
 
 import json
 import sys
 from pathlib import Path
+
+from .failure import GONE
 
 TS_PACKET = 188
 SYNC = 0x47
@@ -35,6 +41,13 @@ def run() -> int:
     class CleanHlsFD(HlsFD):
         def _append_fragment(self, ctx, frag_content):
             return super()._append_fragment(ctx, transport_stream(frag_content))
+
+        def report_retry(self, err, count, retries, *args, **kwargs):
+            # A refusal of a fragment by its status comes here as the error itself (downloader/fragment.py); what the
+            # downloader of a fragment gives up on by itself (a cut read, a 5xx) does not, and is no last word.
+            if getattr(err, "status", None) in GONE:
+                print(json.dumps({"type": "gone", "status": err.status}), flush=True)
+            return super().report_retry(err, count, retries, *args, **kwargs)
 
     class Quiet:
         def debug(self, message):

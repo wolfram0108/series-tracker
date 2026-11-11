@@ -31,6 +31,7 @@ from core.proc import LOST, REAP_TIMEOUT_S, exited, program, run_capture, spawn,
 from core.retry import UNTIMED, Budget, retrying
 
 from . import hls_native, ranged
+from .failure import Failed, Unasked, kind_of
 
 ProgressCb = Callable[[dict], Awaitable[None]]
 
@@ -316,7 +317,7 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
                                   on_progress: ProgressCb, announced: float | None = None) -> tuple[bool, str]:
     executable = program("ffmpeg")
     if not executable:
-        return False, "ffmpeg не найден в PATH"
+        return False, Unasked("ffmpeg не найден в PATH")
     duration = announced if announced is not None else await _probe_duration_ffprobe(stream_url, headers)
     tmp_out = full_output_path + ".download.mp4"
     await on_progress({"phase": "download", "progress": 0, "eta": 0, "speed": 0.0})
@@ -386,7 +387,7 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
     if _interrupted(code, tail):
-        return False, f"{INTERRUPTED}: ffmpeg direct download: {last or code}"
+        return False, Unasked(f"{INTERRUPTED}: ffmpeg direct download: {last or code}")
     return False, f"ffmpeg direct download: {last or code}"
 
 
@@ -402,7 +403,8 @@ async def download(video_url: str, full_output_path: str,
                    threads: int = 6,
                    progressive: bool = False,
                    max_height: int | None = None,
-                   playlist: bool = False) -> tuple[bool, str]:
+                   playlist: bool = False,
+                   resumable: bool = False) -> tuple[bool, str]:
     """Two-phase video download. Supports parts of a ready file, direct ffmpeg copy and yt-dlp.
 
     A download that says it is done is taken only at the length its source announced: a stream copy short of it fails (the
@@ -412,20 +414,26 @@ async def download(video_url: str, full_output_path: str,
     cannot serve parts. `max_height` caps a page the downloader reads itself (a resolved stream is one file already).
     The name is owned from the first step to the last: the programs, their leftovers and the publication.
 
-    `playlist` marks an HLS playlist a player resolved: it is downloaded by its segments (modules/downloads/hls_native.py)."""
+    `playlist` marks an HLS playlist a player resolved: it is downloaded by its segments (modules/downloads/hls_native.py).
+    `resumable`: the caller asks for this file again after a failure of the way to it — the segments a broken transfer
+    took stay next to the name (`download_artifacts`) and the next ask continues them; the caller removes them when it
+    gives the file up.
+
+    The words of a failure tell what it says of the source (modules/downloads/failure.py)."""
     if not os.path.isabs(full_output_path):
         return False, "путь сохранения должен быть абсолютным"
     try:
         with storage.hold(full_output_path):
             if playlist:
-                return await _download_playlist(video_url, full_output_path, on_progress, headers or {}, threads)
+                return await _download_playlist(video_url, full_output_path, on_progress, headers or {}, threads,
+                                                resumable)
             announced = await _announced_length(video_url, headers, progressive)
             await on_progress({"phase": "link", "source_seconds": announced or None})
             done = await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive,
                                          announced=announced, max_height=max_height)
             return await _as_long_as_announced(done, full_output_path, announced, on_progress)
     except storage.StorageBusy:  # an operation on this name has not ended: a file written now could be lost
-        return False, "путь занят незавершённой файловой операцией (timeout)"
+        return False, Unasked("путь занят незавершённой файловой операцией")
 
 
 def short_of(got: float, announced: float) -> bool:
@@ -447,29 +455,37 @@ async def _announced_length(video_url: str, headers: dict | None, progressive: b
 
 
 async def _download_playlist(video_url: str, full_output_path: str, on_progress: ProgressCb, headers: dict,
-                             threads: int) -> tuple[bool, str]:
+                             threads: int, resumable: bool = False) -> tuple[bool, str]:
     """The playlist read by our client and saved, its segments by the native downloader of yt-dlp, the stream copied into
     the container by ffmpeg; the file is taken at the length the playlist states, short of it by up to its longest
-    segment."""
+    segment. The parts of a transfer that broke stay for a `resumable` download, and are continued by its next ask under
+    the same listing of segments."""
     await storage.call(os.makedirs, os.path.dirname(full_output_path), exist_ok=True)
     if await storage.call(os.path.exists, full_output_path):
         return True, "файл уже существует"
     await on_progress({"method": "hls"})
+    done, seconds, tolerance = (False, ""), 0.0, HOLE_S
     try:
         try:
             snap = await hls_native.snapshot(video_url, headers, full_output_path)
         except hls_native.PlaylistError as exc:
-            return False, str(exc)
-        await on_progress({"phase": "link", "source_seconds": snap.seconds or None})
+            done = (False, exc.failure)
+            return done
+        seconds, tolerance = snap.seconds, max(HOLE_S, snap.tolerance)
+        await on_progress({"phase": "link", "source_seconds": seconds or None})
         raw = full_output_path + ".download.ts"
+        if await storage.call(hls_native.continued, raw, snap.listing, owns=full_output_path):
+            hls_native.logger.info("%s: загрузка продолжается с полученных сегментов",
+                                   os.path.basename(full_output_path))
         done = await hls_native.fetch(snap, headers, raw, threads, on_progress)
         if done[0]:
-            done = await _phase_remux(raw, full_output_path, on_progress, snap.seconds)
+            done = await _phase_remux(raw, full_output_path, on_progress, seconds)
     finally:
-        # The playlist, the stream and the leftovers of the downloader go, whatever the end.
-        await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
-    return await _as_long_as_announced(done, full_output_path, snap.seconds, on_progress,
-                                       tolerance=max(HOLE_S, snap.tolerance))
+        # The playlist, the stream and the leftovers of the downloader go, whatever the end — but for the parts of a
+        # transfer whose way broke, when the caller asks again: an exception (a stop) leaves `done` a failure of no words.
+        if not (resumable and not done[0] and done[1] and kind_of(done[1]) is Failed.BROKEN):
+            await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
+    return await _as_long_as_announced(done, full_output_path, seconds, on_progress, tolerance=tolerance)
 
 
 async def _as_long_as_announced(done: tuple[bool, str], path: str, announced: float,
@@ -564,7 +580,7 @@ async def _phase_download(video_url: str, full_output_path: str,
     (False, error)."""
     executable = program("yt-dlp")
     if not executable:
-        return False, "yt-dlp не найден в PATH"
+        return False, Unasked("yt-dlp не найден в PATH")
     out_template = full_output_path + ".download.%(ext)s"
 
     proc = await spawn(
@@ -600,7 +616,7 @@ async def _phase_download(video_url: str, full_output_path: str,
     if stopped:
         return False, stopped
     if code != 0 and _interrupted(code, tail):
-        return False, f"{INTERRUPTED}: yt-dlp завершился с кодом {code}"
+        return False, Unasked(f"{INTERRUPTED}: yt-dlp завершился с кодом {code}")
     # A lost status says nothing: the file yt-dlp left is judged by what follows (the remux and the check of its length).
     if code not in (0, LOST):
         error = _ytdlp_error(
@@ -623,7 +639,7 @@ async def _phase_remux(raw: str, full_output_path: str,
     yt-dlp (надёжно), не из промежуточного TS (находка 52)."""
     executable = program("ffmpeg")
     if not executable:
-        return False, "ffmpeg не найден в PATH"
+        return False, Unasked("ffmpeg не найден в PATH")
     await on_progress({"phase": "remux", "progress": 0, "eta": 0,
                        "speed": 0.0})
 
@@ -685,5 +701,5 @@ async def _phase_remux(raw: str, full_output_path: str,
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
     if _interrupted(code, tail):
-        return False, f"{INTERRUPTED}: ffmpeg remux: {last or code}"
+        return False, Unasked(f"{INTERRUPTED}: ffmpeg remux: {last or code}")
     return False, f"ffmpeg remux: {last or code}"

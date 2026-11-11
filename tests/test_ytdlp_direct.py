@@ -8,7 +8,7 @@ import pytest
 
 from core.proc import program
 from modules.downloads import ytdlp
-from modules.downloads.module import _transient_download_error
+from modules.downloads.failure import Failed, kind_of
 from proc_helpers import Spy, alive, stalled_downloader
 
 FFMPEG = """#!/bin/bash
@@ -114,7 +114,7 @@ async def test_a_broken_off_stream_is_not_taken_for_a_finished_episode(fake, tmp
     ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, target, noop)
     assert not ok and "обрыв" in error and "300" in error and "1200" in error
     assert not os.path.exists(target) and not os.path.exists(target + ".download.mp4")
-    assert _transient_download_error(error)
+    assert kind_of(error) is Failed.BROKEN
 
 
 @pytest.mark.asyncio
@@ -125,7 +125,7 @@ async def test_a_download_a_signal_ends_is_interrupted_not_refused_and_is_asked_
     state, _ = fake
     (state / how).write_text("1")
     ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, str(tmp_path / "e.mp4"), noop)
-    assert not ok and error.startswith(ytdlp.INTERRUPTED) and _transient_download_error(error)
+    assert not ok and error.startswith(ytdlp.INTERRUPTED) and kind_of(error) is Failed.UNASKED
 
 
 @pytest.mark.asyncio
@@ -146,7 +146,7 @@ async def test_a_file_short_of_the_announced_length_by_a_segment_is_incomplete_a
     ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, target, noop)
     assert not ok and "обрыв" in error and "№2" in error and "1268" in error and "1282" in error
     assert not os.path.exists(target) and not os.path.exists(target + ".download.mp4")
-    assert _transient_download_error(error)
+    assert kind_of(error) is Failed.BROKEN
 
 
 @pytest.mark.asyncio
@@ -187,7 +187,7 @@ async def test_a_stalled_ffmpeg_is_stopped_and_counted_as_a_transient_failure(fa
     monkeypatch.setattr(ytdlp, "STALL_TIMEOUT_S", 0.3)
     target = str(tmp_path / "e.mp4")
     ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, target, noop)
-    assert not ok and "нет прогресса" in error and _transient_download_error(error)
+    assert not ok and "нет прогресса" in error and kind_of(error) is Failed.BROKEN
     assert not os.path.exists(target + ".download.mp4")
 
 
@@ -218,7 +218,7 @@ async def test_a_silent_downloader_is_stopped_and_counted_as_a_transient_failure
             patch.object(ytdlp, "program", return_value=stalled_downloader(tmp_path)):
         result = await asyncio.wait_for(
             ytdlp._phase_download("https://vk.test/v", str(tmp_path / "e.mp4"), noop, 1, ytdlp.HLS_FORMAT), 10)
-    assert result[0] is False and "нет прогресса" in result[1] and _transient_download_error(result[1])
+    assert result[0] is False and "нет прогресса" in result[1] and kind_of(result[1]) is Failed.BROKEN
     assert not alive(spy.started[0].pid)
 
 
@@ -230,7 +230,7 @@ async def test_a_silent_remux_is_stopped_and_leaves_no_partial_file(tmp_path, mo
     with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy), \
             patch.object(ytdlp, "program", return_value=stalled_downloader(tmp_path, "ffmpeg")):
         ok, error = await asyncio.wait_for(ytdlp._phase_remux(str(tmp_path / "raw.ts"), target, noop, 10.0), 10)
-    assert not ok and "нет прогресса" in error and _transient_download_error(error)
+    assert not ok and "нет прогресса" in error and kind_of(error) is Failed.BROKEN
     assert not alive(spy.started[0].pid) and not os.path.exists(target + ".remux.mp4")
 
 
@@ -244,7 +244,7 @@ async def test_a_download_does_not_start_on_a_name_an_unfinished_removal_still_o
     with pytest.raises(storage.StorageTimeout):
         await storage.call(lambda: release.wait(5), timeout=0.05, owns=target + ".remux.mp4")
     ok, error = await ytdlp.download("https://cdn.test/v.m3u8", target, noop, headers={"Referer": "x"})
-    assert not ok and "занят" in error and _transient_download_error(error)
+    assert not ok and "занят" in error and kind_of(error) is Failed.UNASKED
     release.set()
 
 
@@ -286,7 +286,7 @@ async def test_a_download_does_not_start_a_program_where_an_operation_has_not_en
         await storage.call(lambda: release.wait(5), owns=os.path.dirname(target), timeout=0.02)
     try:
         ok, error = await ytdlp.download("https://cdn.test/e.mp4", target, noop)
-        assert not ok and _transient_download_error(error)
+        assert not ok and kind_of(error) is Failed.UNASKED
         assert not (state / "ffmpeg_args").exists(), "no program was started"
     finally:
         release.set()

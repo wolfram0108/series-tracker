@@ -26,6 +26,10 @@ Queries / commands:
 
 Events out:
   downloads.fetch.started {key, series_id, path}, downloads.fetch.finished {key, ok, error, transient, path, series_id}.
+      A fetch is given its attempts (failure.py): the last word of the source ends it at once, a way that broke is asked
+      again (a playlist is continued from the segments it got), and a fetch that spent its attempts failed. `transient`
+      is only a failure that said nothing of the source (a module of ours did not answer, a name was busy): the owner
+      asks the same source again at its next round; any other failure is the source's, and the owner goes to the next.
   downloads.queue.changed {tasks, count} - the cards changed, on the beat of core/clock while a download goes, and when an
       interface connects (gateway.sse.clients): SSE download_queue_update. The cards live with the sync of their series
       (scan.run.changed): while it runs every card is kept; at its end only a failed card and a finished one whose plan
@@ -50,6 +54,7 @@ from core.envelope import Envelope
 from core.retry import UNTIMED, Budget, retrying
 
 from . import ytdlp
+from .failure import Failed, kind_of
 from .cards import CardBook
 from .repository import DownloadsRepository
 
@@ -61,14 +66,6 @@ MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
 # The setting of the limit of each line of fetches: the videos of the references, and the rest.
 LIMIT_KEYS = {"video": "max_parallel_downloads", "other": "max_parallel_dub_downloads"}
-# A download a signal interrupted (ytdlp.INTERRUPTED) is asked again: at a stop of the service the repeat is cancelled with
-# the module, and the work is taken up at the next start.
-_TRANSIENT_MARKERS = ("прервано сигналом", "timed out", "timeout", "connection", "network", "обрыв", "input/output error",
-                      "temporarily", "server returned 5", "server returned 429",
-                      "server returned 403", "http error 403", "http error 408",
-                      "http error 429", "http error 5")
-
-
 async def _always() -> bool:
     return True
 
@@ -76,11 +73,6 @@ async def _always() -> bool:
 async def _never() -> bool:
     """A link whose stream request failed is not handed to yt-dlp: a page of a web player is no stream."""
     return False
-
-
-def _transient_download_error(error: str) -> bool:
-    lowered = (error or "").lower()
-    return any(marker in lowered for marker in _TRANSIENT_MARKERS)
 
 
 def awaited(task: asyncio.Task) -> str:
@@ -309,8 +301,10 @@ class DownloadsModule(BaseModule):
     # --- the fetches ------------------------------------------------------------------
 
     async def _resolve_stream(self, url: str, *, max_height: int | None = None,
-                              ytdlp_fallback) -> tuple[str, dict | None, tuple[str, bool] | None, bool, bool]:
-        """(stream url, headers, (error, transient), progressive, playlist) of a link, via the provider that owns it.
+                              ytdlp_fallback) -> tuple[str, dict | None, tuple[str, Failed] | None, bool, bool]:
+        """(stream url, headers, (error, what it says of the source), progressive, playlist) of a link, via the provider
+        that owns it. The provider says itself whether its refusal is its last word; a provider that did not answer said
+        nothing of the source.
 
         `ytdlp_fallback` is an async callable asked only when the request fails: True hands the link to
         the downloader as it is, False makes the failure the error of the job, since a page of a web
@@ -319,13 +313,14 @@ class DownloadsModule(BaseModule):
         try:
             reply = await self.request("sources.video.stream", payload)
             if reply.get("error"):
-                return url, None, (reply["error"], bool(reply.get("transient"))), False, False
+                return (url, None, (reply["error"], Failed.BROKEN if reply.get("transient") else Failed.FINAL),
+                        False, False)
             if reply.get("handled"):
                 return (reply["stream_url"], reply.get("headers"), None, bool(reply.get("progressive")),
                         bool(reply.get("playlist")))
         except Exception as exc:
             if not await ytdlp_fallback():
-                return url, None, (f"поток не получен: {exc}", True), False, False
+                return url, None, (f"поток не получен: {exc}", Failed.UNASKED), False, False
             self.log.debug("sources.video.stream не обработан для %s: %s", url, exc)
         return url, None, None, False, False
 
@@ -377,8 +372,12 @@ class DownloadsModule(BaseModule):
             "path": job["path"], "series_id": job.get("series_id")})
 
     async def _fetch_one(self, job: dict) -> None:
+        """One download with its attempts (modules/downloads/failure.py): the source's last word ends it at once; a way
+        that broke is asked again, a playlist continued from the segments it got; a download that spent its attempts
+        failed, and its owner goes to the next source. `transient` of the end is only a failure that said nothing of the
+        source: the owner asks the same source again at its next round."""
         key, path = job["key"], job["path"]
-        ok, error, transient = False, "", False
+        ok, error, said = False, "", None
 
         need_key = job["need_key"]
         tries = 0
@@ -386,7 +385,7 @@ class DownloadsModule(BaseModule):
         async def on_progress(data: dict) -> None:
             self.cards.progress(need_key, data)
 
-        async def attempt_once() -> tuple[bool, str, bool]:
+        async def attempt_once() -> tuple[bool, str, Failed | None]:
             nonlocal tries
             tries += 1
             self.cards.attempt(need_key, tries, budget.attempts)
@@ -402,29 +401,29 @@ class DownloadsModule(BaseModule):
             if progressive:
                 kw["progressive"] = True
             if playlist:
-                kw["playlist"] = True
+                kw["playlist"] = kw["resumable"] = True  # what an attempt got is dropped at the end of the fetch
             done, failure = await self._watched(key, stream_url, path, on_progress, **kw)
-            return done, failure, not done and _transient_download_error(failure)
+            return done, failure, None if done else kind_of(failure)
 
         budget = _download_budget()
 
-        def report(result: tuple[bool, str, bool], attempt: int, pause: float) -> None:
+        def report(result: tuple[bool, str, Failed | None], attempt: int, pause: float) -> None:
             self.cards.attempt_failed(need_key)
             self.log.warning("загрузка %s: %s — повтор %d/%d через %.0f с", key, result[1], attempt, budget.attempts, pause)
 
         stopped = False
         try:
-            (ok, error, transient), _attempts, _exhausted = await retrying(
-                attempt_once, final=lambda result: result[0] or not result[2], budget=budget, on_retry=report)
+            (ok, error, said), _attempts, _exhausted = await retrying(
+                attempt_once, final=lambda result: result[0] or result[2] is Failed.FINAL, budget=budget, on_retry=report)
         except asyncio.CancelledError:
             stopped = key not in self._cancelled
             if not stopped:
-                error, transient = "отменено пользователем", False
+                error, said = "отменено пользователем", Failed.FINAL
             else:
                 raise
         except Exception as exc:  # noqa: BLE001 - one failed fetch must not take the module down
             self.log.exception("сбой загрузки %s", key)
-            ok, error, transient = False, f"внутренняя ошибка: {exc}", False
+            ok, error, said = False, f"внутренняя ошибка: {exc}", Failed.UNASKED
         finally:
             # The place of the fetch is given back whatever happens to what it wrote: a place kept by a fetch that ended
             # would show it under way for ever and stop its owner from asking for it again.
@@ -439,7 +438,7 @@ class DownloadsModule(BaseModule):
                 film = film_stream(await streams_of(path) or []) if size else None
                 self.cards.finished(need_key, ok, size_mb=round(size / 1024 ** 2, 1) if size else None,
                                     height=(film or {}).get("height"))
-                self._finished(job, ok, error, transient)
+                self._finished(job, ok, error, not ok and said is Failed.UNASKED)
             self._fetch_pump()
             self._announce_queue()
 
@@ -474,7 +473,7 @@ class DownloadsModule(BaseModule):
                                      key, SILENCE_FUSE_S, awaited(run))
                     run.cancel()
                     await asyncio.gather(run, return_exceptions=True)
-                    return False, f"нет признаков жизни {SILENCE_FUSE_S:.0f} с (timeout)"
+                    return False, f"нет признаков жизни {SILENCE_FUSE_S:.0f} с"
         finally:
             if beat is not None:
                 beat.cancel()  # a download cancelled in the middle of the wait leaves no watch behind

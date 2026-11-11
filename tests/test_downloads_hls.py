@@ -4,13 +4,16 @@ stream begins (a host puts the head of a PNG before it) — and ffmpeg copies th
 segment is never skipped: the download fails and leaves nothing. Real files on a real HTTP host (tests/plan_disk.py)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
 
 import pytest
 
+from core import storage
 from modules.downloads import hls_native, ytdlp
+from modules.downloads.failure import Failed, kind_of
 from modules.downloads.hls_worker import transport_stream
 from plan_disk import Codec, Host, _run
 
@@ -115,11 +118,64 @@ async def test_a_refused_segment_is_never_skipped_the_download_fails_and_leaves_
         name = stream(str(tmp_path / "site"))
         host.missing.add("show/seg2.ts")
         out = str(tmp_path / "lib" / "e1.mp4")
-        ok, why = await ytdlp.download(host.url(name), out, noop, playlist=True, threads=4)
+        ok, why = await ytdlp.download(host.url(name), out, noop, playlist=True, threads=4, resumable=True)
         assert not ok and "загрузчик сегментов" in why
+        # The host said the segment is not there: its last word on the file, and nothing is kept to be continued.
+        assert kind_of(why) is Failed.FINAL
         assert os.listdir(tmp_path / "lib") == []
     finally:
         host.close()
+
+
+async def test_a_segment_cut_in_its_middle_is_a_broken_way_and_the_next_ask_continues_from_what_was_got(tmp_path):
+    host = Host(str(tmp_path / "site"))
+    try:
+        name = stream(str(tmp_path / "site"))
+        host.cut["show/seg2.ts"] = 100  # every ask of the first download: the downloader gives the segment up
+        out = str(tmp_path / "lib" / "e1.mp4")
+        ok, why = await ytdlp.download(host.url(name), out, noop, playlist=True, threads=1, resumable=True)
+        assert not ok and "загрузчик сегментов" in why
+        assert kind_of(why) is Failed.BROKEN, why
+        assert any(each.endswith(".download.ts.part") for each in os.listdir(tmp_path / "lib")), "what was got stays"
+        before = len(host.served)
+        host.cut.clear()
+        # The name is asked for again once the programs of the first ask have ended (its owner pauses between attempts).
+        free = asyncio.get_running_loop().create_future()
+        storage.when_free(out, lambda: free.set_result(None))
+        await free
+        ok, why = await ytdlp.download(host.url(name), out, noop, playlist=True, threads=1, resumable=True)
+        assert ok, why
+        again = host.served[before:]
+        assert "show/seg0.ts" not in again and "show/seg1.ts" not in again, "the segments got are not asked for again"
+        assert float(probe(out)["format"]["duration"]) == pytest.approx(4, abs=0.5)
+        assert sorted(os.listdir(tmp_path / "lib")) == ["e1.mp4"], "no leftover of the download stays"
+    finally:
+        host.close()
+
+
+async def test_the_parts_of_a_broken_transfer_go_unless_the_caller_asks_again(tmp_path):
+    host = Host(str(tmp_path / "site"))
+    try:
+        name = stream(str(tmp_path / "site"))
+        host.cut["show/seg2.ts"] = 100
+        ok, _why = await ytdlp.download(host.url(name), str(tmp_path / "lib" / "e1.mp4"), noop, playlist=True, threads=1)
+        assert not ok and os.listdir(tmp_path / "lib") == []
+    finally:
+        host.close()
+
+
+def test_the_parts_of_another_listing_are_not_continued(tmp_path):
+    """A playlist that lists other segments would be finished into a file of two films; the query of an address is the
+    signature of an ask and changes nothing."""
+    first = "#EXTM3U\n#EXTINF:10.0,\nhttps://cdn/v/1.ts?sign=a\n#EXTINF:10.0,\nhttps://cdn/v/2.ts?sign=a\n#EXT-X-ENDLIST\n"
+    signed = first.replace("sign=a", "sign=b")
+    other = first.replace("/v/2.ts", "/w/2.ts")
+    assert hls_native.listing_of(first) == hls_native.listing_of(signed) != hls_native.listing_of(other)
+    raw = str(tmp_path / "e1.mp4.download.ts")
+    assert not hls_native.continued(raw, hls_native.listing_of(first)), "nothing to continue at the first transfer"
+    (tmp_path / "e1.mp4.download.ts.part").write_bytes(b"segments")
+    assert hls_native.continued(raw, hls_native.listing_of(signed)) and os.path.exists(raw + ".part")
+    assert not hls_native.continued(raw, hls_native.listing_of(other)) and not os.path.exists(raw + ".part")
 
 
 AD = ("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:11\n#EXT-X-MEDIA-SEQUENCE:0\n"

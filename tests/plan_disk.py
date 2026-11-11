@@ -126,6 +126,8 @@ class Host:
         self.missing: set[str] = set()
         self.flaky: set[str] = set()
         self.served: list[str] = []  # the names of the files given out, in order: what was downloaded and how often
+        # A file in `cut` is given out half and the connection closed, for as many asks as its number says.
+        self.cut: dict[str, int] = {}
         # A file in `hold` is given out half and held there until `released` (a download caught in its middle, its
         # program alive); `holding` is set when such a file is being held.
         self.hold: set[str] = set()
@@ -152,7 +154,7 @@ class Host:
                     return
                 name = self.path.lstrip("/")
                 host.served.append(name)
-                if name not in host.hold:
+                if name not in host.hold and not host.cut.get(name):
                     super().do_GET()
                     return
                 with open(os.path.join(root, name), "rb") as file:
@@ -161,6 +163,11 @@ class Host:
                 self.send_header("Content-Type", "video/mp4")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
+                if host.cut.get(name):
+                    host.cut[name] -= 1
+                    self.wfile.write(body[:len(body) // 2])
+                    self.close_connection = True
+                    return
                 try:
                     self.wfile.write(body[:len(body) // 2])
                     self.wfile.flush()

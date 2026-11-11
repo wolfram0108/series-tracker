@@ -112,11 +112,11 @@ async def test_a_part_that_fails_twice_is_asked_again_and_the_file_is_whole(tmp_
 
 @pytest.mark.asyncio
 async def test_a_part_that_never_comes_ends_the_download_and_leaves_no_file_and_the_error_can_be_retried(tmp_path):
-    from modules.downloads.module import _transient_download_error
+    from modules.downloads.failure import Failed, kind_of
 
     (ok, error), out = await fetch(Server(bytes(25), fails={10: 99}), tmp_path)
 
-    assert not ok and "503" in error and _transient_download_error(error)
+    assert not ok and "503" in error and kind_of(error) is Failed.BROKEN
     assert not os.path.exists(out)
 
 
@@ -130,13 +130,13 @@ async def test_a_part_that_comes_short_is_not_taken_for_whole(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_refused_link_is_not_asked_again_and_a_link_that_expired_can_be_retried_by_the_caller(tmp_path):
-    from modules.downloads.module import _transient_download_error
+    from modules.downloads.failure import Failed, kind_of
 
     server = Server(bytes(25), status={10: 403})
 
     (ok, error), out = await fetch(server, tmp_path)
 
-    assert not ok and "403" in error and _transient_download_error(error)
+    assert not ok and "403" in error and kind_of(error) is Failed.BROKEN
     assert server.seen.count("bytes=10-19") == 1
     assert not os.path.exists(out)
 
