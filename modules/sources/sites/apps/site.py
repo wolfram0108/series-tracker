@@ -18,8 +18,9 @@ A row of the table is a video with its frame, or the absence of the episode on i
 measured". Every row is asked at the pace the read of a card keeps (`ROWS_PER_SECOND`) under the policy of every player
 (policy.py: an unsure answer is asked again, the application parsing the episode anew, the pause a host names is kept).
 A row whose answer stayed unsure while the whole card was being asked (no answer, a host too busy, a refusal a parser
-words at one request and not at the next) is asked again when the rest is done, a few rows at a time (`CALM_ROUNDS`): an
-answer under the load of the read is not yet the answer about the episode. A final answer (the host has no such file, a
+words at one request and not at the next) is asked again when the rest is done, a few rows at a time, while a round
+gives some row its answer (`CALM_ROUNDS` at most): an answer under the load of the read is not yet the answer about the
+episode. A final answer (the host has no such file, a
 store serves a stub for the start of the film) is asked once. An episode that gave no picture after all of it is
 `absent` with what the host or the application said last,
 and the log of the read names every such episode of every line. The field `stream` of a row says how its stream comes:
@@ -50,7 +51,8 @@ ROWS_PER_SECOND = 25
 # host that slows down holds back the asks instead of piling them up.
 ROWS_IN_FLIGHT = ROWS_PER_SECOND * 4
 # The rows whose answer stayed unsure under the load of the read are asked again when the rest is done, this many at a
-# time and this many times over: a host that was too busy for a hundred asks answers a few.
+# time and at most this many times over, while a round gives some row its answer: a host that was too busy for a
+# hundred asks answers a few, and one that answers none of its rows in a round is not asked a round more.
 CALM_IN_FLIGHT = 8
 CALM_ROUNDS = 2
 
@@ -165,13 +167,18 @@ class AppSite:
 
         said = dict(await asyncio.gather(*(ask(line, link, self.in_flight, True) for line, link in asked)))
         calm = asyncio.Semaphore(CALM_IN_FLIGHT)
+        again = [(line, link) for line, link in asked if _unsure(said[link])]
         for _round in range(CALM_ROUNDS):
-            again = [(line, link) for line, link in asked if _unsure(said[link])]
             if not again:
                 break
             logger.info("приложение %s, карточка %s: %d строк без окончательного ответа спрашиваются снова", self.name,
                         self._card(card_url), len(again))
             said.update(await asyncio.gather(*(ask(line, link, calm, False) for line, link in again)))
+            still = [(line, link) for line, link in again if _unsure(said[link])]
+            if len(still) == len(again):
+                # A round that gave no row its answer is not repeated: what is left is not of the load of the read.
+                break
+            again = still
         labels = {link: line.label for line, link in asked}
         return {**kept, **{link: _frame_of(each, labels[link]) for link, each in said.items()}}
 

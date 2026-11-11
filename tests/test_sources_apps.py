@@ -26,7 +26,6 @@ from modules.sources.players.contract import Answer, Kind, Reading, StreamUnavai
 from modules.sources.players.registry import PlayerRegistry
 from modules.sources.sites import PHASE_PLAYERS, ReadContext
 from modules.sources.sites.apps import AppSite
-from modules.sources.sites.apps.site import CALM_ROUNDS
 from app99_model import HOST, UUID, App99Model, Card, Line, profile
 from schema_db import migrated
 
@@ -94,7 +93,8 @@ def world(model: App99Model, playlists: dict[str, str] | None = None) -> tuple[h
         if path.startswith("/once-525/") and failed.setdefault(url, 0) < 1:  # a host's passing error, once
             failed[url] += 1
             return httpx.Response(525, text="")
-        if path.startswith("/busy/") and failed.setdefault(url, 0) < 4:  # a host too busy while the whole card is asked
+        busy = 4 if path.startswith("/busy/") else 7 if path.startswith("/busier/") else 0
+        if failed.setdefault(url, 0) < busy:  # a host too busy while the whole card is asked, and one busier still
             failed[url] += 1
             return httpx.Response(429, headers={"Retry-After": "0"}, text="")
         if path.startswith("/flaky/") and failed.setdefault(url, 0) < 2:  # a host that makes the playlist anew and
@@ -162,12 +162,12 @@ async def test_a_card_is_a_table_of_its_admitted_lines_each_row_with_the_frame_o
         assert any("серий без видео — CO4K: 1 (2)" in record.getMessage() for record in caplog.records)
         assert draft.names == ["万界独尊", "Ten Thousand Worlds"] and draft.title == "半日 · 万界独尊 (2021)"
         # One ask for an episode that answered, its playlist asked of its host once; an episode that gave no stream is
-        # asked as many times as the policy of the players allows, in the read and in each calm round after it; the
-        # refused line is not asked.
+        # asked as many times as the policy of the players allows, in the read and in one calm round after it (a round
+        # that gave no row its answer is not repeated); the refused line is not asked.
         assert sorted(heads) == sorted(f"{CDN}{name}/seg0.ts" for name in "abcd")
         assert sorted(_asked) == sorted(f"{CDN}{name}" for name in ("a/index.m3u8", "b/index.m3u8", "c/pv.m3u8", "d/1.m3u8"))
         assert sorted(fields["url"] for path, fields in model.calls if path == "/app/vodParser") == \
-            ["CO4K_pv", "CO4K_tok1"] + ["CO4K_tok2"] * policy.DEFAULT.attempts * (1 + CALM_ROUNDS)
+            ["CO4K_pv", "CO4K_tok1"] + ["CO4K_tok2"] * policy.DEFAULT.attempts * 2
         assert [row.site_fields["stream"] for row in draft.rows] == ["playlist"] * 2 + ["parser"] * 3
         assert players.video_of("line:CO4K", draft.rows[2].link) == "CO4K_tok1"
         assert players.get("line:CO4K").apps["banri"] is player and "line:CO4K" in players and "other:CO4K" not in players
@@ -179,7 +179,7 @@ async def test_a_card_is_a_table_of_its_admitted_lines_each_row_with_the_frame_o
         assert [(row.state, row.heights) for row in again.rows] == [(row.state, row.heights) for row in draft.rows]
         assert len(heads) == 4
         assert [fields["url"] for path, fields in model.calls if path == "/app/vodParser"][parsed:] == \
-            ["CO4K_tok2"] * policy.DEFAULT.attempts * (1 + CALM_ROUNDS)
+            ["CO4K_tok2"] * policy.DEFAULT.attempts * 2
 
         # The stream of an episode of a line of playlists is its playlist, its frame not measured for the download.
         got = await player.stream(draft.rows[0].link, http, None, players.pacer)
@@ -253,14 +253,16 @@ async def test_an_answer_that_is_not_final_is_asked_again_and_a_row_ends_with_it
 
 async def test_a_row_the_way_to_which_failed_under_the_load_of_the_read_is_asked_again_when_the_rest_is_done(caplog):
     """A host too busy for every ask the policy allows while the whole card is being asked is not the answer about the
-    episode: its rows are asked again after the rest, a few at a time, and get the frames of their own episodes."""
+    episode: its rows are asked again after the rest, a few at a time, and get the frames of their own episodes. A round
+    is followed by another while it gives some row its answer."""
     model = card_world()
     model.parses[(9, "CO4K_tok1")] = f"{CDN}busy/1.m3u8"
-    playlists = {f"{CDN}{name}": PLAYLIST for name in ("a/index.m3u8", "b/index.m3u8", "busy/1.m3u8")}
+    model.parses[(9, "CO4K_pv")] = f"{CDN}busier/pv.m3u8"
+    playlists = {f"{CDN}{name}": PLAYLIST for name in ("a/index.m3u8", "b/index.m3u8", "busy/1.m3u8", "busier/pv.m3u8")}
     http, asked = world(model, playlists)
 
     async def measure(_http, head, _referer):
-        return {"a": 720, "b": 1080, "busy": 2160}[head.segment.removeprefix(CDN).split("/")[0]]
+        return {"a": 720, "b": 1080, "busy": 2160, "busier": 1440}[head.segment.removeprefix(CDN).split("/")[0]]
 
     progress: list[tuple] = []
     async with http:
@@ -268,8 +270,10 @@ async def test_a_row_the_way_to_which_failed_under_the_load_of_the_read_is_asked
         with caplog.at_level("INFO", logger="sources"):
             draft = await AppSite(player, AppLines([player])).read(
                 "app://banri/219017", ReadContext(http, lambda *step: progress.append(step)))
-    assert {row.key: row.heights for row in draft.rows}["banri:CO4K:1"] == [2160]
-    assert asked.count(f"{CDN}busy/1.m3u8") == 5
+    heights = {row.key: row.heights for row in draft.rows}
+    assert heights["banri:CO4K:1"] == [2160] and heights["banri:CO4K:3"] == [1440]
+    # Three asks of the read and two of the first round; three, three and two of the second round for the busier one.
+    assert asked.count(f"{CDN}busy/1.m3u8") == 5 and asked.count(f"{CDN}busier/pv.m3u8") == 8
     assert any("строк без окончательного ответа спрашиваются снова" in record.getMessage() for record in caplog.records)
     # The count of the rows of the read goes up to their number once, whatever is asked again.
     assert [step[1:] for step in progress if step[0] == PHASE_PLAYERS][-1] == (5, 5)
