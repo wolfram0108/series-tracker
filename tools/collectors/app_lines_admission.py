@@ -7,7 +7,11 @@ whole within `FILE_LIMIT_S`, is a file that did not come.
 One JSON line per episode, appended to `data/raw/app_lines_admission__<stamp>__<app>-<card>.jsonl` (out of git); the
 files are deleted once read. The registry of admitted lines is made of these records (tools/analyzers/app_lines_registry.py).
 
-    .venv/bin/python tools/collectors/app_lines_admission.py <app> <card> [line,line,...] [first,central,last]
+    systemd-run --scope -q -p MemoryMax=1800M -p MemorySwapMax=0 \
+        .venv/bin/python tools/collectors/app_lines_admission.py <app> <card> [line,line,...] [first,central,last]
+
+The run is on the machine of the service: under the limit of memory of its own scope, and marked for the kernel as the
+first to go when memory runs out (its downloads inherit the mark), so files of 2160p side by side never cost the service.
 
 The episodes can be admitted one at a time (the last argument): the registry takes the last record of each episode.
 """
@@ -147,7 +151,14 @@ async def main(app: str, card: str, only: list[str], which_only: list[str]) -> N
     print("raw:", raw_path)
 
 
+# The kernel takes this run and its downloads, not the service, when the machine runs out of memory (as the tests do,
+# tests/conftest.py).
+FIRST_TO_GO = 1000
+
+
 if __name__ == "__main__":
+    with open("/proc/self/oom_score_adj", "w", encoding="ascii") as score:
+        score.write(str(FIRST_TO_GO))
     asyncio.run(main(sys.argv[1], sys.argv[2], sys.argv[3].split(",") if len(sys.argv) > 3 else [],
                      sys.argv[4].split(",") if len(sys.argv) > 4 else []))
     print("ADMISSION_DONE")
