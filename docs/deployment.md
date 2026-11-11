@@ -187,6 +187,7 @@ sudo systemctl restart series-tracker
 ```bash
 .venv/bin/python tools/checks/live_api.py preview "<адрес страницы>" [--now]
 .venv/bin/python tools/checks/live_api.py sync <номер сериала>
+.venv/bin/python tools/checks/live_api.py source <номер сериала> "<адрес страницы>"
 ```
 
 | Шаг | Как |
@@ -195,6 +196,7 @@ sudo systemctl restart series-tracker
 | Сессия | Кука сессии помечена `Secure` (сервис работает за HTTPS), поэтому клиент на `http://127.0.0.1:5000` сам её не отправит. Кука из `Set-Cookie` передаётся заголовком `Cookie`. |
 | Неудачный вход | Сервис считает неудачи по адресу и на время блокирует его (429). Повторять вход нельзя: сначала разобраться в причине. |
 | Таблица страницы | `POST /api/sources/preview {url, refresh: true}` — как окно добавления: таблица в пределах срока актуальности опроса источников (раздел «Отладка», час по умолчанию) отдаётся готовой. `POST /api/sources/read {url}` — чтение сейчас, независимо от возраста таблицы. |
+| Источник сериала | `POST /api/series/<id>/sources {url, source_type}` после чтения таблицы адреса — как область источников сериала; `source_type` даёт `POST /api/sources/resolve`. |
 | Синхронизация | `POST /api/series/<id>/scan`, затем `GET /api/series/<id>/plan` — файлы плана и неудачи. |
 | Конец работы | По потоку событий `GET /api/stream?frames=batch`, без опроса: для чтения — `sources_table_ready` / `sources_table_failed` с каноническим адресом страницы; для синхронизации — `series_updated`, где у сериала появился и пропал статус `scanning`. |
 | Запросы к сайтам | Каждый исходящий запрос сервиса записан в `logs/info.log` (строки группы `httpx`); по ним считается, что сервис спрашивал у сайтов и плееров. |

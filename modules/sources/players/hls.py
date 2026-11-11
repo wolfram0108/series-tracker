@@ -20,10 +20,19 @@ from core.ffprobe import film_stream, streams_of
 from core.hls_playlist import without_insertions
 
 from .contract import Answer, Kind, Reading
-from .http import USER_AGENT, get_answer
-from .http import retry_after
+from .http import USER_AGENT, get_answer, retry_after
 
 REQUEST_TIMEOUT_S = 20.0
+# A host that takes no connection within this long takes none, however long the answer of one that did may be waited for:
+# a silent host costs a read this much an ask, not the whole wait for an answer.
+CONNECT_TIMEOUT_S = 8.0
+
+
+def waiting(seconds: float) -> httpx.Timeout:
+    """The wait for an answer of a host of a stream: `seconds` for what it sends, `CONNECT_TIMEOUT_S` for its connection."""
+    return httpx.Timeout(seconds, connect=CONNECT_TIMEOUT_S)
+
+
 # Enough of a segment to hold its first key frame with the parameters of the picture; the rest of it is not fetched.
 HEAD_BYTES = 256 * 1024
 MEASURE_TIMEOUT_S = 30.0
@@ -102,7 +111,7 @@ async def _served(http: httpx.AsyncClient, url: str, referer: str, limit: int | 
     """The body a host serves at an address (its head when `limit` is given) and the type it announces."""
     headers = _headers(referer, {"Range": f"bytes=0-{limit - 1}"} if limit else None)
     try:
-        response = await http.get(url, headers=headers, follow_redirects=True, timeout=REQUEST_TIMEOUT_S)
+        response = await http.get(url, headers=headers, follow_redirects=True, timeout=waiting(REQUEST_TIMEOUT_S))
     except httpx.HTTPError as exc:
         raise MeasureError(Answer(None, error=f"{type(exc).__name__}: {urlsplit(url).hostname}")) from exc
     if response.status_code not in (200, 206):
@@ -153,13 +162,13 @@ async def measured(http: httpx.AsyncClient, playlist: str, referer: str, measure
     answer that says it is not. The reading names the playlist as the one file of the stream. `fetched` is the playlist
     when the caller already has it: a host that makes the playlist anew at every request is asked for it once."""
     answer = fetched if fetched is not None else await get_answer(
-        http, playlist, referer, headers=_headers(referer, headers), timeout=REQUEST_TIMEOUT_S)
+        http, playlist, referer, headers=_headers(referer, headers), timeout=waiting(REQUEST_TIMEOUT_S))
     if answer.status != 200 or not is_playlist(answer.text):
         return answer
     media, base = answer.text, answer.final_url or playlist
     variant = best_variant(media, base)
     if variant is not None:
-        answer = await get_answer(http, variant, referer, headers=_headers(referer, headers), timeout=REQUEST_TIMEOUT_S)
+        answer = await get_answer(http, variant, referer, headers=_headers(referer, headers), timeout=waiting(REQUEST_TIMEOUT_S))
         if answer.status != 200 or not is_playlist(answer.text):
             return answer
         media, base = answer.text, answer.final_url or variant

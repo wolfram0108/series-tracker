@@ -36,7 +36,7 @@ from ..apps.lines import LineRegistry
 from ..policy import settle
 from ..term import Term
 from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
-from .hls import MEASURE_TIMEOUT_S, Measure, is_playlist, measure_head, measured
+from .hls import MEASURE_TIMEOUT_S, Measure, is_playlist, measure_head, measured, waiting
 from .http import USER_AGENT, retry_after
 from .vk_files import pick_file
 
@@ -82,7 +82,7 @@ async def served_as(http: httpx.AsyncClient, address: str, headers: dict[str, st
     try:
         asked = {"User-Agent": USER_AGENT, **headers, "Range": f"bytes=0-{PLAYLIST_BYTES - 1}"}
         async with http.stream("GET", address, headers=asked, follow_redirects=True,
-                               timeout=MEASURE_TIMEOUT_S) as response:
+                               timeout=waiting(MEASURE_TIMEOUT_S)) as response:
             if response.status_code not in (200, 206):
                 return Served("", Answer(response.status_code, "", retry_after(response), final_url=str(response.url)))
             kind, final = response.headers.get("content-type", ""), str(response.url)

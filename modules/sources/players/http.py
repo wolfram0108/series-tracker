@@ -22,7 +22,8 @@ def retry_after(response: httpx.Response) -> float | None:
 
 
 async def get_answer(http: httpx.AsyncClient, url: str, referer: str, agent: str = USER_AGENT, *,
-                     headers: dict | None = None, params: dict | None = None, timeout: float = REQUEST_TIMEOUT_S) -> Answer:
+                     headers: dict | None = None, params: dict | None = None,
+                     timeout: "float | httpx.Timeout" = REQUEST_TIMEOUT_S) -> Answer:
     """`headers` replace the default pair when a host wants its own (an Origin, a fixed agent)."""
     try:
         response = await http.get(url, headers=headers or {"Referer": referer, "User-Agent": agent}, params=params,

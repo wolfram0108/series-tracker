@@ -2,6 +2,7 @@
 
     .venv/bin/python tools/checks/live_api.py preview <address of a page> [--now]
     .venv/bin/python tools/checks/live_api.py sync <series id>
+    .venv/bin/python tools/checks/live_api.py source <series id> <address of a page>
 
 Signs in with ST_ADMIN_USER / ST_ADMIN_PASSWORD of .env (the values are never printed). Reads the table of the page as the
 window of a new series reads it (`POST /api/sources/preview`), or at once whatever its age (`--now`: `POST
@@ -10,7 +11,9 @@ and prints the table: its state, the names, the players and the first lines with
 made to the hosts of the files meanwhile are counted in its log (`logs/info.log`, lines of httpx): `ranges` is how many
 heads of segments it fetched, the cost of measuring frames. `sync` presses «Синхронизировать» of a series (`POST
 /api/series/<id>/scan`), waits for its end as the window does (the status «scanning» of the series comes and goes in
-`series_updated`) and prints the files of its plan and its failures. The last line is `LIVE_API_DONE`.
+`series_updated`) and prints the files of its plan and its failures. `source` adds a source to a series as the area of
+its sources does: the table of the address is read as the window reads it, then the address becomes a source of the
+series (`POST /api/series/<id>/sources`), and the sources of the series are printed. The last line is `LIVE_API_DONE`.
 """
 from __future__ import annotations
 
@@ -141,6 +144,18 @@ async def sync(series_id: int) -> None:
             print("  failure", json.dumps(failure, ensure_ascii=False)[:300])
 
 
+async def source(series_id: int, url: str) -> None:
+    await preview(url, False)
+    async with httpx.AsyncClient(base_url=BASE, timeout=30) as http:
+        await signed_in(http)
+        resolved = (await http.post("/api/sources/resolve", json={"url": url})).json()
+        added = await http.post(f"/api/series/{series_id}/sources",
+                                json={"url": resolved["canonical_url"], "source_type": resolved.get("source_type") or "web_video"})
+        print("added:", added.status_code, added.text[:200])
+        for each in (await http.get(f"/api/series/{series_id}/sources")).json():
+            print("  source", each.get("id"), each.get("position"), each.get("url"), "profile", each.get("parser_profile_id"))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -149,8 +164,12 @@ def main() -> None:
     shown.add_argument("--now", action="store_true", help="read it now, whatever the age of its table")
     synced = commands.add_parser("sync", help="a sync of a series to its end, and the files of its plan")
     synced.add_argument("series_id", type=int)
+    added = commands.add_parser("source", help="a source added to a series, as the area of its sources adds it")
+    added.add_argument("series_id", type=int)
+    added.add_argument("url")
     args = parser.parse_args()
-    asyncio.run(preview(args.url, args.now) if args.command == "preview" else sync(args.series_id))
+    asyncio.run(preview(args.url, args.now) if args.command == "preview"
+                else source(args.series_id, args.url) if args.command == "source" else sync(args.series_id))
     print("LIVE_API_DONE")
 
 
