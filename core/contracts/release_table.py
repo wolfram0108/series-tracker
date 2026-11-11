@@ -6,7 +6,7 @@ which is the only source of numbers. `line_of` is the one place that turns a row
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -205,6 +205,38 @@ class SiteResolveReply(BaseModel):
     canonical_url: str | None = None
     # What kind of source a page of this site makes (`vk_video` or `web_video`); the window does not guess it.
     source_type: str | None = None
+
+
+class PlayerPlace(BaseModel):
+    """A site or an application where a player is: `sources` is how many of the sources asked about are its pages with rows
+    of the player (0 for an application that admits the line while none of those sources is a card of it)."""
+
+    name: str
+    label: str
+    sources: int = 0
+
+
+class PlayerFacts(BaseModel):
+    """A player of the order of sources as the sources know it: a player of the pages of sites or a line of the
+    applications, the best height its rows of the sources asked about were measured at (None when none was), and where
+    it is, the place with the most sources first."""
+
+    name: str
+    label: str
+    kind: Literal["site", "line"]
+    height: int | None = None
+    places: list[PlayerPlace] = Field(default_factory=list)
+
+
+class PlayersListRequest(BaseModel):
+    """`sources.players.list`: the addresses of the sources whose tables say where each player is; none, no place but the
+    applications that admit a line."""
+
+    urls: list[str] = Field(default_factory=list)
+
+
+class PlayersListReply(BaseModel):
+    players: list[PlayerFacts] = Field(default_factory=list)
 
 
 class TableProgress(BaseModel):

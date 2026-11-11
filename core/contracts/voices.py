@@ -147,10 +147,14 @@ LANGUAGES = ("rus", "eng", "chi", "jpn", "kor")
 
 
 class VoiceSettingsDraft(BaseModel):
-    """What the settings screen of the voices sends: the order of the sources, the groups of voice-overs and the language
-    of each group. A group is a name with the list of names that put a voice-over into it; a save replaces every value."""
+    """What the settings screen of the voices sends: the order of the sources, the players of it switched off, the groups
+    of voice-overs and the language of each group. A group is a name with the list of names that put a voice-over into
+    it; a save replaces every value."""
 
     priority: list[str]
+    # The players of the order switched off for every source: their rows stay in the tables and go to no layout
+    # (Exclusion.SETTINGS); a player keeps its place in the order while it is off.
+    players_off: list[str] = Field(default_factory=list)
     voice_groups: dict[str, list[str]]
     # The language of the voice-over of each group (`LANGUAGES`); a group the user has not given one is absent.
     voice_languages: dict[str, str] = Field(default_factory=dict)

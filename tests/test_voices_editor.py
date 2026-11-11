@@ -75,12 +75,25 @@ def test_a_trigger_written_twice_in_one_group_is_kept_once():
     assert problems(form) == [] and editor.clean(form).voice_groups == {"AniLibria": ["aniliberty"]}
 
 
-def test_a_saved_form_is_stored_trimmed_without_blank_rows_and_only_these_three_values_are_written():
+def test_a_saved_form_is_stored_trimmed_without_blank_rows_and_only_these_four_values_are_written():
     clean = editor.clean(draft(priority=[" kodik ", "kodik", "cvh"], voice_groups={" AniLibria ": [" aniliberty ", ""], "": []},
-                               voice_languages={" AniLibria ": "rus", "Gone": "jpn"}))
+                               voice_languages={" AniLibria ": "rus", "Gone": "jpn"}, players_off=[" cvh ", "cvh", ""]))
     assert clean.priority == ["kodik", "cvh"] and clean.voice_groups == {"AniLibria": ["aniliberty"]}
-    assert editor.stored(clean) == {"voices.source_priority": '["kodik", "cvh"]', "voices.groups": '{"AniLibria": ["aniliberty"]}',
-                                    "voices.languages": '{"AniLibria": "rus"}'}
+    assert editor.stored(clean) == {"voices.source_priority": '["kodik", "cvh"]', "voices.players_off": '["cvh"]',
+                                    "voices.groups": '{"AniLibria": ["aniliberty"]}', "voices.languages": '{"AniLibria": "rus"}'}
+
+
+def test_a_player_is_switched_off_only_once_and_only_one_the_order_knows():
+    assert problems(draft(players_off=["kodik"])) == []
+    assert problems(draft(players_off=["kodik", "Kodik"])) == [("players_off", "priority_duplicate")]
+    assert problems(draft(players_off=["nobody"])) == [("players_off", "priority_unknown_player")]
+
+
+def test_the_players_switched_off_are_read_back_and_shown_and_a_wrong_stored_value_is_refused():
+    settings = parse(editor.stored(editor.clean(draft(players_off=["cvh"]))))
+    assert settings.players_off == ("cvh",) and editor.view(settings).players_off == ["cvh"]
+    broken = parse({"voices.players_off": '{"cvh": true}'})
+    assert broken.players_off == () and editor.view(broken).rejected == ["players_off"]
 
 
 def test_a_group_is_kept_without_a_language_until_it_is_given_one_and_only_a_known_one():

@@ -36,8 +36,12 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    The player that owns the link (a VK player link with its key, an AllVideo embed,
                                    a Vibix entry, an item of CDN VideoHub or of Kodik) resolves it; any other
                                    address is not handled
-  sources.players.list {} → {players: [{name, label}]}: every player a row of a table can be of, as the order of sources
-                                   names it: the players of the registry and the lines some application admits, one
+  sources.players.list PlayersListRequest {urls} → PlayersListReply {players: [PlayerFacts]}: every player a row of a
+                                   table can be of, as the order of sources names it, with where it is among the pages
+                                   of `urls` (their stored tables, no network): its kind (`site`, `line`), the best
+                                   height of its rows and its places — the sites whose pages hold its rows, or the
+                                   applications that admit the line, each with how many of the pages are its. The
+                                   players are those of the registry and the lines some application admits, one
                                    player a code whichever application lists it (`line:<code>`, named by the code;
                                    modules/sources/apps/lines.py)
   sources.apps.search {query, page?, app?} → AppSearchReply {apps: [AppResults]}: a page of the search of every video
@@ -89,7 +93,8 @@ import httpx
 
 from core import BaseModule, compute, ids
 from core import storage
-from core.contracts import (AppCard, AppResults, AppSearchReply, AppSearchRequest, ParsedDomains, SiteResolveRequest,
+from core.contracts import (AppCard, AppResults, AppSearchReply, AppSearchRequest, ParsedDomains, PlayerFacts, PlayerPlace,
+                            PlayersListReply, PlayersListRequest, SiteResolveRequest,
                             SourcesSettingsView, TableGetRequest, TrackerMirrors)
 from core.deadlines import TABLE_READ_S
 from core.db import Database
@@ -432,12 +437,31 @@ class SourcesModule(BaseModule):
         return self.tables.resolve(request.url).model_dump(mode="json")
 
     async def on_players_list(self, env: Envelope) -> dict:
-        """Every player a row of a table can be of, with the words a window names it by: the players of the registry, and
-        the admitted lines of the applications (`<application>:<code>`, named by their codes)."""
-        players = [{"name": each.name, "label": getattr(each, "label", "") or each.name}
+        """Every player a row of a table can be of, with the words a window names it by and where it is among the pages
+        asked about: the players of the registry, and the admitted lines of the applications (`line:<code>`, named by
+        their codes), each line in every application that admits it."""
+        request = PlayersListRequest.model_validate(env.payload or {})
+        urls = list(dict.fromkeys(self.tables.resolve(url).canonical_url or url for url in request.urls))
+        pages, heights = await self.repo.players_of_pages(urls)
+
+        def places(player: str, admitting: Iterable[AppPlayer] = ()) -> list[PlayerPlace]:
+            found = {app.name: PlayerPlace(name=app.name, label=app.label, sources=pages.get((player, app.name), 0))
+                     for app in admitting}
+            labels = {app.name: app.label for app in self.lines.apps.values()}
+            for (name, site), count in pages.items():
+                if name == player and site not in found:
+                    found[site] = PlayerPlace(name=site, label=labels.get(site, site), sources=count)
+            return sorted(found.values(), key=lambda place: (-place.sources, place.label))
+
+        players = [PlayerFacts(name=each.name, label=getattr(each, "label", "") or each.name, kind="site",
+                               height=heights.get(each.name), places=places(each.name))
                    for each in self.players if not getattr(each, "lines", False)]
-        players += [{"name": line_player_name(code), "label": code} for code in self.lines.codes()]
-        return {"players": players}
+        for code in self.lines.codes():
+            name = line_player_name(code)
+            admitting = [app for app in self.lines.apps.values() if code in app.registry.admitted]
+            players.append(PlayerFacts(name=name, label=code, kind="line", height=heights.get(name),
+                                       places=places(name, admitting)))
+        return PlayersListReply(players=players).model_dump(mode="json")
 
     async def on_apps_search(self, env: Envelope) -> dict:
         """payload: AppSearchRequest; reply: AppSearchReply — a page of the search of every application (or of the one

@@ -267,6 +267,27 @@ def test_every_row_of_the_table_is_in_the_layout_once_and_only_the_choice_of_the
     assert {r.row_key for r in out.rows if not r.excluded} == in_play
 
 
+@pytest.mark.parametrize("chosen", [None, 1, 3])
+@pytest.mark.parametrize("off", [(), ("kodik",), ("vibix",)])
+@pytest.mark.parametrize("everywhere", [(), ("kodik",), ("vibix",), ("vibix", "kodik")])
+def test_a_player_switched_off_in_the_settings_leaves_every_source_as_the_settings_choice(chosen, off, everywhere):
+    """Every row is in the layout once: a row of a player switched off in the settings is excluded as the settings'
+    choice whatever the source chose, a row the source's own choice leaves out as the source's, the others are in play
+    and they alone are asked of the constructor."""
+    src = source(vibix_season=chosen, players_off=list(off))
+    tbl = catalog_table()
+    answered = item(src, tbl, {key: {"episode": 1} for key in ("v11", "v12", "v21", "v22", "k1")})
+    out = project([SourceInput(answered.source, answered.table, answered.reply, players_off=frozenset(everywhere))], {}, {})
+    by_settings = {r.key for r in tbl.rows if r.player in everywhere}
+    by_source = {r.key for r in tbl.rows} - {r.key for r in selected_rows(src, tbl)} - by_settings
+    assert sorted(r.row_key for r in out.rows) == sorted(r.key for r in tbl.rows)
+    assert {r.row_key for r in out.rows if r.exclusion == Exclusion.SETTINGS} == by_settings
+    assert {r.row_key for r in out.rows if r.exclusion == Exclusion.SOURCE} == by_source
+    in_play = {r.key for r in tbl.rows} - by_settings - by_source
+    assert {r.row_key for r in out.rows if not r.excluded} == in_play
+    assert {line.key for line in lines_for(src, tbl, everywhere)} == in_play
+
+
 def test_a_source_without_a_profile_or_an_answer_still_has_no_rows():
     tbl = catalog_table()
     assert project([item(source(profile=None, players_off=["kodik"]), tbl, {})], {}, {}).rows == []

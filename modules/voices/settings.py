@@ -14,6 +14,8 @@ DEFAULT_PRIORITY = ("alloha", "vk", "cvh", "allvideo", "vibix", "kodik")
 PREFIX = "voices."
 PRIORITY_KEY = "voices.source_priority"
 VOICE_GROUPS_KEY = "voices.groups"
+# The players of the order switched off for every source: their rows stay in the tables and go to no layout.
+PLAYERS_OFF_KEY = "voices.players_off"
 PLAYER_GROUPS_KEY = "voices.player_groups"
 MAX_TEMP_KEY = "voices.max_temp_episodes"
 # Stage 12: the height the file of a compilation is downloaded at for its cuts (0 or unset: the best it has). A check of
@@ -37,6 +39,7 @@ class VoiceSettings:
     player_groups: Mapping[str, list[str]] = field(default_factory=dict)
     rejected: tuple[str, ...] = ()
     voice_languages: Mapping[str, str] = field(default_factory=dict)
+    players_off: tuple[str, ...] = ()
 
 
 def _json(raw: str | None, key: str, problems: list[str], rejected: list[str]) -> object:
@@ -108,9 +111,15 @@ def parse(values: Mapping[str, str | None]) -> VoiceSettings:
     voices = _groups(values.get(VOICE_GROUPS_KEY), VOICE_GROUPS_KEY, problems, rejected) or {}
     players = _groups(values.get(PLAYER_GROUPS_KEY), PLAYER_GROUPS_KEY, problems, rejected) or {}
     languages = _languages(values.get(LANGUAGES_KEY), LANGUAGES_KEY, problems, rejected)
+    off = _json(values.get(PLAYERS_OFF_KEY), PLAYERS_OFF_KEY, problems, rejected)
+    if off is not None and not (isinstance(off, list) and all(isinstance(item, str) for item in off)):
+        problems.append(f"{PLAYERS_OFF_KEY}: ожидается список строк, отключённых плееров нет")
+        rejected.append(PLAYERS_OFF_KEY)
+        off = None
     return VoiceSettings(
         priority=tuple(priority) if priority else tuple(DEFAULT_PRIORITY),
         voices=Groups.of(voices), players=Groups.of(players),
         max_temp_episodes=cap, cut_max_height=cut_height, problems=tuple(problems),
         voice_groups=voices, player_groups=players, rejected=tuple(rejected),
-        voice_languages={name: code for name, code in languages.items() if name in voices})
+        voice_languages={name: code for name, code in languages.items() if name in voices},
+        players_off=tuple(off or ()))

@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from core import BaseModule, Bus
+from core.contracts import ReleaseTable, RowState, TableRow
 from core.db import Database
+from app99_model import profile as app_profile
 from modules.sources.module import SourcesModule
 from modules.sources.players.vibix import link_of
 from modules.sources.sites import PHASES
@@ -72,6 +74,55 @@ async def test_the_settings_of_the_sources_are_the_mirrors_of_each_tracker_and_e
         (site.name, list(site.domains)) for site in sources.sites]
     assert ("maccms", ["jszyapi.com", "xinlangapi.com", "lziapi.com", "subocaiji.com"]) in [
         (each["name"], each["domains"]) for each in readers]
+
+
+# --- where each player of the order of sources is ----------------------------------------------------------------------------
+
+def page(url: str, site: str, *rows: tuple[str, str, list[int]]) -> ReleaseTable:
+    return ReleaseTable(url=url, site=site, names=["Название"], read_at="2026-11-12T10:00:00Z", complete=True,
+                        rows=[TableRow(key=key, player=player, text=key, heights=heights,
+                                       state=RowState.PLAYABLE if heights else RowState.ABSENT)
+                              for key, player, heights in rows])
+
+
+@pytest.fixture
+async def with_lines(tmp_path):
+    """A module with one application: its lines are those its registry admits (modules/sources/apps/admitted)."""
+    path = migrated(tmp_path / "sources.db")
+    bus = Bus()
+    app = app_profile(label="半日 (Banri)")
+    sources = SourcesModule(bus, Database(str(path)), torrent_cache_dir=str(tmp_path / "cache"), apps=[app])
+    probe = Probe(bus)
+    await sources.start()
+    await probe.start()
+    yield sources, probe
+    await probe.stop()
+    await sources.stop()
+
+
+async def test_every_player_says_where_it_is_among_the_pages_asked_about_and_the_best_height_of_its_rows(with_lines):
+    sources, probe = with_lines
+    ruchime = "https://ruchime.ru/watch/1"
+    await sources.repo.save_table(page(DOLLS, "dunhuatv", ("k1", "kodik", [480, 720]), ("c1", "cvh", [1080]),
+                                       ("c2", "cvh", [])))
+    await sources.repo.save_table(page(ruchime, "ruchime", ("k1", "kodik", [720])))
+    await sources.repo.save_table(page("app://banri/7", "banri", ("n1", "line:NBY", [1080]), ("n2", "line:NBY", [2160])))
+    await sources.repo.save_table(page("https://dunhuatv.ru/other.html", "dunhuatv", ("k1", "kodik", [2160])))
+
+    asked = await probe.request("sources.players.list", {"urls": [DOLLS, ruchime, "app://banri/7"]}, timeout=5)
+    facts = {each["name"]: each for each in asked["players"]}
+    # A page not asked about says nothing, whatever it holds.
+    assert facts["kodik"]["kind"] == "site" and facts["kodik"]["height"] == 720
+    assert [(each["label"], each["sources"]) for each in facts["kodik"]["places"]] == [("dunhuatv", 1), ("ruchime", 1)]
+    assert facts["cvh"]["height"] == 1080 and [each["name"] for each in facts["cvh"]["places"]] == ["dunhuatv"]
+    assert facts["alloha"]["places"] == [] and facts["alloha"]["height"] is None
+    # A line is in every application that admits it, with none of the pages when no page asked about is its.
+    assert facts["line:NBY"]["kind"] == "line" and facts["line:NBY"]["height"] == 2160
+    assert facts["line:NBY"]["places"] == [{"name": "banri", "label": "半日 (Banri)", "sources": 1}]
+    assert facts["line:CO4K"]["places"] == [{"name": "banri", "label": "半日 (Banri)", "sources": 0}]
+
+    bare = {each["name"]: each for each in (await probe.request("sources.players.list", {}, timeout=5))["players"]}
+    assert set(bare) == set(facts) and bare["kodik"]["places"] == [] and bare["line:NBY"]["places"][0]["sources"] == 0
 
 
 # --- the stream of a candidate ------------------------------------------------------------------------------------------------

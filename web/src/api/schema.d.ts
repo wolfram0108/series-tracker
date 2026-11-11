@@ -1461,6 +1461,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/voices/players": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Voices Players
+         * @description Every player of the order of sources with where it is among the sources of the series.
+         */
+        get: operations["voices_players_api_voices_players_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conform/settings": {
         parameters: {
             query?: never;
@@ -2539,11 +2559,12 @@ export interface components {
         };
         /**
          * Exclusion
-         * @description Why a row is out of the layout: the constructor excluded it, it gave the row no episode number, or the source's
-         *     own choice left it out (a switched-off player, another season of a catalog).
+         * @description Why a row is out of the layout: the constructor excluded it, it gave the row no episode number, the source's own
+         *     choice left it out (a player switched off for the source, another season of a catalog), or its player is switched
+         *     off in the settings for every source.
          * @enum {string}
          */
-        Exclusion: "rule" | "no_number" | "source";
+        Exclusion: "rule" | "no_number" | "source" | "settings";
         /**
          * FailuresReset
          * @description Неудачные попытки сериала сброшены: сколько озвучек начато сначала (работа — со следующей синхронизацией).
@@ -3237,6 +3258,43 @@ export interface components {
             commands?: components["schemas"]["PlanCommand"][];
         };
         /**
+         * PlayerFacts
+         * @description A player of the order of sources as the sources know it: a player of the pages of sites or a line of the
+         *     applications, the best height its rows of the sources asked about were measured at (None when none was), and where
+         *     it is, the place with the most sources first.
+         */
+        PlayerFacts: {
+            /** Name */
+            name: string;
+            /** Label */
+            label: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "site" | "line";
+            /** Height */
+            height?: number | null;
+            /** Places */
+            places?: components["schemas"]["PlayerPlace"][];
+        };
+        /**
+         * PlayerPlace
+         * @description A site or an application where a player is: `sources` is how many of the sources asked about are its pages with rows
+         *     of the player (0 for an application that admits the line while none of those sources is a card of it).
+         */
+        PlayerPlace: {
+            /** Name */
+            name: string;
+            /** Label */
+            label: string;
+            /**
+             * Sources
+             * @default 0
+             */
+            sources: number;
+        };
+        /**
          * PlayerSummary
          * @description What a window may show of a player before any rule has read its rows: how many rows it has and how a catalog
          *     splits them. Episodes, voice-overs and resolutions of a player are the constructor's answer: the rows of the layout.
@@ -3261,6 +3319,11 @@ export interface components {
             groups: number;
             /** Group Names */
             group_names?: string[];
+        };
+        /** PlayersListReply */
+        PlayersListReply: {
+            /** Players */
+            players?: components["schemas"]["PlayerFacts"][];
         };
         /**
          * PreviewLine
@@ -3923,12 +3986,15 @@ export interface components {
         };
         /**
          * VoiceSettingsDraft
-         * @description What the settings screen of the voices sends: the order of the sources, the groups of voice-overs and the language
-         *     of each group. A group is a name with the list of names that put a voice-over into it; a save replaces every value.
+         * @description What the settings screen of the voices sends: the order of the sources, the players of it switched off, the groups
+         *     of voice-overs and the language of each group. A group is a name with the list of names that put a voice-over into
+         *     it; a save replaces every value.
          */
         VoiceSettingsDraft: {
             /** Priority */
             priority: string[];
+            /** Players Off */
+            players_off?: string[];
             /** Voice Groups */
             voice_groups: {
                 [key: string]: string[];
@@ -3957,6 +4023,8 @@ export interface components {
         VoiceSettingsView: {
             /** Priority */
             priority: string[];
+            /** Players Off */
+            players_off?: string[];
             /** Voice Groups */
             voice_groups: {
                 [key: string]: string[];
@@ -8144,6 +8212,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    voices_players_api_voices_players_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayersListReply"];
                 };
             };
         };

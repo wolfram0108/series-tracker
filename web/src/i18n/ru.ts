@@ -836,6 +836,20 @@ export const ru = {
   "voices.settings.priority.hint": "Выше в списке значит предпочтительнее: при равном разрешении референсом становится верхний плеер, он же первым пробуется при скачивании озвучки.",
   "voices.settings.priority.drag": "Перетащить",
   "voices.settings.priority.reset": "Порядок по умолчанию",
+  "voices.settings.priority.col.place": "№",
+  "voices.settings.priority.col.name": "Плеер или линия",
+  "voices.settings.priority.col.kind": "Вид",
+  "voices.settings.priority.col.height": "До",
+  "voices.settings.priority.col.where": "Где есть · источников",
+  "voices.settings.priority.col.on": "Вкл.",
+  "voices.settings.priority.kind.site": "Плеер сайта",
+  "voices.settings.priority.kind.line": "Линия приложения",
+  "voices.settings.priority.height": "{height}p",
+  "voices.settings.priority.upTo": "до {height}p",
+  "voices.settings.priority.noSources": "нет источников",
+  "voices.settings.priority.on": "{player}: включён",
+  "voices.settings.priority.off": "{player}: отключён",
+  "voices.settings.priority.playersFailed": "Не удалось узнать, где есть плееры",
 } as const
 
 export type MessageKey = keyof typeof ru

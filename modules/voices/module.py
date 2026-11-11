@@ -4,7 +4,8 @@ The work with the voice-overs of a series — their downloads, their alignment, 
 the series (modules/planner, stage 12). What is left here is what the user sets once for every series: the groups of the
 names of voice-overs, the order of the players, the groups of players.
 
-Settings: voices.source_priority (JSON list of player kinds), voices.groups and voices.player_groups (JSON objects
+Settings: voices.source_priority (JSON list of player kinds), voices.players_off (JSON list of the players of the order
+switched off for every source), voices.groups and voices.player_groups (JSON objects
 {group: [names]}: a voice-over, or a player, called by one of the names belongs to the group). They are read together
 (settings.py): a wrong value is logged once and its default is used.
 
@@ -17,6 +18,9 @@ Queries:
       order to return to and the fields whose stored value was refused; with `values` (RunSnapshot.voices), what applied
       when a run took them.
   voices.settings.export {} -> {values}: the stored settings as they are, for the snapshot of a run.
+  voices.players.get {} -> PlayersListReply: every player of the order with where it is among the sources of the series
+      (the sources of every series of `catalog.series.list` but torrents, asked of `sources.players.list`); for the screen
+      of the order, not for a count.
 Command:
   voices.settings.set VoiceSettingsDraft -> VoiceSettingsSaved: groups, their languages and order are checked
       (editor.check: a known language or none) and written in one step through settings.values.set_many, or
@@ -28,7 +32,8 @@ Events out:
 from __future__ import annotations
 
 from core import BaseModule
-from core.contracts import GroupsResolveReply, GroupsResolveRequest, VoiceSettingsDraft, VoiceSettingsSaved
+from core.contracts import (GroupsResolveReply, GroupsResolveRequest, PlayersListReply, PlayersListRequest, SourceType,
+                            VoiceSettingsDraft, VoiceSettingsSaved)
 from core.envelope import Envelope
 
 from . import editor
@@ -46,6 +51,7 @@ class VoicesModule(BaseModule):
         self.handle("voices.groups.resolve", self.on_groups_resolve)
         self.handle("voices.settings.get", self.on_settings_get)
         self.handle("voices.settings.export", self.on_settings_export)
+        self.handle("voices.players.get", self.on_players_get)
         self.handle("voices.settings.set", self.on_settings_set)
 
     async def _settings(self, values: dict | None = None) -> VoiceSettings:
@@ -76,6 +82,13 @@ class VoicesModule(BaseModule):
     async def on_settings_get(self, env: Envelope) -> dict:
         settings = await self._settings((env.payload or {}).get("values"))
         return editor.view(settings, await self._players()).model_dump(mode="json")
+
+    async def on_players_get(self, env: Envelope) -> dict:
+        series = await self.request("catalog.series.list", {})
+        urls = [source["url"] for each in series for source in each.get("sources") or []
+                if source.get("source_type") != SourceType.TORRENT and source.get("url")]
+        reply = await self.request("sources.players.list", PlayersListRequest(urls=urls).model_dump(mode="json"))
+        return PlayersListReply.model_validate(reply).model_dump(mode="json")
 
     async def on_settings_export(self, env: Envelope) -> dict:
         reply = await self.request("settings.values.by_prefix", {"prefix": PREFIX})

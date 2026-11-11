@@ -141,6 +141,24 @@ class SourcesRepository:
             (url, site, reason))
 
 
+    async def players_of_pages(self, urls: list[str]) -> tuple[dict[tuple[str, str], int], dict[str, int]]:
+        """Of the stored tables of these pages: how many pages of each site hold rows of each player ({(player, site):
+        pages}), and the best height each player's rows were measured at ({player: height})."""
+        if not urls:
+            return {}, {}
+        marks = ", ".join("?" for _ in urls)
+
+        def read(conn) -> tuple[dict[tuple[str, str], int], dict[str, int]]:
+            pages = {(player, site): count for player, site, count in conn.execute(
+                f"SELECT r.player, t.site, COUNT(DISTINCT t.url) FROM release_rows r JOIN release_tables t ON t.url = r.url"
+                f" WHERE t.url IN ({marks}) GROUP BY r.player, t.site", urls)}
+            heights = {player: height for player, height in conn.execute(
+                f"SELECT r.player, MAX(CAST(j.value AS INTEGER)) FROM release_rows r, json_each(r.heights) j"
+                f" WHERE r.url IN ({marks}) GROUP BY r.player", urls) if height}
+            return pages, heights
+
+        return await self._db.transaction(read)
+
     async def pages_being_read(self) -> list[dict]:
         """Pages whose read was recorded as begun and never concluded: a stop interrupted it."""
         return await self._db.fetch_all(

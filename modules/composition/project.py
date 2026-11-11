@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, Iterator, Mapping, Sequence
 
+from core.contracts.composition import LEFT_BEFORE_RULES
 from core.contracts import (CompositionRow, Exclusion, PlayerSummary, SeasonVoiceOrder, VoiceSpan, ReleaseTable, RowState, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, line_of, place_of)
 from core.voice_names import fold_name
@@ -34,6 +35,8 @@ class SourceInput:
     failure: str | None = None
     # The canonical address of the page as `sources` gave it, known before the first table arrives.
     table_url: str | None = None
+    # The players switched off in the settings for every source (`voices.players_off`).
+    players_off: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -45,28 +48,34 @@ class Projection:
     unknown_voices: dict[str, int]
 
 
-def selected_rows(source: SeriesSource, table: ReleaseTable) -> list[TableRow]:
-    """The rows the source's own choice leaves in play; the single place that applies that choice.
-
-    A switched-off player drops out; of a catalog player only the season at the chosen 1-based position stays."""
-    off = set(source.players_off)
+def left_out(source: SeriesSource, table: ReleaseTable, everywhere: Iterable[str] = ()) -> dict[str, Exclusion]:
+    """The rows the choices of the user leave out of play, by key, with whose choice it is; the single place that applies
+    them. A player switched off in the settings drops out of every source (SETTINGS); a player switched off for the
+    source drops out of it, and of a catalog player only the season at the chosen 1-based position stays (SOURCE)."""
+    settings, off = set(everywhere), set(source.players_off)
     groups = list(dict.fromkeys(row.group for row in table.rows if row.player == CATALOG_PLAYER))
     position = source.vibix_season - 1 if source.vibix_season and source.vibix_season > 0 else None
     chosen = groups[position] if position is not None and 0 <= position < len(groups) else None
-    kept = []
+    out = {}
     for row in table.rows:
-        if row.player in off:
-            continue
-        if row.player == CATALOG_PLAYER and position is not None and (chosen is None or row.group != chosen):
-            continue
-        kept.append(row)
-    return kept
+        if row.player in settings:
+            out[row.key] = Exclusion.SETTINGS
+        elif row.player in off or (row.player == CATALOG_PLAYER and position is not None
+                                   and (chosen is None or row.group != chosen)):
+            out[row.key] = Exclusion.SOURCE
+    return out
 
 
-def lines_for(source: SeriesSource, table: ReleaseTable) -> list[RuleLine]:
+def selected_rows(source: SeriesSource, table: ReleaseTable, everywhere: Iterable[str] = ()) -> list[TableRow]:
+    """The rows the choices leave in play (`left_out`)."""
+    out = left_out(source, table, everywhere)
+    return [row for row in table.rows if row.key not in out]
+
+
+def lines_for(source: SeriesSource, table: ReleaseTable, everywhere: Iterable[str] = ()) -> list[RuleLine]:
     """What the constructor is asked about the source: one line with its key for every row in play."""
     return [RuleLine(key=row.key, text=line_of(table, row), player=row.player,
-                     voice=row.voice.name) for row in selected_rows(source, table)]
+                     voice=row.voice.name) for row in selected_rows(source, table, everywhere)]
 
 
 def voice_name_of(row: TableRow, result: RuleResult | None) -> str:
@@ -112,8 +121,8 @@ def group_renames(before: Sequence[CompositionRow], after: Sequence[CompositionR
     became: dict[str, set[str]] = {}
     for row in after:
         old = was.get((row.source_id, row.row_key))
-        if row.exclusion == Exclusion.SOURCE or old is None or old.exclusion == Exclusion.SOURCE:
-            continue  # a row the source leaves out names no group: a player switched off renames nothing
+        if row.exclusion in LEFT_BEFORE_RULES or old is None or old.exclusion in LEFT_BEFORE_RULES:
+            continue  # a row left out before the constructor names no group: a player switched off renames nothing
         if old.voice_label == row.voice_label or old.voice_name != row.voice_name:
             continue
         became.setdefault(old.voice_label, set()).add(row.voice_label)
@@ -161,7 +170,7 @@ def _answered_rows(item: SourceInput) -> Iterator[tuple[TableRow, RuleResult]]:
     """The rows of a source with a table and a profile; a row the constructor gave no answer for has no numbers."""
     if item.table is None or item.reply is None or item.source.parser_profile_id is None:
         return
-    for row in selected_rows(item.source, item.table):
+    for row in selected_rows(item.source, item.table, item.players_off):
         result = item.reply.results.get(row.key)
         yield row, result if result is not None else RuleResult()
 
@@ -174,17 +183,17 @@ def _given_now(item: SourceInput):
 
 
 def _left_by_source(item: SourceInput) -> Iterator[tuple[CompositionRow, TableRow]]:
-    """The rows the source's own choice leaves out, as excluded rows (with the row of the table each is): the layout says
-    the video is there and is not wanted, which a row a read did not bring cannot say. They are asked nothing and name no
-    voice-over group."""
+    """The rows the choices of the user leave out (`left_out`), as excluded rows (with the row of the table each is): the
+    layout says the video is there and is not wanted, which a row a read did not bring cannot say. They are asked nothing
+    and name no voice-over group."""
     if item.table is None or item.reply is None or item.source.parser_profile_id is None:
         return
-    kept = {row.key for row in selected_rows(item.source, item.table)}
+    out = left_out(item.source, item.table, item.players_off)
     for row in item.table.rows:
-        if row.key not in kept:
+        if row.key in out:
             yield CompositionRow(
                 series_id=item.source.series_id, source_id=item.source.id, row_key=row.key, excluded=True,
-                exclusion=Exclusion.SOURCE, player=row.player, player_label=row.player_label,
+                exclusion=out[row.key], player=row.player, player_label=row.player_label,
                 group=row.group, text=row.text, heights=list(row.heights), state=row.state, published=row.published,
                 link=row.link, video=row.video), row
 

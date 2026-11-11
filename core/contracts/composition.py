@@ -12,17 +12,21 @@ from .rules import RuleResult
 
 
 class Exclusion(StrEnum):
-    """Why a row is out of the layout: the constructor excluded it, it gave the row no episode number, or the source's
-    own choice left it out (a switched-off player, another season of a catalog)."""
+    """Why a row is out of the layout: the constructor excluded it, it gave the row no episode number, the source's own
+    choice left it out (a player switched off for the source, another season of a catalog), or its player is switched
+    off in the settings for every source."""
 
     RULE = "rule"
     NO_NUMBER = "no_number"
     SOURCE = "source"
+    SETTINGS = "settings"
 
 
 # The exclusions that are a choice of the user: the video is taken out on purpose. A row with no number is not one: a
 # site that changed its wording is no choice, and like a row a read did not bring it proves nothing.
-CHOSEN_EXCLUSIONS = frozenset({Exclusion.RULE, Exclusion.SOURCE})
+CHOSEN_EXCLUSIONS = frozenset({Exclusion.RULE, Exclusion.SOURCE, Exclusion.SETTINGS})
+# The exclusions made before the constructor: the row is asked nothing and names no voice-over group.
+LEFT_BEFORE_RULES = frozenset({Exclusion.SOURCE, Exclusion.SETTINGS})
 
 
 class CompositionRow(BaseModel):

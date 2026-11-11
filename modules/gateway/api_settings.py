@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from core import BusRequestError
 from core import logging as core_logging
 from core.contracts import (LINE_FIELDS, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView,
-                            VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
+                            PlayersListReply, VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
 from core.reasons import reason
 
 from .routing import refusal, route_per_method
@@ -206,6 +206,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def voices_settings():
         """What applies now; the screen shows exactly this."""
         return await gw.request("voices.settings.get", {})
+
+    @r.get("/api/voices/players", response_model=PlayersListReply)
+    async def voices_players():
+        """Every player of the order of sources with where it is among the sources of the series."""
+        return await gw.request("voices.players.get", {})
 
     @r.put("/api/voices/settings", response_model=VoiceSettingsSaved)
     async def save_voices_settings(draft: VoiceSettingsDraft):

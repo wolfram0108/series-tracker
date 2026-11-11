@@ -14,8 +14,9 @@ compilation that covers it, is switched on (`compilation.take`) and is higher th
 
 Queries:
   composition.get {series_id, include_excluded?} → CompositionReply: the rows of the layout in the order of the sources
-      (rows the constructor excluded, gave no episode number, or the source's own choice left out — a switched-off
-      player, another season of a catalog, `exclusion='source'` — only with include_excluded), the summary of every
+      (rows the constructor excluded, gave no episode number, the source's own choice left out — a player switched off
+      for it, another season of a catalog, `exclusion='source'` —, or whose player is switched off in the settings for
+      every source, `exclusion='settings'`; only with include_excluded), the summary of every
       source (status waiting / no_profile / ready / failed, players with rows, seasons, resolutions and voice-overs
       with their groups, `place`: the site and the channel its rows come from, as the line of the constructor names them), the levers of the series and of each season of the layout as the headers of those levels
       show them (`levels`, the series first), and the levers of every episode of the layout with the level each comes
@@ -72,7 +73,8 @@ Events (incoming) — every one of them only asks for a recount of the series it
       found by the canonical address `sources.table.get` returned for them. How a page stands, a failed read
       included, is what `sources.table.get` says of it at the recount; nothing of it is kept here
   rules.profile.changed {profile_id} — the series whose sources are read by that profile
-  voices.settings.changed — the groups of voice-overs may have changed: every series is counted again
+  voices.settings.changed — the groups of voice-overs or the players switched off in the settings may have changed:
+      every series is counted again
   series.updated {series_id, season?} — the season of the card is the constructor's fallback season
   series.added {id} — a series came; series.deleted {series_id} — everything of the series goes, then series.purged
   Whatever the cause, a recount is the same one function over the whole series, and recounting twice with the same
@@ -81,7 +83,7 @@ Events (incoming) — every one of them only asks for a recount of the series it
 
 Neighbours (all over the bus): catalog.series.get / .list, catalog.sources.by_profile, sources.table.get,
 rules.apply (one request per source with a profile, all lines of its table at once), voices.settings.get (the order of
-players, for the queues), voices.groups.resolve (all
+players, for the queues, and the players switched off for every source, at each count), voices.groups.resolve (all
 names in one request). A source without a table or without a profile does not stop the others. Start this module
 after the modules it asks; a request that gets no answer fails the recount, not the start.
 
@@ -321,10 +323,11 @@ class CompositionModule(BaseModule):
                                       parser_profile_id=request.profile_id,
                                       players_off=request.players_off, vibix_season=request.vibix_season)
                 answer = None
+                off = await self._players_off()
                 if request.profile_id is not None:
-                    answer = await self._answer(source, table, request.series_season)
+                    answer = await self._answer(source, table, request.series_season, everywhere=off)
                 item = SourceInput(source, table, answer, got.reason if got.state == TableState.FAILED else None,
-                                   got.url)
+                                   got.url, players_off=off)
                 names = await compute.run(project.voice_names, [item])
                 groups = await self._groups(names) if names else {}
                 # The page is thousands of rows: its projection and the reply are made off the loop.
@@ -609,13 +612,14 @@ class CompositionModule(BaseModule):
         sources = [SeriesSource.model_validate(each) for each in card.get("sources", [])
                    if each.get("source_type") != SourceType.TORRENT]
         snapshot = self._snapshots.get(series_id)
+        off = await self._players_off(snapshot)
         inputs = []
         for source in sources:
             table, failure, url = await self._table(series_id, flight, source, source.id in refresh)
             answer = None
             if table is not None and source.parser_profile_id is not None:
-                answer = await self._answer(source, table, card.get("season"), snapshot)
-            inputs.append(SourceInput(source, table, answer, failure, url))
+                answer = await self._answer(source, table, card.get("season"), snapshot, off)
+            inputs.append(SourceInput(source, table, answer, failure, url, players_off=off))
         names = project.voice_names(inputs)
         return inputs, await self._groups(names, snapshot) if names else {}
 
@@ -639,10 +643,16 @@ class CompositionModule(BaseModule):
         request = TableGetRequest(url=source.url, refresh=begin)
         return await self._ask("sources.table.get", request.model_dump(mode="json"), model=TableGetReply)
 
+    async def _players_off(self, snapshot: RunSnapshot | None = None) -> frozenset[str]:
+        """The players switched off in the settings for every source, as they are now or as the run took them."""
+        values = snapshot.voices if snapshot is not None else None
+        view = await self._ask("voices.settings.get", {"values": values}, model=VoiceSettingsView)
+        return frozenset(view.players_off)
+
     async def _answer(self, source: SeriesSource, table: ReleaseTable, season,
-                      snapshot: RunSnapshot | None = None) -> RulesApplyReply:
+                      snapshot: RunSnapshot | None = None, everywhere: frozenset[str] = frozenset()) -> RulesApplyReply:
         rules = snapshot.profiles.get(source.parser_profile_id) if snapshot is not None else None
-        payload = await compute.run(_rules_request, source, table, season, rules)
+        payload = await compute.run(_rules_request, source, table, season, rules, everywhere)
         if payload is None:
             return RulesApplyReply(results={})
         return await self._ask("rules.apply", payload, model=RulesApplyReply)
@@ -756,9 +766,10 @@ def _layout_reply(request: CompositionGetRequest, stored) -> dict:
     return reply.model_dump(mode="json")
 
 
-def _rules_request(source: SeriesSource, table: ReleaseTable, season, rules) -> dict | None:
+def _rules_request(source: SeriesSource, table: ReleaseTable, season, rules,
+                   everywhere: frozenset[str] = frozenset()) -> dict | None:
     """The request of the rules for the lines of a table; None when the table has none for the source."""
-    lines = project.lines_for(source, table)
+    lines = project.lines_for(source, table, everywhere)
     if not lines:
         return None
     return RulesApplyRequest(profile_id=source.parser_profile_id, lines=lines, series_season=season,
@@ -773,7 +784,7 @@ def _page_preview(got: TableGetReply, table: ReleaseTable, source: SeriesSource,
     results = answer.results if answer is not None else {}
     heights = {row.key: list(row.heights) for row in table.rows if row.state == RowState.PLAYABLE}
     lines = [PreviewLine(key=line.key, line=line.text, result=results.get(line.key), heights=heights.get(line.key, []))
-             for line in project.lines_for(source, table)]
+             for line in project.lines_for(source, table, item.players_off)]
     return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason, names=list(table.names),
                                    summary=projection.sources[0], lines=lines,
                                    rows=[row for row in projection.rows if not row.excluded]).model_dump(mode="json")
