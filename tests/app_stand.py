@@ -34,6 +34,8 @@ from core import Bus, Envelope, Runner
 from core import container as mkv
 from core.db import Database
 from app99_model import HOST as APP_HOST, App99Model, Card, Line, profile as app_profile
+from app_protocol_models import AppGetModel, AppMnModel, GuluModel, YunDuoModel
+from appdrama_model import DramaModel, Video as DramaVideo
 from plan_disk import Codec, Daemon, Host, _run
 from plan_world import truth_of
 from schema_db import migrated
@@ -169,6 +171,12 @@ class Title:
 HLS_KEY = bytes(range(16))
 
 
+# The application of each protocol on the stand, and the code of its one admitted line: a line is one player whichever
+# application lists it, so each has a code of its own here.
+APP_OF = {"appdrama": "huayi", "appget": "moli", "gulu": "gulu", "yunduo": "yunduo", "appmn": "appmn"}
+LINE_OF = {"huayi": "DRAMA", "moli": "MOLI", "gulu": "GULU", "yunduo": "YUNDUO", "appmn": "MINUO"}
+
+
 class Site:
     """The site and the player as the real parser and the real player read them; the files on the host."""
 
@@ -188,6 +196,33 @@ class Site:
         os.makedirs(self.app_lines, exist_ok=True)
         with open(os.path.join(self.app_lines, "banri.json"), "w", encoding="utf-8") as registry:
             json.dump({"app": "banri", "admitted": {"BLU": {}}, "refused": {}}, registry)
+        # The applications of every other protocol the service reads, each with one admitted line of its own code.
+        self.drama = DramaModel()
+        self.others = {"appget": AppGetModel(), "gulu": GuluModel(), "yunduo": YunDuoModel(), "appmn": AppMnModel()}
+        for name in ("huayi", "moli", "gulu", "yunduo", "appmn"):
+            with open(os.path.join(self.app_lines, f"{name}.json"), "w", encoding="utf-8") as registry:
+                json.dump({"app": name, "admitted": {LINE_OF[name]: {}}, "refused": {}}, registry)
+
+    def profiles(self) -> list:
+        """The profiles of every application the stand models."""
+        return [app_profile(), self.drama.profile(), *(model.profile() for model in self.others.values())]
+
+    def protocol_card(self, protocol: str, number: int, name: str, episodes: dict[int, int]) -> str:
+        """A card of an application of this protocol with its one admitted line: an episode (number → height) is a playlist
+        on the host its stream names. The address of the card as its source is added."""
+        app = APP_OF[protocol]
+        made = []
+        for episode, height in sorted(episodes.items()):
+            folder, token = f"{app}-{number}-ep{episode}", f"{app}-tok-{number}-{episode}"
+            self._hls(folder, truth_of(1, episode), height)
+            made.append((f"第{episode}集", token, self.host.url(folder + "/index.m3u8")))
+        if protocol == "appdrama":
+            self.drama.cards[number] = (name, 2021, [DramaVideo(LINE_OF[app], LINE_OF[app], label, token)
+                                                     for label, token, _ in made])
+            self.drama.plays.update({(LINE_OF[app], token): (address, {}) for _label, token, address in made})
+        else:
+            self.others[protocol].card(number, name, LINE_OF[app], made)
+        return f"app://{app}/{number}"
 
     def title(self, number: int) -> Title:
         return self.titles.setdefault(number, Title(number))
@@ -369,6 +404,11 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
             path = request.url.path.strip("/")
             if str(request.url).startswith(APP_HOST):
                 return self.app.handle(request)
+            if request.url.host in ("navigator.model", "drama.model"):
+                return self.drama.handle(request)
+            model = next((each for each in self.others.values() if each.owns(str(request.url))), None)
+            if model is not None:
+                return model.handle(request)
             if request.url.host == "127.0.0.1":
                 return self._host_file(request)
             if request.url.host == "jszyapi.com" and path == "api.php/provide/vod":
@@ -415,7 +455,7 @@ class AppStand:
         self.db = Database(self.db_path)
         self.gateway, self.modules = assemble(self.bus, self.db, Options(
             db_path=self.db_path, auth_required=False, cookie_secure=False,
-            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now, apps=[app_profile()],
+            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now, apps=self.site.profiles(),
             app_lines_dir=self.site.app_lines))
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()
