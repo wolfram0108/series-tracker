@@ -1,0 +1,49 @@
+{
+ "app": "yunduo",
+ "admitted": {
+  "zijianm3u8": {
+   "card": "209",
+   "at": "2026-11-11T16:35:20.920063+00:00",
+   "episodes": [
+    {
+     "which": "first",
+     "label": "第1集",
+     "width": 3840,
+     "height": 2160,
+     "audio": 1,
+     "duration": "580.128000",
+     "size": 253661821,
+     "mbit_s": 69.5
+    },
+    {
+     "which": "central",
+     "label": "第250集",
+     "width": 3840,
+     "height": 2160,
+     "audio": 1,
+     "duration": "589.792000",
+     "size": 394936625,
+     "mbit_s": 37.6
+    },
+    {
+     "which": "last",
+     "label": "第101集 K4",
+     "width": 3840,
+     "height": 2160,
+     "audio": 1,
+     "duration": "585.450667",
+     "size": 302518526,
+     "mbit_s": 53.2
+    }
+   ]
+  }
+ },
+ "refused": {
+  "CO4K": {
+   "card": "209",
+   "episode": "1",
+   "step": "stream",
+   "reason": "{\"code\":\"player_failed\",\"player\":\"布布\",\"cause\":\"{\\\"code\\\":\\\"app_no_stream\\\",\\\"app\\\":\\\"布布\\\",\\\"parser\\\":\\\"CO4K\\\",\\\"message\\\":\\\"PLATFORM_NOT_ALLOWED\\\"}\"}"
+  }
+ }
+}

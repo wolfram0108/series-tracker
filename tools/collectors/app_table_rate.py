@@ -80,9 +80,9 @@ async def main(app: str, card: str, recent: int | None, after: bool, lines: list
             return measure
 
         def timed_head(inner):
-            async def measure(http_, head, referer):
+            async def measure(http_, head, referer, headers=None):
                 began = time.monotonic()
-                height = await inner(http_, head, referer)
+                height = await inner(http_, head, referer, headers)
                 measures.append({"kind": "playlist", "host": urlsplit(head.segment).hostname,
                                  "seconds": round(time.monotonic() - began, 2), "heights": [height] if height else [],
                                  "said": "" if height else "the head of the first segment gave no frame"})
