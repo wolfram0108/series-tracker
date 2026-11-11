@@ -456,24 +456,29 @@ async def test_how_many_go_at_once_is_by_the_way_the_file_comes(system, tmp_path
 
 
 @pytest.mark.asyncio
-async def test_a_fetch_is_announced_when_it_leaves_the_queue_and_starts(system, tmp_path):
+async def test_a_fetch_is_announced_when_it_leaves_the_queue_and_transfers_in_its_turn(system, tmp_path):
+    """A fetch is announced when it leaves the queue; with one place of its way, the second transfers only once the first
+    has, in the order they were asked."""
     bus, fake, dl, probe = system
     fake.stream_replies["https://site/#cvh=1"] = {"handled": True, "stream_url": "https://cdn/1.mp4", "headers": {}}
     fake.stream_replies["https://site/#cvh=2"] = {"handled": True, "stream_url": "https://cdn/2.mp4", "headers": {}}
     started = bus.subscribe("downloads.fetch.started")
-    finished = bus.subscribe("downloads.fetch.finished")
     # One fetch at a time: the setting is read by the module when it changes.
     probe.publish_event("settings.changed", {"key": "download_single_at_once", "value": "1"})
     await _quiet()
+    dl.gate = asyncio.Event()
     probe.send_command("downloads.fetch", {"key": "dub:1", "url": "https://site/#cvh=1",
                                            "path": str(tmp_path / "t" / "1.mp4"), "series_id": 3})
     probe.send_command("downloads.fetch", {"key": "dub:2", "url": "https://site/#cvh=2",
                                            "path": str(tmp_path / "t" / "2.mp4"), "series_id": 3})
     first = (await asyncio.wait_for(started.queue.get(), 3)).payload
     assert first == {"key": "dub:1", "series_id": 3, "path": str(tmp_path / "t" / "1.mp4")}
-    assert (await asyncio.wait_for(finished.queue.get(), 3)).payload["key"] == "dub:1"
-    second = (await asyncio.wait_for(started.queue.get(), 3)).payload
-    assert second["key"] == "dub:2"
+    assert await _wait(lambda: dl.concurrent == 1)
+    await _running.bus.settled()
+    assert dl.started == ["https://cdn/1.mp4"], "the second waits for the place of its way"
+    dl.gate.set()
+    assert await _wait(lambda: len(dl.started) == 2 and dl.concurrent == 0)
+    assert dl.started == ["https://cdn/1.mp4", "https://cdn/2.mp4"] and dl.max_concurrent == 1
 
 
 @pytest.mark.asyncio
