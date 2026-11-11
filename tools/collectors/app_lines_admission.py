@@ -6,7 +6,9 @@ episodes still waiting are not asked. Up to `AT_ONCE` files go side by side.
 One JSON line per episode, appended to `data/raw/app_lines_admission__<stamp>__<app>-<card>.jsonl` (out of git); the
 files are deleted once read. The registry of admitted lines is made of these records (tools/analyzers/app_lines_registry.py).
 
-    .venv/bin/python tools/collectors/app_lines_admission.py <app> <card> [line,line,...]
+    .venv/bin/python tools/collectors/app_lines_admission.py <app> <card> [line,line,...] [first,central,last]
+
+The episodes can be admitted one at a time (the last argument): the registry takes the last record of each episode.
 """
 from __future__ import annotations
 
@@ -38,7 +40,7 @@ from app_lines_inventory import environment, ffprobe  # noqa: E402
 AT_ONCE = 8
 
 
-async def main(app: str, card: str, only: list[str]) -> None:
+async def main(app: str, card: str, only: list[str], which_only: list[str]) -> None:
     (profile,) = [each for each in profiles_of(environment()) if each.name == app]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     raw_path = os.path.join(ROOT, "data", "raw", f"app_lines_admission__{stamp}__{app}-{card}.jsonl")
@@ -106,6 +108,8 @@ async def main(app: str, card: str, only: list[str]) -> None:
                 if only and code not in only or not items:
                     continue
                 for which, item in (("first", items[0]), ("central", items[len(items) // 2]), ("last", items[-1])):
+                    if which_only and which not in which_only:
+                        continue
                     lines.setdefault(code, []).append(asyncio.create_task(
                         admit(code, which, item.place, item.label, item.token, raw)))
             jobs = [task for tasks in lines.values() for task in tasks]
@@ -131,5 +135,6 @@ async def main(app: str, card: str, only: list[str]) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main(sys.argv[1], sys.argv[2], sys.argv[3].split(",") if len(sys.argv) > 3 else []))
+    asyncio.run(main(sys.argv[1], sys.argv[2], sys.argv[3].split(",") if len(sys.argv) > 3 else [],
+                     sys.argv[4].split(",") if len(sys.argv) > 4 else []))
     print("ADMISSION_DONE")

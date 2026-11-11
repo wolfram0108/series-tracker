@@ -179,7 +179,10 @@ async def snapshot(url: str, headers: dict, path: str) -> Snapshot:
                 raise PlaylistError(f"плейлист не получен: статус {response.status_code}")
             text, base = response.text, str(response.url)
             if not text.lstrip("﻿").lstrip().startswith("#EXTM3U"):
-                raise PlaylistError("по адресу потока не плейлист HLS")
+                # What the host served instead is the reason's own fact: a page, a refusal in words, a file.
+                served = " ".join(text[:120].split())
+                raise PlaylistError(f"по адресу потока не плейлист HLS: {response.headers.get('content-type') or 'без типа'}, "
+                                    f"{len(response.content)} байт, начало «{served}»")
             variants = _variants(text, base)
             if not variants:
                 break

@@ -17,6 +17,8 @@ import time
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit
 
+import httpx
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
@@ -97,7 +99,11 @@ async def playlist(http, got: dict, headers: dict) -> dict:
         found["segment"] = None
         return found
     found["method"] = first.method
-    segment = await http.get(first.segment, headers={"User-Agent": USER_AGENT, **headers, "Range": "bytes=0-262143"})
+    try:
+        segment = await http.get(first.segment, headers={"User-Agent": USER_AGENT, **headers, "Range": "bytes=0-262143"})
+    except httpx.HTTPError as exc:  # the inventory records what failed
+        found["segment"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}", "host": urlsplit(first.segment).hostname}
+        return found
     found["segment"] = {"status": segment.status_code, "host": urlsplit(first.segment).hostname,
                         "bytes": len(segment.content)}
     if segment.status_code in (200, 206) and first.method == "NONE":
@@ -134,7 +140,10 @@ async def main(app: str, card: str) -> None:
                         record["host"] = urlsplit(address).hostname
                         got = record["head"] = await head(http, address, headers)
                         if got.get("playlist"):
-                            record["hls"] = await playlist(http, got, headers)
+                            try:
+                                record["hls"] = await playlist(http, got, headers)
+                            except httpx.HTTPError as exc:  # the inventory records what failed
+                                record["hls"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
                         else:
                             record["file"] = await ffprobe(address, "-user_agent", USER_AGENT)
                         got.pop("text", None)

@@ -37,7 +37,9 @@ from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppS
 
 logger = logging.getLogger("sources")
 
-REQUEST_TIMEOUT_S = 20.0
+# A safeguard above the longest answer measured: the parser of a line (videoUsableUrl of 橘汁 vod_1080) answers in
+# 8.6–28.3 s (2026-11-11); a safeguard under it would take a slow answer for none.
+REQUEST_TIMEOUT_S = 60.0
 SEARCH_PAGE = 50
 AGENT = "okhttp/3.12.1"
 SUCCESS = 200
@@ -297,7 +299,10 @@ class AppDramaClient:
     async def resolve(self, line: str, token: str) -> AppStream:
         play = play_of(await self.call("/api/proto/v5/videoUsableUrl", {"vodPlayFrom": line, "playUrl": token}))
         if not play["play_url"].startswith(("http://", "https://")):
-            raise AppError(reason("app_no_stream", app=self.profile.label, parser=line, message=play["msg"][:300]))
+            # No address and no words: the application failed on the way (under load it answers so for episodes it
+            # parses at other times, 2026-11-11); a refusal in words is its answer about the episode.
+            raise AppError(reason("app_no_stream", app=self.profile.label, parser=line, message=play["msg"][:300]),
+                           transient=not play["msg"].strip())
         return AppStream(play["play_url"], play["headers"])
 
     async def search_page(self, query: str, page: int) -> AppPage:

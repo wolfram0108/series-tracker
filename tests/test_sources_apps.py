@@ -19,6 +19,7 @@ from modules.sources.apps import AppProfile, card_address, profiles_of
 from modules.sources.apps.app99 import App99Client, seal, signature, unseal
 from modules.sources.module import SourcesModule
 from modules.sources.apps.lines import LineRegistry
+from modules.sources.players import app_lines
 from modules.sources.players.app_lines import AppLines, AppPlayer, measure_file_frame
 from modules.sources.players.contract import Answer, Kind, Reading, StreamUnavailable
 from modules.sources.players.registry import PlayerRegistry
@@ -65,6 +66,7 @@ MP4_HEAD = b"\0\0\0\x20ftypisom" + b"\0" * 5000
 
 def world(model: App99Model, playlists: dict[str, str] | None = None) -> tuple[httpx.AsyncClient, list[str]]:
     asked: list[str] = []
+    failed: dict[str, int] = {}
 
     def handle(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
@@ -84,6 +86,12 @@ def world(model: App99Model, playlists: dict[str, str] | None = None) -> tuple[h
             return httpx.Response(302, headers={"Location": url.replace("/moved/", "/png/")})
         if request.url.host == "ad.model":  # the host of an advertisement given instead of the episode
             raise httpx.ConnectError("All connection attempts failed", request=request)
+        if path.startswith("/once-down/") and failed.setdefault(url, 0) < 1:  # a connection that fails once
+            failed[url] += 1
+            raise httpx.ConnectError("All connection attempts failed", request=request)
+        if path.startswith("/once-525/") and failed.setdefault(url, 0) < 1:  # a host's passing error, once
+            failed[url] += 1
+            return httpx.Response(525, text="")
         text = (playlists or {}).get(url)
         return httpx.Response(200, text=text) if text is not None else httpx.Response(404, text="")
     return httpx.AsyncClient(transport=BoundedTransport(httpx.MockTransport(handle))), asked
@@ -202,6 +210,62 @@ async def test_a_card_of_many_episodes_is_measured_at_the_pace_of_twenty_to_thir
         rate = len(draft.rows) / (time.monotonic() - began)
     assert [row.heights for row in draft.rows] == [[1080]] * 200
     assert 20 <= rate <= 30, rate
+
+
+async def test_a_row_whose_host_failed_on_the_way_is_asked_again_and_one_the_application_refused_is_not():
+    """A connection that failed or a host's passing error is no answer about the episode: the row is asked again and gets
+    the frame of its own episode. What the application said of the episode (no parser gave an address) is its answer."""
+    model = card_world()
+    model.parses[(9, "CO4K_pv")] = f"{CDN}once-525/pv.m3u8"
+    model.parses[(9, "CO4K_tok1")] = f"{CDN}once-down/1.m3u8"
+    playlists = {f"{CDN}{name}": PLAYLIST for name in ("a/index.m3u8", "b/index.m3u8", "once-525/pv.m3u8",
+                                                       "once-down/1.m3u8")}
+    http, _asked = world(model, playlists)
+
+    async def measure(_http, head, _referer):
+        return {"a": 720, "b": 1080, "once-525": 2160, "once-down": 1080}[head.segment.removeprefix(CDN).split("/")[0]]
+
+    async with http:
+        player = AppPlayer(App99Client(profile(), lambda: http), measure, registry=admitting("ffm3u8", "CO4K"))
+        draft = await AppSite(player, AppLines([player])).read("app://banri/219017", ReadContext(http, lambda *_: None))
+    assert {row.key: row.heights for row in draft.rows} == {
+        "banri:ffm3u8:1": [720], "banri:ffm3u8:2": [1080], "banri:CO4K:1": [1080], "banri:CO4K:2": [],
+        "banri:CO4K:3": [2160]}
+    assert [fields["url"] for path, fields in model.calls if path == "/app/vodParser"].count("CO4K_tok2") == 1
+
+
+async def test_a_failure_of_the_way_out_of_a_measure_is_no_answer_and_the_row_is_asked_again(monkeypatch):
+    """A transport error while the frame is measured, and what ffprobe says of a broken connection, are no answer
+    about the episode: asked again. What ffprobe says of the file itself stays the answer."""
+    model = card_world()
+    model.parses[(9, "CO4K_pv")] = f"{CDN}c/pv.m3u8"
+    model.parses[(9, "CO4K_tok1")] = f"{CDN}d/1.m3u8"
+    playlists = {f"{CDN}{name}": PLAYLIST for name in ("a/index.m3u8", "b/index.m3u8", "c/pv.m3u8", "d/1.m3u8")}
+    http, _asked = world(model, playlists)
+    timed_out: list[str] = []
+
+    async def measure(_http, head, _referer):
+        folder = head.segment.removeprefix(CDN).split("/")[0]
+        if folder == "d" and not timed_out:
+            timed_out.append(folder)
+            raise httpx.ReadTimeout("timed out")
+        return {"a": 720, "b": 1080, "c": 2160, "d": 1080}[folder]
+
+    async with http:
+        player = AppPlayer(App99Client(profile(), lambda: http), measure, registry=admitting("ffm3u8", "CO4K"))
+        draft = await AppSite(player, AppLines([player])).read("app://banri/219017", ReadContext(http, lambda *_: None))
+    assert timed_out and {row.key: row.heights for row in draft.rows}["banri:CO4K:1"] == [1080]
+
+    said = {"value": ""}
+
+    async def probe(_address, **_options):
+        return None, said["value"]
+
+    monkeypatch.setattr(app_lines, "probe", probe)
+    said["value"] = "https://cdn.model/f.mp4: Connection reset by peer"
+    assert (await measure_file_frame(f"{CDN}f.mp4", {})).reading.kind is Kind.NO_ANSWER
+    said["value"] = "https://cdn.model/f.mp4: Invalid data found when processing input"
+    assert (await measure_file_frame(f"{CDN}f.mp4", {})).reading.kind is Kind.NO_FILE
 
 
 async def test_what_a_parser_gave_serves_the_download_within_the_hour_and_an_address_no_longer_served_is_parsed_anew():

@@ -43,6 +43,8 @@ class DramaModel:
     cards: dict[int, tuple[str, int, list[Video]]] = field(default_factory=dict)
     found: list[tuple[int, str, int, str]] = field(default_factory=list)  # the search: (id, name, year, remark)
     plays: dict[tuple[str, str], tuple[str, dict]] = field(default_factory=dict)  # (line, token) -> (address, headers)
+    # (line, token) the application answers with no address and no words (as it does under load).
+    silent: set[tuple[str, str]] = field(default_factory=set)
     navigator_down: bool = False
     calls: list[tuple[str, dict]] = field(default_factory=list)
     zones: int = 0
@@ -101,7 +103,8 @@ class DramaModel:
         if path == "/api/proto/v5/videoUsableUrl":
             address, headers = self.plays.get((query["vodPlayFrom"], query["playUrl"]), ("", {}))
             data = pb(1, address) + b"".join(pb(6, pb(1, key) + pb(2, value)) for key, value in headers.items())
-            return self._answer(data + (b"" if address else pb(9, "解析失败")))
+            key = (query["vodPlayFrom"], query["playUrl"])
+            return self._answer(data + (b"" if address or key in self.silent else pb(9, "解析失败")))
         if path == "/api/proto/v5/drama/search":
             data = b"".join(pb(1, pb(3, number) + pb(5, name) + pb(13, remark) + pb(14, year))
                             for number, name, year, remark in self.found)

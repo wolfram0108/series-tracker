@@ -26,8 +26,10 @@ from urllib.parse import urlsplit
 from core.contracts import RowState, TableRow
 from core.reasons import reason
 
-from ...players.contract import PlayerRef
-from ...policy import Pacer
+from core.retry import retrying
+
+from ...players.contract import Kind, PlayerRef, Reading
+from ...policy import DEFAULT, Pacer, status_is_transient
 from ...apps import SCHEME, card_address
 from ...apps import AppError
 from ...players.app_lines import AppLines, AppPlayer
@@ -41,6 +43,11 @@ ROWS_PER_SECOND = 25
 # A row is asked, read and measured in about three seconds: four seconds of rows at that pace in flight at most, so that a
 # host that slows down holds back the asks instead of piling them up.
 ROWS_IN_FLIGHT = ROWS_PER_SECOND * 4
+
+
+def _passing(reading: Reading) -> bool:
+    """A failure of the way, not an answer about the episode: no answer at all, or a host's passing error."""
+    return reading.kind is Kind.NO_ANSWER or (reading.kind is Kind.HTTP_ERROR and status_is_transient(reading.status))
 
 
 class AppSite:
@@ -120,9 +127,20 @@ class AppSite:
                                              if card.names else "") if part)
         return TableDraft(names=card.names, title=title, rows=rows)
 
+    async def _asked(self, line, link: str, http, card_url: str) -> Reading:
+        """What the player of a row says of its episode. A connection that failed or a host's passing error (no answer,
+        5xx) is asked again within the budget of every player (core/retry.py); what the application or the host said of
+        the episode itself (no stream, no file, a refusal) is its answer and is not asked again."""
+        async def ask() -> Reading:
+            await self.pacer.wait()
+            return line.read(await line.fetch(PlayerRef(line.name, link), http, card_url))
+
+        reading, _attempts, _left = await retrying(ask, final=lambda said: not _passing(said), budget=DEFAULT)
+        return reading
+
     async def _frames(self, card_url: str, lines, ctx: ReadContext) -> dict[str, tuple[list[int], dict]]:
         """The frame of each row measured on its own video, by its link ([height] or [] with why): the last table's of
-        every row it measured on itself, the others measured now — each once, not repeated, at the pace of the players."""
+        every row it measured on itself, the others measured now at the pace of the players, a failure of the way asked again."""
         kept = {row.link: (list(row.heights), {"frame": "measured"}) for row in ctx.last_rows
                 if self.player.owns(row.link) and row.heights and row.site_fields.get("frame") == "measured"}
         asked = [(line, link) for line, _fields, listed in lines
@@ -135,8 +153,7 @@ class AppSite:
             nonlocal done
             try:
                 async with self.in_flight:
-                    await self.pacer.wait()
-                    reading = line.read(await line.fetch(PlayerRef(line.name, link), ctx.http, card_url))
+                    reading = await self._asked(line, link, ctx.http, card_url)
                 said = reading.message or reading.kind.value
                 heights = sorted(reading.resolutions)[-1:]
                 failed = said if said.startswith('{"code"') else reason("player_failed", player=line.label, cause=said)

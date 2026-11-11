@@ -99,6 +99,12 @@ async def test_the_session_opens_by_the_key_of_the_zone_at_the_host_the_navigato
         with pytest.raises(AppError) as caught:
             await client.resolve("qq", "https://v.qq.com/x/2.html")
         assert '"code":"app_no_stream"' in caught.value.reason and "解析失败" in caught.value.reason
+        assert not caught.value.transient  # a refusal in words is the answer about the episode
+        # No address and no words: the application failed on the way (as under load), and the episode is asked again.
+        model.silent.add(("zijianm3u8", "zijian_tok2"))
+        with pytest.raises(AppError) as caught:
+            await client.resolve("zijianm3u8", "zijian_tok2")
+        assert '"code":"app_no_stream"' in caught.value.reason and caught.value.transient
         assert model.zones == 1 and model.calls[0] == ("/api/proto/v5/drama/getDetail", {"id": "407608"})
         assert model.calls[1] == ("/api/proto/v5/videoUsableUrl", {"vodPlayFrom": "zijianm3u8", "playUrl": "zijian_tok1"})
         # A card the application does not know is a refusal with its message.

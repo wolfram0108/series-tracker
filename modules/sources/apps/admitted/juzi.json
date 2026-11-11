@@ -1,0 +1,163 @@
+{
+ "app": "juzi",
+ "admitted": {
+  "bfzym3u8": {
+   "card": "543690",
+   "at": "2026-11-11T06:59:14.627996+00:00",
+   "episodes": [
+    {
+     "which": "first",
+     "label": "1",
+     "width": 1280,
+     "height": 720,
+     "audio": 1,
+     "duration": "1216.679184",
+     "size": 282080981,
+     "mbit_s": 185.0
+    },
+    {
+     "which": "central",
+     "label": "84",
+     "width": 1280,
+     "height": 720,
+     "audio": 1,
+     "duration": "1249.703000",
+     "size": 283040975,
+     "mbit_s": 123.7
+    },
+    {
+     "which": "last",
+     "label": "167",
+     "width": 1920,
+     "height": 1080,
+     "audio": 1,
+     "duration": "1293.049637",
+     "size": 478814052,
+     "mbit_s": 128.1
+    }
+   ]
+  },
+  "newxfyun": {
+   "card": "543690",
+   "at": "2026-11-11T07:03:09.716771+00:00",
+   "episodes": [
+    {
+     "which": "first",
+     "label": "1",
+     "width": 3840,
+     "height": 2160,
+     "audio": 1,
+     "duration": "1208.981333",
+     "size": 850983962,
+     "mbit_s": 271.2
+    },
+    {
+     "which": "central",
+     "label": "84",
+     "width": 3840,
+     "height": 2160,
+     "audio": 1,
+     "duration": "1249.685333",
+     "size": 760494469,
+     "mbit_s": 140.5
+    },
+    {
+     "which": "last",
+     "label": "167",
+     "width": 3840,
+     "height": 2160,
+     "audio": 1,
+     "duration": "1303.359125",
+     "size": 520883557,
+     "mbit_s": 116.7
+    }
+   ]
+  },
+  "youku": {
+   "card": "543690",
+   "at": "2026-11-11T07:00:11.043731+00:00",
+   "episodes": [
+    {
+     "which": "first",
+     "label": "1",
+     "width": 1280,
+     "height": 720,
+     "audio": 1,
+     "duration": "1209.180272",
+     "size": 226045112,
+     "mbit_s": 103.3
+    },
+    {
+     "which": "central",
+     "label": "84",
+     "width": 1280,
+     "height": 720,
+     "audio": 1,
+     "duration": "1249.784853",
+     "size": 200845222,
+     "mbit_s": 77.2
+    },
+    {
+     "which": "last",
+     "label": "167",
+     "width": 1280,
+     "height": 720,
+     "audio": 1,
+     "duration": "1304.202721",
+     "size": 315309025,
+     "mbit_s": 109.7
+    }
+   ]
+  }
+ },
+ "refused": {
+  "JD4K": {
+   "card": "543690",
+   "episode": "1",
+   "step": "download",
+   "reason": "загрузчик сегментов: ERROR: \r[download] Got error: HTTP Error 404: Not Found. Giving up after 3 retries; ERROR: \r[download] Got error: HTTP Error 404: Not Found. Giving up after 3 retries"
+  },
+  "PAN1": {
+   "card": "543690",
+   "episode": "1",
+   "step": "download",
+   "reason": "по адресу потока не плейлист HLS: application/json, 60 байт, начало «{\"code\":201,\"msg\":\"\\u89e3\\u6790\\u5931\\u8d25\\u4e86\",\"url\":\"\"}»"
+  },
+  "SH4K": {
+   "card": "543690",
+   "episode": "84",
+   "step": "stream",
+   "reason": "{\"code\":\"player_failed\",\"player\":\"Juzi\",\"cause\":\"ConnectError: yytv.wki8.com\"}"
+  },
+  "pylg": {
+   "card": "543690",
+   "episode": "84",
+   "step": "stream",
+   "reason": "{\"code\":\"player_failed\",\"player\":\"Juzi\",\"cause\":\"ConnectError: v26-forum.picovr.com\"}"
+  },
+  "qsvip": {
+   "card": "543690",
+   "episode": "1",
+   "step": "stream",
+   "reason": "{\"code\":\"player_failed\",\"player\":\"Juzi\",\"cause\":\"ConnectError: aws.shenhua7.vip\"}"
+  },
+  "tocyyds": {
+   "card": "543690",
+   "episode": "1",
+   "step": "stream",
+   "reason": "{\"code\":\"player_failed\",\"player\":\"Juzi\",\"cause\":\"the host answered 413\"}"
+  },
+  "vod_1080": {
+   "card": "543690",
+   "episode": "158",
+   "step": "table",
+   "reason": "10 rows of the table without the frame of their episode, as {\"code\":\"player_failed\",\"player\":\"vod_1080\",\"cause\":\"RemoteProtocolError: yun2.jiexicn.top\"}"
+  },
+  "zy1080_01": {
+   "card": "543690",
+   "episode": "1",
+   "step": "stream",
+   "reason": "{\"code\":\"player_failed\",\"player\":\"Juzi\",\"cause\":\"the host answered 403\"}"
+  }
+ }
+}

@@ -102,8 +102,16 @@ async def measure_file_frame(address: str, headers: dict[str, str]) -> Answer:
     film = film_stream(streams or [])
     if film is None or not film.get("height"):
         cause = said.replace(address, urlsplit(address).hostname or "").strip() or "no picture in the file"
-        return Answer(200, reading=Reading(Kind.NO_FILE, 200, message=cause))
+        # A failure of the way (the connection, the time) is no answer about the file and is asked again.
+        kind = Kind.NO_ANSWER if _ON_THE_WAY.search(cause) else Kind.NO_FILE
+        return Answer(200, reading=Reading(kind, 200, message=cause))
     return Answer(200, reading=Reading(Kind.PLAYABLE, 200, (int(film["height"]),), files=((int(film["height"]), address),)))
+
+
+# What ffprobe says when the way to the file failed, not the file: a connection cut or timed out, a server error of the
+# host. A refused connection is the host saying no (a dead address an application gives) and stays the answer.
+_ON_THE_WAY = re.compile(r"connection (reset|timed out)|timed out|input/output error|server returned 5\d\d|"
+                         r"gave no answer|network is unreachable|name or service not known|failed to resolve", re.I)
 
 
 # The player of the lines of the applications: a row of a line is of `line:<code>`, whichever application lists it.
@@ -185,7 +193,7 @@ class AppPlayer:
             got = await self.address(line, item)
         except AppError as exc:
             return Answer(200, reading=Reading(Kind.NO_ANSWER if exc.transient else Kind.NO_FILE, 200, message=exc.reason))
-        answer = await self._stream_answer(http, got.address, got.headers, measure)
+        answer = await self._served(http, got.address, got.headers, measure)
         if was_kept and self.read(answer).kind is not Kind.PLAYABLE:
             # The address kept from an earlier parse is no longer served: the episode is parsed anew, once.
             self._parsed.pop((line, item), None)
@@ -194,8 +202,16 @@ class AppPlayer:
             except AppError as exc:
                 return Answer(200, reading=Reading(Kind.NO_ANSWER if exc.transient else Kind.NO_FILE, 200,
                                                    message=exc.reason))
-            answer = await self._stream_answer(http, got.address, got.headers, measure)
+            answer = await self._served(http, got.address, got.headers, measure)
         return answer
+
+    async def _served(self, http: httpx.AsyncClient, address: str, headers: dict[str, str], measure: bool) -> Answer:
+        """What the host serves; a transport failure on the way is an answer without a status (no answer), as the
+        contract of a player has it, not an error out of the player."""
+        try:
+            return await self._stream_answer(http, address, headers, measure)
+        except httpx.HTTPError as exc:
+            return Answer(None, error=f"{type(exc).__name__}: {urlsplit(address).hostname}")
 
     async def _stream_answer(self, http: httpx.AsyncClient, address: str, headers: dict[str, str],
                              measure: bool) -> Answer:

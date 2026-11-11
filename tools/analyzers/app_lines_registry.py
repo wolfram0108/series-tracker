@@ -2,7 +2,9 @@
 (tools/collectors/app_lines_admission.py, `data/raw/app_lines_admission__*__<app>-*.jsonl`).
 
 A line is admitted when the last record of each of its first, central and last episode says its file came whole and was
-read back; any other line is refused, with the reason of its first episode that did not come. The registry holds no
+read back, and the last read of its card by the service's own code (`data/raw/app_table_rate__*__<app>-*.jsonl`) gave
+every row of it the frame of its episode; any other line is refused, with the reason of the episode or the rows that
+failed. The registry holds no
 address of a stream: the episodes, their frames, sound, length, size and the speed of their download.
 
     .venv/bin/python tools/analyzers/app_lines_registry.py <app>   →   modules/sources/apps/admitted/<app>.json
@@ -18,7 +20,21 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 WHICH = ("first", "central", "last")
 
 
+def table_misses(app: str) -> dict[str, list[dict]]:
+    """The rows of each line left without the frame of their episode in the last read of its card by the service's own
+    code (tools/collectors/app_table_rate.py): a line whose rows the table cannot measure is no player."""
+    last: dict[str, list[dict]] = {}
+    for path in sorted(glob.glob(os.path.join(ROOT, "data", "raw", f"app_table_rate__*__{app}-*.jsonl"))):
+        rows = [json.loads(line) for line in open(path, encoding="utf-8")]
+        read = [row for row in rows if "heights" in row]
+        for code in {row["player"].removeprefix("line:") for row in read}:
+            last[code] = [row for row in read if row["player"] == f"line:{code}"]
+    return {code: [row for row in rows if not row["heights"]] for code, rows in last.items()
+            if any(not row["heights"] for row in rows)}
+
+
 def registry(app: str) -> dict:
+    misses = table_misses(app)
     last: dict[tuple[str, str], dict] = {}
     for path in sorted(glob.glob(os.path.join(ROOT, "data", "raw", f"app_lines_admission__*__{app}-*.jsonl"))):
         with open(path, encoding="utf-8") as raw:
@@ -28,15 +44,21 @@ def registry(app: str) -> dict:
     admitted, refused = {}, {}
     for code in sorted({line for line, _which in last}):
         records = [last.get((code, which)) for which in WHICH]
-        if all(record is not None and record["ok"] for record in records):
+        if all(record is not None and record["ok"] for record in records) and code in misses:
+            rows = misses[code]
+            refused[code] = {"card": records[0]["card"], "episode": rows[0]["text"], "step": "table",
+                             "reason": f"{len(rows)} rows of the table without the frame of their episode, as "
+                                       f"{rows[0]['fields'].get('frame_failed', '')}"[:300]}
+        elif all(record is not None and record["ok"] for record in records):
             admitted[code] = {"card": records[0]["card"], "at": max(record["at"] for record in records), "episodes": [
                 {"which": record["which"], "label": record["label"], "width": record["file"]["width"],
                  "height": record["file"]["height"], "audio": record["file"]["audio"],
                  "duration": record["file"]["duration"], "size": record["size"], "mbit_s": record.get("mbit_s")}
                 for record in records]}
         else:
-            failed = next(record for record in records if record is None or not record["ok"])
-            refused[code] = {"card": records[0]["card"] if records[0] else None,
+            # The reason is the episode that failed; an episode never asked (its line was decided first) tells none.
+            failed = next((record for record in records if record is not None and not record["ok"]), None)
+            refused[code] = {"card": next((record["card"] for record in records if record), None),
                              "episode": failed["label"] if failed else None,
                              "step": failed.get("step") if failed else "not asked",
                              "reason": (failed.get("reason") or "")[:300] if failed else "not asked"}
