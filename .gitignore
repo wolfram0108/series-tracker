@@ -50,3 +50,6 @@ docs/missions/voice-alignment/stage-10/raw/*
 
 # Raw answers of real services (collectors): not for a public repository
 data/
+
+# Backups of the working data taken before a migration or a risky change
+backups/
