@@ -19,12 +19,14 @@ from modules.sources.apps import AppProfile, card_address, profiles_of
 from modules.sources.apps.app99 import App99Client, seal, signature, unseal
 from modules.sources.module import SourcesModule
 from modules.sources.apps.lines import LineRegistry
-from modules.sources.players import app_lines
+from modules.sources import policy
+from modules.sources.players import app_lines, hls
 from modules.sources.players.app_lines import AppLines, AppPlayer, measure_file_frame
 from modules.sources.players.contract import Answer, Kind, Reading, StreamUnavailable
 from modules.sources.players.registry import PlayerRegistry
-from modules.sources.sites import ReadContext
+from modules.sources.sites import PHASE_PLAYERS, ReadContext
 from modules.sources.sites.apps import AppSite
+from modules.sources.sites.apps.site import CALM_ROUNDS
 from app99_model import HOST, UUID, App99Model, Card, Line, profile
 from schema_db import migrated
 
@@ -92,6 +94,12 @@ def world(model: App99Model, playlists: dict[str, str] | None = None) -> tuple[h
         if path.startswith("/once-525/") and failed.setdefault(url, 0) < 1:  # a host's passing error, once
             failed[url] += 1
             return httpx.Response(525, text="")
+        if path.startswith("/busy/") and failed.setdefault(url, 0) < 4:  # a host too busy while the whole card is asked
+            failed[url] += 1
+            return httpx.Response(429, headers={"Retry-After": "0"}, text="")
+        if path.startswith("/flaky/") and failed.setdefault(url, 0) < 2:  # a host that makes the playlist anew and
+            failed[url] += 1                                               # refuses some of the requests in words
+            return httpx.Response(200, headers={"Content-Type": "application/json"}, text='{"code":201,"msg":"解析失败了"}')
         text = (playlists or {}).get(url)
         return httpx.Response(200, text=text) if text is not None else httpx.Response(404, text="")
     return httpx.AsyncClient(transport=BoundedTransport(httpx.MockTransport(handle))), asked
@@ -144,29 +152,34 @@ async def test_a_card_is_a_table_of_its_admitted_lines_each_row_with_the_frame_o
             ("banri:ffm3u8:1", "line:ffm3u8", "ffm3u8", "第01集", "playable", [720]),
             ("banri:ffm3u8:2", "line:ffm3u8", "ffm3u8", "第02集", "playable", [1080]),
             ("banri:CO4K:1", "line:CO4K", "CO4K", "1", "playable", [1080]),
-            ("banri:CO4K:2", "line:CO4K", "CO4K", "2", "not_obtained", []),
+            ("banri:CO4K:2", "line:CO4K", "CO4K", "2", "absent", []),
             ("banri:CO4K:3", "line:CO4K", "CO4K", "《万界独尊》PV", "playable", [2160]),
         ]
         assert [row.site_fields["line_name"] for row in draft.rows] == ["非凡（备用线路）"] * 2 + ["4K"] * 3
         assert any("co_egg (419: stream — no parser)" in record.getMessage() for record in caplog.records)
-        # A row whose episode gave no stream says why.
+        # An episode that gave no stream is absent on its line, and the row and the log of the read say so with the cause.
         assert '"code":"app_no_parser"' in draft.rows[3].reason
+        assert any("серий без видео — CO4K: 1 (2)" in record.getMessage() for record in caplog.records)
         assert draft.names == ["万界独尊", "Ten Thousand Worlds"] and draft.title == "半日 · 万界独尊 (2021)"
-        # One ask a row: each episode once; the refused line is not asked.
+        # One ask for an episode that answered, its playlist asked of its host once; an episode that gave no stream is
+        # asked as many times as the policy of the players allows, in the read and in each calm round after it; the
+        # refused line is not asked.
         assert sorted(heads) == sorted(f"{CDN}{name}/seg0.ts" for name in "abcd")
+        assert sorted(_asked) == sorted(f"{CDN}{name}" for name in ("a/index.m3u8", "b/index.m3u8", "c/pv.m3u8", "d/1.m3u8"))
         assert sorted(fields["url"] for path, fields in model.calls if path == "/app/vodParser") == \
-            ["CO4K_pv", "CO4K_tok1", "CO4K_tok2"]
+            ["CO4K_pv", "CO4K_tok1"] + ["CO4K_tok2"] * policy.DEFAULT.attempts * (1 + CALM_ROUNDS)
         assert [row.site_fields["stream"] for row in draft.rows] == ["playlist"] * 2 + ["parser"] * 3
         assert players.video_of("line:CO4K", draft.rows[2].link) == "CO4K_tok1"
         assert players.get("line:CO4K").apps["banri"] is player and "line:CO4K" in players and "other:CO4K" not in players
         assert AppLines([player]).codes() == ["CO4K", "ffm3u8"]
 
-        # The next read keeps every frame the last table measured on its row: only the rows without one are asked again.
+        # The next read keeps every frame the last table measured on its row: only the absent episode is asked again.
         parsed = len([1 for path, _fields in model.calls if path == "/app/vodParser"])
         again = await site.read("app://banri/219017", ReadContext(http, lambda *_: None, last_rows=tuple(draft.rows)))
         assert [(row.state, row.heights) for row in again.rows] == [(row.state, row.heights) for row in draft.rows]
         assert len(heads) == 4
-        assert [fields["url"] for path, fields in model.calls if path == "/app/vodParser"][parsed:] == ["CO4K_tok2"]
+        assert [fields["url"] for path, fields in model.calls if path == "/app/vodParser"][parsed:] == \
+            ["CO4K_tok2"] * policy.DEFAULT.attempts * (1 + CALM_ROUNDS)
 
         # The stream of an episode of a line of playlists is its playlist, its frame not measured for the download.
         got = await player.stream(draft.rows[0].link, http, None, players.pacer)
@@ -212,26 +225,97 @@ async def test_a_card_of_many_episodes_is_measured_at_the_pace_of_twenty_to_thir
     assert 20 <= rate <= 30, rate
 
 
-async def test_a_row_whose_host_failed_on_the_way_is_asked_again_and_one_the_application_refused_is_not():
-    """A connection that failed or a host's passing error is no answer about the episode: the row is asked again and gets
-    the frame of its own episode. What the application said of the episode (no parser gave an address) is its answer."""
+async def test_an_answer_that_is_not_final_is_asked_again_and_a_row_ends_with_its_frame_or_as_an_absent_episode():
+    """A connection that failed, a host's passing error and a refusal a host words at one request and not at the next
+    are no answer about the episode: the row is asked again, the application parsing the episode anew, and gets the frame
+    of its own episode. An episode no ask gave a stream of is absent on its line, never left "not measured"."""
     model = card_world()
     model.parses[(9, "CO4K_pv")] = f"{CDN}once-525/pv.m3u8"
     model.parses[(9, "CO4K_tok1")] = f"{CDN}once-down/1.m3u8"
-    playlists = {f"{CDN}{name}": PLAYLIST for name in ("a/index.m3u8", "b/index.m3u8", "once-525/pv.m3u8",
-                                                       "once-down/1.m3u8")}
+    model.parses[(9, "CO4K_tok2")] = f"{CDN}flaky/2.m3u8"
+    playlists = {f"{CDN}{name}": PLAYLIST for name in ("a/index.m3u8", "once-525/pv.m3u8", "once-down/1.m3u8",
+                                                       "flaky/2.m3u8")}
     http, _asked = world(model, playlists)
 
     async def measure(_http, head, _referer):
-        return {"a": 720, "b": 1080, "once-525": 2160, "once-down": 1080}[head.segment.removeprefix(CDN).split("/")[0]]
+        return {"a": 720, "once-525": 2160, "once-down": 1080, "flaky": 1440}[head.segment.removeprefix(CDN).split("/")[0]]
 
     async with http:
         player = AppPlayer(App99Client(profile(), lambda: http), measure, registry=admitting("ffm3u8", "CO4K"))
         draft = await AppSite(player, AppLines([player])).read("app://banri/219017", ReadContext(http, lambda *_: None))
-    assert {row.key: row.heights for row in draft.rows} == {
-        "banri:ffm3u8:1": [720], "banri:ffm3u8:2": [1080], "banri:CO4K:1": [1080], "banri:CO4K:2": [],
-        "banri:CO4K:3": [2160]}
-    assert [fields["url"] for path, fields in model.calls if path == "/app/vodParser"].count("CO4K_tok2") == 1
+    assert {row.key: (row.state.value, row.heights) for row in draft.rows} == {
+        "banri:ffm3u8:1": ("playable", [720]), "banri:ffm3u8:2": ("absent", []), "banri:CO4K:1": ("playable", [1080]),
+        "banri:CO4K:2": ("playable", [1440]), "banri:CO4K:3": ("playable", [2160])}
+    # Every ask after a refusal has the application parse the episode anew: the address that gave no stream is not kept.
+    assert [fields["url"] for path, fields in model.calls if path == "/app/vodParser"].count("CO4K_tok2") == 3
+    assert "answered 404" in draft.rows[1].reason
+
+
+async def test_a_row_the_way_to_which_failed_under_the_load_of_the_read_is_asked_again_when_the_rest_is_done(caplog):
+    """A host too busy for every ask the policy allows while the whole card is being asked is not the answer about the
+    episode: its rows are asked again after the rest, a few at a time, and get the frames of their own episodes."""
+    model = card_world()
+    model.parses[(9, "CO4K_tok1")] = f"{CDN}busy/1.m3u8"
+    playlists = {f"{CDN}{name}": PLAYLIST for name in ("a/index.m3u8", "b/index.m3u8", "busy/1.m3u8")}
+    http, asked = world(model, playlists)
+
+    async def measure(_http, head, _referer):
+        return {"a": 720, "b": 1080, "busy": 2160}[head.segment.removeprefix(CDN).split("/")[0]]
+
+    progress: list[tuple] = []
+    async with http:
+        player = AppPlayer(App99Client(profile(), lambda: http), measure, registry=admitting("ffm3u8", "CO4K"))
+        with caplog.at_level("INFO", logger="sources"):
+            draft = await AppSite(player, AppLines([player])).read(
+                "app://banri/219017", ReadContext(http, lambda *step: progress.append(step)))
+    assert {row.key: row.heights for row in draft.rows}["banri:CO4K:1"] == [2160]
+    assert asked.count(f"{CDN}busy/1.m3u8") == 5
+    assert any("строк без окончательного ответа спрашиваются снова" in record.getMessage() for record in caplog.records)
+    # The count of the rows of the read goes up to their number once, whatever is asked again.
+    assert [step[1:] for step in progress if step[0] == PHASE_PLAYERS][-1] == (5, 5)
+
+
+async def test_the_frame_of_a_playlist_is_of_its_film_and_a_stub_served_for_its_start_is_the_absence_of_the_video():
+    """A host puts a block of its own before the film (the downloader leaves it out, and so does the measure), and a
+    store that took the start of a file away serves a stub of a few hundred bytes for its first segments. The frame is
+    of the first segment of the film; a film whose start is a stub is damaged, whatever the rest of it shows: the
+    episode is absent, and the row says what the host served."""
+    film = "".join(f"#EXTINF:6,\nhttps://film.model/v/s{n}.ts\n" for n in range(4))
+    asked: list[str] = []
+
+    def measuring(frames: dict[str, int]):
+        async def measure(_http, head, _referer):
+            asked.append(head.segment)
+            if head.segment not in frames:
+                raise hls.MeasureError(Answer(200, reading=Reading(Kind.NOT_FOUND, 200, message=(
+                    "the host served no picture in the segment: image/jpeg, 629 bytes"))))
+            return frames[head.segment]
+        return measure
+
+    inserted = "#EXTM3U\n#EXTINF:6,\nhttps://ads.model/a/ad0.ts\n#EXT-X-DISCONTINUITY\n" + film + "#EXT-X-ENDLIST\n"
+    answer = await hls.measured(None, "https://film.model/v/index.m3u8", "", measuring({"https://film.model/v/s0.ts": 1080}),
+                                fetched=Answer(200, inserted, final_url="https://film.model/v/index.m3u8"))
+    assert answer.reading.kind is Kind.PLAYABLE and answer.reading.resolutions == (1080,)
+    assert asked == ["https://film.model/v/s0.ts"]
+
+    # The start of the film is a stub while its middle shows a picture: the file is damaged, the middle is not asked.
+    asked.clear()
+    answer = await hls.measured(None, "https://film.model/v/index.m3u8", "", measuring({"https://film.model/v/s2.ts": 1080}),
+                                fetched=Answer(200, "#EXTM3U\n" + film, final_url="https://film.model/v/index.m3u8"))
+    assert answer.reading.kind is Kind.NOT_FOUND and "image/jpeg, 629 bytes" in answer.reading.message
+    assert asked == ["https://film.model/v/s0.ts"]
+
+    # A stub as a store serves it, measured by the real ffprobe: no picture, and what the host served is said.
+    stub = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01" + b"\x00" * 617
+
+    def handle(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(206, headers={"Content-Type": "image/jpeg"}, content=stub)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        with pytest.raises(hls.MeasureError) as failed:
+            await hls.measure_head(http, hls.Head("https://store.model/s0.ts", 0), "")
+    said = failed.value.answer.reading
+    assert said.kind is Kind.NOT_FOUND and "store.model served no picture in the segment: image/jpeg, 629 bytes" in said.message
 
 
 async def test_a_failure_of_the_way_out_of_a_measure_is_no_answer_and_the_row_is_asked_again(monkeypatch):
@@ -331,10 +415,10 @@ async def test_a_stream_is_what_its_host_serves_by_its_signature_and_a_row_witho
         got = {row.text: (row.state.value, row.heights, row.reason or "") for row in draft.rows}
         assert got["png"][:2] == ("playable", [720]) and got["moved"][:2] == ("playable", [720])
         assert got["jpeg"][:2] == ("playable", [1080]) and files == [f"{CDN}jpeg/2"]
-        assert got["forbidden"][:2] == ("not_obtained", []) and "answered 403" in got["forbidden"][2]
+        assert got["forbidden"][:2] == ("absent", []) and "answered 403" in got["forbidden"][2]
         assert "served no stream" in got["page"][2] and "Error 1020" in got["page"][2]
         assert "ConnectError" in got["ad"][2] and "ad.model" in got["ad"][2]
-        assert got["whole"][0] == "not_obtained"
+        assert got["whole"][0] == "absent"
         assert f"{CDN}jpeg/2" in asked  # only the head of the file was asked, never the whole of it
 
         jpeg = next(row for row in draft.rows if row.text == "jpeg")

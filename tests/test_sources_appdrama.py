@@ -150,9 +150,9 @@ async def test_a_line_of_two_applications_is_one_player_and_each_row_is_asked_of
 
     assert [(row.key, row.player, row.player_label, row.text, row.state.value, row.heights) for row in from_drama.rows] == [
         ("huayi:zijianm3u8:1", "line:zijianm3u8", "zijianm3u8", "1", "playable", [2160]),
-        ("huayi:zijianm3u8:2", "line:zijianm3u8", "zijianm3u8", "2", "not_obtained", []),
+        ("huayi:zijianm3u8:2", "line:zijianm3u8", "zijianm3u8", "2", "absent", []),
         ("huayi:qq:1", "line:qq", "qq", "1", "playable", [1080]),
-        ("huayi:qq:2", "line:qq", "qq", "2", "not_obtained", [])]
+        ("huayi:qq:2", "line:qq", "qq", "2", "absent", [])]
     assert [(row.key, row.player, row.heights) for row in from_app99.rows] == [("banri:qq:1", "line:qq", [720])]
     assert from_drama.title == "华谊 · 万界独尊 (2021)" and from_drama.names == ["万界独尊"]
     # One player of the line in both applications, in the order of sources once.

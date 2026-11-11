@@ -17,10 +17,10 @@ says what the host served instead.
 """
 from __future__ import annotations
 
-import json
 import logging
 import re
 import time
+from dataclasses import dataclass
 from typing import Awaitable, Callable
 from urllib.parse import parse_qs, quote, urldefrag, urlsplit
 
@@ -37,13 +37,15 @@ from ..policy import settle
 from ..term import Term
 from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
 from .hls import MEASURE_TIMEOUT_S, Measure, is_playlist, measure_head, measured
-from .http import USER_AGENT
+from .http import USER_AGENT, retry_after
 from .vk_files import pick_file
 
 logger = logging.getLogger("sources")
 
 # Enough of the start of an answer to tell a playlist from a file by its signature.
 PEEK_BYTES = 4096
+# The range asked of the address of a stream: a playlist of thousands of segments fits whole, a file is not taken.
+PLAYLIST_BYTES = 8 * 1024 * 1024
 _DIRECT = re.compile(r"\.(m3u8|mp4)(?:$|\?)", re.I)
 TS_PACKET = 188
 
@@ -66,31 +68,43 @@ def _excerpt(head: bytes) -> str:
     return " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())[:80]
 
 
-async def served_as(http: httpx.AsyncClient, address: str, headers: dict[str, str]) -> str | Answer:
-    """What the host serves at the address of a stream: "playlist", "file", or the answer that says it serves none (its
-    status, its failure, or what it served instead of a stream). Only the head of the answer is asked."""
+@dataclass(frozen=True)
+class Served:
+    """What a host serves at the address of a stream: a playlist (`answer` is the playlist itself), a file, or no stream
+    (`answer` is what the host said: its status, its failure, or what it served instead)."""
+    kind: str
+    answer: Answer = Answer(None)
+
+
+async def served_as(http: httpx.AsyncClient, address: str, headers: dict[str, str]) -> Served:
+    """What the host serves at the address of a stream, asked once: a playlist is read whole (a host that makes it anew
+    at every request may refuse the next one), of a file only the head is taken."""
     try:
-        asked = {"User-Agent": USER_AGENT, **headers, "Range": f"bytes=0-{PEEK_BYTES - 1}"}
+        asked = {"User-Agent": USER_AGENT, **headers, "Range": f"bytes=0-{PLAYLIST_BYTES - 1}"}
         async with http.stream("GET", address, headers=asked, follow_redirects=True,
                                timeout=MEASURE_TIMEOUT_S) as response:
             if response.status_code not in (200, 206):
-                return Answer(response.status_code, "", final_url=str(response.url))
-            kind = response.headers.get("content-type", "")
-            head = b""
+                return Served("", Answer(response.status_code, "", retry_after(response), final_url=str(response.url)))
+            kind, final = response.headers.get("content-type", ""), str(response.url)
+            head, playlist = b"", False
             async for chunk in response.aiter_bytes():
                 head += chunk
-                if len(head) >= PEEK_BYTES:
-                    break
+                if not playlist and len(head) >= PEEK_BYTES:
+                    playlist = is_playlist(head[:PEEK_BYTES].decode("utf-8", "replace"))
+                    if not playlist:
+                        break
+            # A range the host kept to cuts a playlist longer than it: the whole of it is then asked by the measure.
+            cut = response.status_code == 206 and len(head) >= PLAYLIST_BYTES
     except AnswerTooLarge as exc:
-        return Answer(None, error=f"{type(exc).__name__}: the host ignores the range of a head")
+        return Served("", Answer(None, error=f"{type(exc).__name__}: the host ignores the range of a head"))
     except httpx.HTTPError as exc:
-        return Answer(None, error=f"{type(exc).__name__}: {urlsplit(address).hostname}")
+        return Served("", Answer(None, error=f"{type(exc).__name__}: {urlsplit(address).hostname}"))
     if is_playlist(head[:PEEK_BYTES].decode("utf-8", "replace")):
-        return "playlist"
+        return Served("playlist", Answer(None) if cut else Answer(200, head.decode("utf-8", "replace"), final_url=final))
     if container_of(head) is not None:
-        return "file"
-    return Answer(200, reading=Reading(Kind.NO_FILE, 200, message=(
-        f"the host {urlsplit(address).hostname} served no stream: {kind or 'no type'}, «{_excerpt(head)}»")))
+        return Served("file")
+    return Served("", Answer(200, reading=Reading(Kind.NO_FILE, 200, message=(
+        f"the host {urlsplit(address).hostname} served no stream: {kind or 'no type'}, «{_excerpt(head)}»"))))
 
 
 async def measure_file_frame(address: str, headers: dict[str, str]) -> Answer:
@@ -188,21 +202,18 @@ class AppPlayer:
         if found is None:
             return Answer(200, reading=Reading(Kind.NOT_PLAYER, 200, message="not a link of the application"))
         line, item = found
-        was_kept = self._kept(line, item) is not None
-        try:
-            got = await self.address(line, item)
-        except AppError as exc:
-            return Answer(200, reading=Reading(Kind.NO_ANSWER if exc.transient else Kind.NO_FILE, 200, message=exc.reason))
-        answer = await self._served(http, got.address, got.headers, measure)
-        if was_kept and self.read(answer).kind is not Kind.PLAYABLE:
-            # The address kept from an earlier parse is no longer served: the episode is parsed anew, once.
-            self._parsed.pop((line, item), None)
+        # An address kept from an earlier parse that is no longer served is parsed anew, once, within the same ask.
+        for _ in range(2 if self._kept(line, item) is not None else 1):
             try:
                 got = await self.address(line, item)
             except AppError as exc:
                 return Answer(200, reading=Reading(Kind.NO_ANSWER if exc.transient else Kind.NO_FILE, 200,
                                                    message=exc.reason))
             answer = await self._served(http, got.address, got.headers, measure)
+            if self.read(answer).kind is Kind.PLAYABLE:
+                return answer
+            # An address that gave no stream serves no later ask: the next one has the application parse the episode anew.
+            self._parsed.pop((line, item), None)
         return answer
 
     async def _served(self, http: httpx.AsyncClient, address: str, headers: dict[str, str], measure: bool) -> Answer:
@@ -217,13 +228,14 @@ class AppPlayer:
                              measure: bool) -> Answer:
         """What the host serves at the address of a stream: a file or a playlist, measured or only seen to be there."""
         served = await served_as(http, address, headers)
-        if isinstance(served, Answer):
-            return served
-        if served == "file":
+        if served.kind == "file":
             if not measure:
                 return Answer(200, reading=Reading(Kind.PLAYABLE, 200, files=((0, address),)))
             return await self._measure_file(address, headers)
-        return await measured(http, address, "", self._measure if measure else None, headers)
+        if served.kind == "playlist":
+            return await measured(http, address, "", self._measure if measure else None, headers,
+                                  fetched=served.answer if served.answer.status else None)
+        return served.answer
 
     def read(self, answer: Answer) -> Reading:
         if answer.reading is not None:
@@ -233,7 +245,7 @@ class AppPlayer:
         if answer.status == 404:
             return Reading(Kind.NOT_FOUND, answer.status, message="the host answered 404")
         if answer.status == 200:
-            return Reading(Kind.NOT_PLAYER, 200, message="the host served no playlist")
+            return Reading(Kind.NOT_PLAYER, 200, message=f"the host served no playlist: «{_excerpt(answer.text.encode())}»")
         return Reading(Kind.HTTP_ERROR, answer.status, message=f"the host answered {answer.status}")
 
     async def stream(self, url: str, http: httpx.AsyncClient, max_height: int | None, pacer) -> dict:
@@ -247,11 +259,11 @@ class AppPlayer:
         kept = self._kept(*found)
         headers = kept.headers if kept is not None else {}
         served = await served_as(http, picked[1], headers)
-        if isinstance(served, Answer):
-            cause = self.read(served)
+        if not served.kind:
+            cause = self.read(served.answer)
             raise StreamUnavailable(reason("player_failed", player=self.label, cause=cause.message or cause.kind.value),
                                     True)
-        progressive = served == "file"
+        progressive = served.kind == "file"
         return {"stream_url": picked[1], "headers": headers, "progressive": progressive, "playlist": not progressive}
 
 

@@ -11,7 +11,7 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 REQUEST_TIMEOUT_S = 8.0
 
 
-def _retry_after(response: httpx.Response) -> float | None:
+def retry_after(response: httpx.Response) -> float | None:
     value = response.headers.get("Retry-After")
     if not isinstance(value, str):
         return None
@@ -29,7 +29,7 @@ async def get_answer(http: httpx.AsyncClient, url: str, referer: str, agent: str
                                   follow_redirects=True, timeout=timeout)
     except httpx.HTTPError as exc:
         return Answer(None, error=type(exc).__name__)
-    return Answer(response.status_code, response.text, _retry_after(response), final_url=str(response.url))
+    return Answer(response.status_code, response.text, retry_after(response), final_url=str(response.url))
 
 
 async def post_answer(http: httpx.AsyncClient, url: str, data: dict, headers: dict, *,
@@ -39,7 +39,7 @@ async def post_answer(http: httpx.AsyncClient, url: str, data: dict, headers: di
                                    follow_redirects=True, timeout=timeout)
     except httpx.HTTPError as exc:
         return Answer(None, error=type(exc).__name__)
-    return Answer(response.status_code, response.text, _retry_after(response))
+    return Answer(response.status_code, response.text, retry_after(response))
 
 
 def read_answer(answer: Answer, reader: Callable[[int, str], Reading]) -> Reading:

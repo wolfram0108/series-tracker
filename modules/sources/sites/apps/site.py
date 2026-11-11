@@ -10,12 +10,20 @@ its parsers are visible fields of its rows.
 
 The table is the card as the application lists it, read by two requests, and the frame of every row measured on its own
 video: its stream asked (a parse of the application for a line of a parser), its playlist or file read, the head of the
-picture given to ffprobe (players/app_lines.py). A frame is of the row it was measured on and of no other row. Each row
-is asked once, at the pace the read of a card keeps (`ROWS_PER_SECOND`); a row the last table measured on itself
-(`frame: measured`) keeps its frame and is not asked again, so a read after the first one asks only the episodes that are
-new. A row whose episode gave no stream is `not_obtained` with the cause the host or the application gave, and is asked
-again by the next read. The field `stream` of a row says how its stream comes: the playlist the line lists itself, or a
-parser of the application.
+picture given to ffprobe (players/app_lines.py). A frame is of the row it was measured on and of no other row. A row the
+last table measured on itself (`frame: measured`) keeps its frame and is not asked again, so a read after the first one
+asks only the episodes that are new and the ones that were absent.
+
+A row of the table is a video with its frame, or the absence of the episode on its line: there is no row left "not
+measured". Every row is asked at the pace the read of a card keeps (`ROWS_PER_SECOND`) under the policy of every player
+(policy.py: an unsure answer is asked again, the application parsing the episode anew, the pause a host names is kept).
+A row whose answer stayed unsure while the whole card was being asked (no answer, a host too busy, a refusal a parser
+words at one request and not at the next) is asked again when the rest is done, a few rows at a time (`CALM_ROUNDS`): an
+answer under the load of the read is not yet the answer about the episode. A final answer (the host has no such file, a
+store serves a stub for the start of the film) is asked once. An episode that gave no picture after all of it is
+`absent` with what the host or the application said last,
+and the log of the read names every such episode of every line. The field `stream` of a row says how its stream comes:
+the playlist the line lists itself, or a parser of the application.
 """
 from __future__ import annotations
 
@@ -26,10 +34,8 @@ from urllib.parse import urlsplit
 from core.contracts import RowState, TableRow
 from core.reasons import reason
 
-from core.retry import retrying
-
-from ...players.contract import Kind, PlayerRef, Reading
-from ...policy import DEFAULT, Pacer, status_is_transient
+from ...players.contract import Kind, PlayerRef
+from ...policy import Pacer, Verdict, settle
 from ...apps import SCHEME, card_address
 from ...apps import AppError
 from ...players.app_lines import AppLines, AppPlayer
@@ -43,11 +49,10 @@ ROWS_PER_SECOND = 25
 # A row is asked, read and measured in about three seconds: four seconds of rows at that pace in flight at most, so that a
 # host that slows down holds back the asks instead of piling them up.
 ROWS_IN_FLIGHT = ROWS_PER_SECOND * 4
-
-
-def _passing(reading: Reading) -> bool:
-    """A failure of the way, not an answer about the episode: no answer at all, or a host's passing error."""
-    return reading.kind is Kind.NO_ANSWER or (reading.kind is Kind.HTTP_ERROR and status_is_transient(reading.status))
+# The rows whose answer stayed unsure under the load of the read are asked again when the rest is done, this many at a
+# time and this many times over: a host that was too busy for a hundred asks answers a few.
+CALM_IN_FLIGHT = 8
+CALM_ROUNDS = 2
 
 
 class AppSite:
@@ -106,6 +111,7 @@ class AppSite:
                         "; ".join(passed))
         frames = await self._frames(card_url, lines, ctx)
         rows: list[TableRow] = []
+        absent: dict[str, list[str]] = {}
         for line, fields, listed in lines:
             for place, label, token in listed:
                 link = self.player.link_of(card_url, line.code, token)
@@ -118,29 +124,24 @@ class AppSite:
                                          state=RowState.PLAYABLE, heights=heights, link=link,
                                          site_fields={**own, **frame}))
                     continue
+                absent.setdefault(line.code, []).append(label)
                 rows.append(TableRow(key=key, player=line.name, player_label=line.label, text=label,
-                                     state=RowState.NOT_OBTAINED, link=link, site_fields={**own, **frame},
+                                     state=RowState.ABSENT, link=link, site_fields={**own, **frame},
                                      reason=frame["frame_failed"]))
+        if absent:
+            logger.warning("приложение %s, карточка %s: серий без видео — %s", self.name, self._card(card_url),
+                           "; ".join(f"{code}: {len(labels)} ({', '.join(labels[:12])}{'…' if len(labels) > 12 else ''})"
+                                     for code, labels in absent.items()))
         if not rows:
             raise SiteError(reason("no_players_empty", site=self.player.label))
         title = " · ".join(part for part in (self.label, card.names[0] + (f" ({card.year})" if card.year else "")
                                              if card.names else "") if part)
         return TableDraft(names=card.names, title=title, rows=rows)
 
-    async def _asked(self, line, link: str, http, card_url: str) -> Reading:
-        """What the player of a row says of its episode. A connection that failed or a host's passing error (no answer,
-        5xx) is asked again within the budget of every player (core/retry.py); what the application or the host said of
-        the episode itself (no stream, no file, a refusal) is its answer and is not asked again."""
-        async def ask() -> Reading:
-            await self.pacer.wait()
-            return line.read(await line.fetch(PlayerRef(line.name, link), http, card_url))
-
-        reading, _attempts, _left = await retrying(ask, final=lambda said: not _passing(said), budget=DEFAULT)
-        return reading
-
     async def _frames(self, card_url: str, lines, ctx: ReadContext) -> dict[str, tuple[list[int], dict]]:
         """The frame of each row measured on its own video, by its link ([height] or [] with why): the last table's of
-        every row it measured on itself, the others measured now at the pace of the players, a failure of the way asked again."""
+        every row it measured on itself, the others asked now; the rows whose answer stayed unsure asked again after
+        the rest, a few at a time."""
         kept = {row.link: (list(row.heights), {"frame": "measured"}) for row in ctx.last_rows
                 if self.player.owns(row.link) and row.heights and row.site_fields.get("frame") == "measured"}
         asked = [(line, link) for line, _fields, listed in lines
@@ -149,21 +150,46 @@ class AppSite:
         done = 0
         ctx.progress(PHASE_PLAYERS, 0, len(asked))
 
-        async def measure(line, link) -> tuple[str, tuple[list[int], dict]]:
+        async def ask(line, link, flight: asyncio.Semaphore, first: bool) -> tuple[str, Verdict | Exception]:
             nonlocal done
             try:
-                async with self.in_flight:
-                    reading = await self._asked(line, link, ctx.http, card_url)
-                said = reading.message or reading.kind.value
-                heights = sorted(reading.resolutions)[-1:]
-                failed = said if said.startswith('{"code"') else reason("player_failed", player=line.label, cause=said)
+                async with flight:
+                    said: Verdict | Exception = await settle(line, PlayerRef(line.name, link), ctx.http, card_url,
+                                                             pacer=self.pacer)
             except Exception as exc:  # noqa: BLE001 - one row cannot take the others with it
-                heights, failed = [], reason("player_failed", player=line.label, cause=type(exc).__name__)
-            done += 1
-            ctx.progress(PHASE_PLAYERS, done, len(asked))
-            if heights:
-                return link, (heights, {"frame": "measured"})
-            return link, ([], {"frame_failed": failed})
+                said = exc
+            if first:
+                done += 1
+                ctx.progress(PHASE_PLAYERS, done, len(asked))
+            return link, said
 
-        measured = dict(await asyncio.gather(*(measure(line, link) for line, link in asked)))
-        return {**kept, **measured}
+        said = dict(await asyncio.gather(*(ask(line, link, self.in_flight, True) for line, link in asked)))
+        calm = asyncio.Semaphore(CALM_IN_FLIGHT)
+        for _round in range(CALM_ROUNDS):
+            again = [(line, link) for line, link in asked if _unsure(said[link])]
+            if not again:
+                break
+            logger.info("приложение %s, карточка %s: %d строк без окончательного ответа спрашиваются снова", self.name,
+                        self._card(card_url), len(again))
+            said.update(await asyncio.gather(*(ask(line, link, calm, False) for line, link in again)))
+        labels = {link: line.label for line, link in asked}
+        return {**kept, **{link: _frame_of(each, labels[link]) for link, each in said.items()}}
+
+
+def _unsure(said: Verdict | Exception) -> bool:
+    """An answer that is not the last word about the episode: the ask failed, or the policy of the players left it
+    unsure when its attempts ran out (nothing came, the host was too busy, a refusal that may pass)."""
+    return isinstance(said, Exception) or said.exhausted
+
+
+def _frame_of(said: Verdict | Exception, label: str) -> tuple[list[int], dict]:
+    """What the asks of a row came to: its frame, or why its episode has none."""
+    if isinstance(said, Exception):
+        return [], {"frame_failed": reason("player_failed", player=label, cause=f"{type(said).__name__}: {said}"[:200])}
+    reading = said.reading
+    heights = sorted(reading.resolutions)[-1:] if reading.kind is Kind.PLAYABLE else []
+    if heights:
+        return heights, {"frame": "measured"}
+    cause = reading.message or reading.kind.value
+    return [], {"frame_failed": cause if cause.startswith('{"code"') else reason("player_failed", player=label, cause=cause),
+                "asked": said.attempts}
