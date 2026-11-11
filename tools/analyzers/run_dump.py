@@ -41,12 +41,42 @@ def row_of(op: str) -> str:
     return f"{found.group(1)}:{found.group(2)}" if found else op
 
 
+# What the summary never reads: the whole state of other queues sent at each change (they make most of a dump: 0.6 of
+# 700 MB of a sync of a day), and the lines of the log below INFO.
+SKIPPED = frozenset({"conform.queue.changed", "planner.pack.changed", "planner.journal.changed"})
+# Each change of the queue of the downloads carries every card: only the last of each card is read.
+CARDS = "downloads.queue.changed"
+
+
+def dump_rows(path: str) -> tuple[list[dict], int, str]:
+    """(the rows the summary reads, the number of rows of the dump, the time of its last row), the dump read line by line:
+    the memory a summary takes does not grow with the queues the dump carries."""
+    rows: list[dict] = []
+    cards: dict[str, dict] = {}
+    count, last = 0, ""
+    for line in gzip.open(path, "rt", encoding="utf-8"):
+        row = json.loads(line)
+        count, last = count + 1, row["t"]
+        if row["e"] == "bus" and row.get("topic") in SKIPPED:
+            continue
+        if row["e"] == "log" and row.get("level") == "DEBUG":
+            continue
+        if row["e"] == "bus" and row.get("topic") == CARDS:
+            for task in row["payload"].get("tasks") or []:
+                cards[task["id"]] = task
+            continue
+        rows.append(row)
+    if cards:
+        rows.append({"e": "bus", "topic": CARDS, "t": last, "payload": {"tasks": list(cards.values())}})
+    return rows, count, last
+
+
 def main(path: str, logs: bool) -> None:
-    rows = [json.loads(line) for line in gzip.open(path, "rt", encoding="utf-8")]
+    rows, count, last = dump_rows(path)
     bus = [row for row in rows if row["e"] == "bus"]
-    began, ended = stamp(rows[0]["t"]), stamp(rows[-1]["t"])
-    print(f"дамп {os.path.basename(path)}: {clock(rows[0]['t'])} — {clock(rows[-1]['t'])} UTC, "
-          f"{(ended - began).total_seconds():.0f} с, строк {len(rows)}")
+    began, ended = stamp(rows[0]["t"]), stamp(last)
+    print(f"дамп {os.path.basename(path)}: {clock(rows[0]['t'])} — {clock(last)} UTC, "
+          f"{(ended - began).total_seconds():.0f} с, строк {count}")
 
     subject = rows[0].get("url") or (f"сериал {rows[0]['series_id']}" if rows[0].get("series_id") is not None else "")
     if subject:
