@@ -284,6 +284,7 @@ export const ru = {
   "sources.phase.players": "Опрос плееров",
   "sources.phase.catalog": "Каталог плеера",
   "sources.phase.videos": "Видео канала",
+  "sources.phase.recheck": "Повторный запрос строк без ответа",
   "sources.phase.unknown": "Чтение страницы",
   "sources.title": "Источники",
   "output.tab": "Выход",

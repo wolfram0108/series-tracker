@@ -18,9 +18,11 @@ A row of the table is a video with its frame, or the absence of the episode on i
 measured". Every row is asked at the pace the read of a card keeps (`ROWS_PER_SECOND`) under the policy of every player
 (policy.py: an unsure answer is asked again, the application parsing the episode anew, the pause a host names is kept).
 A row whose answer stayed unsure while the whole card was being asked (no answer, a host too busy, a refusal a parser
-words at one request and not at the next) is asked again when the rest is done, a few rows at a time, while a round
-gives some row its answer (`CALM_ROUNDS` at most): an answer under the load of the read is not yet the answer about the
-episode. A final answer (the host has no such file, a
+words at one request and not at the next) is looked at again when the rest is done: an answer under the load of the
+read is not yet the answer about the episode. The rows of one line left with one cause are one question, answered by
+asking one of them again: the same answer says the way is down (a host that takes no connection), and the others keep
+it unasked; another answer says it was the load, and every one of them is asked again, a few at a time. The read shows
+this as a phase of its own (`recheck`) with its count. A final answer (the host has no such file, a
 store serves a stub for the start of the film) is asked once. An episode that gave no picture after all of it is
 `absent` with what the host or the application said last,
 and the log of the read names every such episode of every line. The field `stream` of a row says how its stream comes:
@@ -40,7 +42,7 @@ from ...policy import Pacer, Verdict, settle
 from ...apps import SCHEME, card_address
 from ...apps import AppError
 from ...players.app_lines import AppLines, AppPlayer
-from .. import PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError, TableDraft
+from .. import PHASE_PLAYERS, PHASE_RECHECK, PHASE_RELEASE, ReadContext, SiteError, TableDraft
 from ..recent import last_of_each
 
 logger = logging.getLogger("sources")
@@ -51,10 +53,8 @@ ROWS_PER_SECOND = 25
 # host that slows down holds back the asks instead of piling them up.
 ROWS_IN_FLIGHT = ROWS_PER_SECOND * 4
 # The rows whose answer stayed unsure under the load of the read are asked again when the rest is done, this many at a
-# time and at most this many times over, while a round gives some row its answer: a host that was too busy for a
-# hundred asks answers a few, and one that answers none of its rows in a round is not asked a round more.
+# time: a host that was too busy for a hundred asks answers a few.
 CALM_IN_FLIGHT = 8
-CALM_ROUNDS = 2
 
 
 class AppSite:
@@ -142,8 +142,8 @@ class AppSite:
 
     async def _frames(self, card_url: str, lines, ctx: ReadContext) -> dict[str, tuple[list[int], dict]]:
         """The frame of each row measured on its own video, by its link ([height] or [] with why): the last table's of
-        every row it measured on itself, the others asked now; the rows whose answer stayed unsure asked again after
-        the rest, a few at a time."""
+        every row it measured on itself, the others asked now; the rows whose answer stayed unsure looked at again
+        after the rest, cause by cause."""
         kept = {row.link: (list(row.heights), {"frame": "measured"}) for row in ctx.last_rows
                 if self.player.owns(row.link) and row.heights and row.site_fields.get("frame") == "measured"}
         asked = [(line, link) for line, _fields, listed in lines
@@ -152,35 +152,68 @@ class AppSite:
         done = 0
         ctx.progress(PHASE_PLAYERS, 0, len(asked))
 
-        async def ask(line, link, flight: asyncio.Semaphore, first: bool) -> tuple[str, Verdict | Exception]:
-            nonlocal done
+        async def ask(line, link, flight: asyncio.Semaphore) -> tuple[str, Verdict | Exception]:
             try:
                 async with flight:
-                    said: Verdict | Exception = await settle(line, PlayerRef(line.name, link), ctx.http, card_url,
-                                                             pacer=self.pacer)
+                    return link, await settle(line, PlayerRef(line.name, link), ctx.http, card_url, pacer=self.pacer)
             except Exception as exc:  # noqa: BLE001 - one row cannot take the others with it
-                said = exc
-            if first:
-                done += 1
-                ctx.progress(PHASE_PLAYERS, done, len(asked))
-            return link, said
+                return link, exc
 
-        said = dict(await asyncio.gather(*(ask(line, link, self.in_flight, True) for line, link in asked)))
+        async def first(line, link) -> tuple[str, Verdict | Exception]:
+            nonlocal done
+            answer = await ask(line, link, self.in_flight)
+            done += 1
+            ctx.progress(PHASE_PLAYERS, done, len(asked))
+            return answer
+
+        said = dict(await asyncio.gather(*(first(line, link) for line, link in asked)))
+        # The rows left unsure, by their line and what was said of them: one cause of one line is one question — was it
+        # the load of the read, or is the way to these episodes down.
+        unsure: dict[tuple[str, str], list] = {}
+        for line, link in asked:
+            if _unsure(said[link]):
+                unsure.setdefault((line.code, _cause_of(said[link])), []).append((line, link))
+        total, checked = sum(len(rows) for rows in unsure.values()), 0
         calm = asyncio.Semaphore(CALM_IN_FLIGHT)
-        again = [(line, link) for line, link in asked if _unsure(said[link])]
-        for _round in range(CALM_ROUNDS):
-            if not again:
-                break
-            logger.info("приложение %s, карточка %s: %d строк без окончательного ответа спрашиваются снова", self.name,
-                        self._card(card_url), len(again))
-            said.update(await asyncio.gather(*(ask(line, link, calm, False) for line, link in again)))
-            still = [(line, link) for line, link in again if _unsure(said[link])]
-            if len(still) == len(again):
-                # A round that gave no row its answer is not repeated: what is left is not of the load of the read.
-                break
-            again = still
+
+        async def recheck(cause: str, rows: list) -> None:
+            """One row of the cause is asked again when the rest of the card is done. The same answer: the way is down,
+            and the other rows of the cause keep it unasked (a host that takes no connection is not asked for each of
+            its hundred episodes again). Another answer: it was the load, and every row of the cause is asked again."""
+            nonlocal checked
+            (line, link), rest = rows[0], rows[1:]
+            said[link] = (await ask(line, link, calm))[1]
+            down = _unsure(said[link]) and _cause_of(said[link]) == cause
+            checked += 1 if rest and not down else len(rows)
+            ctx.progress(PHASE_RECHECK, checked, total)
+            logger.info("приложение %s, карточка %s, линия %s: «%s» — %s", self.name, self._card(card_url), line.code,
+                        cause[:160], f"подтвердилось на повторном запросе, остальные {len(rest)} строк не спрашиваются"
+                        if down else f"не подтвердилось, спрашиваются остальные {len(rest)} строк")
+            if down or not rest:
+                return
+
+            async def again(each_line, each_link) -> tuple[str, Verdict | Exception]:
+                nonlocal checked
+                answer = await ask(each_line, each_link, calm)
+                checked += 1
+                ctx.progress(PHASE_RECHECK, checked, total)
+                return answer
+            said.update(await asyncio.gather(*(again(each_line, each_link) for each_line, each_link in rest)))
+
+        if unsure:
+            logger.info("приложение %s, карточка %s: %d строк без окончательного ответа, причин %d — каждая причина "
+                        "проверяется повторным запросом одной строки", self.name, self._card(card_url), total, len(unsure))
+            ctx.progress(PHASE_RECHECK, 0, total)
+            await asyncio.gather(*(recheck(cause, rows) for (_code, cause), rows in unsure.items()))
         labels = {link: line.label for line, link in asked}
         return {**kept, **{link: _frame_of(each, labels[link]) for link, each in said.items()}}
+
+
+def _cause_of(said: Verdict | Exception) -> str:
+    """What was said of a row that got no frame, in the words the row is given."""
+    if isinstance(said, Exception):
+        return f"{type(said).__name__}: {said}"[:200]
+    return said.reading.message or said.reading.kind.value
 
 
 def _unsure(said: Verdict | Exception) -> bool:

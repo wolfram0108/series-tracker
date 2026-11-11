@@ -29,8 +29,19 @@ import httpx
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BASE = os.environ.get("ST_LIVE_BASE", "http://127.0.0.1:5000")
 LOG = os.path.join(ROOT, "logs", "info.log")
-# A read of a page ends by itself; a stream that tells nothing for this long is a broken check, not a slow read.
-READ_LIMIT_S = 170.0
+# A read of a page and a sync end by themselves and are waited for by their event, however long they take (the limit of
+# the whole check is its run's own). A stream that sends nothing at all for this long is a broken connection.
+STREAM_SILENT_S = 170.0
+
+
+async def lines_of(stream):
+    """The lines of the stream of events; the stream going silent ends the check with an error."""
+    lines = stream.aiter_lines()
+    while True:
+        try:
+            yield await asyncio.wait_for(anext(lines), STREAM_SILENT_S)
+        except StopAsyncIteration:
+            return
 
 
 def secrets() -> dict[str, str]:
@@ -68,7 +79,7 @@ def ranges_since(moment: str) -> int:
 async def table_end(http: httpx.AsyncClient, canonical: str, listening: asyncio.Event) -> str:
     async with http.stream("GET", "/api/stream", params={"frames": "batch"}, timeout=None) as stream:
         listening.set()
-        async for line in stream.aiter_lines():
+        async for line in lines_of(stream):
             if line.startswith("data:"):
                 for each in json.loads(line[5:]):
                     if each.get("event") in ("sources_table_ready", "sources_table_failed") \
@@ -94,7 +105,7 @@ async def preview(url: str, now: bool) -> None:
             state = "reading" if asked.status_code == 200 else f"refused {asked.status_code}"
         else:
             state = (await http.post("/api/sources/preview", json={"url": url, "refresh": True})).json().get("state")
-        outcome = await asyncio.wait_for(ending, READ_LIMIT_S) if state == "reading" else state
+        outcome = await ending if state == "reading" else state
         if not ending.done():
             ending.cancel()
         seconds = time.perf_counter() - started
@@ -114,7 +125,7 @@ async def series_end(http: httpx.AsyncClient, series_id: int, listening: asyncio
     seen = False
     async with http.stream("GET", "/api/stream", params={"frames": "batch"}, timeout=None) as stream:
         listening.set()
-        async for line in stream.aiter_lines():
+        async for line in lines_of(stream):
             if line.startswith("data:"):
                 for each in json.loads(line[5:]):
                     data = each.get("data") or {}
@@ -135,7 +146,7 @@ async def sync(series_id: int) -> None:
         await listening.wait()
         pressed = await http.post(f"/api/series/{series_id}/scan")
         print("sync", pressed.status_code, pressed.text[:200])
-        statuses = await asyncio.wait_for(ending, READ_LIMIT_S)
+        statuses = await ending
         plan = (await http.get(f"/api/series/{series_id}/plan")).json()
         print(f"ended in {time.perf_counter() - started:.1f} s, statuses {statuses}")
         for asset in plan.get("assets") or []:

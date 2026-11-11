@@ -24,7 +24,7 @@ from modules.sources.players import app_lines, hls
 from modules.sources.players.app_lines import AppLines, AppPlayer, measure_file_frame
 from modules.sources.players.contract import Answer, Kind, Reading, StreamUnavailable
 from modules.sources.players.registry import PlayerRegistry
-from modules.sources.sites import PHASE_PLAYERS, ReadContext
+from modules.sources.sites import PHASE_PLAYERS, PHASE_RECHECK, ReadContext
 from modules.sources.sites.apps import AppSite
 from app99_model import HOST, UUID, App99Model, Card, Line, profile
 from schema_db import migrated
@@ -93,7 +93,7 @@ def world(model: App99Model, playlists: dict[str, str] | None = None) -> tuple[h
         if path.startswith("/once-525/") and failed.setdefault(url, 0) < 1:  # a host's passing error, once
             failed[url] += 1
             return httpx.Response(525, text="")
-        busy = 4 if path.startswith("/busy/") else 7 if path.startswith("/busier/") else 0
+        busy = 4 if path.startswith("/busy/") else 5 if path.startswith("/busier/") else 0
         if failed.setdefault(url, 0) < busy:  # a host too busy while the whole card is asked, and one busier still
             failed[url] += 1
             return httpx.Response(429, headers={"Retry-After": "0"}, text="")
@@ -162,8 +162,8 @@ async def test_a_card_is_a_table_of_its_admitted_lines_each_row_with_the_frame_o
         assert any("серий без видео — CO4K: 1 (2)" in record.getMessage() for record in caplog.records)
         assert draft.names == ["万界独尊", "Ten Thousand Worlds"] and draft.title == "半日 · 万界独尊 (2021)"
         # One ask for an episode that answered, its playlist asked of its host once; an episode that gave no stream is
-        # asked as many times as the policy of the players allows, in the read and in one calm round after it (a round
-        # that gave no row its answer is not repeated); the refused line is not asked.
+        # asked as many times as the policy of the players allows, in the read and once more when the rest is done;
+        # the refused line is not asked.
         assert sorted(heads) == sorted(f"{CDN}{name}/seg0.ts" for name in "abcd")
         assert sorted(_asked) == sorted(f"{CDN}{name}" for name in ("a/index.m3u8", "b/index.m3u8", "c/pv.m3u8", "d/1.m3u8"))
         assert sorted(fields["url"] for path, fields in model.calls if path == "/app/vodParser") == \
@@ -253,8 +253,9 @@ async def test_an_answer_that_is_not_final_is_asked_again_and_a_row_ends_with_it
 
 async def test_a_row_the_way_to_which_failed_under_the_load_of_the_read_is_asked_again_when_the_rest_is_done(caplog):
     """A host too busy for every ask the policy allows while the whole card is being asked is not the answer about the
-    episode: its rows are asked again after the rest, a few at a time, and get the frames of their own episodes. A round
-    is followed by another while it gives some row its answer."""
+    episode. When the rest is done one row of the cause is asked again: it answers, so it was the load, and the other
+    rows of the cause are asked again too and get the frames of their own episodes. The read shows it as a phase of
+    its own."""
     model = card_world()
     model.parses[(9, "CO4K_tok1")] = f"{CDN}busy/1.m3u8"
     model.parses[(9, "CO4K_pv")] = f"{CDN}busier/pv.m3u8"
@@ -272,11 +273,41 @@ async def test_a_row_the_way_to_which_failed_under_the_load_of_the_read_is_asked
                 "app://banri/219017", ReadContext(http, lambda *step: progress.append(step)))
     heights = {row.key: row.heights for row in draft.rows}
     assert heights["banri:CO4K:1"] == [2160] and heights["banri:CO4K:3"] == [1440]
-    # Three asks of the read and two of the first round; three, three and two of the second round for the busier one.
-    assert asked.count(f"{CDN}busy/1.m3u8") == 5 and asked.count(f"{CDN}busier/pv.m3u8") == 8
-    assert any("строк без окончательного ответа спрашиваются снова" in record.getMessage() for record in caplog.records)
-    # The count of the rows of the read goes up to their number once, whatever is asked again.
+    # Three asks of the read and two more of the row asked first; three and three of the other row of the cause.
+    assert asked.count(f"{CDN}busy/1.m3u8") == 5 and asked.count(f"{CDN}busier/pv.m3u8") == 6
+    assert any("не подтвердилось, спрашиваются остальные 1 строк" in record.getMessage() for record in caplog.records)
+    # The rows of the read are counted once; what is looked at again is a phase of its own with its own count.
     assert [step[1:] for step in progress if step[0] == PHASE_PLAYERS][-1] == (5, 5)
+    # Three rows were left unsure: the two of the busy host (one cause) and the episode no parser gave a stream of.
+    assert [step[1:] for step in progress if step[0] == PHASE_RECHECK] == [(0, 3), (1, 3), (2, 3), (3, 3)]
+
+
+async def test_a_host_that_takes_no_connection_is_asked_again_for_one_of_its_rows_not_for_each(caplog):
+    """A hundred episodes of a line lie on a host that takes no connection. It is no load of the read: one row of the
+    cause asked again says the same, and the others keep their answer unasked — the read does not stand for minutes
+    asking a dead host for every episode. Each of them is an absent episode with the cause."""
+    model = App99Model(parsers=[9])
+    model.line("L", "线", parsers="9")
+    model.cards[1] = Card(1, "万界独尊", lines=[Line("L", [(str(n), f"tok{n}") for n in range(1, 7)])])
+    for n in range(1, 6):
+        model.parses[(9, f"tok{n}")] = f"https://ad.model/v/{n}.m3u8"
+    model.parses[(9, "tok6")] = f"{CDN}png/6"
+    http, asked = world(model)
+    progress: list[tuple] = []
+    async with http:
+        player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(720), registry=admitting("L"))
+        with caplog.at_level("INFO", logger="sources"):
+            draft = await AppSite(player, AppLines([player])).read(
+                "app://banri/1", ReadContext(http, lambda *step: progress.append(step)))
+    assert [(row.text, row.state.value, row.heights) for row in draft.rows] == \
+        [(str(n), "absent", []) for n in range(1, 6)] + [("6", "playable", [720])]
+    assert all("ConnectError: ad.model" in row.reason for row in draft.rows[:5])
+    dead = [url for url in asked if "ad.model" in url]
+    # Every row in the read, as the policy allows, and one of them once more: not every one of them again.
+    assert len(dead) == 5 * policy.DEFAULT.attempts + policy.DEFAULT.attempts
+    assert any("подтвердилось на повторном запросе, остальные 4 строк не спрашиваются" in record.getMessage()
+               for record in caplog.records)
+    assert [step[1:] for step in progress if step[0] == PHASE_RECHECK] == [(0, 5), (5, 5)]
 
 
 async def test_the_frame_of_a_playlist_is_of_its_film_and_a_stub_served_for_its_start_is_the_absence_of_the_video():

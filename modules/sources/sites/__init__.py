@@ -25,7 +25,8 @@ PHASE_EPISODES = "episodes"  # the page of each episode
 PHASE_PLAYERS = "players"    # the asks of the players on the rows
 PHASE_CATALOG = "catalog"    # the catalog of a player that describes the whole series (Vibix)
 PHASE_VIDEOS = "videos"      # the videos of a channel
-PHASES = (PHASE_RELEASE, PHASE_EPISODES, PHASE_PLAYERS, PHASE_CATALOG, PHASE_VIDEOS)
+PHASE_RECHECK = "recheck"    # the rows whose answer stayed unsure, looked at again when the rest is done
+PHASES = (PHASE_RELEASE, PHASE_EPISODES, PHASE_PLAYERS, PHASE_CATALOG, PHASE_VIDEOS, PHASE_RECHECK)
 
 
 class SiteError(Exception):

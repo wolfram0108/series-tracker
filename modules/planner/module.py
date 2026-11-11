@@ -110,6 +110,9 @@ PLANNER = "planner"
 COPY_TIMEOUT_S = 1800.0
 ENDED = ("done", "failed", "cancelled", "gone")  # the states of a job that ended (conform.job.get)
 WORK = "planner"  # the folder of the planner's work inside the work folder of the alignment service
+# The containers built at one time, whatever series they are of: the episodes of a sync are built as each is ready, the
+# machine of the service holds 4 GB and the library lies on a network disk. A container that waits is `queued` in its card.
+BUILDS_AT_ONCE = 2
 
 
 def _row_key(row: RowId) -> list:
@@ -540,7 +543,8 @@ class BusSync(SeriesSync):
                     self.m.pack_publish()
             return report
         try:
-            steps = await self.files.build(made, group, results, report_for)
+            async with self.m.building:
+                steps = await self.files.build(made, group, results, report_for)
         except BaseException as exc:
             # The card gives the code of a build that failed (BuildFailed); the words of the error are the log's.
             if isinstance(exc, Exception):
@@ -597,6 +601,7 @@ class PlannerModule(BaseModule):
         self._seq = 0
         # The cards of the packing (core/contracts/packing.py): the containers the syncs build, by series and episode.
         self.packing = PackBook()
+        self.building = asyncio.Semaphore(BUILDS_AT_ONCE)
         self._packing_going = asyncio.Event()  # a container is under way: the queue is told on the beat of core/clock
         super().__init__(bus)
         # The flags of the status of each series: what its sync is at, and what it stands at (contribute, _stand).
