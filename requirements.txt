@@ -27,3 +27,4 @@ camoufox[geoip]==0.5.4
 yt-dlp[default]==2026.10.26
 # Анализ графов кода (code dependency analysis)
 git+https://github.com/safishamsi/graphify.git@3bc3feed545d635a8eec0472109966b05a955636
+curl_cffi==0.17.0

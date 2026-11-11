@@ -51,6 +51,8 @@ class Options:
     table_clock: Callable[[], datetime] = utc_now
     # The video applications read through their APIs (modules/sources/apps), from the private environment.
     apps: list = field(default_factory=list)
+    # The client profile Alloha is asked as (modules/sources/players/alloha_session.py), from the private environment.
+    alloha_profile: object = None
     # Where the registries of the admitted lines of the applications are (modules/sources/apps/lines.py); the package's own
     # folder when None.
     app_lines_dir: str | None = None
@@ -71,7 +73,7 @@ def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, l
         TrackerauthModule(bus, db),
         SourcesModule(bus, db, read_recent=options.read_recent, torrent_cache_dir=options.torrent_cache_dir,
                       table_clock=options.table_clock, apps=options.apps,
-                      app_lines_dir=options.app_lines_dir),
+                      app_lines_dir=options.app_lines_dir, alloha_profile=options.alloha_profile),
         MetadataModule(bus, db),
         LibraryModule(bus, db),
         # scan/downloads/renaming — после catalog/settings/sources/rules: их reconcile при старте шлёт запросы соседям.

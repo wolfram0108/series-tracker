@@ -136,7 +136,8 @@ async def test_the_module_resolves_the_stream_of_a_link_a_player_owns_and_leaves
     other = await probe.request("sources.video.stream", {"url": "https://vk.com/video-1_2"}, timeout=5)
 
     assert allvideo == {"handled": True, "stream_url": "https://cdn.test/1080.mp4/",
-                        "headers": {"Referer": "https://fsst.online/"}, "progressive": True, "playlist": False}
+                        "headers": {"Referer": "https://fsst.online/"}, "progressive": True, "playlist": False,
+                        "player_fetch": False}
     assert other == {"handled": False}
 
 

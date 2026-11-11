@@ -243,3 +243,43 @@ async def test_a_playlist_with_an_advertisement_put_into_it_is_downloaded_withou
         assert not any(served.startswith("ad/") for served in host.served), "nothing of the advertisement was asked"
     finally:
         host.close()
+
+
+# --- a playlist its player takes itself (Alloha) ---------------------------------------------------------------------------------
+
+def player(folder: str, seconds: float, *, refused: str = ""):
+    """A player that takes the segments of the stream on disk into the raw file it is given, or refuses with `refused`."""
+    async def fetch(target: str, on_progress) -> tuple[bool, str, float, float]:
+        if refused:
+            return False, failure.Final(refused), 0.0, 0.0
+        with open(target, "ab") as raw:
+            for index in range(4):
+                with open(os.path.join(folder, f"seg{index}.ts"), "rb") as segment:
+                    raw.write(segment.read())
+        await on_progress({"phase": "download", "progress": 100})
+        return True, "", seconds, 1.0
+    return fetch
+
+
+@pytest.mark.parametrize("stated, whole", [(4.0, True), (9.0, False)])
+async def test_a_stream_its_player_took_is_put_into_the_container_and_taken_only_at_the_length_of_its_playlist(
+        tmp_path, stated, whole):
+    stream(str(tmp_path / "site"))
+    out = str(tmp_path / "lib" / "e1.mp4")
+    ok, why = await ytdlp.download("https://old.yummyani.me/x#alloha=1", out, noop, playlist=True,
+                                   fetcher=player(str(tmp_path / "site" / "show"), stated))
+
+    assert ok is whole, why
+    if whole:
+        assert float(probe(out)["format"]["duration"]) == pytest.approx(4, abs=0.5)
+        assert sorted(os.listdir(tmp_path / "lib")) == ["e1.mp4"], "no leftover of the download stays"
+    else:
+        assert "обрыв" in why and os.listdir(tmp_path / "lib") == []
+
+
+async def test_a_stream_its_player_refused_is_its_failure_with_what_it_says_of_the_source_and_leaves_nothing(tmp_path):
+    out = str(tmp_path / "lib" / "e1.mp4")
+    ok, why = await ytdlp.download("https://old.yummyani.me/x#alloha=1", out, noop, playlist=True,
+                                   fetcher=player(str(tmp_path), 4.0, refused="у плеера нет этой серии"))
+
+    assert not ok and kind_of(why) is Failed.FINAL and os.listdir(tmp_path / "lib") == []

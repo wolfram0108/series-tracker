@@ -404,7 +404,8 @@ async def download(video_url: str, full_output_path: str,
                    progressive: bool = False,
                    max_height: int | None = None,
                    playlist: bool = False,
-                   resumable: bool = False) -> tuple[bool, str]:
+                   resumable: bool = False,
+                   fetcher=None) -> tuple[bool, str]:
     """Two-phase video download. Supports parts of a ready file, direct ffmpeg copy and yt-dlp.
 
     A download that says it is done is taken only at the length its source announced: a stream copy short of it fails (the
@@ -415,6 +416,8 @@ async def download(video_url: str, full_output_path: str,
     The name is owned from the first step to the last: the programs, their leftovers and the publication.
 
     `playlist` marks an HLS playlist a player resolved: it is downloaded by its segments (modules/downloads/hls_native.py).
+    `fetcher`: the player takes the segments itself (`async (raw path, on_progress) -> (ok, words, seconds, longest)`);
+    the stream is then copied and checked as any playlist.
     `resumable`: the caller asks for this file again after a failure of the way to it — the segments a broken transfer
     took stay next to the name (`download_artifacts`) and the next ask continues them; the caller removes them when it
     gives the file up.
@@ -426,7 +429,7 @@ async def download(video_url: str, full_output_path: str,
         with storage.hold(full_output_path):
             if playlist:
                 return await _download_playlist(video_url, full_output_path, on_progress, headers or {}, threads,
-                                                resumable)
+                                                resumable, fetcher)
             announced = await _announced_length(video_url, headers, progressive)
             await on_progress({"phase": "link", "source_seconds": announced or None})
             done = await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive,
@@ -461,7 +464,7 @@ async def _announced_length(video_url: str, headers: dict | None, progressive: b
 
 
 async def _download_playlist(video_url: str, full_output_path: str, on_progress: ProgressCb, headers: dict,
-                             threads: int, resumable: bool = False) -> tuple[bool, str]:
+                             threads: int, resumable: bool = False, fetcher=None) -> tuple[bool, str]:
     """The playlist read by our client and saved, its segments by the native downloader of yt-dlp, the stream copied into
     the container by ffmpeg; the file is taken at the length the playlist states, short of it by up to its longest
     segment. The parts of a transfer that broke stay for a `resumable` download, and are continued by its next ask under
@@ -471,6 +474,8 @@ async def _download_playlist(video_url: str, full_output_path: str, on_progress:
         return True, "файл уже существует"
     await on_progress({"method": "hls"})
     done, seconds, tolerance = (False, ""), 0.0, HOLE_S
+    if fetcher is not None:
+        return await _playlist_by_player(fetcher, full_output_path, on_progress)
     try:
         try:
             snap = await hls_native.snapshot(video_url, headers, full_output_path)
@@ -491,6 +496,33 @@ async def _download_playlist(video_url: str, full_output_path: str, on_progress:
         # transfer whose way broke, when the caller asks again: an exception (a stop) leaves `done` a failure of no words.
         if not (resumable and not done[0] and done[1] and kind_of(done[1]) is Failed.BROKEN):
             await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
+    return await _as_long_as_announced(done, full_output_path, seconds, on_progress, tolerance=tolerance)
+
+
+def player_target(full_output_path: str) -> str:
+    """The file a player writes the segments of a download into: a name of its own next to the file, outside the name the
+    download holds (the player writes from its own module, which the hold of the download does not cover)."""
+    return os.path.join(os.path.dirname(full_output_path), "." + os.path.basename(full_output_path) + ".player.ts")
+
+
+async def _playlist_by_player(fetcher, full_output_path: str, on_progress: ProgressCb) -> tuple[bool, str]:
+    """The segments taken by the player, moved into the raw stream of the download, copied into the container by ffmpeg
+    and checked at the length of the playlist as any playlist; a transfer is never continued (the session of the player
+    that took it is gone)."""
+    raw, taken = full_output_path + ".download.ts", player_target(full_output_path)
+    done, seconds, tolerance = (False, ""), 0.0, HOLE_S
+    try:
+        await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
+        await storage.discard(taken)
+        ok, words, seconds, longest = await fetcher(taken, on_progress)
+        tolerance = max(HOLE_S, longest)
+        done = (ok, words)
+        if ok:
+            await storage.call(os.replace, taken, raw, owns=(taken, raw))
+            done = await _phase_remux(raw, full_output_path, on_progress, seconds)
+    finally:
+        await storage.discard(taken)
+        await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
     return await _as_long_as_announced(done, full_output_path, seconds, on_progress, tolerance=tolerance)
 
 

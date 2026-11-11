@@ -59,7 +59,7 @@ _QUICK = (
     "torrents.queue.get",
     "trackerauth.credentials.get", "trackerauth.credentials.set",
     "planner.work.get", "planner.delete", "planner.delete.cancel", "planner.failures.forget",
-    "planner.downloaded_counts", "planner.seasons",
+    "planner.downloaded_counts", "planner.seasons", "sources.video.fetch.stop",
 )
 
 _FUSES: dict[str, float] = {
@@ -110,8 +110,9 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
 }
 
 # The topics whose request has no fuse of its own (see the top).
-# The move of a series is one move for each file, each with its own (core.storage.MOVE_TIMEOUT_S).
-_UNBOUNDED = frozenset({"scan.series.run", "scan.series.prepare", "library.relocation.apply"})
+# The move of a series is one move for each file, each with its own (core.storage.MOVE_TIMEOUT_S). A file a player
+# downloads itself is as long as its episode: the asker watches its progress events under its fuse of silence.
+_UNBOUNDED = frozenset({"scan.series.run", "scan.series.prepare", "library.relocation.apply", "sources.video.fetch"})
 
 UNBOUNDED = None
 

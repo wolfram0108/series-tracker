@@ -38,7 +38,9 @@ Events out:
       interface connects (gateway.sse.clients): SSE download_queue_update. The cards live with the sync of their series
       (scan.run.changed): while it runs every card is kept; at its end only a failed card and a finished one whose plan
       was rebuilt stay, in the table download_cards, until the user removes them or the next sync of the series begins.
-Events in: scan.run.changed, settings.changed (download_threads_total, download_threads_per_file, download_single_at_once),
+A link whose player downloads the file itself (`player_fetch` of its stream: Alloha) is taken by `sources.video.fetch`
+into the raw file of the download, the progress by `sources.video.progress`; the rest is as for any playlist.
+Events in: sources.video.progress {target, ...figures}, scan.run.changed, settings.changed (download_threads_total, download_threads_per_file, download_single_at_once),
   work.withdrawn {series_id, keys?},
   series.deleted (the fetches of the series stop).
 """
@@ -58,7 +60,7 @@ from core.reasons import reason
 from core.retry import UNTIMED, Budget, retrying
 
 from . import ytdlp
-from .failure import Failed, kind_of
+from .failure import Failed, Final, Unasked, kind_of
 from .limits import KEYS, Limits, Places, whole
 from .cards import CardBook
 from .repository import DownloadsRepository
@@ -130,6 +132,7 @@ class DownloadsModule(BaseModule):
         self.cards = CardBook()  # the telemetry of every need under way (core/contracts/downloads.py)
         self._going = asyncio.Event()  # a card is under way: the queue is told on the beat of core/clock
         self._cancelled: set[str] = set()  # fetches the user stopped: their owners hear them end
+        self._player_progress: dict[str, object] = {}  # the files players download now -> where their progress goes
         super().__init__(bus)
 
     def register(self) -> None:
@@ -141,6 +144,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.queue.clear", self.on_queue_clear)
         self.handle("downloads.cancel", self.on_cancel)
         self.handle("downloads.fetch", self.on_fetch)
+        self.handle("sources.video.progress", self.on_player_progress)
         self.handle(WORK_WITHDRAWN, self.on_work_withdrawn)
         self.handle("downloads.withdraw", self.on_withdraw, concurrent=True)
         self.handle("downloads.item.set_filename", self.on_set_filename)
@@ -320,10 +324,11 @@ class DownloadsModule(BaseModule):
     # --- the fetches ------------------------------------------------------------------
 
     async def _resolve_stream(self, url: str, *, max_height: int | None = None,
-                              ytdlp_fallback) -> tuple[str, dict | None, tuple[str, Failed] | None, bool, bool]:
-        """(stream url, headers, (error, what it says of the source), progressive, playlist) of a link, via the provider
-        that owns it. The provider says itself whether its refusal is its last word; a provider that did not answer said
-        nothing of the source.
+                              ytdlp_fallback) -> tuple[str, dict | None, tuple[str, Failed] | None, bool, bool, bool]:
+        """(stream url, headers, (error, what it says of the source), progressive, playlist, by the player) of a link, via
+        the provider that owns it. The provider says itself whether its refusal is its last word; a provider that did not
+        answer said nothing of the source. `by the player`: the player downloads the file itself (`sources.video.fetch`),
+        a playlist by its segments.
 
         `ytdlp_fallback` is an async callable asked only when the request fails: True hands the link to
         the downloader as it is, False makes the failure the error of the job, since a page of a web
@@ -333,15 +338,16 @@ class DownloadsModule(BaseModule):
             reply = await self.request("sources.video.stream", payload)
             if reply.get("error"):
                 return (url, None, (reply["error"], Failed.BROKEN if reply.get("transient") else Failed.FINAL),
-                        False, False)
+                        False, False, False)
             if reply.get("handled"):
+                by_player = bool(reply.get("player_fetch"))
                 return (reply["stream_url"], reply.get("headers"), None, bool(reply.get("progressive")),
-                        bool(reply.get("playlist")))
+                        bool(reply.get("playlist")) or by_player, by_player)
         except Exception as exc:
             if not await ytdlp_fallback():
-                return url, None, (f"поток не получен: {exc}", Failed.UNASKED), False, False
+                return url, None, (f"поток не получен: {exc}", Failed.UNASKED), False, False, False
             self.log.debug("sources.video.stream не обработан для %s: %s", url, exc)
-        return url, None, None, False, False
+        return url, None, None, False, False, False
 
     async def on_fetch(self, env: Envelope) -> None:
         job = {k: env.payload.get(k) for k in ("key", "url", "path", "max_height", "series_id", "whole", "ytdlp")}
@@ -410,7 +416,7 @@ class DownloadsModule(BaseModule):
             self.cards.attempt(need_key, tries, budget.attempts)
             self.places.asking(turn)
             try:
-                stream_url, headers, stream_error, progressive, playlist = await resolve()
+                stream_url, headers, stream_error, progressive, playlist, by_player = await resolve()
                 if stream_error is not None:
                     return (False, *stream_error)
                 multi = ytdlp.multithreaded(stream_url, headers, progressive, playlist)
@@ -432,15 +438,18 @@ class DownloadsModule(BaseModule):
                 if waited:
                     # An address a host signed may not outlive the wait: the stream is asked anew.
                     self.cards.attempt(need_key, tries, budget.attempts)
-                    stream_url, headers, stream_error, progressive, playlist = await resolve()
+                    stream_url, headers, stream_error, progressive, playlist, by_player = await resolve()
                     if stream_error is not None:
                         return (False, *stream_error)
-                return await fetched(stream_url, headers, progressive, playlist)
+                return await fetched(stream_url, headers, progressive, playlist, by_player)
             finally:
                 await self.places.give(multi)
 
-        async def fetched(stream_url: str, headers, progressive: bool, playlist: bool) -> tuple[bool, str, Failed | None]:
+        async def fetched(stream_url: str, headers, progressive: bool, playlist: bool,
+                          by_player: bool = False) -> tuple[bool, str, Failed | None]:
             kw: dict = {"threads": self.places.limits.threads_per_file}
+            if by_player:
+                kw["fetcher"] = self._by_player(stream_url, job.get("max_height"), self.places.limits.threads_per_file)
             if job.get("max_height"):
                 kw["max_height"] = job["max_height"]  # a page the downloader reads itself keeps the cap of the job
             if headers:
@@ -496,6 +505,34 @@ class DownloadsModule(BaseModule):
                 self._finished(job, ok, error, not ok and said is Failed.UNASKED)
             self._fetch_pump()
             self._announce_queue()
+
+    def _by_player(self, url: str, max_height: int | None, connections: int):
+        """The transfer of a file its player downloads itself (`sources.video.fetch`): the segments into the raw file of
+        the download, the progress told by the player's events. (ok, words of a failure, seconds, longest segment)."""
+        async def fetch(target: str, on_progress) -> tuple[bool, str, float, float]:
+            self._player_progress[target] = on_progress
+            payload = {"url": url, "target": target, "connections": connections,
+                       **({"max_height": max_height} if max_height else {})}
+            try:
+                reply = await self.request("sources.video.fetch", payload)
+            except asyncio.CancelledError:
+                # The file is given up: the player stops taking it.
+                self.spawn(self.request("sources.video.fetch.stop", {"target": target}))
+                raise
+            except Exception as exc:  # noqa: BLE001 - a player that did not answer said nothing of the source
+                return False, Unasked(f"плеер не ответил о загрузке: {exc}"), 0.0, 0.0
+            finally:
+                self._player_progress.pop(target, None)
+            if not reply.get("ok"):
+                words = f"загрузка плеером: {reply.get('error') or 'отказ'}"
+                return False, Final(words) if reply.get("final") else words, 0.0, 0.0
+            return True, "", float(reply.get("seconds") or 0), float(reply.get("longest") or 0)
+        return fetch
+
+    async def on_player_progress(self, env: Envelope) -> None:
+        told = self._player_progress.get(env.payload.get("target", ""))
+        if told is not None:
+            await told({key: value for key, value in env.payload.items() if key != "target"})
 
     async def _drop_fetched(self, path: str) -> None:
         """What a fetch that did not end whole wrote goes; a name another operation still owns stays, and the log says so."""

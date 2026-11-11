@@ -32,6 +32,7 @@ from core import Bus, Envelope, Runner
 from core.db import Database
 from core.logging import configure, get_logger
 from modules.sources.apps import profiles_of
+from modules.sources.players.alloha_session import profile_of as alloha_profile_of
 
 configure()
 log = get_logger("run")
@@ -68,7 +69,8 @@ gateway, modules = assemble(bus, db, Options(
     docs_enabled=docs_enabled, allowed_hosts=allowed_hosts, read_recent=read_recent,
     conform_url=os.environ.get("ST_CONFORM_URL", ""),
     qbit_url=os.environ.get("ST_QBIT_URL", ""), qbit_username=os.environ.get("ST_QBIT_USER", "admin"),
-    qbit_password=os.environ.get("ST_QBIT_PASS", ""), apps=profiles_of(os.environ)))
+    qbit_password=os.environ.get("ST_QBIT_PASS", ""), apps=profiles_of(os.environ),
+    alloha_profile=alloha_profile_of(os.environ)))
 
 runner = Runner(bus, modules)
 

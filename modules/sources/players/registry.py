@@ -10,6 +10,7 @@ from typing import Callable, Iterable
 
 from ..policy import Pacer
 from .alloha import AllohaPlayer
+from .alloha_session import Profile
 from .allvideo import AllVideoPlayer
 from .animakima import AnimakimaPlayer
 from .cdnvideohub import CdnVideoHubPlayer, Measure
@@ -33,12 +34,13 @@ class PlayerRegistry:
 
     @classmethod
     def standard(cls, browser_getter: Callable | None = None, key_path: str | Path | None = None,
-                 manifest_dir: str | Path | None = None, measure: Measure | None = None) -> "PlayerRegistry":
+                 manifest_dir: str | Path | None = None, measure: Measure | None = None,
+                 alloha_profile: Profile | None = None) -> "PlayerRegistry":
         """All the players: VK, AllVideo, Vibix (which needs the browser pool and the cache paths), CDN VideoHub (which
         measures the frame height of a stream the labels do not state), Kodik, the own player of animakima.ru, Alloha
-        (which is opened in the browser pool) and the HLS of the MacCMS sites."""
+        (asked as its player asks, with the client profile of the environment) and the HLS of the MacCMS sites."""
         return cls([VkPlayer(), AllVideoPlayer(), VibixPlayer(browser_getter, key_path, manifest_dir),
-                    CdnVideoHubPlayer(measure), KodikPlayer(), AnimakimaPlayer(), AllohaPlayer(browser_getter), MaccmsPlayer()])
+                    CdnVideoHubPlayer(measure), KodikPlayer(), AnimakimaPlayer(), AllohaPlayer(alloha_profile), MaccmsPlayer()])
 
     def register(self, player: Player) -> None:
         if player.name in self._players:

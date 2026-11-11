@@ -13,6 +13,7 @@ import pytest
 from core import BaseModule, Bus, Runner, storage
 from core.db import Database
 from modules.downloads import DownloadsModule
+from modules.downloads.ytdlp import player_target
 from settle import settle, wait_until
 from schema_db import migrated
 
@@ -26,12 +27,36 @@ class FakeNeighbours(BaseModule):
         self.stream_replies: dict[str, dict] = {}
         self.stream_raises: set[str] = set()
         self.stream_payloads: list[dict] = []
+        # The downloads a player makes itself: what it was asked, the gate it waits at, the files it was told to stop.
+        self.player_fetches: list[dict] = []
+        self.player_gate: asyncio.Event | None = None
+        self.player_stops: list[str] = []
         super().__init__(bus)
 
     def register(self):
         self.handle("settings.value.get", self.on_get)
         self.handle("settings.value.set", self.on_set)
         self.handle("sources.video.stream", self.on_stream)
+        self.handle("sources.video.fetch", self.on_player_fetch, concurrent=True)
+        self.handle("sources.video.fetch.stop", self.on_player_stop)
+
+    async def on_player_fetch(self, env):
+        self.player_fetches.append(dict(env.payload))
+        target = env.payload["target"]
+        self.publish_event("sources.video.progress", {"target": target, "phase": "download", "progress": 40,
+                                                      "dlspeed": 12 * 1024 ** 2, "eta": 3, "total_size_mb": 300.0})
+        if self.player_gate is not None:
+            await self.player_gate.wait()
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as file:
+            file.write(b"segments")
+        return {"ok": True, "seconds": 1200.0, "longest": 4.0, "height": 720}
+
+    async def on_player_stop(self, env):
+        self.player_stops.append(env.payload["target"])
+        if self.player_gate is not None:
+            self.player_gate.set()
+        return {"stopped": True}
 
     async def on_set(self, env):
         self.settings[env.payload["key"]] = env.payload["value"]
@@ -66,6 +91,12 @@ class FakeDownloader:
         self.threads = threads
         self.started.append(url)
         self.kwargs[url] = kw
+        if kw.get("fetcher") is not None:
+            # A file its player takes itself: the raw stream by the player, the container made of it here.
+            ok, words, _seconds, _longest = await kw["fetcher"](player_target(path), on_progress)
+            if ok:
+                os.replace(player_target(path), path)
+            return ok, words
         self.concurrent += 1
         self.max_concurrent = max(self.max_concurrent, self.concurrent)
         try:
@@ -515,3 +546,47 @@ async def test_a_downloaded_clip_the_host_served_instead_of_the_episode_is_no_fi
     (done,) = await _fetch(probe, bus, 1, jobs=[{"key": "dub:n", "url": "https://site/#cvh=9", "path": path, "series_id": 3}])
     assert done["ok"] is False and "test-quota" in done["error"] and done["transient"] is False
     assert dl.started.count("https://site/#cvh=9") == 3 and not os.path.exists(path)
+
+
+# --- a file its player downloads itself (Alloha) -----------------------------------------------------------------------
+
+PLAYER_LINK = "https://old.yummyani.me/catalog/item/x#alloha=https%3A%2F%2Falloha.test%2F%3Ftoken_movie%3D1"
+
+
+@pytest.mark.asyncio
+async def test_a_file_its_player_takes_itself_is_asked_of_the_player_with_the_cap_and_the_connections_and_its_progress_shown(
+        system, tmp_path):
+    bus, fake, dl, probe = system
+    fake.stream_replies[PLAYER_LINK] = {"handled": True, "stream_url": PLAYER_LINK, "headers": {}, "player_fetch": True}
+    fake.player_gate = asyncio.Event()
+    path = str(tmp_path / "temp" / "e1.mp4")
+    probe.send_command("downloads.fetch", {"key": "video:1", "url": PLAYER_LINK, "path": path, "max_height": 720,
+                                           "series_id": 3, "whole": True})
+    assert await _wait(lambda: fake.player_fetches)
+    # The player's progress is the card's: it is a playlist by its segments, a download by many connections.
+    queue = await probe.request("downloads.queue.get", {}, timeout=5)
+    assert [card["figures"]["progress"] for card in queue["tasks"]] == [40]
+    assert dl.kwargs[PLAYER_LINK]["playlist"] is True and queue["count"] == 1
+    sub = bus.subscribe("downloads.fetch.finished")
+    fake.player_gate.set()
+    done = (await asyncio.wait_for(sub.queue.get(), 5)).payload
+
+    (asked,) = fake.player_fetches
+    assert done["ok"] is True and os.path.isfile(path)
+    assert asked == {"url": PLAYER_LINK, "target": player_target(path), "connections": 16, "max_height": 720}
+
+
+@pytest.mark.asyncio
+async def test_a_file_its_player_takes_that_is_cancelled_stops_the_player(system, tmp_path):
+    bus, fake, dl, probe = system
+    fake.stream_replies[PLAYER_LINK] = {"handled": True, "stream_url": PLAYER_LINK, "headers": {}, "player_fetch": True}
+    fake.player_gate = asyncio.Event()
+    path = str(tmp_path / "temp" / "e1.mp4")
+    sub = bus.subscribe("downloads.fetch.finished")
+    probe.send_command("downloads.fetch", {"key": "video:2", "url": PLAYER_LINK, "path": path, "series_id": 3})
+    assert await _wait(lambda: fake.player_fetches)
+
+    assert await probe.request("downloads.cancel", {"task_id": "fetch:video:2"}, timeout=5) == {"cancelled": True}
+    done = (await asyncio.wait_for(sub.queue.get(), 5)).payload
+
+    assert done["ok"] is False and await _wait(lambda: fake.player_stops == [player_target(path)])

@@ -34,6 +34,7 @@ from core import Bus, Envelope, Runner
 from core import container as mkv
 from core.db import Database
 from app99_model import HOST as APP_HOST, App99Model, Card, Line, profile as app_profile
+from alloha_model import PROFILE as ALLOHA_PROFILE, AllohaModel
 from app_protocol_models import AppGetModel, AppMnModel, GuluModel, YunDuoModel
 from appdrama_model import DramaModel, Video as DramaVideo
 from plan_disk import Codec, Daemon, Host, _run
@@ -199,6 +200,9 @@ class Site:
         # The applications of every other protocol the service reads, each with one admitted line of its own code.
         self.drama = DramaModel()
         self.others = {"appget": AppGetModel(), "gulu": GuluModel(), "yunduo": YunDuoModel(), "appmn": AppMnModel()}
+        # A title of yummyani.me and its player Alloha (tests/alloha_model.py), the CDN of which serves an HLS of the host.
+        self.alloha = AllohaModel(voices={})
+        self.yummy: dict[str, tuple[int, str, list[dict]]] = {}
         for name in ("huayi", "moli", "gulu", "yunduo", "appmn"):
             with open(os.path.join(self.app_lines, f"{name}.json"), "w", encoding="utf-8") as registry:
                 json.dump({"app": name, "admitted": {LINE_OF[name]: {}}, "refused": {}}, registry)
@@ -223,6 +227,23 @@ class Site:
         else:
             self.others[protocol].card(number, name, LINE_OF[app], made)
         return f"app://{app}/{number}"
+
+    def alloha_title(self, slug: str, number: int, name: str, voice: str, episodes: dict[int, int]) -> str:
+        """A title of yummyani.me whose voice-over plays in Alloha: an episode (number → height) an unencrypted HLS on the
+        host its CDN serves. The address of the title as a source."""
+        listed = self.alloha.voices.setdefault("158", {}).setdefault(1, [])
+        videos = []
+        for episode, height in sorted(episodes.items()):
+            folder = f"alloha-{slug}-ep{episode}"
+            self._hls(folder, truth_of(1, episode), height, encrypted=False)
+            listed.append(episode)
+            self.alloha.served[f"9{episode}"] = (os.path.join(self.root, folder), height)
+            iframe = f"//alloha.yani.tv/?token_movie=8bf4&translation=158&season=1&episode={episode}&token=8b55"
+            videos.append({"video_id": number * 1000 + episode, "number": str(episode), "iframe_url": iframe,
+                           "data": {"player": "Плеер Alloha", "dubbing": f"Озвучка {voice}", "player_id": 1},
+                           "index": episode})
+        self.yummy[slug] = (number, name, videos)
+        return f"https://old.yummyani.me/catalog/item/{slug}"
 
     def title(self, number: int) -> Title:
         return self.titles.setdefault(number, Title(number))
@@ -261,22 +282,25 @@ class Site:
             os.remove(source)
         return name + "-video"
 
-    def _hls(self, name: str, truth: int, height: int) -> None:
+    def _hls(self, name: str, truth: int, height: int, *, encrypted: bool = True) -> None:
         folder = os.path.join(self.root, name)
         if os.path.exists(os.path.join(folder, "index.m3u8")):
             return
         os.makedirs(folder)
         source = os.path.join(folder, "source.mp4")
         self.codec.make(source, [truth])
-        with open(os.path.join(folder, "enc.key"), "wb") as key:
-            key.write(HLS_KEY)
-        info = os.path.join(folder, "key.info")
-        with open(info, "w") as written:
-            written.write(f"enc.key\n{os.path.join(folder, 'enc.key')}\n")
+        keyed = []
+        if encrypted:
+            with open(os.path.join(folder, "enc.key"), "wb") as key:
+                key.write(HLS_KEY)
+            info = os.path.join(folder, "key.info")
+            with open(info, "w") as written:
+                written.write(f"enc.key\n{os.path.join(folder, 'enc.key')}\n")
+            keyed = ["-hls_key_info_file", info]
         # H.264, as the sites give it: its parameters ride in every segment, which the player reads the frame from.
         _run("-i", source, "-vf", f"scale={height * 16 // 9 // 2 * 2}:{height}", "-c:v", "libx264", "-preset", "ultrafast",
              "-c:a", "copy",
-             "-f", "hls", "-hls_time", "1", "-hls_playlist_type", "vod", "-hls_key_info_file", info,
+             "-f", "hls", "-hls_time", "1", "-hls_playlist_type", "vod", *keyed,
              "-hls_segment_filename", os.path.join(folder, "seg%d.ts"), os.path.join(folder, "index.m3u8"))
         os.remove(source)
 
@@ -292,6 +316,15 @@ class Site:
         return json.dumps({"code": 1, "msg": "数据列表", "list": [{
             "vod_id": title.number, "vod_name": f"师兄{title.number}", "vod_play_from": "$$$".join(lists),
             "vod_play_url": "$$$".join(lists.values())}]}, ensure_ascii=False)
+
+    def _yummy_api(self, rest: str) -> dict | None:
+        """`/api/anime/<address>` (the number and the names of a title) and `/api/anime/<number>/videos`."""
+        for slug, (number, name, videos) in self.yummy.items():
+            if rest == slug:
+                return {"response": {"anime_id": number, "anime_url": slug, "title": name, "other_titles": []}}
+            if rest == f"{number}/videos":
+                return {"response": videos}
+        return None
 
     def _host_file(self, request: httpx.Request) -> httpx.Response:
         """A file of the host as the in-process web gives it to the player: the part a range asks for, or all of it."""
@@ -411,6 +444,9 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
                 return model.handle(request)
             if request.url.host == "127.0.0.1":
                 return self._host_file(request)
+            if request.url.host == "old.yummyani.me" and path.startswith("api/anime/"):
+                found = self._yummy_api(path.removeprefix("api/anime/"))
+                return (200, json.dumps(found, ensure_ascii=False)) if found is not None else (404, "")
             if request.url.host == "jszyapi.com" and path == "api.php/provide/vod":
                 title = self.titles.get(int(request.url.params.get("ids") or 0))
                 return (200, self._title_record(title)) if title is not None else (200, json.dumps({"code": 1, "list": []}))
@@ -460,6 +496,9 @@ class AppStand:
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()
         self.module("sources")._http = self.site.web().client()
+        # Alloha is asked as its player asks, by the client of its model, with the profile of the model.
+        self.module("sources").players.get("alloha").configure(alloha_profile=ALLOHA_PROFILE,
+                                                                alloha_client=self.site.alloha.client)
         if before_started is not None:
             before_started()
         self.bus.publish(Envelope(topic="system.started", kind="event"))

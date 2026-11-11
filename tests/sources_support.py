@@ -98,9 +98,10 @@ OWNED = {"vk": "https://vkvideo.ru/video_ext.php?oid=-1&id=100&hash=abc", "allvi
 TRANSIENT = {mode: {name: expected for name in OWNED}
              for mode, expected in (("gone", False), ("busy", True), ("silent", True), ("garbage", True))}
 TRANSIENT["garbage"]["vibix"] = False
-# Alloha is asked in the browser of the module, never over these hosts: without it nothing is known yet, whatever they do.
+# Alloha downloads its file itself, never over these hosts: a registry with no client profile refuses its stream at once,
+# whatever they do, and asking again does not give it one.
 for _mode in TRANSIENT:
-    TRANSIENT[_mode]["alloha"] = True
+    TRANSIENT[_mode]["alloha"] = False
 
 
 def host_that(mode: str) -> Web:

@@ -21,7 +21,7 @@ from modules.sources.sites import ReadContext, SiteError
 from modules.sources.sites.yummyani import YummyAniSite
 from modules.sources.sites.yummyani.site import voice_of
 from sources_support import READ_LIMIT_S, Web, within
-from test_alloha_player import Browser, answer, document, track
+from alloha_model import PROFILE, AllohaModel
 from test_sources_cvh_kodik import ftor_links, season_page
 
 URL = "https://old.yummyani.me/catalog/item/lyubov-pod-gipnozom"
@@ -60,18 +60,13 @@ def site_web(title: dict | tuple = TITLE) -> Web:
     web.route("kodikplayer.com/ftor", lambda request: json.dumps(ftor_links(360, 720)), method="POST")
     web.route("/player/sv/playlist", json.dumps(CVH_PLAYLIST))
     web.route("/player/sv/video/", json.dumps({"sources": {"mpegHighUrl": "https://okcdn.test/v1/720"}}))
-    # The document of the iframe of Alloha: the player has both episodes of the voice-over of the site.
-    web.route("alloha.yani.tv/?", document({"158": {1: [1, 2]}}))
     return web
 
 
-async def read(web: Web, browser: Browser | None = None):
-    browser = browser or Browser(answer(track("1")), episodes={"2": answer(track("1"))})
-
-    async def getter():
-        return browser
-
-    players = PlayerRegistry([KodikPlayer(), CdnVideoHubPlayer(), VkPlayer(), AllohaPlayer(getter)])
+async def read(web: Web, model: AllohaModel | None = None):
+    # The host of Alloha: the player has both episodes of the voice-over of the site.
+    model = model or AllohaModel(voices={"158": {1: [1, 2]}})
+    players = PlayerRegistry([KodikPlayer(), CdnVideoHubPlayer(), VkPlayer(), AllohaPlayer(PROFILE, client=model.client)])
     async with web.client() as http:
         return await within(YummyAniSite(players).read(URL, ReadContext(http, lambda *step: None)), READ_LIMIT_S, "the read")
 
@@ -94,8 +89,8 @@ def test_a_voice_over_is_its_name_and_the_kind_the_site_puts_before_it():
 
 async def test_the_table_has_every_player_of_the_api_each_read_as_on_any_page_that_embeds_it(caplog):
     caplog.set_level(logging.INFO, "sources")
-    web, browser = site_web(), Browser(answer(track("1")), episodes={"2": answer(track("1"))})
-    table = await read(web, browser)
+    web, model = site_web(), AllohaModel(voices={"158": {1: [1, 2]}})
+    table = await read(web, model)
     rows = {player: [row for row in table.rows if row.player == player] for player in ("kodik", "cvh", "vk", "alloha")}
 
     # Kodik: the list of the season once, however many elements and spellings of the voice-over point at it.
@@ -111,8 +106,8 @@ async def test_the_table_has_every_player_of_the_api_each_read_as_on_any_page_th
     assert [(row.key, row.text, row.voice.name, row.heights) for row in rows["alloha"]] == [
         ("alloha:8bf4/158/1/1", "1 серия", "AniStar", [360, 720, 1080]),
         ("alloha:8bf4/158/1/2", "2 серия", "AniStar", [360, 720, 1080])]
-    # The episodes of a season of Alloha are one open of the player, the second a switch inside it.
-    assert browser.opened == 1 and browser.switches == ["2"]
+    # Each episode of Alloha is its document and one ask of its files, signed afresh.
+    assert len(model.files_asked) == 2
     assert table.names == ["Любовь под гипнозом", "Hypnosis love", "Кохання під гіпнозом"]
     assert len({row.key for row in table.rows}) == len(table.rows) == 6
     # A player no player here knows is not read, and the log says which.

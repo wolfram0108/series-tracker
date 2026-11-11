@@ -340,3 +340,31 @@ async def test_a_card_whose_parser_gives_a_video_at_an_address_without_an_extens
     assert "1080p" in asset["name"], asset["name"]
     held = await mkv.contents(os.path.join(stand.library, asset["name"]))
     assert [track.language for track in held.audio] == ["chi"]
+
+
+async def test_a_title_whose_voice_over_plays_in_alloha_is_downloaded_by_its_player_and_built(stand):
+    """The player of Alloha takes its episodes itself: each is opened as the player opens it, plays (the socket gives the
+    access to the CDN), and its segments come from the HLS of the host into the file of the episode at its own height,
+    then built as any other."""
+    url = stand.site.alloha_title("bratik", 700, "Братик", "AniStar", {1: 720, 2: 480})
+    await stand.configure(["AniStar"])
+    made = await stand.call("POST", "/api/parser-profiles", {"name": "серии Alloha"})
+    label = json.dumps([{"type": "number"}, {"type": "text", "value": " серия"}], ensure_ascii=False)
+    await stand.call("POST", f"/api/parser-profiles/{made['id']}/rules", {
+        "name": "серия", "continue_after_match": False,
+        "action_pattern": json.dumps([{"action_type": "extract_single", "action_pattern": label},
+                                      {"action_type": "assign_voiceover", "action_pattern": "AniStar"}]),
+        "conditions": [{"condition_type": "contains", "pattern": label, "logical_operator": "AND"}]})
+    series = await stand.call("POST", "/api/series", {
+        "name": "Братик", "name_en": "Bratik", "site": "yummyani", "save_path": stand.library,
+        "sources": [{"url": url, "source_type": "web_video", "parser_profile_id": made["id"]}]})
+
+    await stand.sync(series["series_id"])
+    view = await stand.check(series["series_id"])
+
+    assert sorted(("720p" in each["name"], "480p" in each["name"]) for each in view["assets"]) == [(False, True),
+                                                                                                    (True, False)]
+    model = stand.site.alloha
+    # Each episode was its own session: it said it plays, and every request of the CDN carried the access it was given.
+    assert len(model.sockets) == 2 and all(each.said[:2] == ["playback_start", "resumed"] for each in model.sockets)
+    assert {each["Accepts-Controls"] for each in model.media} == {"E1"} and model.closed == 2

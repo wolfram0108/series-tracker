@@ -25,6 +25,11 @@ Tables of site pages (the one way to read a site page; sites are registered in `
   sources.table.cancel {url} → {cancelled}: the read of the page going now stops (the user stopped the sync that waits
                                    for it): it ends failed (`read_cancelled`) and is not begun again at the start; the
                                    last complete table still serves. False when no read of it goes.
+  sources.video.fetch {url, target, max_height?, connections} → {ok, seconds, longest, height} | {ok: false, error,
+                                   final}: the file of a link whose player downloads it itself, into `target`; how far
+                                   it is goes as `sources.video.progress {target, phase, progress, ...}`. A refusal the
+                                   player knows to be final (no such file) is `final`.
+  sources.video.fetch.stop {target} → {stopped}: that download stops (its owner gave the file up).
   sources.site.resolve {url} → {site, canonical_url}: which site reads the address and the canonical
                                    form of it (no network); both null when no site does
   sources.settings.get {} → SourcesSettingsView {trackers: [{id, display_name, mirrors}], readers: [{name, kind:
@@ -32,7 +37,8 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    each tracker, and the domains the service reads pages of now: every tracker with its
                                    domains and mirrors, every site of the registry with its own (no network)
   sources.video.stream {url, max_height?} → {handled, stream_url, headers, progressive, playlist} | {handled, error,
-                                   transient}: the stream of a candidate link, asked for right before the download.
+                                   transient}: the stream of a candidate link, asked for right before the download;
+                                   `player_fetch` instead: the player downloads the file itself (sources.video.fetch).
                                    The player that owns the link (a VK player link with its key, an AllVideo embed,
                                    a Vibix entry, an item of CDN VideoHub or of Kodik) resolves it; any other
                                    address is not handled
@@ -117,6 +123,7 @@ from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
 from .term import DEFAULT_HOURS, TERM_KEY, Term, hours_of
+from .players.alloha_session import AllohaRefused, Profile as AllohaProfile
 from .players.app_lines import AppLines, AppPlayer, line_player_name
 from .players.contract import StreamUnavailable
 from .players.registry import PlayerRegistry
@@ -156,8 +163,11 @@ class SourcesModule(BaseModule):
                  sites: Iterable[Site] | None = None,
                  table_clock: Callable[[], datetime] = utc_now,
                  table_safeguard_s: float = TABLE_READ_S, read_recent: int | None = None,
-                 apps: Iterable[AppProfile] = (), app_lines_dir: str | None = None) -> None:
+                 apps: Iterable[AppProfile] = (), app_lines_dir: str | None = None,
+                 alloha_profile: AllohaProfile | None = None) -> None:
         self.repo = SourcesRepository(db)
+        # The downloads players make themselves, by their files (`sources.video.fetch`).
+        self._transfers: dict[str, asyncio.Future] = {}
         self._cache_dir = torrent_cache_dir
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
@@ -169,7 +179,8 @@ class SourcesModule(BaseModule):
             key_path=os.path.abspath(os.path.join(torrent_cache_dir,
                                                   "vibix-key.json")),
             manifest_dir=os.path.abspath(os.path.join(torrent_cache_dir,
-                                                      "manifests")))
+                                                      "manifests")),
+            alloha_profile=alloha_profile)
         # One object per player for the whole module: the sites read with them and the streams are resolved by them.
         self.players = PlayerRegistry.standard(**wiring)
         # The video applications the environment describes: each a player of its lines and a site of its cards.
@@ -211,6 +222,8 @@ class SourcesModule(BaseModule):
         self.handle("sources.tracker.resolve", self.on_tracker_resolve)
         self.handle("sources.tracker.set_mirrors", self.on_set_mirrors)
         self.handle("sources.video.stream", self.on_video_stream)
+        self.handle("sources.video.fetch", self.on_video_fetch, concurrent=True)
+        self.handle("sources.video.fetch.stop", self.on_video_fetch_stop)
         self.handle("sources.table.get", self.on_table_get)
         self.handle("sources.table.read", self.on_table_read)
         self.handle("sources.table.cancel", self.on_table_cancel)
@@ -507,8 +520,44 @@ class SourcesModule(BaseModule):
                 "headers": stream_info.get("headers", {}),
                 "progressive": bool(stream_info.get("progressive")),
                 "playlist": bool(stream_info.get("playlist")),
+                "player_fetch": bool(stream_info.get("player_fetch")),
             }
         return {"handled": False}
+
+    async def on_video_fetch(self, env: Envelope) -> dict:
+        """payload: {url, target, max_height?, connections}; reply: {ok, seconds, longest, height} | {ok: false, error,
+        final}. The file of a link whose player downloads it itself (`player_fetch` of the stream): the player takes the
+        segments into `target`, telling how far it is by `sources.video.progress {target, ...figures}`."""
+        url, target = env.payload["url"], env.payload["target"]
+        player = next((each for each in self.players if each.owns(url) and hasattr(each, "transfer")), None)
+        if player is None:
+            return {"ok": False, "error": "ссылку не скачивает ни один плеер", "final": True}
+
+        async def told(figures: dict) -> None:
+            self.publish_event("sources.video.progress", {"target": target, **figures})
+
+        work = asyncio.ensure_future(player.transfer(url, target, env.payload.get("max_height"),
+                                                     int(env.payload.get("connections") or 1), told))
+        self._transfers[target] = work
+        try:
+            done = await work
+        except asyncio.CancelledError:
+            if work.cancelled():
+                return {"ok": False, "error": "загрузка остановлена", "final": False}
+            raise
+        except AllohaRefused as exc:
+            self.log.warning("%s: загрузка плеером не удалась: %s", os.path.basename(target), exc)
+            return {"ok": False, "error": str(exc), "final": exc.final}
+        finally:
+            self._transfers.pop(target, None)
+        return {"ok": True, **done}
+
+    async def on_video_fetch_stop(self, env: Envelope) -> dict:
+        """payload: {target}; the download of the player into that file stops (its owner gave the file up)."""
+        work = self._transfers.get(env.payload["target"])
+        if work is not None:
+            work.cancel()
+        return {"stopped": work is not None}
 
     # --- скачивание .torrent (Р-1) ----------------------------------------------------
 
