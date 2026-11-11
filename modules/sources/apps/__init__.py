@@ -29,22 +29,24 @@ ENV_PREFIX = "ST_APP_"
 class AppProfile:
     """What the client of an application says of itself, as its own build does, and the device it is known by."""
     name: str          # the name of the application in the addresses of its cards (`banri`)
-    label: str         # its name as the application shows it (`半日`)
+    label: str         # its name as the owner sees it: its own and its Latin one (`半日 (Banri)`)
     protocol: str      # the family of its API (`app99`)
     settings: Mapping[str, str]
 
 
 def profiles_of(environ: Mapping[str, str]) -> list[AppProfile]:
-    """The applications the environment describes: `ST_APP_<NAME>` holds a JSON object with `label`, `protocol` and the
-    settings of the protocol; a value that is no such object is a fault of the environment and stops the start."""
+    """The applications the environment describes: `ST_APP_<NAME>` holds a JSON object with `label` (the name the
+    application shows), `latin` (that name in Latin letters), `protocol` and the settings of the protocol; a value that is
+    no such object is a fault of the environment and stops the start. Both names are required: the owner tells the
+    applications apart by the Latin one, so no application is shown by its own name alone."""
     found = []
     for key, value in sorted(environ.items()):
         if not key.startswith(ENV_PREFIX) or not value.strip():
             continue
         data = json.loads(value)
-        if not isinstance(data, dict) or not data.get("protocol") or not data.get("label"):
-            raise ValueError(f"{key}: an application needs a JSON object with `protocol` and `label`")
-        found.append(AppProfile(name=key[len(ENV_PREFIX):].lower(), label=str(data["label"]),
+        if not isinstance(data, dict) or not all(data.get(each) for each in ("protocol", "label", "latin")):
+            raise ValueError(f"{key}: an application needs a JSON object with `protocol`, `label` and `latin`")
+        found.append(AppProfile(name=key[len(ENV_PREFIX):].lower(), label=f"{data['label']} ({data['latin']})",
                                 protocol=str(data["protocol"]), settings={k: str(v) for k, v in data.items()}))
     return found
 

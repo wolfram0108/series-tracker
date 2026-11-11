@@ -50,10 +50,18 @@ def test_a_request_is_sealed_and_signed_and_an_answer_is_read_compressed_or_not_
 
 
 def test_an_application_is_described_by_the_environment_and_a_value_that_is_not_one_stops_the_start():
-    found = profiles_of({"ST_APP_BANRI": '{"label": "半日", "protocol": "app99", "host": "h"}', "ST_OTHER": "x"})
-    assert [(each.name, each.label, each.protocol) for each in found] == [("banri", "半日", "app99")]
+    found = profiles_of({"ST_APP_BANRI": '{"label": "半日", "latin": "Banri", "protocol": "app99", "host": "h"}',
+                         "ST_OTHER": "x"})
+    assert [(each.name, each.label, each.protocol) for each in found] == [("banri", "半日 (Banri)", "app99")]
     with pytest.raises(ValueError):
         profiles_of({"ST_APP_X": '{"host": "h"}'})
+
+
+def test_an_application_without_its_latin_name_stops_the_start():
+    """The owner tells the applications apart by their Latin names: an application known by its own name only is a fault
+    of the environment, not a source shown in hieroglyphs."""
+    with pytest.raises(ValueError):
+        profiles_of({"ST_APP_YUNDUO": '{"label": "布布", "protocol": "yunduo", "host": "h"}'})
 
 
 # --- a world of the model and a CDN as the real one serves --------------------------------------------------------------
