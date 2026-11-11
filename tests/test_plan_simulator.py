@@ -1,9 +1,12 @@
 """The planner of a series in a world of tables (tests/plan_world.py): every situation is only other inputs, and after
 every sync the invariants of the model hold (docs/missions/voice-alignment/stage-12/episode-table/MODEL.md)."""
+import asyncio
 import random
+from dataclasses import dataclass, field
 
 import pytest
 
+from core.plan.executor import DOWNLOADS
 from core.plan.tables import RowId
 from plan_world import Chaos, World
 
@@ -684,3 +687,70 @@ def test_a_deleted_video_that_waits_for_another_one_takes_no_new_work():
     step = world.sync("склейка при удалённом видео")
     world.check(step)
     assert not step.plan.ops and not container_of(world, 2).tracks and world.choices.delete
+
+
+# --- the work is of each episode: a group is applied when its own steps have ended -------------------------------------
+
+@dataclass
+class Gated(World):
+    """A world where the download of the rows in `waits` begins only once a group of the sync has been applied. An
+    executor that applies nothing before every step has ended never gives that signal: the wait is its safeguard."""
+    waits: set = field(default_factory=set)
+    order: list = field(default_factory=list)  # what happened, in its order
+    applied_one: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def do(self, op, results):
+        if op.kind in DOWNLOADS and op.subject.id in self.waits:
+            await asyncio.wait_for(self.applied_one.wait(), 5)
+            self.order.append(("download", op.subject.id.row_key))
+        return await World.do(self, op, results)
+
+    async def commit(self, before, staged=None) -> None:
+        self.order.append(("written", sorted(each.video.id.row_key for each in self.containers.values())))
+        self.applied_one.set()
+
+
+def test_an_episode_is_applied_when_its_own_steps_have_ended_while_another_still_downloads():
+    """The plan is of the series, the work is of each episode: episode 1 is built, put in place and written while the
+    download of episode 2 has not even begun; episode 2 follows on its own."""
+    world = Gated()
+    world.put(1, "ref1", 1, group=REF)
+    world.put(2, "g1e1", 1, group="G1", player="kodik")
+    world.put(1, "ref2", 2, group=REF)
+    world.waits.add(RowId(1, "ref2", "ref2"))
+    step = world.sync("две серии, загрузка второй ждёт")
+    world.check(step)
+    assert not step.failed and set(step.applied) == {((1, 1),), ((1, 2),)}
+    assert world.order[:2] == [("written", ["ref1"]), ("download", "ref2")]
+    assert world.order[2] == ("written", ["ref1", "ref2"])
+
+
+def test_a_failed_attempt_takes_the_next_way_at_once_without_waiting_for_the_other_episodes():
+    """The first source of episode 1 does not download: the attempt is recorded, the plan is made again at once, and
+    episode 1 is applied from the next source while the download of episode 2 still waits. Nothing is downloaded
+    twice, and the plan made again does not begin the waiting download anew."""
+    world = Gated()
+    world.put(1, "ref1", 1, group=REF)
+    world.put(3, "alt1", 1, group=REF, player="cvh")
+    world.put(1, "ref2", 2, group=REF)
+    world.download_fails.add(RowId(1, "ref1", "ref1"))
+    world.waits.add(RowId(1, "ref2", "ref2"))
+    step = world.sync("первый источник серии 1 не скачался")
+    world.check(step)
+    assert step.replanned == (("download", RowId(1, "ref1", "ref1")),)
+    assert world.order[:2] == [("written", ["alt1"]), ("download", "ref2")]
+    assert not step.failed and container_of(world, 1).video.id.row_key == "alt1"
+    assert container_of(world, 2).video.id.row_key == "ref2"
+
+
+def test_a_group_whose_step_failed_for_the_moment_is_left_and_the_others_are_applied():
+    """A download that fails for this sync only and has no other way leaves its episode as it was; the episode beside
+    it is applied all the same, and the outcome names what is lacking."""
+    world = World()
+    world.put(1, "ref1", 1, group=REF)
+    world.put(1, "ref2", 2, group=REF)
+    world.transient.add(RowId(1, "ref2", "ref2"))
+    step = world.sync("вторая серия не скачалась на этот раз")
+    world.check(step)
+    assert step.applied == (((1, 1),),) and [each.video.id.row_key for each in world.containers.values()] == ["ref1"]
+    assert [(slot, kind) for slot, kind, _voice, _reason in step.problems] == [((1, 2), "download_video")]

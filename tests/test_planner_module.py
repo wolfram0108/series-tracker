@@ -431,6 +431,34 @@ async def test_a_sync_the_user_stops_takes_its_jobs_off_the_service_before_the_s
         number for number, topic in enumerate(order) if topic == "conform.cancel"), order
 
 
+async def test_an_episode_is_put_in_place_while_another_is_still_aligned_and_a_stop_keeps_it(world):
+    """The work is of each episode: episode 1 (no voice-over) is built, put into the library and written to the table
+    while the job of the service for episode 2 is still under way. «Остановить синхронизацию» then takes the work of
+    episode 2 off; episode 1, applied by then, stays."""
+    neighbours, planner, db_path = world
+    episode(neighbours, 1, 0)
+    episode(neighbours, 2, 1)
+    neighbours.holding = neighbours.daemon.hold = True  # the job of episode 2 stays under way until the stop
+    counted = planner.bus.subscribe("series.downloaded.changed")
+    assert (await planner.request("planner.sync", {"series_id": SERIES, "download": True}))["accepted"]
+    await asyncio.wait_for(neighbours.submitted.wait(), 60)
+    assert (await asyncio.wait_for(counted.queue.get(), 60)).payload == {"series_id": SERIES, "count": 1}
+    stored = await check(world)
+    assert [each["video"]["id"]["row_key"] for each in stored.values()] == ["ref1"]
+    assert (await planner.request("planner.work.get", {"series_id": SERIES}))["active"]
+
+    assert (await planner.request("planner.sync.cancel", {"series_id": SERIES}, timeout=60))["cancelled"]
+    assert neighbours.daemon.jobs == {}
+    stored = await check(world)
+    assert [each["video"]["id"]["row_key"] for each in stored.values()] == ["ref1"]
+    assert not (await planner.request("planner.work.get", {"series_id": SERIES}))["active"]
+    # The next sync does what the stop left: episode 2, and nothing of episode 1 again.
+    neighbours.holding = neighbours.daemon.hold = False
+    await sync(world)
+    stored = await check(world)
+    assert sorted(each["video"]["id"]["row_key"] for each in stored.values()) == ["ref1", "ref2"]
+
+
 async def test_a_sync_written_down_is_work_of_the_series_before_the_start_takes_it_up(world):
     """`system.started` reaches the modules in no set order: a run that asks before the planner took its written sync
     up again hears it as work, not as an end."""

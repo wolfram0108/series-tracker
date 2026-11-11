@@ -13,8 +13,8 @@ from pydantic import BaseModel, Field
 from .downloads import DownloadVariant
 
 # The stages of a build, in order: waiting for the others, ffmpeg copying the streams into the container, the result read
-# back, the file put in place by the journal of the sync. Between the build and the journal a container is `built`: the
-# journal puts every file of the sync in place at once, after the rest of the work of the sync, so it waits, in no stage.
+# back, the file put in place by the journal of its group. Between the build and the journal a container is `built`: the
+# journals of a series go one at a time, so a container built while another group is put in place waits, in no stage.
 PackStage = Literal["queue", "build", "verify", "apply"]
 PACK_STAGES: tuple[PackStage, ...] = ("queue", "build", "verify", "apply")
 PackStatus = Literal["queued", "build", "verify", "built", "apply", "done", "failed"]
@@ -45,7 +45,7 @@ class PackFigures(BaseModel):
     size_mb: float | None = None
     steps_done: int | None = None
     steps_of: int | None = None
-    # How long a built container waited for the journal of the sync.
+    # How long a built container waited for the journal of its group.
     wait_s: float | None = None
 
 

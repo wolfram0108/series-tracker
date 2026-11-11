@@ -1,9 +1,13 @@
 """The executor of the plan of a series (stage 12, the table of an episode).
 
-One sync: the plan is counted from the snapshot (the asset as it is, the tables now); the graph runs; an attempt that
-fails is recorded and the plan is counted again from the same snapshot with the record, until no new failure comes; then
-every group whose operations all succeeded is applied — the new table of the asset, the files of the journal — once, at
-the end. The steps are the subclass's: the service does them through its modules, the simulator through its models."""
+One sync: the plan is counted from the snapshot (the asset as it is, the tables now) and its graph runs, every step on the
+signal that the steps before it ended. The plan is of the series, the work is of each episode: a group — the episodes
+and files that share work — is applied (its containers built aside, its journal carried out, the table written) as soon as
+its own steps have ended, whatever the other episodes still do. An attempt that fails is recorded and the plan is counted
+again at once from the asset as it is by then, with the record: a step the new plan asks the same work of is not done
+twice, its episode goes on with the next way while the others run. A group is applied only by a plan made after
+everything known by then. The sync ends when every group is applied or left. The steps are the subclass's: the service
+does them through its modules, the simulator through its models."""
 from __future__ import annotations
 
 import asyncio
@@ -60,18 +64,25 @@ def judged(result: dict | None, *, cut: bool) -> str | None:
     raise Passing
 
 
-def carried(op: Op, done: dict[str, tuple[object, Made]], results: dict[str, Made]) -> Made | None:
-    """What a run before in this sync made that this step asks again: a download of the same row and a cut of the same
-    compilation, an alignment of the same voice-over onto the same video. A build is always made anew of its parts."""
-    before = done.get(op.id)
-    if before is None or op.kind == "build":
-        return None
-    subject, made = before
+def same_work(before: Op, op: Op) -> bool:
+    """Whether a step of a new plan asks the work a step of this sync already does or did: a download of the same row and
+    a cut of the same compilation, an alignment of the same voice-over onto the same video. A build is always made anew
+    of its parts."""
+    if op.kind == "build" or before.kind != op.kind:
+        return False
     if op.kind == "align":
-        goal, way = op.subject
-        track = made.value
-        return made if track.dub == way.dub and track.aligned_to == video_of(goal, results).timeline else None
-    return made if subject == op.subject else None
+        (was, old), (goal, way) = before.subject, op.subject
+        return old.dub == way.dub and was.video.key == goal.video.key and was.video.timeline == goal.video.timeline
+    return before.subject == op.subject
+
+
+@dataclass(eq=False)
+class Work:
+    """A step of this sync, under way or ended: the task resolves to what it made (None: it failed or was left)."""
+
+    op: Op
+    task: "asyncio.Future"
+    left: bool = False  # a step before it failed: it was not tried
 
 
 def video_of(goal: Goal, results: dict[str, Made]) -> Video:
@@ -109,21 +120,17 @@ def outstanding(found: list[tuple], made: Plan, applied: list) -> tuple[tuple, .
     return tuple(kept)
 
 
-def failures(made: Plan, results: dict[str, Made], failed: set[str], passing: set[str]) -> list[tuple]:
-    """The attempts that failed in a run, as the planner reads them, but those named in `passing`; a step that failed
-    because a step before it did is no attempt of its own."""
-    found = []
-    for op in made.ops:
-        if op.id not in failed or op.id in passing or any(need in failed for need in op.needs):
-            continue
-        if op.kind in DOWNLOADS:
-            found.append(("download", op.subject.id))
-        elif op.kind == "align":
-            goal, way = op.subject
-            found.append(("align", way.dub, video_of(goal, results).timeline))
-        elif op.kind == "cut":
-            found.append(("cut", op.subject.row.id, op.subject.timeline))
-    return found
+def attempt_of(op: Op, results: dict[str, Made]) -> tuple | None:
+    """The attempt a step is, as the planner reads its failure: a download of a row, an alignment of a voice-over onto a
+    timeline, a cut of a compilation onto one; None for a step whose failure the planner has no record of (a build)."""
+    if op.kind in DOWNLOADS:
+        return ("download", op.subject.id)
+    if op.kind == "align":
+        goal, way = op.subject
+        return ("align", way.dub, video_of(goal, results).timeline)
+    if op.kind == "cut":
+        return ("cut", op.subject.row.id, op.subject.timeline)
+    return None
 
 
 def table_after(containers: dict[str, Container], made: Plan, group: Group, results: dict[str, Made]) -> dict[str, Container]:
@@ -206,6 +213,7 @@ class SeriesSync:
         # The rows whose video this sync downloaded anew to another length (`Made.retimed`): the tracks the library holds
         # aligned to them are given to the plans of the sync as aligned to the file before, which is no longer the video.
         self.retimed: set[RowId] = set()
+        self.applying = asyncio.Lock()  # one group of the sync is put in place at a time
 
     # --- the steps: the subclass's ------------------------------------------------------------------------------
 
@@ -224,11 +232,13 @@ class SeriesSync:
         outcomes = await asyncio.gather(*(each(op) for op in ops))
         return {op.id: outcome for op, outcome in zip(ops, outcomes)}
 
-    async def stage(self, made: Plan, group: Group, results: dict[str, Made]) -> None:
-        """The files of a group made aside before anything is applied (the new containers)."""
+    async def stage(self, made: Plan, group: Group, results: dict[str, Made]) -> object:
+        """The files of a group made aside before anything of it is applied (the new containers); what it returns is
+        given to `commit` (the steps that put them in place). The groups of a sync are staged side by side."""
 
-    async def commit(self, before: dict[str, Container]) -> None:
-        """The end of the sync: the journal of the files, the table written."""
+    async def commit(self, before: dict[str, Container], staged: object = None) -> None:
+        """A group is applied — `staged` is what its `stage` made: the journal of its files, the table written — one
+        group at a time; and, with nothing staged, the end of the sync: what it recorded is written."""
 
     async def left(self, made: Plan, group: Group, missing: list[str]) -> None:
         """A group not applied: a step of it did not succeed (`missing`); its files stay as they are."""
@@ -272,127 +282,233 @@ class SeriesSync:
         self.commands = frozenset(each for each in self.commands if each[1] in self.containers)
         self.skipped = set()  # what failed for the moment in the last sync is tried again
         self.retimed = set()
-        inputs = self.inputs(online, choices)
+        self.passing = set()
+        self.reasons = {}
+        self.applying = getattr(self, "applying", None) or asyncio.Lock()  # one journal of the library at a time
         before = dict(self.containers)
         replanned: list[tuple] = []
         problems: list[tuple] = []
-        done: dict[str, tuple[object, Made]] = {}
+        applied: list[tuple[Slot, ...]] = []
+        unbuilt: set[tuple[Slot, ...]] = set()  # the groups whose containers could not be built in this sync
+        build_failed: set[str] = set()
+        work: dict[str, Work] = {}  # the steps of the plan in force, by their ids
+        every: list[Work] = []  # every step this sync began, the ones a later plan no longer asks among them
+        news: list[tuple[str, tuple]] = []  # what the steps learned since the plan in force was made
+        told = asyncio.Event()  # a step learned something: the plan is made again
+        applies: dict[asyncio.Task, tuple[Plan, Group]] = {}
+        watchers: dict[asyncio.Task, Group] = {}
         round_ = 0
-        while True:
-            made = await self.plan_of(inputs)
-            round_ += 1
-            await self.trace("plan", {"round": round_, "inputs": inputs, "plan": made})
-            results, failed = await self.run(made, done)
-            problems += [each for each in problems_of(made, self.passing, self.reasons) if each not in problems]
-            subjects = {op.id: op.subject for op in made.ops}
-            done = {key: (subjects[key], value) for key, value in results.items()}
-            new = [key for key in failures(made, results, failed, self.passing) if key not in self.failed]
-            moment = [key for key in failures(made, results, failed, set()) if key[0] == "download"
-                      and key not in new and key not in self.failed and key not in self.skipped]
-            # A video that came to another length: the plan is made again on the file as it is now (the step of the
-            # download tells it; the planner has no rule for it — the tracks before are simply not aligned to it).
-            retimed = sorted({value.value.id for value in results.values() if value.retimed} - self.retimed, key=repr)
-            if not new and not moment and not retimed:
-                break
-            self.failed |= set(new)
-            self.skipped |= set(moment)
-            self.retimed |= set(retimed)
-            replanned += new
-            await self.trace("replan", {"recorded": new, "for_this_sync": moment, "retimed": retimed})
-            inputs = self.inputs(online, choices)
-        applied = []
-        for group in made.groups:
-            if any(op not in results for op in group.ops):
-                missing = sorted(op for op in group.ops if op not in results)
-                await self.trace("apply", {"slots": group.slots, "applied": False, "missing": missing})
-                await self.left(made, group, missing)
-                continue
-            try:
-                await self.stage(made, group, results)
-            except Exception as exc:  # noqa: BLE001 - a container that cannot be built leaves its group, not the sync
-                # Its build is a step that failed for the moment: the next sync builds it again.
-                failed |= {f"build:{slot}" for slot in group.built}
-                problems += [(slot, "build", None, getattr(exc, "code", "") or str(exc)) for slot in group.built]
-                await self.trace("apply", {"slots": group.slots, "applied": False, "missing": ["build"],
-                                           "error": str(exc)})
-                await self.left(made, group, [f"build: {exc}"])
-                continue
-            await self.trace("apply", {"slots": group.slots, "applied": True, "group": group})
-            self.containers = table_after(self.containers, made, group, results)
-            self.commands = commands_after(self.commands, made, group)
-            applied.append(group.slots)
-        await self.commit(before)
-        return Synced(inputs, tuple(sorted(before.values(), key=lambda each: each.name)), made, tuple(failed),
-                      tuple(applied), tuple(replanned), outstanding(problems, made, applied))
+        made: Plan | None = None
+        inputs = self.inputs(online, choices)
 
-    async def run(self, made: Plan, done: dict[str, tuple[object, Made]] | None = None) -> tuple[dict[str, Made], set[str]]:
-        """The graph: a step starts on the signal that every step before it ended, so independent work runs at once.
-        `done` is what a run of this sync made before a new failure made the plan again: a step the new plan asks the
-        same of is not done twice (`carried`)."""
-        done = done or {}
-        self.passing = set()
-        self.reasons = {}
-        results: dict[str, Made] = {}
-        failed: set[str] = set()
-        ended = {op.id: asyncio.Event() for op in made.ops}
-        missing = {need for op in made.ops for need in op.needs} - set(ended)
-        if missing:
-            raise AssertionError(f"the graph names steps it does not have: {sorted(missing)}")
+        def results_of(steps: dict[str, Work]) -> dict[str, Made]:
+            """What the steps of a plan have made by now."""
+            return {key: entry.task.result() for key, entry in steps.items()
+                    if entry.task is not None and entry.task.done() and not entry.task.cancelled()
+                    and entry.task.exception() is None and entry.task.result() is not None}
 
-        # A batch starts once every step of it is ready or left behind (a step before it failed): the ready ones go as
-        # one piece of work, and each step takes its own outcome out of it.
-        sizes = Counter(op.batch for op in made.ops if op.batch)
-        arrived: dict[str, list[Op | None]] = {key: [] for key in sizes}
-        settled = {key: asyncio.Event() for key in sizes}
-        outcomes: dict[str, Made | None | Passing] = {}
+        def begin(plan_: Plan) -> dict[str, Work]:
+            """The steps of a plan: one that asks the work a step of this sync does or did keeps that step, with what
+            the steps before it are; any other begins anew."""
+            by_id = {op.id: op for op in plan_.ops}
+            missing = {need for op in plan_.ops for need in op.needs} - set(by_id)
+            if missing:
+                raise AssertionError(f"the graph names steps it does not have: {sorted(missing)}")
+            kept: dict[str, bool] = {}
 
-        async def batch_of(op: Op, ready: bool) -> None:
-            kept = carried(op, done, results) if ready else None
-            if kept is not None:
-                outcomes[op.id] = kept
-            arrived[op.batch].append(op if ready and kept is None else None)
-            if len(arrived[op.batch]) == sizes[op.batch]:
+            def keeps(op: Op) -> bool:
+                if op.id not in kept:
+                    entry = work.get(op.id)
+                    kept[op.id] = entry is not None and same_work(entry.op, op) and all(keeps(by_id[need]) for need in op.needs) \
+                        and not (entry.task.done() and (entry.task.cancelled() or entry.task.exception() is not None))
+                return kept[op.id]
+
+            fresh = [op for op in plan_.ops if not keeps(op)]
+            # A batch starts once every step of it is ready or left behind (a step before it failed): the ready ones go
+            # as one piece of work, and each step takes its own outcome out of it.
+            sizes = Counter(op.batch for op in fresh if op.batch)
+            batch = {"sizes": sizes, "arrived": {key: [] for key in sizes},
+                     "settled": {key: asyncio.Event() for key in sizes}, "outcomes": {}}
+            steps = {op.id: work[op.id] for op in plan_.ops if kept[op.id]}
+            for op in fresh:
+                steps[op.id] = Work(op, None)
+                every.append(steps[op.id])
+            for op in fresh:
+                steps[op.id].task = asyncio.ensure_future(
+                    one(steps[op.id], [steps[need] for need in op.needs], plan_, steps, batch))
+            return steps
+
+        async def batch_of(entry: Work, ready: bool, steps: dict[str, Work], batch: dict) -> None:
+            op = entry.op
+            batch["arrived"][op.batch].append(op if ready else None)
+            if len(batch["arrived"][op.batch]) == batch["sizes"][op.batch]:
                 try:
-                    members = [each for each in arrived[op.batch] if each is not None]
+                    members = [each for each in batch["arrived"][op.batch] if each is not None]
                     if members:
-                        outcomes.update(await self.do_batch(members, results))
+                        batch["outcomes"].update(await self.do_batch(members, results_of(steps)))
                 finally:
-                    settled[op.batch].set()
-            await settled[op.batch].wait()
+                    batch["settled"][op.batch].set()
+            await batch["settled"][op.batch].wait()
 
-        async def one(op: Op) -> None:
-            try:
-                for need in op.needs:
-                    await ended[need].wait()
-                ready = not any(need in failed for need in op.needs)
-                await self.trace("step", {"op": op.id, "kind": op.kind, "slot": op.slot, "ready": ready})
-                if op.batch:
-                    await batch_of(op, ready)
-                if not ready:
-                    failed.add(op.id)
-                    await self.trace("done", {"op": op.id, "outcome": "left", "why": sorted(need for need in op.needs if need in failed)})
-                    return
-                if op.batch:
-                    outcome = outcomes.get(op.id, Passing("партия не выполнена"))
-                elif (kept := carried(op, done, results)) is not None:
-                    outcome = kept
-                else:
-                    try:
-                        outcome = await self.do(op, results)
-                    except Passing as passing:
-                        outcome = passing
-                if isinstance(outcome, Passing):
+        async def one(entry: Work, needs: list[Work], plan_: Plan, steps: dict[str, Work], batch: dict) -> Made | None:
+            op = entry.op
+            for need in needs:
+                await asyncio.wait({need.task})
+            ready = all(need.task.exception() is None and need.task.result() is not None for need in needs)
+            await self.trace("step", {"op": op.id, "kind": op.kind, "slot": op.slot, "ready": ready})
+            if op.batch:
+                await batch_of(entry, ready, steps, batch)
+            if not ready:
+                entry.left = True
+                await self.trace("done", {"op": op.id, "outcome": "left", "why": sorted(
+                    need.op.id for need in needs if need.task.exception() is not None or need.task.result() is None)})
+                return None
+            if op.batch:
+                outcome = batch["outcomes"].get(op.id, Passing("партия не выполнена"))
+            else:
+                try:
+                    outcome = await self.do(op, results_of(steps))
+                except Passing as passing:
+                    outcome = passing
+            current = work.get(op.id) is entry  # a later plan asks other work of this step: what it learned is not told
+            if isinstance(outcome, Passing):
+                if current:
                     self.passing.add(op.id)
                     self.reasons[op.id] = str(outcome.args[0]) if outcome.args else ""
-                    outcome = None
-                if outcome is None:
-                    failed.add(op.id)
-                    await self.trace("done", {"op": op.id, "outcome": "passing" if op.id in self.passing else "failed",
-                                              "why": self.reasons.get(op.id, "")})
-                else:
-                    results[op.id] = outcome
-                    await self.trace("done", {"op": op.id, "outcome": "made", "made": outcome})
-            finally:
-                ended[op.id].set()
-        await asyncio.gather(*(one(op) for op in made.ops))
-        return results, failed
+                    problems.extend(each for each in problems_of(plan_, {op.id}, self.reasons) if each not in problems)
+                    attempt = attempt_of(op, results_of(steps)) if op.kind in DOWNLOADS else None
+                    if attempt is not None and attempt not in self.failed and attempt not in self.skipped:
+                        news.append(("moment", attempt))
+                        told.set()
+                await self.trace("done", {"op": op.id, "outcome": "passing", "why": str(outcome.args[0]) if outcome.args else ""})
+                return None
+            if outcome is None:
+                attempt = attempt_of(op, results_of(steps))
+                if current and attempt is not None and attempt not in self.failed:
+                    news.append(("recorded", attempt))
+                    told.set()
+                await self.trace("done", {"op": op.id, "outcome": "failed", "why": ""})
+                return None
+            if current and outcome.retimed and outcome.value.id not in self.retimed:
+                # A video that came to another length: the plan is made again on the file as it is now (the step of the
+                # download tells it; the planner has no rule for it — the tracks before are simply not aligned to it).
+                news.append(("retimed", outcome.value.id))
+                told.set()
+            await self.trace("done", {"op": op.id, "outcome": "made", "made": outcome})
+            return outcome
+
+        async def ended(group: Group) -> Group:
+            """The steps of a group, and the steps they need, have ended."""
+            tasks = {work[each].task for each in group.ops}
+            if tasks:
+                await asyncio.wait(tasks)
+            return group
+
+        async def apply(plan_: Plan, group: Group, results: dict[str, Made]) -> bool:
+            """A group whose steps all succeeded: its files are made aside (side by side with the other groups'), then
+            put in place and the table written, one group at a time."""
+            try:
+                staged = await self.stage(plan_, group, results)
+            except Exception as exc:  # noqa: BLE001 - a container that cannot be built leaves its group, not the sync
+                # Its build is a step that failed for the moment: the next sync builds it again.
+                build_failed.update(f"build:{slot}" for slot in group.built)
+                problems.extend((slot, "build", None, getattr(exc, "code", "") or str(exc)) for slot in group.built)
+                await self.trace("apply", {"slots": group.slots, "applied": False, "missing": ["build"], "error": str(exc)})
+                await self.left(plan_, group, [f"build: {exc}"])
+                return False
+            async with self.applying:
+                await self.trace("apply", {"slots": group.slots, "applied": True, "group": group})
+                table = table_after(self.containers, plan_, group, results)
+                commands = commands_after(self.commands, plan_, group)
+                changed = bool(staged) or table != self.containers or commands != self.commands
+                self.containers, self.commands = table, commands
+                if changed:
+                    await self.commit(before, staged)
+            return True
+
+        def take_news() -> bool:
+            """What the steps learned is recorded; True when the plan has to be made again."""
+            recorded = [key for kind, key in news if kind == "recorded" and key not in self.failed]
+            moment = [key for kind, key in news if kind == "moment" and key not in self.failed and key not in self.skipped]
+            retimed = sorted({key for kind, key in news if kind == "retimed"} - self.retimed, key=repr)
+            news.clear()
+            told.clear()
+            if not recorded and not moment and not retimed:
+                return False
+            recorded, moment = list(dict.fromkeys(recorded)), list(dict.fromkeys(moment))
+            self.failed |= set(recorded)
+            self.skipped |= set(moment)
+            self.retimed |= set(retimed)
+            replanned.extend(recorded)
+            self.note = {"recorded": recorded, "for_this_sync": moment, "retimed": retimed}
+            return True
+
+        stale, waiting = True, False
+        try:
+            while True:
+                if stale:
+                    for task in watchers:
+                        task.cancel()
+                    watchers.clear()
+                    inputs = self.inputs(online, choices)
+                    made = await self.plan_of(inputs)
+                    round_ += 1
+                    # The rows of the sources are those of the first plan for the whole sync: they are told once.
+                    await self.trace("plan", {"round": round_, "inputs": inputs if round_ == 1 else replace(inputs, online=()),
+                                              "plan": made})
+                    work = begin(made)
+                    busy = {slot for _, group in applies.values() for slot in group.slots}
+                    stale = waiting = False
+                    for group in made.groups:
+                        if busy & set(group.slots):
+                            waiting = True  # its episodes are being applied by the plan before: looked at after that
+                        elif group.slots not in unbuilt:
+                            watchers[asyncio.ensure_future(ended(group))] = group
+                if not watchers and not applies:
+                    break
+                signal = asyncio.ensure_future(told.wait())
+                try:
+                    finished, _ = await asyncio.wait({signal, *watchers, *applies}, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    signal.cancel()
+                for task in [task for task in finished if task in applies]:
+                    _plan, group = applies.pop(task)
+                    if task.result():
+                        if group.slots not in applied:
+                            applied.append(group.slots)
+                    else:
+                        unbuilt.add(group.slots)
+                    stale = stale or waiting
+                if take_news():
+                    # A group is applied only by a plan made after everything known: the plan is made again first.
+                    await self.trace("replan", self.note)
+                    stale = True
+                    continue
+                for task in [task for task in finished if task in watchers]:
+                    group = watchers.pop(task)
+                    task.result()
+                    results = results_of(work)
+                    if all(op in results for op in group.ops):
+                        applies[asyncio.ensure_future(apply(made, group, results))] = (made, group)
+            # The steps a later plan no longer asked end on their own: nothing of the sync works after it.
+            await asyncio.wait({entry.task for entry in every}) if every else None
+            for entry in every:
+                entry.task.result()
+        except BaseException:
+            for task in [*watchers, *applies, *(entry.task for entry in every if entry.task is not None)]:
+                task.cancel()
+            await asyncio.gather(*watchers, *applies, *(entry.task for entry in every if entry.task is not None),
+                                 return_exceptions=True)
+            raise
+        results = results_of(work)
+        failed = {op.id for op in made.ops if op.id not in results} | build_failed
+        for group in made.groups:
+            missing = sorted(op for op in group.ops if op not in results)
+            if not missing:
+                continue  # applied, or its containers could not be built (told when that happened)
+            await self.trace("apply", {"slots": group.slots, "applied": False, "missing": missing})
+            await self.left(made, group, missing)
+        async with self.applying:
+            await self.commit(before)
+        return Synced(inputs, tuple(sorted(before.values(), key=lambda each: each.name)), made, tuple(failed),
+                      tuple(applied), tuple(replanned), outstanding(problems, made, applied))

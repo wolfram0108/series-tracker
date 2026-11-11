@@ -53,6 +53,8 @@ class Step:
     replanned: tuple[tuple, ...] = ()
     # What the outcome of the sync still lacks (the window and the card of the series show it as an error).
     problems: tuple[tuple, ...] = ()
+    # The asset the last plan of the sync was made on: the groups applied before it are in it as they were applied.
+    planned_on: tuple[Container, ...] = ()
 
 
 @dataclass
@@ -161,7 +163,7 @@ class World(SeriesSync):
         self.choose(delete=self.commands)
         step = Step(title, inputs.online, synced.before, synced.plan, tuple(sorted(synced.failed)), synced.applied,
                     tuple(sorted(self.containers.values(), key=lambda each: each.name)), inputs.choices, self.choices,
-                    inputs.failed, synced.replanned, synced.problems)
+                    inputs.failed, synced.replanned, synced.problems, inputs.containers)
         self.history.append(step)
         return step
 
@@ -256,7 +258,7 @@ class World(SeriesSync):
 
     def check(self, step: Step | None = None) -> None:
         step = step or self.history[-1]
-        again = plan(Inputs(step.online, step.before, step.choices, step.failed_rows))
+        again = plan(Inputs(step.online, step.planned_on, step.choices, step.failed_rows))
         assert repr(again) == repr(step.plan), "the plan is not a function of its inputs"
         # Whatever the plan is, the window is told it in the terms of its contract.
         PlannerView.model_validate(view_of(0, self, step.plan, running=False, rows=step.online))
@@ -345,7 +347,7 @@ class World(SeriesSync):
         visible = Counter(each.video.episode for each in step.after if not each.off)  # the number its file was built for
         assert all(count == 1 for count in visible.values()), f"two visible files of an episode: {visible}"
         # When every group was applied the library shows exactly the goals; anything else is hidden.
-        if len(step.applied) == len(step.plan.groups):
+        if all(group.slots in step.applied for group in step.plan.groups):
             shown = {each.name for each in step.after if not each.off}
             assert shown == {goal.name for goal in step.plan.goals if not goal.off}, shown
         if not step.failed:

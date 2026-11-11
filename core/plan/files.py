@@ -1,10 +1,11 @@
 """The files of the plan of a series (stage 12): the table of the asset as JSON (the database and the attachment of every
 container agree), the build of the container of a goal, and the journal that applies a sync to the library.
 
-The journal: the new containers are built aside (staging), then the journal — the steps and the table they lead to — is
-written, then carried out: out of the way, remove, into place, publish, retag. A stop at any step leaves the journal;
-`recover` carries it out to the end. A stop before the journal leaves the snapshot as it was. Every step can be carried out
-twice: it does what is left of it."""
+The journal is of a group of a sync (the episodes and files that share work): its new containers are built aside
+(staging), then the journal — the steps and the table they lead to — is written, then carried out: out of the way, remove,
+into place, publish, retag. One journal at a time; the groups of a sync build aside side by side. A stop at any step leaves
+the journal; `recover` carries it out to the end. A stop before the journal leaves the snapshot as it was. Every step can
+be carried out twice: it does what is left of it."""
 from __future__ import annotations
 
 import json
@@ -234,9 +235,13 @@ class Library:
                 os.replace(again, path)
 
     def finish(self) -> None:
-        """The journal is carried out: it goes, and what was made aside goes with it."""
+        """The journal is carried out: it goes. What it published is no longer aside; what other groups of the sync made
+        aside meanwhile stays for their own journals."""
         if os.path.exists(self.journal):
             os.remove(self.journal)
+
+    def sweep(self) -> None:
+        """Nothing of a sync works any more: what was made aside and never put in place goes."""
         shutil.rmtree(os.path.join(self.root, STAGING), ignore_errors=True)
 
     def files(self) -> list[str]:

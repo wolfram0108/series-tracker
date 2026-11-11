@@ -136,8 +136,8 @@ class PackBook:
         return moved
 
     def built(self, key: str) -> None:
-        """The container is made aside and read back: it waits, in no stage, for the journal of the sync, which puts every
-        file of the sync in place at once after the rest of its work."""
+        """The container is made aside and read back: it waits, in no stage, for the journal of its group, which puts the
+        files of the group in place (one journal of a series at a time)."""
         card = self.cards.get(key)
         if card is not None and card.status not in ENDED:
             self._leave(card, "done")
@@ -167,10 +167,11 @@ class PackBook:
             card.seconds = self._clock() - self._since.get(key, self._clock())
 
     def journal(self, series_id: int, steps: list[tuple]) -> None:
-        """The journal of the sync is written: every built card of the series enters its stage of putting in place and
-        counts the steps that name its files."""
+        """The journal of a group of the sync is written: every built card of the series whose files it names enters its
+        stage of putting in place and counts the steps that name them. A card built for another group waits for the
+        journal of its own."""
         for key, card in self.cards.items():
-            if card.series_id == series_id and card.status == "built":
+            if card.series_id == series_id and card.status == "built" and any(self._mine(key, step) for step in steps):
                 card.figures.wait_s = self._clock() - self._wait_since.pop(key, self._clock())
                 self._enter(card, "apply")
                 card.figures.steps_of = sum(1 for step in steps if self._mine(key, step))

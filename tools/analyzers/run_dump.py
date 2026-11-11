@@ -1,5 +1,6 @@
 """What a sync of a series did, read from its dump (`logs/runs/<series>/<start>-<pid>.jsonl.gz`, module `runlog`): the tables
-read, the plan of each round by episode (which row is the video, which the voice-overs), every step of the graph with its
+read, the plan of each round by episode (which row is the video, which the voice-overs; a plan made again shows the
+episodes it changed and what made it), every step of the graph with its
 start, its end and its outcome, every download with its variant, its time, the size of its file, the seconds of its stages
 (queue, link, download, remux, check) and the length it got against the length its source stated, every job of the
 alignment with what the daemon said of each voice-over, every group applied and how long it waited after its last step,
@@ -54,19 +55,30 @@ def main(path: str, logs: bool) -> None:
                   f"{' — ' + str(row['payload'].get('reason')) if row['payload'].get('reason') else ''}")
 
     trace = [row for row in bus if row["topic"] == "planner.sync.trace"]
+    online, shown = 0, {}
     for row in trace:
         data = row["payload"]["data"]
+        if row["payload"]["kind"] == "replan":
+            print(f"\n== план составляется заново ({clock(row['t'])}): записано неудач {len(data.get('recorded') or [])}, "
+                  f"не скачалось на этот раз {len(data.get('for_this_sync') or [])}, "
+                  f"видео другой длины {len(data.get('retimed') or [])}")
+            continue
         if row["payload"]["kind"] != "plan":
             continue
         inputs, plan = data["inputs"], data["plan"]
-        print(f"\n== план, круг {data['round']} ({clock(row['t'])}): онлайн-строк {len(inputs['online'])}, "
+        online = len(inputs["online"]) or online  # the rows of the sources are told with the first plan of a sync
+        print(f"\n== план, круг {data['round']} ({clock(row['t'])}): онлайн-строк {online}, "
               f"файлов в активе {len(inputs['containers'])}, неудач {len(inputs['failed'])}, целей {len(plan['goals'])}")
         for goal in plan["goals"]:
             video = goal.get("video") or {}
             shot = video.get("snapshot") or {}
             dubs = [f"{each.get('voice')}←{(each.get('snapshot') or {}).get('player', '?')}" for each in goal.get("tracks") or []]
-            print(f"  s{goal['slot'][0]:02d}e{goal['slot'][1]:02d}: видео {video.get('kind')} {shot.get('source')} "
-                  f"{shot.get('player')} {shot.get('height')}p; озвучки: {', '.join(dubs) or '—'}")
+            line = (f"видео {video.get('kind')} {shot.get('source')} {shot.get('player')} {shot.get('height')}p; "
+                    f"озвучки: {', '.join(dubs) or '—'}")
+            slot = tuple(goal["slot"])
+            if shown.get(slot) != line:  # a later plan shows only the episodes it changed
+                print(f"  s{goal['slot'][0]:02d}e{goal['slot'][1]:02d}: {line}")
+            shown[slot] = line
 
     print("\n== шаги")
     started: dict[str, tuple[str, dict]] = {}

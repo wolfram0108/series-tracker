@@ -374,7 +374,6 @@ class DiskWorld(World):
         self.host = Host(os.path.join(root, "site"))
         self.daemon = Daemon(self.codec)
         self.files = Library(os.path.join(root, "library"))
-        self.pending: list[tuple] = []  # the steps of the journal of this sync
         self.crash_at: int | None = None  # the step of the journal the process stops before (-1: before the journal)
         self.table = os.path.join(root, "assets.json")
         self._write_table()
@@ -495,20 +494,23 @@ class DiskWorld(World):
     def aligned_truth(self, aligned: Made) -> tuple[int, ...]:
         return (self.codec.sound(aligned.file, 0),)
 
-    async def stage(self, made, group, results) -> None:
+    async def stage(self, made, group, results) -> list:
         await World.stage(self, made, group, results)
-        self.pending += await self.files.build(made, group, results)
+        return await self.files.build(made, group, results)
 
-    async def commit(self, before) -> None:
+    async def commit(self, before, staged=None) -> None:
         if self.crash_at == -1:
-            self.pending = []
             raise Crash("before the journal")
-        if not self.pending:
-            self._clean()
-            return
         table = [container_json(each) for each in sorted(self.containers.values(), key=lambda each: each.name)]
-        steps = self.files.write_journal(self.pending, table)
-        self.pending = []
+        if not staged:
+            # The end of the sync, or a group that moves no file: the table as it is now, what was made aside goes.
+            if staged is None:
+                self.files.sweep()
+                self._clean()
+            with open(self.table, "w") as out:
+                json.dump(table, out)
+            return
+        steps = self.files.write_journal(staged, table)
         await self._carry_out(steps, table)
 
     async def _carry_out(self, steps: list, table: list) -> None:
@@ -520,18 +522,15 @@ class DiskWorld(World):
         with open(self.table, "w") as out:
             json.dump(table, out)
         self.files.finish()
-        self._clean()
 
     def recover(self) -> None:
         """The restart after a crash: a journal is carried out to the end; with no journal the snapshot stands."""
         self.crash_at = None
-        self.pending = []
         journal = self.files.read_journal()
         if journal is not None:
             asyncio.run(self._carry_out(journal["steps"], journal["table"]))
-        else:
-            self.files.finish()
-            self._clean()
+        self.files.sweep()
+        self._clean()
         with open(self.table) as found:
             self.containers = {each["name"]: container_of(each) for each in json.load(found)}
 
