@@ -167,11 +167,14 @@ def tracks_of(data: Any) -> list[Track]:
 
 
 class AllohaSession:
-    """One open of the player of one episode. `send` is how a request goes out (curl_cffi with the TLS of the browser of
-    the profile); `connect` opens the socket the host names. Both are given by the caller so that a stand serves them."""
+    """One open of the player of one episode. `http` is how its requests go out (curl_cffi with the TLS of the browser of
+    the profile); `media` makes a client of its own for each connection of a download (a client speaks HTTP/2 and would
+    carry every request of a download over one connection). Both are given by the caller so that a stand serves them."""
 
-    def __init__(self, profile: Profile, http, *, clock: Callable[[], float] = time.time) -> None:
+    def __init__(self, profile: Profile, http, *, media: Callable[[], Any] | None = None,
+                 clock: Callable[[], float] = time.time) -> None:
         self.profile, self.http, self._clock = profile, http, clock
+        self._media = media
         self.origin = self.iframe = self.authorizations = ""
         self.edge = ""
         self.view: dict[str, str] = {}
@@ -191,10 +194,14 @@ class AllohaSession:
     def _base(self) -> dict[str, str]:
         return {"User-Agent": self.profile.user_agent, "Accept-Language": LANGUAGE}
 
-    async def request(self, method: str, url: str, *, headers: Mapping[str, str] | None = None, **kw):
+    def media_client(self):
+        """A client for one connection of a download: a new one, or the session's own when it makes none."""
+        return self._media() if self._media is not None else self.http
+
+    async def request(self, method: str, url: str, *, headers: Mapping[str, str] | None = None, client=None, **kw):
         try:
-            return await self.http.request(method, url, headers={**self._base(), **(headers or {})},
-                                           timeout=REQUEST_TIMEOUT_S, **kw)
+            return await (client or self.http).request(method, url, headers={**self._base(), **(headers or {})},
+                                                       timeout=REQUEST_TIMEOUT_S, **kw)
         except Exception as exc:  # noqa: BLE001 - every failure of the way is a refusal with its kind
             raise AllohaRefused(f"{urlsplit(url).hostname}: {type(exc).__name__}") from exc
 

@@ -96,6 +96,7 @@ class AllohaModel:
         self.reports: list[str] = []
         self.sockets: list[Socket] = []
         self.closed = 0
+        self.clients = 0  # the clients the sessions made: one for the session, one for each connection of a download
         self.refuse_files: int | None = None  # a status the host answers every ask of the files with
         self.gone: set[int] = set()  # segments the CDN has not
         self.after_segment: dict[int, object] = {}  # an action when a segment is asked (renew the edge, drop the socket)
@@ -107,6 +108,7 @@ class AllohaModel:
     # --- the client of a session --------------------------------------------------------------------------------------
 
     def client(self, profile: Profile) -> "Client":
+        self.clients += 1
         return Client(self, profile)
 
     def handle(self, method: str, url: str, headers: dict, data: dict | None) -> Response:

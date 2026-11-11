@@ -163,7 +163,7 @@ class AllohaPlayer:
         if self._profile is None:
             raise AllohaRefused("нет профиля клиента Alloha (ST_ALLOHA_FINGERPRINT, ST_ALLOHA_USER_AGENT)")
         http = self._client(self._profile)
-        session = AllohaSession(self._profile, http)
+        session = AllohaSession(self._profile, http, media=lambda: self._client(self._profile))
         try:
             yield session
         finally:

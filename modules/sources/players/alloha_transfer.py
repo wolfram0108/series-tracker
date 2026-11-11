@@ -84,8 +84,8 @@ def playlist_of(text: str, base: str) -> Playlist:
     return Playlist(init, tuple(segments))
 
 
-async def _media(session: AllohaSession, url: str) -> bytes:
-    response = await session._ok("GET", url, headers=session.media_headers())
+async def _media(session: AllohaSession, url: str, client=None) -> bytes:
+    response = await session._ok("GET", url, headers=session.media_headers(), client=client)
     kind = (response.headers.get("Content-Type") or "").lower()
     if any(each in kind for each in _TEXT_TYPES):
         raise AllohaRefused(f"вместо сегмента ответ {kind}")
@@ -132,6 +132,14 @@ async def transfer(session: AllohaSession, listed: Playlist, target: str, connec
     window = max(1, connections) * WINDOW_PER_CONNECTION
 
     async def worker() -> None:
+        client = session.media_client()  # one connection of the download, as the player's own are
+        try:
+            await take(client)
+        finally:
+            if client is not session.http:
+                await client.close()
+
+    async def take(client) -> None:
         nonlocal taken, got
         while True:
             async with turn:
@@ -142,7 +150,7 @@ async def transfer(session: AllohaSession, listed: Playlist, target: str, connec
                 taken += 1
             if session.error:
                 raise AllohaRefused(session.error)
-            body = await _media(session, listed.segments[index][0])
+            body = await _media(session, listed.segments[index][0], client)
             session.bytes_loaded += len(body)
             got += len(body)
             async with turn:
