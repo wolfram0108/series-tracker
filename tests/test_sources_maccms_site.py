@@ -247,7 +247,8 @@ async def test_the_stream_of_an_episode_is_its_playlist_with_no_headers_for_a_do
 
     # One rendition: a cap has nothing to choose, and the downloader is handed the playlist itself; its frame, measured on
     # the table, is not measured again.
-    assert stream == {"stream_url": "https://vv.jisuzyv.test/play/B/index.m3u8", "headers": {}, "playlist": True}
+    assert stream == {"stream_url": "https://vv.jisuzyv.test/play/B/index.m3u8", "headers": {}, "progressive": False,
+                      "playlist": True}
     assert web.count(".ts") == heads
 
 

@@ -203,6 +203,8 @@ class CdnVideoHubPlayer:
     label = "CVH"
     series_scope = True
     stream_headers = STREAM_HEADERS
+    # The rungs are the mp4 files of the VK video: a ready file, asked in parts.
+    stream_kind = "file"
 
     def __init__(self, measure: Measure | None = None) -> None:
         self._measure = measure or measure_rung

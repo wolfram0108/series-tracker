@@ -107,6 +107,8 @@ class AnimakimaPlayer:
     # Its list is the list of episodes of the page, which the site of animakima reads: no page shows it as a catalog.
     series_scope = False
     stream_headers = STREAM_HEADERS
+    # The files of an episode are HLS playlists on the CDN of the site.
+    stream_kind = "playlist"
 
     def __init__(self, measure: Measure | None = None) -> None:
         self._measure = measure or measure_file

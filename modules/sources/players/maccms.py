@@ -33,6 +33,7 @@ class MaccmsPlayer:
     # The site of the title lists the episodes; no page shows this player as a catalog.
     series_scope = False
     stream_headers: dict[str, str] = {}
+    stream_kind = "playlist"
 
     def __init__(self, measure: Measure | None = None) -> None:
         self._measure = measure or measure_head
@@ -62,7 +63,7 @@ class MaccmsPlayer:
 
     async def stream(self, url: str, http: httpx.AsyncClient, max_height: int | None, pacer) -> dict:
         # The stream is an HLS playlist: it is downloaded by its segments (modules/downloads/hls_native.py).
-        return {**(await listed_stream(self, url, http, max_height, pacer)), "playlist": True}
+        return await listed_stream(self, url, http, max_height, pacer)
 
     def capped(self, max_height: int | None) -> "_Located":
         """An episode has one rendition, its frame measured on the table: there is nothing to choose under a cap, and the

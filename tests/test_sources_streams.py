@@ -43,7 +43,8 @@ async def test_an_allvideo_embed_resolves_to_its_best_stream_with_the_referer_of
 
     stream = await resolved(ALLVIDEO, web)
 
-    assert stream == {"stream_url": "https://cdn.test/1080.mp4/", "headers": {"Referer": "https://fsst.online/"}}
+    assert stream == {"stream_url": "https://cdn.test/1080.mp4/", "headers": {"Referer": "https://fsst.online/"},
+                      "progressive": True}
 
 
 async def test_the_best_stream_of_an_embed_is_4k_when_it_lists_one():

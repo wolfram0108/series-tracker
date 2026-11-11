@@ -118,7 +118,8 @@ class AllVideoPlayer:
         if picked is None:
             probe = probe_from(verdict, ref, self.label)
             raise StreamUnavailable(reason("player_failed", player=self.label, cause=probe.reason), probe.transient)
-        return {"stream_url": picked[1], "headers": {"Referer": asked.origin} if asked.origin else {}}
+        # The files of the list are ready mp4 files: asked in parts.
+        return {"stream_url": picked[1], "headers": {"Referer": asked.origin} if asked.origin else {}, "progressive": True}
 
     def resolving(self) -> "_Resolving":
         """The same player asked for the files of an embed, which says where the embed finally answered from."""

@@ -21,4 +21,8 @@ async def listed_stream(player, url: str, http: httpx.AsyncClient, max_height: i
     if picked is None:
         probe = probe_from(verdict, ref, player.label)
         raise StreamUnavailable(reason("player_failed", player=player.label, cause=probe.reason), probe.transient)
-    return {"stream_url": picked[1], "headers": dict(player.stream_headers)}
+    # What the file is decides how it is downloaded: a ready file in parts, a playlist by its segments; a player that
+    # names neither is read by ffmpeg over one connection.
+    kind = getattr(player, "stream_kind", "")
+    return {"stream_url": picked[1], "headers": dict(player.stream_headers),
+            "progressive": kind == "file", "playlist": kind == "playlist"}

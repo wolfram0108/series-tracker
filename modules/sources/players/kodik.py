@@ -269,6 +269,8 @@ class KodikPlayer:
     series_scope = True
     # What a stream of this player is asked with.
     stream_headers = {"Referer": ORIGIN + "/"}
+    # /ftor gives an HLS playlist for each quality.
+    stream_kind = "playlist"
 
     def __init__(self) -> None:
         # A session belongs to the client that asked for it: the signatures are issued for that visitor.

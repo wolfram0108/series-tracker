@@ -369,6 +369,7 @@ class DownloadsModule(BaseModule):
         while (self._fetch_queue and len(self._fetch_active) - len(self._placing) < self.places.total
                and len(self._placing) < self.places.total):
             job = self._fetch_queue.pop(0)
+            job["turn"] = self.places.turn()
             runner = self.spawn(self._fetch_one(job))
             self._fetch_active[job["key"]] = (runner, job["series_id"])
             self._fetch_jobs[job["key"]] = job
@@ -402,33 +403,33 @@ class DownloadsModule(BaseModule):
             nonlocal tries
             tries += 1
             self.cards.attempt(need_key, tries, budget.attempts)
-            stream_url, headers, stream_error, progressive, playlist = await resolve()
-            if stream_error is not None:
-                return (False, *stream_error)
-            multi = ytdlp.multithreaded(stream_url, headers, progressive, playlist)
-            if not self.places.free(multi):
-                # The way of the file is full: the fetch waits in the queue, and asks its stream anew when its turn comes
-                # (an address a host signed may not outlive the wait).
-                self.cards.waiting(need_key)
-                self._placing[key] = multi
-                self._fetch_pump()
-                self._announce_queue()
+            self.places.asking(turn)
+            try:
+                stream_url, headers, stream_error, progressive, playlist = await resolve()
+                if stream_error is not None:
+                    return (False, *stream_error)
+                multi = ytdlp.multithreaded(stream_url, headers, progressive, playlist)
+
+                def wait() -> None:
+                    # The way of the file is full: the fetch waits in the queue.
+                    self.cards.waiting(need_key)
+                    self._placing[key] = multi
+                    self._fetch_pump()
+                    self._announce_queue()
+
                 try:
-                    await self.places.take(multi)
+                    waited = await self.places.take(multi, turn, wait)
                 finally:
                     self._placing.pop(key, None)
-                try:
+            finally:
+                await self.places.leave(turn)
+            try:
+                if waited:
+                    # An address a host signed may not outlive the wait: the stream is asked anew.
                     self.cards.attempt(need_key, tries, budget.attempts)
                     stream_url, headers, stream_error, progressive, playlist = await resolve()
-                except BaseException:
-                    await self.places.give(multi)
-                    raise
-                if stream_error is not None:
-                    await self.places.give(multi)
-                    return (False, *stream_error)
-            else:
-                await self.places.take(multi)
-            try:
+                    if stream_error is not None:
+                        return (False, *stream_error)
                 return await fetched(stream_url, headers, progressive, playlist)
             finally:
                 await self.places.give(multi)
@@ -447,6 +448,7 @@ class DownloadsModule(BaseModule):
             return done, failure, None if done else kind_of(failure)
 
         budget = _download_budget()
+        turn = job["turn"]
 
         def report(result: tuple[bool, str, Failed | None], attempt: int, pause: float) -> None:
             self.cards.attempt_failed(need_key)
