@@ -29,6 +29,21 @@ export function excludingRule(result: TestResult | null | undefined): string {
   return typeof event?.rule === "string" ? event.rule : ""
 }
 
+/** The rules that gave the line something, in their order, and whether the last of them stopped the rest (its
+ *  «продолжать» is off): a rule placed lower was then not tried. */
+export function firedRules(result: TestResult | null | undefined): { names: string[]; stopped: boolean } {
+  const events = (result?.events ?? []).filter((each) => typeof each.rule === "string")
+  return { names: events.map((each) => String(each.rule)), stopped: events.some((each) => each.stopped === true) }
+}
+
+/** The line of the card that names them; empty when no rule gave anything. */
+export function firedText(result: TestResult | null | undefined): string {
+  const { names, stopped } = firedRules(result)
+  if (names.length === 0) return ""
+  const listed = names.join(" → ")
+  return stopped ? t("rulesTest.fired.stopped", { rules: listed, rule: names[names.length - 1] }) : t("rulesTest.fired", { rules: listed })
+}
+
 // Fields the constructor may add besides the numbers; shown only when they hold a word or a number.
 const shown = (value: unknown): string | null =>
   typeof value === "string" && value !== "" ? value : typeof value === "number" ? String(value) : null

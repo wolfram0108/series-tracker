@@ -235,17 +235,26 @@ class RulesModule(BaseModule):
             rule["error"] = error
         return rules
 
+    @staticmethod
+    def _checked(data: dict) -> None:
+        """A rule the engine cannot compile is refused to the user in the engine's words: a refusal, not a failure of
+        the module (no trace in the journal)."""
+        try:
+            validate_rule(data)
+        except ValueError as exc:
+            raise ValueError(reason("rule_invalid", detail=str(exc))) from None
+
     async def on_rule_add(self, env: Envelope) -> dict:
         profile_id = env.payload["profile_id"]
         await self._require_profile(profile_id)
-        validate_rule(env.payload.get("data") or {})
+        self._checked(env.payload.get("data") or {})
         rule_id = await self.repo.add_rule(profile_id, env.payload["data"])
         self._profile_changed(profile_id)
         return {"id": rule_id}
 
     async def on_rule_update(self, env: Envelope) -> dict:
         rule_id = env.payload["rule_id"]
-        validate_rule(env.payload.get("data") or {})
+        self._checked(env.payload.get("data") or {})
         profile_id = await self.repo.profile_id_of_rule(rule_id)
         await self.repo.update_rule(rule_id, env.payload["data"])
         if profile_id is not None:

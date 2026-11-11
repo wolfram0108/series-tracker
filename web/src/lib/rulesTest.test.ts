@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { cardState, excludingRule, pillsOf, resolutionBadge, type TestResult } from "./rulesTest"
+import { cardState, excludingRule, firedText, pillsOf, resolutionBadge, type TestResult } from "./rulesTest"
 
 const result = (over: Partial<TestResult> = {}): TestResult => ({ excluded: false, events: [], errors: [], ...over })
 const extracted = { rule: "серия", action: "extract" }
@@ -45,5 +45,17 @@ describe("resolutionBadge", () => {
     expect(resolutionBadge([360, 480])).toBe("SD 480")
     expect(resolutionBadge([240])).toBe("240p")
     expect([resolutionBadge([]), resolutionBadge(null), resolutionBadge(undefined)]).toEqual([null, null, null])
+  })
+})
+
+describe("the rules that gave a line something", () => {
+  it("are named in their order, with the one that stopped the rest", () => {
+    const voice = { rule: "Озвучки · 2", action: "extract", extracted: { voiceover: "AniStar" } }
+    const episode = { rule: "Серия · 1", action: "extract", extracted: { episode: 5 }, stopped: true }
+    expect(firedText(result({ events: [voice] }))).toBe("Правила: Озвучки · 2")
+    expect(firedText(result({ events: [voice, episode] })))
+      .toBe("Правила: Озвучки · 2 → Серия · 1 — «Серия · 1» остановило обработку, правила ниже не применялись")
+    expect(firedText(result())).toBe("")
+    expect(firedText(null)).toBe("")
   })
 })

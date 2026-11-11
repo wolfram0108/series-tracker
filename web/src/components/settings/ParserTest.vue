@@ -7,7 +7,7 @@ import StInput from "../StInput.vue"
 import { useRulesTest } from "../../composables/useRulesTest"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
-import { cardState, excludingRule, pillsOf, resolutionBadge } from "../../lib/rulesTest"
+import { cardState, excludingRule, firedText, pillsOf, resolutionBadge } from "../../lib/rulesTest"
 import { progressText } from "../../lib/sources"
 
 // The test of a profile: the rows of a page (a site, or a channel of VK) or the file names of a series, or titles
@@ -133,6 +133,7 @@ function runTest(): Promise<void> {
             <span class="card-title" :title="row.line">{{ row.line }}</span>
             <div v-if="resolutionBadge(row.heights)" class="quality-badge">{{ resolutionBadge(row.heights) }}</div>
           </div>
+          <small v-if="firedText(row.result)" class="fired-rules">{{ firedText(row.result) }}</small>
         </div>
         <div class="pills-column">
           <div v-if="cardState(row.result) === 'no-match'" class="pill">
@@ -151,3 +152,8 @@ function runTest(): Promise<void> {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* The rules that gave the line something: said under the line, in the muted words of a hint. */
+.fired-rules { color: var(--text-muted); font-size: 0.8rem; overflow-wrap: anywhere; }
+</style>

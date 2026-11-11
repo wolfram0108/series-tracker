@@ -276,7 +276,9 @@ def _compile_any(rule: dict) -> list[CompiledRule]:
 def table_rules(rule: dict) -> list[dict]:
     """The rows of a rule «Таблица» as the ordinary rules they are, in their order, at the place of the table: each row is
     one condition «содержит» (its template «ЕСЛИ») and one action of the column (its value «ТО»), with the table's own
-    `continue_after_match`. Matching them is the code of every rule; nothing of it is the table's own."""
+    `continue_after_match`. Matching them is the code of every rule; nothing of it is the table's own. A row carries
+    both its cells whole; the marks `if_joined` / `then_joined` (a cell joined with the one above) are the editor's way
+    of writing the table and mean nothing here."""
     table = rule["rule_table"]
     if not isinstance(table, dict):
         raise ValueError("таблица повреждена")
@@ -587,6 +589,9 @@ def process_title(profile: CompiledProfile, title: str) -> dict[str, Any]:
                                          if before.get(k) != v}})
             # Фикс В: остановка — только если правило ДАЛО результат.
             if not rule.continue_after_match:
+                # The rules after this one were not tried: said in the event, so the test of a profile can show why a
+                # rule placed lower did nothing.
+                events[-1]["stopped"] = True
                 break
     return {"excluded": False, "extracted": extracted, "events": events,
             "errors": errors}

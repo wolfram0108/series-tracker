@@ -901,3 +901,18 @@ def test_a_broken_table_is_disabled_whole_and_the_other_rules_still_work():
     profile = compile_profile(1, [broken, episode])
     assert profile.invalid_rules == [{"rule_id": 5, "name": "Озвучки", "error": "строка 2: пустое условие «ЕСЛИ»"}]
     assert process_title(profile, "Серия 4 | V:A")["extracted"] == {"episode": 4}
+
+
+def test_the_rule_that_stops_the_rest_says_so_in_its_event_and_a_table_reads_its_rows_whatever_cells_are_joined():
+    """The test of a profile shows why a rule placed lower did nothing; the marks of joined cells are the editor's."""
+    table = {"id": 7, "name": "Серия", "continue_after_match": 0, "action_pattern": "[]", "conditions": [],
+             "rule_table": {"action_type": "extract_single", "rows": [
+                 {"if": [{"type": "text", "value": "PID:a"}], "then": [{"type": "text", "value": "第"}, {"type": "number"}]},
+                 {"if": [{"type": "text", "value": "PID:a"}], "if_joined": True,
+                  "then": [{"type": "number"}, {"type": "whitespace"}, {"type": "text", "value": "серия"}]}]}}
+    profile = compile_profile(1, [table])
+    assert profile.invalid_rules == []
+    # The first «ТО» of the joined «ЕСЛИ» finds nothing in this line, the second does and stops the rest.
+    outcome = process_title(profile, "PID:a | 12 серия")
+    assert outcome["extracted"] == {"episode": 12}
+    assert [(event["rule"], event.get("stopped", False)) for event in outcome["events"]] == [("Серия · 2", True)]
