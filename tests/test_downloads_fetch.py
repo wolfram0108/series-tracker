@@ -500,3 +500,18 @@ async def test_a_download_cancelled_in_the_middle_of_its_watch_leaves_no_task_be
     await asyncio.gather(watch, return_exceptions=True)
     left = [task for task in asyncio.all_tasks() if task is not asyncio.current_task() and not task.done()]
     assert left == []
+
+
+@pytest.mark.asyncio
+async def test_a_downloaded_clip_the_host_served_instead_of_the_episode_is_no_file(system, tmp_path, monkeypatch):
+    """A download that came whole may be a clip of the host (a spent quota, core/notices.py): known by its head, it is no
+    episode — the fetch fails as a way that broke, and what it wrote goes."""
+    import hashlib
+    from core import notices
+    monkeypatch.setattr("modules.downloads.module.RETRY_DELAY_S", 0.0)
+    monkeypatch.setattr(notices, "NOTICES", (notices.Notice("test-quota", 5, hashlib.sha256(b"video").hexdigest(), "spent"),))
+    bus, _, dl, probe = system
+    path = str(tmp_path / "n.mp4")
+    (done,) = await _fetch(probe, bus, 1, jobs=[{"key": "dub:n", "url": "https://site/#cvh=9", "path": path, "series_id": 3}])
+    assert done["ok"] is False and "test-quota" in done["error"] and done["transient"] is False
+    assert dl.started.count("https://site/#cvh=9") == 3 and not os.path.exists(path)

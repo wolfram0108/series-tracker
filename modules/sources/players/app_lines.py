@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, quote, urldefrag, urlsplit
 import httpx
 
 from core.ffprobe import film_stream, probe
+from core import notices
 from core.http_limits import AnswerTooLarge
 from core.reasons import reason
 
@@ -77,7 +78,8 @@ async def served_as(http: httpx.AsyncClient, address: str, headers: dict[str, st
                 head += chunk
                 if not playlist and len(head) >= PEEK_BYTES:
                     playlist = is_playlist(head[:PEEK_BYTES].decode("utf-8", "replace"))
-                    if not playlist:
+                    # Of a file, as much of its head as tells a notice of the host from an episode (core/notices.py).
+                    if not playlist and len(head) >= max(PEEK_BYTES, notices.head_bytes()):
                         break
             # A range the host kept to cuts a playlist longer than it: the whole of it is then asked by the measure.
             cut = response.status_code == 206 and len(head) >= PLAYLIST_BYTES
@@ -88,6 +90,12 @@ async def served_as(http: httpx.AsyncClient, address: str, headers: dict[str, st
     if is_playlist(head[:PEEK_BYTES].decode("utf-8", "replace")):
         return Served("playlist", Answer(None) if cut else Answer(200, head.decode("utf-8", "replace"), final_url=final))
     if container_of(head) is not None:
+        notice = notices.notice_of(head)
+        if notice is not None:
+            # A clip the host serves instead of the episode: it has a frame and a length, and is no episode.
+            return Served("", Answer(200, reading=Reading(Kind.NOT_FOUND, 200, message=(
+                f"the host {urlsplit(address).hostname} served its notice «{notice.id}» instead of the episode: "
+                f"{notice.words}"))))
         return Served("file")
     return Served("", Answer(200, reading=Reading(Kind.NO_FILE, 200, message=(
         f"the host {urlsplit(address).hostname} served no stream: {kind or 'no type'}, «{_excerpt(head)}»"))))

@@ -597,3 +597,25 @@ async def test_the_name_a_site_gives_its_source_is_kept_with_its_table(tmp_path)
                          rows=[TableRow(key="banri:CO4K:1", player="line:CO4K", state=RowState.PLAYABLE, text="1")])
     await repo.save_table(table)
     assert (await repo.stored("app://banri/219017")).table.title == "半日 · 万界独尊 (2021)"
+
+
+async def test_a_clip_the_host_serves_instead_of_the_episode_is_known_by_its_head_and_is_no_episode(monkeypatch):
+    """A host serves a clip of its own (a spent quota) in place of an episode: a file with a frame and a length. It is
+    known by the hash of its head (core/notices.py), never by its length: the row is left without the episode, with the
+    words of the notice; any other file is a file."""
+    import hashlib
+    from core import notices
+    clip = b"\x00\x00\x00\x18ftypisom" + bytes(range(256)) * 300
+    other = b"\x00\x00\x00\x18ftypisom" + bytes(80000)
+    monkeypatch.setattr(notices, "NOTICES", (notices.Notice("test-quota", 65536, hashlib.sha256(clip[:65536]).hexdigest(),
+                                                            "the limit of attempts is spent"),))
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(206, content=clip if request.url.path == "/clip.mp4" else other)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        refused = await app_lines.served_as(http, "https://store.model/clip.mp4", {})
+        served = await app_lines.served_as(http, "https://store.model/film.mp4", {})
+    assert refused.kind == "" and refused.answer.reading.kind is Kind.NOT_FOUND
+    assert "test-quota" in refused.answer.reading.message and "instead of the episode" in refused.answer.reading.message
+    assert served.kind == "file"

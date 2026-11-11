@@ -48,7 +48,7 @@ import asyncio
 import os
 import traceback
 
-from core import BaseModule, storage
+from core import BaseModule, notices, storage
 from core.clock import beat_while
 from core.ffprobe import film_stream, streams_of
 from core.contracts import RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, WorkWithdrawn
@@ -104,6 +104,11 @@ def remove_download(path: str) -> bool:
         if os.path.isfile(each) and not storage.remove_file(each):
             clean = False
     return clean
+
+
+def _head_of(path: str, size: int) -> bytes:
+    with open(path, "rb") as file:
+        return file.read(size)
 
 
 def _download_budget() -> Budget:
@@ -445,6 +450,12 @@ class DownloadsModule(BaseModule):
             if playlist:
                 kw["playlist"] = kw["resumable"] = True  # what an attempt got is dropped at the end of the fetch
             done, failure = await self._watched(key, stream_url, path, on_progress, **kw)
+            if done:
+                notice = notices.notice_of(await storage.call(_head_of, path, notices.head_bytes()))
+                if notice is not None:
+                    # The file is a clip the host served instead of the episode (core/notices.py): no episode, and the
+                    # way to it may open again (a quota of a day).
+                    return False, f"источник отдал уведомление «{notice.id}» вместо серии", Failed.BROKEN
             return done, failure, None if done else kind_of(failure)
 
         budget = _download_budget()
