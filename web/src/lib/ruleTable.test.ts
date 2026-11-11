@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { canJoin, emptyRow, fieldValues, join, joined, rowOf, rowsOf, settle, spanOf, split, storedOf, textsOf } from "./ruleTable"
+import {
+  canJoin, canJoinRange, cellsIn, emptyRow, fieldValues, join, joinRange, joined, rangeOf, rowOf, rowsOf, settle, spanOf, split,
+  splitRange, storedOf, textsOf,
+} from "./ruleTable"
 
 const LINES = [
   "PID:1.ruchime.org | P:Kodik | Вечная воля | Серия 1 | V:AniStar | VT:voice | R:1080",
@@ -91,6 +94,34 @@ describe("a rule table", () => {
     expect(rows.map((row) => row.then.value)).toEqual(["ChinaTown", "AniStar", "ChinaTown"])
     expect(rows.map((_row, at) => joined(rows, at, "then"))).toEqual([false, false, false])
     rows[2].then.value = "отдельно"
+    expect(rows[0].then.value).toBe("ChinaTown")
+  })
+
+  it("makes several chosen cells one: it holds what the uppermost held, what the others held is dropped", () => {
+    const rows = [...voices(), rowOf("V", "FumoDub")]
+    // The choice from the second row to the fourth, whichever of the two was clicked first: three cells.
+    expect(rangeOf(rows, 3, 1, "then")).toEqual([1, 4])
+    expect(cellsIn(rows, 1, 4, "then")).toBe(3)
+    joinRange(rows, 1, 4, "then")
+    expect(rows.map((row) => row.then.value)).toEqual(["ChinaTown", "ChineTown", "ChineTown", "ChineTown"])
+    expect(spanOf(rows, 2, "then")).toEqual([1, 4])
+    // A choice that ends inside a joined cell takes the whole of it; one cell alone is nothing to join.
+    expect(rangeOf(rows, 0, 2, "then")).toEqual([0, 4])
+    expect(canJoinRange(rows, 1, 4, "then")).toBe(false)
+    expect(canJoinRange(rows, 0, 4, "then")).toBe(true)
+    // Cells that are one cell on the other side already are not joined.
+    expect(canJoinRange(rows, 1, 3, "if")).toBe(false)
+    expect(canJoinRange(rows, 0, 2, "if")).toBe(true)
+  })
+
+  it("splits every joined cell of the chosen rows, each row keeping what the joined cell held", () => {
+    const rows = [...voices(), rowOf("V", "FumoDub")]
+    joinRange(rows, 0, 2, "then")
+    joinRange(rows, 2, 4, "then")
+    splitRange(rows, 0, 4, "then")
+    expect(rows.map((_row, at) => joined(rows, at, "then"))).toEqual([false, false, false, false])
+    expect(rows.map((row) => row.then.value)).toEqual(["ChinaTown", "ChinaTown", "AniStar", "AniStar"])
+    rows[1].then.value = "своя"
     expect(rows[0].then.value).toBe("ChinaTown")
   })
 

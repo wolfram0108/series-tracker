@@ -73,25 +73,40 @@ describe("a rule «Таблица»", () => {
     expect(w.findAll("tbody td.col-if")).toHaveLength(1)
   })
 
-  it("joins the cell being edited with the one below and splits it again, by the tools of the cell", async () => {
+  it("joins the chosen cells of a column into one and splits them again, by the tools over the table", async () => {
     const { w, rule } = opened([rowOf("V", "ChinaTown"), rowOf("V", "ChineTown"), rowOf("V", "AniStar")])
-    const cells = () => w.findAll("tbody td.col-then").map((cell) => cell.attributes("rowspan") ?? "1")
-    expect(cells()).toEqual(["1", "1", "1"])
-    await w.findAll("tbody td.col-then")[0].trigger("mousedown")
-    await w.find("td.col-then .cell-join").trigger("click")
-    // One cell «ТО» of two rows: the second row has no cell of its own, and its value is the joined one.
-    expect(cells()).toEqual(["2", "1"])
+    const thens = () => w.findAll("tbody td.col-then")
+    const spans = (side: string) => w.findAll(`tbody td.col-${side}`).map((cell) => cell.attributes("rowspan") ?? "1")
+    const tool = (name: string) => w.find(`.cell-tools .cell-${name}`)
+    // Nothing chosen: there is nothing to join or to split.
+    expect([tool("join").attributes("disabled"), tool("split").attributes("disabled")]).toEqual(["", ""])
+    // A click chooses a cell, Shift+click another of the column: the two are chosen together, one frame around them.
+    await thens()[0].trigger("mousedown")
+    await thens()[1].trigger("mousedown", { shiftKey: true })
+    expect(thens().map((cell) => cell.classes().filter((name) => name.startsWith("is-")).sort())).toEqual([
+      ["is-first", "is-picked"], ["is-last", "is-picked"], []])
+    expect(tool("join").attributes("disabled")).toBeUndefined()
+    await tool("join").trigger("click")
+    // One cell «ТО» of two rows with what the upper one held; it is the cell chosen now.
+    expect(spans("then")).toEqual(["2", "1"])
     expect(storedOf("assign_voiceover", rule.table!.rows, false).rows.map((row) => row.then)).toEqual(["ChinaTown", "ChinaTown", "AniStar"])
+    expect(thens()[0].classes()).toContain("is-selected")
     await w.find("td.col-then input.table-value").setValue("Чайнатаун")
     expect(rule.table!.rows.map((row) => row.then.value)).toEqual(["Чайнатаун", "Чайнатаун", "AniStar"])
-    await w.find("td.col-then .cell-split").trigger("click")
-    expect(cells()).toEqual(["1", "1", "1"])
-    // «ЕСЛИ» is joined the same way: one condition with two «ТО».
-    await w.findAll("tbody td.col-if")[1].trigger("mousedown")
-    await w.find("td.col-if .cell-join").trigger("click")
-    expect(w.findAll("tbody td.col-if").map((cell) => cell.attributes("rowspan") ?? "1")).toEqual(["1", "2"])
-    // The rows joined in «ЕСЛИ» cannot be joined in «ТО» too.
-    await w.findAll("tbody td.col-then")[1].trigger("mousedown")
-    expect(w.find("td.col-then .cell-join").attributes("disabled")).toBeDefined()
+    // One cell chosen: «Объединить» takes the cell below it.
+    await tool("join").trigger("click")
+    expect(spans("then")).toEqual(["3"])
+    await tool("split").trigger("click")
+    expect(spans("then")).toEqual(["1", "1", "1"])
+    expect(rule.table!.rows.map((row) => row.then.value)).toEqual(["Чайнатаун", "Чайнатаун", "Чайнатаун"])
+    // «ЕСЛИ» is joined the same way; rows joined in «ЕСЛИ» are not joined in «ТО» too.
+    const ifs = () => w.findAll("tbody td.col-if")
+    await ifs()[1].trigger("mousedown")
+    await ifs()[2].trigger("mousedown", { shiftKey: true })
+    await tool("join").trigger("click")
+    expect(spans("if")).toEqual(["1", "2"])
+    await thens()[1].trigger("mousedown")
+    await thens()[2].trigger("mousedown", { shiftKey: true })
+    expect(tool("join").attributes("disabled")).toBeDefined()
   })
 })

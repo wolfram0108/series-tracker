@@ -6,7 +6,8 @@ import StSelect from "../StSelect.vue"
 import { t } from "../../i18n"
 import { normalizeAttachments, type PatternBlock } from "../../lib/patternBlocks"
 import {
-  canJoin, emptyRow, fieldValues, join, joined, rowOf, settle, spanOf, split, textsOf, type Side, type TableRow,
+  canJoin, canJoinRange, cellsIn, emptyRow, fieldValues, join, joinRange, joined, rangeOf, rowOf, settle, spanOf,
+  splitRange, textsOf, type Side, type TableRow,
 } from "../../lib/ruleTable"
 import { actionLabel, actionOptions, fieldText, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
 import type { EditableRule } from "./ParserRuleCard.vue"
@@ -34,7 +35,10 @@ const props = defineProps<{
 const emit = defineEmits<{ toggle: []; save: []; delete: []; move: [dir: -1 | 1] }>()
 
 const ACTIONS = actionOptions()
+// The cell clicked, and the row its choice was extended to (Shift+click): the cells of the column between the two are
+// chosen together.
 const selected = ref<Cell | null>(null)
+const upto = ref<number | null>(null)
 // The rows the last quick template added, marked until the next one.
 const fresh = ref<Set<number>>(new Set())
 
@@ -50,18 +54,43 @@ const templates = computed(() => {
   }))
 })
 
-// The template the palette serves: the cell being edited, when its side holds blocks.
-const target = computed<{ blocks: PatternBlock[]; context: "if" | "then" } | null>(() => {
+// The rows the chosen cells span, and how many cells they are.
+const picked = computed<{ side: Side; first: number; end: number; cells: number } | null>(() => {
   const cell = selected.value
-  const row = cell && table.value.rows.find((each) => each.key === cell.key)
-  if (!row) return null
-  if (cell.side === "if") return { blocks: row.if.blocks, context: "if" }
+  const rows = table.value.rows
+  const from = cell ? rows.findIndex((each) => each.key === cell.key) : -1
+  if (!cell || from < 0) return null
+  const to = upto.value === null ? -1 : rows.findIndex((each) => each.key === upto.value)
+  const [first, end] = rangeOf(rows, from, to < 0 ? from : to, cell.side)
+  return { side: cell.side, first, end, cells: cellsIn(rows, first, end, cell.side) }
+})
+
+// The template the palette serves: the one cell chosen, when its side holds blocks.
+const target = computed<{ blocks: PatternBlock[]; context: "if" | "then" } | null>(() => {
+  const chosen = picked.value
+  if (!chosen || chosen.cells !== 1) return null
+  const row = table.value.rows[chosen.first]
+  if (chosen.side === "if") return { blocks: row.if.blocks, context: "if" }
   return extracts.value ? { blocks: row.then.blocks, context: "then" } : null
 })
 
-const isSelected = (row: TableRow, side: Cell["side"]) => selected.value?.key === row.key && selected.value.side === side
-function select(row: TableRow, side: Cell["side"]): void {
+/** How the cell that begins at the row stands in the choice: the one cell chosen, or its place in a run of several. */
+function markOf(at: number, side: Side): Record<string, boolean> {
+  const chosen = picked.value
+  const [first, end] = spanOf(table.value.rows, at, side)
+  if (!chosen || chosen.side !== side || first < chosen.first || end > chosen.end) return {}
+  if (chosen.cells === 1) return { "is-selected": true }
+  return { "is-picked": true, "is-first": first === chosen.first, "is-last": end === chosen.end }
+}
+function select(row: TableRow, side: Side, event?: MouseEvent): void {
+  if (event?.shiftKey && selected.value?.side === side) {
+    // The choice is extended, nothing is typed: the click neither moves the caret nor selects text.
+    event.preventDefault()
+    upto.value = row.key
+    return
+  }
   selected.value = { key: row.key, side }
+  upto.value = null
 }
 function pick(block: PatternBlock): void {
   if (!target.value) return
@@ -80,25 +109,48 @@ function addRow(): void {
 }
 function removeRow(at: number): void {
   const [gone] = table.value.rows.splice(at, 1)
-  if (gone && selected.value?.key === gone.key) selected.value = null
+  if (gone && (selected.value?.key === gone.key || upto.value === gone.key)) {
+    selected.value = null
+    upto.value = null
+  }
   settle(table.value.rows)
 }
-// Joined cells: a cell spans the rows that hold it; it is joined with the one below and split from where it is selected.
+// Joined cells: a cell spans the rows that hold it. Several chosen cells are made one; one chosen cell takes the cell
+// below it. The joined cell holds what the uppermost held.
 const rowsOfCell = (at: number, side: Side): number => {
   const [first, end] = spanOf(table.value.rows, at, side)
   return end - first
 }
 const isJoined = (at: number, side: Side): boolean => joined(table.value.rows, at, side)
-const mayJoin = (at: number, side: Side): boolean => canJoin(table.value.rows, at, side)
-function joinBelow(at: number, side: Side): void {
-  join(table.value.rows, at, side)
+const mayJoin = computed(() => {
+  const chosen = picked.value
+  if (!chosen) return false
+  return chosen.cells > 1 ? canJoinRange(table.value.rows, chosen.first, chosen.end, chosen.side)
+    : canJoin(table.value.rows, chosen.first, chosen.side)
+})
+const maySplit = computed(() => {
+  const chosen = picked.value
+  return chosen !== null && chosen.end - chosen.first > chosen.cells
+})
+function joinPicked(): void {
+  const chosen = picked.value
+  if (!chosen || !mayJoin.value) return
+  const rows = table.value.rows
+  if (chosen.cells > 1) joinRange(rows, chosen.first, chosen.end, chosen.side)
+  else join(rows, chosen.first, chosen.side)
+  selected.value = { key: rows[chosen.first].key, side: chosen.side }
+  upto.value = null
 }
-function splitCell(at: number, side: Side): void {
-  split(table.value.rows, at, side)
+function splitPicked(): void {
+  const chosen = picked.value
+  if (!chosen) return
+  splitRange(table.value.rows, chosen.first, chosen.end, chosen.side)
+  upto.value = table.value.rows[chosen.end - 1].key
 }
 function moved(): void {
   settle(table.value.rows)
   selected.value = null
+  upto.value = null
 }
 function setAction(value: string): void {
   table.value.action_type = value
@@ -135,7 +187,25 @@ function setAction(value: string): void {
     </div>
 
     <div v-if="isOpen" class="rule-body table-body">
-      <PatternPalette class="table-palette" :blocks="target?.blocks ?? null" :context="target?.context ?? 'if'" @pick="pick" />
+      <div class="table-bar">
+        <PatternPalette
+          class="table-palette" :class="{ 'is-idle': picked !== null && !target }"
+          :blocks="target?.blocks ?? null" :context="target?.context ?? 'if'" @pick="pick"
+        />
+        <div class="cell-tools">
+          <span class="cell-tools-name">{{ t("rules.table.cells") }}</span>
+          <button type="button" class="cell-tool cell-join" :disabled="!mayJoin" @click="joinPicked">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+              <rect x="2.5" y="1.5" width="11" height="13" rx="1" /><path d="M8 3.5v3M6.5 5.2L8 6.7l1.5-1.5M8 12.5v-3M6.5 10.8L8 9.3l1.5 1.5" />
+            </svg>{{ t("rules.table.join") }}
+          </button>
+          <button type="button" class="cell-tool cell-split" :disabled="!maySplit" @click="splitPicked">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+              <rect x="2.5" y="1.5" width="11" height="13" rx="1" /><path d="M2.5 8h11M8 6.3v-3M6.5 4.8L8 3.3l1.5 1.5M8 9.7v3M6.5 11.2L8 12.7l1.5-1.5" />
+            </svg>{{ t("rules.table.split") }}
+          </button>
+        </div>
+      </div>
 
       <div class="table-scroll">
       <table class="rule-table">
@@ -174,24 +244,13 @@ function setAction(value: string): void {
               </td>
               <td
                 v-if="!isJoined(at, 'if')" class="col-if" :rowspan="rowsOfCell(at, 'if')"
-                :class="{ 'is-selected': isSelected(row, 'if'), 'is-joined': rowsOfCell(at, 'if') > 1 }" @mousedown="select(row, 'if')"
+                :class="[markOf(at, 'if'), { 'is-joined': rowsOfCell(at, 'if') > 1 }]" @mousedown="select(row, 'if', $event)"
               >
                 <ParserPatternEditor :blocks="row.if.blocks" context="if" :show-palette="false" />
-                <div v-if="isSelected(row, 'if')" class="cell-tools">
-                  <button
-                    type="button" class="cell-tool cell-join" :disabled="!mayJoin(at, 'if')"
-                    :title="t('rules.table.join')" :aria-label="t('rules.table.join')" @click.stop="joinBelow(at, 'if')"
-                  ><i class="pi pi-arrow-down" /></button>
-                  <button
-                    v-if="rowsOfCell(at, 'if') > 1" type="button" class="cell-tool cell-split"
-                    :title="t('rules.table.split')" :aria-label="t('rules.table.split')" @click.stop="splitCell(at, 'if')"
-                  ><i class="pi pi-arrows-v" /></button>
-                </div>
               </td>
               <td
                 v-if="!isJoined(at, 'then')" class="col-then" :rowspan="rowsOfCell(at, 'then')"
-                :class="{ 'is-selected': extracts && isSelected(row, 'then'), 'is-joined': rowsOfCell(at, 'then') > 1 }"
-                @mousedown="select(row, 'then')"
+                :class="[markOf(at, 'then'), { 'is-joined': rowsOfCell(at, 'then') > 1 }]" @mousedown="select(row, 'then', $event)"
               >
                 <ParserPatternEditor v-if="extracts" :blocks="row.then.blocks" context="then" :show-palette="false" />
                 <input
@@ -200,16 +259,6 @@ function setAction(value: string): void {
                   :aria-label="actionLabel(table.action_type)"
                   @input="row.then.value = fieldText($event)"
                 />
-                <div v-if="isSelected(row, 'then')" class="cell-tools">
-                  <button
-                    type="button" class="cell-tool cell-join" :disabled="!mayJoin(at, 'then')"
-                    :title="t('rules.table.join')" :aria-label="t('rules.table.join')" @click.stop="joinBelow(at, 'then')"
-                  ><i class="pi pi-arrow-down" /></button>
-                  <button
-                    v-if="rowsOfCell(at, 'then') > 1" type="button" class="cell-tool cell-split"
-                    :title="t('rules.table.split')" :aria-label="t('rules.table.split')" @click.stop="splitCell(at, 'then')"
-                  ><i class="pi pi-arrows-v" /></button>
-                </div>
               </td>
               <td class="col-remove">
                 <button type="button" class="row-remove" :title="t('rules.table.removeRow')" :aria-label="t('rules.table.removeRow')" @click="removeRow(at)">
@@ -278,16 +327,23 @@ function setAction(value: string): void {
 
 .rule-table tr.is-fresh td { background: #f1f7ff; }
 .rule-table td.is-selected { box-shadow: inset 0 0 0 2px #0d6efd; }
-/* A cell joined of several rows stands at the top of its rows. */
-.rule-table td.is-joined { vertical-align: top; background: #fcfcfd; }
-/* The tools stand under what the cell holds, never over it. */
-.cell-tools { display: flex; justify-content: flex-end; gap: 0.25rem; margin-top: 0.375rem; }
+/* Several cells of a column chosen together: one frame around all of them. */
+.rule-table td.is-picked { background: #eaf2ff; box-shadow: inset 2px 0 0 #0d6efd, inset -2px 0 0 #0d6efd; }
+.rule-table td.is-picked.is-first { box-shadow: inset 2px 2px 0 #0d6efd, inset -2px 0 0 #0d6efd; }
+.rule-table td.is-picked.is-last { box-shadow: inset 2px -2px 0 #0d6efd, inset -2px 0 0 #0d6efd; }
+/* A joined cell is one cell of several rows: what it holds stands in its middle. */
+.rule-table td.is-joined { background: #fbfcfe; }
+/* The palette of blocks and the tools of the cells stand in one line over the table, and wrap when it is narrow. */
+.table-bar { display: flex; flex-wrap: wrap; gap: 0.625rem 1rem; align-items: center; justify-content: space-between; }
+.table-palette.is-idle { opacity: 0.45; }
+.cell-tools { display: flex; flex-wrap: wrap; gap: 0.375rem; align-items: center; }
+.cell-tools-name { margin-right: 0.125rem; color: var(--text-muted); font-size: 0.8125rem; }
 .cell-tool {
-  display: inline-flex; align-items: center; justify-content: center; inline-size: 1.5rem; block-size: 1.5rem; padding: 0;
-  border: 1px solid #ced4da; border-radius: 4px; background: #fff; color: #0d6efd; font-size: 0.75rem; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 0.375rem; block-size: 2rem; padding: 0 0.75rem; border: 1px solid #9ec5fe;
+  border-radius: 6px; background: #fff; color: #0a58ca; font: inherit; font-size: 0.8125rem; cursor: pointer;
 }
 .cell-tool:hover:not(:disabled) { border-color: #0d6efd; }
-.cell-tool:disabled { color: #adb5bd; cursor: default; }
+.cell-tool:disabled { border-color: #e9ecef; color: #adb5bd; cursor: default; }
 /* The template of a cell is the plain row of its blocks: the frame is the cell's. */
 .rule-table td :deep(.pattern-constructor) { padding: 0; background: transparent; }
 .rule-table td :deep(.pattern-blocks-container) { min-height: 2rem; padding: 0; }

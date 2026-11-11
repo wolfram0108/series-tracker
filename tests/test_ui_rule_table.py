@@ -177,10 +177,16 @@ async def test_cells_joined_in_the_table_are_saved_joined_and_give_their_one_val
         await table.locator(".template-chip", has_text="V:").click()
     await expect(table.locator("tbody td.col-then")).to_have_count(2)
 
-    await table.locator("tbody td.col-then").first.dispatch_event("mousedown")
-    await ui.shot("t3-cell-tools")
-    await table.locator("td.col-then .cell-join").click()
+    # The two cells «ТО» are chosen together (a click, then Shift+click) and made one by the tool over the table.
+    join = table.locator(".cell-tools .cell-join")
+    await expect(join).to_be_disabled()
+    await table.locator("tbody td.col-then").nth(0).click()
+    await table.locator("tbody td.col-then").nth(1).click(modifiers=["Shift"])
+    await expect(table.locator("tbody td.col-then.is-picked")).to_have_count(2)
+    await ui.shot("t3-cells-chosen")
+    await join.click()
     await expect(table.locator("tbody td.col-then")).to_have_count(1)
+    await expect(table.locator(".cell-tools .cell-split")).to_be_enabled()
     await expect(table.locator("tbody td.col-then")).to_have_attribute("rowspan", "2")
     async with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/rules")) as saved, \
             page.expect_response(lambda r: r.request.method == "GET" and r.url.endswith("/rules")):

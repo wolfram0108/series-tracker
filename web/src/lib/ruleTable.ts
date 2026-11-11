@@ -101,6 +101,41 @@ export function split(rows: TableRow[], at: number, side: Side): void {
   for (let each = first + 1; each < end; each++) (rows[each][side] as IfCell | ThenCell) = copyOf(rows[each][side])
 }
 
+const other = (side: Side): Side => (side === "if" ? "then" : "if")
+
+/** The rows of the cells of a column from the one that covers row `a` to the one that covers row `b`, whole cells:
+ *  [the first row, the one after the last]. */
+export function rangeOf(rows: TableRow[], a: number, b: number, side: Side): [number, number] {
+  const [low, high] = a <= b ? [a, b] : [b, a]
+  return [spanOf(rows, low, side)[0], spanOf(rows, high, side)[1]]
+}
+
+/** How many cells of the column the rows hold. */
+export function cellsIn(rows: TableRow[], first: number, end: number, side: Side): number {
+  let cells = 0
+  for (let at = first; at < end; at++) if (at === first || !joined(rows, at, side)) cells += 1
+  return cells
+}
+
+/** Whether the cells of the rows can be made one: there are several, and no two of them are one cell on the other side
+ *  already (rows alike in both cells would be one rule written twice). */
+export function canJoinRange(rows: TableRow[], first: number, end: number, side: Side): boolean {
+  if (cellsIn(rows, first, end, side) < 2) return false
+  for (let at = first + 1; at < end; at++) if (!joined(rows, at, side) && joined(rows, at, other(side))) return false
+  return true
+}
+
+/** The cells of the rows made one cell: it holds what the uppermost held, what the others held is dropped. */
+export function joinRange(rows: TableRow[], first: number, end: number, side: Side): void {
+  if (!canJoinRange(rows, first, end, side)) return
+  for (let at = first + 1; at < end; at++) (rows[at][side] as IfCell | ThenCell) = rows[first][side]
+}
+
+/** Every joined cell of the rows made the cells of its rows again, each with what the joined one held. */
+export function splitRange(rows: TableRow[], first: number, end: number, side: Side): void {
+  for (let at = end - 1; at > first; at--) if (joined(rows, at, side)) (rows[at][side] as IfCell | ThenCell) = copyOf(rows[at][side])
+}
+
 /** After rows were moved, added or removed: a row taken out of the rows it shared a cell with gets a cell of its own
  *  with the same content, so a cell is always a run of neighbouring rows. */
 export function settle(rows: TableRow[]): void {
