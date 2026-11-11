@@ -21,7 +21,7 @@ from modules.sources.sites import ReadContext, SiteError
 from modules.sources.sites.yummyani import YummyAniSite
 from modules.sources.sites.yummyani.site import voice_of
 from sources_support import READ_LIMIT_S, Web, within
-from test_alloha_player import Browser, answer, track
+from test_alloha_player import Browser, answer, document, track
 from test_sources_cvh_kodik import ftor_links, season_page
 
 URL = "https://old.yummyani.me/catalog/item/lyubov-pod-gipnozom"
@@ -60,6 +60,8 @@ def site_web(title: dict | tuple = TITLE) -> Web:
     web.route("kodikplayer.com/ftor", lambda request: json.dumps(ftor_links(360, 720)), method="POST")
     web.route("/player/sv/playlist", json.dumps(CVH_PLAYLIST))
     web.route("/player/sv/video/", json.dumps({"sources": {"mpegHighUrl": "https://okcdn.test/v1/720"}}))
+    # The document of the iframe of Alloha: the player has both episodes of the voice-over of the site.
+    web.route("alloha.yani.tv/?", document({"158": {1: [1, 2]}}))
     return web
 
 

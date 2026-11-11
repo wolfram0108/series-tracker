@@ -3,7 +3,9 @@
 The iframe is loaded under a blank page at the address of the site; the player answers `POST /bnsi/movies/<id>` with the
 HLS of the episode by height; once it plays, its first request to the CDN carries the access headers (after a CORS
 preflight that carries none). A click on an item of its (hidden) list of episodes answers the same request for that
-episode, without loading the player again.
+episode, without loading the player again. The document of the iframe is an ordinary page of the host: it lists the
+files the player has of the title (voice-over, season, episode -> the number its files are asked by), and the host
+answers 404 for a voice-over or an episode it has not.
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ from core.reasons import parse
 from core.retry import Budget
 from modules.sources import policy
 from modules.sources.players import alloha
-from modules.sources.players.alloha import AllohaPlayer, link_of, parse_link, read_answer
+from modules.sources.players.alloha import AllohaPlayer, catalog_of, link_of, parse_link, read_answer
 from modules.sources.players.contract import Kind, PlayerRef, StreamUnavailable
 from sources_support import STEP_LIMIT_S, Web, within
 
@@ -55,8 +57,8 @@ class Request:
 
 
 class Response:
-    def __init__(self, url: str, body: str) -> None:
-        self.url, self._body = url, body
+    def __init__(self, url: str, body: str, status: int = 200) -> None:
+        self.url, self._body, self.status = url, body, status
 
     async def text(self) -> str:
         return self._body
@@ -73,9 +75,10 @@ class Frame:
         if episode not in browser.episodes:
             return False
         browser.switches.append(episode)
-        if browser.episodes[episode] is not None:
-            await self.page.emit("response", Response("https://alloha.yani.tv/bnsi/movies/9" + episode,
-                                                      json.dumps(browser.episodes[episode])))
+        if episode in browser.refused:
+            await self.page.emit("response", Response(files_address(episode), json.dumps({"error": "не найден"}), 404))
+        elif browser.episodes[episode] is not None:
+            await self.page.emit("response", Response(files_address(episode), json.dumps(browser.episodes[episode])))
         return True
 
 
@@ -102,8 +105,8 @@ class Page:
         self.browser.iframes.append(src)
         await self.emit("response", Response("https://alloha.yani.tv/ws-player.js", "console.log(1)"))
         if self.browser.player_answer is not None:
-            await self.emit("response", Response("https://alloha.yani.tv/bnsi/movies/285818",
-                                                 json.dumps(self.browser.player_answer)))
+            episode = src.split("episode=")[1].split("&")[0]
+            await self.emit("response", Response(files_address(episode), json.dumps(self.browser.player_answer)))
 
     async def click(self, _x: int, _y: int) -> None:
         self.browser.clicks += 1
@@ -132,11 +135,38 @@ class Browser:
         # What the CDN answers to each request of the player that carries the access headers, in order.
         self.cdn_answers = cdn_answers
         self.routed, self.parents, self.iframes, self.switches = [], [], [], []
+        self.refused: set[str] = set()  # the episodes the host refuses the files of (its rate)
         self.clicks = self.closed = self.opened = 0
 
     async def new_context(self, **_options) -> Context:
         self.opened += 1
         return Context(self)
+
+
+def files_address(episode: str) -> str:
+    """The address the player asks the files of an episode by: the number of the files is its last part."""
+    return "https://alloha.yani.tv/bnsi/movies/9" + episode
+
+
+def document(voices: dict[str, dict[int, list[int]]]) -> str:
+    """The document of the iframe: the list of the files of the title in a string of its script."""
+    listed = {"type": "serial", "active": {}, "all": {
+        f"t{voice}": {"name": "Озвучка «А»", "file": {str(season): {
+            str(episode): {"id": int(f"9{episode}"), "id_translation": int(voice), "seasons": season, "episode": episode}
+            for episode in episodes} for season, episodes in seasons.items()}}
+        for voice, seasons in voices.items()}}
+    text = json.dumps(listed).replace("\\", "\\\\").replace("'", "\\'")
+    return f"<script>const playerConfigs = {{}}; \tconst fileList = JSON.parse('{text}');</script>"
+
+
+def host(voices: dict[str, dict[int, list[int]]]) -> Web:
+    """The host of the player as the server sees it: the document of an iframe of a voice-over it has, 404 of another."""
+    def answer_of(request):
+        named = dict(request.url.params)
+        assert request.headers["referer"] == "https://old.yummyani.me/"
+        episodes = voices.get(named["translation"], {}).get(int(named["season"]), [])
+        return document(voices) if int(named["episode"]) in episodes else (404, "<title>Ошибка!</title>")
+    return Web().route("alloha.yani.tv/?", answer_of)
 
 
 def a_player(browser: Browser | None) -> AllohaPlayer:
@@ -152,6 +182,12 @@ def quick(monkeypatch):
     monkeypatch.setattr(alloha, "PLAY_TIMEOUT_S", 0.05)
     monkeypatch.setattr(alloha, "SWITCH_TIMEOUT_S", 0.05)
     monkeypatch.setattr(policy, "DEFAULT", Budget(attempts=2, pauses=(0.0,), limit_s=5.0))
+
+
+@pytest.fixture(autouse=True)
+def unpaced(monkeypatch):
+    """The pace of the asks is the host's limit; a model of the host has none."""
+    monkeypatch.setattr(alloha, "ASK_INTERVAL_S", 0.0)
 
 
 # --- the link and the iframe ------------------------------------------------------------------------------------------------------
@@ -187,7 +223,9 @@ async def test_an_ask_opens_the_iframe_under_a_blank_page_of_the_site_and_reads_
     reading = player.read(await within(player.fetch(player.ref_of(PAGE, IFRAME), None, PAGE), STEP_LIMIT_S, "the ask"))
 
     assert (reading.kind, reading.resolutions) == (Kind.PLAYABLE, (360, 720, 1080))
-    assert browser.parents == browser.routed == ["https://old.yummyani.me/"] and browser.iframes == ["https:" + IFRAME]
+    # A page opened to read loads the player alone (every request is routed), under the blank page of the site.
+    assert browser.parents == ["https://old.yummyani.me/"] and browser.routed == ["**/*", "https://old.yummyani.me/"]
+    assert browser.iframes == ["https:" + IFRAME]
     assert browser.clicks == 0 and browser.closed == browser.opened == 1
 
 
@@ -205,8 +243,9 @@ async def test_an_ask_with_no_answer_or_no_browser_is_unsure_and_the_page_is_clo
 # --- a stream: the player played once, the access headers caught -------------------------------------------------------------------
 
 def cdn(answer_of=lambda request: "#EXTM3U\n") -> Web:
-    """The CDN of the files as the server sees it: the manifest of the stream, or what the test makes of it."""
-    return Web().route("vkvideo.test", answer_of)
+    """The CDN of the files as the server sees it: the manifest of the stream, or what the test makes of it — beside
+    the host of the player, which has the episode of the iframe."""
+    return host({"158": {1: [5]}}).route("vkvideo.test", answer_of)
 
 
 async def stream_of(player, http, cap=720):
@@ -227,7 +266,7 @@ async def test_a_stream_is_the_best_file_within_the_cap_with_the_headers_of_the_
                               "user-agent": "Mozilla/5.0 Firefox", "origin": "https://alloha.yani.tv"}
     assert browser.clicks == 1 and browser.closed == browser.opened == 1
     # The manifest is opened from here with those headers before the download is given the stream.
-    [opened] = web.requests
+    [opened] = [request for request in web.requests if "vkvideo.test" in str(request.url)]
     assert str(opened.url) == got["stream_url"] and opened.headers["authorizations"] == "token-200"
 
 
@@ -274,21 +313,67 @@ async def test_the_episodes_of_a_season_are_read_in_one_open_and_another_season_
     browser = Browser(answer(track("1", (360,))), episodes={"2": answer(track("1", (480,))), "3": answer(track("1", (720,)))})
     player = a_player(browser)
     refs = [episode_ref(1), episode_ref(2), episode_ref(3), episode_ref(1, season=2), episode_ref(1, translation="200")]
-    settled = await within(player.read_batch(refs, None, PAGE), STEP_LIMIT_S, "the batch")
+    web = host({"158": {1: [1, 2, 3], 2: [1]}, "200": {1: [1]}})
+    async with web.client() as http:
+        settled = await within(player.read_batch(refs, http, PAGE), STEP_LIMIT_S, "the batch")
 
     assert [settled[ref].resolutions for ref in refs] == [(360,), (480,), (720,), (360,), (360,)]
     assert browser.opened == browser.closed == 3 and browser.switches == ["2", "3"]
+    assert web.count("alloha.yani.tv/?") == 3  # one document a season of a voice-over
 
 
 async def test_an_episode_the_switch_does_not_settle_is_left_to_its_own_ask_and_nothing_is_lost(quick):
     missing = Browser(answer(track("1")), episodes={"3": answer(track("1"))})
     silent = Browser(answer(track("1")), episodes={"2": None, "3": answer(track("1"))})
+    refused = Browser(answer(track("1")), episodes={"2": answer(track("1")), "3": answer(track("1"))})
+    refused.refused = {"2"}
     refs = [episode_ref(1), episode_ref(2), episode_ref(3)]
 
-    # Not in the list of the player: the next one is still switched to. No answer to a switch: the open is left there.
-    assert set(await within(a_player(missing).read_batch(refs, None, PAGE), STEP_LIMIT_S, "the batch")) == {refs[0], refs[2]}
-    assert set(await within(a_player(silent).read_batch(refs, None, PAGE), STEP_LIMIT_S, "the batch")) == {refs[0]}
-    assert silent.closed == silent.opened == 1
+    async with host({"158": {1: [1, 2, 3]}}).client() as http:
+        # Not in the list of the player's page: the next one is still switched to. No answer to a switch, or the files
+        # refused (the host answers 404 past its rate): the open is left there, and nothing is concluded of the rest.
+        assert set(await within(a_player(missing).read_batch(refs, http, PAGE), STEP_LIMIT_S, "the batch")) == {refs[0], refs[2]}
+        assert set(await within(a_player(silent).read_batch(refs, http, PAGE), STEP_LIMIT_S, "the batch")) == {refs[0]}
+        assert set(await within(a_player(refused).read_batch(refs, http, PAGE), STEP_LIMIT_S, "the batch")) == {refs[0]}
+    assert silent.closed == silent.opened == 1 and refused.switches == ["2"]
+
+
+# --- the document of the iframe: what the player has of the title, known without a browser ----------------------------------------
+
+def test_the_list_of_the_files_is_read_from_the_document_and_a_document_without_it_says_nothing():
+    listed = catalog_of(document({"158": {1: [1, 2], 2: [7]}, "200": {1: [1]}}))
+    assert listed == {("158", "1", "1"): "91", ("158", "1", "2"): "92", ("158", "2", "7"): "97", ("200", "1", "1"): "91"}
+    assert catalog_of("<html><title>Ошибка!</title></html>") is None
+    assert catalog_of("<script>const fileList = JSON.parse('{\"type\":\"movie\"}');</script>") is None
+
+
+async def test_a_voice_over_or_an_episode_the_player_has_not_is_told_by_the_document_and_no_page_is_opened():
+    browser = Browser(answer(track("1")))
+    player = a_player(browser)
+    web = host({"158": {1: [5]}})
+    async with web.client() as http:
+        other_voice = player.read(await player.fetch(episode_ref(5, translation="200"), http, PAGE))
+        listed = player.read(await player.fetch(episode_ref(5), http, PAGE))
+        settled = await within(player.read_batch([episode_ref(5), episode_ref(6), episode_ref(7)], http, PAGE),
+                               STEP_LIMIT_S, "the batch")
+
+    # The host answers 404 for the iframe: the player has no such video. It is final, and it cost no page of the browser.
+    assert (other_voice.kind, other_voice.status) == (Kind.NOT_FOUND, 404)
+    assert listed.kind is Kind.PLAYABLE and browser.opened == 2
+    # The list of the player has no episodes 6 and 7 of this voice-over: each is settled by the list, the listed one read.
+    assert [settled[episode_ref(n)].kind for n in (5, 6, 7)] == [Kind.PLAYABLE, Kind.NOT_FOUND, Kind.NOT_FOUND]
+
+
+async def test_a_voice_over_the_host_has_not_settles_its_first_row_and_leaves_each_other_to_its_own_document():
+    player = a_player(Browser(answer(track("1"))))
+    refs = [episode_ref(1, translation="88"), episode_ref(2, translation="88")]
+    web = host({"158": {1: [1, 2]}})
+    async with web.client() as http:
+        settled = await within(player.read_batch(refs, http, PAGE), STEP_LIMIT_S, "the batch")
+        second = player.read(await player.fetch(refs[1], http, PAGE))
+
+    assert {ref: reading.kind for ref, reading in settled.items()} == {refs[0]: Kind.NOT_FOUND}
+    assert second.kind is Kind.NOT_FOUND and web.count("alloha.yani.tv/?") == 2
 
 
 def test_the_link_names_the_player_and_another_link_is_not_its_own():
