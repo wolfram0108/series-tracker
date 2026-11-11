@@ -174,12 +174,12 @@ class AppPlayer:
             return None
         return found[0]
 
-    async def address(self, line: str, item: str) -> AppStream:
+    async def address(self, line: str, item: str, card: str = "") -> AppStream:
         """The stream of an episode: what the application gave for it within the term, else what it gives now."""
         kept = self._kept(line, item)
         if kept is not None:
             return kept
-        got = await self.client.resolve(line, item)
+        got = await self.client.resolve(line, item, card)
         self._parsed[(line, item)] = (got, self._clock())
         return got
 
@@ -191,7 +191,7 @@ class AppPlayer:
         # An address kept from an earlier parse that is no longer served is parsed anew, once, within the same ask.
         for _ in range(2 if self._kept(line, item) is not None else 1):
             try:
-                got = await self.address(line, item)
+                got = await self.address(line, item, urlsplit(ref.url).path.strip("/"))
             except AppError as exc:
                 return Answer(200, reading=Reading(Kind.NO_ANSWER if exc.transient else Kind.NO_FILE, 200,
                                                    message=exc.reason))

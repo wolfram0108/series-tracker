@@ -1,7 +1,8 @@
 """The admission of the lines of a video application: the first, the central and the last episode of each line of a card
 downloaded whole by the project's own path (the stream of the player, the downloader of the service) and the file read
 back — picture, frame, sound, length; the speed of each download is recorded, the measure the downloader is tuned by. A line one of whose three files did not come is not admitted, and its other
-episodes still waiting are not asked. Up to `AT_ONCE` files go side by side.
+episodes still waiting are not asked. Up to `AT_ONCE` files go side by side. A download silent for `SILENCE_S`, or not
+whole within `FILE_LIMIT_S`, is a file that did not come.
 
 One JSON line per episode, appended to `data/raw/app_lines_admission__<stamp>__<app>-<card>.jsonl` (out of git); the
 files are deleted once read. The registry of admitted lines is made of these records (tools/analyzers/app_lines_registry.py).
@@ -25,6 +26,7 @@ sys.path.insert(0, ROOT)
 
 from core.http_limits import bounded_client  # noqa: E402
 from modules.downloads.module import FRAGMENTS_AT_ONCE  # noqa: E402
+from modules.downloads import ytdlp  # noqa: E402
 from modules.downloads.ytdlp import download  # noqa: E402
 from modules.sources.apps import card_address, profiles_of  # noqa: E402
 from modules.sources.module import APP_PROTOCOLS  # noqa: E402
@@ -38,6 +40,13 @@ from app_lines_inventory import environment, ffprobe  # noqa: E402
 
 # Files downloaded side by side: the time of the admission is the line's slowest file, not the sum of all of them.
 AT_ONCE = 8
+# A download silent for this long at the admission is a line that does not give its file: the service itself waits three
+# times longer before it gives a download up (modules/downloads/ytdlp.py, STALL_TIMEOUT_S) and goes to the next source.
+SILENCE_S = 60.0
+ytdlp.STALL_TIMEOUT_S = SILENCE_S
+# A file of the admission comes whole within this long or is no file of it: the lines admitted so far gave an episode of
+# 2160p in 25–90 s (52–271 Mbit/s). A line that needs longer is admitted by a run of its own, agreed with the owner.
+FILE_LIMIT_S = 140.0
 
 
 async def main(app: str, card: str, only: list[str], which_only: list[str]) -> None:
@@ -75,9 +84,13 @@ async def main(app: str, card: str, only: list[str], which_only: list[str]) -> N
 
                     record["stream_seconds"] = round(time.monotonic() - began, 1)
                     fetching = time.monotonic()
-                    done, failure = await download(stream["stream_url"], path, progress, headers=stream["headers"],
-                                                   threads=FRAGMENTS_AT_ONCE, progressive=stream["progressive"],
-                                                   playlist=stream["playlist"])
+                    try:
+                        done, failure = await asyncio.wait_for(
+                            download(stream["stream_url"], path, progress, headers=stream["headers"],
+                                     threads=FRAGMENTS_AT_ONCE, progressive=stream["progressive"],
+                                     playlist=stream["playlist"]), FILE_LIMIT_S)
+                    except TimeoutError:
+                        done, failure = False, f"файл не получен целиком за {FILE_LIMIT_S:.0f} с"
                     record["download_seconds"] = round(time.monotonic() - fetching, 1)
                     if not done:
                         record.update(ok=False, step="download", reason=failure[:300])

@@ -296,7 +296,7 @@ class AppDramaClient:
         return AppCardData([detail["name"]] if detail["name"] else [], "" if year == "0" else year,
                            [AppLine(code, names[code], False, "", tuple(items)) for code, items in lines.items()])
 
-    async def resolve(self, line: str, token: str) -> AppStream:
+    async def resolve(self, line: str, token: str, card: str = "") -> AppStream:
         play = play_of(await self.call("/api/proto/v5/videoUsableUrl", {"vodPlayFrom": line, "playUrl": token}))
         if not play["play_url"].startswith(("http://", "https://")):
             # No address and no words: the application failed on the way (under load it answers so for episodes it

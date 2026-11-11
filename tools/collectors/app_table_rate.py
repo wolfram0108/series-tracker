@@ -10,7 +10,7 @@ git). The requests are the card, a parse and a head of each row read.
     .venv/bin/python tools/collectors/app_table_rate.py <app> <card> [recent] [after] [lines=a,b]   (recent 0: the whole card)
 
 With `after` the read follows the table the service stored of the card (app.db, read only), as its next read would: the
-rows that table measured keep their frames and only the others are asked. With `lines=` only the named lines are read,
+rows that table measured keep their frames and only the others are asked. With `lines=` only the named lines are read (`lines=*`: every line of the card),
 whatever the registry says of them: the table part of the admission of a line (requirement 4а) is checked so before the
 registry admits it.
 """
@@ -50,13 +50,20 @@ def stored_rows(url: str) -> tuple[TableRow, ...]:
                  for key, player, text, heights, state, why, link, fields in found)
 
 
+class Every(LineRegistry):
+    """Every line of a card, whatever the registry says: the inventory of the lines of an application not yet admitted."""
+
+    def admits(self, code: str) -> bool:
+        return True
+
+
 async def main(app: str, card: str, recent: int | None, after: bool, lines: list[str]) -> None:
     (profile,) = [each for each in profiles_of(environment()) if each.name == app]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     raw_path = os.path.join(ROOT, "data", "raw", f"app_table_rate__{stamp}__{app}-{card}.jsonl")
     os.makedirs(os.path.dirname(raw_path), exist_ok=True)
     async with bounded_client(timeout=20.0, follow_redirects=True, limits=CONNECTIONS) as http:
-        registry = LineRegistry(frozenset(lines), {}) if lines else LineRegistry.load(app)
+        registry = Every() if lines == ["*"] else LineRegistry(frozenset(lines), {}) if lines else LineRegistry.load(app)
         player = AppPlayer(APP_PROTOCOLS[profile.protocol](profile, lambda: http), registry=registry)
         site = AppSite(player, AppLines([player]))
         measures: list[dict] = []

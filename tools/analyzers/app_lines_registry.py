@@ -3,8 +3,8 @@
 
 A line is admitted when the last record of each of its first, central and last episode says its file came whole and was
 read back, and the last read of the last ten episodes of it by the service's own code
-(`data/raw/app_table_rate__*__<app>-*.jsonl`, the reads of `recent` 10) gave every row of it the frame of its episode; any other line is refused, with the reason of the episode or the rows that
-failed. The registry holds no
+(`data/raw/app_table_rate__*__<app>-*.jsonl`, the reads of `recent` 10) gave every row of it the frame of its episode, and the three files are three files (one clip served for every episode is no
+episode); any other line is refused, with the reason of the episode or the rows that failed. The registry holds no
 address of a stream: the episodes, their frames, sound, length, size and the speed of their download.
 
     .venv/bin/python tools/analyzers/app_lines_registry.py <app>   →   modules/sources/apps/admitted/<app>.json
@@ -14,6 +14,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -38,6 +39,18 @@ def table_misses(app: str) -> dict[str, list[dict]]:
             if any(not row["heights"] for row in rows)}
 
 
+def same_file(records: list[dict]) -> bool:
+    """The three files of a line are one and the same: the same bytes and the same length for different episodes. A
+    parser that serves one clip for every episode (a notice for those who did not pay) gives no episode."""
+    return len({(record.get("size"), (record.get("file") or {}).get("duration")) for record in records}) < len(records)
+
+
+def public(text: str) -> str:
+    """A reason as the registry keeps it (the registry is in git): no address of a machine in it — a host that refuses
+    by the address of the asker names the address of the server of the service."""
+    return re.sub(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", "<ip>", text)
+
+
 def registry(app: str) -> dict:
     misses = table_misses(app)
     last: dict[tuple[str, str], dict] = {}
@@ -49,11 +62,15 @@ def registry(app: str) -> dict:
     admitted, refused = {}, {}
     for code in sorted({line for line, _which in last}):
         records = [last.get((code, which)) for which in WHICH]
-        if all(record is not None and record["ok"] for record in records) and code in misses:
+        if all(record is not None and record["ok"] for record in records) and same_file(records):
+            refused[code] = {"card": records[0]["card"], "episode": records[0]["label"], "step": "file",
+                             "reason": f"one and the same file for the first, the central and the last episode "
+                                       f"({records[0]['size']} bytes, {records[0]['file']['duration']} s): not the episodes"}
+        elif all(record is not None and record["ok"] for record in records) and code in misses:
             rows = misses[code]
             refused[code] = {"card": records[0]["card"], "episode": rows[0]["text"], "step": "table",
-                             "reason": f"{len(rows)} rows of the table without the frame of their episode, as "
-                                       f"{rows[0]['fields'].get('frame_failed', '')}"[:300]}
+                             "reason": public(f"{len(rows)} rows of the table without the frame of their episode, as "
+                                              f"{rows[0]['fields'].get('frame_failed', '')}")[:300]}
         elif all(record is not None and record["ok"] for record in records):
             admitted[code] = {"card": records[0]["card"], "at": max(record["at"] for record in records), "episodes": [
                 {"which": record["which"], "label": record["label"], "width": record["file"]["width"],
@@ -66,7 +83,7 @@ def registry(app: str) -> dict:
             refused[code] = {"card": next((record["card"] for record in records if record), None),
                              "episode": failed["label"] if failed else None,
                              "step": failed.get("step") if failed else "not asked",
-                             "reason": (failed.get("reason") or "")[:300] if failed else "not asked"}
+                             "reason": public(failed.get("reason") or "")[:300] if failed else "not asked"}
     return {"app": app, "admitted": admitted, "refused": refused}
 
 

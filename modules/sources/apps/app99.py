@@ -227,7 +227,7 @@ class App99Client:
         names = [str(data.get("name") or "").strip(), *(part.strip() for part in str(data.get("sub") or "").split(","))]
         return AppCardData(list(dict.fromkeys(name for name in names if name)), str(data.get("year") or "").strip(), lines)
 
-    async def resolve(self, line: str, token: str) -> AppStream:
+    async def resolve(self, line: str, token: str, card: str = "") -> AppStream:
         """The stream of an episode: the token itself for a line that lists its playlists, else what the parsers the
         line allows make of it, in the order the application lists its parsers, the first that gives an address."""
         player = await self._line_player(line)
