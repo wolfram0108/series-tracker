@@ -21,8 +21,9 @@ A row whose answer stayed unsure while the whole card was being asked (no answer
 words at one request and not at the next) is looked at again when the rest is done: an answer under the load of the
 read is not yet the answer about the episode. The rows of one line left with one cause are one question, answered by
 asking one of them again: the same answer says the way is down (a host that takes no connection), and the others keep
-it unasked; another answer says it was the load, and every one of them is asked again, a few at a time. The read shows
-this as a phase of its own (`recheck`) with its count. A final answer (the host has no such file, a
+it unasked; another answer says it was the load, and every one of them is asked again, a few at a time
+(players/asking.py, `look_again`, the rule of every source). The read shows this as a phase of its own (`recheck`) with
+its count. A final answer (the host has no such file, a
 store serves a stub for the start of the film) is asked once. An episode that gave no picture after all of it is
 `absent` with what the host or the application said last,
 and the log of the read names every such episode of every line. The field `stream` of a row says how its stream comes:
@@ -42,6 +43,7 @@ from ...policy import Pacer, Verdict, settle
 from ...apps import SCHEME, card_address
 from ...apps import AppError
 from ...players.app_lines import AppLines, AppPlayer
+from ...players.asking import CALM_IN_FLIGHT, look_again
 from .. import PHASE_PLAYERS, PHASE_RECHECK, PHASE_RELEASE, ReadContext, SiteError, TableDraft
 from ..recent import last_of_each
 
@@ -52,9 +54,6 @@ ROWS_PER_SECOND = 25
 # A row is asked, read and measured in about three seconds: four seconds of rows at that pace in flight at most, so that a
 # host that slows down holds back the asks instead of piling them up.
 ROWS_IN_FLIGHT = ROWS_PER_SECOND * 4
-# The rows whose answer stayed unsure under the load of the read are asked again when the rest is done, this many at a
-# time: a host that was too busy for a hundred asks answers a few.
-CALM_IN_FLIGHT = 8
 
 
 class AppSite:
@@ -167,59 +166,18 @@ class AppSite:
             return answer
 
         said = dict(await asyncio.gather(*(first(line, link) for line, link in asked)))
-        # The rows left unsure, by their line and what was said of them: one cause of one line is one question — was it
-        # the load of the read, or is the way to these episodes down.
-        unsure: dict[tuple[str, str], list] = {}
-        for line, link in asked:
-            if _unsure(said[link]):
-                unsure.setdefault((line.code, _cause_of(said[link])), []).append((line, link))
-        total, checked = sum(len(rows) for rows in unsure.values()), 0
+        # The rows left unsure are looked at again when the rest is done, line by line and cause by cause.
+        line_of = {link: line for line, link in asked}
         calm = asyncio.Semaphore(CALM_IN_FLIGHT)
 
-        async def recheck(cause: str, rows: list) -> None:
-            """One row of the cause is asked again when the rest of the card is done. The same answer: the way is down,
-            and the other rows of the cause keep it unasked (a host that takes no connection is not asked for each of
-            its hundred episodes again). Another answer: it was the load, and every row of the cause is asked again."""
-            nonlocal checked
-            (line, link), rest = rows[0], rows[1:]
-            said[link] = (await ask(line, link, calm))[1]
-            down = _unsure(said[link]) and _cause_of(said[link]) == cause
-            checked += 1 if rest and not down else len(rows)
-            ctx.progress(PHASE_RECHECK, checked, total)
-            logger.info("приложение %s, карточка %s, линия %s: «%s» — %s", self.name, self._card(card_url), line.code,
-                        cause[:160], f"подтвердилось на повторном запросе, остальные {len(rest)} строк не спрашиваются"
-                        if down else f"не подтвердилось, спрашиваются остальные {len(rest)} строк")
-            if down or not rest:
-                return
+        async def again(link: str) -> Verdict | Exception:
+            return (await ask(line_of[link], link, calm))[1]
 
-            async def again(each_line, each_link) -> tuple[str, Verdict | Exception]:
-                nonlocal checked
-                answer = await ask(each_line, each_link, calm)
-                checked += 1
-                ctx.progress(PHASE_RECHECK, checked, total)
-                return answer
-            said.update(await asyncio.gather(*(again(each_line, each_link) for each_line, each_link in rest)))
-
-        if unsure:
-            logger.info("приложение %s, карточка %s: %d строк без окончательного ответа, причин %d — каждая причина "
-                        "проверяется повторным запросом одной строки", self.name, self._card(card_url), total, len(unsure))
-            ctx.progress(PHASE_RECHECK, 0, total)
-            await asyncio.gather(*(recheck(cause, rows) for (_code, cause), rows in unsure.items()))
+        await look_again(said, again, lambda link: line_of[link].code,
+                         told=lambda current, total: ctx.progress(PHASE_RECHECK, current, total),
+                         what=f"приложение {self.name}, карточка {self._card(card_url)}")
         labels = {link: line.label for line, link in asked}
         return {**kept, **{link: _frame_of(each, labels[link]) for link, each in said.items()}}
-
-
-def _cause_of(said: Verdict | Exception) -> str:
-    """What was said of a row that got no frame, in the words the row is given."""
-    if isinstance(said, Exception):
-        return f"{type(said).__name__}: {said}"[:200]
-    return said.reading.message or said.reading.kind.value
-
-
-def _unsure(said: Verdict | Exception) -> bool:
-    """An answer that is not the last word about the episode: the ask failed, or the policy of the players left it
-    unsure when its attempts ran out (nothing came, the host was too busy, a refusal that may pass)."""
-    return isinstance(said, Exception) or said.exhausted
 
 
 def _frame_of(said: Verdict | Exception, label: str) -> tuple[list[int], dict]:

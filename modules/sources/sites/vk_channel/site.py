@@ -38,7 +38,7 @@ from ...players.registry import PlayerRegistry
 from ...players.vk_files import embed_parts
 from ...policy import Pacer
 from ...term import Term
-from .. import PHASE_PLAYERS, PHASE_VIDEOS, Progress, ReadContext, SiteError, TableDraft
+from .. import PHASE_PLAYERS, PHASE_RECHECK, PHASE_VIDEOS, Progress, ReadContext, SiteError, TableDraft
 from .api import (PAGE_SIZE, dedupe, error_code_of, heights_of, is_external, keep_by_terms, key_of, link_of,
                   owner_id_from_resolve, parse_address, published_of)
 
@@ -228,7 +228,8 @@ class VkChannelSite:
 
             ctx.progress(PHASE_PLAYERS, 0, len(set(sought)))
             asked = await ask_many(self.players.get("vk"), sought, ctx.http, channel_url, self.players.pacer,
-                                   on_asked=counted)
+                                   on_asked=counted,
+                                   on_recheck=lambda current, total: ctx.progress(PHASE_RECHECK, current, total))
         rows = []
         for video in videos:
             heights = heights_of(video)

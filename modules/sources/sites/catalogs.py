@@ -20,7 +20,7 @@ from ..players.contract import Answer, PlayerRef, Reading
 from ..players.http import USER_AGENT, get_answer
 from ..players.registry import PlayerRegistry
 from ..policy import ask
-from . import PHASE_CATALOG, PHASE_PLAYERS, ReadContext, SiteError
+from . import PHASE_CATALOG, PHASE_PLAYERS, PHASE_RECHECK, ReadContext, SiteError
 from .recent import last_of_each
 
 PAGE_TIMEOUT_S = 20.0
@@ -80,6 +80,10 @@ class AskCount:
     def __call__(self) -> None:
         self.done += 1
         self._ctx.progress(PHASE_PLAYERS, self.done, self.total)
+
+    def recheck(self, current: int, total: int) -> None:
+        """The videos left unsure are looked at again (players/asking.py): a phase of the read of its own."""
+        self._ctx.progress(PHASE_RECHECK, current, total)
 
 
 def catalog_part(player, ref: PlayerRef) -> str:

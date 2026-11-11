@@ -2,6 +2,10 @@
 
 Which answers are final, how often to ask again and how fast are decided in `policy`; this module only gathers the asks of
 one player and turns each verdict into the state of a row: playable (with its steps), absent, or not obtained.
+
+An answer that stayed unsure while a whole page was being asked (nothing came, a host too busy, a status that passes) is
+not yet the answer about the video: a host asked for hundreds of videos at once refuses some of them. When the rest is
+done such videos are looked at again (`look_again`), cause by cause, and the read shows it as a phase of its own.
 """
 from __future__ import annotations
 
@@ -20,6 +24,70 @@ from .catalog import Entry
 from .contract import Player, PlayerRef, Reading
 
 logger = logging.getLogger("sources")
+
+# The videos asked again at one time once the rest of a page is done: a host too busy for a hundred asks answers a few.
+CALM_IN_FLIGHT = 8
+
+
+def unsure(said: "Verdict | Exception") -> bool:
+    """An answer that is not the last word about the video: the ask failed, or the policy of the players left it unsure
+    when its attempts ran out."""
+    return isinstance(said, Exception) or said.exhausted
+
+
+def cause_of(said: "Verdict | Exception") -> str:
+    """What was said of a video that was not confirmed, in words that tell one cause from another."""
+    if isinstance(said, Exception):
+        return f"{type(said).__name__}: {said}"[:200]
+    reading = said.reading
+    return reading.message or f"{reading.kind.value} {reading.status or ''}".strip()
+
+
+async def look_again(said: dict, ask: Callable, kind_of: Callable, *, told: Callable[[int, int], None] | None = None,
+                     what: str = "") -> None:
+    """The videos of `said` (key -> verdict or exception) left unsure, looked at again when the rest is done; `said` is
+    updated. The videos of one kind (`kind_of(key)`: a player, a line) left with one cause are one question — was it the
+    load of the read, or is the way to them down — answered by asking one of them again (`ask(key)`): the same answer
+    says the way is down, and the others keep it unasked (a host that takes no connection is not asked for each of its
+    hundred videos again); another answer says it was the load, and every one of them is asked again, a few at a time.
+    `told(current, total)` is told how far it is, by videos."""
+    groups: dict[tuple, list] = {}
+    for key, verdict in said.items():
+        if unsure(verdict):
+            groups.setdefault((kind_of(key), cause_of(verdict)), []).append(key)
+    if not groups:
+        return
+    total, checked = sum(len(keys) for keys in groups.values()), 0
+    calm = asyncio.Semaphore(CALM_IN_FLIGHT)
+    logger.info("%s: %d без окончательного ответа, причин %d — каждая причина проверяется повторным запросом одного",
+                what, total, len(groups))
+    if told is not None:
+        told(0, total)
+
+    async def one(key) -> None:
+        nonlocal checked
+        async with calm:
+            said[key] = await ask(key)
+        checked += 1
+        if told is not None:
+            told(checked, total)
+
+    async def group(kind, cause: str, keys: list) -> None:
+        nonlocal checked
+        first, rest = keys[0], keys[1:]
+        async with calm:
+            said[first] = await ask(first)
+        down = unsure(said[first]) and cause_of(said[first]) == cause
+        checked += len(keys) if down or not rest else 1
+        if told is not None:
+            told(checked, total)
+        logger.info("%s, %s: «%s» — %s", what, kind, cause[:160],
+                    f"подтвердилось на повторном запросе, остальные {len(rest)} не спрашиваются" if down
+                    else f"не подтвердилось, спрашиваются остальные {len(rest)}")
+        if not down:
+            await asyncio.gather(*(one(key) for key in rest))
+
+    await asyncio.gather(*(group(kind, cause, keys) for (kind, cause), keys in groups.items()))
 
 
 @dataclass(frozen=True)
@@ -60,11 +128,14 @@ async def ask_many(player: Player, refs: Sequence[PlayerRef], http: httpx.AsyncC
                    page_url: "str | Callable[[PlayerRef], str]", pacer: Pacer, *,
                    gate: asyncio.Semaphore | None = None,
                    on_asked: Callable[[], None] | None = None,
-                   known: Mapping[PlayerRef, Reading] | None = None) -> dict[PlayerRef, Verdict | Exception]:
+                   known: Mapping[PlayerRef, Reading] | None = None,
+                   on_recheck: Callable[[int, int], None] | None = None) -> dict[PlayerRef, Verdict | Exception]:
     """The verdict of the player on each video; an ask that raised comes back as its exception, so that one video cannot
     take the others with it. `page_url` is the page that shows the videos, or a function from a video to its page.
     `gate` bounds the asks in flight and `on_asked` is told as each one ends. `known` is what an answer of the player
-    already said of some videos (a playlist of its own that lists their files): those are not asked again."""
+    already said of some videos (a playlist of its own that lists their files): those are not asked again. The videos
+    left unsure are looked at again when the rest is done (`look_again`); `on_recheck(current, total)` — or the
+    `recheck` of the counter given as `on_asked` — is told how far that is."""
     page_of = page_url if callable(page_url) else (lambda ref: page_url)
     unique = list(dict.fromkeys(refs))
     known = known or {}
@@ -84,10 +155,20 @@ async def ask_many(player: Player, refs: Sequence[PlayerRef], http: httpx.AsyncC
                 on_asked()
 
     answers = await asyncio.gather(*(ask(ref) for ref in unique), return_exceptions=True)
-    for ref, answer in zip(unique, answers):
+    said = dict(zip(unique, answers))
+
+    async def again(ref: PlayerRef) -> Verdict | Exception:
+        try:
+            return await settle(player, ref, http, page_of(ref), pacer=pacer)
+        except Exception as exc:  # noqa: BLE001 - one video cannot take the others with it
+            return exc
+
+    await look_again(said, again, lambda _ref: getattr(player, "label", player.name),
+                     told=on_recheck or getattr(on_asked, "recheck", None), what=f"плеер {player.name}")
+    for ref, answer in said.items():
         if isinstance(answer, Exception):
             logger.warning("%s ask failed for %s: %s", player.name, ref.url, answer)
-    return dict(zip(unique, answers))
+    return said
 
 
 async def catalog_rows(player, entries: Sequence[Entry], http: httpx.AsyncClient, page_url: str, pacer: Pacer, *,

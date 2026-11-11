@@ -275,7 +275,7 @@ async def test_a_row_the_way_to_which_failed_under_the_load_of_the_read_is_asked
     assert heights["banri:CO4K:1"] == [2160] and heights["banri:CO4K:3"] == [1440]
     # Three asks of the read and two more of the row asked first; three and three of the other row of the cause.
     assert asked.count(f"{CDN}busy/1.m3u8") == 5 and asked.count(f"{CDN}busier/pv.m3u8") == 6
-    assert any("не подтвердилось, спрашиваются остальные 1 строк" in record.getMessage() for record in caplog.records)
+    assert any("не подтвердилось, спрашиваются остальные 1" in record.getMessage() for record in caplog.records)
     # The rows of the read are counted once; what is looked at again is a phase of its own with its own count.
     assert [step[1:] for step in progress if step[0] == PHASE_PLAYERS][-1] == (5, 5)
     # Three rows were left unsure: the two of the busy host (one cause) and the episode no parser gave a stream of.
@@ -305,7 +305,7 @@ async def test_a_host_that_takes_no_connection_is_asked_again_for_one_of_its_row
     dead = [url for url in asked if "ad.model" in url]
     # Every row in the read, as the policy allows, and one of them once more: not every one of them again.
     assert len(dead) == 5 * policy.DEFAULT.attempts + policy.DEFAULT.attempts
-    assert any("подтвердилось на повторном запросе, остальные 4 строк не спрашиваются" in record.getMessage()
+    assert any("подтвердилось на повторном запросе, остальные 4 не спрашиваются" in record.getMessage()
                for record in caplog.records)
     assert [step[1:] for step in progress if step[0] == PHASE_RECHECK] == [(0, 5), (5, 5)]
 
