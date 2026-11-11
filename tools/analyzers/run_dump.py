@@ -118,6 +118,7 @@ def main(path: str, logs: bool) -> None:
         print(f"  {clock(at)} {message[:260]}")
 
     trace = [row for row in bus if row["topic"] == "planner.sync.trace"]
+    synced = bool(trace) or any(row["topic"] == "downloads.fetch" for row in bus)  # the dump of a read has no sync
     online, shown = 0, {}
     for row in trace:
         data = row["payload"]["data"]
@@ -143,7 +144,7 @@ def main(path: str, logs: bool) -> None:
                 print(f"  s{goal['slot'][0]:02d}e{goal['slot'][1]:02d}: {line}")
             shown[slot] = line
 
-    print("\n== шаги")
+    print("\n== шаги") if synced else None
     started: dict[str, tuple[str, dict]] = {}
     last_done: dict[str, str] = {}
     for row in trace:
@@ -159,7 +160,7 @@ def main(path: str, logs: bool) -> None:
                   f"{(stamp(row['t']) - stamp(at)).total_seconds():6.0f} с  {data['outcome']:<7} {row_of(data['op'])[:70]}"
                   f"{'  ' + str(data.get('problem') or data.get('error') or '')[:160] if data['outcome'] != 'made' else ''}")
 
-    print("\n== загрузки")
+    print("\n== загрузки") if synced else None
     asked = {row["payload"]["key"]: row for row in bus if row["topic"] == "downloads.fetch"}
     tasks: dict[str, dict] = {}
     for row in bus:
@@ -191,7 +192,7 @@ def main(path: str, logs: bool) -> None:
               f"{variant.get('place', ''):<28.28} {variant.get('player_label', ''):<12} {str(variant.get('height') or ''):>4}p "
               f"{clock(at)}→{clock(row['t'])} {seconds:5.0f} с  {speed}  {'ok' if payload['ok'] else 'ОТКАЗ: ' + payload['error'][:160]}")
 
-    print("\n== выравнивание")
+    print("\n== выравнивание") if synced else None
     submitted = [row for row in bus if row["topic"] == "conform.submit"]
     for row in bus:
         if row["topic"] != "conform.job.finished":
@@ -207,7 +208,7 @@ def main(path: str, logs: bool) -> None:
     if submitted:
         print(f"  отправлено задач: {len(submitted)}, первая {clock(submitted[0]['t'])}, последняя {clock(submitted[-1]['t'])}")
 
-    print("\n== применение групп")
+    print("\n== применение групп") if synced else None
     for row in trace:
         if row["payload"]["kind"] != "apply":
             continue
