@@ -36,7 +36,7 @@ from cryptography.hazmat.primitives.padding import PKCS7
 
 from core.reasons import reason
 
-from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream, parsed_address
+from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream, advertised_headers, parsed_address
 
 logger = logging.getLogger("sources")
 
@@ -82,7 +82,7 @@ def lines_of(detail: dict) -> list[tuple[AppLine, dict]]:
         items = tuple(AppItem(place, str(each.get("name") or each.get("title") or "").strip(), str(each["url"]).strip())
                       for place, each in enumerate(urls, start=1))
         parse = str(info.get("parse") or "").strip()
-        asked = {"parse": parse, "episodes": {str(each["url"]).strip(): (str(each.get("parse_api_url") or "").strip(),
+        asked = {"parse": parse, "headers": advertised_headers(info), "episodes": {str(each["url"]).strip(): (str(each.get("parse_api_url") or "").strip(),
                                                                        str(each.get("token") or "")) for each in urls}}
         found.append((AppLine(name, str(info.get("show") or ""), not parse, "", items), asked))
     return found
@@ -192,27 +192,29 @@ class AppGetClient:
         return AppCardData(list(dict.fromkeys(name for name in names if name)), "" if year == "0" else year,
                            [line for line, _parsers in found])
 
-    async def _asked_with(self, line: str, token: str, card: str) -> tuple[str, str, str]:
-        """(the parser of the line, the address of the parser of the episode, the token of the episode), as the card of
-        the episode says them: held from the read of the card, else the card is asked again."""
+    async def _asked_with(self, line: str, token: str, card: str) -> tuple[str, str, str, dict[str, str]]:
+        """(the parser of the line, the address of the parser of the episode, the token of the episode, the headers the
+        player of the line names for its stream), as the card of the episode says them: held from the read of the card,
+        else the card is asked again."""
         held = self._parsers.get(str(card), {}).get(line)
         if (held is None or token not in held["episodes"]) and card:
             await self._detail(card)
             held = self._parsers.get(str(card), {}).get(line)
         if held is None:
-            return "", "", ""
+            return "", "", "", {}
         address, own = held["episodes"].get(token, ("", ""))
-        return held["parse"], address, own
+        return held["parse"], address, own, held["headers"]
 
     async def resolve(self, line: str, token: str, card: str = "") -> AppStream:
         agent = {"User-Agent": self._settings.get("ua") or AGENT}
-        parse, address, own = await self._asked_with(line, token, card)
+        parse, address, own, player = await self._asked_with(line, token, card)
         address = address or token
         if address.startswith(("http://", "https://")):
-            # A playlist or a file by the path of the address is the stream; any other address is a parser, asked.
+            # A playlist or a file by the path of the address is the stream; any other address is a parser, asked. The
+            # stream is asked with what the player of the line names for it.
             if _MEDIA.search(urlsplit(address).path):
-                return AppStream(address, agent)
-            return await self._parsed(line, address, agent)
+                return AppStream(address, {**agent, **player})
+            return await self._parsed(line, address, agent, player)
         # No address of a parser: the application parses the episode itself, by the name of the parser of its line.
         asked = (f"parse_api={parse}&url="
                  f"{quote_plus(encrypt(token, self._settings['dataKey'], self._settings['dataIv']))}&token={own}")
@@ -226,9 +228,9 @@ class AppGetClient:
             # No address and no words is a failure of the way; a refusal in words is the parser's answer about the episode.
             raise AppError(reason("app_no_stream", app=self.profile.label, parser=line, message=words[:300]),
                            transient=not words.strip())
-        return AppStream(target, {})
+        return AppStream(target, {**player, **advertised_headers(answer)})
 
-    async def _parsed(self, line: str, address: str, agent: dict[str, str]) -> AppStream:
+    async def _parsed(self, line: str, address: str, agent: dict[str, str], player: dict[str, str]) -> AppStream:
         """What the parser of an episode answers: the playlist itself (the address is then the stream), or JSON that
         names the stream. A refusal in words is the parser's answer about the episode; none at all is a failure of the
         way."""
@@ -241,16 +243,16 @@ class AppGetClient:
         logger.info("приложение %s, парсер линии %s: статус %s, %d байт (%.1f с)", self.profile.name, line,
                     response.status_code, len(response.content), time.monotonic() - began)
         if response.status_code == 200 and head.startswith(b"#EXTM3U"):
-            return AppStream(address, agent)
+            return AppStream(address, {**agent, **player})
         try:
             said = response.json()
         except ValueError:
             said = None
         target, message = parsed_address(said) if response.status_code == 200 else ("", "")
         if target:
-            # The stream a parser names is asked as any player asks it: the agent of the application is of its API
-            # (a CDN of a stream refuses it for the segments: 403).
-            return AppStream(target, {})
+            # The stream a parser names is asked as the player of the line and the parser say: the agent of the
+            # application is of its API (a CDN of a stream refuses it for the segments: 403).
+            return AppStream(target, {**player, **advertised_headers(said)})
         if response.status_code != 200:
             raise AppError(reason("app_status", app=self.profile.label, status=response.status_code),
                            response.status_code >= 500 or response.status_code == 429)

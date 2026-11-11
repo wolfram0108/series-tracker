@@ -32,7 +32,7 @@ import httpx
 
 from core.reasons import reason
 
-from . import AppCardData, AppError, AppLine, AppPage, AppProfile, AppStream, listed_lines, parsed_address
+from . import AppCardData, AppError, AppLine, AppPage, AppProfile, AppStream, advertised_headers, listed_lines, parsed_address
 
 logger = logging.getLogger("sources")
 
@@ -183,7 +183,7 @@ class AppMnClient:
         logger.info("приложение %s, парсер линии %s: статус %s, %s (%.1f с)", self.profile.name, line, response.status_code,
                     "адрес" if target else f"без адреса: {words[:120] or '—'}", time.monotonic() - began)
         if target and response.status_code == 200:
-            return AppStream(target, {"User-Agent": self.headers()["User-Agent"]})
+            return AppStream(target, {"User-Agent": self.headers()["User-Agent"], **advertised_headers(said)})
         if not words.strip() and response.status_code != 200:
             raise AppError(reason("app_status", app=self.profile.label, status=response.status_code),
                            response.status_code >= 500 or response.status_code == 429)

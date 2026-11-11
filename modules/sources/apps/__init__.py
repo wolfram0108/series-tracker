@@ -8,6 +8,7 @@ environment of the process (`ST_APP_<NAME>`, JSON); without it the application i
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Mapping, Protocol
 
@@ -108,6 +109,35 @@ def listed_lines(codes: str, lists: str) -> list[tuple[str, str, tuple[AppItem, 
 # The codes by which a parser says it made the address of the episode (the clients the applications are read by state
 # one of these on success; a number of an HTTP refusal or a word of failure in its place is the parser saying no).
 _PARSED = frozenset({"0", "1", "200", "true", "ok", "success"})
+
+
+def advertised_headers(said: object) -> dict[str, str]:
+    """The headers a player or a parser of an application names for the stream: its agent (`user_agent`) and its
+    `header`/`headers` (an object, or JSON of one). A name is one header whatever its case; what is no header is left out."""
+    if not isinstance(said, dict):
+        return {}
+    found: dict[str, str] = {}
+
+    def put(name: object, value: object) -> None:
+        name = str(name).strip()
+        if name and re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) and "\r" not in str(value) and "\n" not in str(value):
+            for held in [held for held in found if held.lower() == name.lower()]:
+                del found[held]
+            found[name] = str(value)
+
+    agent = said.get("user_agent") or said.get("userAgent")
+    if agent:
+        put("User-Agent", agent)
+    for each in (said.get("header"), said.get("headers")):
+        if isinstance(each, str):
+            try:
+                each = json.loads(each)
+            except ValueError:
+                each = None
+        if isinstance(each, dict):
+            for name, value in each.items():
+                put(name, value)
+    return found
 
 
 def parsed_address(answer: object, key: str = "url") -> tuple[str, str]:

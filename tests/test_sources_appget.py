@@ -28,15 +28,16 @@ def profile(**more) -> AppProfile:
     return AppProfile("moli", "Moli", "appget", {"dataKey": KEY, "dataIv": IV, "site": SITE, **more})
 
 
-def group(code: str, show: str, parse: str, urls: list[tuple[str, str, str]]) -> dict:
-    return {"player_info": {"show": show, "parse": parse}, "urls": [
+def group(code: str, show: str, parse: str, urls: list[tuple[str, str, str]], **player) -> dict:
+    return {"player_info": {"show": show, "parse": parse, **player}, "urls": [
         {"name": name, "url": url, "from": code, "nid": place, "token": "", "parse_api_url": address}
         for place, (name, url, address) in enumerate(urls, start=1)]}
 
 
 DETAIL = {"vod": {"vod_name": "万界独尊", "vod_year": "2021", "vod_sub": "Ten Thousand Worlds"}, "vod_play_list": [
     group("JD4K", "4K", "abc123", [("01", "JD-1", "abc123JD-1"), ("02", "JD-2", "abc123JD-2")]),
-    group("NBY", "NB-蓝光-限", PARSER, [("1", "NBY-x1", PARSER + "NBY-x1"), ("2", "NBY-x2", PARSER + "NBY-x2")]),
+    group("NBY", "NB-蓝光-限", PARSER, [("1", "NBY-x1", PARSER + "NBY-x1"), ("2", "NBY-x2", PARSER + "NBY-x2")],
+          user_agent="Line/1.0", headers=json.dumps({"Referer": "https://line.model/", "bad name": "x"})),
     group("ffm3u8", "F蓝光-限", PARSER, [("第01集", "https://cdn.model/f/1/index.m3u8", PARSER + "https://cdn.model/f/1/index.m3u8")]),
     group("ffm3u8", "备用F-有广", "", [("第01集", "https://cdn.model/f/1/index.m3u8", "https://cdn.model/f/1/index.m3u8")]),
 ]}
@@ -49,7 +50,8 @@ class Model:
         self.calls: list[tuple[str, object, dict]] = []
         self.parsed: list[str] = []
         self.answers = {"NBY-x1": httpx.Response(200, text=PLAYLIST),
-                        "NBY-x2": httpx.Response(200, json={"code": 200, "url": "https://cdn.model/n/2.m3u8"}),
+                        "NBY-x2": httpx.Response(200, json={"code": 200, "url": "https://cdn.model/n/2.m3u8",
+                                                            "header": {"X-Parser": "said"}}),
                         # A refusal names an address too, as the parsers of the applications do.
                         "https://cdn.model/f/1/index.m3u8": httpx.Response(200, json={
                             "code": 404, "msg": "解析失败", "url": "https://gone.model/f/1.m3u8"})}
@@ -113,7 +115,9 @@ async def test_the_stream_of_an_episode_is_what_its_way_gives(world):
     # A parser that answers with the playlist: its address is the stream. One that names the stream: that address.
     assert (await client.resolve("NBY", "NBY-x1", "4307")).address == PARSER + "NBY-x1"
     named = await client.resolve("NBY", "NBY-x2", "4307")
-    assert named.address == "https://cdn.model/n/2.m3u8" and named.headers == {}
+    # The stream is asked with what the player of its line names (its agent, its headers) and what the parser adds.
+    assert named.address == "https://cdn.model/n/2.m3u8"
+    assert named.headers == {"User-Agent": "Line/1.0", "Referer": "https://line.model/", "X-Parser": "said"}
     # A refusal in words is the parser's answer about the episode.
     with pytest.raises(AppError) as refused:
         await client.resolve("ffm3u8", "https://cdn.model/f/1/index.m3u8", "4307")
