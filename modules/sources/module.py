@@ -95,9 +95,11 @@ from core.deadlines import TABLE_READ_S
 from core.db import Database
 from core.envelope import Envelope
 from core.http_limits import bounded_client
+from core.logging import get_logger
 from core.reasons import reason
 
 from . import anilibria, delivery, parsers
+from .browser_pool import BrowserPool
 from .apps import AppError, AppProfile, card_address
 from .apps.app99 import App99Client
 from .apps.appdrama import AppDramaClient
@@ -151,8 +153,11 @@ class SourcesModule(BaseModule):
         self._cache_dir = torrent_cache_dir
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
+        # The one browser of the module, started at the first page that needs it and stopped after its last user
+        # (browser_pool.py): the players and the tracker pages take their contexts of it.
+        self.browsers = BrowserPool(get_logger("sources"))
         wiring = dict(
-            browser_getter=self._ensure_browser,
+            browser_getter=self.browsers.browser,
             key_path=os.path.abspath(os.path.join(torrent_cache_dir,
                                                   "vibix-key.json")),
             manifest_dir=os.path.abspath(os.path.join(torrent_cache_dir,
@@ -179,7 +184,8 @@ class SourcesModule(BaseModule):
         self.sites.configure(players=self.players, vk_call=self._vk_call, term=self.term)
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
-            players=self.players, clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent, term=self.term)
+            players=self.players, clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent, term=self.term,
+            holding=self.browsers.held)
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(
@@ -210,11 +216,6 @@ class SourcesModule(BaseModule):
 
     async def on_start(self) -> None:
         self._http = bounded_client(timeout=20.0, follow_redirects=True, limits=CONNECTIONS)
-        # Браузерный пул (astar/anilibria_tv) поднимается ЛЕНИВО при
-        # первом обращении — на стенде без этих трекеров firefox не
-        # запускается (находка 14: один браузер на модуль, а не на скан).
-        self._pw = None
-        self._browser = None
         try:
             stored = (await self.request("settings.value.get", {"key": TERM_KEY})).get("value")
         except Exception:  # noqa: BLE001 - a setting that cannot be read leaves the term at its default
@@ -229,10 +230,7 @@ class SourcesModule(BaseModule):
     async def on_stop(self) -> None:
         await self.tables.close()
         await self._http.aclose()
-        if self._browser is not None:
-            await self._browser.close()
-        if self._pw is not None:
-            await self._pw.stop()
+        await self.browsers.shutdown()
 
     async def on_term_get(self, env: Envelope) -> dict:
         return {"hours": self.term.hours}
@@ -340,31 +338,20 @@ class SourcesModule(BaseModule):
 
         raise SourceParseError(f"нет реализации для трекера {service}")
 
-    # --- браузерный пул (astar/anilibria_tv, Р-9) ------------------------------------
-
-    async def _ensure_browser(self):
-        """Ленивый запуск общего браузера: поднимается при первом
-        обращении к astar/anilibria_tv, переиспользуется (контекст — на
-        запрос). Снимает находку 14 (старый код плодил браузер на скан)."""
-        if self._browser is None:
-            from playwright.async_api import async_playwright
-            self._pw = await async_playwright().start()
-            self._browser = await self._pw.firefox.launch(headless=True)
-            self.log.info("браузерный пул запущен (firefox, headless)")
-        return self._browser
+    # --- браузерный пул (astar/anilibria_tv, Р-9): modules/sources/browser_pool.py ---------
 
     async def _browser_html(self, service: str, url: str) -> str:
         """HTML страницы трекера через браузер. Подготовка страницы
         зависит от трекера (порт старых парсеров): astar — открыть список
         кликом «Все торренты»; anilibria_tv — дождаться таблицы после
         JS-челленджа."""
-        browser = await self._ensure_browser()
+        browser = await self.browsers.browser()
         context = await browser.new_context(
             user_agent=self._BROWSER_UA,
             viewport={"width": 1920, "height": 1080},
             ignore_https_errors=True)
-        page = await context.new_page()
         try:
+            page = await context.new_page()
             await page.goto(url, timeout=self.BROWSER_TIMEOUT,
                             wait_until="domcontentloaded")
             if service == "astar":

@@ -288,10 +288,13 @@ class AllohaPlayer:
             except Exception as exc:  # noqa: BLE001 - a browser that failed is an unsure answer, asked again by the policy
                 await context.close()
                 raise AllohaError(f"browser: {type(exc).__name__}") from exc
+            except BaseException:  # a cancelled ask leaves no page behind it in the browser
+                await asyncio.shield(context.close())
+                raise
             try:
                 yield shown
             finally:
-                await context.close()
+                await asyncio.shield(context.close())
 
 
 class _Playing:

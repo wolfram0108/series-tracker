@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -83,15 +84,23 @@ class Pace:
         return round(current / elapsed, 2) if current > 0 and elapsed > 0 else None
 
 
+@asynccontextmanager
+async def _nothing():
+    yield
+
+
 class TableReader:
     """Answers for the table of a page, and reads the page when its table is missing or past its term."""
 
     def __init__(self, repo: SourcesRepository, sites: SiteRegistry, publish: Publish,
                  http: Callable[[], httpx.AsyncClient], *, players: PlayerRegistry, clock: Callable[[], datetime] = utc_now,
-                 term: Term | None = None, safeguard_s: float = TABLE_READ_S, recent: int | None = None) -> None:
+                 term: Term | None = None, safeguard_s: float = TABLE_READ_S, recent: int | None = None,
+                 holding: Callable[[], AbstractAsyncContextManager] | None = None) -> None:
         self._repo, self._sites, self._publish, self._http, self._players = repo, sites, publish, http, players
         self._clock, self._safeguard_s, self._recent = clock, safeguard_s, recent
         self._term = term if term is not None else Term()
+        # What a read holds for its whole length (the browser of the module, kept between the rows of the page).
+        self._holding = holding if holding is not None else _nothing
         self._log = get_logger("sources")
         self._reading: dict[str, asyncio.Task] = {}
         self._cancelled: set[str] = set()  # the pages whose read the user stopped: a verdict, unlike a stop of the process
@@ -207,7 +216,8 @@ class TableReader:
         self._publish(TRACE_TOPIC, {"url": key, "site": site.name, "kind": "begin", "fresh": fresh})
         try:
             await self._repo.mark_reading(key, site.name, self._stamp())
-            table = await self._read(site, key, fresh)
+            async with self._holding():
+                table = await self._read(site, key, fresh)
         except asyncio.CancelledError:
             if key not in self._cancelled:
                 raise  # a stop of the process: the page stays `reading` and is read again at the start

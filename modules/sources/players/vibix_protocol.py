@@ -339,8 +339,6 @@ async def capture_with_browser(browser: Browser, page_url: str, *,
     """Open an episode page in the shared browser and capture API and manifest."""
     context = await browser.new_context(locale="ru-RU",
                                         viewport={"width": 1366, "height": 900})
-    await context.route("**/*", _block_ads)
-    page = await context.new_page()
     api_future: asyncio.Future = asyncio.get_running_loop().create_future()
     manifest_future: asyncio.Future = asyncio.get_running_loop().create_future()
 
@@ -350,8 +348,11 @@ async def capture_with_browser(browser: Browser, page_url: str, *,
         elif ".m3u8" in response.url and not manifest_future.done():
             manifest_future.set_result(response)
 
-    page.on("response", on_response)
+    # The context is closed whatever ends the capture, a cancellation at its first step too.
     try:
+        await context.route("**/*", _block_ads)
+        page = await context.new_page()
+        page.on("response", on_response)
         await page.goto(page_url, wait_until="domcontentloaded", timeout=timeout_s * 1000)
         try:
             button = await page.wait_for_selector(
@@ -367,7 +368,7 @@ async def capture_with_browser(browser: Browser, page_url: str, *,
     except asyncio.TimeoutError as exc:
         raise VibixUnavailable(reason("vibix_api_timeout")) from exc
     finally:
-        await context.close()
+        await asyncio.shield(context.close())
 
 
 async def _manifest(future: asyncio.Future) -> tuple[str, bytes | None]:
