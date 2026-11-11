@@ -51,6 +51,11 @@ class Model:
         return httpx.Response(404)
 
 
+@pytest.fixture(autouse=True)
+def unpaced(monkeypatch):
+    monkeypatch.setattr("modules.sources.apps.yunduo.REQUEST_INTERVAL_S", 0.0)
+
+
 @pytest.fixture
 async def world():
     model = Model()
@@ -110,3 +115,14 @@ async def test_the_search_gives_the_cards_as_the_application_gives_them(world):
     assert (page.pages, page.total) == (1, 1)
     assert page.cards == [{"id": 209, "name": "万界独尊", "sub": "", "year": "2021", "area": "大陆", "class": "动漫",
                            "remarks": "第497集", "blurb": "", "pic": "https://pic.model/209.jpg"}]
+
+
+async def test_the_requests_of_a_client_go_one_at_a_time_no_closer_than_the_interval(world, monkeypatch):
+    """The host bans a machine that asks too much at once: the client asks one request at a time, the interval apart."""
+    import asyncio
+    import time
+    monkeypatch.setattr("modules.sources.apps.yunduo.REQUEST_INTERVAL_S", 0.2)
+    model, client = world
+    began = time.monotonic()
+    await asyncio.gather(*(client.search_page("万界独尊", 1) for _ in range(3)))
+    assert time.monotonic() - began >= 0.39 and len(model.asked) == 3
