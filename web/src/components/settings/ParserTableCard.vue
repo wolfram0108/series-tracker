@@ -6,7 +6,7 @@ import StSelect from "../StSelect.vue"
 import { t } from "../../i18n"
 import { normalizeAttachments, type PatternBlock } from "../../lib/patternBlocks"
 import { emptyRow, fieldValues, rowOf, textsOf, type TableRow } from "../../lib/ruleTable"
-import { actionLabel, actionOptions, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
+import { actionLabel, actionOptions, fieldText, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
 import type { EditableRule } from "./ParserRuleCard.vue"
 import ParserPatternEditor from "./ParserPatternEditor.vue"
 import PatternPalette from "./PatternPalette.vue"
@@ -158,7 +158,8 @@ function setAction(value: string): void {
               <td class="col-then" :class="{ 'is-selected': extracts && isSelected(row, 'then') }" @mousedown="select(row, 'then')">
                 <ParserPatternEditor v-if="extracts" :blocks="row.thenBlocks" context="then" :show-palette="false" />
                 <input
-                  v-else-if="assigns" v-model="row.thenValue" class="table-value" :type="isNumberAssign(table.action_type) ? 'number' : 'text'"
+                  v-else-if="assigns" :value="row.thenValue" class="table-value" :type="isNumberAssign(table.action_type) ? 'number' : 'text'"
+                  @input="row.thenValue = fieldText($event)"
                   :placeholder="table.action_type === 'assign_range' ? t('rules.action.assign_range.hint') : t('rules.action.valuePlaceholder')"
                   :aria-label="actionLabel(table.action_type)"
                 />

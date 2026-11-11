@@ -207,7 +207,8 @@ async function loadRules(): Promise<void> {
       })),
       actions: actions.map((a) => ({
         action_type: a.action_type,
-        action_pattern: a.action_pattern ?? "",
+        // The value of an assignment is text; a rule stored with a number (the core takes both) is read as its text.
+        action_pattern: String(a.action_pattern ?? ""),
         _action_blocks: parsePatternJson(a.action_pattern),
       })),
       table: rule.rule_table ? { action_type: rule.rule_table.action_type, rows: rowsOf(rule.rule_table) } : null,
@@ -273,7 +274,14 @@ function prepareRuleForSave(rule: EditableRule): Record<string, unknown> {
 
 async function saveRule(rule: EditableRule): Promise<void> {
   const isNew = !!rule.is_new
-  const payload = prepareRuleForSave(rule)
+  let payload: Record<string, unknown>
+  try {
+    payload = prepareRuleForSave(rule)
+  } catch (error) {
+    // A rule the window could not put together is not saved, and the user is told so: a save never fails in silence.
+    toast.add({ severity: "error", summary: t("rules.rule.toast"), detail: t("rules.rule.saveFailed"), life: 6000 })
+    throw error
+  }
   if (isNew) {
     const data = (await request(
       api.POST("/api/parser-profiles/{profile_id}/rules", {

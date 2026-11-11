@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { mount, type VueWrapper } from "@vue/test-utils"
 import ParserTableCard from "./ParserTableCard.vue"
 import type { EditableRule } from "./ParserRuleCard.vue"
-import { emptyRow, rowOf } from "../../lib/ruleTable"
+import { emptyRow, rowOf, storedOf } from "../../lib/ruleTable"
 import { t } from "../../i18n"
 
 const LINES = [
@@ -42,6 +42,22 @@ describe("a rule «Таблица»", () => {
     expect(w.findAll("tbody tr.is-fresh")).toHaveLength(2)
     expect(chip(w, "V").text()).toBe("V:0")
     expect(chip(w, "V").attributes("disabled")).toBeDefined()
+  })
+
+  it("keeps the number typed for a season, an episode or a part as the text the core stores, and the table is saved", async () => {
+    for (const action of ["assign_season", "assign_episode", "assign_part"]) {
+      const row = rowOf("PID", "dunhuatv.ru")
+      row.thenValue = ""
+      const rule: EditableRule = { id: 5, name: "Сезон", continue_after_match: true, conditions: [], actions: [],
+                                   table: { action_type: action, rows: [row] } }
+      mounted?.unmount()
+      mounted = mount(ParserTableCard, { props: { rule, index: 0, total: 1, isOpen: true, lines: LINES, codes: CODES } })
+      const field = mounted.find("input.table-value")
+      expect(field.attributes("type")).toBe("number")
+      await field.setValue("4")
+      expect(rule.table!.rows[0].thenValue).toBe("4")
+      expect(storedOf(action, rule.table!.rows, false).rows[0].then).toBe("4")
+    }
   })
 
   it("puts a block picked in the one palette into the cell being edited, and a row is added and removed", async () => {

@@ -82,3 +82,67 @@ async def test_a_table_filled_from_the_pages_by_a_template_names_the_voice_overs
     for asset in view["assets"]:
         held = await mkv.contents(os.path.join(ui.library, asset["name"]))
         assert sorted(track.label for track in held.audio) == ["AniStar", "AnimeVost"]
+
+
+async def _season_of_the_first_line(page) -> list[str]:
+    async with page.expect_response(lambda r: r.url.endswith("/api/parser-profiles/test")):
+        await page.get_by_role("button", name=text("rulesTest.run")).click()
+    await expect(page.locator(".card-test-result").first).to_be_visible()
+    return [each.strip() for each in await page.locator(".card-test-result").first.locator(".pill").all_inner_texts()]
+
+
+async def test_a_season_assigned_by_a_table_and_by_a_rule_is_saved_as_typed_and_given_to_the_lines(ui):
+    """The number of a season is typed into a field of numbers: the table is saved with it (it once was not saved at
+    all, in silence), and a rule that assigns it gives the season where the rules before it let the line pass on."""
+    ui.site.release("dub", "AnimeVost")
+    ui.site.episode("dub", 1, height=720)
+    await ui.first_run()
+    await ui.set_up(["AnimeVost"])
+    page = ui.page
+    await ui.settings("Фильтры VK")
+    if not await page.locator("#new-profile-name").is_visible():
+        await page.locator("button.accordion-button").first.click()
+    await page.locator("#new-profile-name").fill(PROFILE)
+    await page.locator("button.btn-add[title='Создать']").click()
+    rules_step = page.get_by_text(text("rules.step.rules", profile=PROFILE))
+    test_step = page.get_by_text(text("rules.step.test"))
+    await rules_step.wait_for()
+    await test_step.click()
+    await page.get_by_label(text("rulesTest.field.address")).fill(ui.site.releases["dub"].url)
+    await page.get_by_role("button", name=text("rulesTest.fetch.page")).click()
+    await expect(page.locator(".parser-test-textarea")).to_have_value(re.compile(r"V:"), timeout=60_000)
+
+    # The table: a row by the quick template, the season typed into its field of «ТО», saved by its button.
+    await rules_step.click()
+    await page.get_by_role("button", name=text("rules.table.add")).click()
+    table = page.locator(".rule-table-card")
+    await table.locator(".rule-name-input").fill("сезон")
+    await _pick(page, table.locator(".col-then .item-select"), text("rules.action.assign_season"))
+    await table.locator(".template-chip", has_text="V:").click()
+    await table.locator("input.table-value").fill("7")
+    async with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/rules")) as saved, \
+            page.expect_response(lambda r: r.request.method == "GET" and r.url.endswith("/rules")):
+        await table.locator(f"button[title='{text('rules.rule.save')}']").click()
+    assert (await saved.value).ok, "the table of the season was not saved"
+    await expect(page.locator(".rule-table-card input.table-value")).to_have_value("7")
+    await test_step.click()
+    assert await _season_of_the_first_line(page) == ["Сезон: 7"]
+
+    # The rule of the episode after the table: the table stops the line («продолжать» off), so the episode is not read;
+    # with «продолжать» on the line goes on to the rule of the episode and keeps its season.
+    await rules_step.click()
+    await ui._rule({"name": "серия", "if": SINGLE, "then": [("extract_single", SINGLE)]})
+    await test_step.click()
+    assert await _season_of_the_first_line(page) == ["Сезон: 7"]
+    await rules_step.click()
+    async with page.expect_response(lambda r: r.request.method == "PUT" and "/api/parser-rules/" in r.url):
+        await page.locator(".rule-table-card .p-toggleswitch").click()
+    await test_step.click()
+    assert await _season_of_the_first_line(page) == ["Сезон: 7", "Серия: 1"]
+
+    # An ordinary rule that assigns the season, after the rule of the episode that stops: it is not reached.
+    await rules_step.click()
+    await ui._rule({"name": "другой сезон", "if": [{"type": "text", "value": "Серия"}], "then": [("assign_season", "9")]})
+    await expect(page.locator(".rule-card").last.locator(".then-block input.item-input")).to_have_value("9")
+    await test_step.click()
+    assert await _season_of_the_first_line(page) == ["Сезон: 7", "Серия: 1"]

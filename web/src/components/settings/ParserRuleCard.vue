@@ -6,7 +6,7 @@ import StSelect from "../StSelect.vue"
 import { t } from "../../i18n"
 import ParserPatternEditor, { type PatternBlock } from "./ParserPatternEditor.vue"
 import type { TableRow } from "../../lib/ruleTable"
-import { actionLabel, actionOptions, conditionOptions, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
+import { actionLabel, actionOptions, conditionOptions, fieldText, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
 
 // Карточка одного правила профиля парсера. Шапка (имя + управление) и
 // тело (условия «ЕСЛИ» с конструктором паттернов + действия «ТО»).
@@ -213,8 +213,9 @@ function getAssignActionLabel(actionType: string): string {
             <StGroup v-else-if="isAssign(action.action_type)">
               <div class="constructor-item item-label">{{ getAssignActionLabel(action.action_type) }}</div>
               <input
-                v-model="action.action_pattern"
+                :value="action.action_pattern"
                 :type="isNumberAssign(action.action_type) ? 'number' : 'text'"
+                @input="action.action_pattern = fieldText($event)"
                 class="constructor-item item-input"
                 :placeholder="action.action_type === 'assign_range' ? t('rules.action.assign_range.hint') : t('rules.action.valuePlaceholder')"
               />

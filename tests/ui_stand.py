@@ -291,7 +291,7 @@ class UiStand(AppStand):
 
 ADMIN, PASSWORD = "stand", "stand-throwaway"  # of the database of the stand, which goes with it
 ACTION_LABEL = {"extract_single": "Извлечь номер серии", "extract_range": "Извлечь диапазон серий",
-                "assign_voiceover": "Назначить озвучку/тег"}
+                "assign_voiceover": "Назначить озвучку/тег", "assign_season": "Назначить номер сезона"}
 
 
 def _option(page: Page, label: str):

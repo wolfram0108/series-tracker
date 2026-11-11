@@ -59,7 +59,8 @@ export function rowsOf(table: StoredTable): TableRow[] {
   return table.rows.map((stored) => {
     const row = emptyRow()
     row.ifBlocks = withIds(stored.if ?? [])
-    if (typeof stored.then === "string") row.thenValue = stored.then
+    // A value is text; a table stored with a number (the core takes both) is read as its text.
+    if (typeof stored.then === "string" || typeof stored.then === "number") row.thenValue = String(stored.then)
     else if (Array.isArray(stored.then)) row.thenBlocks = withIds(stored.then)
     return row
   })

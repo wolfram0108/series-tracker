@@ -18,6 +18,10 @@ export const isExtract = (type: string): boolean => (EXTRACT_TYPES as readonly s
 export const isAssign = (type: string): boolean => (ASSIGN_TYPES as readonly string[]).includes(type)
 export const isNumberAssign = (type: string): boolean => (NUMBER_ASSIGNS as readonly string[]).includes(type)
 
+/** What a field of the editor holds, as text: the value of every assignment is text for the core and for the editor,
+ *  also the number of a season, an episode or a part (a field of numbers bound as a model would hand over a number). */
+export const fieldText = (event: Event): string => (event.target as HTMLInputElement).value
+
 /** The options of the selects of the constructor, worded by the catalog. */
 export const conditionOptions = () => CONDITION_TYPES.map((value) => ({ value, label: t(`rules.condition.${value}`) }))
 export const actionOptions = () => ACTION_TYPES.map((value) => ({ value, label: t(`rules.action.${value}`) }))

@@ -35,4 +35,10 @@ describe("a rule table", () => {
       expect(storedOf(table.action_type, rowsOf(table), extract)).toEqual(table)
     }
   })
+
+  it("reads a number a table was stored with as the text of its value", () => {
+    const stored = { action_type: "assign_season", rows: [{ if: [{ type: "text", value: "PID:site" }], then: 4 as unknown as string }] }
+    expect(rowsOf(stored)[0].thenValue).toBe("4")
+    expect(storedOf("assign_season", rowsOf(stored), false).rows[0].then).toBe("4")
+  })
 })
