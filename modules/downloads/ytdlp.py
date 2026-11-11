@@ -31,6 +31,7 @@ from core.proc import LOST, REAP_TIMEOUT_S, exited, program, run_capture, spawn,
 from core.retry import UNTIMED, Budget, retrying
 
 from . import hls_native, ranged
+from . import failure
 from .failure import Failed, Unasked, kind_of
 
 ProgressCb = Callable[[dict], Awaitable[None]]
@@ -50,7 +51,6 @@ HOLE_S = 1.0
 # ffmpeg prints this line at every refusal of a segment, also of one the next look took: it explains an incomplete file and
 # does not make one, which is judged by what the file holds.
 _REFUSED_SEGMENT = re.compile(rb"Failed to open segment (\d+) of playlist \d+")
-STALL_TIMEOUT_S = 180.0
 DOWNLOAD_TIMEOUT_S = 3600.0
 PROBE_ATTEMPTS = 3
 PROBE_RETRY_S = 2.0
@@ -201,11 +201,11 @@ class _Silent(Exception):
 
 
 async def _next_line(proc, program: str, started: float, total: float | None = None) -> bytes:
-    """The next line of a program's output; the program is declared silent after STALL_TIMEOUT_S."""
+    """The next line of a program's output; the program is declared silent after `failure.SILENCE_S`."""
     try:
-        line = await asyncio.wait_for(proc.stdout.readline(), STALL_TIMEOUT_S)
+        line = await asyncio.wait_for(proc.stdout.readline(), failure.SILENCE_S)
     except asyncio.TimeoutError:
-        raise _Silent(f"{program}: нет прогресса {STALL_TIMEOUT_S:.0f} с (timeout)") from None
+        raise _Silent(f"{program}: нет прогресса {failure.SILENCE_S:.0f} с (timeout)") from None
     if total is not None and time.monotonic() - started > total:
         raise _Silent(f"{program}: загрузка дольше {total:.0f} с (timeout)")
     return line

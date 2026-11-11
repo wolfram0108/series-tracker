@@ -30,6 +30,7 @@ sys.path.insert(0, ROOT)
 
 from core.http_limits import bounded_client  # noqa: E402
 from modules.downloads.limits import THREADS_PER_FILE  # noqa: E402
+from modules.downloads import failure as downloads_failure  # noqa: E402
 from modules.downloads import ytdlp  # noqa: E402
 from modules.downloads.ytdlp import download  # noqa: E402
 from modules.sources.apps import card_address, profiles_of  # noqa: E402
@@ -45,9 +46,9 @@ from app_lines_inventory import environment, ffprobe  # noqa: E402
 # Files downloaded side by side: the time of the admission is the line's slowest file, not the sum of all of them.
 AT_ONCE = 8
 # A download silent for this long at the admission is a line that does not give its file: the service itself waits three
-# times longer before it gives a download up (modules/downloads/ytdlp.py, STALL_TIMEOUT_S) and goes to the next source.
+# times longer before it gives a download up (modules/downloads/failure.py, SILENCE_S) and goes to the next source.
 SILENCE_S = 60.0
-ytdlp.STALL_TIMEOUT_S = SILENCE_S
+downloads_failure.SILENCE_S = SILENCE_S  # every downloader program: ffmpeg, yt-dlp, the worker of segments
 # A file of the admission comes whole within this long or is no file of it: the lines admitted so far gave an episode of
 # 2160p in 25–90 s (52–271 Mbit/s). A line that needs longer is admitted by a run of its own, agreed with the owner.
 FILE_LIMIT_S = 140.0

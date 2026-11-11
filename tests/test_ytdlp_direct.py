@@ -8,6 +8,7 @@ import pytest
 
 from core.proc import program
 from modules.downloads import ytdlp
+from modules.downloads import failure
 from modules.downloads.failure import Failed, kind_of
 from proc_helpers import Spy, alive, stalled_downloader
 
@@ -186,7 +187,7 @@ async def test_without_a_known_stream_length_a_readable_file_is_accepted(fake, t
 async def test_a_stalled_ffmpeg_is_stopped_and_counted_as_a_transient_failure(fake, tmp_path, monkeypatch):
     state, _ = fake
     (state / "stall").write_text("1")
-    monkeypatch.setattr(ytdlp, "STALL_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(failure, "SILENCE_S", 0.3)
     target = str(tmp_path / "e.mp4")
     ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, target, noop)
     assert not ok and "нет прогресса" in error and kind_of(error) is Failed.BROKEN
@@ -215,7 +216,7 @@ async def test_the_stream_length_is_probed_again_after_a_failed_look(fake, tmp_p
 @pytest.mark.asyncio
 async def test_a_silent_downloader_is_stopped_and_counted_as_a_transient_failure(tmp_path, monkeypatch):
     spy = Spy()
-    monkeypatch.setattr(ytdlp, "STALL_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(failure, "SILENCE_S", 0.3)
     with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy), \
             patch.object(ytdlp, "program", return_value=stalled_downloader(tmp_path)):
         result = await asyncio.wait_for(
@@ -227,7 +228,7 @@ async def test_a_silent_downloader_is_stopped_and_counted_as_a_transient_failure
 @pytest.mark.asyncio
 async def test_a_silent_remux_is_stopped_and_leaves_no_partial_file(tmp_path, monkeypatch):
     spy = Spy()
-    monkeypatch.setattr(ytdlp, "STALL_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(failure, "SILENCE_S", 0.3)
     target = str(tmp_path / "e.mp4")
     with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy), \
             patch.object(ytdlp, "program", return_value=stalled_downloader(tmp_path, "ffmpeg")):

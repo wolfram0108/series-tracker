@@ -13,6 +13,7 @@ import pytest
 
 from core import storage
 from modules.downloads import hls_native, ytdlp
+from modules.downloads import failure
 from modules.downloads.failure import Failed, kind_of
 from modules.downloads.hls_worker import transport_stream
 from plan_disk import Codec, Host, _run
@@ -108,6 +109,23 @@ async def test_a_playlist_is_downloaded_whole_by_its_segments(tmp_path, wrapped,
         assert told[0] == {"method": "hls"} and any(each.get("phase") == "download" for each in told)
         assert sorted(os.listdir(tmp_path / "lib")) == ["e1.mp4"], "no leftover of the download stays"
         assert not any(name.endswith("low.m3u8") for name in host.served), "the variant of the highest frame is taken"
+    finally:
+        host.close()
+
+
+async def test_a_worker_of_segments_that_goes_silent_is_given_up_by_the_one_fuse_of_every_downloader(tmp_path,
+                                                                                                    monkeypatch):
+    """A host that sends half a segment and holds the rest leaves the worker silent: the download fails as a way that
+    broke once the fuse of silence of every downloader program (failure.SILENCE_S) has passed — the same fuse ffmpeg and
+    yt-dlp are judged by, so that a caller that shortens it shortens it for all of them."""
+    monkeypatch.setattr(failure, "SILENCE_S", 1.0)
+    host = Host(str(tmp_path / "site"))
+    try:
+        name = stream(str(tmp_path / "site"))
+        host.hold.add("show/seg1.ts")
+        out = str(tmp_path / "lib" / "e1.mp4")
+        ok, why = await asyncio.wait_for(ytdlp.download(host.url(name), out, noop, playlist=True, threads=1), 30)
+        assert not ok and "нет прогресса 1 с" in why and kind_of(why) is Failed.BROKEN, why
     finally:
         host.close()
 

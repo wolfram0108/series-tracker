@@ -21,6 +21,11 @@ import enum
 # The statuses by which a host says a file or a segment of it is not there for good.
 GONE = (404, 410)
 
+# A downloader program (ffmpeg, yt-dlp, the worker of segments) that prints nothing for this long is stuck: its download
+# fails as a way that broke. One fuse for every program, read when it is used, so that a caller that changes it changes
+# it for all of them.
+SILENCE_S = 180.0
+
 
 class Failed(enum.Enum):
     FINAL = "final"

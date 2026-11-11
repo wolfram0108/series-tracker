@@ -33,6 +33,7 @@ from core.hls_playlist import Insertion, without_insertions  # noqa: F401 - the 
 from core.http_limits import bounded_client
 from core.proc import exited, spawn, stop
 
+from . import failure as failure_words
 from .failure import GONE, Final
 
 ProgressCb = Callable[[dict], Awaitable[None]]
@@ -40,7 +41,6 @@ logger = logging.getLogger("downloads")
 
 REQUEST_TIMEOUT_S = 30.0
 # A worker that prints nothing for this long is stuck (a fragment is retried well within it).
-SILENCE_S = 180.0
 MB = 1024 * 1024
 _URI = re.compile(r'URI="([^"]*)"')
 _ATTRIBUTE = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
@@ -201,9 +201,9 @@ async def fetch(snap: Snapshot, headers: dict, target: str, fragments: int, on_p
     try:
         while True:
             try:
-                line = await asyncio.wait_for(proc.stdout.readline(), SILENCE_S)
+                line = await asyncio.wait_for(proc.stdout.readline(), failure_words.SILENCE_S)
             except asyncio.TimeoutError:
-                failure = f"загрузчик сегментов: нет прогресса {SILENCE_S:.0f} с (timeout)"
+                failure = f"загрузчик сегментов: нет прогресса {failure_words.SILENCE_S:.0f} с (timeout)"
                 break
             if not line:
                 break
