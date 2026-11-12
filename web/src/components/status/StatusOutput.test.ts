@@ -163,14 +163,14 @@ describe("StatusOutput", () => {
     await flushPromises()
     await w.findAll(".episode-card")[1].find(".power-switch input").setValue(false)
     await flushPromises()
-    expect(calls.switchOutput).toHaveBeenCalledWith(1, { season: 1, episode: 2, off: true })
+    expect(calls.switchOutput).toHaveBeenCalledWith(1, { season: 1, episodes: [2], off: true })
     expect(w.find(".episode-detail").exists()).toBe(false)
   })
 
-  it("opens an episode below its row with its tracks, and asks for the queues of that episode", async () => {
+  it("opens an episode below its row by a double click, with its tracks, and asks for the queues of that episode", async () => {
     const w = mountOutput()
     await flushPromises()
-    await w.findAll(".episode-card")[0].trigger("click")
+    await w.findAll(".episode-card")[0].trigger("dblclick")
     await flushPromises()
     expect(calls.fetchQueues).toHaveBeenCalledWith(1, 1, 1, null)
     const detail = w.find(".episode-detail")
@@ -189,7 +189,7 @@ describe("StatusOutput", () => {
     }))
     const w = mountOutput()
     await flushPromises()
-    await w.findAll(".episode-card")[0].trigger("click")
+    await w.findAll(".episode-card")[0].trigger("dblclick")
     await flushPromises()
     await w.find(".track-action.do-retry").trigger("click")
     await flushPromises()
@@ -205,7 +205,7 @@ describe("StatusOutput", () => {
     }))
     const w = mountOutput()
     await flushPromises()
-    await w.findAll(".episode-card")[0].trigger("click")
+    await w.findAll(".episode-card")[0].trigger("dblclick")
     await flushPromises()
     await w.find(".track-action.do-redo").trigger("click")
     await flushPromises()
@@ -219,7 +219,7 @@ describe("StatusOutput", () => {
     }))
     const w = mountOutput()
     await flushPromises()
-    await w.findAll(".episode-card")[0].trigger("click")
+    await w.findAll(".episode-card")[0].trigger("dblclick")
     await flushPromises()
     await w.find(".track-action.do-refetch").trigger("click")
     await flushPromises()
@@ -229,7 +229,7 @@ describe("StatusOutput", () => {
   it("sends the order the user dragged a queue into, and a variant left out, as levers of the episode", async () => {
     const w = mountOutput()
     await flushPromises()
-    await w.findAll(".episode-card")[0].trigger("click")
+    await w.findAll(".episode-card")[0].trigger("dblclick")
     await flushPromises()
     await button(w, t("output.tab.reference"))!.trigger("click")
     const rows = w.findAll(".variant-row")
@@ -254,12 +254,98 @@ describe("StatusOutput", () => {
   it("switches an episode off from its detail, and a season from its header", async () => {
     const w = mountOutput()
     await flushPromises()
-    await w.findAll(".episode-card")[1].trigger("click")
+    await w.findAll(".episode-card")[1].trigger("dblclick")
     await flushPromises()
     await w.find(".episode-detail .power-switch input").setValue(false)
     await w.findAll(".season-head .power-switch input")[1].setValue(false)
     expect(vi.mocked(calls.switchOutput).mock.calls).toEqual([
-      [1, { season: 1, episode: 2, off: true }], [1, { season: 2, off: true }]])
+      [1, { season: 1, episodes: [2], off: true }], [1, { season: 2, off: true }]])
+  })
+
+  // --- the selection of episodes (lib/selection.ts) ---------------------------------------------------------------
+
+  const sixEpisodes = (off: number[] = []) => {
+    const many = composition()
+    many.rows = [1, 2, 3, 4, 5, 6].map((episode) => row(1, episode))
+    many.voice_orders = [{ season: 1, voices: [{ label: "Ruchime", episodes: "1–6" }] }]
+    vi.mocked(calls.fetchComposition).mockResolvedValue(ok(many))
+    givePlan(planView(), [1, 2, 3, 4, 5, 6].map((episode) => reference(1, episode, off.includes(episode) ? { mark: "off" } : {})))
+  }
+  const card = (w: VueWrapper, episode: number) => w.find(`.episode-card[data-episode="${episode}"]`)
+  const selected = (w: VueWrapper) => w.findAll(".episode-card.is-selected").map((each) => Number(each.attributes("data-episode")))
+  // A click of a mouse counts its presses (`detail`); one made by Enter counts none.
+  const press = async (where: { element: Element }, keys: { shiftKey?: boolean; ctrlKey?: boolean } = {}) => {
+    where.element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1, ...keys }))
+    await flushPromises()
+  }
+  const click = (w: VueWrapper, episode: number, keys: { shiftKey?: boolean; ctrlKey?: boolean } = {}) => press(card(w, episode), keys)
+
+  it("selects an episode by a click, the run to another by Shift+click, adds one by Ctrl+click, without opening any", async () => {
+    sixEpisodes()
+    const w = mountOutput()
+    await flushPromises()
+    await click(w, 2)
+    expect(selected(w)).toEqual([2])
+    await click(w, 4, { shiftKey: true })
+    expect(selected(w)).toEqual([2, 3, 4])
+    await click(w, 6, { ctrlKey: true })
+    expect(selected(w)).toEqual([2, 3, 4, 6])
+    expect(w.find(".episode-detail").exists()).toBe(false)
+    expect(calls.fetchQueues).not.toHaveBeenCalled()
+  })
+
+  it("switches the episodes selected by Space as one command, off when any of them is on", async () => {
+    sixEpisodes([3])
+    const w = mountOutput()
+    await flushPromises()
+    await click(w, 2)
+    await click(w, 5, { shiftKey: true })
+    await card(w, 4).find(".card-hit").trigger("keydown", { key: " " })
+    await flushPromises()
+    expect(vi.mocked(calls.switchOutput).mock.calls).toEqual([[1, { season: 1, episodes: [2, 3, 4, 5], off: true }]])
+  })
+
+  it("switches the selection on by Space when all of it is off", async () => {
+    sixEpisodes([2, 3])
+    const w = mountOutput()
+    await flushPromises()
+    await click(w, 2)
+    await click(w, 3, { shiftKey: true })
+    await card(w, 3).find(".card-hit").trigger("keydown", { key: " " })
+    await flushPromises()
+    expect(vi.mocked(calls.switchOutput).mock.calls).toEqual([[1, { season: 1, episodes: [2, 3], off: false }]])
+  })
+
+  it("lets the selection go by Esc and keeps Esc from the window, which it closes only when nothing is selected", async () => {
+    sixEpisodes()
+    const w = mountOutput()
+    await flushPromises()
+    const closing = vi.fn()
+    document.addEventListener("keydown", closing)
+    await click(w, 2)
+    await card(w, 2).find(".card-hit").trigger("keydown", { key: "Escape" })
+    expect(selected(w)).toEqual([])
+    expect(closing).not.toHaveBeenCalled()
+    await card(w, 2).find(".card-hit").trigger("keydown", { key: "Escape" })
+    expect(closing).toHaveBeenCalledTimes(1)
+    document.removeEventListener("keydown", closing)
+  })
+
+  it("selects tiles as cards and switches them by Space", async () => {
+    sixEpisodes()
+    const w = mountOutput()
+    await flushPromises()
+    await button(w, t("output.view.tiles"))!.trigger("click")
+    const tile = (episode: number) => w.find(`.episode-tile[data-episode="${episode}"]`)
+    await press(tile(1))
+    await press(tile(3), { shiftKey: true })
+    expect(w.findAll(".episode-tile.is-selected").map((each) => Number(each.attributes("data-episode")))).toEqual([1, 2, 3])
+    await tile(2).trigger("keydown", { key: " " })
+    await flushPromises()
+    expect(vi.mocked(calls.switchOutput).mock.calls).toEqual([[1, { season: 1, episodes: [1, 2, 3], off: true }]])
+    await tile(2).trigger("dblclick")
+    await flushPromises()
+    expect(w.find(".episode-detail").attributes("data-episode")).toBe("2")
   })
 
   it("shows the words of a refusal", async () => {

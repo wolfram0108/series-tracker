@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { inFrame } from "../../../lib/layout"
 import { t } from "../../../i18n"
 import type { Badge } from "../../../lib/compilations"
+import { pickOf, type Pick } from "../../../lib/selection"
 import {
   cutPictureOf, refVariants, widestFitting, type EpisodeStatus, type EpisodeView, type SourceMark as Mark, type TrackCell,
 } from "../../../lib/output"
@@ -12,8 +13,9 @@ import SourceMark from "./SourceMark.vue"
 import TrackStrip from "./TrackStrip.vue"
 
 // A card of an episode: coloured by its state; its number with the name of its file (when the card is wider than the
-// smallest one); the source and the resolution of its reference; its tracks. The card opens the episode below its row;
-// the switch in its corner turns the episode on and off without opening it.
+// smallest one); the source and the resolution of its reference; its tracks. The card opens the episode below its row; in
+// the grid of a season (`selectable`) a click selects it and a double click (or Enter) opens it (lib/selection.ts). The
+// switch in its corner turns the episode on and off without opening or selecting it.
 const props = defineProps<{
   view: EpisodeView
   cells: TrackCell[]
@@ -29,8 +31,16 @@ const props = defineProps<{
   note?: string
   /** What the switch says, when it is not the switch of the episode itself. */
   switchLabel?: string
+  /** A click selects the card, a double click opens it (the grid of a season). */
+  selectable?: boolean
+  selected?: boolean
 }>()
-defineEmits<{ (e: "open"): void; (e: "switch", off: boolean): void }>()
+const emit = defineEmits<{ (e: "open"): void; (e: "select", pick: Pick): void; (e: "switch", off: boolean): void }>()
+// A press of Enter on the card comes as a click with no count of presses: it opens, as a double click does.
+function clicked(event: MouseEvent): void {
+  if (!props.selectable || event.detail === 0) emit("open")
+  else if (event.detail === 1) emit("select", pickOf(event))
+}
 
 const references = computed(() => props.view.references.filter((each) => each.source_id != null))
 const own = computed(() => props.view.references.some((each) => each.mark === "own" || each.mark === "other_player"))
@@ -77,11 +87,11 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
 
 <template>
   <div
-    class="episode-card" :class="[`is-${status}`, { 'is-open': open }]" :data-season="view.season" :data-episode="view.episode"
-    @click="$emit('open')"
+    class="episode-card" :class="[`is-${status}`, { 'is-open': open, 'is-selected': selected }]" :data-season="view.season"
+    :data-episode="view.episode" @click="clicked" @dblclick="selectable && emit('open')"
   >
     <!-- The whole card is the button: a press of it (or of Enter on it) comes up to the card as one click. -->
-    <button type="button" class="card-hit" :aria-expanded="open" :aria-label="label" />
+    <button type="button" class="card-hit" :aria-expanded="open" :aria-pressed="selectable ? !!selected : undefined" :aria-label="label" />
     <span ref="inner" class="card-in">
       <span class="card-top">
         <span class="glass card-num">{{ view.episode }}</span>
@@ -96,7 +106,7 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
             <PowerSwitch
               :on="status !== 'off'" :busy="busy"
               :label="switchLabel ?? t(status === 'off' ? 'output.episode.enable' : 'output.episode.disable')"
-              @toggle="$emit('switch', !$event)"
+              @toggle="emit('switch', !$event)"
             />
           </span>
         </span>

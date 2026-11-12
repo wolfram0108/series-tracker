@@ -114,7 +114,7 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
     # The download takes the address the read parsed within the hour: no parse of its own.
     assert [fields["url"] for path, fields in ui.site.app.calls if path == "/app/vodParser"] == ["tok-219017-1"]
 
-    await page.locator(".episode-card").first.click()
+    await page.locator(".episode-card").first.dblclick()
     detail = page.locator(".episode-detail")
     await detail.locator(".st-tab", has_text=text("output.tab.reference")).click()
     rows = detail.locator(".queue-table .variant-row")

@@ -38,7 +38,7 @@ def row(ui, episode: int, group: str):
 async def opened(ui, episode: int) -> None:
     detail = ui.page.locator(f".episode-detail[data-episode='{episode}']")
     if not await detail.count():
-        await ui.page.locator(f".episode-card[data-episode='{episode}']").click()
+        await ui.page.locator(f".episode-card[data-episode='{episode}']").dblclick()
     await detail.wait_for()
 
 

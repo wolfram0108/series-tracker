@@ -82,12 +82,12 @@ async def test_a_voice_over_switched_off_for_the_series_goes_from_the_files(stan
 async def test_an_episode_switched_off_hides_its_file_and_switched_on_shows_it_with_no_work(stand):
     series_id = await series_of(stand, (1, 2))
     await stand.sync(series_id)
-    await stand.call("PUT", f"/api/series/{series_id}/output/switch", {"season": 1, "episode": 2, "off": True})
+    await stand.call("PUT", f"/api/series/{series_id}/output/switch", {"season": 1, "episodes": [2], "off": True})
     view = await stand.sync(series_id)
     await stand.check(series_id)
     assert [name.endswith(".mkv.off") for name in stand.files()] == [False, True]
     assert {each["mark"] for each in view["references"] if each["episode"] == 2} == {"off"}
-    await stand.call("PUT", f"/api/series/{series_id}/output/switch", {"season": 1, "episode": 2, "off": False})
+    await stand.call("PUT", f"/api/series/{series_id}/output/switch", {"season": 1, "episodes": [2], "off": False})
     view = await stand.sync(series_id)
     await stand.check(series_id)
     assert not any(name.endswith(".off") for name in stand.files())

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue"
 import Button from "primevue/button"
 import { useSeriesOutput } from "../../composables/useSeriesOutput"
 import { t } from "../../i18n"
@@ -9,6 +9,7 @@ import {
 } from "../../lib/output"
 import { CHANGE_ANSWER } from "../../lib/changeAnswer"
 import { HELD, holdLever } from "../../lib/lever"
+import { NO_SELECTION, keyOf, picked, selectedOf, switchesOff, type Pick, type Selection } from "../../lib/selection"
 import { pageHost, progressText } from "../../lib/sources"
 import { useSeriesStore } from "../../stores/series"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
@@ -81,6 +82,44 @@ function open(season: number, episode: number | null): void {
   opened.value = episode === null ? null : { season, episode }
   if (episode !== null) void output.loadQueues(season, episode)
 }
+// The episodes selected, as in a file manager (lib/selection.ts): a click, Shift+click, Ctrl+click on the cards or tiles of a
+// season; Space switches what is selected (off when any of it is on), one command per season; Esc lets it go. A filter
+// changes what a run takes, so a new filter starts from nothing selected.
+const selection = ref<Selection>(NO_SELECTION)
+watch(filter, () => { selection.value = NO_SELECTION })
+const shownOf = (season: number): number[] => seasons.value.find((each) => each.season === season)?.shown.map((view) => view.episode) ?? []
+function select(season: number, episode: number, pick: Pick): void {
+  selection.value = picked(selection.value, season, episode, pick, shownOf(season))
+}
+const NONE: number[] = []
+const selectedBySeason = computed(() => new Map(seasons.value.map((season) =>
+  [season.season, selectedOf(selection.value, season.season, season.shown.map((view) => view.episode))] as const)))
+async function switchSelected(focused: { season: number; episode: number } | null): Promise<void> {
+  const keys = selection.value.keys.size ? selection.value.keys : new Set(focused ? [keyOf(focused.season, focused.episode)] : [])
+  const chosen = all.value.filter((view) => keys.has(keyOf(view.season, view.episode)))
+  if (chosen.length === 0 || waiting.value) return
+  const off = switchesOff(chosen.map((view) => !isOff(view)))
+  for (const season of [...new Set(chosen.map((view) => view.season))]) {
+    await output.switchTo(season, chosen.filter((view) => view.season === season).map((view) => view.episode), off)
+  }
+}
+// The keys act inside the grid of a season only: Space and Esc anywhere else (a field, a switch) keep their own meaning.
+function onKey(event: KeyboardEvent): void {
+  const target = event.target as HTMLElement | null
+  if (!target?.closest(".season-grid") || target.closest("input, textarea, select, [contenteditable]")) return
+  if (event.key === " ") {
+    event.preventDefault()  // a press of Space on a card or a tile is not a click of it
+    if (event.type === "keydown" && !event.repeat) {
+      const cell = target.closest<HTMLElement>("[data-episode]")
+      const season = Number(target.closest<HTMLElement>("[data-season]")?.dataset.season)
+      void switchSelected(cell && Number.isFinite(season) ? { season, episode: Number(cell.dataset.episode) } : null)
+    }
+  } else if (event.key === "Escape" && event.type === "keydown" && selection.value.keys.size) {
+    event.stopPropagation()  // Esc lets the selection go; it closes the window only when nothing is selected
+    selection.value = NO_SELECTION
+  }
+}
+
 function openSettings(season: number | null, compilation: string | null = null): void {
   settingsOf.value = { season, ...(compilation === null ? {} : { compilation }) }
   void output.loadQueues(season, null, compilation)
@@ -132,7 +171,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
 </script>
 
 <template>
-  <div ref="root" class="status-output" :class="{ 'is-waiting': waiting }">
+  <div ref="root" class="status-output" :class="{ 'is-waiting': waiting }" @keydown="onKey" @keyup="onKey">
     <div class="output-bar output-actions">
       <Button :label="t('output.settings.series')" icon="pi pi-sliders-h" size="small" severity="info" class="output-series-settings"
               @click="openSettings(null)" />
@@ -194,9 +233,11 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       :mode="mode === 'tiles' ? 'tiles' : 'cards'" :opened="opened?.season === season.season && !opened.compilation ? opened.episode : null"
       :compilations="compilationsOf(season.season)" :cuts="cuts"
       :queues="opened?.season === season.season ? output.queuesOf(season.season, opened.episode) : undefined" :busy="busy"
-      @open="open(season.season, $event)" @settings="openSettings(season.season)"
+      :selected="selectedBySeason.get(season.season) ?? NONE"
+      @open="open(season.season, $event)" @select="(episode, pick) => select(season.season, episode, pick)"
+      @settings="openSettings(season.season)"
       @switch-season="output.switchTo(season.season, null, $event)"
-      @switch-episode="(episode, off) => output.switchTo(season.season, episode, off)"
+      @switch-episode="(episode, off) => output.switchTo(season.season, [episode], off)"
       @voice-order="output.order(season.season, $event)"
       @voice-title="(label, title) => output.rename(label, title)"
       @refetch="(episode, part) => output.refetch(season.season, episode, part)"

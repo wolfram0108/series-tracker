@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
-import CompilationOutline from "./CompilationOutline.vue"
+import GroupOutline from "./GroupOutline.vue"
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) } as DOMRect
@@ -23,9 +23,9 @@ function grid(height: number, scrollHeight: number): HTMLElement {
   return element
 }
 
-describe("CompilationOutline", () => {
+describe("GroupOutline", () => {
   it("is as tall as the grid now, whatever the layer once made the grid scroll to", async () => {
-    const w = mount(CompilationOutline, { props: { grid: grid(50, 20000), layout: 1, groups: [{ episodes: [1, 2], color: 1 }] } })
+    const w = mount(GroupOutline, { props: { grid: grid(50, 20000), layout: 1, groups: [{ episodes: [1, 2], tone: "var(--compilation-1)" }] } })
     await flushPromises()
     expect(w.get("svg").attributes()).toMatchObject({ width: "210", height: "50" })
   })

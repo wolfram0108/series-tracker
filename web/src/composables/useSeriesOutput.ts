@@ -125,9 +125,10 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const reset = (scope: Scope, lever?: string, target?: string | null, queue?: QueueName): Promise<string | null> =>
     act(() => resetLever(seriesId, resetBody(scope, lever, target, queue)), busy)
 
-  // An episode, or a whole season (no episode in the scope), off or on; the references that follow come as events.
-  const switchTo = (season: number, episode: number | null, off: boolean): Promise<string | null> =>
-    act(() => switchOutput(seriesId, { season, ...(episode === null ? {} : { episode }), off }), busy)
+  // Episodes of a season, one or many in one command, or the whole season (no episodes), off or on; the references that
+  // follow come as events.
+  const switchTo = (season: number, episodes: number[] | null, off: boolean): Promise<string | null> =>
+    act(() => switchOutput(seriesId, { season, ...(episodes === null ? {} : { episodes }), off }), busy)
 
   const sync = (): Promise<string | null> => act(() => syncSeries(seriesId), syncing)
   const stop = (): Promise<string | null> => act(() => cancelSync(seriesId), stopping)

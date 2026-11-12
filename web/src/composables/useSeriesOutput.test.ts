@@ -225,12 +225,14 @@ describe("useSeriesOutput", () => {
     expect(vi.mocked(calls.syncSeries).mock.calls.length).toBe(syncs) // the reset is no sync
   })
 
-  it("switches an episode or a season off and on with the body the core reads, and returns a refusal in words", async () => {
+  it("switches episodes or a season off and on with the body the core reads, and returns a refusal in words", async () => {
     const output = setup()
     await flushPromises()
-    expect(await output.switchTo(1, 2, true)).toBeNull()
+    expect(await output.switchTo(1, [2], true)).toBeNull()
+    expect(await output.switchTo(1, [3, 4, 9], true)).toBeNull()
     expect(await output.switchTo(1, null, false)).toBeNull()
-    expect(vi.mocked(calls.switchOutput).mock.calls).toEqual([[1, { season: 1, episode: 2, off: true }], [1, { season: 1, off: false }]])
+    expect(vi.mocked(calls.switchOutput).mock.calls).toEqual([[1, { season: 1, episodes: [2], off: true }],
+      [1, { season: 1, episodes: [3, 4, 9], off: true }], [1, { season: 1, off: false }]])
     vi.mocked(calls.switchOutput).mockResolvedValueOnce({ ok: false, text: "Сериал не найден" })
     expect(await output.switchTo(9, null, true)).toBe("Сериал не найден")
     expect(output.failure.value).toBe("Сериал не найден")

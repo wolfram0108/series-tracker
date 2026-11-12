@@ -2806,13 +2806,14 @@ export interface components {
         };
         /**
          * OutputSwitchBody
-         * @description The body of the command `scan.output.switch` without the series: an episode, or a whole season, off or on.
+         * @description The body of the command `scan.output.switch` without the series: episodes of a season (one or many at once), or
+         *     without `episodes` the whole season, off or on.
          */
         OutputSwitchBody: {
             /** Season */
             season: number;
-            /** Episode */
-            episode?: number | null;
+            /** Episodes */
+            episodes?: number[] | null;
             /** Off */
             off: boolean;
         };

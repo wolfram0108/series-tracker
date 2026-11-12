@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from "vue"
-import { outlinePieces, type Geometry, type Piece } from "../../../lib/compilations"
+import { outlinePieces, type Geometry, type Piece } from "../../../lib/outline"
 
-// The outline of the compilations of a season behind its cards or tiles (stage 12): each compilation a band of its colour
-// whose outer edge lies on the centre of the gaps and whose arcs are concentric with the corners of the cards. It is drawn
-// from the grid as it lies on the page (`layout` grows with every measure of the grid), so it follows any width.
+// The outline of groups of the cards or tiles of a season, behind them: each group a band of its tone whose outer edge
+// lies on the centre of the gaps and whose arcs are concentric with the corners of the cards. The compilations of a season
+// are one layer of groups (stage 12), the episodes selected another (lib/selection.ts): a card may be in both. It is
+// drawn from the grid as it lies on the page (`layout` grows with every measure of the grid), so it follows any width.
 const props = defineProps<{
   grid: HTMLElement | null
   layout: number
-  /** Per compilation: the episodes it takes and its colour (1…16). */
-  groups: { episodes: number[]; color: number }[]
+  /** Per group: its episodes and its tone (a CSS colour: a token of a compilation, of the selection). */
+  groups: { episodes: number[]; tone: string }[]
 }>()
 
-interface Drawn { color: number; own: Piece[]; others: Piece[] }
+interface Drawn { tone: string; own: Piece[]; others: Piece[] }
 const drawn = ref<Drawn[]>([])
 const size = ref({ width: 0, height: 0 })
 
@@ -70,7 +71,7 @@ function draw(): void {
     const cols = own.map((piece) => piece.col)
     const near = (piece: Piece) => piece.row >= Math.min(...rows) - 1 && piece.row <= Math.max(...rows) + 1
       && piece.col >= Math.min(...cols) - 1 && piece.col <= Math.max(...cols) + 1
-    return { color: each.color, own, others: pieces.filter((piece) => piece.owner !== index && near(piece)) }
+    return { tone: each.tone, own, others: pieces.filter((piece) => piece.owner !== index && near(piece)) }
   }).filter((each) => each.own.length > 0)
 }
 
@@ -79,7 +80,7 @@ const id = `outline-${Math.random().toString(36).slice(2)}`
 </script>
 
 <template>
-  <svg v-if="drawn.length" class="compilation-outline" :width="size.width" :height="size.height" aria-hidden="true">
+  <svg v-if="drawn.length" class="group-outline" :width="size.width" :height="size.height" aria-hidden="true">
     <defs>
       <mask v-for="(each, index) in drawn" :id="`${id}-${index}`" :key="index" maskUnits="userSpaceOnUse"
             x="-50" y="-50" :width="size.width + 100" :height="size.height + 100">
@@ -87,9 +88,9 @@ const id = `outline-${Math.random().toString(36).slice(2)}`
         <path v-for="(piece, at) in each.own" :key="at" :d="piece.d" fill="#fff" />
       </mask>
     </defs>
-    <g v-for="(each, index) in drawn" :key="index" :style="{ '--tone': `var(--compilation-${each.color})` }">
-      <path v-for="(piece, at) in each.own" :key="`g${at}`" :d="piece.d" class="compilation-ground" />
-      <g :mask="`url(#${id}-${index})`" class="compilation-ring">
+    <g v-for="(each, index) in drawn" :key="index" :style="{ '--tone': each.tone }">
+      <path v-for="(piece, at) in each.own" :key="`g${at}`" :d="piece.d" class="group-ground" />
+      <g :mask="`url(#${id}-${index})`" class="group-ring">
         <path v-for="(piece, at) in each.others" :key="`r${at}`" :d="piece.d" />
       </g>
     </g>
@@ -97,8 +98,8 @@ const id = `outline-${Math.random().toString(36).slice(2)}`
 </template>
 
 <style scoped>
-.compilation-outline { position: absolute; inset-block-start: 0; inset-inline-start: 0; z-index: -1; overflow: visible; pointer-events: none; }
-.compilation-ground { fill: var(--tone); fill-opacity: var(--compilation-ground-share); }
-/* What is not the compilation, grown by the width of the line and seen only inside it: the band along its edge. */
-.compilation-ring { fill: var(--tone); stroke: var(--tone); stroke-width: calc(2 * var(--compilation-line)); stroke-linejoin: round; }
+.group-outline { position: absolute; inset-block-start: 0; inset-inline-start: 0; z-index: -1; overflow: visible; pointer-events: none; }
+.group-ground { fill: var(--tone); fill-opacity: var(--outline-ground-share); }
+/* What is not the group, grown by the width of the line and seen only inside it: the band along its edge. */
+.group-ring { fill: var(--tone); stroke: var(--tone); stroke-width: calc(2 * var(--outline-line)); stroke-linejoin: round; }
 </style>

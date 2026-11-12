@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .compilation import CompilationRef
 
@@ -54,12 +54,13 @@ class Reference(BaseModel):
 
 
 class OutputSwitch(BaseModel):
-    """The command `scan.output.switch`: an episode (or, without `episode`, a whole season) is switched off or on.
-    Switching a season on switches on everything of it, the episodes switched off one by one included."""
+    """The command `scan.output.switch`: episodes of a season (or, without `episodes`, the whole season) are switched off
+    or on, one episode or a thousand at once: one change of the memory of the series. Switching a season on switches on
+    everything of it, the episodes switched off one by one included."""
 
     series_id: int
     season: int
-    episode: int | None = None
+    episodes: list[int] | None = Field(default=None, min_length=1)
     off: bool
 
 

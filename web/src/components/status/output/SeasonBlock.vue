@@ -11,7 +11,8 @@ import { useCardGrid } from "../../../composables/useCardGrid"
 import { sharing } from "../../../lib/sharing"
 import VoiceOrder from "../VoiceOrder.vue"
 import { badgeOf, cutOf, cutOverride, membersOf, memberOf, takes, type CompilationView, type CutItem } from "../../../lib/compilations"
-import CompilationOutline from "./CompilationOutline.vue"
+import { pickOf, type Pick } from "../../../lib/selection"
+import GroupOutline from "./GroupOutline.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
 import PowerSwitch from "./PowerSwitch.vue"
@@ -35,10 +36,14 @@ const props = withDefaults(defineProps<{
   compilations?: CompilationView[]
   /** The cuts of the episodes out of their compilations: a cut under way is the state of its episode. */
   cuts?: Map<string, CutItem>
-}>(), { names: () => [], mode: "cards", opened: null, busy: false, compilations: () => [], cuts: () => new Map() })
+  /** The episodes of the season selected (lib/selection.ts): their outline behind the cards, over the compilations'. */
+  selected?: number[]
+}>(), { names: () => [], mode: "cards", opened: null, busy: false, compilations: () => [], cuts: () => new Map(),
+  selected: () => [] })
 
 const emit = defineEmits<{
   (e: "open", episode: number | null): void
+  (e: "select", episode: number, pick: Pick): void
   (e: "settings"): void
   (e: "switch-season", off: boolean): void
   (e: "switch-episode", episode: number, off: boolean): void
@@ -103,9 +108,18 @@ const heights = computed(() => new Map(props.episodes.map((view) => [view.episod
 const height = (_season: number, episode: number) => heights.value.get(episode) ?? null
 const members = computed(() => membersOf(props.compilations, height))
 const outline = computed(() => props.compilations.map((view) => ({
-  color: badgeOf(view).color,
+  tone: `var(--compilation-${badgeOf(view).color})`,
   episodes: (view.episodes ?? []).filter((each) => takes(view, each.episode, height)).map((each) => each.episode),
 })).filter((each) => each.episodes.length > 0))
+
+const selection = computed(() => props.selected.length ? [{ episodes: props.selected, tone: "var(--selection-tone)" }] : [])
+const chosen = computed(() => new Set(props.selected))
+const toggleOpen = (episode: number): void => emit("open", opened.value?.view.episode === episode ? null : episode)
+// A tile is selected by a click and opened by a double click, as a card; a press of Enter comes with no count of presses.
+function clickedTile(episode: number, event: MouseEvent): void {
+  if (event.detail === 0) toggleOpen(episode)
+  else if (event.detail === 1) emit("select", episode, pickOf(event))
+}
 
 const opened = computed(() => items.value.find((item) => item.view.episode === props.opened) ?? null)
 function step(by: number): void {
@@ -151,20 +165,21 @@ function step(by: number): void {
       />
       <div ref="grid" class="season-grid" :class="`is-${mode}`" :style="columns">
         <span ref="ruler" class="grid-ruler" aria-hidden="true" />
-        <CompilationOutline :grid="grid" :layout="layout + episodes.length + (opened ? 1 : 0)" :groups="outline" />
+        <GroupOutline :grid="grid" :layout="layout + episodes.length + (opened ? 1 : 0)" :groups="outline" />
+        <GroupOutline :grid="grid" :layout="layout + episodes.length + (opened ? 1 : 0)" :groups="selection" />
         <template v-for="item in items" :key="item.view.episode">
           <EpisodeCard
             v-if="mode === 'cards'" :view="item.view" :cells="item.cells" :status="item.status" :marks="marks"
             :file="wide ? item.file : undefined" :open="opened?.view.episode === item.view.episode" :busy="busy"
-            :badge="memberOf(members, season, item.view.episode)"
-            @open="emit('open', opened?.view.episode === item.view.episode ? null : item.view.episode)"
+            :badge="memberOf(members, season, item.view.episode)" selectable :selected="chosen.has(item.view.episode)"
+            @open="toggleOpen(item.view.episode)" @select="emit('select', item.view.episode, $event)"
             @switch="emit('switch-episode', item.view.episode, $event)"
           />
           <button
             v-else type="button" class="episode-tile" :data-episode="item.view.episode"
-            :class="[`is-${item.status}`, { 'is-open': opened?.view.episode === item.view.episode }]"
-            :style="item.tone" :title="item.label" :aria-label="item.label"
-            @click="emit('open', opened?.view.episode === item.view.episode ? null : item.view.episode)"
+            :class="[`is-${item.status}`, { 'is-open': opened?.view.episode === item.view.episode, 'is-selected': chosen.has(item.view.episode) }]"
+            :style="item.tone" :title="item.label" :aria-label="item.label" :aria-pressed="chosen.has(item.view.episode)"
+            @click="clickedTile(item.view.episode, $event)" @dblclick="toggleOpen(item.view.episode)"
           >{{ item.view.episode }}</button>
           <EpisodeDetail
             v-if="opened?.view.episode === item.view.episode" :view="item.view" :cells="item.cells" :status="item.status"

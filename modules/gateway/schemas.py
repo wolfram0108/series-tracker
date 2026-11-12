@@ -274,9 +274,10 @@ class VoiceTitleBody(RequestModel):
 
 
 class OutputSwitchBody(RequestModel):
-    """The body of the command `scan.output.switch` without the series: an episode, or a whole season, off or on."""
+    """The body of the command `scan.output.switch` without the series: episodes of a season (one or many at once), or
+    without `episodes` the whole season, off or on."""
     season: int
-    episode: int | None = None
+    episodes: list[int] | None = Field(default=None, min_length=1)
     off: bool
 
 

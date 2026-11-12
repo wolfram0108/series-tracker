@@ -73,7 +73,7 @@ onMounted(() => {
   const depth = Math.round(100 * (1 - end.reduce((sum, part) => sum + part, 0) / Math.max(1, rgb(ground).reduce((sum, part) => sum + part, 0))))
   current.value = { ground, depth, stripe: toHex(root("--partial-stripe")), share: parseFloat(root("--partial-stripe-share")),
     colors: Array.from({ length: COMPILATION_COLORS }, (_, index) => toHex(root(`--compilation-${index + 1}`))),
-    line: parseFloat(root("--compilation-line")), fill: parseFloat(root("--compilation-ground-share")) }
+    line: parseFloat(root("--outline-line")), fill: parseFloat(root("--outline-ground-share")) }
   Object.assign(state, { ...current.value, colors: [...current.value.colors] })
 })
 
@@ -84,8 +84,8 @@ const tokens = computed(() => ({
   "--partial-stripe": state.stripe,
   "--partial-stripe-share": `${state.share}%`,
   ...Object.fromEntries(state.colors.map((colour, index) => [`--compilation-${index + 1}`, colour])),
-  "--compilation-line": `${state.line}rem`,
-  "--compilation-ground-share": `${state.fill}`,
+  "--outline-line": `${state.line}rem`,
+  "--outline-ground-share": `${state.fill}`,
 }))
 const block = computed(() => `:root {\n${Object.entries(tokens.value).map(([name, value]) => `  ${name}: ${value};`).join("\n")}\n}`)
 

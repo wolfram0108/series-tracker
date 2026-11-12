@@ -97,6 +97,8 @@
   --compilation-14: #1c7ed6;
   --compilation-15: #d6336c;
   --compilation-16: #212529;
-  --compilation-line: 0.16rem;
-  --compilation-ground-share: 0.28;
+  /* The outline of a group of cards or tiles (components/status/output/GroupOutline.vue): a compilation, the selection. */
+  --outline-line: 0.16rem;
+  --outline-ground-share: 0.28;
+  --selection-tone: var(--color-blue);
 }

@@ -204,19 +204,23 @@ async def test_a_reset_the_registry_refuses_is_a_400_with_the_code(tmp_path):
 # --- the switch of an episode or a season -------------------------------------------------------------
 
 
-async def test_an_episode_and_a_season_are_switched_with_the_series_of_the_path(tmp_path):
+async def test_episodes_and_a_season_are_switched_with_the_series_of_the_path(tmp_path):
     async with serving(tmp_path, {"scan.output.switch": {"success": True}}) as (client, owners, _, _):
-        episode = await client.put("/api/series/1/output/switch", json={"season": 2, "episode": 3, "off": True})
+        episode = await client.put("/api/series/1/output/switch", json={"season": 2, "episodes": [3], "off": True})
+        await client.put("/api/series/1/output/switch", json={"season": 2, "episodes": [4, 5, 9], "off": True})
         await client.put("/api/series/1/output/switch", json={"season": 2, "off": False})
     assert episode.status_code == 200 and episode.json() == {"success": True}
+    # Many episodes are one command: one change of the memory of the series.
     assert owners.asked("scan.output.switch") == [
-        {"series_id": 1, "season": 2, "episode": 3, "off": True},
-        {"series_id": 1, "season": 2, "episode": None, "off": False}]
+        {"series_id": 1, "season": 2, "episodes": [3], "off": True},
+        {"series_id": 1, "season": 2, "episodes": [4, 5, 9], "off": True},
+        {"series_id": 1, "season": 2, "episodes": None, "off": False}]
 
 
 async def test_a_switch_without_its_answer_or_with_a_foreign_field_is_a_malformed_request_and_asks_nobody(tmp_path):
     async with serving(tmp_path, {"scan.output.switch": {"success": True}}) as (client, owners, _, _):
-        for body in ({"season": 1}, {"off": True}, {"season": 1, "off": True, "series_id": 2}):
+        for body in ({"season": 1}, {"off": True}, {"season": 1, "off": True, "series_id": 2},
+                     {"season": 1, "episodes": [], "off": True}, {"season": 1, "episode": 2, "off": True}):
             assert (await client.put("/api/series/1/output/switch", json=body)).status_code == 422
     assert owners.asked("scan.output.switch") == []
 

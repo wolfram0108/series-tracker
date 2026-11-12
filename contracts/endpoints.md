@@ -209,7 +209,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | POST | `/api/series/{series_id}/output/dubs/retry` | «Повторить»: неудачные и отклонённые озвучки охвата (`season`, `episode?`, `part?`, `voice_label?`) начинаются заново и идут в загрузку сразу (`voices.dubs.retry`) | — |
 | POST | `/api/series/{series_id}/output/dubs/redo` | «Пересоздать»: озвучки охвата с уложенной дорожкой делаются заново сразу (`voices.dubs.redo`); контейнер берёт новые дорожки в синхронизации | — |
 | POST | `/api/series/{series_id}/output/reference/refetch` | «Скачать заново»: референс серии (`season`, `episode`, `part?`) скачивается заново сразу; файл заменяется, когда новый целый (`downloads.reference.refetch`) | — |
-| PUT | `/api/series/{series_id}/output/switch` | Отключить или включить серию, а сезон целиком — без `episode` (`scan.output.switch`) | — |
+| PUT | `/api/series/{series_id}/output/switch` | Отключить или включить серии сезона списком `episodes` (одну или выделенные), а сезон целиком — без `episodes` (`scan.output.switch`) | — |
 | POST | `/api/series/{series_id}/output/settings/reset` | Вернуть рычаги уровня в наследование (`composition.settings.reset`) | — |
 
 ---
@@ -265,7 +265,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | Статус-окно: вкладка «Нарезка» — удалить исходник | POST | `/api/media-items/{unique_id}/delete-source` |
 | Статус-окно: раздел «Выход» — раскладка | GET | `/api/series/{series_id}/composition` |
 | Статус-окно: раздел «Выход» — референсы | GET | `/api/series/{series_id}/output` |
-| Статус-окно: раздел «Выход» — отключить или включить серию, сезон | PUT | `/api/series/{series_id}/output/switch` |
+| Статус-окно: раздел «Выход» — отключить или включить серию, выделенные серии, сезон | PUT | `/api/series/{series_id}/output/switch` |
 | Статус-окно: раздел «Выход» — рычаг | PUT | `/api/series/{series_id}/output/settings` |
 | Статус-окно: раздел «Выход» — сбросить рычаги уровня | POST | `/api/series/{series_id}/output/settings/reset` |
 | Статус-окно: раздел «Выход» — имена файлов | GET | `/api/series/{series_id}/rename_preview` |
@@ -781,10 +781,11 @@ voice_group, height, reason}`; `mark` — `by_level` | `own` | `other_player` | 
 сезон, номер серии или строка плана; референса и озвучек у неё нет). Сведения раскладки и
 озвучек (`/composition`, `/voices`) шлюз не склеивает: интерфейс сопоставляет их по (сезон, серия).
 
-**PUT `/api/series/{series_id}/output/switch`** — тело `{season, episode?, off}`; без `episode` — сезон целиком. Память
-сериала (`ignored_seasons`, `ignored_episodes`) и строки плана меняются вместе; включение сезона включает в нём всё.
-Ответ `{success}`; изменение приходит событиями `reference_changed`. 404 — сериал не найден; 422 — нет `season` или
-`off`, либо неизвестное поле.
+**PUT `/api/series/{series_id}/output/switch`** — тело `{season, episodes?, off}`; `episodes` — список серий сезона
+(одна или выделенные, одной командой), без `episodes` — сезон целиком. Память сериала (`ignored_seasons`,
+`ignored_episodes`) и строки плана меняются вместе, одним изменением; включение сезона включает в нём всё. Ответ
+`{success}`; изменение приходит событиями `reference_changed`. 404 — сериал не найден; 422 — нет `season` или `off`,
+пустой список `episodes` либо неизвестное поле.
 
 **PUT `/api/series/{series_id}/output/settings`** — тело `{season?, episode?, lever, target?, value}`; уровень — сериал
 (без сезона), сезон или серия (сезон и серия). Ответ `{success}`. 400 с кодом: `unknown_lever`, `bad_target`,

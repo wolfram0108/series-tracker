@@ -29,9 +29,10 @@ Queries:
   scan.series.prepare {series_id} → the summary of a torrent scan without a download: the torrent is added to
       qBittorrent, split into its files (torrent_files) and left paused — the user picks the episodes in the
       composition, the next scan starts the download.
-  scan.output.switch {series_id, season, episode?, off} → {success}: switches an episode (without `episode`, a whole
-      season) off or on in the memory of the series (ignored_seasons, ignored_episodes), for the rows that exist and for
-      those a new release brings; switching a season on switches on all of it. The plan of the series reads the memory.
+  scan.output.switch {series_id, season, episodes?, off} → {success}: switches episodes of a season, one or many at once
+      in one change (without `episodes`, the whole season), off or on in the memory of the series (ignored_seasons,
+      ignored_episodes), for the rows that exist and for those a new release brings; switching a season on switches on
+      all of it. The plan of the series reads the memory.
       A series the catalog does not have is refused with the catalog's own answer.
 
 Commands:
@@ -321,9 +322,9 @@ class ScanModule(BaseModule):
             await over.wait()
 
     async def on_output_switch(self, env: Envelope) -> dict:
-        """An episode, or a whole season, is switched off or on by the user: the memory of the series holds it, for the
-        rows that are there and for those a new release brings; the plan of the series reads it. Switching a season on
-        switches on all of it."""
+        """Episodes (one or many at once), or a whole season, are switched off or on by the user: the memory of the series
+        holds it, for the rows that are there and for those a new release brings; the plan of the series reads it.
+        Switching a season on switches on all of it."""
         request = OutputSwitch.model_validate(env.payload)
         series_id = request.series_id
         self._require_idle(series_id, availability.Action.EDIT, env)
@@ -331,14 +332,13 @@ class ScanModule(BaseModule):
         async def apply() -> None:
             series = await self.request("catalog.series.get", {"series_id": series_id})
             seasons, memory = self._ignored_seasons(series), self._ignored_episodes(series)
-            if request.episode is None:
+            if request.episodes is None:
                 seasons = seasons | {request.season} if request.off else seasons - {request.season}
                 if not request.off:
                     memory.pop(request.season, None)
             else:
-                numbers = memory.get(request.season, set())
-                numbers = numbers | {request.episode} if request.off else numbers - {request.episode}
-                memory[request.season] = numbers
+                numbers, asked = memory.get(request.season, set()), set(request.episodes)
+                memory[request.season] = numbers | asked if request.off else numbers - asked
             # The memory of the series is the switch: the plan of the series reads it (modules/planner).
             await self.request("catalog.series.update", {"series_id": series_id, "fields": {
                 "ignored_seasons": json.dumps(sorted(seasons)),

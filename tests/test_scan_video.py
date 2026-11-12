@@ -426,9 +426,10 @@ async def test_a_pass_over_all_series_that_the_stop_of_the_module_cancels_asks_n
 # --- what the user switched off ---------------------------------------------------------------------------------------------
 
 
-async def switch(rig: "Rig", season: int, episode: int | None, switched: bool) -> dict:
+async def switch(rig: "Rig", season: int, episodes: list[int] | int | None, switched: bool) -> dict:
+    episodes = [episodes] if isinstance(episodes, int) else episodes
     return await rig.probe.request("scan.output.switch", {
-        "series_id": rig.series_id, "season": season, "episode": episode, "off": switched}, timeout=STUCK_S)
+        "series_id": rig.series_id, "season": season, "episodes": episodes, "off": switched}, timeout=STUCK_S)
 
 
 def memory_of(rig: "Rig") -> tuple[str, str]:
@@ -450,6 +451,17 @@ async def test_an_episode_switched_off_by_the_user_is_remembered_by_number_and_s
         {"ignored_seasons": "[]", "ignored_episodes": '{"1": [2]}'},
         {"ignored_seasons": "[]", "ignored_episodes": "{}"}]
     assert memory_of(rig) == ("[]", "{}")
+
+
+async def test_many_episodes_are_switched_off_and_on_by_one_change_of_the_memory(rig):
+    """A selection of episodes goes as one command: the memory of the series changes once, with all of them."""
+    writes = rig.bus.subscribe("catalog.series.update")
+    assert await switch(rig, 1, [2, 3, 7], True) == {"success": True}
+    assert await switch(rig, 1, [3, 7], False) == {"success": True}
+    assert writes_of(writes) == [
+        {"ignored_seasons": "[]", "ignored_episodes": '{"1": [2, 3, 7]}'},
+        {"ignored_seasons": "[]", "ignored_episodes": '{"1": [2]}'}]
+    assert memory_of(rig) == ("[]", '{"1": [2]}')
 
 
 async def test_an_episode_switched_off_in_advance_comes_back_when_the_user_switches_it_on(rig):
@@ -713,7 +725,7 @@ async def test_a_change_admitted_before_a_sync_is_not_refused_by_the_sync_that_w
     async with admitted(rig.probe, rig.series_id):
         running = rig.start_run(download=False)
         assert await wait_until(lambda: rig.series_id in rig.scan._running, rig.bus, *rig.runner.modules)
-        await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": 1, "off": True},
+        await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episodes": [1], "off": True},
                                 timeout=5)
     await asyncio.wait_for(running, 10)
 
@@ -721,7 +733,7 @@ async def test_a_change_admitted_before_a_sync_is_not_refused_by_the_sync_that_w
     rig.scan._running.add(rig.series_id)
     try:
         with pytest.raises(BusRequestError, match="NotAllowed"):
-            await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": 1,
+            await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episodes": [1],
                                                            "off": False}, timeout=5)
     finally:
         rig.scan._running.discard(rig.series_id)
@@ -797,7 +809,7 @@ async def test_a_write_nested_under_the_handler_of_an_admitted_request_holds_the
 
     async def edit():
         async with admitted(rig.probe, rig.series_id):
-            await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": 1,
+            await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episodes": [1],
                                                            "off": True}, timeout=0.2)
 
     editing = asyncio.create_task(edit())
