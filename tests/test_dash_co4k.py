@@ -247,3 +247,94 @@ async def test_a_refused_audio_has_the_application_parse_the_episode_anew(media)
         first = player.read(await player.fetch(ref, http, ''))
         second = player.read(await player.fetch(ref, http, ''))
     assert first.kind is Kind.HTTP_ERROR and second.kind is Kind.PLAYABLE and len(resolved) == 2
+
+
+def tv_tracks(cid='123', duration=3):
+    from modules.sources.players.dash import Tracks
+    base = f'https://upos-sz-mirrorhw.bilivideo.com/upgcxcode/01/23/{cid}/{cid}'
+    return Tracks((base + '-video.mp4?platform=android_tv_yst',), base + '-audio.mp4?platform=tv', duration)
+
+
+def audio_reply(cid='123', **fields):
+    return {'code': 0, 'result': {'is_preview': 0, 'is_drm': False, 'timelength': 3000,
+        'dash': {'audio': [{'bandwidth': 100, 'base_url':
+            f'https://upos-hz-mirrorakam.akamaized.net/upgcxcode/01/23/{cid}/{cid}-fresh.mp4'}]}, **fields}}
+
+
+@pytest.mark.asyncio
+async def test_refused_tv_audio_is_renewed_without_replacing_the_video(media):
+    found = tv_tracks()
+    fresh = audio_reply()['result']['dash']['audio'][0]['base_url']
+    requests = []
+    def respond(request):
+        requests.append(request)
+        if request.url.host == 'resolver.test':
+            return httpx.Response(200, text=mpd(found.videos[0], found.audio).replace(
+                'type="static"', 'type="static" mediaPresentationDuration="PT3S"'))
+        if request.url.host == 'api.bilibili.com':
+            assert request.url.params['cid'] == '123'
+            assert request.headers['Referer'] == 'https://www.bilibili.com/'
+            return httpx.Response(200, json=audio_reply())
+        assert request.headers['User-Agent'] == 'okhttp/3.14.9' and 'Referer' not in request.headers
+        if str(request.url) == found.audio:
+            return httpx.Response(403)
+        name = 'video.mp4' if str(request.url) == found.videos[0] else 'audio.mp4'
+        return httpx.Response(200, content=(media / name).read_bytes())
+    async def resolve(*args):
+        return AppStream('https://resolver.test/manifest', {})
+    player = AppPlayer(SimpleNamespace(profile=SimpleNamespace(name='banri', label='Banri',
+                                                               settings={'player_agent': 'okhttp/3.14.9'}), resolve=resolve))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        answer = await player.fetch(PlayerRef('line:CO4K', 'app://banri/1#line=CO4K&item=t'), http, '')
+        assert player.read(answer).kind is Kind.PLAYABLE
+        stream = await player.stream('app://banri/1#line=CO4K&item=t', http, None, None)
+    assert stream['stream_url'] == found.videos[0] and stream['audio_url'] == fresh
+    assert stream['headers'] == {'User-Agent': 'okhttp/3.14.9'}
+    assert sum(r.url.host == 'api.bilibili.com' for r in requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('reply', [audio_reply(is_preview=1), audio_reply(is_drm=True),
+    audio_reply(timelength=120000), audio_reply(cid='456'), {'code': -10403, 'message': 'not available'}])
+async def test_audio_renewal_rejects_preview_drm_wrong_episode_or_duration(reply):
+    from modules.sources.players.dash import AudioRenewal
+    count = 0
+    def respond(request):
+        nonlocal count
+        count += 1
+        return httpx.Response(200, json=reply)
+    renewal = AudioRenewal()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        assert await renewal.get(http, tv_tracks()) is None
+        assert await renewal.get(http, tv_tracks()) is None
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_audio_renewal_cools_down_across_episodes_after_api_refusal():
+    from modules.sources.players.dash import AudioRenewal
+    count = 0
+    def respond(request):
+        nonlocal count
+        count += 1
+        return httpx.Response(412)
+    renewal = AudioRenewal()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        assert await renewal.get(http, tv_tracks()) is None
+        assert await renewal.get(http, tv_tracks('456')) is None
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_audio_renewal_spaces_requests_for_different_episodes():
+    import time
+    from modules.sources.players.dash import AudioRenewal
+    starts = []
+    def respond(request):
+        starts.append(time.monotonic())
+        return httpx.Response(200, json=audio_reply(cid=request.url.params['cid']))
+    renewal = AudioRenewal()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        assert await renewal.get(http, tv_tracks())
+        assert await renewal.get(http, tv_tracks('456'))
+    assert len(starts) == 2 and starts[1] - starts[0] >= .95

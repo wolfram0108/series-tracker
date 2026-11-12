@@ -37,7 +37,7 @@ from ..apps.lines import LineRegistry
 from ..policy import settle
 from ..term import Term
 from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
-from .dash import UnsupportedDash, is_dash, tracks
+from .dash import AudioRenewal, Tracks, UnsupportedDash, is_dash, tracks
 from .hls import (MEASURE_TIMEOUT_S, Measure, container_of, file_head_size, is_playlist, measure_head, measured,
                   probe_args, waiting)
 from .http import USER_AGENT, retry_after
@@ -172,6 +172,7 @@ class AppPlayer:
         # The agent the application's own player plays its streams with (`player_agent` of the profile): some CDNs of
         # the applications refuse any other. A header the application gave with the stream stays as it is.
         self.agent = str(client.profile.settings.get("player_agent") or "")
+        self._dash_renewal = AudioRenewal(clock)
 
     # --- the link of a row ------------------------------------------------------------------------------------
 
@@ -282,8 +283,8 @@ class AppPlayer:
             measured_tracks = await self._dash_files(http, found.videos, headers)
             if isinstance(measured_tracks, Answer):
                 return measured_tracks
-            audio = await self._dash_audio(http, found.audio, headers)
-            if audio is not None:
+            audio = await self._dash_audio_ready(http, found, headers)
+            if isinstance(audio, Answer):
                 return audio
             heights = tuple(sorted({height for height, _ in measured_tracks}))
             return Answer(200, reading=Reading(Kind.PLAYABLE, 200, heights,
@@ -311,9 +312,21 @@ class AppPlayer:
             files.extend(self.read(answer).files)
         return tuple(files)
 
+    async def _dash_audio_ready(self, http: httpx.AsyncClient, found: Tracks, headers: dict[str, str]) -> str | Answer:
+        """The audio of the episode: the application's, else, when the CDN refused it, Bilibili's for the same CID."""
+        failure = await self._dash_audio(http, found.audio, headers)
+        if failure is None:
+            return found.audio
+        if failure.status == 403:
+            renewed = await self._dash_renewal.get(http, found)
+            if renewed:
+                if await self._dash_audio(http, renewed, headers) is None:
+                    return renewed
+                self._dash_renewal.reject(found)
+        return failure
+
     async def _dash_audio(self, http: httpx.AsyncClient, address: str, headers: dict[str, str]) -> Answer | None:
-        """A working picture alone is no playable DASH episode: its audio has a signature of its own. A refused audio
-        answers the ask as the video would: the next ask has the application parse the episode anew (`fetch`)."""
+        """A working picture alone is no playable DASH episode: its audio has a signature of its own."""
         served = await served_as(http, address, headers)
         if served.kind != "file":
             reading = self.read(served.answer) if not served.kind else Reading(Kind.NO_FILE, 200)
@@ -359,10 +372,10 @@ class AppPlayer:
                 cause = self.read(files)
             elif (video := pick_file(files, max_height)) is None:
                 cause = Reading(Kind.NO_FILE, message="DASH: no measured video track")
-            elif (refused := await self._dash_audio(http, found_tracks.audio, headers)) is not None:
-                cause = self.read(refused)
+            elif isinstance(audio := await self._dash_audio_ready(http, found_tracks, headers), Answer):
+                cause = self.read(audio)
             else:
-                return {"stream_url": video[1], "audio_url": found_tracks.audio, "headers": headers,
+                return {"stream_url": video[1], "audio_url": audio, "headers": headers,
                         "progressive": False, "playlist": False}
             raise StreamUnavailable(reason("player_failed", player=self.label, cause=cause.message or cause.kind.value),
                                     cause.kind in {Kind.NO_ANSWER, Kind.HTTP_ERROR})
