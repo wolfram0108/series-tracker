@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, onUpdated, ref } from "vue"
 import { useBodyScrollLock } from "../composables/useBodyScrollLock"
+import { t } from "../i18n"
 
 // Переиспользуемая оболочка модального окна (порт modern-modal): оверлей +
 // шапка (заголовок + слот для вкладок/доп. + крестик) + тело + футер.
@@ -80,7 +81,7 @@ onUnmounted(() => observer?.disconnect())
       <div ref="header" class="modern-header">
         <h5 class="modal-title"><slot name="title">{{ title }}</slot></h5>
         <slot name="header-extra" />
-        <button class="modern-close" title="Закрыть" @click="emit('close')"><i class="pi pi-times"></i></button>
+        <button class="modern-close" :title="t('common.close')" @click="emit('close')"><i class="pi pi-times"></i></button>
       </div>
       <div class="modern-body"><slot /></div>
       <div v-if="$slots.footer" class="modern-footer"><slot name="footer" /></div>

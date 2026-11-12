@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue"
 import Button from "primevue/button"
 import ModalShell from "../ModalShell.vue"
 import { api } from "../../api/client"
+import { t } from "../../i18n"
 import { useApi } from "../../composables/useApi"
 
 // Полноэкранное окно просмотра БД (порт DatabaseViewerModal): список
@@ -21,7 +22,7 @@ const loading = ref(false)
 async function fetchTables() {
   loading.value = true
   const data = (await request(api.GET("/api/database/tables"), {
-    errorMessage: "Ошибка загрузки списка таблиц",
+    errorMessage: t("dbViewer.tablesFailed"),
   })) as string[] | null
   loading.value = false
   if (data) {
@@ -39,7 +40,7 @@ async function fetchTable(name: string) {
     api.GET("/api/database/table/{table_name}", {
       params: { path: { table_name: name } },
     } as never),
-    { errorMessage: `Ошибка загрузки таблицы ${name}` },
+    { errorMessage: t("dbViewer.tableFailed", { name }) },
   )) as Record<string, unknown>[] | null
   loading.value = false
   if (data) {
@@ -58,18 +59,18 @@ onMounted(fetchTables)
 
 <template>
   <ModalShell size="full" fixed-height @close="emit('close')">
-    <template #title><i class="pi pi-database"></i> Просмотр базы данных</template>
+    <template #title><i class="pi pi-database"></i> {{ t("dbViewer.title") }}</template>
 
     <div class="db-viewer">
       <div class="db-tabs">
         <button
-          v-for="t in tables"
-          :key="t"
+          v-for="name in tables"
+          :key="name"
           class="db-tab"
-          :class="{ active: activeTable === t }"
-          @click="fetchTable(t)"
+          :class="{ active: activeTable === name }"
+          @click="fetchTable(name)"
         >
-          {{ t }}
+          {{ name }}
         </button>
       </div>
 
@@ -77,7 +78,7 @@ onMounted(fetchTables)
         <div v-if="loading" class="db-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
         <div v-else-if="!rows.length" class="db-empty">
           <i class="pi pi-inbox" />
-          <p>В таблице «{{ activeTable }}» нет данных.</p>
+          <p>{{ t("dbViewer.empty", { table: activeTable ?? "" }) }}</p>
         </div>
         <div v-else class="db-table-wrap">
           <table class="db-table">
@@ -99,7 +100,7 @@ onMounted(fetchTables)
     </div>
 
     <template #footer>
-      <Button label="Закрыть" icon="pi pi-times" severity="secondary" @click="emit('close')" />
+      <Button :label="t('common.close')" icon="pi pi-times" severity="secondary" @click="emit('close')" />
     </template>
   </ModalShell>
 </template>

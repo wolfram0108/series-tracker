@@ -31,32 +31,32 @@ async function onSave() {
   }
 }
 const tabs = [
-  { label: "Авторизация", value: "auth", icon: "pi-key" },
-  { label: "Аккаунт", value: "account", icon: "pi-user" },
+  { label: t("settings.tab.auth"), value: "auth", icon: "pi-key" },
+  { label: t("settings.tab.account"), value: "account", icon: "pi-user" },
   { label: t("settings.tab.sources"), value: "sources", icon: "pi-wifi" },
   { label: t("rules.tab"), value: "parser", icon: "pi-filter" },
   { label: t("settings.tab.voices"), value: "voices", icon: "pi-volume-up" },
-  { label: "Агенты", value: "agents", icon: "pi-server" },
-  { label: "Отладка", value: "debug", icon: "pi-wrench" },
+  { label: t("settings.tab.agents"), value: "agents", icon: "pi-server" },
+  { label: t("settings.tab.debug"), value: "debug", icon: "pi-wrench" },
 ] as const
 
 </script>
 
 <template>
   <ModalShell size="xl" fixed-height @close="emit('close')">
-    <template #title><i class="pi pi-cog"></i> Настройки</template>
+    <template #title><i class="pi pi-cog"></i> {{ t("settings.title") }}</template>
     <template #header-extra>
       <div class="header-tabs st-tabs">
         <button
-          v-for="t in tabs"
-          :key="t.value"
+          v-for="tb in tabs"
+          :key="tb.value"
           class="st-tab"
-          :class="{ active: tab === t.value }"
-          :title="t.label"
-          @click="tab = t.value"
+          :class="{ active: tab === tb.value }"
+          :title="tb.label"
+          @click="tab = tb.value"
         >
-          <i class="pi tab-icon" :class="t.icon"></i>
-          <span class="tab-label" :data-text="t.label"><span class="tl-text">{{ t.label }}</span></span>
+          <i class="pi tab-icon" :class="tb.icon"></i>
+          <span class="tab-label" :data-text="tb.label"><span class="tl-text">{{ tb.label }}</span></span>
         </button>
       </div>
     </template>
@@ -72,12 +72,12 @@ const tabs = [
     <template #footer>
       <Button
         v-if="savable"
-        label="Сохранить"
+        :label="t('common.save')"
         icon="pi pi-check"
         :loading="saving"
         @click="onSave"
       />
-      <Button label="Закрыть" icon="pi pi-times" severity="secondary" @click="emit('close')" />
+      <Button :label="t('common.close')" icon="pi pi-times" severity="secondary" @click="emit('close')" />
     </template>
   </ModalShell>
 </template>

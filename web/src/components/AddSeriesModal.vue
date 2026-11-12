@@ -12,7 +12,7 @@ import SettingsParser from "./settings/SettingsParser.vue"
 import AppSearch from "./AppSearch.vue"
 import SourcesEditor from "./SourcesEditor.vue"
 import { api } from "../api/client"
-import { t } from "../i18n"
+import { t, tn } from "../i18n"
 import { reasonText } from "../lib/reason"
 import { joinVkAddress, siteOf, sourceTypeOf, splitVkAddress, titlesOf, vkQuery } from "../lib/sources"
 import { useApi } from "../composables/useApi"
@@ -185,7 +185,7 @@ const seasonState = computed<VState>(() => {
 })
 
 const profileOptions = computed(() => [
-  { label: "Выберите профиль...", value: null as number | null },
+  { label: t("add.profilePick"), value: null as number | null },
   ...profiles.value.map((p) => ({ label: p.name, value: p.id as number | null })),
 ])
 const qualityOptionsAnilibria = computed(() => {
@@ -292,7 +292,7 @@ async function parseTorrentUrl() {
   try {
     site.value = new URL(newSeries.url).hostname.replace(/^www\./, "")
   } catch {
-    urlError.value = "Некорректный URL"
+    urlError.value = t("add.error.url")
     parsing.value = false
     return
   }
@@ -372,7 +372,7 @@ async function searchTMDB() {
     if (res?.success) {
       tmdbResults.value = res.results ?? []
     } else {
-      toast.add({ severity: "warn", summary: "TMDB", detail: `Ошибка поиска: ${res?.error ?? "неизвестно"}`, life: 4000 })
+      toast.add({ severity: "warn", summary: "TMDB", detail: t("seriesForm.tmdbSearchFailed", { error: res?.error ?? t("add.unknown") }), life: 4000 })
     }
   } finally {
     tmdbLoading.value = false
@@ -396,9 +396,9 @@ async function copyCatalogName() {
   if (!tmdbCatalogName.value) return
   try {
     await navigator.clipboard.writeText(tmdbCatalogName.value)
-    toast.add({ severity: "success", summary: "Скопировано", detail: "Имя каталога в буфере", life: 2500 })
+    toast.add({ severity: "success", summary: t("common.copied"), detail: t("seriesForm.catalogCopied"), life: 2500 })
   } catch {
-    toast.add({ severity: "error", summary: "Ошибка", detail: "Не удалось скопировать", life: 2500 })
+    toast.add({ severity: "error", summary: t("common.error"), detail: t("common.copyFailed"), life: 2500 })
   }
 }
 function updateTMDBEpisodeCount() {
@@ -415,7 +415,7 @@ watch(() => newSeries.name, (v) => {
 async function addSeries() {
   showValidation.value = true
   if (!canAddSeries.value) {
-    toast.add({ severity: "error", summary: "Проверьте поля", detail: "Заполните все обязательные поля корректно.", life: 4000 })
+    toast.add({ severity: "error", summary: t("common.checkFields"), detail: t("add.fillFields"), life: 4000 })
     return
   }
   saving.value = true
@@ -467,10 +467,10 @@ async function addSeries() {
       payload.torrents = parserData.value?.torrents ?? []
     }
     const ok = await request(api.POST("/api/series", { body: payload } as never), {
-      errorMessage: "Ошибка добавления сериала",
+      errorMessage: t("add.createFailed"),
     })
     if (ok !== null) {
-      toast.add({ severity: "success", summary: "Готово", detail: "Сериал успешно добавлен", life: 3000 })
+      toast.add({ severity: "success", summary: t("common.done"), detail: t("add.created"), life: 3000 })
       emit("created")
       emit("close")
     }
@@ -499,16 +499,16 @@ onBeforeUnmount(() => {
 
 <template>
   <ModalShell size="xl" @close="emit('close')">
-    <template #title><i class="pi pi-plus"></i> Добавить новый сериал</template>
+    <template #title><i class="pi pi-plus"></i> {{ t("add.title") }}</template>
     <template #header-extra>
       <div class="header-tabs st-tabs">
-        <button class="st-tab" :class="{ active: activeTab === 'add' }" title="Добавление" @click="activeTab = 'add'">
+        <button class="st-tab" :class="{ active: activeTab === 'add' }" :title="t('add.tabAdd')" @click="activeTab = 'add'">
           <i class="pi tab-icon pi-plus-circle"></i>
-          <span class="tab-label" data-text="Добавление"><span class="tl-text">Добавление</span></span>
+          <span class="tab-label" :data-text="t('add.tabAdd')"><span class="tl-text">{{ t("add.tabAdd") }}</span></span>
         </button>
-        <button class="st-tab" :class="{ active: activeTab === 'naming' }" title="Проверка нейминга" @click="activeTab = 'naming'">
+        <button class="st-tab" :class="{ active: activeTab === 'naming' }" :title="t('add.tabNaming')" @click="activeTab = 'naming'">
           <i class="pi tab-icon pi-filter"></i>
-          <span class="tab-label" data-text="Проверка нейминга"><span class="tl-text">Проверка нейминга</span></span>
+          <span class="tab-label" :data-text="t('add.tabNaming')"><span class="tl-text">{{ t("add.tabNaming") }}</span></span>
         </button>
       </div>
     </template>
@@ -534,7 +534,7 @@ onBeforeUnmount(() => {
       <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->
       <StGroup v-if="firstMode === 'address'" :state="urlState">
         <StIcon icon="pi pi-link" />
-        <StInput v-model="newSeries.url" label="URL для парсинга" />
+        <StInput v-model="newSeries.url" :label="t('add.urlLabel')" />
         <template v-if="candidate && candidateChannel">
           <StIcon icon="pi pi-search" />
           <StInput
@@ -552,56 +552,56 @@ onBeforeUnmount(() => {
         </div>
       </StGroup>
       <div v-if="urlError" class="add-error">{{ urlError }}</div>
-      <div v-if="parsing" class="add-hint">Распознаём ссылку…</div>
+      <div v-if="parsing" class="add-hint">{{ t("add.recognizing") }}</div>
       <div v-if="candidate && candidateChannel" class="add-hint">{{ t("sources.vk.hint") }}</div>
     </div>
 
     <div v-if="parsed || kind === 'video'">
       <!-- Информация о сериале -->
       <div class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">Информация о сериале</span></div>
+        <div class="fieldset-header"><span class="fieldset-title">{{ t("seriesForm.infoTitle") }}</span></div>
         <div class="fieldset-content">
           <div class="add-grid-2">
             <StGroup :state="nameState">
               <StIcon icon="pi pi-pencil" />
-              <StInput v-model="newSeries.name" label="Название (RU)" />
+              <StInput v-model="newSeries.name" :label="t('seriesForm.nameRu')" />
             </StGroup>
             <StGroup :state="nameEnState">
               <StIcon icon="pi pi-language" />
-              <StInput v-model="newSeries.name_en" label="Название (EN)" kind="filename" />
+              <StInput v-model="newSeries.name_en" :label="t('seriesForm.nameEn')" kind="filename" />
             </StGroup>
           </div>
           <div class="add-grid-2 mt-3">
             <StGroup :state="savePathState">
               <StIcon icon="pi pi-folder-open" />
-              <StInput v-model="newSeries.save_path" label="Путь сохранения" kind="path" />
+              <StInput v-model="newSeries.save_path" :label="t('seriesForm.savePath')" kind="path" />
               <SavedPathDropdown :catalog-name="tmdbCatalogName" @select="newSeries.save_path = $event" />
             </StGroup>
             <StGroup :state="seasonState" :class="{ 'is-disabled': isSeasonless }">
               <StIcon icon="pi pi-hashtag" />
-              <StInput v-model="newSeries.season" label="Сезон (формат s01)" />
+              <StInput v-model="newSeries.season" :label="t('seriesForm.season')" />
             </StGroup>
           </div>
           <div v-if="newSeries.save_path && !isAbsolutePath(newSeries.save_path)" class="add-error">
-            Путь должен быть абсолютным и начинаться с «/», например /nas/...
+            {{ t("seriesForm.savePathAbsolute") }}
           </div>
           <!-- оверрайды качества/разрешения (ручной ввод; как в инфо-модалке) -->
           <div class="add-grid-2 mt-3">
             <StGroup>
               <StIcon icon="pi pi-video" />
-              <StInput v-model="newSeries.quality_override" label="Качество (ручной ввод)" kind="filename" />
+              <StInput v-model="newSeries.quality_override" :label="t('seriesForm.qualityOverride')" kind="filename" />
             </StGroup>
             <StGroup>
               <StIcon icon="pi pi-desktop" />
-              <StInput v-model="newSeries.resolution_override" label="Разрешение (ручной ввод)" kind="filename" />
+              <StInput v-model="newSeries.resolution_override" :label="t('seriesForm.resolutionOverride')" kind="filename" />
             </StGroup>
           </div>
           <div v-if="kind === 'torrent'" class="field-group mt-3">
             <StGroup :state="profileState">
-              <div class="constructor-item item-label-icon item-label-text-icon" title="Профиль правил">
-                <i class="pi pi-filter" /><span>Профиль правил</span>
+              <div class="constructor-item item-label-icon item-label-text-icon" :title="t('sources.profile.label')">
+                <i class="pi pi-filter" /><span>{{ t("sources.profile.label") }}</span>
               </div>
-              <StSelect v-model="newSeries.parser_profile_id" :options="profileOptions" placeholder="Выберите профиль..." />
+              <StSelect v-model="newSeries.parser_profile_id" :options="profileOptions" :placeholder="t('add.profilePick')" />
             </StGroup>
           </div>
         </div>
@@ -624,19 +624,19 @@ onBeforeUnmount(() => {
         <div class="fieldset-content">
           <label class="modern-form-check">
             <input v-model="isSeasonless" type="checkbox" class="form-switch-input" />
-            <span class="modern-form-check-label">Раздача содержит несколько сезонов (или сезон не важен)</span>
+            <span class="modern-form-check-label">{{ t("seriesForm.seasonless") }}</span>
           </label>
         </div>
       </div>
 
       <!-- Качество -->
       <div v-if="showQualityBlock" class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">Выбор качества</span></div>
+        <div class="fieldset-header"><span class="fieldset-title">{{ t("seriesForm.qualityChoice") }}</span></div>
         <div class="fieldset-content">
           <template v-if="qualitySelector === 'anilibria'">
             <div v-if="isQualityOptionsReady && qualityOptionsAnilibria.length" class="field-group">
               <StGroup>
-                <div class="constructor-item item-label">Качество</div>
+                <div class="constructor-item item-label">{{ t("common.quality") }}</div>
                 <StSelect
                   :model-value="newSeries.qualityByEpisodes.all"
                   :options="qualityOptionsAnilibria"
@@ -644,15 +644,15 @@ onBeforeUnmount(() => {
                 />
               </StGroup>
             </div>
-            <div v-else-if="isQualityOptionsReady" class="add-error">Качества не найдены</div>
+            <div v-else-if="isQualityOptionsReady" class="add-error">{{ t("seriesForm.qualityNotFound") }}</div>
           </template>
 
           <template v-if="qualitySelector === 'astar' && isQualityOptionsReady">
-            <p class="fieldset-hint mb-2">Для релизов Astar можно выбрать версию для каждой группы эпизодов.</p>
+            <p class="fieldset-hint mb-2">{{ t("add.astarHint") }}</p>
             <template v-for="ep in sortedQualityOptionsKeys" :key="ep">
               <div v-if="episodeQualityOptions[ep].length > 1" class="field-group mt-2">
                 <StGroup>
-                  <div class="constructor-item item-label">Эпизоды {{ ep }}</div>
+                  <div class="constructor-item item-label">{{ t("seriesForm.episodeGroup", { ep }) }}</div>
                   <StSelect
                     :model-value="newSeries.qualityByEpisodes[ep]"
                     :options="episodeQualityOptions[ep].map((q) => ({ label: q, value: q }))"
@@ -661,25 +661,25 @@ onBeforeUnmount(() => {
                 </StGroup>
               </div>
             </template>
-            <div v-if="!astarHasAlternatives" class="fieldset-hint">Для данного релиза нет альтернативных версий.</div>
+            <div v-if="!astarHasAlternatives" class="fieldset-hint">{{ t("seriesForm.noAlternatives") }}</div>
           </template>
         </div>
       </div>
 
       <!-- TMDB -->
       <div class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">Синхронизация с TMDB</span></div>
+        <div class="fieldset-header"><span class="fieldset-title">{{ t("seriesForm.tmdbSync") }}</span></div>
         <div class="fieldset-content">
           <div class="input-group mb-3">
             <input
               v-model="tmdbSearchQuery"
               type="text"
               class="form-control"
-              placeholder="Название сериала"
+              :placeholder="t('seriesForm.tmdbPlaceholder')"
               @keyup.enter="searchTMDB"
             />
             <button type="button" class="input-group-btn" :disabled="tmdbLoading" @click="searchTMDB">
-              <i class="pi" :class="tmdbLoading ? 'pi-spin pi-spinner' : 'pi-search'" /> Найти
+              <i class="pi" :class="tmdbLoading ? 'pi-spin pi-spinner' : 'pi-search'" /> {{ t("common.find") }}
             </button>
           </div>
 
@@ -695,40 +695,40 @@ onBeforeUnmount(() => {
                 <span class="card-title">{{ tmdbName(res) }} <small style="opacity: 0.6">({{ res.year }})</small></span>
                 <div class="path-line tmdb-pills">
                   <span v-if="res.original_name" class="path-pill">
-                    <span class="path-pill-label">Оригинал:</span>
+                    <span class="path-pill-label">{{ t("seriesForm.originalLabel") }}</span>
                     <span class="path-pill-value">{{ res.original_name }}</span>
                   </span>
                   <span v-if="tmdbSelected && tmdbSelected.id === res.id && !isSeasonless" class="path-pill">
-                    <span class="path-pill-label">Сезон {{ tmdbSeasonNumber }}:</span>
-                    <span class="path-pill-value">{{ tmdbEpisodeCount }} эпизодов</span>
+                    <span class="path-pill-label">{{ t("seriesForm.seasonPill", { n: tmdbSeasonNumber }) }}</span>
+                    <span class="path-pill-value">{{ tn("seriesForm.episodes", tmdbEpisodeCount) }}</span>
                   </span>
                   <span v-else-if="tmdbSelected && tmdbSelected.id === res.id" class="path-pill">
-                    <span class="path-pill-value">Несколько сезонов</span>
+                    <span class="path-pill-value">{{ t("add.severalSeasons") }}</span>
                   </span>
                 </div>
               </div>
               <div class="pills-column">
                 <div class="quality-badge">ID: {{ res.id }}</div>
                 <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill">
-                  <i class="pi pi-check-circle" /><span>Выбран</span>
+                  <i class="pi pi-check-circle" /><span>{{ t("seriesForm.chosen") }}</span>
                 </div>
                 <div
                   v-if="tmdbSelected && tmdbSelected.id === res.id"
                   class="pill pill-link"
-                  title="Сбросить выбор"
+                  :title="t('add.tmdbClear')"
                   @click.stop="clearTMDBSelection"
                 >
-                  <i class="pi pi-times" /><span>Сброс</span>
+                  <i class="pi pi-times" /><span>{{ t("seriesForm.clearChoice") }}</span>
                 </div>
               </div>
             </div>
           </div>
 
           <div v-if="tmdbSelected && tmdbCatalogName" class="tmdb-catalog">
-            <label class="tmdb-catalog-label">Имя каталога</label>
+            <label class="tmdb-catalog-label">{{ t("seriesForm.catalogName") }}</label>
             <div class="input-group">
               <input class="form-control" :value="tmdbCatalogName" readonly @focus="($event.target as HTMLInputElement).select()" />
-              <button type="button" class="input-group-btn" title="Скопировать" @click="copyCatalogName">
+              <button type="button" class="input-group-btn" :title="t('common.copy')" @click="copyCatalogName">
                 <i class="pi pi-clipboard" />
               </button>
             </div>
@@ -738,23 +738,23 @@ onBeforeUnmount(() => {
 
       <!-- Доступные торренты -->
       <div v-if="kind === 'torrent' && parserData && parserData.torrents.length" class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">Доступные торренты ({{ parserData.torrents.length }})</span></div>
+        <div class="fieldset-header"><span class="fieldset-title">{{ t("add.torrentsTitle", { count: parserData.torrents.length }) }}</span></div>
         <div class="fieldset-content">
           <div class="div-table table-site-torrents">
             <div class="div-table-header">
               <div class="div-table-cell">ID</div>
-              <div class="div-table-cell">Ссылка</div>
-              <div class="div-table-cell">Дата</div>
-              <div class="div-table-cell">Эпизоды</div>
-              <div class="div-table-cell">Качество</div>
+              <div class="div-table-cell">{{ t("common.link") }}</div>
+              <div class="div-table-cell">{{ t("common.date") }}</div>
+              <div class="div-table-cell">{{ t("common.episodes") }}</div>
+              <div class="div-table-cell">{{ t("common.quality") }}</div>
             </div>
             <div class="div-table-body">
-              <div v-for="(t, i) in parserData.torrents" :key="t.torrent_id ?? i" class="div-table-row">
-                <div class="div-table-cell">{{ t.torrent_id }}</div>
-                <div class="div-table-cell">{{ t.link }}</div>
-                <div class="div-table-cell">{{ t.date_time }}</div>
-                <div class="div-table-cell">{{ t.episodes }}</div>
-                <div class="div-table-cell">{{ t.quality }}</div>
+              <div v-for="(tor, i) in parserData.torrents" :key="tor.torrent_id ?? i" class="div-table-row">
+                <div class="div-table-cell">{{ tor.torrent_id }}</div>
+                <div class="div-table-cell">{{ tor.link }}</div>
+                <div class="div-table-cell">{{ tor.date_time }}</div>
+                <div class="div-table-cell">{{ tor.episodes }}</div>
+                <div class="div-table-cell">{{ tor.quality }}</div>
               </div>
             </div>
           </div>
@@ -774,8 +774,8 @@ onBeforeUnmount(() => {
     </div>
 
     <template #footer>
-      <Button label="Добавить" icon="pi pi-check" :loading="saving" :disabled="!canAddSeries || parsing" @click="addSeries" />
-      <Button label="Отмена" icon="pi pi-times" severity="secondary" @click="emit('close')" />
+      <Button :label="t('common.add')" icon="pi pi-check" :loading="saving" :disabled="!canAddSeries || parsing" @click="addSeries" />
+      <Button :label="t('common.cancel')" icon="pi pi-times" severity="secondary" @click="emit('close')" />
     </template>
   </ModalShell>
 </template>

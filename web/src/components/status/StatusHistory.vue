@@ -2,6 +2,7 @@
 import { ref, onMounted } from "vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
+import { t } from "../../i18n"
 
 // Вкладка «История» — порт StatusTabHistory. Торрент: таблица истории
 // торрентов (GET torrents/history). VK: таблица медиа-элементов в БД
@@ -46,12 +47,12 @@ function episodeInfo(m: MediaRow): string {
   return `${season}${ep}`
 }
 function chapterStatus(m: MediaRow): string {
-  if (!m.chapters) return "Нет"
+  if (!m.chapters) return t("common.no")
   try {
     const ch = JSON.parse(m.chapters) as unknown[]
-    return ch.length > 0 ? `Да (${ch.length})` : "Ошибка"
+    return ch.length > 0 ? t("history.chapters.yes", { count: ch.length }) : t("common.error")
   } catch {
-    return "Ошибка"
+    return t("common.error")
   }
 }
 function fmtDate(iso?: string): string {
@@ -68,13 +69,13 @@ async function load() {
     if (isVk) {
       const data = (await request(
         api.GET("/api/series/{series_id}/media-items", { params: { path: { series_id: props.seriesId } } } as never),
-        { errorMessage: "Ошибка загрузки истории медиа-элементов" },
+        { errorMessage: t("history.error.media") },
       )) as MediaRow[] | null
       if (Array.isArray(data)) mediaHistory.value = data
     } else {
       const data = (await request(
         api.GET("/api/series/{series_id}/torrents/history", { params: { path: { series_id: props.seriesId } } } as never),
-        { errorMessage: "Ошибка загрузки истории торрентов" },
+        { errorMessage: t("history.error.torrents") },
       )) as TorrentRow[] | null
       if (Array.isArray(data)) torrentHistory.value = data
     }
@@ -91,17 +92,17 @@ onMounted(load)
     <div v-if="loading" class="status-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
 
     <template v-else-if="isVk">
-      <h6 class="status-history-title">История медиа-элементов в БД</h6>
+      <h6 class="status-history-title">{{ t("history.vk.title") }}</h6>
       <div class="status-history-scroll">
         <div class="div-table table-media-item-history">
           <div class="div-table-header">
             <div class="div-table-cell">Unique ID</div>
             <div class="div-table-cell">URL</div>
-            <div class="div-table-cell">Эпизоды</div>
-            <div class="div-table-cell">Статус</div>
-            <div class="div-table-cell">Файл</div>
-            <div class="div-table-cell">Главы</div>
-            <div class="div-table-cell">Дата</div>
+            <div class="div-table-cell">{{ t("common.episodes") }}</div>
+            <div class="div-table-cell">{{ t("common.status") }}</div>
+            <div class="div-table-cell">{{ t("common.file") }}</div>
+            <div class="div-table-cell">{{ t("history.col.chapters") }}</div>
+            <div class="div-table-cell">{{ t("common.date") }}</div>
           </div>
           <div class="div-table-body">
             <div v-for="m in mediaHistory" :key="m.id" class="div-table-row">
@@ -113,35 +114,35 @@ onMounted(load)
               <div class="div-table-cell">{{ chapterStatus(m) }}</div>
               <div class="div-table-cell">{{ fmtDate(m.publication_date) }}</div>
             </div>
-            <div v-if="!mediaHistory.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">Пусто</div></div>
+            <div v-if="!mediaHistory.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">{{ t("common.none") }}</div></div>
           </div>
         </div>
       </div>
     </template>
 
     <template v-else>
-      <h6 class="status-history-title">История торрентов в БД</h6>
+      <h6 class="status-history-title">{{ t("history.torrents.title") }}</h6>
       <div class="div-table table-torrents-history">
         <div class="div-table-header">
           <div class="div-table-cell">ID</div>
-          <div class="div-table-cell">Ссылка</div>
-          <div class="div-table-cell">Дата</div>
-          <div class="div-table-cell">Эпизоды</div>
-          <div class="div-table-cell">Качество</div>
-          <div class="div-table-cell">Активен?</div>
-          <div class="div-table-cell">Хеш qBit</div>
+          <div class="div-table-cell">{{ t("common.link") }}</div>
+          <div class="div-table-cell">{{ t("common.date") }}</div>
+          <div class="div-table-cell">{{ t("common.episodes") }}</div>
+          <div class="div-table-cell">{{ t("common.quality") }}</div>
+          <div class="div-table-cell">{{ t("history.col.active") }}</div>
+          <div class="div-table-cell">{{ t("history.col.hash") }}</div>
         </div>
         <div class="div-table-body">
-          <div v-for="t in torrentHistory" :key="t.id" class="div-table-row">
-            <div class="div-table-cell">{{ t.torrent_id }}</div>
-            <div class="div-table-cell">{{ t.link }}</div>
-            <div class="div-table-cell">{{ t.date_time }}</div>
-            <div class="div-table-cell">{{ t.episodes ?? "—" }}</div>
-            <div class="div-table-cell">{{ t.quality ?? "—" }}</div>
-            <div class="div-table-cell">{{ t.is_active ? "Да" : "Нет" }}</div>
-            <div class="div-table-cell">{{ t.qb_hash || "N/A" }}</div>
+          <div v-for="row in torrentHistory" :key="row.id" class="div-table-row">
+            <div class="div-table-cell">{{ row.torrent_id }}</div>
+            <div class="div-table-cell">{{ row.link }}</div>
+            <div class="div-table-cell">{{ row.date_time }}</div>
+            <div class="div-table-cell">{{ row.episodes ?? "—" }}</div>
+            <div class="div-table-cell">{{ row.quality ?? "—" }}</div>
+            <div class="div-table-cell">{{ row.is_active ? t("common.yes") : t("common.no") }}</div>
+            <div class="div-table-cell">{{ row.qb_hash || "N/A" }}</div>
           </div>
-          <div v-if="!torrentHistory.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">Пусто</div></div>
+          <div v-if="!torrentHistory.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">{{ t("common.none") }}</div></div>
         </div>
       </div>
     </template>

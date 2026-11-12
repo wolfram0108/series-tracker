@@ -5,6 +5,7 @@ import StIcon from "../StIcon.vue"
 import StInput from "../StInput.vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
+import { t } from "../../i18n"
 
 // Вкладка «Авторизация»: учётки сервисов (qBittorrent/Kinozal/VK/RuTracker/
 // TMDB). GET /api/auth — загрузка, POST /api/auth — сохранение. Поля — через
@@ -32,7 +33,7 @@ const { request } = useApi()
 
 /** Подпись поля секрета: помечает, что секрет уже задан. */
 function secretLabel(base: string, on: boolean): string {
-  return on ? `${base} (задан — пусто = без изменений)` : base
+  return on ? t("auth.secret.set", { label: base }) : base
 }
 
 async function load() {
@@ -61,7 +62,7 @@ async function load() {
 
 async function save(): Promise<boolean> {
   const ok = await request(api.POST("/api/auth", { body: creds.value } as never), {
-    errorMessage: "Ошибка сохранения настроек авторизации",
+    errorMessage: t("auth.saveFailed"),
   })
   return ok !== null
 }
@@ -79,9 +80,9 @@ defineExpose({ save })
           <StIcon icon="pi pi-link" />
           <StInput v-model="creds.qbittorrent.url" label="URL" />
           <StIcon icon="pi pi-user" />
-          <StInput v-model="creds.qbittorrent.username" label="Логин" />
+          <StInput v-model="creds.qbittorrent.username" :label="t('auth.login')" />
           <StIcon icon="pi pi-lock" />
-          <StInput v-model="creds.qbittorrent.password" :label="secretLabel('Пароль', configured.qbittorrent)" type="password" />
+          <StInput v-model="creds.qbittorrent.password" :label="secretLabel(t('auth.password'), configured.qbittorrent)" type="password" />
         </StGroup>
       </div>
     </div>
@@ -91,9 +92,9 @@ defineExpose({ save })
       <div class="fieldset-content">
         <StGroup>
           <StIcon icon="pi pi-user" />
-          <StInput v-model="creds.kinozal.username" label="Логин" />
+          <StInput v-model="creds.kinozal.username" :label="t('auth.login')" />
           <StIcon icon="pi pi-lock" />
-          <StInput v-model="creds.kinozal.password" :label="secretLabel('Пароль', configured.kinozal)" type="password" />
+          <StInput v-model="creds.kinozal.password" :label="secretLabel(t('auth.password'), configured.kinozal)" type="password" />
         </StGroup>
       </div>
     </div>
@@ -113,9 +114,9 @@ defineExpose({ save })
       <div class="fieldset-content">
         <StGroup>
           <StIcon icon="pi pi-user" />
-          <StInput v-model="creds.rutracker.username" label="Логин" />
+          <StInput v-model="creds.rutracker.username" :label="t('auth.login')" />
           <StIcon icon="pi pi-lock" />
-          <StInput v-model="creds.rutracker.password" :label="secretLabel('Пароль', configured.rutracker)" type="password" />
+          <StInput v-model="creds.rutracker.password" :label="secretLabel(t('auth.password'), configured.rutracker)" type="password" />
         </StGroup>
       </div>
     </div>
@@ -127,7 +128,7 @@ defineExpose({ save })
           <StIcon icon="pi pi-key" />
           <StInput v-model="creds.tmdb.token" :label="secretLabel('Read Access Token (v4)', configured.tmdb)" type="password" />
         </StGroup>
-        <small class="fieldset-hint">Необходим для поиска информации о сериалах и эпизодах.</small>
+        <small class="fieldset-hint">{{ t("auth.tmdbHint") }}</small>
       </div>
     </div>
 

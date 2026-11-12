@@ -135,7 +135,7 @@ watch([states, reading, tmdb], () => nextTick(fit))
 
 const scanTime = computed(() => {
   const iso = props.series.last_scan_time
-  if (!iso) return "Никогда"
+  if (!iso) return t("common.never")
   return new Date(iso).toLocaleString("ru-RU", {
     day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
   })
@@ -163,8 +163,8 @@ const scanTime = computed(() => {
       <div class="card-meta">
         <span class="series-site unified-text-bg">{{ series.site }}</span>
         <div class="auto-scan-switch unified-text-bg">
-          <span>Готовность</span>
-          <label class="switch" :title="series.auto_scan_enabled ? 'Авто-сканирование включено' : 'Авто-сканирование выключено'">
+          <span>{{ t("series.autoSync") }}</span>
+          <label class="switch" :title="series.auto_scan_enabled ? t('series.autoSync.on') : t('series.autoSync.off')">
             <input
               type="checkbox"
               :checked="series.auto_scan_enabled"
@@ -194,24 +194,24 @@ const scanTime = computed(() => {
           <i class="pi pi-spin pi-spinner"></i>
           <span>{{ reading }}</span>
         </div>
-        <div v-if="tmdb" class="status-pill status-pill-other ms-auto" title="Прогресс эпизодов">
+        <div v-if="tmdb" class="status-pill status-pill-other ms-auto" :title="t('series.progress')">
           <i class="pi pi-images"></i>
           <span>{{ tmdb.downloaded }} / {{ tmdb.total }}</span>
         </div>
       </div>
       <div class="scan-time unified-text-bg">{{ scanTime }}</div>
       <div class="card-actions">
-        <button class="action-btn btn-status" title="Статус" @click="emit('open-status', series.id)">
+        <button class="action-btn btn-status" :title="t('common.status')" @click="emit('open-status', series.id)">
           <i class="pi pi-info-circle" />
         </button>
         <button v-if="series.is_busy && !saving" class="action-btn btn-stop" :title="t('sync.stop')"
                 @click="emit('cancel-scan', series.id)">
           <i class="pi pi-stop-circle" />
         </button>
-        <button v-else class="action-btn btn-scan" title="Сканировать" :disabled="busy" @click="emit('scan', series.id)">
+        <button v-else class="action-btn btn-scan" :title="t('output.sync')" :disabled="busy" @click="emit('scan', series.id)">
           <i class="pi pi-refresh" />
         </button>
-        <button class="action-btn btn-delete" title="Удалить" :disabled="busy" @click="emit('delete', series.id)">
+        <button class="action-btn btn-delete" :title="t('common.delete')" :disabled="busy" @click="emit('delete', series.id)">
           <i class="pi pi-trash" />
         </button>
       </div>

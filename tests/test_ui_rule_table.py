@@ -198,5 +198,5 @@ async def test_cells_joined_in_the_table_are_saved_joined_and_give_their_one_val
     await ui.shot("t3-joined-cell")
     # The page of the second voice-over is still in the test: its line is given the value of the joined cell.
     await test_step.click()
-    assert await _season_of_the_first_line(page) == ["Сезон: 1", "Тег: AnimeVost"]
+    assert await _season_of_the_first_line(page) == ["Сезон: 1", f"{text('rulesTest.pill.voiceover')}: AnimeVost"]
     await expect(page.locator(".card-test-result .fired-rules").first).to_have_text(re.compile("Озвучки · 2"))

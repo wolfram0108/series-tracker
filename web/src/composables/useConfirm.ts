@@ -1,4 +1,5 @@
 import { reactive } from "vue"
+import { t } from "../i18n"
 
 export interface ConfirmCheckbox {
   text: string
@@ -19,7 +20,7 @@ interface ConfirmState {
 // Singleton-состояние: одно окно подтверждения на приложение, Promise-API.
 const state = reactive<ConfirmState>({
   visible: false,
-  title: "Подтверждение",
+  title: t("common.confirmTitle"),
   message: "",
   checkbox: null,
   resolve: null,
@@ -30,7 +31,7 @@ const state = reactive<ConfirmState>({
  *  «удалить из qBittorrent». */
 export function useConfirm() {
   function open(opts: { title?: string; message: string; checkbox?: ConfirmCheckbox }): Promise<ConfirmResult> {
-    state.title = opts.title ?? "Подтверждение"
+    state.title = opts.title ?? t("common.confirmTitle")
     state.message = opts.message
     state.checkbox = opts.checkbox ? { ...opts.checkbox } : null
     state.visible = true

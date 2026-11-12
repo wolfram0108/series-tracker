@@ -27,9 +27,10 @@ const saving = ref(false)
 // Занятость берём из стора: он живёт на SSE, а локальная копия серии
 // читается один раз и застыла бы на «Обработка…» после сохранения.
 const seriesStore = useSeriesStore()
-const isBusy = computed(
-  () => saving.value || !!(seriesStore.byId(props.seriesId)?.is_busy ?? series.value?.is_busy),
-)
+const syncing = computed(() => !!(seriesStore.byId(props.seriesId)?.is_busy ?? series.value?.is_busy))
+const isBusy = computed(() => saving.value || syncing.value)
+const saveLabel = computed(() =>
+  saving.value ? t("common.saving") : syncing.value ? t("status.syncing") : t("common.save"))
 const isVideo = computed(() => series.value?.kind === "video")
 
 type TabKey = "properties" | "composition" | "slicing" | "parser" | "history"
@@ -38,18 +39,18 @@ const tab = ref<TabKey>("properties")
 // (the output of a long series is thousands of elements) nor asks the core for what they show.
 const built = ref(new Set<TabKey>([tab.value]))
 const tabs = computed(() => {
-  const list = [{ value: "properties" as TabKey, label: "Свойства", icon: "pi-info-circle" }]
-  list.push({ value: "composition", label: isVideo.value ? t("output.tab") : "Композиция", icon: "pi-sitemap" })
-  if (isVideo.value) list.push({ value: "slicing", label: "Нарезка", icon: "pi-images" })
+  const list = [{ value: "properties" as TabKey, label: t("status.tab.properties"), icon: "pi-info-circle" }]
+  list.push({ value: "composition", label: isVideo.value ? t("output.tab") : t("status.tab.composition"), icon: "pi-sitemap" })
+  if (isVideo.value) list.push({ value: "slicing", label: t("status.tab.slicing"), icon: "pi-images" })
   list.push({ value: "parser", label: t("rules.tab"), icon: "pi-filter" })
-  list.push({ value: "history", label: "История", icon: "pi-history" })
+  list.push({ value: "history", label: t("status.tab.history"), icon: "pi-history" })
   return list
 })
 
 async function load() {
   const data = (await request(
     api.GET("/api/series/{series_id}", { params: { path: { series_id: props.seriesId } } } as never),
-    { errorMessage: "Сериал не найден" },
+    { errorMessage: t("status.notFound") },
   )) as Series | null
   if (data) series.value = data
 }
@@ -82,19 +83,19 @@ onMounted(load)
 
 <template>
   <ModalShell size="xl" fixed-height @close="emit('close')">
-    <template #title><i class="pi pi-info-circle"></i> Статус</template>
+    <template #title><i class="pi pi-info-circle"></i> {{ t("status.title") }}</template>
     <template #header-extra>
       <div class="header-tabs st-tabs">
         <button
-          v-for="t in tabs"
-          :key="t.value"
+          v-for="tb in tabs"
+          :key="tb.value"
           class="st-tab"
-          :class="{ active: tab === t.value }"
-          :title="t.label"
-          @click="tab = t.value"
+          :class="{ active: tab === tb.value }"
+          :title="tb.label"
+          @click="tab = tb.value"
         >
-          <i class="pi tab-icon" :class="t.icon"></i>
-          <span class="tab-label" :data-text="t.label"><span class="tl-text">{{ t.label }}</span></span>
+          <i class="pi tab-icon" :class="tb.icon"></i>
+          <span class="tab-label" :data-text="tb.label"><span class="tl-text">{{ tb.label }}</span></span>
         </button>
       </div>
     </template>
@@ -128,13 +129,13 @@ onMounted(load)
     <template #footer>
       <Button
         v-if="tab === 'properties'"
-        :label="isBusy ? 'Обработка…' : 'Сохранить'"
+        :label="saveLabel"
         icon="pi pi-check"
         :loading="saving"
         :disabled="isBusy"
         @click="save"
       />
-      <Button label="Закрыть" icon="pi pi-times" severity="secondary" @click="emit('close')" />
+      <Button :label="t('common.close')" icon="pi pi-times" severity="secondary" @click="emit('close')" />
     </template>
   </ModalShell>
 </template>

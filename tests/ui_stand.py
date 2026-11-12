@@ -206,7 +206,7 @@ class UiStand(AppStand):
         # The window saves the rule and reads the rules of the profile again: both answers of the server are the signal.
         async with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/rules")) as saved, \
                 page.expect_response(lambda r: r.request.method == "GET" and r.url.endswith("/rules")):
-            await card.locator("button[title='Сохранить правило']").click()
+            await card.locator(f"button[title='{text('rules.rule.save')}']").click()
         assert (await saved.value).ok, "the rule was not saved"
         await expect(page.locator(".parser-loading")).to_have_count(0)
 
@@ -297,8 +297,8 @@ class UiStand(AppStand):
 
 
 ADMIN, PASSWORD = "stand", "stand-throwaway"  # of the database of the stand, which goes with it
-ACTION_LABEL = {"extract_single": "Извлечь номер серии", "extract_range": "Извлечь диапазон серий",
-                "assign_voiceover": "Назначить озвучку/тег", "assign_season": "Назначить номер сезона"}
+ACTION_LABEL = {kind: text(f"rules.action.{kind}") for kind in ("extract_single", "extract_range", "assign_voiceover",
+                                                                 "assign_season")}
 
 
 def _option(page: Page, label: str):

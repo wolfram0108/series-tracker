@@ -5,6 +5,7 @@ import InputText from "primevue/inputtext"
 import ModalShell from "./ModalShell.vue"
 import LogsLoggingTab from "./LogsLoggingTab.vue"
 import { api } from "../api/client"
+import { t } from "../i18n"
 import { useApi } from "../composables/useApi"
 
 // Модалка логов: две вкладки — «Просмотр» (фильтры группа/уровень/лимит +
@@ -14,8 +15,8 @@ defineEmits<{ (e: "close"): void }>()
 
 const tab = ref<"viewer" | "settings">("viewer")
 const TABS = [
-  { label: "Просмотр", value: "viewer", icon: "pi-list" },
-  { label: "Настройка", value: "settings", icon: "pi-sliders-h" },
+  { labelKey: "logs.tab.viewer", value: "viewer", icon: "pi-list" },
+  { labelKey: "logs.tab.settings", value: "settings", icon: "pi-sliders-h" },
 ] as const
 
 interface LogEntry { timestamp: string; group: string; level: string; message: string }
@@ -32,15 +33,15 @@ const { request } = useApi()
 // Группы — динамически из GET /api/logs/groups (distinct из реальных логов),
 // а не статичный список: имя группы = имя модуля, набор меняется с кодовой
 // базой, и фильтр не должен отставать.
-const groupOptions = ref<{ label: string; value: string }[]>([{ label: "Все группы", value: ALL }])
+const groupOptions = ref<{ label: string; value: string }[]>([{ label: t("logs.allGroups"), value: ALL }])
 
 async function loadGroups() {
   const data = (await request(api.GET("/api/logs/groups", {} as never))) as unknown
   const groups = Array.isArray(data) ? (data as string[]) : []
-  groupOptions.value = [{ label: "Все группы", value: ALL }, ...groups.map((g) => ({ label: g, value: g }))]
+  groupOptions.value = [{ label: t("logs.allGroups"), value: ALL }, ...groups.map((g) => ({ label: g, value: g }))]
 }
 const levelOptions = [
-  { label: "Все уровни", value: ALL },
+  { label: t("logs.allLevels"), value: ALL },
   { label: "DEBUG", value: "DEBUG" },
   { label: "INFO", value: "INFO" },
   { label: "WARNING", value: "WARNING" },
@@ -79,19 +80,19 @@ onMounted(() => {
 
 <template>
   <ModalShell size="xl" fixed-height @close="$emit('close')">
-    <template #title><i class="pi pi-book"></i> Логи</template>
+    <template #title><i class="pi pi-book"></i> {{ t("logs.title") }}</template>
     <template #header-extra>
       <div class="header-tabs st-tabs">
         <button
-          v-for="t in TABS"
-          :key="t.value"
+          v-for="item in TABS"
+          :key="item.value"
           class="st-tab"
-          :class="{ active: tab === t.value }"
-          :title="t.label"
-          @click="tab = t.value"
+          :class="{ active: tab === item.value }"
+          :title="t(item.labelKey)"
+          @click="tab = item.value"
         >
-          <i class="pi tab-icon" :class="t.icon"></i>
-          <span class="tab-label" :data-text="t.label"><span class="tl-text">{{ t.label }}</span></span>
+          <i class="pi tab-icon" :class="item.icon"></i>
+          <span class="tab-label" :data-text="t(item.labelKey)"><span class="tl-text">{{ t(item.labelKey) }}</span></span>
         </button>
       </div>
     </template>
@@ -100,15 +101,15 @@ onMounted(() => {
       <div class="logs-filters">
         <Select v-model="group" :options="groupOptions" option-label="label" option-value="value" @change="loadLogs" />
         <Select v-model="level" :options="levelOptions" option-label="label" option-value="value" @change="loadLogs" />
-        <InputText v-model="limit" inputmode="numeric" class="limit-input" title="Лимит строк" @change="loadLogs" />
+        <InputText v-model="limit" inputmode="numeric" class="limit-input" :title="t('logs.limit')" @change="loadLogs" />
       </div>
 
       <div class="div-table logs-table">
         <div class="div-table-header">
-          <div class="div-table-cell">Время</div>
-          <div class="div-table-cell">Группа</div>
-          <div class="div-table-cell">Уровень</div>
-          <div class="div-table-cell">Сообщение</div>
+          <div class="div-table-cell">{{ t("logs.col.time") }}</div>
+          <div class="div-table-cell">{{ t("logs.col.group") }}</div>
+          <div class="div-table-cell">{{ t("logs.col.level") }}</div>
+          <div class="div-table-cell">{{ t("logs.col.message") }}</div>
         </div>
         <div class="div-table-body">
           <div v-for="(l, i) in logs" :key="i" class="div-table-row" :class="rowClass(l.level)">
@@ -117,7 +118,7 @@ onMounted(() => {
             <div class="div-table-cell">{{ l.level }}</div>
             <div class="div-table-cell msg">{{ l.message }}</div>
           </div>
-          <div v-if="!logs.length" class="div-table-row"><div class="div-table-cell empty">Логов нет</div></div>
+          <div v-if="!logs.length" class="div-table-row"><div class="div-table-cell empty">{{ t("logs.empty") }}</div></div>
         </div>
       </div>
     </template>

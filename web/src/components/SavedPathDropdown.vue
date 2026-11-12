@@ -2,6 +2,7 @@
 import { ref, onMounted, onBeforeUnmount } from "vue"
 import { api } from "../api/client"
 import { computeDropStyle, type DropStyle } from "../composables/useDropAnchor"
+import { t } from "../i18n"
 
 // Выбор сохранённого пути (Настройки → Отладка → «Сохранённые пути»).
 // Встраивается в input-constructor-group поля пути компактной кнопкой-
@@ -76,13 +77,13 @@ onBeforeUnmount(() => {
     ref="root"
     class="constructor-item saved-path-trigger"
     :class="{ open }"
-    title="Сохранённые пути"
+    :title="t('savedPaths.title')"
     @click.stop="toggle"
   >
     <i class="pi pi-chevron-down chevron" />
     <Teleport to="body">
       <div v-if="open" ref="list" class="options-list" :style="dropStyle ?? undefined">
-        <div v-if="!paths.length" class="path-combo-empty">Нет сохранённых путей</div>
+        <div v-if="!paths.length" class="path-combo-empty">{{ t("savedPaths.empty") }}</div>
         <div v-for="p in paths" :key="p.id" class="option" @click.stop="choose(p.path)">{{ p.path }}</div>
       </div>
     </Teleport>

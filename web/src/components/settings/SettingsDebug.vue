@@ -10,7 +10,7 @@ import DatabaseViewerModal from "./DatabaseViewerModal.vue"
 import SettingsConformServer from "./SettingsConformServer.vue"
 import { api } from "../../api/client"
 import { sanitizePath } from "../../lib/fsnames"
-import { t } from "../../i18n"
+import { t, type MessageKey } from "../../i18n"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { useScannerStore } from "../../stores/scanner"
@@ -39,11 +39,11 @@ async function saveScanner() {
     api.POST("/api/scanner/settings", {
       body: { enabled: enabled.value, interval: Number(interval.value) },
     } as never),
-    { errorMessage: "Ошибка сохранения настроек сканера" },
+    { errorMessage: t("debug.autoSync.saveFailed") },
   )
 }
 async function scanAll() {
-  await request(api.POST("/api/scanner/scan_all", {} as never), { errorMessage: "Ошибка запуска сканирования" })
+  await request(api.POST("/api/scanner/scan_all", {} as never), { errorMessage: t("debug.syncAll.failed") })
 }
 
 // --- флаги конвейера (GET/POST → {enabled}) ---------------------------
@@ -58,9 +58,9 @@ async function loadFlag(path: string): Promise<boolean> {
 }
 async function saveFlag(path: string, value: boolean, label: string) {
   const ok = await request(api.POST(path as never, { body: { enabled: value } } as never), {
-    errorMessage: "Ошибка сохранения настройки",
+    errorMessage: t("debug.flag.saveFailed"),
   })
-  if (ok !== null) toast.add({ severity: "info", summary: label, detail: value ? "включено" : "выключено", life: 2000 })
+  if (ok !== null) toast.add({ severity: "info", summary: label, detail: value ? t("common.enabled") : t("common.disabled"), life: 2000 })
 }
 
 // --- числовые параметры yt-dlp (GET/POST → {value}) -------------------
@@ -122,7 +122,7 @@ async function addPath() {
   if (!v) return
   const ok = await request(
     api.POST("/api/settings/saved_paths", { body: { path: v } } as never),
-    { errorMessage: "Ошибка добавления пути" },
+    { errorMessage: t("debug.paths.addFailed") },
   )
   if (ok !== null) {
     newPath.value = ""
@@ -132,7 +132,7 @@ async function addPath() {
 async function removePath(id: number) {
   const ok = await request(
     api.DELETE("/api/settings/saved_paths", { body: { id } } as never),
-    { errorMessage: "Ошибка удаления пути" },
+    { errorMessage: t("debug.paths.removeFailed") },
   )
   if (ok !== null) await loadPaths()
 }
@@ -142,32 +142,32 @@ const tables = ref<string[]>([])
 const selectedTable = ref("")
 const showDb = ref(false)
 
-const TABLE_DESCRIPTIONS: Record<string, string> = {
-  series: "Удалить все отслеживаемые сериалы.",
-  torrents: "Удалить все связанные торренты из БД (не из qBittorrent).",
-  media_items: "Удалить все найденные медиа-элементы (для VK-сериалов).",
-  download_tasks: "Очистить текущую очередь загрузок для VK-видео.",
-  slicing_tasks: "Очистить очередь задач на нарезку видео.",
-  sliced_files: "Удалить все записи о нарезанных файлах.",
-  advanced_renaming_patterns: "Сбросить все продвинутые паттерны переименования.",
-  renaming_patterns: "Сбросить все паттерны переименования эпизодов.",
-  season_patterns: "Сбросить все паттерны переименования сезонов.",
-  settings: "Удалить все сохранённые настройки, включая SID и флаги отладки.",
+const TABLE_DESCRIPTION_KEYS: Record<string, MessageKey> = {
+  series: "debug.db.table.series",
+  torrents: "debug.db.table.torrents",
+  media_items: "debug.db.table.media_items",
+  download_tasks: "debug.db.table.download_tasks",
+  slicing_tasks: "debug.db.table.slicing_tasks",
+  sliced_files: "debug.db.table.sliced_files",
+  advanced_renaming_patterns: "debug.db.table.advanced_renaming_patterns",
+  renaming_patterns: "debug.db.table.renaming_patterns",
+  season_patterns: "debug.db.table.season_patterns",
+  settings: "debug.db.table.settings",
 }
 
 const tableOptions = computed(() => [
-  { label: "Выберите таблицу…", value: "" },
-  ...tables.value.map((t) => ({ label: t, value: t })),
+  { label: t("debug.db.chooseTable"), value: "" },
+  ...tables.value.map((name) => ({ label: name, value: name })),
 ])
-const tableDescription = computed(() =>
-  selectedTable.value
-    ? TABLE_DESCRIPTIONS[selectedTable.value] || `Очистить таблицу «${selectedTable.value}».`
-    : "Выберите таблицу для описания.",
-)
+const tableDescription = computed(() => {
+  if (!selectedTable.value) return t("debug.db.describeHint")
+  const key = TABLE_DESCRIPTION_KEYS[selectedTable.value]
+  return key ? t(key) : t("debug.db.table.other", { table: selectedTable.value })
+})
 
 async function loadTables() {
   const data = (await request(api.GET("/api/database/tables"), {
-    errorMessage: "Ошибка загрузки списка таблиц",
+    errorMessage: t("dbViewer.tablesFailed"),
   })) as string[] | null
   if (data) tables.value = data
 }
@@ -175,16 +175,16 @@ async function loadTables() {
 async function clearTable() {
   if (!selectedTable.value) return
   const r = await confirm.open({
-    title: "Очистка таблицы",
-    message: `ВНИМАНИЕ! Удалить ВСЕ записи из таблицы «${selectedTable.value}»? Действие необратимо.`,
+    title: t("debug.db.clear.title"),
+    message: t("debug.db.clear.message", { table: selectedTable.value }),
   })
   if (!r.confirmed) return
   const data = (await request(
     api.POST("/api/database/clear_table", { body: { table_name: selectedTable.value } } as never),
-    { errorMessage: "Ошибка очистки таблицы" },
+    { errorMessage: t("debug.db.clear.failed") },
   )) as { success?: boolean; message?: string } | null
   if (data?.success) {
-    toast.add({ severity: "success", summary: "БД", detail: data.message || "Таблица очищена", life: 3000 })
+    toast.add({ severity: "success", summary: t("debug.db.toast"), detail: data.message || t("debug.db.clear.done"), life: 3000 })
   }
 }
 
@@ -205,18 +205,18 @@ onMounted(async () => {
   <div class="settings-debug">
     <!-- Сканер -->
     <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-th-large"></i> Агент сканирования</div>
+      <div class="fieldset-header"><i class="pi pi-th-large"></i> {{ t("debug.sync.title") }}</div>
       <div class="fieldset-content debug-scanner">
         <label class="debug-switch">
           <ToggleSwitch v-model="enabled" @change="saveScanner" />
-          <span>Автосканирование</span>
+          <span>{{ t("series.autoSync") }}</span>
         </label>
         <div class="debug-interval">
-          <span>Интервал (мин):</span>
+          <span>{{ t("debug.autoSync.interval") }}</span>
           <InputText v-model="interval" inputmode="numeric" class="interval-input" @change="saveScanner" />
         </div>
         <Button
-          label="Сканировать всё сейчас"
+          :label="t('debug.syncAll.button')"
           icon="pi pi-refresh"
           :disabled="scanner.status?.is_scanning || scanner.status?.is_awaiting_tasks"
           @click="scanAll"
@@ -226,20 +226,20 @@ onMounted(async () => {
 
     <!-- Параметры конвейера и отладка -->
     <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-sliders-h"></i> Параметры конвейера</div>
+      <div class="fieldset-header"><i class="pi pi-sliders-h"></i> {{ t("debug.pipeline.title") }}</div>
       <div class="fieldset-content">
         <div class="flags-grid">
-          <label class="debug-switch" title="Считать все существующие торренты устаревшими и пытаться заменить при любом сканировании.">
-            <ToggleSwitch v-model="forceReplace" @change="saveFlag('/api/settings/force_replace', forceReplace, 'Всегда заменять торренты')" />
-            <span>Всегда заменять торренты</span>
+          <label class="debug-switch" :title="t('debug.flag.forceReplace.hint')">
+            <ToggleSwitch v-model="forceReplace" @change="saveFlag('/api/settings/force_replace', forceReplace, t('debug.flag.forceReplace'))" />
+            <span>{{ t("debug.flag.forceReplace") }}</span>
           </label>
-          <label class="debug-switch" title="Проверять наличие файлов на диске, даже если их нет в БД: найденный файл регистрируется, а не скачивается заново.">
-            <ToggleSwitch v-model="lessStrict" @change="saveFlag('/api/settings/less_strict_scan', lessStrict, 'Менее строгий скан')" />
-            <span>Менее строгий режим сканирования</span>
+          <label class="debug-switch" :title="t('debug.flag.lessStrict.hint')">
+            <ToggleSwitch v-model="lessStrict" @change="saveFlag('/api/settings/less_strict_scan', lessStrict, t('debug.flag.lessStrict'))" />
+            <span>{{ t("debug.flag.lessStrict") }}</span>
           </label>
-          <label class="debug-switch" title="Агент нарезки удалит исходный файл-компиляцию после успешной нарезки.">
-            <ToggleSwitch v-model="slicingDelete" @change="saveFlag('/api/settings/slicing_delete_source', slicingDelete, 'Удалять исходник после нарезки')" />
-            <span>Удалять исходник после нарезки</span>
+          <label class="debug-switch" :title="t('debug.flag.slicingDelete.hint')">
+            <ToggleSwitch v-model="slicingDelete" @change="saveFlag('/api/settings/slicing_delete_source', slicingDelete, t('debug.flag.slicingDelete'))" />
+            <span>{{ t("debug.flag.slicingDelete") }}</span>
           </label>
           <label class="debug-switch" :title="t('conform.settings.clearFinishedHint')">
             <ToggleSwitch v-model="conformClear" @change="saveFlag('/api/settings/conform_clear_finished', conformClear, t('conform.settings.clearFinished'))" />
@@ -272,20 +272,20 @@ onMounted(async () => {
 
     <!-- База данных -->
     <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-database"></i> База данных</div>
+      <div class="fieldset-header"><i class="pi pi-database"></i> {{ t("debug.db.title") }}</div>
       <div class="fieldset-content">
         <div class="db-actions-row">
-          <Button label="Просмотр БД" icon="pi pi-table" severity="info" @click="showDb = true" />
-          <span class="muted-hint">Полноэкранное окно просмотра всех таблиц базы данных.</span>
+          <Button :label="t('debug.db.view')" icon="pi pi-table" severity="info" @click="showDb = true" />
+          <span class="muted-hint">{{ t("debug.db.viewHint") }}</span>
         </div>
         <hr class="debug-sep" />
-        <p class="muted-hint danger-hint">Очистка таблицы необратима и удаляет все её данные.</p>
+        <p class="muted-hint danger-hint">{{ t("debug.db.clearWarning") }}</p>
         <div class="field-group">
           <StGroup>
-            <StSelect v-model="selectedTable" :options="tableOptions" placeholder="Выберите таблицу…" />
+            <StSelect v-model="selectedTable" :options="tableOptions" :placeholder="t('debug.db.chooseTable')" />
             <div class="constructor-item item-label clear-desc">{{ tableDescription }}</div>
             <div class="constructor-item item-button-group">
-              <button class="btn-icon btn-delete" title="Очистить таблицу" :disabled="!selectedTable" @click="clearTable">
+              <button class="btn-icon btn-delete" :title="t('debug.db.clear')" :disabled="!selectedTable" @click="clearTable">
                 <i class="pi pi-trash" />
               </button>
             </div>
@@ -296,18 +296,18 @@ onMounted(async () => {
 
     <!-- Сохранённые пути -->
     <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-folder"></i> Сохранённые пути</div>
+      <div class="fieldset-header"><i class="pi pi-folder"></i> {{ t("savedPaths.title") }}</div>
       <div class="fieldset-content">
         <div v-if="paths.length" class="saved-paths-list">
           <div v-for="p in paths" :key="p.id" class="saved-path-row">
             <span class="saved-path-value">{{ p.path }}</span>
-            <Button icon="pi pi-times" severity="danger" text rounded title="Удалить" @click="removePath(p.id)" />
+            <Button icon="pi pi-times" severity="danger" text rounded :title="t('common.delete')" @click="removePath(p.id)" />
           </div>
         </div>
-        <div v-else class="muted-hint">Сохранённых путей пока нет.</div>
+        <div v-else class="muted-hint">{{ t("debug.paths.empty") }}</div>
         <div class="add-path-row">
           <InputText v-model="newPath" placeholder="/nas/media/..." class="add-path-input" @keyup.enter="addPath" />
-          <Button label="Добавить" icon="pi pi-plus" severity="secondary" @click="addPath" />
+          <Button :label="t('common.add')" icon="pi pi-plus" severity="secondary" @click="addPath" />
         </div>
       </div>
     </div>

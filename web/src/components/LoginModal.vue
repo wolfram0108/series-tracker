@@ -5,6 +5,7 @@ import StGroup from "./StGroup.vue"
 import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
 import { api } from "../api/client"
+import { t } from "../i18n"
 import { useAuthStore } from "../stores/auth"
 import { useBodyScrollLock } from "../composables/useBodyScrollLock"
 
@@ -32,7 +33,7 @@ async function submit(): Promise<void> {
   attempted.value = true
   if (busy.value) return
   if (!password.value) {
-    notice.value = "Введите пароль"
+    notice.value = t("login.error.empty")
     return
   }
   busy.value = true
@@ -47,9 +48,9 @@ async function submit(): Promise<void> {
       return
     }
     notice.value = (error as unknown as { error?: string } | null)?.error ||
-      "Неверный пароль"
+      t("login.error.wrong")
   } catch {
-    notice.value = "Ошибка сети — сервер недоступен"
+    notice.value = t("common.networkDown")
   } finally {
     busy.value = false
   }
@@ -60,15 +61,15 @@ async function submit(): Promise<void> {
   <Teleport to="body">
     <div class="login-overlay">
       <form class="login-card" @submit.prevent="submit">
-        <h2 class="login-title">Вход</h2>
+        <h2 class="login-title">{{ t("login.title") }}</h2>
         <p class="login-user">{{ auth.adminName }}</p>
 
         <StGroup :state="passState">
           <StIcon icon="pi pi-lock" />
-          <StInput v-model="password" label="Пароль" type="password" />
+          <StInput v-model="password" :label="t('auth.password')" type="password" />
         </StGroup>
 
-        <Button class="login-submit" type="submit" label="Войти"
+        <Button class="login-submit" type="submit" :label="t('login.submit')"
                 icon="pi pi-sign-in" :loading="busy" />
       </form>
 

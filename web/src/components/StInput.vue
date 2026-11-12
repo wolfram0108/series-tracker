@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, useId } from "vue"
 import { FS_RULES, type FsKind } from "../lib/fsnames"
+import { t } from "../i18n"
 
 // Floating-label поле (constructor-item item-floating-label). Иконка —
 // отдельным StIcon перед ним (как в оригинале). Опц. пароль-глазик.
@@ -59,7 +60,7 @@ watch(() => props.modelValue, (v) => {
       v-if="type === 'password'"
       type="button"
       class="password-toggle-btn"
-      :title="show ? 'Скрыть' : 'Показать'"
+      :title="show ? t('common.hide') : t('common.show')"
       @click="show = !show"
     >
       <i class="pi" :class="show ? 'pi-eye-slash' : 'pi-eye'" />

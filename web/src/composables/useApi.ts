@@ -1,6 +1,7 @@
 import { ref } from "vue"
 import { useToast } from "primevue/usetoast"
 import { reasonText } from "../lib/reason"
+import { t } from "../i18n"
 
 /** Тело ошибки бэка по контракту (schemas.py: ErrorResponse/ErrorOnly). */
 function extractError(error: unknown): string | null {
@@ -25,15 +26,15 @@ export function useApi() {
     try {
       const { data, error } = await call
       if (error) {
-        const detail = extractError(error) || opts.errorMessage || "Ошибка запроса"
-        toast.add({ severity: "error", summary: "Ошибка", detail, life: 5000 })
+        const detail = extractError(error) || opts.errorMessage || t("common.requestFailed")
+        toast.add({ severity: "error", summary: t("common.error"), detail, life: 5000 })
         return null
       }
       return (data ?? null) as T | null
     } catch (e) {
       toast.add({
         severity: "error",
-        summary: "Ошибка сети",
+        summary: t("common.networkFailed"),
         detail: opts.errorMessage || String(e),
         life: 5000,
       })

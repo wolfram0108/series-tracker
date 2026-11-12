@@ -69,8 +69,8 @@ async function onScan(id: number) {
   if (r === null || r.cancelled) return  // a stopped sync is told by its stop
   toast.add(
     r.changed
-      ? { severity: "success", summary: "Сканирование завершено", life: 3000 }
-      : { severity: "info", summary: "Обновлений нет", life: 3000 },
+      ? { severity: "success", summary: t("app.sync.done"), life: 3000 }
+      : { severity: "info", summary: t("app.sync.noUpdates"), life: 3000 },
   )
 }
 function onToggle(id: number, enabled: boolean) {
@@ -93,10 +93,10 @@ async function onDelete(id: number) {
   // delete_from_qb убирает запись из qB; файлы на диске остаются.
   const isTorrent = (s?.kind ?? "torrent") === "torrent"
   const r = await confirm.open({
-    title: "Удаление сериала",
-    message: `Удалить сериал «${s?.name ?? id}»? Это действие необратимо.`,
+    title: t("app.delete.title"),
+    message: t("app.delete.message", { name: s?.name ?? id }),
     ...(isTorrent
-      ? { checkbox: { text: "Удалить также записи из qBittorrent (файлы на диске останутся)", checked: true } }
+      ? { checkbox: { text: t("app.delete.fromQb"), checked: true } }
       : {}),
   })
   if (!r.confirmed) return
@@ -130,7 +130,7 @@ async function onDelete(id: number) {
         @delete="onDelete"
         @toggle-auto-scan="onToggle"
       />
-      <div v-if="!seriesStore.list.length" class="empty-state">Нет сериалов. Добавьте первый.</div>
+      <div v-if="!seriesStore.list.length" class="empty-state">{{ t("app.empty") }}</div>
     </div>
 
     <SettingsModal v-if="openModal === 'settings'" @close="openModal = null" />

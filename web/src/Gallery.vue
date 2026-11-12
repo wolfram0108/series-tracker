@@ -17,20 +17,27 @@ import StSelect from "./components/StSelect.vue"
 import StBtn from "./components/StBtn.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import Toast from "primevue/toast"
-import { t } from "./i18n"
-import { stateLabel } from "./lib/states"
+import { t, tAround } from "./i18n"
+import { SERIES_STATES, stateLabel, stateWord } from "./lib/states"
+import {
+  DISABLED_SAMPLE, EXCLUDED_BY_RULE, FRONT_EPISODE_TITLE, LOGS, MISSING_EPISODE, PASSWORD_SAMPLE,
+  PROFILE_ANIME, PROFILE_DEFAULT, PROFILE_MOVIES, QUEUE_DOWNLOAD, QUEUE_MONITOR, QUEUE_PROCESSING,
+  QUEUE_SLICING, RICK_EPISODE_FILE, RICK_EPISODE_TITLE, RICK_RECEIVED_FILE,
+  RICK_SLICED_FILE, RICK_SLICED_TITLE, RICK_TEST_APPLIED, RICK_TEST_EXCLUDED, ROOT_PATH, ROWS,
+  SERIES_FRONT, SERIES_FROM, SERIES_STRANGE, SLICING_SAMPLE,
+} from "./gallery.fixtures"
 
 // Карточки сериала — по состояниям, по порядку.
 const cards = [
-  { id: 1, name: "Ожидание (пусто)", site: "kinozal.me", auto_scan_enabled: true, statuses: ["waiting"] },
-  { id: 2, name: "Готов", site: "kinozal.me", auto_scan_enabled: true, statuses: ["ready"], last_scan_time: "18.06, 00:34", tmdb: { downloaded: 10, total: 10 } },
-  { id: 3, name: "Фронт кровавой блокады", site: "kinozal.me", auto_scan_enabled: true, statuses: ["downloading"], last_scan_time: "18.06, 00:31", tmdb: { downloaded: 5, total: 12 } },
-  { id: 4, name: "Простой (нет пиров)", site: "rutracker", auto_scan_enabled: false, statuses: ["idle"], last_scan_time: "18.06, 00:30" },
-  { id: 5, name: "В очереди", site: "rutracker", auto_scan_enabled: true, statuses: ["queued"] },
-  { id: 6, name: "Обработка", site: "anilibria", auto_scan_enabled: true, statuses: ["scanning"] },
-  { id: 7, name: "Ошибка", site: "kinozal.me", auto_scan_enabled: true, statuses: ["error"] },
-  { id: 8, name: "Несколько статусов", site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "downloading", "metadata"] },
-  { id: 9, name: "Готов + ожидание (VK)", site: "vk_video", auto_scan_enabled: true, statuses: ["ready", "waiting"], tmdb: { downloaded: 7, total: 24 } },
+  { id: 1, name: t("gallery.card.stateEmpty", { state: stateLabel(SERIES_STATES.waiting) }), site: "kinozal.me", auto_scan_enabled: true, statuses: ["waiting"] },
+  { id: 2, name: stateLabel(SERIES_STATES.ready), site: "kinozal.me", auto_scan_enabled: true, statuses: ["ready"], last_scan_time: "18.06, 00:34", tmdb: { downloaded: 10, total: 10 } },
+  { id: 3, name: SERIES_FRONT, site: "kinozal.me", auto_scan_enabled: true, statuses: ["downloading"], last_scan_time: "18.06, 00:31", tmdb: { downloaded: 5, total: 12 } },
+  { id: 4, name: t("gallery.card.stateNoPeers", { state: stateLabel(SERIES_STATES.idle) }), site: "rutracker", auto_scan_enabled: false, statuses: ["idle"], last_scan_time: "18.06, 00:30" },
+  { id: 5, name: stateLabel(SERIES_STATES.queued), site: "rutracker", auto_scan_enabled: true, statuses: ["queued"] },
+  { id: 6, name: stateLabel(SERIES_STATES.scanning), site: "anilibria", auto_scan_enabled: true, statuses: ["scanning"] },
+  { id: 7, name: stateLabel(SERIES_STATES.error), site: "kinozal.me", auto_scan_enabled: true, statuses: ["error"] },
+  { id: 8, name: t("gallery.card.severalStatuses"), site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "downloading", "metadata"] },
+  { id: 9, name: t("gallery.card.mixedVk", { first: stateLabel(SERIES_STATES.ready), second: stateWord(SERIES_STATES.waiting) }), site: "vk_video", auto_scan_enabled: true, statuses: ["ready", "waiting"], tmdb: { downloaded: 7, total: 24 } },
   { id: 10, name: stateLabel("slice"), site: "kinozal.me", auto_scan_enabled: true, statuses: ["slicing"] },
   { id: 11, name: t("gallery.card.alignAndPack"), site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "aligning", "packing", "downloading"] },
 ]
@@ -38,21 +45,21 @@ const cards = [
 // Симуляция анимаций карточки: смена статусов → перетекание слоёв (0.8s),
 // fade пилюль (badge-fade), смена скорости полос. Эталон — старый фронт.
 const simStates: Record<string, string[]> = {
-  "Ожидание": ["waiting"],
-  "Обработка": ["scanning"],
+  [stateLabel(SERIES_STATES.waiting)]: ["waiting"],
+  [stateLabel(SERIES_STATES.scanning)]: ["scanning"],
   [stateLabel("slice")]: ["slicing"],
   [stateLabel("align")]: ["aligning"],
   [stateLabel("pack")]: ["packing"],
-  "Загрузка": ["downloading"],
-  "Простой": ["idle"],
-  "В очереди": ["queued"],
-  "Метадата": ["metadata"],
-  "Готов": ["ready"],
-  "Мульти": ["scanning", "downloading", "metadata"],
-  "Ошибка": ["error"],
+  [stateLabel(SERIES_STATES.downloading)]: ["downloading"],
+  [stateLabel(SERIES_STATES.idle)]: ["idle"],
+  [stateLabel(SERIES_STATES.queued)]: ["queued"],
+  [stateLabel(SERIES_STATES.metadata)]: ["metadata"],
+  [stateLabel(SERIES_STATES.ready)]: ["ready"],
+  [t("gallery.sim.multi")]: ["scanning", "downloading", "metadata"],
+  [stateLabel(SERIES_STATES.error)]: ["error"],
 }
 const simSeries = reactive({
-  id: 42, name: "Симуляция анимаций", site: "kinozal.me",
+  id: 42, name: t("gallery.sim.seriesName"), site: "kinozal.me",
   auto_scan_enabled: true, statuses: ["waiting"] as string[],
   last_scan_time: "18.06, 00:34", tmdb: { downloaded: 6, total: 12 },
 })
@@ -75,47 +82,37 @@ function togglePlay() {
 onUnmounted(() => clearInterval(simTimer))
 
 // Парити-галерея (Ф2). Эталон — старый фронт на «/».
-const text = ref("Очень странные дела")
+const text = ref(SERIES_STRANGE)
 const num = ref(2)
 const sel = ref(null)
 const selOptions = [
-  { label: "Профиль по умолчанию", value: 1 },
-  { label: "Аниме", value: 2 },
+  { label: PROFILE_DEFAULT, value: 1 },
+  { label: PROFILE_ANIME, value: 2 },
 ]
 const sw = ref(true)
 const check = ref(true)
 const mode = ref("search")
 const modeOptions = [
-  { label: "Быстрый поиск", value: "search" },
-  { label: "Полное сканирование", value: "get_all" },
+  { label: t("gallery.mode.search"), value: "search" },
+  { label: t("gallery.mode.getAll"), value: "get_all" },
 ]
-const rows = [
-  { name: "Фронт кровавой блокады", status: "Загрузка", progress: 45 },
-  { name: "Извне", status: "Готов", progress: 100 },
-  { name: "Рик и Морти", status: "В очереди", progress: 0 },
-]
-const logs = [
-  { time: "18.06.2026, 00:34:41", group: "gateway", level: "INFO", msg: "SSE клиент подключился (count=1)" },
-  { time: "18.06.2026, 00:33:01", group: "https", level: "INFO", msg: "HTTP Request: GET /api/scanner/status \"HTTP/1.1 200 OK\"" },
-  { time: "18.06.2026, 00:32:39", group: "torrents", level: "WARNING", msg: "серия 1: торрент отсутствует в qBit — запись сброшена" },
-  { time: "18.06.2026, 00:31:10", group: "scan", level: "INFO", msg: "запущено модулей: 13" },
-]
+const rowsView = ROWS.map((r) => ({ ...r, status: stateLabel(r.status) }))
 
 // Карточки-сущности (Композиция / тест VK / TMDB) — единый стиль .card-final.
 // TMDB-результаты (список + выбранный)
 const tmdbResults = [
-  { name: "Очень странные дела", original: "Stranger Things", year: 2016, id: 66732, selected: false },
-  { name: "Извне", original: "From", year: 2022, id: 122226, selected: true },
+  { name: SERIES_STRANGE, original: "Stranger Things", year: 2016, id: 66732, selected: false },
+  { name: SERIES_FROM, original: "From", year: 2022, id: 122226, selected: true },
 ]
 // Композиция торрента
 const torrentFiles = [
   {
-    title: "Фронт кровавой блокады s01e01", res: "1080p",
+    title: FRONT_EPISODE_TITLE, res: "1080p",
     got: "Kekkai.Sensen.S01E01.Secret.Society.avi", actual: "Kekkai Sensen s01e01.avi",
     pills: [
-      { icon: "pi-check-square", label: "Статус", value: "renamed" },
-      { icon: "pi-tags", label: "Тег", value: "AniLibria" },
-      { icon: "pi-video", label: "Качество", value: "WEB-DL" },
+      { icon: "pi-check-square", label: t("common.status"), value: "renamed" },
+      { icon: "pi-tags", label: t("gallery.pill.tag"), value: "AniLibria" },
+      { icon: "pi-video", label: t("common.quality"), value: "WEB-DL" },
       { icon: "pi-id-card", label: "ID", value: "1 / 974f83ee" },
     ],
   },
@@ -123,68 +120,50 @@ const torrentFiles = [
 // Композиция VK (compilation) — со свитчом
 const compFiles = [
   {
-    title: "Рик и Морти s07e01", res: "720p",
-    got: "Рик и Морти 7 сезон 1 серия [AniLibria].mp4", actual: "Рик и Морти s07e01.mkv",
-    will: "Рик и Морти s07e01.mkv", enabled: true,
+    title: RICK_EPISODE_TITLE, res: "720p",
+    got: RICK_RECEIVED_FILE, actual: RICK_EPISODE_FILE,
+    will: RICK_EPISODE_FILE, enabled: true,
     pills: [
-      { icon: "pi-calendar", label: "План", value: "scheduled" },
-      { icon: "pi-tags", label: "Тег", value: "AniLibria" },
-      { icon: "pi-check-circle", label: "Статус", value: "renamed" },
+      { icon: "pi-calendar", label: t("gallery.pill.plan"), value: "scheduled" },
+      { icon: "pi-tags", label: t("gallery.pill.tag"), value: "AniLibria" },
+      { icon: "pi-check-circle", label: t("common.status"), value: "renamed" },
       { icon: "pi-id-card", label: "ID", value: "a1b2c3d4" },
     ],
   },
 ]
 // Тест правил VK — результат (применилось / исключено)
 const testResults = [
-  { title: "Рик и Морти 7 сезон 1 серия [AniLibria] 1080p", res: "1080p", status: "success",
-    pills: [{ icon: "pi-tags", label: "Озвучка", value: "AniLibria" }, { icon: "pi-hashtag", label: "Серия", value: "1" }] },
-  { title: "Рик и Морти 7 сезон [трейлер]", res: "1080p", status: "excluded",
-    pills: [{ icon: "pi-times-circle", label: "ИСКЛЮЧЕНО", value: "правило «трейлер»" }] },
-]
-
-// Нарезка (slicing-card) — раскрытый список глав
-const slicing = {
-  title: "Рик и Морти 7 сезон [компиляция].mkv",
-  active: ["00:00 (s07e01)", "22:14 (s07e02)", "44:30 (s07e03)"],
-  garbage: ["00:00 (Интро)", "21:50 (Реклама блогера)"],
-  status: "Готово к нарезке: 3 главы",
-}
-
-// Карточки очередей (Агенты) — вместо таблиц
-const queueProcessing = [
-  { title: "Фронт кровавой блокады", torrent: 12, hash: "974f83ee", stage: "renaming" },
-]
-const queueDownload = [
-  { file: "Рик и Морти s07e01.mp4", status: "загрузка", cls: "pill-primary", progress: 62, speed: "2.1 MB/s", eta: "1:20", remux: false },
-  { file: "Извне s01e04.mp4", status: "обработка", cls: "pill-info", progress: 90, speed: "", eta: "0:10", remux: true },
-]
-const queueSlicing = [
-  { title: "Рик и Морти", status: "slicing", done: 2, total: 5 },
-]
-const queueMonitor = [
-  { title: "Извне", hash: "a1b2c3d4", status: "Загрузка", progress: 48, speed: "2.1 MB/s", eta: "1:20" },
+  { title: RICK_TEST_APPLIED, res: "1080p", status: "success",
+    pills: [{ icon: "pi-tags", label: t("rulesTest.pill.voiceover"), value: "AniLibria" }, { icon: "pi-hashtag", label: t("rulesTest.pill.episode"), value: "1" }] },
+  { title: RICK_TEST_EXCLUDED, res: "1080p", status: "excluded",
+    pills: [{ icon: "pi-times-circle", label: t("gallery.test.excluded"), value: EXCLUDED_BY_RULE }] },
 ]
 
 // Шапка вкладок настроек — SelectButton (сегмент, адаптивнее папочек)
 const settingsTab = ref("auth")
 const settingsTabs = [
-  { label: "Авторизация", value: "auth", icon: "pi-key" },
-  { label: "Источники", value: "sources", icon: "pi-wifi" },
+  { label: t("settings.tab.auth"), value: "auth", icon: "pi-key" },
+  { label: t("settings.tab.sources"), value: "sources", icon: "pi-wifi" },
   { label: t("rules.tab"), value: "parser", icon: "pi-filter" },
-  { label: "Агенты", value: "agents", icon: "pi-server" },
-  { label: "Отладка", value: "debug", icon: "pi-wrench" },
+  { label: t("settings.tab.agents"), value: "agents", icon: "pi-server" },
+  { label: t("settings.tab.debug"), value: "debug", icon: "pi-wrench" },
 ]
+// The words around the name of the open tab, which the body shows in bold.
+const settingsBody = tAround("gallery.settings.body", "tab")
+function settingsLabel(): string {
+  return settingsTabs.find((tab) => tab.value === settingsTab.value)?.label ?? ""
+}
 
 // StField (floating-label, порт constructor-group)
 const fText = ref("")
-const fPath = ref("/nas/media/Сериалы")
-const fPwd = ref("секрет123")
+const fPath = ref(ROOT_PATH)
+const fPwd = ref(PASSWORD_SAMPLE)
 
 // Нагруженные примеры из прода
 const profileSel = ref<number | null>(null)
 const profileOptions = [
-  { label: "Аниме", value: 1 },
-  { label: "Кино", value: 2 },
+  { label: PROFILE_ANIME, value: 1 },
+  { label: PROFILE_MOVIES, value: 2 },
 ]
 const newProfile = ref("")
 const rtLogin = ref("bitter194")
@@ -195,18 +174,18 @@ const rtPass = ref("password123")
   <main class="gallery">
     <Toast />
     <header>
-      <h1>Парити-галерея <small>/v2 · Ф2</small></h1>
-      <p class="muted">PrimeVue + StField (порт constructor-group) под токены series-tracker. Эталон — старый фронт на «/».</p>
+      <h1>{{ t("gallery.heading") }} <small>{{ t("gallery.heading.version") }}</small></h1>
+      <p class="muted">{{ t("gallery.intro") }}</p>
     </header>
 
     <section>
-      <h2>Карточки сериала (кастом-островок) — по состояниям</h2>
+      <h2>{{ t("gallery.cards.h2") }}</h2>
       <SeriesCard v-for="c in cards" :key="c.id" :series="c" />
     </section>
 
     <section>
-      <h2>Симуляция анимаций карточки (слои + пилюли + полосы)</h2>
-      <p class="muted">Жми сценарии или «Прогон» — слои перетекают (0.8s), пилюли появляются/схлопываются (badge-fade), полосы меняют скорость (2s / 10s / стоп).</p>
+      <h2>{{ t("gallery.sim.h2") }}</h2>
+      <p class="muted">{{ t("gallery.sim.hint") }}</p>
       <SeriesCard :series="simSeries" />
       <div class="row" style="margin-top: 12px">
         <Button
@@ -217,15 +196,15 @@ const rtPass = ref("password123")
           severity="secondary"
           @click="setSim(states)"
         />
-        <Button :label="playing ? '⏸ Стоп' : '▶ Прогон'" size="small" @click="togglePlay" />
+        <Button :label="playing ? t('gallery.sim.stop') : t('gallery.sim.run')" size="small" @click="togglePlay" />
       </div>
     </section>
 
     <section>
-      <h2>Карточки — единый стиль (.card-final, radius 9px, общая палитра)</h2>
-      <p class="muted">Сведены к одному языку: Композиция (торрент/VK/нарезка), тест VK, TMDB. Раньше — разные радиусы (8/10) и фоны.</p>
+      <h2>{{ t("gallery.unified.h2") }}</h2>
+      <p class="muted">{{ t("gallery.unified.hint") }}</p>
 
-      <h3 class="sub">TMDB-результат (добавление сериала / инфо)</h3>
+      <h3 class="sub">{{ t("gallery.sub.tmdb") }}</h3>
       <div class="composition-cards-container">
         <div
           v-for="r in tmdbResults"
@@ -236,17 +215,17 @@ const rtPass = ref("password123")
           <div class="info-column">
             <span class="card-title">{{ r.name }} <small style="opacity:.6">({{ r.year }})</small></span>
             <div class="path-line">
-              <span class="path-pill"><span class="path-pill-label">Оригинал:</span><span class="path-pill-value">{{ r.original }}</span></span>
+              <span class="path-pill"><span class="path-pill-label">{{ t("seriesForm.originalLabel") }}</span><span class="path-pill-value">{{ r.original }}</span></span>
             </div>
           </div>
           <div class="pills-column">
             <div class="quality-badge">ID: {{ r.id }}</div>
-            <div v-if="r.selected" class="pill"><i class="pi pi-check-circle"></i><span>Выбран</span></div>
+            <div v-if="r.selected" class="pill"><i class="pi pi-check-circle"></i><span>{{ t("seriesForm.chosen") }}</span></div>
           </div>
         </div>
       </div>
 
-      <h3 class="sub">Композиция торрента (Статус → Композиция)</h3>
+      <h3 class="sub">{{ t("gallery.sub.torrent") }}</h3>
       <div class="composition-cards-container">
         <div v-for="f in torrentFiles" :key="f.title" class="card-final card-torrent status-success">
           <div class="info-column">
@@ -254,8 +233,8 @@ const rtPass = ref("password123")
               <span class="card-title">{{ f.title }}</span>
               <div class="quality-badge">{{ f.res }}</div>
             </div>
-            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Полученное:</span><span class="path-pill-value">{{ f.got }}</span></span></div>
-            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Фактическое:</span><span class="path-pill-value">{{ f.actual }}</span></span></div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">{{ t("composition.label.received") }}</span><span class="path-pill-value">{{ f.got }}</span></span></div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">{{ t("composition.label.actual") }}</span><span class="path-pill-value">{{ f.actual }}</span></span></div>
           </div>
           <div class="pills-column">
             <div v-for="p in f.pills" :key="p.label" class="pill"><i class="pi" :class="p.icon"></i><span>{{ p.label }}: <strong>{{ p.value }}</strong></span></div>
@@ -263,7 +242,7 @@ const rtPass = ref("password123")
         </div>
       </div>
 
-      <h3 class="sub">Композиция медиатеки VK (compilation) — со свитчом</h3>
+      <h3 class="sub">{{ t("gallery.sub.vk") }}</h3>
       <div class="composition-cards-container">
         <div v-for="f in compFiles" :key="f.title" class="card-final card-compilation status-pending">
           <div class="info-column">
@@ -271,9 +250,9 @@ const rtPass = ref("password123")
               <span class="card-title">{{ f.title }}</span>
               <div class="quality-badge">{{ f.res }}</div>
             </div>
-            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Полученное:</span><span class="path-pill-value">{{ f.got }}</span></span></div>
-            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Фактическое:</span><span class="path-pill-value">{{ f.actual }}</span></span></div>
-            <div class="path-line"><span class="path-pill is-mismatch"><span class="path-pill-label">Будет:</span><span class="path-pill-value">{{ f.will }}</span></span></div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">{{ t("composition.label.received") }}</span><span class="path-pill-value">{{ f.got }}</span></span></div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">{{ t("composition.label.actual") }}</span><span class="path-pill-value">{{ f.actual }}</span></span></div>
+            <div class="path-line"><span class="path-pill is-mismatch"><span class="path-pill-label">{{ t("composition.label.will") }}</span><span class="path-pill-value">{{ f.will }}</span></span></div>
           </div>
           <div class="pills-column">
             <div v-for="p in f.pills" :key="p.label" class="pill"><i class="pi" :class="p.icon"></i><span>{{ p.label }}: <strong>{{ p.value }}</strong></span></div>
@@ -284,141 +263,141 @@ const rtPass = ref("password123")
         </div>
       </div>
 
-      <h3 class="sub">Нарезанный файл (sliced, синий) и Отсутствует (missing)</h3>
+      <h3 class="sub">{{ t("gallery.sub.sliced") }}</h3>
       <div class="composition-cards-container">
         <div class="card-final card-sliced">
           <div class="info-column">
             <div class="card-title-block">
-              <span class="card-title">Рик и Морти s07e03</span>
+              <span class="card-title">{{ RICK_SLICED_TITLE }}</span>
               <div class="quality-badge">720p</div>
             </div>
-            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Родитель:</span><span class="path-pill-value">Рик и Морти 7 сезон [компиляция].mkv</span></span></div>
-            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Фактическое:</span><span class="path-pill-value">Рик и Морти s07e03.mkv</span></span></div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">{{ t("gallery.path.parent") }}</span><span class="path-pill-value">{{ SLICING_SAMPLE.title }}</span></span></div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">{{ t("composition.label.actual") }}</span><span class="path-pill-value">{{ RICK_SLICED_FILE }}</span></span></div>
           </div>
           <div class="pills-column">
-            <div class="pill"><i class="pi pi-images"></i><strong>Нарезанный файл</strong></div>
-            <div class="pill"><i class="pi pi-check-circle"></i><span>Файл на месте</span></div>
+            <div class="pill"><i class="pi pi-images"></i><strong>{{ t("gallery.sliced.label") }}</strong></div>
+            <div class="pill"><i class="pi pi-check-circle"></i><span>{{ t("gallery.sliced.onPlace") }}</span></div>
           </div>
         </div>
         <div class="card-final card-missing">
-          <span class="card-title">Эпизод s07e05 — не найден в источнике</span>
+          <span class="card-title">{{ t("gallery.missing.label", { code: MISSING_EPISODE }) }}</span>
           <i class="pi pi-eye-slash missing-icon"></i>
         </div>
       </div>
 
-      <h3 class="sub">Тест правил VK — результат (применилось / исключено)</h3>
+      <h3 class="sub">{{ t("gallery.sub.test") }}</h3>
       <div class="composition-cards-container">
-        <div v-for="t in testResults" :key="t.title" class="card-final card-test-result" :class="`status-${t.status}`">
+        <div v-for="item in testResults" :key="item.title" class="card-final card-test-result" :class="`status-${item.status}`">
           <div class="info-column">
             <div class="card-title-block">
-              <span class="card-title">{{ t.title }}</span>
-              <div class="quality-badge">{{ t.res }}</div>
+              <span class="card-title">{{ item.title }}</span>
+              <div class="quality-badge">{{ item.res }}</div>
             </div>
           </div>
           <div class="pills-column">
-            <div v-for="p in t.pills" :key="p.label" class="pill"><i class="pi" :class="p.icon"></i><span>{{ p.label }}: <strong>{{ p.value }}</strong></span></div>
+            <div v-for="p in item.pills" :key="p.label" class="pill"><i class="pi" :class="p.icon"></i><span>{{ p.label }}: <strong>{{ p.value }}</strong></span></div>
           </div>
         </div>
       </div>
 
-      <h3 class="sub">Нарезка (slicing-card) — раскрытый список глав</h3>
+      <h3 class="sub">{{ t("gallery.sub.slicing") }}</h3>
       <div class="slicing-card slicing-card-accent status-success">
         <div class="slicing-card-header">
-          <strong class="compilation-title">{{ slicing.title }}</strong>
+          <strong class="compilation-title">{{ SLICING_SAMPLE.title }}</strong>
           <div style="display: flex; gap: 8px">
-            <button class="control-btn" title="Проверить оглавление"><i class="pi pi-search"></i></button>
-            <button class="control-btn text-info" title="Проверить и отфильтровать"><i class="pi pi-filter"></i></button>
-            <button class="control-btn text-primary" title="Нарезать"><i class="pi pi-clone"></i></button>
-            <button class="control-btn text-danger" title="Удалить исходник"><i class="pi pi-trash"></i></button>
+            <button class="control-btn" :title="t('slicing.check')"><i class="pi pi-search"></i></button>
+            <button class="control-btn text-info" :title="t('slicing.checkFilter')"><i class="pi pi-filter"></i></button>
+            <button class="control-btn text-primary" :title="t('gallery.slicing.cut')"><i class="pi pi-clone"></i></button>
+            <button class="control-btn text-danger" :title="t('gallery.slicing.deleteSource')"><i class="pi pi-trash"></i></button>
           </div>
         </div>
         <div class="slicing-card-body">
           <div class="chapter-section">
-            <h6>Активные главы ({{ slicing.active.length }}):</h6>
+            <h6>{{ t("slicing.chapters.active", { count: SLICING_SAMPLE.active.length }) }}</h6>
             <div class="chapter-list">
-              <span v-for="c in slicing.active" :key="c" class="chapter-pill chapter-active">{{ c }}</span>
+              <span v-for="c in SLICING_SAMPLE.active" :key="c" class="chapter-pill chapter-active">{{ c }}</span>
             </div>
           </div>
           <div class="chapter-section">
-            <h6>Мусорные главы ({{ slicing.garbage.length }}):</h6>
+            <h6>{{ t("slicing.chapters.garbage", { count: SLICING_SAMPLE.garbage.length }) }}</h6>
             <div class="chapter-list">
-              <span v-for="c in slicing.garbage" :key="c" class="chapter-pill chapter-garbage">{{ c }} <i class="pi pi-times-circle"></i></span>
+              <span v-for="c in SLICING_SAMPLE.garbage" :key="c" class="chapter-pill chapter-garbage">{{ c }} <i class="pi pi-times-circle"></i></span>
             </div>
           </div>
         </div>
         <div class="slicing-card-footer card-footer-status">
-          <span>{{ slicing.status }}</span>
+          <span>{{ SLICING_SAMPLE.status }}</span>
         </div>
       </div>
     </section>
 
     <section>
-      <h2>Карточки очередей (Агенты) — вместо таблиц</h2>
-      <p class="muted">4 очереди переведены с таблиц на единый карточный вид. Компактно, 1–2 строки, без раздувания.</p>
+      <h2>{{ t("gallery.queues.h2") }}</h2>
+      <p class="muted">{{ t("gallery.queues.hint") }}</p>
 
-      <h3 class="sub">Агент Обработки</h3>
+      <h3 class="sub">{{ t("agents.processing.title") }}</h3>
       <div class="composition-cards-container">
-        <div v-for="t in queueProcessing" :key="t.hash" class="card-final card-queue">
+        <div v-for="q in QUEUE_PROCESSING" :key="q.hash" class="card-final card-queue">
           <div class="queue-row">
-            <span class="queue-title">{{ t.title }}</span>
-            <div class="pill"><i class="pi pi-link"></i> Торрент: {{ t.torrent }}</div>
-            <div class="pill"><i class="pi pi-key"></i> {{ t.hash }}…</div>
-            <div class="pill pill-info">{{ t.stage }}</div>
+            <span class="queue-title">{{ q.title }}</span>
+            <div class="pill"><i class="pi pi-link"></i> {{ t("agents.torrent", { id: q.torrent }) }}</div>
+            <div class="pill"><i class="pi pi-key"></i> {{ q.hash }}…</div>
+            <div class="pill pill-info">{{ stateWord(q.stage) }}</div>
           </div>
         </div>
       </div>
 
-      <h3 class="sub">Агент Загрузки (yt-dlp)</h3>
+      <h3 class="sub">{{ t("download.title") }}</h3>
       <div class="composition-cards-container">
-        <div v-for="t in queueDownload" :key="t.file" class="card-final card-queue">
+        <div v-for="q in QUEUE_DOWNLOAD" :key="q.file" class="card-final card-queue">
           <div class="queue-row">
-            <span class="queue-title">{{ t.file }}</span>
-            <div class="pill" :class="t.cls">{{ t.status }}</div>
-            <button class="btn-cancel" title="Отменить загрузку"><i class="pi pi-times"></i></button>
+            <span class="queue-title">{{ q.file }}</span>
+            <div class="pill" :class="q.cls">{{ stateWord(q.status) }}</div>
+            <button class="btn-cancel" :title="t('gallery.queue.stopDownload')"><i class="pi pi-times"></i></button>
           </div>
           <div class="queue-row">
             <div class="progress">
-              <div class="progress-bar progress-bar-striped progress-bar-animated" :class="{ 'bg-info': t.remux }" :style="{ width: t.progress + '%' }">{{ t.progress }}%</div>
+              <div class="progress-bar progress-bar-striped progress-bar-animated" :class="{ 'bg-info': q.remux }" :style="{ width: q.progress + '%' }">{{ q.progress }}%</div>
             </div>
             <div class="queue-metrics">
-              <span v-if="t.speed" class="m-speed">↓{{ t.speed }}</span>
-              <span v-if="t.remux" class="m-size">remux</span>
-              <span class="m-eta">ETA {{ t.eta }}</span>
+              <span v-if="q.speed" class="m-speed">↓{{ q.speed }}</span>
+              <span v-if="q.remux" class="m-size">remux</span>
+              <span class="m-eta">ETA {{ q.eta }}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <h3 class="sub">Агент Нарезки (ffmpeg)</h3>
+      <h3 class="sub">{{ t("agents.slicing.title") }}</h3>
       <div class="composition-cards-container">
-        <div v-for="t in queueSlicing" :key="t.title" class="card-final card-queue">
+        <div v-for="q in QUEUE_SLICING" :key="q.title" class="card-final card-queue">
           <div class="queue-row">
-            <span class="queue-title">{{ t.title }}</span>
-            <div class="pill pill-info">{{ t.status }}</div>
+            <span class="queue-title">{{ q.title }}</span>
+            <div class="pill pill-info">{{ stateLabel(q.status) }}</div>
           </div>
           <div class="queue-row">
             <div class="progress">
-              <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: (t.done / t.total * 100) + '%' }">{{ t.done }} / {{ t.total }} глав</div>
+              <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: (q.done / q.total * 100) + '%' }">{{ t("gallery.queue.chapters", { done: q.done, total: q.total }) }}</div>
             </div>
           </div>
         </div>
       </div>
 
-      <h3 class="sub">Мониторинг торрентов</h3>
+      <h3 class="sub">{{ t("agents.torrents.title") }}</h3>
       <div class="composition-cards-container">
-        <div v-for="t in queueMonitor" :key="t.hash" class="card-final card-queue">
+        <div v-for="q in QUEUE_MONITOR" :key="q.hash" class="card-final card-queue">
           <div class="queue-row">
-            <span class="queue-title">{{ t.title }}</span>
-            <div class="pill"><i class="pi pi-key"></i> {{ t.hash }}…</div>
-            <div class="pill pill-primary">{{ t.status }}</div>
+            <span class="queue-title">{{ q.title }}</span>
+            <div class="pill"><i class="pi pi-key"></i> {{ q.hash }}…</div>
+            <div class="pill pill-primary">{{ stateLabel(q.status) }}</div>
           </div>
           <div class="queue-row">
             <div class="progress">
-              <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: t.progress + '%' }">{{ t.progress }}%</div>
+              <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: q.progress + '%' }">{{ q.progress }}%</div>
             </div>
             <div class="queue-metrics">
-              <span class="m-speed">↓{{ t.speed }}</span>
-              <span class="m-eta">ETA {{ t.eta }}</span>
+              <span class="m-speed">↓{{ q.speed }}</span>
+              <span class="m-eta">ETA {{ q.eta }}</span>
             </div>
           </div>
         </div>
@@ -426,43 +405,43 @@ const rtPass = ref("password123")
     </section>
 
     <section>
-      <h2>Поля — обычная высота (46px, PrimeVue)</h2>
+      <h2>{{ t("gallery.fields.h2") }}</h2>
       <div class="grid">
-        <div class="cell"><label>Текст</label><InputText v-model="text" /></div>
-        <div class="cell"><label>Текст (invalid)</label><InputText v-model="text" invalid /></div>
-        <div class="cell"><label>Текст (disabled)</label><InputText model-value="нельзя" disabled /></div>
-        <div class="cell"><label>Число</label><InputNumber v-model="num" show-buttons :min="0" :max="8" /></div>
-        <div class="cell"><label>Select</label><Select v-model="sel" :options="selOptions" option-label="label" placeholder="Профиль правил" /></div>
+        <div class="cell"><label>{{ t("gallery.field.text") }}</label><InputText v-model="text" /></div>
+        <div class="cell"><label>{{ t("gallery.field.textInvalid") }}</label><InputText v-model="text" invalid /></div>
+        <div class="cell"><label>{{ t("gallery.field.textDisabled") }}</label><InputText :model-value="DISABLED_SAMPLE" disabled /></div>
+        <div class="cell"><label>{{ t("gallery.field.number") }}</label><InputNumber v-model="num" show-buttons :min="0" :max="8" /></div>
+        <div class="cell"><label>Select</label><Select v-model="sel" :options="selOptions" option-label="label" :placeholder="t('sources.profile.label')" /></div>
       </div>
     </section>
 
     <section>
-      <h2>Поля floating-label — повышенная высота (64px, StField)</h2>
+      <h2>{{ t("gallery.float.h2") }}</h2>
       <div class="grid">
-        <div class="cell"><StField v-model="fText" label="Название (RU)" /></div>
-        <div class="cell"><StField v-model="fPath" label="Путь сохранения" icon="pi pi-folder-open" /></div>
-        <div class="cell"><StField v-model="fPwd" label="Пароль" type="password" icon="pi pi-lock" /></div>
-        <div class="cell"><StField model-value="" label="Имя (invalid)" icon="pi pi-tag" state="invalid" /></div>
+        <div class="cell"><StField v-model="fText" :label="t('seriesForm.nameRu')" /></div>
+        <div class="cell"><StField v-model="fPath" :label="t('seriesForm.savePath')" icon="pi pi-folder-open" /></div>
+        <div class="cell"><StField v-model="fPwd" :label="t('auth.password')" type="password" icon="pi pi-lock" /></div>
+        <div class="cell"><StField model-value="" :label="t('gallery.float.invalid')" icon="pi pi-tag" state="invalid" /></div>
       </div>
     </section>
 
     <section>
-      <h2>Переключатели</h2>
+      <h2>{{ t("gallery.toggles.h2") }}</h2>
       <div class="grid">
         <div class="cell"><label>ToggleSwitch</label><ToggleSwitch v-model="sw" /></div>
         <div class="cell"><label>Checkbox</label><Checkbox v-model="check" binary /></div>
         <div class="cell">
-          <label>SelectButton (как btn-group)</label>
+          <label>{{ t("gallery.toggles.selectButton") }}</label>
           <SelectButton v-model="mode" :options="modeOptions" option-label="label" option-value="value" />
         </div>
       </div>
     </section>
 
     <section>
-      <h2>Кнопки</h2>
+      <h2>{{ t("gallery.buttons.h2") }}</h2>
       <div class="row">
-        <Button label="Сохранить" icon="pi pi-check" />
-        <Button label="Закрыть" severity="secondary" icon="pi pi-times" />
+        <Button :label="t('common.save')" icon="pi pi-check" />
+        <Button :label="t('common.close')" severity="secondary" icon="pi pi-times" />
         <Button label="Success" severity="success" icon="pi pi-save" />
         <Button label="Danger" severity="danger" icon="pi pi-trash" />
         <Button label="Warn" severity="warn" />
@@ -477,52 +456,50 @@ const rtPass = ref("password123")
     </section>
 
     <section class="wide-section">
-      <h2>Окно настроек — шапка с вкладками (адаптивные)</h2>
-      <p class="muted small">Целая модалка: шапка (заголовок + вкладки + крестик), тело, футер — единое скруглённое окно. Вкладки интегрированы в шапку и адаптивны (узко → иконки), вместо ломавшихся папочек.</p>
+      <h2>{{ t("gallery.settings.h2") }}</h2>
+      <p class="muted small">{{ t("gallery.settings.hint") }}</p>
       <div class="modern-modal">
         <div class="modern-header">
-          <h5 class="modal-title"><i class="pi pi-cog"></i> Настройки</h5>
+          <h5 class="modal-title"><i class="pi pi-cog"></i> {{ t("settings.title") }}</h5>
           <div class="header-tabs st-tabs">
             <button
-              v-for="t in settingsTabs"
-              :key="t.value"
+              v-for="tab in settingsTabs"
+              :key="tab.value"
               class="st-tab"
-              :class="{ active: settingsTab === t.value }"
-              :title="t.label"
-              @click="settingsTab = t.value"
+              :class="{ active: settingsTab === tab.value }"
+              :title="tab.label"
+              @click="settingsTab = tab.value"
             >
-              <i class="pi tab-icon" :class="t.icon"></i>
-              <span class="tab-label" :data-text="t.label"><span class="tl-text">{{ t.label }}</span></span>
+              <i class="pi tab-icon" :class="tab.icon"></i>
+              <span class="tab-label" :data-text="tab.label"><span class="tl-text">{{ tab.label }}</span></span>
             </button>
           </div>
-          <button class="modern-close" title="Закрыть"><i class="pi pi-times"></i></button>
+          <button class="modern-close" :title="t('common.close')"><i class="pi pi-times"></i></button>
         </div>
-        <div class="modern-body">
-          Содержимое вкладки «<strong>{{ settingsTabs.find((t) => t.value === settingsTab)?.label }}</strong>» — здесь формы/таблицы соответствующего раздела.
-        </div>
+        <div class="modern-body">{{ settingsBody[0] }}<strong>{{ settingsLabel() }}</strong>{{ settingsBody[1] }}</div>
         <div class="modern-footer">
-          <Button label="Сохранить" icon="pi pi-check" />
-          <Button label="Закрыть" icon="pi pi-times" severity="secondary" />
+          <Button :label="t('common.save')" icon="pi pi-check" />
+          <Button :label="t('common.close')" icon="pi pi-times" severity="secondary" />
         </div>
       </div>
     </section>
 
     <section>
-      <h2>Пилюли и бейджи — по местам в проде</h2>
+      <h2>{{ t("gallery.pills.h2") }}</h2>
       <div class="grid">
         <div class="cell">
-          <label>Статус-бейдж очереди (Агенты)</label>
+          <label>{{ t("gallery.badge.title") }}</label>
           <div class="row" style="gap: 6px">
-            <span class="badge bg-primary">загрузка</span>
-            <span class="badge bg-info">обработка</span>
-            <span class="badge bg-success">готово</span>
-            <span class="badge bg-danger">ошибка</span>
-            <span class="badge bg-secondary">ожидание</span>
-            <span class="badge bg-dark">неизвестно</span>
+            <span class="badge bg-primary">{{ stateWord("download") }}</span>
+            <span class="badge bg-info">{{ stateWord("remux") }}</span>
+            <span class="badge bg-success">{{ stateWord("done") }}</span>
+            <span class="badge bg-danger">{{ stateWord("failed") }}</span>
+            <span class="badge bg-secondary">{{ stateWord("planned") }}</span>
+            <span class="badge bg-dark">{{ t("add.unknown") }}</span>
           </div>
         </div>
         <div class="cell">
-          <label>Зеркало трекера (Источники)</label>
+          <label>{{ t("gallery.mirror.title") }}</label>
           <div class="row" style="gap: 8px">
             <span class="mirror-pill">anilibria.top <button class="mirror-pill-remove">&times;</button></span>
             <span class="mirror-pill">aniliberty.top <button class="mirror-pill-remove">&times;</button></span>
@@ -530,51 +507,51 @@ const rtPass = ref("password123")
         </div>
       </div>
       <div class="cell" style="margin-top: 16px">
-        <label>Предпросмотр VK-фильтра (тест правил) — пилюли на цветном фоне</label>
+        <label>{{ t("gallery.vk.title") }}</label>
         <div class="vk-preview">
           <span class="quality-badge">1080p</span>
-          <span class="pill"><i class="pi pi-th-large" />Сезон: <strong>1</strong></span>
-          <span class="pill"><i class="pi pi-video" />Серия: <strong>5</strong></span>
-          <span class="pill"><i class="pi pi-tags" />Тег: <strong>AniLibria</strong></span>
+          <span class="pill"><i class="pi pi-th-large" />{{ t("common.season") }}: <strong>1</strong></span>
+          <span class="pill"><i class="pi pi-video" />{{ t("rulesTest.pill.episode") }}: <strong>5</strong></span>
+          <span class="pill"><i class="pi pi-tags" />{{ t("gallery.pill.tag") }}: <strong>AniLibria</strong></span>
         </div>
       </div>
     </section>
 
     <section>
-      <h2>Таблицы (под div-table)</h2>
-      <p class="muted small">Очередь — в fieldset с заголовком-баром (как у агентов); ниже — таблица логов.</p>
+      <h2>{{ t("gallery.tables.h2") }}</h2>
+      <p class="muted small">{{ t("gallery.tables.hint") }}</p>
       <div class="fieldset" style="margin-bottom: 20px">
-        <div class="fieldset-head"><span>Очередь Агента Загрузки (yt-dlp)</span></div>
+        <div class="fieldset-head"><span>{{ t("download.title") }}</span></div>
         <div class="fieldset-body">
-          <DataTable :value="rows" size="small">
-            <Column field="name" header="Сериал / Файл" />
-            <Column field="status" header="Статус" />
-            <Column field="progress" header="Прогресс, %" />
+          <DataTable :value="rowsView" size="small">
+            <Column field="name" :header="t('gallery.table.seriesOrFile')" />
+            <Column field="status" :header="t('common.status')" />
+            <Column field="progress" :header="t('gallery.table.progress')" />
           </DataTable>
         </div>
       </div>
-      <DataTable :value="logs" size="small">
-        <Column field="time" header="Время" />
-        <Column field="group" header="Группа" />
-        <Column field="level" header="Уровень" />
-        <Column field="msg" header="Сообщение" />
+      <DataTable :value="LOGS" size="small">
+        <Column field="time" :header="t('logs.col.time')" />
+        <Column field="group" :header="t('sources.table.group')" />
+        <Column field="level" :header="t('logs.col.level')" />
+        <Column field="msg" :header="t('logs.col.message')" />
       </DataTable>
     </section>
 
     <section class="loaded">
-      <h2>Нагруженные примеры из прода (монолитные группы)</h2>
-      <p class="muted small">Несколько айтемов соединены в один блок (одна рамка, внутренние разделители) — как в проде.</p>
+      <h2>{{ t("gallery.loaded.h2") }}</h2>
+      <p class="muted small">{{ t("gallery.loaded.hint") }}</p>
 
       <div class="block">
-        <p class="muted small">Выберите профиль для редактирования или создайте новый. Правила и тестирование появятся ниже после выбора профиля.</p>
+        <p class="muted small">{{ t("gallery.profile.hint") }}</p>
         <StGroup>
           <StIcon icon="pi pi-user-edit" />
-          <StSelect v-model="profileSel" :options="profileOptions" placeholder="-- Выберите профиль --" />
-          <StInput v-model="newProfile" label="Имя нового профиля..." />
+          <StSelect v-model="profileSel" :options="profileOptions" :placeholder="t('gallery.profile.placeholder')" />
+          <StInput v-model="newProfile" :label="t('rules.profile.new')" />
           <div class="constructor-item item-button-group">
-            <StBtn icon="pi pi-plus" variant="add" title="Создать" :disabled="!newProfile" />
-            <StBtn icon="pi pi-pencil" variant="edit" title="Переименовать" :disabled="!profileSel" />
-            <StBtn icon="pi pi-trash" variant="delete" title="Удалить" :disabled="!profileSel" />
+            <StBtn icon="pi pi-plus" variant="add" :title="t('rules.profile.create')" :disabled="!newProfile" />
+            <StBtn icon="pi pi-pencil" variant="edit" :title="t('rules.profile.rename')" :disabled="!profileSel" />
+            <StBtn icon="pi pi-trash" variant="delete" :title="t('common.delete')" :disabled="!profileSel" />
           </div>
         </StGroup>
       </div>
@@ -584,9 +561,9 @@ const rtPass = ref("password123")
         <div class="fieldset-body">
           <StGroup>
             <StIcon icon="pi pi-user" />
-            <StInput v-model="rtLogin" label="Логин" />
+            <StInput v-model="rtLogin" :label="t('auth.login')" />
             <StIcon icon="pi pi-lock" />
-            <StInput v-model="rtPass" label="Пароль" type="password" />
+            <StInput v-model="rtPass" :label="t('auth.password')" type="password" />
           </StGroup>
         </div>
       </div>

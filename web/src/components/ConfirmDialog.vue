@@ -2,6 +2,7 @@
 import Button from "primevue/button"
 import ModalShell from "./ModalShell.vue"
 import { useConfirm } from "../composables/useConfirm"
+import { t } from "../i18n"
 
 // Глобальное окно подтверждения (монтируется один раз в App). Управляется
 // singleton-состоянием useConfirm.
@@ -10,15 +11,15 @@ const { state, confirm, cancel } = useConfirm()
 
 <template>
   <ModalShell v-if="state.visible" :title="state.title" @close="cancel">
-    <!-- сообщение формируем мы (не пользовательский ввод) -->
-    <p class="confirm-message" v-html="state.message"></p>
+    <!-- Plain text: a message carries names the user typed (a series, a table), never markup. -->
+    <p class="confirm-message">{{ state.message }}</p>
     <label v-if="state.checkbox" class="confirm-checkbox">
       <input type="checkbox" v-model="state.checkbox.checked" />
       <span>{{ state.checkbox.text }}</span>
     </label>
     <template #footer>
-      <Button label="Отмена" icon="pi pi-times" severity="secondary" @click="cancel" />
-      <Button label="Подтвердить" icon="pi pi-check" severity="danger" @click="confirm" />
+      <Button :label="t('common.cancel')" icon="pi pi-times" severity="secondary" @click="cancel" />
+      <Button :label="t('common.confirm')" icon="pi pi-check" severity="danger" @click="confirm" />
     </template>
   </ModalShell>
 </template>

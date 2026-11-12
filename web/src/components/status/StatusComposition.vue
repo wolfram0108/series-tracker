@@ -8,6 +8,8 @@ import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { useSSE } from "../../composables/useSSE"
+import { t } from "../../i18n"
+import { stateLabel } from "../../lib/states"
 
 // Вкладка «Композиция» (торрент) — порт StatusTabTorrentComposition.
 // Файлы сериала, сгруппированные по сезонам, карточками card-torrent;
@@ -73,7 +75,7 @@ function baseName(path?: string): string {
   return path.split(/[\\/]/).pop() ?? ""
 }
 function seasonTitle(n: string): string {
-  return n === "N/A" ? "Сезон не определён" : `Сезон ${n.padStart(2, "0")}`
+  return n === "N/A" ? t("composition.season.unknown") : t("output.season", { n: n.padStart(2, "0") })
 }
 function sxxexx(m?: Meta): string {
   if (!m) return ""
@@ -131,7 +133,7 @@ async function saveEpisodes(next: Record<string, number[]>): Promise<boolean> {
       params: { path: { series_id: props.seriesId } },
       body: { episodes: next },
     } as never),
-    { errorMessage: "Ошибка изменения плана загрузки" },
+    { errorMessage: t("composition.error.plan") },
   )
   if (ok === null) {
     ignoredEpisodes.value = previous
@@ -166,7 +168,7 @@ async function bulkSetSeason(sn: string) {
   let next = ignoredEpisodes.value
   for (const f of items) next = withEpisodes(next, sn, fileEpisodes(f), off)
   if (await saveEpisodes(next)) {
-    toast.add({ severity: "success", summary: off ? "Серии сезона выключены" : "Серии сезона включены", life: 2000 })
+    toast.add({ severity: "success", summary: off ? t("composition.toast.bulkOff") : t("composition.toast.bulkOn"), life: 2000 })
   }
 }
 
@@ -180,7 +182,7 @@ async function toggleSeasonIgnored(sn: string) {
       params: { path: { series_id: props.seriesId } },
       body: { seasons: ignoredSeasons.value },
     } as never),
-    { errorMessage: "Ошибка игнорирования сезона" },
+    { errorMessage: t("composition.error.season") },
   )
   if (ok === null) ignoredSeasons.value = previous
 }
@@ -231,7 +233,7 @@ async function load(refresh = false) {
       api.GET("/api/series/{series_id}/composition", {
         params: { path: { series_id: props.seriesId }, query: { refresh } },
       } as never),
-      { errorMessage: refresh ? "Ошибка получения данных раздачи" : "Ошибка загрузки композиции" },
+      { errorMessage: refresh ? t("composition.error.fetch") : t("composition.error.load") },
     )) as TFile[] | null
     if (Array.isArray(data)) files.value = data
   } finally {
@@ -242,23 +244,23 @@ async function load(refresh = false) {
 async function fetchData() {
   await load(true)
   await loadSeries()
-  toast.add({ severity: "success", summary: "Данные получены", detail: "Загрузка остановлена — отберите серии и запустите сканирование", life: 4000 })
+  toast.add({ severity: "success", summary: t("composition.toast.fetched"), detail: t("composition.toast.fetchedDetail"), life: 4000 })
 }
 
 async function reprocess() {
   const r = await confirm.open({
-    title: "Переприменить правила",
-    message: "Заново применить правила ко всем файлам этого сериала? Существующие метаданные и имена будут перезаписаны.",
+    title: t("composition.reprocess"),
+    message: t("composition.reprocess.message"),
   })
   if (!r.confirmed) return
   reprocessing.value = true
   try {
     const ok = await request(
       api.POST("/api/series/{series_id}/reprocess", { params: { path: { series_id: props.seriesId } } } as never),
-      { errorMessage: "Ошибка переобработки" },
+      { errorMessage: t("composition.error.reprocess") },
     )
     if (ok !== null) {
-      toast.add({ severity: "success", summary: "Переобработка", detail: "Задача принята в обработку", life: 3000 })
+      toast.add({ severity: "success", summary: t("composition.toast.reprocess"), detail: t("composition.toast.reprocessDetail"), life: 3000 })
     }
   } finally {
     reprocessing.value = false
@@ -285,10 +287,10 @@ defineExpose({ reload: () => load() })
   <div class="status-composition">
     <div class="modern-fieldset">
       <div class="fieldset-header">
-        <span class="fieldset-title">Управление файлами</span>
+        <span class="fieldset-title">{{ t("composition.manage") }}</span>
         <div class="vk-comp-actions">
           <Button
-            label="Переприменить правила"
+            :label="t('composition.reprocess')"
             icon="pi pi-pencil"
             size="small"
             severity="warn"
@@ -297,7 +299,7 @@ defineExpose({ reload: () => load() })
             @click="reprocess"
           />
           <Button
-            label="Получить данные"
+            :label="t('composition.fetch')"
             icon="pi pi-refresh"
             size="small"
             :loading="fetching"
@@ -310,7 +312,7 @@ defineExpose({ reload: () => load() })
 
     <div v-if="loading || fetching" class="status-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
     <div v-else-if="!files.length" class="empty-state">
-      Состав раздачи ещё не получен. Нажмите «Получить данные»: раздача попадёт в клиент и будет разобрана, загрузка при этом не начнётся.
+      {{ t("composition.empty") }}
     </div>
     <div v-else>
       <div v-for="sn in sortedSeasons" :key="sn" class="season-group">
@@ -318,11 +320,11 @@ defineExpose({ reload: () => load() })
           <span>{{ seasonTitle(sn) }}</span>
           <label v-if="sn !== 'N/A'" class="season-ignore">
             <ToggleSwitch :model-value="!isSeasonIgnored(sn)" @update:model-value="toggleSeasonIgnored(sn)" />
-            <span class="season-ignore-label">{{ isSeasonIgnored(sn) ? "Игнор" : "В плане" }}</span>
+            <span class="season-ignore-label">{{ isSeasonIgnored(sn) ? t("composition.season.ignore") : stateLabel("planned") }}</span>
           </label>
           <label v-if="sn !== 'N/A'" class="season-ignore">
             <Checkbox binary :model-value="seasonBulkState(sn) === 'on'" :indeterminate="seasonBulkState(sn) === 'mixed'" @update:model-value="bulkSetSeason(sn)" />
-            <span class="season-ignore-label">Все серии сезона</span>
+            <span class="season-ignore-label">{{ t("composition.season.all") }}</span>
           </label>
         </div>
         <div class="composition-cards-container">
@@ -334,32 +336,32 @@ defineExpose({ reload: () => load() })
               </div>
               <div class="path-line">
                 <span class="path-pill">
-                  <span class="path-pill-label">Полученное:</span>
+                  <span class="path-pill-label">{{ t("composition.label.received") }}</span>
                   <span class="path-pill-value" :title="f.original_path">{{ baseName(f.original_path) }}</span>
                 </span>
               </div>
               <div class="path-line">
                 <span class="path-pill" :class="{ 'is-missing': !f.is_file_present && !isFileOff(f) }">
-                  <span class="path-pill-label">Фактическое:</span>
-                  <span v-if="isUnrecognized(f)" class="path-pill-value">Не распознано — не загружается</span>
-                  <span v-else-if="isFileOff(f)" class="path-pill-value">Исключено из загрузки</span>
+                  <span class="path-pill-label">{{ t("composition.label.actual") }}</span>
+                  <span v-if="isUnrecognized(f)" class="path-pill-value">{{ t("composition.file.unrecognized") }}</span>
+                  <span v-else-if="isFileOff(f)" class="path-pill-value">{{ t("composition.file.off") }}</span>
                   <span v-else-if="f.is_file_present" class="path-pill-value" :title="f.renamed_path_preview">{{ baseName(f.renamed_path_preview) }}</span>
-                  <span v-else class="path-pill-value"><i class="pi pi-times-circle" /> Файл не найден</span>
+                  <span v-else class="path-pill-value"><i class="pi pi-times-circle" /> {{ t("composition.file.missing") }}</span>
                 </span>
               </div>
               <div v-if="f.is_mismatch" class="path-line">
                 <span class="path-pill is-mismatch">
-                  <span class="path-pill-label">Будет:</span>
+                  <span class="path-pill-label">{{ t("composition.label.will") }}</span>
                   <span class="path-pill-value" :title="f.renamed_path_preview">{{ baseName(f.renamed_path_preview) }}</span>
                 </span>
               </div>
             </div>
             <div class="pills-column">
-              <div v-if="f.extracted_metadata?.part" class="pill"><i class="pi pi-clone" /><span>Часть: <strong>{{ f.extracted_metadata.part }}</strong></span></div>
-              <div class="pill"><i class="pi pi-check-square" /><span>Статус: <strong>{{ f.status }}</strong></span></div>
-              <div class="pill"><i class="pi pi-tags" /><span>Тег: <strong>{{ f.extracted_metadata?.voiceover || "N/A" }}</strong></span></div>
-              <div class="pill"><i class="pi pi-video" /><span>Качество: <strong>{{ f.extracted_metadata?.quality || "N/A" }}</strong></span></div>
-              <div class="pill"><i class="pi pi-id-card" /><span>ID: <strong>{{ f.id }} / {{ (f.qb_hash ?? "").substring(0, 8) }}</strong></span></div>
+              <div v-if="f.extracted_metadata?.part" class="pill"><i class="pi pi-clone" /><span>{{ t("composition.label.part") }} <strong>{{ f.extracted_metadata.part }}</strong></span></div>
+              <div class="pill"><i class="pi pi-check-square" /><span>{{ t("composition.label.status") }} <strong>{{ f.status }}</strong></span></div>
+              <div class="pill"><i class="pi pi-tags" /><span>{{ t("composition.label.tag") }} <strong>{{ f.extracted_metadata?.voiceover || "N/A" }}</strong></span></div>
+              <div class="pill"><i class="pi pi-video" /><span>{{ t("composition.label.quality") }} <strong>{{ f.extracted_metadata?.quality || "N/A" }}</strong></span></div>
+              <div class="pill"><i class="pi pi-id-card" /><span>{{ t("composition.label.id") }} <strong>{{ f.id }} / {{ (f.qb_hash ?? "").substring(0, 8) }}</strong></span></div>
             </div>
             <div v-if="!isUnrecognized(f)" class="controls-column">
               <ToggleSwitch :model-value="!isFileOff(f)" @update:model-value="toggleFile(f)" />

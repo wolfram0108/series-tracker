@@ -7,6 +7,14 @@ export function t(key: MessageKey, params: Record<string, string | number> = {})
   return ru[key].replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? ""))
 }
 
+/** Text of a key cut at its placeholder `{slot}`: what goes before and after it, so that a screen sets the fact in its own
+ *  element (a name in bold) with the words in the order the catalog gives them. */
+export function tAround(key: MessageKey, slot: string, params: Record<string, string | number> = {}): [string, string] {
+  const marker = "\u0000"
+  const [before, after = ""] = t(key, { ...params, [slot]: marker }).split(marker)
+  return [before, after]
+}
+
 /** Whether the catalog has the text of a key built at run time (a lever registered later has none until it is added). */
 export function hasMessage(key: string): key is MessageKey {
   return Object.hasOwn(ru, key)

@@ -5,6 +5,7 @@ import StGroup from "./StGroup.vue"
 import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
 import { api } from "../api/client"
+import { t } from "../i18n"
 import { useAuthStore } from "../stores/auth"
 import { useBodyScrollLock } from "../composables/useBodyScrollLock"
 
@@ -47,10 +48,10 @@ async function submit(): Promise<void> {
   if (busy.value) return
   if (!canSubmit.value) {
     notice.value = !username.value.trim()
-      ? "Укажите имя администратора"
+      ? t("setup.error.username")
       : password.value.length < 8
-        ? "Пароль не короче 8 символов"
-        : "Пароли не совпадают"
+        ? t("setup.error.passwordShort")
+        : t("common.passwordsMismatch")
     return
   }
   busy.value = true
@@ -65,9 +66,9 @@ async function submit(): Promise<void> {
       return
     }
     notice.value = (error as unknown as { error?: string } | null)?.error ||
-      "Не удалось создать администратора"
+      t("setup.error.create")
   } catch {
-    notice.value = "Ошибка сети — сервер недоступен"
+    notice.value = t("common.networkDown")
   } finally {
     busy.value = false
   }
@@ -78,25 +79,25 @@ async function submit(): Promise<void> {
   <Teleport to="body">
     <div class="login-overlay">
       <form class="login-card" @submit.prevent="submit">
-        <h2 class="login-title">Первый запуск</h2>
-        <p class="login-sub">Создание администратора</p>
+        <h2 class="login-title">{{ t("setup.title") }}</h2>
+        <p class="login-sub">{{ t("setup.sub") }}</p>
 
         <StGroup :state="userState">
           <StIcon icon="pi pi-user" />
-          <StInput v-model="username" label="Имя администратора" />
+          <StInput v-model="username" :label="t('setup.username')" />
         </StGroup>
 
         <StGroup :state="passState">
           <StIcon icon="pi pi-lock" />
-          <StInput v-model="password" label="Пароль (от 8 символов)" type="password" />
+          <StInput v-model="password" :label="t('setup.password')" type="password" />
         </StGroup>
 
         <StGroup :state="pass2State">
           <StIcon icon="pi pi-lock" />
-          <StInput v-model="password2" label="Повтор пароля" type="password" />
+          <StInput v-model="password2" :label="t('setup.passwordRepeat')" type="password" />
         </StGroup>
 
-        <Button class="login-submit" type="submit" label="Создать и войти"
+        <Button class="login-submit" type="submit" :label="t('setup.submit')"
                 icon="pi pi-check" :loading="busy" />
       </form>
 

@@ -139,6 +139,12 @@ export const QBIT_STATES = {
   checkingDL: "checking", checkingResumeData: "checking", moving: "moving", error: "failed", missingFiles: "failed",
 } as const satisfies Record<string, StateName>
 
+/** The state of an object an action was refused in (core/contracts/availability.py): a series, a download task. */
+export const AVAILABILITY_STATES = {
+  idle: "idle", scanning: "sync", pending: "queued", downloading: "download", processing: "download", completed: "done",
+  error: "failed", absent: "absent",
+} as const satisfies Record<string, StateName>
+
 /** A task of the slicing of a torrent compilation (modules/slicing: slicing_tasks.status). */
 export const SLICING_STATES = {
   pending: "queued", slicing: "slice", completed: "done", error: "failed",

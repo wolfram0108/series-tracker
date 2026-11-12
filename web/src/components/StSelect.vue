@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from "vue"
 import { computeDropStyle, type DropStyle } from "../composables/useDropAnchor"
+import { t } from "../i18n"
 
 // Select-айтем внутри группы (constructor-item-select). Безрамочный,
 // показывает выбранное + шеврон. Список рендерится через <Teleport to="body">
@@ -12,7 +13,7 @@ const props = withDefaults(defineProps<{
   modelValue?: unknown
   options: Opt[]
   placeholder?: string
-}>(), { placeholder: "Выберите" })
+}>(), { placeholder: t("common.choose") })
 
 const emit = defineEmits<{ "update:modelValue": [unknown] }>()
 const open = ref(false)

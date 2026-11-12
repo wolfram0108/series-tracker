@@ -11,7 +11,7 @@ import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { fetchProfiles } from "../../composables/sourceCalls"
 import { useSeriesSources } from "../../composables/useSeriesSources"
-import { t } from "../../i18n"
+import { t, tn } from "../../i18n"
 import { useSeriesStore, type Series } from "../../stores/series"
 import { compareNames } from "../../lib/collate"
 
@@ -226,7 +226,7 @@ async function searchTMDB() {
     const { data } = await api.POST("/api/tmdb/search", { body: { query: tmdbSearchQuery.value } } as never)
     const res = (data ?? null) as { success?: boolean; results?: TmdbResult[]; error?: string } | null
     if (res?.success) tmdbResults.value = res.results ?? []
-    else toast.add({ severity: "warn", summary: "TMDB", detail: `Ошибка поиска: ${res?.error ?? "?"}`, life: 4000 })
+    else toast.add({ severity: "warn", summary: "TMDB", detail: t("seriesForm.tmdbSearchFailed", { error: res?.error ?? "?" }), life: 4000 })
   } finally {
     tmdbLoading.value = false
   }
@@ -255,9 +255,9 @@ async function copyCatalogName() {
   if (!tmdbCatalogName.value) return
   try {
     await navigator.clipboard.writeText(tmdbCatalogName.value)
-    toast.add({ severity: "success", summary: "Скопировано", detail: "Имя каталога в буфере", life: 2500 })
+    toast.add({ severity: "success", summary: t("common.copied"), detail: t("seriesForm.catalogCopied"), life: 2500 })
   } catch {
-    toast.add({ severity: "error", summary: "Ошибка", detail: "Не удалось скопировать", life: 2500 })
+    toast.add({ severity: "error", summary: t("common.error"), detail: t("common.copyFailed"), life: 2500 })
   }
 }
 
@@ -271,7 +271,7 @@ const canSave = computed(() => {
 async function save(): Promise<boolean> {
   showValidation.value = true
   if (!canSave.value) {
-    toast.add({ severity: "error", summary: "Проверьте поля", detail: "Заполните обязательные поля.", life: 4000 })
+    toast.add({ severity: "error", summary: t("common.checkFields"), detail: t("properties.fillRequired"), life: 4000 })
     return false
   }
   emit("saving", true)
@@ -313,10 +313,10 @@ async function save(): Promise<boolean> {
     }
     const ok = await request(
       api.POST("/api/series/{series_id}", { params: { path: { series_id: Number(s.id) } }, body: payload } as never),
-      { errorMessage: "Ошибка сохранения" },
+      { errorMessage: t("properties.saveFailed") },
     )
     if (ok !== null) {
-      toast.add({ severity: "success", summary: "Сохранено", detail: "Изменения приняты в обработку", life: 3000 })
+      toast.add({ severity: "success", summary: t("properties.saved"), detail: t("properties.savedDetail"), life: 3000 })
       return true
     }
     return false
@@ -336,45 +336,45 @@ onMounted(() => {
   <div class="status-properties">
     <!-- Информация -->
     <div class="modern-fieldset">
-      <div class="fieldset-header"><span class="fieldset-title">Информация о сериале</span></div>
+      <div class="fieldset-header"><span class="fieldset-title">{{ t("seriesForm.infoTitle") }}</span></div>
       <div class="fieldset-content">
         <div class="add-grid-2">
           <StGroup :state="nameState">
             <StIcon icon="pi pi-pencil" />
-            <StInput v-model="form.name" label="Название (RU)" />
+            <StInput v-model="form.name" :label="t('seriesForm.nameRu')" />
           </StGroup>
           <StGroup :state="nameEnState">
             <StIcon icon="pi pi-language" />
-            <StInput v-model="form.name_en" label="Название (EN)" kind="filename" />
+            <StInput v-model="form.name_en" :label="t('seriesForm.nameEn')" kind="filename" />
           </StGroup>
         </div>
         <div class="add-grid-2 mt-3">
           <StGroup :state="savePathState">
             <StIcon icon="pi pi-folder-open" />
-            <StInput v-model="form.save_path" label="Путь сохранения" kind="path" />
+            <StInput v-model="form.save_path" :label="t('seriesForm.savePath')" kind="path" />
             <SavedPathDropdown :catalog-name="tmdbCatalogName" @select="form.save_path = $event" />
           </StGroup>
           <StGroup :state="seasonState" :class="{ 'is-disabled': isSeasonless }">
             <StIcon icon="pi pi-hashtag" />
-            <StInput v-model="form.season" label="Сезон (формат s01)" />
+            <StInput v-model="form.season" :label="t('seriesForm.season')" />
           </StGroup>
         </div>
         <div v-if="s.planned_save_path" class="relocation-planned">
           {{ t("series.relocation.planned", { path: String(s.save_path ?? "") }) }}
         </div>
         <div v-if="form.save_path && !isAbsolutePath(form.save_path)" class="add-error">
-          Путь должен быть абсолютным и начинаться с «/», например /nas/...
+          {{ t("seriesForm.savePathAbsolute") }}
         </div>
 
         <!-- оверрайды качества/разрешения -->
         <div class="add-grid-2 mt-3">
           <StGroup>
             <StIcon icon="pi pi-video" />
-            <StInput v-model="form.quality_override" label="Качество (ручной ввод)" kind="filename" />
+            <StInput v-model="form.quality_override" :label="t('seriesForm.qualityOverride')" kind="filename" />
           </StGroup>
           <StGroup>
             <StIcon icon="pi pi-desktop" />
-            <StInput v-model="form.resolution_override" label="Разрешение (ручной ввод)" kind="filename" />
+            <StInput v-model="form.resolution_override" :label="t('seriesForm.resolutionOverride')" kind="filename" />
           </StGroup>
         </div>
 
@@ -398,18 +398,18 @@ onMounted(() => {
       <div class="fieldset-content">
         <label class="modern-form-check">
           <input v-model="isSeasonless" type="checkbox" class="form-switch-input" />
-          <span class="modern-form-check-label">Раздача содержит несколько сезонов (или сезон не важен)</span>
+          <span class="modern-form-check-label">{{ t("seriesForm.seasonless") }}</span>
         </label>
       </div>
     </div>
 
     <!-- Выбор качества (торрент, по tracker_info.ui_features) -->
     <div v-if="!isVideo && qualitySelector === 'anilibria'" class="modern-fieldset">
-      <div class="fieldset-header"><span class="fieldset-title">Выбор качества</span></div>
+      <div class="fieldset-header"><span class="fieldset-title">{{ t("seriesForm.qualityChoice") }}</span></div>
       <div class="fieldset-content">
         <div v-if="qualityOptionsAnilibria.length" class="field-group">
           <StGroup>
-            <div class="constructor-item item-label">Качество</div>
+            <div class="constructor-item item-label">{{ t("common.quality") }}</div>
             <StSelect
               :model-value="form.quality"
               :options="qualityOptionsAnilibria"
@@ -417,16 +417,16 @@ onMounted(() => {
             />
           </StGroup>
         </div>
-        <div v-else-if="!siteTorrentsLoading" class="add-error">Качества не найдены</div>
+        <div v-else-if="!siteTorrentsLoading" class="add-error">{{ t("seriesForm.qualityNotFound") }}</div>
       </div>
     </div>
     <div v-if="!isVideo && qualitySelector === 'astar'" class="modern-fieldset">
-      <div class="fieldset-header"><span class="fieldset-title">Выбор качества</span></div>
+      <div class="fieldset-header"><span class="fieldset-title">{{ t("seriesForm.qualityChoice") }}</span></div>
       <div class="fieldset-content">
         <template v-for="ep in sortedQualityOptionsKeys" :key="ep">
           <div v-if="astarQ[ep] && astarQ[ep].length > 1" class="field-group mt-2">
             <StGroup>
-              <div class="constructor-item item-label">Эпизоды {{ ep }}</div>
+              <div class="constructor-item item-label">{{ t("seriesForm.episodeGroup", { ep }) }}</div>
               <StSelect
                 :model-value="qualityByEpisodes[ep]"
                 :options="astarQ[ep].map((q) => ({ label: q, value: q }))"
@@ -436,40 +436,40 @@ onMounted(() => {
           </div>
         </template>
         <div v-if="!siteTorrentsLoading && !astarHasAlternatives" class="fieldset-hint">
-          Для данного релиза нет альтернативных версий.
+          {{ t("seriesForm.noAlternatives") }}
         </div>
       </div>
     </div>
 
     <!-- Доступные раздачи с сайта (торрент) -->
     <div v-if="!isVideo" class="modern-fieldset">
-      <div class="fieldset-header"><span class="fieldset-title">Раздачи с сайта (по выбранному качеству)</span></div>
+      <div class="fieldset-header"><span class="fieldset-title">{{ t("properties.siteTorrentsTitle") }}</span></div>
       <div class="fieldset-content">
         <div v-if="siteTorrentsLoading" class="status-loading">
-          <i class="pi pi-spin pi-spinner" /> Обновляем список с сайта…
+          <i class="pi pi-spin pi-spinner" /> {{ t("properties.siteTorrentsLoading") }}
         </div>
         <template v-else>
           <div class="div-table table-site-torrents">
             <div class="div-table-header">
               <div class="div-table-cell">ID</div>
-              <div class="div-table-cell">Ссылка</div>
-              <div class="div-table-cell">Дата</div>
-              <div class="div-table-cell">Эпизоды</div>
-              <div class="div-table-cell">Качество</div>
+              <div class="div-table-cell">{{ t("common.link") }}</div>
+              <div class="div-table-cell">{{ t("common.date") }}</div>
+              <div class="div-table-cell">{{ t("common.episodes") }}</div>
+              <div class="div-table-cell">{{ t("common.quality") }}</div>
             </div>
             <div class="div-table-body">
-              <div v-for="(t, i) in filteredSiteTorrents" :key="t.torrent_id ?? i" class="div-table-row" :class="{ 'row-stale': siteDataIsStale }">
-                <div class="div-table-cell">{{ t.torrent_id }}</div>
-                <div class="div-table-cell">{{ t.link }}</div>
-                <div class="div-table-cell">{{ t.date_time }}</div>
-                <div class="div-table-cell">{{ t.episodes }}</div>
-                <div class="div-table-cell">{{ t.quality }}</div>
+              <div v-for="(tor, i) in filteredSiteTorrents" :key="tor.torrent_id ?? i" class="div-table-row" :class="{ 'row-stale': siteDataIsStale }">
+                <div class="div-table-cell">{{ tor.torrent_id }}</div>
+                <div class="div-table-cell">{{ tor.link }}</div>
+                <div class="div-table-cell">{{ tor.date_time }}</div>
+                <div class="div-table-cell">{{ tor.episodes }}</div>
+                <div class="div-table-cell">{{ tor.quality }}</div>
               </div>
-              <div v-if="!filteredSiteTorrents.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">Раздач не найдено</div></div>
+              <div v-if="!filteredSiteTorrents.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">{{ t("properties.torrentsNone") }}</div></div>
             </div>
           </div>
           <small v-if="siteDataIsStale" class="add-error" style="display: block; margin-top: 8px">
-            Не удалось обновить данные с сайта — показана последняя сохранённая версия.
+            {{ t("properties.siteStale") }}
           </small>
         </template>
       </div>
@@ -477,12 +477,12 @@ onMounted(() => {
 
     <!-- TMDB -->
     <div class="modern-fieldset">
-      <div class="fieldset-header"><span class="fieldset-title">Синхронизация с TMDB</span></div>
+      <div class="fieldset-header"><span class="fieldset-title">{{ t("seriesForm.tmdbSync") }}</span></div>
       <div class="fieldset-content">
         <div class="input-group mb-3">
-          <input v-model="tmdbSearchQuery" type="text" class="form-control" placeholder="Название сериала" @keyup.enter="searchTMDB" />
+          <input v-model="tmdbSearchQuery" type="text" class="form-control" :placeholder="t('seriesForm.tmdbPlaceholder')" @keyup.enter="searchTMDB" />
           <button type="button" class="input-group-btn" :disabled="tmdbLoading" @click="searchTMDB">
-            <i class="pi" :class="tmdbLoading ? 'pi-spin pi-spinner' : 'pi-search'" /> Найти
+            <i class="pi" :class="tmdbLoading ? 'pi-spin pi-spinner' : 'pi-search'" /> {{ t("common.find") }}
           </button>
         </div>
 
@@ -498,20 +498,20 @@ onMounted(() => {
               <span class="card-title">{{ tmdbName(res) }} <small style="opacity: 0.6">({{ res.year }})</small></span>
               <div class="path-line tmdb-pills">
                 <span v-if="res.original_name" class="path-pill">
-                  <span class="path-pill-label">Оригинал:</span>
+                  <span class="path-pill-label">{{ t("seriesForm.originalLabel") }}</span>
                   <span class="path-pill-value">{{ res.original_name }}</span>
                 </span>
                 <span v-if="tmdbSelected && tmdbSelected.id === res.id" class="path-pill">
-                  <span class="path-pill-label">Сезон {{ tmdbSeasonNumber }}:</span>
-                  <span class="path-pill-value">{{ tmdbEpisodeCount }} эпизодов</span>
+                  <span class="path-pill-label">{{ t("seriesForm.seasonPill", { n: tmdbSeasonNumber }) }}</span>
+                  <span class="path-pill-value">{{ tn("seriesForm.episodes", tmdbEpisodeCount) }}</span>
                 </span>
               </div>
             </div>
             <div class="pills-column">
               <div class="quality-badge">ID: {{ res.id }}</div>
-              <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill"><i class="pi pi-check-circle" /><span>Выбран</span></div>
-              <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill pill-link" title="Сбросить" @click.stop="clearTMDBSelection">
-                <i class="pi pi-times" /><span>Сброс</span>
+              <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill"><i class="pi pi-check-circle" /><span>{{ t("seriesForm.chosen") }}</span></div>
+              <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill pill-link" :title="t('common.reset')" @click.stop="clearTMDBSelection">
+                <i class="pi pi-times" /><span>{{ t("seriesForm.clearChoice") }}</span>
               </div>
             </div>
           </div>
@@ -525,21 +525,21 @@ onMounted(() => {
           <div class="info-column">
             <span class="card-title">{{ tmdbName(tmdbSelected) }} <small style="opacity: 0.6">({{ tmdbSelected.year }})</small></span>
             <div class="path-line">
-              <span class="path-pill"><span class="path-pill-label">Сезон {{ tmdbSeasonNumber }}:</span><span class="path-pill-value">{{ tmdbEpisodeCount }} эпизодов</span></span>
+              <span class="path-pill"><span class="path-pill-label">{{ t("seriesForm.seasonPill", { n: tmdbSeasonNumber }) }}</span><span class="path-pill-value">{{ tn("seriesForm.episodes", tmdbEpisodeCount) }}</span></span>
             </div>
           </div>
           <div class="pills-column">
             <div class="quality-badge">ID: {{ tmdbSelected.id }}</div>
-            <div class="pill"><i class="pi pi-check-circle" /><span>Выбран</span></div>
-            <div class="pill pill-link" title="Сбросить" @click.stop="clearTMDBSelection"><i class="pi pi-times" /><span>Сброс</span></div>
+            <div class="pill"><i class="pi pi-check-circle" /><span>{{ t("seriesForm.chosen") }}</span></div>
+            <div class="pill pill-link" :title="t('common.reset')" @click.stop="clearTMDBSelection"><i class="pi pi-times" /><span>{{ t("seriesForm.clearChoice") }}</span></div>
           </div>
         </div>
 
         <div v-if="tmdbSelected && tmdbCatalogName" class="tmdb-catalog">
-          <label class="tmdb-catalog-label">Имя каталога</label>
+          <label class="tmdb-catalog-label">{{ t("seriesForm.catalogName") }}</label>
           <div class="input-group">
             <input class="form-control" :value="tmdbCatalogName" readonly @focus="($event.target as HTMLInputElement).select()" />
-            <button type="button" class="input-group-btn" title="Скопировать" @click="copyCatalogName"><i class="pi pi-clipboard" /></button>
+            <button type="button" class="input-group-btn" :title="t('common.copy')" @click="copyCatalogName"><i class="pi pi-clipboard" /></button>
           </div>
         </div>
       </div>

@@ -8,6 +8,7 @@ import StInput from "../StInput.vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { useAuthStore } from "../../stores/auth"
+import { t, tAround } from "../../i18n"
 
 // Вкладка «Аккаунт»: смена пароля администратора. POST /api/auth/password
 // (за «замком»): обновляет хэш. Текущий пароль не запрашивается — активная
@@ -30,6 +31,8 @@ const next2State = computed<VState>(() => {
   if (!touched(next2.value)) return null
   return next2.value === next.value && next.value.length >= 8 ? "valid" : "invalid"
 })
+const hint = tAround("account.hint", "name")
+
 const canSubmit = computed(
   () => next.value.length >= 8 && next.value === next2.value)
 
@@ -37,10 +40,10 @@ async function submit(): Promise<void> {
   attempted.value = true
   if (!canSubmit.value) {
     toast.add({
-      severity: "warn", summary: "Проверьте поля", life: 4000,
+      severity: "warn", summary: t("common.checkFields"), life: 4000,
       detail: next.value.length < 8
-        ? "Новый пароль не короче 8 символов"
-        : "Пароли не совпадают",
+        ? t("account.error.short")
+        : t("common.passwordsMismatch"),
     })
     return
   }
@@ -48,11 +51,11 @@ async function submit(): Promise<void> {
     api.POST("/api/auth/password", {
       body: { new: next.value },
     } as never),
-    { errorMessage: "Не удалось сменить пароль" },
+    { errorMessage: t("account.error.change") },
   )
   if (ok === null) return
-  toast.add({ severity: "success", summary: "Готово",
-    detail: "Пароль изменён", life: 4000 })
+  toast.add({ severity: "success", summary: t("common.done"),
+    detail: t("account.changed"), life: 4000 })
   next.value = ""
   next2.value = ""
   attempted.value = false
@@ -62,21 +65,19 @@ async function submit(): Promise<void> {
 <template>
   <div class="settings-account">
     <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-lock"></i> Смена пароля</div>
+      <div class="fieldset-header"><i class="pi pi-lock"></i> {{ t("account.section") }}</div>
       <div class="fieldset-content">
         <StGroup :state="nextState">
           <StIcon icon="pi pi-key" />
-          <StInput v-model="next" label="Новый пароль (от 8 символов)" type="password" />
+          <StInput v-model="next" :label="t('account.new')" type="password" />
         </StGroup>
         <StGroup :state="next2State">
           <StIcon icon="pi pi-key" />
-          <StInput v-model="next2" label="Повтор нового пароля" type="password" />
+          <StInput v-model="next2" :label="t('account.repeat')" type="password" />
         </StGroup>
-        <small class="fieldset-hint">
-          Вход в веб-интерфейс под пользователем <b>{{ auth.adminName }}</b>.
-        </small>
+        <small class="fieldset-hint">{{ hint[0] }}<b>{{ auth.adminName }}</b>{{ hint[1] }}</small>
         <div class="account-actions">
-          <Button label="Сменить пароль" icon="pi pi-check"
+          <Button :label="t('account.change')" icon="pi pi-check"
                   :loading="loading" @click="submit" />
         </div>
       </div>

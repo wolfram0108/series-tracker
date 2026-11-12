@@ -28,6 +28,15 @@ describe("reasonText", () => {
     expect(reasonText({ code: "suspect", params: { text: cause } })).toBe("подозрительно: критично: тишина")
   })
 
+  it("words a refused action and the state of its object, and shows codes it does not know as they came", () => {
+    expect(reasonText({ code: "not_allowed", params: { action: "sync", state: "scanning" } }))
+      .toBe("Действие «синхронизация» недоступно: сейчас «синхронизация»")
+    expect(reasonText({ code: "not_allowed", params: { action: "cancel_download", state: "completed" } }))
+      .toBe("Действие «отмена загрузки» недоступно: сейчас «готово»")
+    expect(reasonText({ code: "not_allowed", params: { action: "later", state: "unseen" } }))
+      .toBe("Действие «later» недоступно: сейчас «unseen»")
+  })
+
   it("says nothing when there is no reason", () => {
     expect(reasonText(null)).toBe("")
     expect(reasonText("")).toBe("")
