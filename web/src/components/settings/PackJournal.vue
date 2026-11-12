@@ -2,6 +2,7 @@
 import { computed } from "vue"
 import type { components } from "../../api/schema"
 import { t, type MessageKey } from "../../i18n"
+import { stateLabel } from "../../lib/states"
 
 type Journal = components["schemas"]["PackJournal"]
 
@@ -25,7 +26,7 @@ const clock = (iso: string | undefined): string => (iso ? new Date(iso).toLocale
     <div class="queue-row work-head">
       <span class="queue-title work-title"><span class="work-series">#{{ journal.series_id }}</span>
         <span>{{ journal.series_name }} · {{ t(`pack.journal.kind.${journal.kind ?? "sync"}` as MessageKey) }}</span></span>
-      <span class="pill">{{ t("pack.journal.going") }}</span>
+      <span class="pill" data-state="apply">{{ stateLabel("apply") }}</span>
     </div>
     <div class="work-facts">
       <span class="journal-count">{{ t("pack.journal.steps", { done, of }) }}</span>

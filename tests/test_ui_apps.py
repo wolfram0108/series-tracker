@@ -13,7 +13,7 @@ from playwright.async_api import expect
 
 from core import container as mkv
 
-from ui_stand import SERIES, SERIES_EN, _pick, lines_of, text, ui  # noqa: F401 - the fixture
+from ui_stand import SERIES, SERIES_EN, _pick, lines_of, state, text, ui  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.ui
 
@@ -78,7 +78,7 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
     await expect(source.locator(".source-place")).to_have_text("半日 · 万界独尊 (2021)")
     await expect(source.locator(".source-app-card input")).to_have_value("app://banri/219017")
     await _pick(page, source.locator(".item-select").first, "серии 半日")
-    await expect(source.locator(".source-state")).to_have_text(text("sources.state.ready"), timeout=60_000)
+    await expect(source.locator(".source-state")).to_have_text(state("readDone"), timeout=60_000)
     await expect(source.locator(".player-tab")).to_have_text(["BLU1"])  # a line is named by its code
     # The search stays at hand in the sources: the card already added is marked by its place.
     sources = page.locator(".sources")
@@ -91,7 +91,7 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
     await page.locator(".source-add button.btn-add", has_text=text("sources.add.button")).click()
     dub = page.locator(".source-card").nth(1)
     await _pick(page, dub.locator(".item-select").first, "серии AnimeVost")
-    await expect(dub.locator(".source-state")).to_have_text(text("sources.state.ready"), timeout=60_000)
+    await expect(dub.locator(".source-state")).to_have_text(state("readDone"), timeout=60_000)
     await page.get_by_label("Название (RU)").fill(SERIES)
     await page.get_by_label("Название (EN)").fill(SERIES_EN)
     await page.get_by_label("Путь сохранения").fill(ui.library)
@@ -104,7 +104,7 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
 
     await ui.open_output()
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
     await ui.shot("a3-first-sync")
     view = await ui.check(series_id)
     (asset,) = view["assets"]
@@ -129,7 +129,7 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
     await ui.shot("a4-reference-order")
     ui.later()
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
     view = await ui.check(series_id)
     (asset,) = view["assets"]
     # The user's queue goes before the frame: the picture is the voice-over's (the model's own, not the 1080 of the line).

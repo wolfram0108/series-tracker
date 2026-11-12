@@ -53,6 +53,12 @@ def text(key: str, **values) -> str:
     return said
 
 
+def state(name: str) -> str:
+    """The word of a state of the vocabulary standing on its own (a pill): its first letter raised (web/src/lib/states.ts)."""
+    word = text(f"state.{name}")
+    return word[:1].upper() + word[1:]
+
+
 class _LoopServer(uvicorn.Server):
     """A server in the loop of the stand: it tells that it listens by an event, not by a pause."""
 
@@ -168,7 +174,7 @@ class UiStand(AppStand):
         """A profile of the constructor, made by hand: each rule its conditions and actions, every template dragged
         block by block from the palette. A rule: {"name", "if": [blocks], "then": [(kind, blocks or value)]}."""
         page = self.page
-        await self.settings("Фильтры VK")
+        await self.settings("Правила")
         if not await page.locator("#new-profile-name").is_visible():
             await page.locator("button.accordion-button").first.click()
         await page.locator("#new-profile-name").fill(name)
@@ -219,7 +225,7 @@ class UiStand(AppStand):
             card = page.locator(".source-card").nth(index)
             await card.wait_for()
             await _pick(page, card.locator(".item-select").first, profile)
-            await expect(card.locator(".source-state")).to_have_text(text("sources.state.ready"), timeout=60_000)
+            await expect(card.locator(".source-state")).to_have_text(state("readDone"), timeout=60_000)
         await page.get_by_label("Название (RU)").fill(name)
         await page.get_by_label("Название (EN)").fill(name_en)
         await page.get_by_label("Путь сохранения").fill(self.library)
@@ -256,7 +262,7 @@ class UiStand(AppStand):
         await expect(cards).to_have_count(before + 1)
         card = cards.nth(before)
         await _pick(page, card.locator(".item-select").first, f"серии {release.voice}")
-        await expect(card.locator(".source-state")).to_have_text(text("sources.state.ready"), timeout=60_000)
+        await expect(card.locator(".source-state")).to_have_text(state("readDone"), timeout=60_000)
 
     async def remove_source(self, slug: str) -> None:
         """A source taken out of the series in its properties («Удалить» on its card): at once, by its own request."""

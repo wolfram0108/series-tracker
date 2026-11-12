@@ -106,7 +106,7 @@ afterEach(() => {
 describe("StatusOutput", () => {
   it("shows the seasons and their episodes as cards, each with the source and the resolution of its reference", async () => {
     const w = mountOutput()
-    expect(w.text()).toContain(t("output.loading"))
+    expect(w.text()).toContain(t("common.fetching"))
     await flushPromises()
     await frame()
     await flushPromises()
@@ -476,7 +476,7 @@ describe("StatusOutput", () => {
     givePlan(cutting)
     const w = mountOutput()
     await flushPromises()
-    expect(w.find(".episode-card[data-episode='1']").classes()).toContain("is-align")
+    expect(w.find(".episode-card[data-episode='1']").attributes("data-state")).toBe("align")
     expect(w.find(".output-filter.is-working strong").text()).toBe("1")
   })
 
@@ -489,7 +489,7 @@ describe("StatusOutput", () => {
     const block = w.find(".compilation-block")
     expect(block.exists()).toBe(true)
     const cardsHere = block.findAll(".episode-card")
-    expect(cardsHere.map((card) => card.classes().find((name) => name.startsWith("is-")))).toEqual(["is-align", "is-off"])
+    expect(cardsHere.map((card) => card.attributes("data-state"))).toEqual(["align", "off"])
     expect(cardsHere[1].find(".card-note").text()).toBe("не выше своей серии")
     expect(cardsHere[1].find(".power-switch input").attributes("disabled")).toBeDefined()  // the compilation is no better
     await cardsHere[0].find(".power-switch input").setValue(false)

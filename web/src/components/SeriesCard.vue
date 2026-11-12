@@ -4,7 +4,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import type { Series } from "../stores/series"
 import { useSeriesReadsStore } from "../stores/seriesReads"
 import { progressText } from "../lib/sources"
-import { t, type MessageKey } from "../i18n"
+import { t } from "../i18n"
+import { SERIES_STATES, stateIcon, stateLabel, stateOf } from "../lib/states"
 
 // Карточка сериала — кастом-островок. Порт логики из app.js
 // (getLayerStyle/getAnimationClass/seriesWithPills) на реальную модель серии.
@@ -21,13 +22,17 @@ const layerHierarchy = [
   "waiting", "ready", "downloading", "queued", "slicing", "aligning", "packing", "activating",
   "checking", "renaming", "metadata", "scanning", "viewing", "error",
 ]
-// The words of a status are `series.status.<name>`; `scanning` is an open run of a sync, shown as processing.
-const stateIcons: Record<string, string> = {
-  waiting: "pi-clock", viewing: "pi-eye", scanning: "pi-th-large", metadata: "pi-file", renaming: "pi-pencil",
-  checking: "pi-sync", activating: "pi-bolt", downloading: "pi-download", idle: "pi-pause", queued: "pi-hourglass",
-  ready: "pi-database", error: "pi-exclamation-triangle", slicing: "pi-clone", aligning: "pi-sliders-h", packing: "pi-box",
+// A status of the series is a state of the vocabulary (lib/states.ts): its word, its icon, its colour; `scanning` is an
+// open run of a sync. A status the vocabulary does not know is shown as it came.
+const layerState = (layer: string) => stateOf(SERIES_STATES, layer) ?? undefined
+const stateTitle = (status: string) => {
+  const state = stateOf(SERIES_STATES, status)
+  return state ? stateLabel(state) : status
 }
-const stateTitle = (state: string) => (state in stateIcons ? t(`series.status.${state}` as MessageKey) : state)
+const iconOf = (status: string) => {
+  const state = stateOf(SERIES_STATES, status)
+  return state ? stateIcon(state) : ""
+}
 
 const states = computed(() => props.series.statuses ?? [])
 const busy = computed(() => Boolean(props.series.is_busy) || Boolean(props.saving))
@@ -111,7 +116,7 @@ const pills = computed(() => {
   const shown = Math.min(s.length, fitting.value)
   const out: { key: string; title: string; icon: string }[] = []
   if (shown < s.length) out.push({ key: "overflow", title: `+${s.length - shown}`, icon: "pi-ellipsis-h" })
-  s.slice(0, shown).forEach((k) => out.push({ key: k, title: stateTitle(k), icon: stateIcons[k] || "" }))
+  s.slice(0, shown).forEach((k) => out.push({ key: k, title: stateTitle(k), icon: iconOf(k) }))
   return out.reverse()
 })
 
@@ -145,6 +150,7 @@ const scanTime = computed(() => {
         :key="l"
         class="color-layer"
         :class="`layer-${l}`"
+        :data-state="layerState(l)"
         :style="layerStyle(l)"
       ></div>
     </div>
@@ -174,7 +180,7 @@ const scanTime = computed(() => {
       <div ref="pillsRow" class="status-pills-container">
         <div ref="measureRow" class="status-pills-measure" aria-hidden="true">
           <div v-for="k in states" :key="k" class="status-pill" :data-key="k">
-            <i class="pi" :class="stateIcons[k]"></i><span>{{ stateTitle(k) }}</span>
+            <i class="pi" :class="iconOf(k)"></i><span>{{ stateTitle(k) }}</span>
           </div>
           <div class="status-pill" data-key="overflow"><i class="pi pi-ellipsis-h"></i><span>+{{ states.length }}</span></div>
         </div>

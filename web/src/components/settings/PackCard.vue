@@ -3,6 +3,7 @@ import { computed } from "vue"
 import type { components } from "../../api/schema"
 import { t, type MessageKey } from "../../i18n"
 import SourceMark from "../status/output/SourceMark.vue"
+import { PACK_STAGES, PACK_STATES, stateLabel } from "../../lib/states"
 
 type Card = components["schemas"]["PackCard"]
 type Track = components["schemas"]["PackTrack"]
@@ -43,13 +44,13 @@ const title = (track: Track): string => t(`pack.track.${track.kind}` as MessageK
     <div class="queue-row work-head">
       <span class="queue-title work-title"><span class="work-series">#{{ card.series_id }}</span>
         <span>{{ card.series_name }} · {{ card.episode }}</span></span>
-      <span class="pill">{{ t(`pack.status.${card.status}` as MessageKey) }}</span>
+      <span class="pill" :data-state="PACK_STATES[card.status]">{{ stateLabel(PACK_STATES[card.status]) }}</span>
       <button v-if="card.status === 'failed'" type="button" class="work-remove" @click="emit('remove', card.id)">{{ t("download.remove") }}</button>
     </div>
 
     <div class="work-steps">
       <span v-for="stage in stages" :key="stage.name" class="work-step" :class="`is-${stage.state}`">
-        {{ t(`pack.stage.${stage.name}` as MessageKey) }}
+        {{ stateLabel(PACK_STAGES[stage.name]) }}
         <span v-if="(stage.seconds ?? 0) >= 0.5" class="work-step-time">{{ duration(stage.seconds) }}</span>
       </span>
     </div>

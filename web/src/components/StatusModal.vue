@@ -41,7 +41,7 @@ const tabs = computed(() => {
   const list = [{ value: "properties" as TabKey, label: "Свойства", icon: "pi-info-circle" }]
   list.push({ value: "composition", label: isVideo.value ? t("output.tab") : "Композиция", icon: "pi-sitemap" })
   if (isVideo.value) list.push({ value: "slicing", label: "Нарезка", icon: "pi-images" })
-  list.push({ value: "parser", label: t("status.tab.parser"), icon: "pi-filter" })
+  list.push({ value: "parser", label: t("rules.tab"), icon: "pi-filter" })
   list.push({ value: "history", label: "История", icon: "pi-history" })
   return list
 })

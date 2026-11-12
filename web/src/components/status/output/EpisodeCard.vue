@@ -4,6 +4,7 @@ import { inFrame } from "../../../lib/layout"
 import { t } from "../../../i18n"
 import type { Badge } from "../../../lib/compilations"
 import { pickOf, type Pick } from "../../../lib/selection"
+import { EPISODE_STATES, stateWord } from "../../../lib/states"
 import {
   cutPictureOf, refVariants, widestFitting, type EpisodeStatus, type EpisodeView, type SourceMark as Mark, type TrackCell,
 } from "../../../lib/output"
@@ -82,12 +83,13 @@ onMounted(() => {
 })
 onBeforeUnmount(() => observer?.disconnect())
 watch(variants, () => void nextTick(fit))
-const label = computed(() => t("output.episode.card", { n: props.view.episode, status: t(`output.status.${props.status}`) }))
+const label = computed(() => t("output.episode.card", { n: props.view.episode, status: stateWord(EPISODE_STATES[props.status]) }))
 </script>
 
 <template>
   <div
-    class="episode-card" :class="[`is-${status}`, { 'is-open': open, 'is-selected': selected }]" :data-season="view.season"
+    class="episode-card" :class="{ 'is-open': open, 'is-selected': selected }" :data-state="EPISODE_STATES[status]"
+    :data-season="view.season"
     :data-episode="view.episode" @click="clicked" @dblclick="selectable && emit('open')"
   >
     <!-- The whole card is the button: a press of it (or of Enter on it) comes up to the card as one click. -->
@@ -144,17 +146,9 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
 }
 .episode-card:hover { box-shadow: var(--card-hover-shadow); }
 .episode-card:has(.card-hit:focus-visible), .episode-card.is-open { outline: 0.1875rem solid var(--color-blue); outline-offset: 0.125rem; }
-.is-ready { background: linear-gradient(135deg, #4CAF50, #409444); }
-/* Put together in part: the ground and the stripes of the tokens (styles/tokens.css, --partial-*). */
-.is-partial {
-  background: linear-gradient(135deg, var(--partial-ground), var(--partial-ground-end));
-  --stripe: color-mix(in srgb, var(--partial-stripe) var(--partial-stripe-share), transparent);
-}
-.is-down { background: linear-gradient(135deg, #009688, #00796D); }
-.is-align { background: linear-gradient(135deg, var(--color-blue-1), color-mix(in srgb, var(--color-blue-1) 85%, black)); }
-.is-wait { background: linear-gradient(135deg, #f0f2f5, #e9ecef); }
-.is-error { background: linear-gradient(135deg, #dc3545, #c82333); }
-.is-off { background: linear-gradient(135deg, #6c757d, #5a6268); }
+.episode-card { background: linear-gradient(135deg, var(--tone), var(--tone-end)); }
+/* Put together in part: the stripes of the tokens (styles/tokens.css, --partial-*) over its ground. */
+.episode-card[data-state="partial"] { --stripe: color-mix(in srgb, var(--partial-stripe) var(--partial-stripe-share), transparent); }
 .card-hit { all: unset; position: absolute; inset: 0; cursor: pointer; }
 /* The lines let a press through to the button under them; only the switch takes it itself. */
 .card-in { position: relative; pointer-events: none; display: flex; flex-direction: column; gap: 0.3rem; padding: var(--card-pad); }

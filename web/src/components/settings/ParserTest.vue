@@ -9,6 +9,7 @@ import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 import { cardState, excludingRule, firedText, pillsOf, resolutionBadge } from "../../lib/rulesTest"
 import { progressText } from "../../lib/sources"
+import { stateLabel } from "../../lib/states"
 
 // The test of a profile: the rows of a page (a site, or a channel of VK) or the file names of a series, or titles
 // typed in the field, each with the answer of the profile. The numbers in the answers are the constructor's alone.
@@ -45,7 +46,7 @@ const working = computed(() => test.state.value === "asking" || test.state.value
 const fetchIcon = computed(() => (working.value ? "pi-spin pi-spinner" : dbId.value ? "pi-database" : "pi-globe"))
 const fetchLabel = computed(() => t(dbId.value ? "rulesTest.fetch.db" : "rulesTest.fetch.page"))
 const failed = computed(() => test.state.value === "failed" || test.error.value !== "")
-const failure = computed(() => test.error.value || reasonText(test.reason.value) || t("rulesTest.state.failed"))
+const failure = computed(() => test.error.value || reasonText(test.reason.value) || t("reason.read_failed"))
 
 async function fetchRows(): Promise<void> {
   loadedNames.value = null
@@ -93,9 +94,9 @@ function runTest(): Promise<void> {
             </div>
           </StGroup>
         </div>
-        <small v-if="test.state.value === 'asking'" class="fieldset-hint">{{ t("rulesTest.state.asking") }}</small>
+        <small v-if="test.state.value === 'asking'" class="fieldset-hint">{{ t("common.fetching") }}</small>
         <small v-else-if="test.state.value === 'reading'" class="fieldset-hint">
-          {{ test.progress.value ? progressText(test.progress.value) : t("rulesTest.state.reading") }}
+          {{ test.progress.value ? progressText(test.progress.value) : stateLabel("read") }}
         </small>
         <small v-else-if="failed" class="fieldset-hint">{{ failure }}</small>
         <small v-else-if="loadedNames !== null" class="fieldset-hint">{{ t("rulesTest.names.loaded", { n: loadedNames }) }}</small>

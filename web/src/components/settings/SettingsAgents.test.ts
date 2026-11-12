@@ -7,6 +7,7 @@ import { nextTick } from "vue"
 import SettingsAgents from "./SettingsAgents.vue"
 import { useQueuesStore, type PackCard } from "../../stores/queues"
 import { t } from "../../i18n"
+import { PACK_STATES, stateLabel } from "../../lib/states"
 
 const stages = (states: string[]) => ["queue", "build", "verify", "apply"].map((name, index) =>
   ({ name, state: states[index], seconds: 12 })) as PackCard["stages"]
@@ -31,7 +32,7 @@ describe("the queue of the packing in the window of agents", () => {
   afterEach(() => mounted?.unmount())
 
   it("says that no packing goes on while the queue is empty", () => {
-    expect(section().text()).toContain(t("agents.pack.empty"))
+    expect(section().text()).toContain(t("agents.empty"))
   })
 
   it("shows each container with its stages, its progress and its tracks as numbers of the season with what changed", async () => {
@@ -42,7 +43,7 @@ describe("the queue of the packing in the window of agents", () => {
 
     const cards = found.findAll(".pack-card")
     expect(cards).toHaveLength(2)
-    expect(cards[0].text()).toContain(t("pack.status.queued"))
+    expect(cards[0].text()).toContain(stateLabel(PACK_STATES.queued))
     expect(cards[1].classes()).toContain("is-running")
     expect(cards[1].text()).toContain("s01e704")
     expect(cards[1].text()).toContain("e704.mkv")
@@ -59,7 +60,7 @@ describe("the queue of the packing in the window of agents", () => {
     queues.setPack([task({ status: "built", stages: stages(["done", "done", "done", "pending"]), figures: { wait_s: 145 } })])
     await nextTick()
     const card = found.find(".pack-card")
-    expect(card.text()).toContain(t("pack.status.built"))
+    expect(card.text()).toContain(stateLabel(PACK_STATES.built))
     expect(card.find(".pack-waits").text()).toContain(t("pack.value.waits", { time: "2:25" }))
     expect(card.findAll(".work-step.is-active")).toHaveLength(0)
     expect(card.find(".progress-bar").exists()).toBe(false)
@@ -70,11 +71,11 @@ describe("the queue of the packing in the window of agents", () => {
     const found = section()
     queues.setPack([task({ status: "failed", waited: true })])
     await nextTick()
-    expect(found.text()).toContain(t("pack.status.failed"))
+    expect(found.text()).toContain(stateLabel(PACK_STATES.failed))
     expect(found.text()).toContain(t("pack.outcome.waited"))
     queues.setPack([])
     await nextTick()
-    expect(found.text()).toContain(t("agents.pack.empty"))
+    expect(found.text()).toContain(t("agents.empty"))
   })
 
   it("shows the journal of a sync step by step with the file under way, whichever episode's it is", async () => {
@@ -89,7 +90,7 @@ describe("the queue of the packing in the window of agents", () => {
     expect(journal.text()).toContain(t("pack.journal.steps", { done: 230, of: 507 }))
     expect(journal.text()).toContain(`${t("pack.journal.step.retag")}: Ten Thousand Worlds s01e394`)
     expect(journal.text()).toContain(t("pack.journal.kind.sync"))
-    expect(found.text()).not.toContain(t("agents.pack.empty"))
+    expect(found.text()).not.toContain(t("agents.empty"))
     queues.setJournals([])
     await nextTick()
     expect(found.find(".pack-journal").exists()).toBe(false)

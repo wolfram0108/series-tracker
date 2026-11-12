@@ -4,6 +4,7 @@ import type { Badge, CompilationView, CutState } from "../../../lib/compilations
 import type { SourceMark as Mark } from "../../../lib/output"
 import PowerSwitch from "./PowerSwitch.vue"
 import SourceMark from "./SourceMark.vue"
+import { CUT_STATES, stateWord } from "../../../lib/states"
 
 /** A compilation that covers the episode, as its row shows it. */
 export interface CompilationRow {
@@ -24,9 +25,6 @@ defineProps<{ rows: CompilationRow[]; marks: Record<number, Mark>; busy?: boolea
 const emit = defineEmits<{ (e: "member", key: string): void; (e: "retry"): void }>()
 
 const range = (row: CompilationRow) => `${row.view.ref.start}–${row.view.ref.end}`
-const CUT_PILL: Record<CutState, string> = {
-  wait: "pill-secondary", down: "pill-primary", align: "pill-primary", ready: "pill-success", error: "pill-danger",
-}
 </script>
 
 <template>
@@ -65,7 +63,7 @@ const CUT_PILL: Record<CutState, string> = {
           <td class="compilation-range">{{ range(row) }}</td>
           <td>
             <template v-if="row.member && row.cut">
-              <span class="pill" :class="CUT_PILL[row.cut]">{{ t(`output.cut.${row.cut}`) }}</span>
+              <span class="pill" :data-state="CUT_STATES[row.cut]">{{ stateWord(CUT_STATES[row.cut]) }}</span>
               <button v-if="row.cut === 'error'" type="button" class="action-btn btn-scan do-retry-cut" data-lever :disabled="busy"
                       @click="emit('retry')">{{ t("output.cut.retry") }}</button>
             </template>

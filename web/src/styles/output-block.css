@@ -12,13 +12,7 @@
 .meter { display: flex; align-items: center; gap: 0.5rem; flex: 1 1 14rem; min-inline-size: 0; }
 .meter-name { flex: none; inline-size: 3.6rem; color: var(--text-muted); font-size: 0.75rem; }
 .meter-bar { display: flex; flex: 1 1 auto; block-size: 0.5rem; border-radius: 4px; overflow: hidden; background: #dee2e6; }
-.meter-bar .is-done { background: #409444; }
-.meter-bar .is-down { background: #009688; }
-.meter-bar .is-align { background: var(--color-blue); }
-.meter-bar .is-wait { background: #ced4da; }
-.meter-bar .is-error { background: var(--color-red-1); }
-.meter-bar .is-absent { background: var(--color-yellow-1); }
-.meter-bar .is-off { background: var(--color-gray-600); }
+.meter-bar [data-state] { background: var(--tone-end); }
 .meter-text { font-size: 0.75rem; color: var(--color-gray-600); white-space: nowrap; }
 .season-settings { min-block-size: 2rem; padding-block: 0.25rem; font-size: 0.85rem; }
 .season-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem 1.25rem; }
@@ -39,14 +33,9 @@
 }
 .episode-tile::after { content: ""; position: absolute; inset-inline: 0; inset-block-end: 0; block-size: 0.25rem; background: var(--source); }
 .episode-tile:focus-visible, .episode-tile.is-open { outline: 0.125rem solid var(--color-blue); outline-offset: 0.0625rem; }
-.episode-tile.is-ready { background: linear-gradient(135deg, #4CAF50, #409444); color: #fff; }
-.episode-tile.is-down { background: linear-gradient(135deg, #009688, #00796D); color: #fff; }
-.episode-tile.is-align { background: var(--color-blue); color: #fff; }
-.episode-tile.is-wait { background: linear-gradient(135deg, #f0f2f5, #e9ecef); color: var(--color-gray-600); }
-.episode-tile.is-partial {
+.episode-tile { background: linear-gradient(135deg, var(--tone), var(--tone-end)); color: var(--tone-ink); }
+.episode-tile[data-state="partial"] {
   background: repeating-linear-gradient(45deg, var(--partial-ground) 0 0.4rem,
     color-mix(in srgb, var(--partial-stripe) var(--partial-stripe-share), var(--partial-ground)) 0.4rem 0.8rem);
   color: var(--color-gray-600);
 }
-.episode-tile.is-error { background: linear-gradient(135deg, #dc3545, #c82333); color: #fff; }
-.episode-tile.is-off { background: linear-gradient(135deg, #6c757d, #5a6268); color: #fff; }

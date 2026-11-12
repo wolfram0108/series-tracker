@@ -43,7 +43,7 @@ async def test_a_title_of_jisu_is_the_reference_its_frames_measured_once_through
     await ui.open_output()
     await ui.press_sync(series_id)
 
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(2)
     await ui.shot("m1-jisu-reference")
     view = await ui.check(series_id)
     # The picture of every file is the one of Jisu: its frame, measured on the picture, beats the label of the voice-over.
@@ -61,6 +61,6 @@ async def test_a_title_of_jisu_is_the_reference_its_frames_measured_once_through
     ui.later()
     await ui.press_sync(series_id)
 
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(2)
     assert ui.site.heads == measured  # read again twice, once after a restart: nothing measured anew
     await ui.check(series_id)

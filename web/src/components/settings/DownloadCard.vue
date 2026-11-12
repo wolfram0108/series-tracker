@@ -4,6 +4,7 @@ import type { components } from "../../api/schema"
 import { t, type MessageKey } from "../../i18n"
 import SourceMark from "../status/output/SourceMark.vue"
 import VoiceMark from "../status/output/VoiceMark.vue"
+import { DOWNLOAD_STAGES, DOWNLOAD_STATES, stateLabel, stateWord } from "../../lib/states"
 
 type Card = components["schemas"]["DownloadCard"]
 type Variant = components["schemas"]["DownloadVariant"]
@@ -37,9 +38,9 @@ const clock = (iso: string, seconds = true): string => iso
   ? new Date(iso).toLocaleTimeString("ru-RU", seconds ? undefined : { hour: "2-digit", minute: "2-digit" }) : ""
 const mark = (variant: Variant) => ({ n: variant.source_n || 0, color: variant.source_color ?? 0, place: variant.place ?? "" })
 const height = (variant: Variant): string => variant.height ? t("download.value.cap", { height: variant.height }) : ""
-const lineText = (line: Line): string => line.outcome === "done" ? t("download.done")
+const lineText = (line: Line): string => line.outcome === "done" ? stateWord("done")
   : line.outcome === "failed" ? t(`download.failed.${line.stage ?? "link"}` as MessageKey)
-    : t(`download.running.${active.value ?? "queue"}` as MessageKey)
+    : stateWord(DOWNLOAD_STAGES[active.value ?? "queue"])
 </script>
 
 <template>
@@ -54,13 +55,13 @@ const lineText = (line: Line): string => line.outcome === "done" ? t("download.d
         </template>
         <span v-else>{{ t(`download.kind.${card.need.kind}` as MessageKey) }}</span>
       </span>
-      <span class="pill">{{ t(`download.status.${card.status}` as MessageKey) }}</span>
+      <span class="pill" :data-state="DOWNLOAD_STATES[card.status]">{{ stateLabel(DOWNLOAD_STATES[card.status]) }}</span>
       <button v-if="ended" type="button" class="work-remove" @click="emit('remove', card.id)">{{ t("download.remove") }}</button>
     </div>
 
     <div class="work-steps">
       <span v-for="stage in stages" :key="stage.name" class="work-step" :class="`is-${stage.state}`">
-        {{ t(`download.stage.${stage.name}` as MessageKey) }}
+        {{ stateLabel(DOWNLOAD_STAGES[stage.name]) }}
         <span v-if="(stage.seconds ?? 0) >= 0.5" class="work-step-time">{{ duration(stage.seconds) }}</span>
       </span>
     </div>

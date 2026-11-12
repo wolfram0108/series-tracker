@@ -44,6 +44,47 @@
   --stripe-intensity: 0.3;
 }
 
+/* The colours of the states (lib/states.ts): a ground, the end of its gradient and the ink on it. An element takes
+   them by its data-state (styles/states.css). */
+:root {
+  --state-planned: #f0f2f5; --state-planned-end: #dfe3e8; --state-planned-ink: #495057;
+  --state-queued: #c9a66b; --state-queued-end: #b4905a; --state-queued-ink: #fff;
+  --state-done: #4caf50; --state-done-end: #409444; --state-done-ink: #fff;
+  --state-failed: #dc3545; --state-failed-end: #c82333; --state-failed-ink: #fff;
+  --state-stopped: #adb5bd; --state-stopped-end: #98a1aa; --state-stopped-ink: #212529;
+  --state-off: #6c757d; --state-off-end: #5a6268; --state-off-ink: #fff;
+  --state-paused: var(--state-stopped); --state-paused-end: var(--state-stopped-end); --state-paused-ink: var(--state-stopped-ink);
+  --state-built: #8bc98e; --state-built-end: #6fb873; --state-built-ink: #fff;
+  --state-partial: var(--partial-ground); --state-partial-end: var(--partial-ground-end); --state-partial-ink: #495057;
+  --state-absent: #ffda6a; --state-absent-end: #f5c84c; --state-absent-ink: #5c4400;
+  --state-noRow: #f8f9fa; --state-noRow-end: #adb5bd; --state-noRow-ink: #6c757d;
+  --state-noFile: var(--state-noRow); --state-noFile-end: var(--state-noRow-end); --state-noFile-ink: var(--state-noRow-ink);
+  --state-noReference: var(--state-failed); --state-noReference-end: var(--state-failed-end); --state-noReference-ink: var(--state-failed-ink);
+  --state-download: #009688; --state-download-end: #00796d; --state-download-ink: #fff;
+  --state-link: var(--state-download); --state-link-end: var(--state-download-end); --state-link-ink: #fff;
+  --state-remux: var(--state-download); --state-remux-end: var(--state-download-end); --state-remux-ink: #fff;
+  --state-check: var(--state-download); --state-check-end: var(--state-download-end); --state-check-ink: #fff;
+  --state-align: #0d6efd; --state-align-end: color-mix(in srgb, #0d6efd 85%, black); --state-align-ink: #fff;
+  --state-cut: var(--state-align); --state-cut-end: var(--state-align-end); --state-cut-ink: #fff;
+  --state-pack: #6f42c1; --state-pack-end: color-mix(in srgb, #6f42c1 85%, black); --state-pack-ink: #fff;
+  --state-build: var(--state-pack); --state-build-end: var(--state-pack-end); --state-build-ink: #fff;
+  --state-verify: var(--state-pack); --state-verify-end: var(--state-pack-end); --state-verify-ink: #fff;
+  --state-apply: var(--state-pack); --state-apply-end: var(--state-pack-end); --state-apply-ink: #fff;
+  --state-slice: #fd7e14; --state-slice-end: color-mix(in srgb, #fd7e14 85%, black); --state-slice-ink: #fff;
+  --state-read: #4fb3d9; --state-read-end: #3a9cc1; --state-read-ink: #fff;
+  --state-sync: #cf9772; --state-sync-end: #bd8561; --state-sync-ink: #fff;
+  --state-readDone: var(--state-done); --state-readDone-end: var(--state-done-end); --state-readDone-ink: #fff;
+  --state-notRead: var(--state-planned); --state-notRead-end: var(--state-planned-end); --state-notRead-ink: var(--state-planned-ink);
+  --state-noProfile: var(--state-absent); --state-noProfile-end: var(--state-absent-end); --state-noProfile-ink: var(--state-absent-ink);
+  --state-checking: #849dd5; --state-checking-end: #6f88c3; --state-checking-ink: #fff;
+  --state-activating: #7ec9d1; --state-activating-end: #6ab8bf; --state-activating-ink: #fff;
+  --state-metadata: #d2b575; --state-metadata-end: #c0a463; --state-metadata-ink: #fff;
+  --state-renaming: #a28ada; --state-renaming-end: #8b73c2; --state-renaming-ink: #fff;
+  --state-moving: var(--state-checking); --state-moving-end: var(--state-checking-end); --state-moving-ink: #fff;
+  --state-idle: var(--state-download); --state-idle-end: var(--state-download-end); --state-idle-ink: #fff;
+  --state-viewing: var(--state-off); --state-viewing-end: var(--state-off-end); --state-viewing-ink: #fff;
+}
+
 /* The colours of the sources of a series (series_sources.color is the index): told apart from each other and from the
    colours of the statuses, with white figures on them. */
 :root {

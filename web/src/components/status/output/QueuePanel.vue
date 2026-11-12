@@ -58,6 +58,6 @@ const hint = computed(() => props.hint ?? (props.queue === "reference" ? t("outp
       v-else-if="view" :rows="view.rows ?? []" :queue="queue" :marks="marks" :level="level !== 'episode'" :busy="busy"
       @order="emit('order', $event)" @allow="(row, allowed) => emit('allow', row, allowed)"
     />
-    <p v-else class="queue-note">{{ t("output.loading") }}</p>
+    <p v-else class="queue-note">{{ t("common.fetching") }}</p>
   </div>
 </template>

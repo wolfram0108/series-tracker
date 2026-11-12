@@ -207,7 +207,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
     <p v-if="output.failure.value" class="output-failure" role="alert">{{ output.failure.value }}</p>
     <p v-if="output.layoutFailure.value" class="output-failure output-layout-failure" role="alert">{{ output.layoutFailure.value }}</p>
 
-    <div v-if="output.loading.value && all.length === 0" class="empty-state">{{ t("output.loading") }}</div>
+    <div v-if="output.loading.value && all.length === 0" class="empty-state">{{ t("common.fetching") }}</div>
     <div v-else-if="all.length === 0" class="empty-state">{{ t("output.empty") }}</div>
     <template v-if="mode === 'compilations'">
       <div v-if="compilationSeasons.length === 0" class="empty-state">{{ t("output.compilations.empty") }}</div>

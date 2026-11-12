@@ -18,6 +18,7 @@ import StBtn from "./components/StBtn.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import Toast from "primevue/toast"
 import { t } from "./i18n"
+import { stateLabel } from "./lib/states"
 
 // Карточки сериала — по состояниям, по порядку.
 const cards = [
@@ -30,7 +31,7 @@ const cards = [
   { id: 7, name: "Ошибка", site: "kinozal.me", auto_scan_enabled: true, statuses: ["error"] },
   { id: 8, name: "Несколько статусов", site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "downloading", "metadata"] },
   { id: 9, name: "Готов + ожидание (VK)", site: "vk_video", auto_scan_enabled: true, statuses: ["ready", "waiting"], tmdb: { downloaded: 7, total: 24 } },
-  { id: 10, name: t("series.status.slicing"), site: "kinozal.me", auto_scan_enabled: true, statuses: ["slicing"] },
+  { id: 10, name: stateLabel("slice"), site: "kinozal.me", auto_scan_enabled: true, statuses: ["slicing"] },
   { id: 11, name: t("gallery.card.alignAndPack"), site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "aligning", "packing", "downloading"] },
 ]
 
@@ -39,9 +40,9 @@ const cards = [
 const simStates: Record<string, string[]> = {
   "Ожидание": ["waiting"],
   "Обработка": ["scanning"],
-  [t("series.status.slicing")]: ["slicing"],
-  [t("series.status.aligning")]: ["aligning"],
-  [t("series.status.packing")]: ["packing"],
+  [stateLabel("slice")]: ["slicing"],
+  [stateLabel("align")]: ["aligning"],
+  [stateLabel("pack")]: ["packing"],
   "Загрузка": ["downloading"],
   "Простой": ["idle"],
   "В очереди": ["queued"],
@@ -169,7 +170,7 @@ const settingsTab = ref("auth")
 const settingsTabs = [
   { label: "Авторизация", value: "auth", icon: "pi-key" },
   { label: "Источники", value: "sources", icon: "pi-wifi" },
-  { label: "Фильтры VK", value: "parser", icon: "pi-filter" },
+  { label: t("rules.tab"), value: "parser", icon: "pi-filter" },
   { label: "Агенты", value: "agents", icon: "pi-server" },
   { label: "Отладка", value: "debug", icon: "pi-wrench" },
 ]

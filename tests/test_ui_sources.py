@@ -8,7 +8,7 @@ import pytest
 from playwright.async_api import expect
 
 from core import container as mkv
-from ui_stand import text, ui  # noqa: F401 - the fixture
+from ui_stand import state, text, ui  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.ui
 
@@ -27,7 +27,7 @@ async def synced(ui, slugs: list[str], episodes, *, also=()) -> int:
     series_id = await ui.make_series(slugs, also=also)
     await ui.open_output()
     await ui.press_sync(series_id)
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(len(episodes))
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(len(episodes))
     return series_id
 
 
@@ -49,7 +49,7 @@ async def test_the_source_forgot_the_reference_the_file_stays_and_its_video_is_m
     ui.later()
     await ui.press_sync(series_id)
     assert ui.files() == files and made(ui) == before  # nothing goes, nothing is made
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(2)
     card = ui.page.locator(".episode-card[data-episode='1']")
     # The corner of presence: grey on the mark of the reference and on the cell of its track, green on the voice-over;
     # the marks of the legend stand for sources, not rows of a file, and carry none.
@@ -75,11 +75,11 @@ async def test_a_source_that_cut_its_list_short_leaves_the_files_whole_and_marks
     ui.later()
     await ui.press_sync(series_id)
     assert ui.files() == files and made(ui) == before
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(4)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(4)
     for episode, offline in ((2, 0), (3, 1), (4, 1)):
         await expect(ui.page.locator(f".episode-card[data-episode='{episode}'] .track-cell.presence.is-offline")).to_have_count(offline)
         await opened(ui, episode)
-        await expect(row(ui, episode, "AnimeVost").locator(".pill")).to_have_text(text("output.track.state.done"))
+        await expect(row(ui, episode, "AnimeVost").locator(".pill")).to_have_text(state("done"))
         await expect(row(ui, episode, "AnimeVost").locator(".track-offline")).to_have_count(offline)
     await ui.shot("s2-list-cut-short")
     view = await ui.check(series_id)
@@ -93,10 +93,10 @@ async def test_a_page_that_does_not_open_changes_nothing(ui):
     ui.later()
     await ui.press_sync(series_id)
     assert ui.files() == files and made(ui) == before
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(2)
     await opened(ui, 1)
     await ui.shot("s3-page-down")
-    await expect(row(ui, 1, "AnimeVost").locator(".pill")).to_have_text(text("output.track.state.done"))
+    await expect(row(ui, 1, "AnimeVost").locator(".pill")).to_have_text(state("done"))
     await ui.check(series_id)
 
 
@@ -117,7 +117,7 @@ async def test_the_source_of_the_reference_taken_out_keeps_the_file_until_the_us
     await expect(row(ui, 1, "AniStar").locator(".track-action")).to_have_text(text("output.action.delete"))
     await row(ui, 1, "AniStar").locator(".track-action.do-delete").click()
     await ui.press_sync(series_id)
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(1)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(1)
     view = await ui.check(series_id)
     (asset,) = view["assets"]
     assert asset["video"]["group"] == "AnimeVost" and asset["video"]["height"] == 480
@@ -135,7 +135,7 @@ async def test_a_compilation_gone_from_its_source_keeps_its_cuts_and_new_voice_o
     series_id = await ui.make_series(["ref"], also=("AnimeVost",))
     await ui.open_output()
     await ui.press_sync(series_id)
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(3)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(3)
     ui.site.drop_compilation("ref", 1)
     ui.site.release("dub", "AnimeVost")
     for number in (1, 2, 3):
@@ -146,7 +146,7 @@ async def test_a_compilation_gone_from_its_source_keeps_its_cuts_and_new_voice_o
     cuts = len([job for job in ui.daemon.jobs.values() if job["kind"] == "reverse"])
     served = len(ui.host.served)
     await ui.press_sync(series_id)
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(3)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(3)
     assert len([job for job in ui.daemon.jobs.values() if job["kind"] == "reverse"]) == cuts  # nothing cut again
     assert all(name.startswith("dub-") for name in ui.host.served[served:])  # only the new voice-overs downloaded
     view = await ui.check(series_id)
@@ -169,7 +169,7 @@ async def test_a_voice_over_that_was_only_in_a_gone_compilation_is_aligned_anew_
     series_id = await ui.make_series(["ref", "comp"], also=("AnimeVost",))
     await ui.open_output()
     await ui.press_sync(series_id)
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(2)
     view = await ui.check(series_id)
     assert all(asset["video"]["cut_of"] and asset["video"]["group"] == "Kansai" for asset in view["assets"])
     await ui.remove_source("comp")
@@ -179,7 +179,7 @@ async def test_a_voice_over_that_was_only_in_a_gone_compilation_is_aligned_anew_
     await ui.add_source("hd")
     await ui.tab(text("output.tab"))
     await ui.press_sync(series_id)
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(2)
     view = await ui.check(series_id)
     for asset in view["assets"]:
         assert asset["video"]["height"] == 2160 and asset["video"]["group"] == "AnimeVost"
@@ -215,7 +215,7 @@ async def test_a_player_that_stopped_giving_the_video_changes_nothing_in_the_fil
     ui.later()
     await ui.press_sync(series_id)
     assert ui.files() == files and made(ui) == before
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(2)
     await opened(ui, 1)
     await ui.shot("s8-player-silent")
     await ui.check(series_id)

@@ -13,6 +13,7 @@ import { sharing } from "../../../lib/sharing"
 import VoiceOrder from "../VoiceOrder.vue"
 import { badgeOf, cutOf, cutOverride, membersOf, memberOf, takes, type CompilationView, type CutItem } from "../../../lib/compilations"
 import { pickOf, type Pick } from "../../../lib/selection"
+import { EPISODE_STATES, stateWord, TRACK_STATES, type StateName } from "../../../lib/states"
 import GroupOutline from "./GroupOutline.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
@@ -70,7 +71,7 @@ const items = sharing(() => props.episodes.map((view) => {
   const mark = source == null ? undefined : props.marks[source]
   return {
     view, cells, status, file: fileNamesOf(props.names, view.season, view.episode)[0],
-    label: t("output.episode.card", { n: view.episode, status: t(`output.status.${status}`) }),
+    label: t("output.episode.card", { n: view.episode, status: stateWord(EPISODE_STATES[status]) }),
     tone: { "--source": mark ? `var(--source-${mark.color % 16})` : "transparent" },
   }
 }))
@@ -95,13 +96,14 @@ const meters = computed(() => {
 const share = (count: number, all: number): string => `${all === 0 ? 0 : (count * 100) / all}%`
 const voicesAll = computed(() => Object.values(meters.value.voices).reduce((sum, count) => sum + count, 0))
 const videoAll = computed(() => meters.value.video.loaded + meters.value.video.pending + meters.value.video.error)
+const counted = (state: StateName, n: number): string => t("state.count", { state: stateWord(state), n })
 const videoText = computed(() => [
-  t("output.meter.loaded", { n: meters.value.video.loaded }),
-  ...(meters.value.video.pending ? [t("output.meter.pending", { n: meters.value.video.pending })] : []),
-  ...(meters.value.video.error ? [t("output.meter.error", { n: meters.value.video.error })] : []),
+  counted("done", meters.value.video.loaded),
+  ...(meters.value.video.pending ? [counted("planned", meters.value.video.pending)] : []),
+  ...(meters.value.video.error ? [counted("failed", meters.value.video.error)] : []),
 ].join(" · "))
 const voicesText = computed(() => (Object.entries(meters.value.voices) as [keyof typeof meters.value.voices, number][])
-  .filter(([, count]) => count > 0).map(([state, count]) => t(`output.meter.${state}`, { n: count })).join(" · "))
+  .filter(([, count]) => count > 0).map(([state, count]) => counted(TRACK_STATES[state], count)).join(" · "))
 
 const { grid, ruler, wide, columns, layout } = useCardGrid(() => props.mode, () => order.value.length, () => props.total)
 const { built, shell } = useShownCells(grid)
@@ -142,15 +144,15 @@ function step(by: number): void {
         <div class="meter">
           <span class="meter-name">{{ t("output.meter.video") }}</span>
           <span class="meter-bar">
-            <span class="is-done" :style="{ inlineSize: share(meters.video.loaded, videoAll) }" />
-            <span class="is-error" :style="{ inlineSize: share(meters.video.error, videoAll) }" />
+            <span data-state="done" :style="{ inlineSize: share(meters.video.loaded, videoAll) }" />
+            <span data-state="failed" :style="{ inlineSize: share(meters.video.error, videoAll) }" />
           </span>
           <span class="meter-text">{{ videoText }}</span>
         </div>
         <div v-if="voicesAll" class="meter">
           <span class="meter-name">{{ t("output.meter.voices") }}</span>
           <span class="meter-bar">
-            <span v-for="(count, state) in meters.voices" :key="state" :class="`is-${state}`" :style="{ inlineSize: share(count, voicesAll) }" />
+            <span v-for="(count, state) in meters.voices" :key="state" :data-state="TRACK_STATES[state]" :style="{ inlineSize: share(count, voicesAll) }" />
           </span>
           <span class="meter-text">{{ voicesText }}</span>
         </div>
@@ -185,7 +187,8 @@ function step(by: number): void {
           />
           <button
             v-else type="button" class="episode-tile" :data-episode="item.view.episode"
-            :class="[`is-${item.status}`, { 'is-open': opened?.view.episode === item.view.episode, 'is-selected': chosen.has(item.view.episode) }]"
+            :data-state="EPISODE_STATES[item.status]"
+            :class="{ 'is-open': opened?.view.episode === item.view.episode, 'is-selected': chosen.has(item.view.episode) }"
             :style="item.tone" :title="item.label" :aria-label="item.label" :aria-pressed="chosen.has(item.view.episode)"
             @click="clickedTile(item.view.episode, $event)" @dblclick="toggleOpen(item.view.episode)"
           >{{ item.view.episode }}</button>

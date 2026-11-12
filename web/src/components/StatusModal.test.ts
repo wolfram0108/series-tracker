@@ -23,7 +23,7 @@ describe("the status window", () => {
     client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", kind } }))
     mounted = mount(StatusModal, { props: { seriesId: 40 }, global: { stubs: Object.fromEntries(STUBS.map((name) => [name, true])) } })
     await flushPromises()
-    const tab = mounted.findAll(".st-tab").find((each) => each.attributes("title") === t("status.tab.parser"))
+    const tab = mounted.findAll(".st-tab").find((each) => each.attributes("title") === t("rules.tab"))
     expect(tab).toBeDefined()
     expect(mounted.find("settings-parser-stub").exists()).toBe(false) // read only when the tab is opened
     await tab!.trigger("click")

@@ -8,6 +8,7 @@ import PowerSwitch from "./PowerSwitch.vue"
 import QueuePanel from "./QueuePanel.vue"
 import TrackTable from "./TrackTable.vue"
 import VoiceMark from "./VoiceMark.vue"
+import { EPISODE_STATES, stateLabel } from "../../../lib/states"
 
 // An episode opened below its row: the tracks with the actions that mend them, and the queues — of the reference and of
 // each voice-over — whose order the user changes for this episode only.
@@ -42,17 +43,13 @@ const tab = ref<string>(props.compilations ? "compilations" : "tracks")
 const groups = computed(() => props.cells.map((cell) => cell.group))
 const referenceGroup = computed(() => props.cells.find((cell) => cell.isReference)?.group ?? null)
 const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) => each.group === group)
-const PILL: Record<EpisodeStatus, string> = {
-  ready: "pill-success", partial: "pill-warning", down: "pill-primary", align: "pill-primary", wait: "pill-secondary",
-  error: "pill-danger", off: "pill-secondary",
-}
 </script>
 
 <template>
   <section class="episode-detail" :data-episode="view.episode">
     <header class="detail-head">
       <h3 class="detail-title">{{ t("output.episode", { n: view.episode }) }}</h3>
-      <span class="pill" :class="PILL[status]">{{ t(`output.status.${status}`) }}</span>
+      <span class="pill" :data-state="EPISODE_STATES[status]">{{ stateLabel(EPISODE_STATES[status]) }}</span>
       <span v-if="file" class="detail-file">{{ file }}</span>
       <span class="detail-grow" />
       <button type="button" class="icon-btn" :aria-label="t('output.episode.prev')" @click="emit('step', -1)"><i class="pi pi-chevron-left" /></button>

@@ -10,7 +10,7 @@ from playwright.async_api import expect
 from app_stand import STAND_LIMIT_S
 from core import container as mkv
 from plan_world import truth_of
-from ui_stand import SERIES, text, ui  # noqa: F401 - the fixture
+from ui_stand import SERIES, state, text, ui  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.ui
 
@@ -33,7 +33,7 @@ async def test_a_series_made_in_the_browser_is_synced_by_its_button_and_its_file
     cards = ui.page.locator(".episode-card")
     await expect(cards).to_have_count(2)
     await ui.press_sync(series_id)
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(2)
     await ui.shot("02-synced")
     view = await ui.check(series_id)
     assert len(view["assets"]) == 2
@@ -43,7 +43,7 @@ async def test_a_series_made_in_the_browser_is_synced_by_its_button_and_its_file
     await ui.shot("03a-opened")
     await expect(detail.locator(".detail-file")).to_have_text(view["assets"][0]["name"])
     row = detail.locator(".track-table tr[data-group='AnimeVost']")
-    await expect(row.locator(".pill")).to_have_text(text("output.track.state.done"))
+    await expect(row.locator(".pill")).to_have_text(state("done"))
     await ui.shot("03-episode")
 
 
@@ -51,7 +51,7 @@ async def synced_in_browser(ui, episodes=(1,)) -> int:
     series_id = await series_in_browser(ui, episodes)
     await ui.open_output(SERIES)
     await ui.press_sync(series_id)
-    await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(len(episodes))
+    await expect(ui.page.locator(".episode-card[data-state='done']")).to_have_count(len(episodes))
     return series_id
 
 
@@ -77,7 +77,7 @@ async def test_remake_and_download_again_wait_for_the_sync_and_can_be_taken_back
     aligned = len(ui.daemon.jobs)
     await ui.press_sync(series_id)
     await expect(pending).to_have_count(0)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
     assert len(ui.daemon.jobs) == aligned + 1  # the voice-over aligned anew, once
     await ui.check(series_id)
 
@@ -86,7 +86,7 @@ async def test_remake_and_download_again_wait_for_the_sync_and_can_be_taken_back
     served = len(ui.host.served)
     await ui.press_sync(series_id)
     await expect(pending).to_have_count(0)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
     assert [name for name in ui.host.served[served:] if name.startswith("ref-ep1-")]  # the video, downloaded anew
     await ui.check(series_id)
     await ui.shot("11-downloaded-again")
@@ -100,22 +100,22 @@ async def test_a_download_that_failed_is_shown_and_tried_again_after_the_failure
     page = ui.page
     await ui.open_output(SERIES)
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-error")).to_have_count(1)
+    await expect(page.locator(".episode-card[data-state='failed']")).to_have_count(1)
     await expect(page.locator(".plan-failures")).to_have_text(text("output.plan.failures", count=1))
     await page.locator(".episode-card").first.dblclick()
     row = page.locator(".episode-detail tr[data-group='AnimeVost']")
-    await expect(row.locator(".pill")).to_have_text(text("output.track.state.error"))
+    await expect(row.locator(".pill")).to_have_text(state("failed"))
     await ui.shot("20-download-failed")
     asked = len(ui.host.served)
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-error")).to_have_count(1)
+    await expect(page.locator(".episode-card[data-state='failed']")).to_have_count(1)
     assert not [name for name in ui.host.served[asked:] if name.startswith("dub-")]  # passed over, not asked again
     ui.site.gone("dub", 1, False)
     await page.locator(".output-retry-failed").click()
     await expect(page.locator(".plan-failures")).to_have_count(0)
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
-    await expect(row.locator(".pill")).to_have_text(text("output.track.state.done"))
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
+    await expect(row.locator(".pill")).to_have_text(state("done"))
     await ui.check(series_id)
 
 
@@ -134,7 +134,7 @@ async def test_a_download_rebuilt_on_the_next_source_is_one_card_in_the_agents_a
     page = ui.page
     await ui.open_output(SERIES)
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
     await ui.close_settings()
     await ui.settings("Агенты")
     card = page.locator(".download-card", has=page.locator(".work-replan"))
@@ -144,7 +144,7 @@ async def test_a_download_rebuilt_on_the_next_source_is_one_card_in_the_agents_a
     await expect(lines).to_have_count(3)
     await expect(lines.nth(0).locator(".is-failed")).to_have_count(1)
     await expect(lines.nth(1)).to_contain_text(text("download.replan"))
-    await expect(lines.nth(2)).to_contain_text(text("download.done"))
+    await expect(lines.nth(2)).to_contain_text(text("state.done"))
     await expect(card.locator(".figure-mark").first).to_be_visible()
     await expect(page.locator(".download-card")).to_have_count(1)  # the others went with the end of the sync
     await ui.shot("25-download-rebuilt-card")
@@ -158,17 +158,17 @@ async def test_a_voice_over_the_service_refused_is_shown_and_aligned_again_by_it
     page = ui.page
     await ui.open_output(SERIES)
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-error")).to_have_count(1)
+    await expect(page.locator(".episode-card[data-state='failed']")).to_have_count(1)
     await page.locator(".episode-card").first.dblclick()
     row = page.locator(".episode-detail tr[data-group='AnimeVost']")
-    await expect(row.locator(".pill")).to_have_text(text("output.track.state.error"))
+    await expect(row.locator(".pill")).to_have_text(state("failed"))
     await ui.shot("21-refused")
     del ui.daemon.answers["Сериал s01e01 AnimeVost"]
     await row.locator(".track-action.do-retry").click()
     await expect(page.locator(".plan-failures")).to_have_count(0)
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
-    await expect(row.locator(".pill")).to_have_text(text("output.track.state.done"))
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
+    await expect(row.locator(".pill")).to_have_text(state("done"))
     await ui.check(series_id)
 
 
@@ -198,14 +198,14 @@ async def test_an_episode_switched_off_on_its_card_hides_its_file_and_on_again_s
     assert len(sent) == 1
     await ui.press_sync(series_id)
     await expect(second).to_have_class(re.compile(r"\bis-off\b"))
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
     assert [name.endswith(".mkv.off") for name in ui.files()] == [False, True]
     await ui.check(series_id)
     await ui.shot("30-episode-off")
     jobs, served = len(ui.daemon.jobs), len(ui.host.served)
     await second.locator(".power-switch").click()
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(2)
     assert not any(name.endswith(".off") for name in ui.files())
     assert (len(ui.daemon.jobs), len(ui.host.served)) == (jobs, served)  # shown again, nothing downloaded or aligned
     await ui.check(series_id)
@@ -230,7 +230,7 @@ async def test_episodes_selected_as_in_a_file_manager_are_switched_off_by_space_
     page.on("request", lambda request: sent.append(request.post_data_json) if request.url.endswith("/output/switch") else None)
     await ui.shot("44-episodes-selected")
     await page.keyboard.press(" ")
-    await expect(page.locator(".episode-card.is-off")).to_have_count(3)
+    await expect(page.locator(".episode-card[data-state='off']")).to_have_count(3)
     assert sent == [{"season": 1, "episodes": [1, 2, 3], "off": True}]
     await card(2).dblclick()
     await expect(page.locator(".episode-detail[data-episode='2']")).to_be_visible()
@@ -254,10 +254,10 @@ async def test_a_voice_over_switched_off_in_the_settings_of_the_season_goes_from
     await ui.press_sync(series_id)
     view = await ui.check(series_id)
     assert view["assets"][0]["tracks"] == []
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)  # switched off by the user: no part missing
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)  # switched off by the user: no part missing
     await page.locator(".episode-card").first.dblclick()
     row = page.locator(".episode-detail tr[data-group='AnimeVost']")
-    await expect(row.locator(".pill")).to_have_text(text("output.track.state.off"))
+    await expect(row.locator(".pill")).to_have_text(state("off"))
     await expect(row.locator(".track-action")).to_have_count(0)
     await ui.shot("32-voice-gone")
 
@@ -294,10 +294,10 @@ async def test_a_better_reference_takes_the_place_and_the_voice_over_gone_from_i
     await ui.press_sync(series_id)
     first = page.locator(".episode-card[data-episode='1']")
     await expect(first.locator(".card-ref-shown")).to_contain_text("1080p")
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(2)
     await first.dblclick()
     row = page.locator(".episode-detail tr[data-group='AnimeVost']")
-    await expect(row.locator(".pill")).to_have_text(text("output.track.state.done"))
+    await expect(row.locator(".pill")).to_have_text(state("done"))
     await expect(row.locator(".track-offline")).to_have_text(text("output.plan.offline"))
     await ui.shot("50-better-reference")
     await ui.check(series_id)
@@ -315,7 +315,7 @@ async def test_the_window_open_through_a_restart_in_the_middle_of_a_sync_shows_i
         pass
     await ui.restart()
     await ui.until_run_ends(series_id)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(2, timeout=30_000)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(2, timeout=30_000)
     await ui.shot("60-after-restart")
     await ui.check(series_id)
 
@@ -327,7 +327,7 @@ async def pills(card) -> list[str]:
 
 
 async def test_the_card_of_the_series_tells_ready_error_and_the_date_of_its_new_files(ui):
-    """The list of series is what the user sees first: a series with files is «Готов», with the date of its new files; a
+    """The list of series is what the user sees first: a series with files is «Готово», with the date of its new files; a
     crash of the alignment service is «Ошибка» there and an error of the episode with its reason in the window; the sync
     that makes the episode clears the error."""
     ui.site.release("ref", "AniStar")
@@ -342,27 +342,27 @@ async def test_the_card_of_the_series_tells_ready_error_and_the_date_of_its_new_
     assert await card.locator(".scan-time").inner_text() == "Никогда"
     await ui.open_output()
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-error")).to_have_count(1)
+    await expect(page.locator(".episode-card[data-state='failed']")).to_have_count(1)
     await expect(page.locator(".plan-problems")).to_have_text(text("output.plan.problems", count=1))
     await page.locator(".episode-card[data-episode='2']").dblclick()
     row = page.locator(".episode-detail tr[data-group='AnimeVost']")
-    await expect(row.locator(".pill")).to_have_text(text("output.track.state.error"))
+    await expect(row.locator(".pill")).to_have_text(state("failed"))
     await expect(row.locator(".track-note")).to_contain_text("сбой")
     await ui.shot("70-crash-in-window")
     await page.get_by_role("button", name="Закрыть").last.click()
     await expect(card.locator(".scan-time")).not_to_have_text("Никогда")  # episode 1 was built: the card has its date
     shown = await pills(card)
-    assert text("series.status.error") in shown and text("series.status.ready") in shown, shown
+    assert state("failed") in shown and state("done") in shown, shown
     await ui.shot("71-crash-on-the-card")
     ui.daemon.answers.clear()
     await ui.open_output()
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(2)
     await expect(page.locator(".plan-problems")).to_have_count(0)
     await page.get_by_role("button", name="Закрыть").last.click()
-    await expect(card.locator(".status-pill", has_text=text("series.status.error"))).to_have_count(0)
+    await expect(card.locator(".status-pill", has_text=state("failed"))).to_have_count(0)
     shown = await pills(card)
-    assert text("series.status.ready") in shown and text("series.status.error") not in shown, shown
+    assert state("done") in shown and state("failed") not in shown, shown
     await ui.check(series_id)
 
 
@@ -547,15 +547,15 @@ async def test_the_markup_reference_set_in_its_tab_lays_the_episode_onto_it_and_
 
     await ui.press_sync(series_id)
     card = page.locator(".episode-card[data-episode='1']")
-    await expect(card).to_have_class(re.compile("is-ready"))
+    await expect(card).to_have_attribute("data-state", "done")
     await expect(card.locator(".card-ref-shown .ref-markup")).to_have_count(1)
     await expect(card.locator(".card-ref-shown")).to_contain_text("2160p")
     # The window shows the sounds in the order the file holds them: the original last.
     await expect(page.locator(".voice-order-item").last).to_contain_text("Оригинал")
     await expect(page.locator(".voice-order-item.is-fixed")).to_have_count(1)
     # Every sound of the file has its cell, the own sound of the cut (ПВА) the reference's.
-    await expect(card.locator(".is-done")).to_have_count(3)
-    await expect(card.locator(".is-done.is-reference")).to_have_count(1)
+    await expect(card.locator("[data-state='done']")).to_have_count(3)
+    await expect(card.locator("[data-state='done'].is-reference")).to_have_count(1)
     await ui.shot("61-markup-synced")
     sources = {each["url"]: each["id"] for each in (await ui.call("GET", f"/api/series/{series_id}"))["sources"]}
     view = await ui.check(series_id)

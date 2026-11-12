@@ -14,15 +14,10 @@ describe("t", () => {
     expect(t("sources.progress", { phase: "Каталог плеера" })).toBe("Каталог плеера:  из ")
   })
 
-  it("has a text for each of the states of a voice-over and for each cause behind them", () => {
-    for (const state of ["planned", "download_queued", "downloading", "align_queued", "running", "done", "error", "absent"]) {
-      expect(t(`voices.state.${state}` as MessageKey)).not.toBe("")
-    }
+  it("has a text for each cause behind the state of a voice-over", () => {
     for (const hint of ["planned", "download_queued", "downloading", "ready", "awaiting_answer", "aligning_wait", "aligning_run", "aligned", "done", "packed"]) {
       expect(t(`voices.hint.${hint}` as MessageKey)).not.toBe("")
     }
-    expect(t("voices.state.download_queued")).toBe("в очереди на загрузку")
-    expect(t("voices.state.align_queued")).toBe("в очереди на выравнивание")
   })
 })
 

@@ -44,17 +44,17 @@ describe("SeriesCard", () => {
     const wide = mount(SeriesCard, { props: { series: four } })
     await flushPromises()
     await frame()
-    expect(visible(wide)).toEqual(["Готов", "Загрузка", "Выравнивание", "Обработка"])
+    expect(visible(wide)).toEqual(["Готово", "Загрузка", "Выравнивание", "Синхронизация"])
     room = 300  // four pills of 100 do not fit: two and the counter of the other two do
     const narrow = mount(SeriesCard, { props: { series: four } })
     await flushPromises()
     await frame()
-    expect(visible(narrow)).toEqual(["Выравнивание", "Обработка", "+2"])
+    expect(visible(narrow)).toEqual(["Выравнивание", "Синхронизация", "+2"])
     widths.mockRestore()
     rooms.mockRestore()
   })
 
-  it("names an open run processing and gives slicing, alignment and packing a pill and a layer of their own", () => {
+  it("names an open run a sync and gives slicing, alignment and packing a pill and a layer of their own", () => {
     const working = { ...series, statuses: ["slicing", "aligning", "packing"] } as unknown as Series
     const w = mount(SeriesCard, { props: { series: working } })
     expect(visible(w).sort()).toEqual(
@@ -64,6 +64,6 @@ describe("SeriesCard", () => {
     }
     expect(w.find(".layer-downloading").attributes("style")).toContain("width: 0%")
     const processing = mount(SeriesCard, { props: { series } })
-    expect(visible(processing)).toContain("Обработка")
+    expect(visible(processing)).toContain("Синхронизация")
   })
 })

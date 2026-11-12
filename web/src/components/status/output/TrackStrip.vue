@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { t } from "../../../i18n"
 import type { TrackCell } from "../../../lib/output"
+import { stateWord, TRACK_STATES } from "../../../lib/states"
 
 // The tracks of an episode in the order of the container: the figure is the place of the track, the colour its state; the
 // track of the reference (the voice of the video itself) is outlined. Cells narrow when a strip has no room, never wrap.
 defineProps<{ cells: TrackCell[] }>()
 
 const title = (cell: TrackCell): string => [t(cell.isReference ? "output.track.cellReference" : "output.track.cell",
-  { group: cell.group, state: t(`output.track.state.${cell.state}`) }),
+  { group: cell.group, state: stateWord(TRACK_STATES[cell.state]) }),
   ...(cell.online == null ? [] : [t(cell.online ? "output.presence.online" : "output.presence.offline")])].join(" · ")
 </script>
 
@@ -15,7 +16,8 @@ const title = (cell: TrackCell): string => [t(cell.isReference ? "output.track.c
   <span class="track-strip">
     <span
       v-for="cell in cells" :key="cell.pos" class="track-cell"
-      :class="[`is-${cell.state}`, { 'is-reference': cell.isReference }, cell.online == null ? null : ['presence', cell.online ? 'is-online' : 'is-offline']]"
+      :data-state="TRACK_STATES[cell.state]"
+      :class="[{ 'is-reference': cell.isReference }, cell.online == null ? null : ['presence', cell.online ? 'is-online' : 'is-offline']]"
       :title="title(cell)" :aria-label="title(cell)"
     >{{ cell.pos }}</span>
   </span>
@@ -26,17 +28,12 @@ const title = (cell: TrackCell): string => [t(cell.isReference ? "output.track.c
 .track-strip { display: flex; align-items: center; gap: 0.125rem; padding-inline: calc((var(--card-row) - var(--track-size)) / 2); max-inline-size: 100%; overflow: hidden; }
 .track-cell {
   flex: 0 1 auto; inline-size: var(--figure-size); min-inline-size: 0.25rem; block-size: var(--track-size); overflow: hidden;
-  display: grid; place-items: center; border-radius: calc(var(--track-size) * var(--round)); color: #fff; font-size: 0.625rem; font-weight: 700; line-height: 1;
+  display: grid; place-items: center; border-radius: calc(var(--track-size) * var(--round)); font-size: 0.625rem; font-weight: 700; line-height: 1;
+  background-color: var(--tone-end); color: var(--tone-ink);
 }
-/* The colour alone: the corner of presence is the image of the same background (styles/pills.css). */
-.track-cell.is-done { background-color: #409444; }
-.track-cell.is-down { background-color: #009688; }
-.track-cell.is-align { background-color: var(--color-blue); }
-.track-cell.is-wait { background-color: #ced4da; color: #343a40; }
-.track-cell.is-error { background-color: var(--color-red-1); }
-.track-cell.is-absent { background-color: var(--color-yellow-2); color: #5c4400; }
-.track-cell.is-off { background: transparent; color: var(--color-gray-600); outline: 1px dashed var(--color-gray-600); }
-.track-cell.is-none { background: none; border: 1px dashed #adb5bd; color: #adb5bd; }
+/* A track the episode has not (switched off, no row) is drawn by its outline, in the colour of its state. */
+.track-cell[data-state="off"] { background: transparent; color: var(--tone); outline: 1px dashed var(--tone); }
+.track-cell[data-state="noRow"] { background: none; border: 1px dashed var(--tone-end); color: var(--tone-end); }
 /* An outline is painted above the cells around it, where a shadow lies under the next one. */
 .track-cell.is-reference { position: relative; z-index: 1; overflow: visible; outline: 0.125rem solid #2c3e50; outline-offset: 0.0625rem; }
 </style>

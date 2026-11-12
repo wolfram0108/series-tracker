@@ -39,7 +39,7 @@ async def test_the_parameters_set_in_the_debug_tab_go_with_the_next_job_to_the_d
 
     await ui.open_output(SERIES)
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(1)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
     # The core holds every change, the last one too: none was taken back by the answer to an earlier one.
     assert (await ui.call("GET", "/api/conform/settings"))["params"] == {
         "audio_method": "band", "drift_speed_pct": 2.5, "keep_tmp": True, "fill_silence": False, "extend_edges": False}

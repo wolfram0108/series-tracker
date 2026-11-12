@@ -26,7 +26,7 @@ async def test_a_table_filled_from_the_pages_by_a_template_names_the_voice_overs
     await ui.set_up([voice for voice, _height in VOICES.values()])
 
     page = ui.page
-    await ui.settings("Фильтры VK")
+    await ui.settings("Правила")
     if not await page.locator("#new-profile-name").is_visible():
         await page.locator("button.accordion-button").first.click()
     await page.locator("#new-profile-name").fill(PROFILE)
@@ -77,7 +77,7 @@ async def test_a_table_filled_from_the_pages_by_a_template_names_the_voice_overs
     series_id = await ui.add_series(SERIES, SERIES_EN, [(ui.site.releases[slug].url, PROFILE) for slug in VOICES])
     await ui.open_output()
     await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(2)
     view = await ui.check(series_id)
     for asset in view["assets"]:
         held = await mkv.contents(os.path.join(ui.library, asset["name"]))
@@ -99,7 +99,7 @@ async def test_a_season_assigned_by_a_table_and_by_a_rule_is_saved_as_typed_and_
     await ui.first_run()
     await ui.set_up(["AnimeVost"])
     page = ui.page
-    await ui.settings("Фильтры VK")
+    await ui.settings("Правила")
     if not await page.locator("#new-profile-name").is_visible():
         await page.locator("button.accordion-button").first.click()
     await page.locator("#new-profile-name").fill(PROFILE)
@@ -156,7 +156,7 @@ async def test_cells_joined_in_the_table_are_saved_joined_and_give_their_one_val
     await ui.first_run()
     await ui.set_up([voice for voice, _height in VOICES.values()])
     page = ui.page
-    await ui.settings("Фильтры VK")
+    await ui.settings("Правила")
     if not await page.locator("#new-profile-name").is_visible():
         await page.locator("button.accordion-button").first.click()
     await page.locator("#new-profile-name").fill(PROFILE)

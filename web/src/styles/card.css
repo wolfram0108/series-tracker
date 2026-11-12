@@ -97,11 +97,12 @@
 .btn-delete { background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); box-shadow: 0 0 8px rgba(0, 0, 0, 0.4); }
 .action-btn:disabled { opacity: 0.6; cursor: not-allowed; filter: none; }
 
-/* --- слои статуса --- */
+/* --- слои статуса: цвет — состояния сериала по словарю (lib/states.ts, data-state), порядок — z-index слоя --- */
 .layer-stripes { position: absolute; inset: 0; }
 .color-layer {
   position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 0;
   overflow: hidden; transition: width 0.8s ease-in-out; border-radius: var(--card-border-radius);
+  background: linear-gradient(135deg, var(--tone), var(--tone-end));
 }
 .layer-stripes::before {
   content: ''; --stripe-size: 50px;
@@ -114,20 +115,20 @@
   background-size: var(--stripe-size) var(--stripe-size);
   z-index: 15;
 }
-.layer-waiting    { background: linear-gradient(135deg, #f0f2f5, #e9ecef); z-index: 1; }
-.layer-ready      { background: linear-gradient(135deg, #4CAF50, #409444); z-index: 2; }
-.layer-downloading{ background: linear-gradient(135deg, #009688, #00796D); z-index: 3; }
-.layer-queued     { background: linear-gradient(135deg, #C9A66B, #b4905a); z-index: 4; }
-.layer-slicing    { background: linear-gradient(135deg, var(--color-red-2), color-mix(in srgb, var(--color-red-2) 85%, black)); z-index: 5; }
-.layer-aligning   { background: linear-gradient(135deg, var(--color-blue-1), color-mix(in srgb, var(--color-blue-1) 85%, black)); z-index: 6; }
-.layer-packing    { background: linear-gradient(135deg, var(--color-purple-1), color-mix(in srgb, var(--color-purple-1) 85%, black)); z-index: 7; }
-.layer-activating { background: linear-gradient(135deg, #7EC9D1, #6ab8bf); z-index: 8; }
-.layer-checking   { background: linear-gradient(135deg, #849DD5, #6f88c3); z-index: 9; }
-.layer-renaming   { background: linear-gradient(135deg, #A28ADA, #8b73c2); z-index: 10; }
-.layer-metadata   { background: linear-gradient(135deg, #D2B575, #c0a463); z-index: 11; }
-.layer-scanning   { background: linear-gradient(135deg, #CF9772, #bd8561); z-index: 12; }
-.layer-viewing    { background: linear-gradient(135deg, #6c757d, #5a6268); z-index: 13; }
-.layer-error      { background: linear-gradient(135deg, #dc3545, #c82333); z-index: 14; }
+.layer-waiting    { z-index: 1; }
+.layer-ready      { z-index: 2; }
+.layer-downloading{ z-index: 3; }
+.layer-queued     { z-index: 4; }
+.layer-slicing    { z-index: 5; }
+.layer-aligning   { z-index: 6; }
+.layer-packing    { z-index: 7; }
+.layer-activating { z-index: 8; }
+.layer-checking   { z-index: 9; }
+.layer-renaming   { z-index: 10; }
+.layer-metadata   { z-index: 11; }
+.layer-scanning   { z-index: 12; }
+.layer-viewing    { z-index: 13; }
+.layer-error      { z-index: 14; }
 
 @keyframes move-stripes { from { background-position: 0 0; } to { background-position: 50px 0; } }
 .layer-stripes.stripes-normal::before { animation: move-stripes 2s linear infinite; }

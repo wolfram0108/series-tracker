@@ -7,9 +7,10 @@ import PackCard from "./PackCard.vue"
 import PackJournal from "./PackJournal.vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
+import { QBIT_STATES, SLICING_STATES, stateLabel, stateOf, TORRENT_STAGES, type StateName } from "../../lib/states"
 
-// Вкладка «Агенты»: 4 очереди карточками (вместо таблиц). Данные — из
-// queuesStore (наполняются SSE-событиями очередей). Пустые очереди — empty.
+// The tab of the agents: every queue as cards, as the core pushes them (queuesStore). A state of a queue is a state of the
+// vocabulary (lib/states.ts); a code the vocabulary does not know is shown as it came.
 const q = useQueuesStore()
 const { request } = useApi()
 
@@ -22,6 +23,8 @@ function str(v: unknown): string {
   return v == null ? "" : String(v)
 }
 
+const stateText = (state: StateName | null, code: unknown): string => state ? stateLabel(state) : str(code)
+
 // A card of the packing that stayed after its sync is removed; the core tells the queue anew (pack_queue_update).
 async function removePack(id: string): Promise<void> {
   await request(api.DELETE("/api/pack/cards/{card_id}", { params: { path: { card_id: id } } }))
@@ -30,17 +33,18 @@ async function removePack(id: string): Promise<void> {
 
 <template>
   <div class="settings-agents">
-    <!-- Очередь Агента Обработки -->
     <section class="queue-section">
-      <h6 class="queue-title-bar"><i class="pi pi-cog"></i> Очередь Агента Обработки</h6>
-      <div v-if="!q.agent.length" class="queue-empty">Очередь пуста</div>
+      <h6 class="queue-title-bar"><i class="pi pi-cog"></i> {{ t("agents.processing.title") }}</h6>
+      <div v-if="!q.agent.length" class="queue-empty">{{ t("agents.empty") }}</div>
       <div v-else class="composition-cards-container">
-        <div v-for="(t, i) in q.agent" :key="str(t.hash) || i" class="card-final card-queue">
+        <div v-for="(task, i) in q.agent" :key="str(task.hash) || i" class="card-final card-queue">
           <div class="queue-row">
-            <span class="queue-title">Серия {{ str(t.series_id) }}</span>
-            <div class="pill"><i class="pi pi-link"></i> Торрент: {{ str(t.torrent_id) }}</div>
-            <div class="pill"><i class="pi pi-key"></i> {{ str(t.hash).slice(0, 8) }}…</div>
-            <div class="pill pill-info">{{ str(t.stage) }}</div>
+            <span class="queue-title">{{ t("agents.series", { id: str(task.series_id) }) }}</span>
+            <div class="pill"><i class="pi pi-link"></i> {{ t("agents.torrent", { id: str(task.torrent_id) }) }}</div>
+            <div class="pill"><i class="pi pi-key"></i> {{ str(task.hash).slice(0, 8) }}…</div>
+            <div class="pill" :data-state="stateOf(TORRENT_STAGES, str(task.stage)) ?? undefined">
+              {{ stateText(stateOf(TORRENT_STAGES, str(task.stage)), task.stage) }}
+            </div>
           </div>
         </div>
       </div>
@@ -49,21 +53,22 @@ async function removePack(id: string): Promise<void> {
     <!-- The downloads: a card to a need of a plan (core/contracts/downloads.py) -->
     <section class="queue-section">
       <h6 class="queue-title-bar"><i class="pi pi-download"></i> {{ t("download.title") }}</h6>
-      <div v-if="!q.downloads.length" class="queue-empty">{{ t("download.empty") }}</div>
+      <div v-if="!q.downloads.length" class="queue-empty">{{ t("agents.empty") }}</div>
       <div v-else class="composition-cards-container">
         <DownloadCard v-for="card in q.downloads" :key="card.id" :card="card" @remove="removeCard" />
       </div>
     </section>
 
-    <!-- Очередь Агента Нарезки (ffmpeg) -->
     <section class="queue-section">
-      <h6 class="queue-title-bar"><i class="pi pi-clone"></i> Очередь Агента Нарезки (ffmpeg)</h6>
-      <div v-if="!q.slicing.length" class="queue-empty">Очередь нарезки пуста</div>
+      <h6 class="queue-title-bar"><i class="pi pi-clone"></i> {{ t("agents.slicing.title") }}</h6>
+      <div v-if="!q.slicing.length" class="queue-empty">{{ t("agents.empty") }}</div>
       <div v-else class="composition-cards-container">
-        <div v-for="(t, i) in q.slicing" :key="str(t.id) || i" class="card-final card-queue">
+        <div v-for="(task, i) in q.slicing" :key="str(task.id) || i" class="card-final card-queue">
           <div class="queue-row">
-            <span class="queue-title">Серия {{ str(t.series_id) }}</span>
-            <div class="pill pill-info">{{ str(t.status) }}</div>
+            <span class="queue-title">{{ t("agents.series", { id: str(task.series_id) }) }}</span>
+            <div class="pill" :data-state="stateOf(SLICING_STATES, str(task.status)) ?? undefined">
+              {{ stateText(stateOf(SLICING_STATES, str(task.status)), task.status) }}
+            </div>
           </div>
         </div>
       </div>
@@ -72,7 +77,7 @@ async function removePack(id: string): Promise<void> {
     <!-- Packing queue: the containers of the episodes, pushed by the core -->
     <section class="queue-section">
       <h6 class="queue-title-bar"><i class="pi pi-box"></i> {{ t("agents.pack.title") }}</h6>
-      <div v-if="!q.pack.length && !q.journals.length" class="queue-empty">{{ t("agents.pack.empty") }}</div>
+      <div v-if="!q.pack.length && !q.journals.length" class="queue-empty">{{ t("agents.empty") }}</div>
       <div v-else class="composition-cards-container">
         <PackJournal v-for="journal in q.journals" :key="`journal-${journal.series_id}`" :journal="journal" />
         <PackCard v-for="card in q.pack" :key="card.id" :card="card" @remove="removePack" />
@@ -85,20 +90,21 @@ async function removePack(id: string): Promise<void> {
       <ConformQueue />
     </section>
 
-    <!-- Активные статусы торрентов (мониторинг) -->
     <section class="queue-section">
-      <h6 class="queue-title-bar"><i class="pi pi-wifi"></i> Активные статусы торрентов (Мониторинг)</h6>
-      <div v-if="!q.torrents.length" class="queue-empty">Нет активных торрентов для мониторинга</div>
+      <h6 class="queue-title-bar"><i class="pi pi-wifi"></i> {{ t("agents.torrents.title") }}</h6>
+      <div v-if="!q.torrents.length" class="queue-empty">{{ t("agents.empty") }}</div>
       <div v-else class="composition-cards-container">
-        <div v-for="(t, i) in q.torrents" :key="str(t.qb_hash) || i" class="card-final card-queue">
+        <div v-for="(task, i) in q.torrents" :key="str(task.qb_hash) || i" class="card-final card-queue">
           <div class="queue-row">
-            <span class="queue-title">{{ str(t.series_name) }}</span>
-            <div class="pill"><i class="pi pi-key"></i> {{ str(t.qb_hash).slice(0, 8) }}…</div>
-            <div class="pill pill-primary">{{ str(t.status) }}</div>
+            <span class="queue-title">{{ str(task.series_name) }}</span>
+            <div class="pill"><i class="pi pi-key"></i> {{ str(task.qb_hash).slice(0, 8) }}…</div>
+            <div class="pill" :data-state="stateOf(QBIT_STATES, str(task.status)) ?? undefined">
+              {{ stateText(stateOf(QBIT_STATES, str(task.status)), task.status) }}
+            </div>
           </div>
           <div class="queue-row">
             <div class="progress">
-              <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: str(t.progress) + '%' }">{{ str(t.progress) }}%</div>
+              <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: str(task.progress) + '%' }">{{ str(task.progress) }}%</div>
             </div>
           </div>
         </div>

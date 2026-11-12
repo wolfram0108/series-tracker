@@ -8,6 +8,7 @@ import { reasonText } from "../../lib/reason"
 import { useQueuesStore, type ConformTask } from "../../stores/queues"
 import { useVoicesStore } from "../../stores/voices"
 import ConformPlotViewer from "./ConformPlotViewer.vue"
+import { CONFORM_DUB_STATES, CONFORM_JOB_STATES, stateLabel, stateOf, stateWord } from "../../lib/states"
 
 // The queue of the alignment service as the service holds it: a card per job. The picture is pushed by the core;
 // a stop or a deletion changes the service and comes back as the next picture.
@@ -15,12 +16,8 @@ const q = useQueuesStore()
 const voices = useVoicesStore()
 const { request } = useApi()
 
-const KNOWN = ["queued", "running", "done", "failed", "cancelled", "paused"] as const
-const statusText = (status: string) =>
-  (KNOWN as readonly string[]).includes(status) ? t(`agents.conform.status.${status as (typeof KNOWN)[number]}`) : status
-const statusClass = (status: string) =>
-  ({ done: "pill-success", failed: "pill-danger", running: "pill-primary", cancelled: "pill-secondary", paused: "pill-secondary" })[status] ?? "pill-info"
-
+// The status of a job as the daemon names it, in the words of the vocabulary; a status it does not know is shown as it came.
+const jobState = (status: string) => stateOf(CONFORM_JOB_STATES, status)
 // The keys are written out, never built from a value, so every text stays findable in the catalog.
 const VERDICT: Record<Verdict, MessageKey> = {
   accepted: "agents.conform.verdict.accepted",
@@ -33,10 +30,7 @@ const VERDICT_PILL: Record<Verdict, string> = {
   accepted: "pill-success", unsure: "pill-warning", rejected: "pill-danger", failed: "pill-danger",
 }
 
-const dubStateText = (state: DubState): string =>
-  state === "running" ? t("agents.conform.dub.running")
-    : state === "cancelled" ? t("agents.conform.dub.cancelled")
-      : t("agents.conform.dub.waiting")
+const dubStateText = (state: DubState): string => stateWord(CONFORM_DUB_STATES[state])
 
 const cards = computed(() =>
   (q.conform?.tasks ?? []).map((task) => ({
@@ -86,15 +80,17 @@ function openPlot(task: ConformTask, episode: string, row: DubRow) {
       <div v-if="q.conform.daemon.version" class="pill">{{ t("agents.conform.daemon.version", { version: str(q.conform.daemon.version) }) }}</div>
       <div v-if="q.conform.daemon.gpu_name || q.conform.daemon.device" class="pill">{{ str(q.conform.daemon.gpu_name || q.conform.daemon.device) }}</div>
     </div>
-    <div v-if="!cards.length" class="queue-empty">{{ t("agents.conform.empty") }}</div>
+    <div v-if="!cards.length" class="queue-empty">{{ t("agents.empty") }}</div>
     <div v-else class="composition-cards-container">
       <div v-for="card in cards" :key="card.task.id" class="card-final card-queue">
         <div class="queue-row head">
           <span class="queue-title">{{ card.title }}<span v-if="card.episode" class="episode">{{ card.episode }}</span></span>
-          <div class="pill" :class="statusClass(card.task.status)">{{ statusText(card.task.status) }}</div>
+          <div class="pill" :data-state="jobState(card.task.status) ?? undefined">
+            {{ jobState(card.task.status) ? stateLabel(jobState(card.task.status)!) : card.task.status }}
+          </div>
           <button type="button" class="card-action" :disabled="pending.has(card.task.id)" @click="change(card.task)">
             <i class="pi" :class="isActive(card.task.status) ? 'pi-ban' : 'pi-trash'"></i>
-            {{ isActive(card.task.status) ? t("agents.conform.action.cancel") : t("agents.conform.action.delete") }}
+            {{ !isActive(card.task.status) ? t("agents.conform.action.delete") : card.task.status === "running" ? t("agents.conform.action.stop") : t("agents.conform.action.cancel") }}
           </button>
         </div>
         <div v-if="card.task.status === 'running'" class="queue-row">

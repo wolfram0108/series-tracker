@@ -85,7 +85,7 @@ describe("SourcesEditor", () => {
 
   it("tells the profile is missing and that rows have no numbers without it", () => {
     const text = mountEditor().text()
-    expect(text).toContain("Профиль конструктора")
+    expect(text).toContain("Профиль правил")
     expect(text).toContain("Пока профиль не назначен, у строк нет номеров серий.")
   })
 
@@ -124,7 +124,7 @@ describe("SourcesEditor", () => {
     expect(mountEditor([reading]).text()).toContain("Страницы серий: 3 из 20")
     const failed = itemOfSource(stored(), summary, { state: "failed", progress: null, reason: '{"code":"read_failed"}', readAt: null })
     const text = mountEditor([failed]).text()
-    expect(text).toContain("Чтение не удалось")
+    expect(text).toContain("Ошибка")
     expect(text).toContain("чтение страницы не удалось")
   })
 

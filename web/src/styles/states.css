@@ -1,0 +1,45 @@
+/* An element takes the colours of its state by its data-state (lib/states.ts, the colours in styles/tokens.css):
+   --tone is the ground, --tone-end the end of its gradient, --tone-ink the ink on it. */
+[data-state="planned"] { --tone: var(--state-planned); --tone-end: var(--state-planned-end); --tone-ink: var(--state-planned-ink); }
+[data-state="queued"] { --tone: var(--state-queued); --tone-end: var(--state-queued-end); --tone-ink: var(--state-queued-ink); }
+[data-state="done"] { --tone: var(--state-done); --tone-end: var(--state-done-end); --tone-ink: var(--state-done-ink); }
+[data-state="failed"] { --tone: var(--state-failed); --tone-end: var(--state-failed-end); --tone-ink: var(--state-failed-ink); }
+[data-state="stopped"] { --tone: var(--state-stopped); --tone-end: var(--state-stopped-end); --tone-ink: var(--state-stopped-ink); }
+[data-state="off"] { --tone: var(--state-off); --tone-end: var(--state-off-end); --tone-ink: var(--state-off-ink); }
+[data-state="paused"] { --tone: var(--state-paused); --tone-end: var(--state-paused-end); --tone-ink: var(--state-paused-ink); }
+[data-state="built"] { --tone: var(--state-built); --tone-end: var(--state-built-end); --tone-ink: var(--state-built-ink); }
+[data-state="partial"] { --tone: var(--state-partial); --tone-end: var(--state-partial-end); --tone-ink: var(--state-partial-ink); }
+[data-state="absent"] { --tone: var(--state-absent); --tone-end: var(--state-absent-end); --tone-ink: var(--state-absent-ink); }
+[data-state="noRow"] { --tone: var(--state-noRow); --tone-end: var(--state-noRow-end); --tone-ink: var(--state-noRow-ink); }
+[data-state="noFile"] { --tone: var(--state-noFile); --tone-end: var(--state-noFile-end); --tone-ink: var(--state-noFile-ink); }
+[data-state="noReference"] { --tone: var(--state-noReference); --tone-end: var(--state-noReference-end); --tone-ink: var(--state-noReference-ink); }
+[data-state="download"] { --tone: var(--state-download); --tone-end: var(--state-download-end); --tone-ink: var(--state-download-ink); }
+[data-state="link"] { --tone: var(--state-link); --tone-end: var(--state-link-end); --tone-ink: var(--state-link-ink); }
+[data-state="remux"] { --tone: var(--state-remux); --tone-end: var(--state-remux-end); --tone-ink: var(--state-remux-ink); }
+[data-state="check"] { --tone: var(--state-check); --tone-end: var(--state-check-end); --tone-ink: var(--state-check-ink); }
+[data-state="align"] { --tone: var(--state-align); --tone-end: var(--state-align-end); --tone-ink: var(--state-align-ink); }
+[data-state="cut"] { --tone: var(--state-cut); --tone-end: var(--state-cut-end); --tone-ink: var(--state-cut-ink); }
+[data-state="pack"] { --tone: var(--state-pack); --tone-end: var(--state-pack-end); --tone-ink: var(--state-pack-ink); }
+[data-state="build"] { --tone: var(--state-build); --tone-end: var(--state-build-end); --tone-ink: var(--state-build-ink); }
+[data-state="verify"] { --tone: var(--state-verify); --tone-end: var(--state-verify-end); --tone-ink: var(--state-verify-ink); }
+[data-state="apply"] { --tone: var(--state-apply); --tone-end: var(--state-apply-end); --tone-ink: var(--state-apply-ink); }
+[data-state="slice"] { --tone: var(--state-slice); --tone-end: var(--state-slice-end); --tone-ink: var(--state-slice-ink); }
+[data-state="read"] { --tone: var(--state-read); --tone-end: var(--state-read-end); --tone-ink: var(--state-read-ink); }
+[data-state="sync"] { --tone: var(--state-sync); --tone-end: var(--state-sync-end); --tone-ink: var(--state-sync-ink); }
+[data-state="readDone"] { --tone: var(--state-readDone); --tone-end: var(--state-readDone-end); --tone-ink: var(--state-readDone-ink); }
+[data-state="notRead"] { --tone: var(--state-notRead); --tone-end: var(--state-notRead-end); --tone-ink: var(--state-notRead-ink); }
+[data-state="noProfile"] { --tone: var(--state-noProfile); --tone-end: var(--state-noProfile-end); --tone-ink: var(--state-noProfile-ink); }
+[data-state="checking"] { --tone: var(--state-checking); --tone-end: var(--state-checking-end); --tone-ink: var(--state-checking-ink); }
+[data-state="activating"] { --tone: var(--state-activating); --tone-end: var(--state-activating-end); --tone-ink: var(--state-activating-ink); }
+[data-state="metadata"] { --tone: var(--state-metadata); --tone-end: var(--state-metadata-end); --tone-ink: var(--state-metadata-ink); }
+[data-state="renaming"] { --tone: var(--state-renaming); --tone-end: var(--state-renaming-end); --tone-ink: var(--state-renaming-ink); }
+[data-state="moving"] { --tone: var(--state-moving); --tone-end: var(--state-moving-end); --tone-ink: var(--state-moving-ink); }
+[data-state="idle"] { --tone: var(--state-idle); --tone-end: var(--state-idle-end); --tone-ink: var(--state-idle-ink); }
+[data-state="viewing"] { --tone: var(--state-viewing); --tone-end: var(--state-viewing-end); --tone-ink: var(--state-viewing-ink); }
+
+/* A pill of a state: a tint of its colour, with the ink of its darker end. */
+.pill[data-state] {
+  background-color: color-mix(in srgb, var(--tone) 22%, transparent);
+  border-color: color-mix(in srgb, var(--tone-end) 55%, transparent);
+  color: color-mix(in srgb, var(--tone-end) 60%, black);
+}

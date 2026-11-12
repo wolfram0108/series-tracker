@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import { t, type MessageKey } from "../../../i18n"
-import { outputLines, type EpisodeView, type SourceMark as Mark, type TrackCell, type TrackState } from "../../../lib/output"
+import { t } from "../../../i18n"
+import { outputLines, type EpisodeView, type SourceMark as Mark, type TrackCell } from "../../../lib/output"
 import { reasonText } from "../../../lib/reason"
 import SourceMark from "./SourceMark.vue"
+import { stateLabel, TRACK_STATES } from "../../../lib/states"
 
 // The tracks of an episode, each with where it comes from, its state and the action that fits it: the reference is
 // downloaded again, a placed voice-over made anew, a failed one done again. An action is the one command it names.
@@ -15,17 +16,6 @@ const emit = defineEmits<{
   (e: "redo", group: string): void
 }>()
 
-// The track of the reference is the file of the video: it is worded as the files of the plan are.
-const FILE_WORDS: Record<TrackState, MessageKey> = {
-  done: "output.file.status.completed", down: "output.file.status.downloading", align: "output.file.status.processing",
-  wait: "output.file.status.pending", error: "output.file.status.error", absent: "output.file.status.none",
-  off: "output.file.status.none", none: "output.file.status.none",
-}
-const stateText = (cell: TrackCell): string => t(cell.isReference ? FILE_WORDS[cell.state] : `output.track.state.${cell.state}`)
-const PILL: Record<TrackState, string> = {
-  done: "pill-success", down: "pill-primary", align: "pill-primary", wait: "pill-secondary", error: "pill-danger",
-  absent: "pill-warning", off: "pill-secondary", none: "pill-secondary",
-}
 
 type Action = "refetch" | "retry" | "redo" | "delete" | null
 
@@ -43,8 +33,8 @@ const rows = computed(() => {
     const gone = line?.online === false
     const action: Action = cell.state === "done" ? (gone ? "delete" : cell.isReference ? "refetch" : "redo")
       : !cell.isReference && cell.state === "error" ? "retry" : null
-    // A placed track the service did not vouch for is done, and marked so.
-    const pill = cell.state === "done" && detail?.code === "align_unsure" ? "pill-warning" : PILL[cell.state]
+    // A placed track the service did not vouch for is done, and its pill bears the warning of that verdict.
+    const pill = cell.state === "done" && detail?.code === "align_unsure" ? "pill-warning" : null
     return {
       cell, sourceId, part: line?.part ?? null,
       where: line && (line.playerLabel ?? line.player) ? `${line.playerLabel ?? line.player}${height}` : "",
@@ -88,7 +78,7 @@ function act(row: (typeof rows.value)[number]): void {
           <span v-else class="muted">—</span>
         </td>
         <td>
-          <span class="pill" :class="row.pill">{{ stateText(row.cell) }}</span>
+          <span class="pill" :class="row.pill" :data-state="row.pill ? undefined : TRACK_STATES[row.cell.state]">{{ stateLabel(TRACK_STATES[row.cell.state]) }}</span>
           <span v-if="row.offline" class="track-offline">{{ t("output.plan.offline") }}</span>
           <span v-if="row.note" class="track-note">{{ row.note }}</span>
         </td>

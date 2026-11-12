@@ -34,7 +34,7 @@ const tabs = [
   { label: "Авторизация", value: "auth", icon: "pi-key" },
   { label: "Аккаунт", value: "account", icon: "pi-user" },
   { label: t("settings.tab.sources"), value: "sources", icon: "pi-wifi" },
-  { label: "Фильтры VK", value: "parser", icon: "pi-filter" },
+  { label: t("rules.tab"), value: "parser", icon: "pi-filter" },
   { label: t("settings.tab.voices"), value: "voices", icon: "pi-volume-up" },
   { label: "Агенты", value: "agents", icon: "pi-server" },
   { label: "Отладка", value: "debug", icon: "pi-wrench" },

@@ -7,6 +7,7 @@ import type { CutState } from "../../../lib/compilations"
 import { trackCells, type EpisodeView, type QueueName, type QueueRow, type SourceMark as Mark, type TrackState } from "../../../lib/output"
 import QueuePanel from "./QueuePanel.vue"
 import VoiceMark from "./VoiceMark.vue"
+import { CUT_STATES, stateWord, TRACK_STATES } from "../../../lib/states"
 
 // The settings of a level — a season, or the whole series — as one table per queue, the order set for all of its
 // episodes at once; a season also has its tracks, with the actions that mend all the episodes of a group.
@@ -41,9 +42,6 @@ const tab = ref<string>(props.compilation ? "cuts" : props.season === null ? "re
 // A compilation has its REF 2 and its cuts; the voice-overs are set on the season and on the episode.
 const groups = computed(() => props.compilation ? []
   : props.queues ? (props.queues.groups ?? []).map((each) => each.group) : props.order)
-const CUT_PILL: Record<CutState, string> = {
-  wait: "pill-secondary", down: "pill-primary", align: "pill-primary", ready: "pill-success", error: "pill-danger",
-}
 const cutEntries = computed(() => Object.entries(props.compilation?.cuts ?? {}).filter(([, count]) => count) as [CutState, number][])
 const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) => each.group === group)
 
@@ -57,12 +55,9 @@ const tracks = computed(() => props.order.map((group, index) => {
   }
   return { group, pos: index + 1, counts }
 }))
-const PILL: Partial<Record<TrackState | "reference", string>> = {
-  reference: "pill-primary", done: "pill-success", down: "pill-primary", align: "pill-primary", wait: "pill-secondary",
-  absent: "pill-warning", off: "pill-secondary", error: "pill-danger",
-}
+// The track of the reference is a role, not a state: it keeps the pill of a role.
 const countText = (state: TrackState | "reference", count: number): string => state === "reference"
-  ? `${t("output.queue.reference")} ${count}` : t(`output.meter.${state === "none" ? "wait" : state}`, { n: count })
+  ? `${t("output.queue.reference")} ${count}` : t("state.count", { state: stateWord(TRACK_STATES[state]), n: count })
 </script>
 
 <template>
@@ -91,12 +86,12 @@ const countText = (state: TrackState | "reference", count: number): string => st
       </div>
       <div v-if="tab === 'cuts' && compilation" class="level-cuts">
         <span class="level-counts">
-          <span v-for="[state, count] in cutEntries" :key="state" class="pill" :class="CUT_PILL[state]">
-            {{ t(`output.cut.meter.${state}`, { n: count }) }}
+          <span v-for="[state, count] in cutEntries" :key="state" class="pill" :data-state="CUT_STATES[state]">
+            {{ t("state.count", { state: stateWord(CUT_STATES[state]), n: count }) }}
           </span>
         </span>
         <button v-if="compilation.cuts.error" type="button" class="level-action do-retry-cuts" data-lever :disabled="busy" @click="emit('retry-cuts')">
-          {{ t("output.cut.retryAll", { n: compilation.cuts.error }) }}
+          {{ t("output.action.retryAll", { n: compilation.cuts.error }) }}
         </button>
       </div>
       <table v-else-if="tab === 'tracks'" class="level-tracks">
@@ -114,7 +109,8 @@ const countText = (state: TrackState | "reference", count: number): string => st
             <td><b>{{ track.group }}</b></td>
             <td>
               <span class="level-counts">
-                <span v-for="(count, state) in track.counts" :key="state" class="pill" :class="PILL[state]">{{ countText(state, count!) }}</span>
+                <span v-for="(count, state) in track.counts" :key="state" class="pill" :class="{ 'pill-primary': state === 'reference' }"
+                      :data-state="state === 'reference' ? undefined : TRACK_STATES[state]">{{ countText(state, count!) }}</span>
               </span>
             </td>
             <td class="narrow">

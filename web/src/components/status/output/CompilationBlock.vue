@@ -13,6 +13,7 @@ import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
 import PowerSwitch from "./PowerSwitch.vue"
 import SourceMark from "./SourceMark.vue"
+import { CUT_STATES, stateWord } from "../../../lib/states"
 
 // A compilation of a season in the view «Компиляции» (stage 12): a block like that of a season, for the episodes the
 // compilation covers. The switch of a card says whether the episode stands in this compilation (it stands in one at most:
@@ -83,7 +84,7 @@ const cutCounts = computed(() => {
 const taken = computed(() => items.value.filter((item) => item.each.member).length)
 const share = (count: number, all: number): string => `${all === 0 ? 0 : (count * 100) / all}%`
 const cutText = computed(() => (Object.entries(cutCounts.value) as [CutState, number][])
-  .filter(([, count]) => count > 0).map(([state, count]) => t(`output.cut.meter.${state}`, { n: count })).join(" · "))
+  .filter(([, count]) => count > 0).map(([state, count]) => t("state.count", { state: stateWord(CUT_STATES[state]), n: count })).join(" · "))
 
 // The rows hold as many cards as those of the season: the block is a copy of the season's for a part of its episodes.
 const { grid, ruler, columns } = useCardGrid(() => props.mode, () => props.order.length, () => props.episodes.length)
@@ -125,7 +126,7 @@ const rows = computed<CompilationRow[]>(() => {
       <div class="season-meters">
         <div class="meter">
           <span class="meter-name">{{ t("output.meter.episodes") }}</span>
-          <span class="meter-bar"><span class="is-align" :style="{ inlineSize: share(taken, items.length) }" /></span>
+          <span class="meter-bar"><span data-state="align" :style="{ inlineSize: share(taken, items.length) }" /></span>
           <span class="meter-text">{{ t("output.meter.taken", { n: taken, total: items.length }) }}</span>
         </div>
         <div v-if="taken" class="meter">

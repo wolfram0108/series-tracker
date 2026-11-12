@@ -7,13 +7,14 @@ import StInput from "./StInput.vue"
 import StSelect from "./StSelect.vue"
 import PowerSwitch from "./status/output/PowerSwitch.vue"
 import SourceMark from "./status/output/SourceMark.vue"
-import { t, type MessageKey } from "../i18n"
+import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
   joinVkAddress, vkQuery, placeOf, profileOptions, progressText, seasonPositions, sourceCaption, spanText, splitVkAddress,
   stepsLines, togglePlayer, type SourceItem,
 } from "../lib/sources"
 import type { DraftPatch } from "../composables/useSourceDrafts"
+import { SOURCE_STATES, stateLabel } from "../lib/states"
 
 // One source of a series: a head with its mark, its place, its state and its actions; its address and its constructor
 // profile; and its players as tabs, each with the table of the voice-overs the rules of the profile made of its rows.
@@ -39,7 +40,7 @@ const seasonOptions = (groups: number) => [
 const stateText = computed(() => {
   const state = view.value.state
   if (state === "reading" && view.value.progress) return progressText(view.value.progress)
-  return t(`sources.state.${state}` as MessageKey)
+  return stateLabel(SOURCE_STATES[state])
 })
 
 // The player whose tab is open; the first one until the user picks another, and again when the picked one is gone.
@@ -81,7 +82,7 @@ async function copyAddress(): Promise<void> {
         <span class="source-place">{{ view.title || placeOf(item.url) }}</span>
       </span>
       <template v-if="!isTorrent">
-        <span class="source-state" :class="`is-${view.state}`">
+        <span class="source-state" :data-state="SOURCE_STATES[view.state]">
           <i v-if="view.state === 'reading'" class="pi pi-spin pi-spinner" />{{ stateText }}
         </span>
         <span v-if="view.players.length" class="muted">{{ sourceCaption(view.players) }}</span>
@@ -238,10 +239,7 @@ async function copyAddress(): Promise<void> {
 }
 .source-title { display: inline-flex; align-items: center; gap: 0.5rem; min-inline-size: 0; font-weight: 600; color: #2c3e50; }
 .source-place { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.source-state { display: inline-flex; align-items: center; gap: var(--space); color: var(--text-muted); }
-.source-state.is-ready { color: var(--color-green-1); }
-.source-state.is-failed { color: var(--color-red-1); }
-.source-state.is-reading { color: var(--color-blue); }
+.source-state { display: inline-flex; align-items: center; gap: var(--space); color: color-mix(in srgb, var(--tone-end) 60%, black); }
 .source-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-inline-start: auto; }
 /* The buttons of the head are those of the main screen at the height of the head of a season. */
 .source-actions .action-btn { min-block-size: 2rem; padding-block: 0.25rem; font-size: 0.85rem; }
