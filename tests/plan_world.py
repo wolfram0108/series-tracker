@@ -557,7 +557,7 @@ class Chaos:
         elif action == "answer":
             world.answers[((season, episode), rng.choice(self.groups))] = rng.choice(("mismatch", "critical", "suspect", "crash", "lost"))
         elif action == "cut_answer":
-            world.cut_answers[(season, episode)] = rng.choice(("critical", "lost"))
+            world.cut_answers[(season, episode)] = rng.choice(("critical", "crash", "lost"))
         elif action == "lose_file" and world.containers:
             world.lose_file(rng.choice(sorted(world.containers)))
         elif action == "reset":
