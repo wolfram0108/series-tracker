@@ -30,6 +30,13 @@ export function reasonText(reason: Reason | string | null | undefined): string {
     return typeof fact === "string" && coded(fact) ? reasonText(fact) : fact
   }
   const facts: Record<string, unknown> = Object.fromEntries(Object.entries(params).map(([name, fact]) => [name, worded(fact)]))
+  // A refused template names its block, the block before it and its place by their codes (modules/rules/engine.py).
+  for (const fact of ["block", "after"]) {
+    const block = `rules.block.${String(params[fact] ?? "")}.label`
+    if (fact in params && block in ru) facts[fact] = t(block as MessageKey)
+  }
+  const place = `rules.place.${String(params.place ?? "")}`
+  if ("place" in params && place in ru) facts.place = t(place as MessageKey)
   // A refused action names the action and the state of the object by their codes: the window words both.
   if (found.code === "not_allowed") {
     const action = `availability.action.${String(params.action ?? "")}`

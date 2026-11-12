@@ -70,7 +70,7 @@ class ChallengeSeen(RuntimeError):
     """Ответ оказался заглушкой антибот-защиты, а не страницей."""
 
     def __init__(self, url: str) -> None:
-        super().__init__(f"антибот-челлендж на {url}")
+        super().__init__(reason("challenge_page", url=url))
         self.url = url
 
 

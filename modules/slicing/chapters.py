@@ -58,13 +58,15 @@ def time_to_seconds(time_str: str) -> int | None:
 def is_garbage_chapter(chapter: dict, index: int, total: int,
                        next_time: int | None = None
                        ) -> tuple[bool, str | None]:
-    title = (chapter.get("title") or "").lower().strip()
-    for pattern in GARBAGE_PATTERNS:
+    # A chapter yt-dlp gave no title (None; the window words it) is judged by its length alone.
+    untitled = chapter.get("title") is None
+    title = "" if untitled else (chapter.get("title") or "").lower().strip()
+    for pattern in () if untitled else GARBAGE_PATTERNS:
         if re.search(pattern, title, re.IGNORECASE):
             return True, reason("chapter_matches_pattern", pattern=pattern)
-    if index == 0 and any(k in title for k in _OPENING_KEYWORDS):
+    if not untitled and index == 0 and any(k in title for k in _OPENING_KEYWORDS):
         return True, reason("chapter_first_like_opening")
-    if index == total - 1 and any(k in title for k in _ENDING_KEYWORDS):
+    if not untitled and index == total - 1 and any(k in title for k in _ENDING_KEYWORDS):
         return True, reason("chapter_last_like_ending")
     # Длительность главы = интервал до СЛЕДУЮЩЕЙ главы, а не её время
     # начала (находка 35/54): иначе глава в 00:00:00 всегда «0 сек».
@@ -74,7 +76,7 @@ def is_garbage_chapter(chapter: dict, index: int, total: int,
         duration = next_time - start
         if 0 <= duration < MIN_DURATION_SECONDS:
             return True, reason("chapter_too_short", seconds=duration)
-    if (index in (0, total - 1) and len(title) < 10
+    if (not untitled and index in (0, total - 1) and len(title) < 10
             and not any(c.isdigit() for c in title)):
         return True, reason("chapter_short_title_at_edge")
     return False, None
@@ -145,4 +147,4 @@ async def fetch_chapters(video_url: str) -> list[dict]:
     if not data:
         return []
     return [{"time": format_seconds(ch.get("start_time")),
-             "title": ch.get("title", "Без названия")} for ch in data]
+             "title": ch.get("title")} for ch in data]

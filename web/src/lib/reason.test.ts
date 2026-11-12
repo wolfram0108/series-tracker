@@ -37,6 +37,13 @@ describe("reasonText", () => {
       .toBe("Действие «later» недоступно: сейчас «unseen»")
   })
 
+  it("words the blocks and the place a refused template names by their codes", () => {
+    expect(reasonText({ code: "block_repeated", params: { place: "condition", block: "range" } }))
+      .toBe("в одном условии может быть только один блок «Диапазон»")
+    expect(reasonText({ code: "block_after_number", params: { block: "modifier", after: "text" } }))
+      .toBe("блок «±» должен следовать сразу за блоком «Число», а не за блоком «Текст»")
+  })
+
   it("says nothing when there is no reason", () => {
     expect(reasonText(null)).toBe("")
     expect(reasonText("")).toBe("")

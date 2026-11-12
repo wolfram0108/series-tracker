@@ -17,7 +17,7 @@ const { request } = useApi()
 const toast = useToast()
 const confirm = useConfirm()
 
-interface Chapter { time?: string; title?: string; garbage_reason?: string; original_index?: number }
+interface Chapter { time?: string; title?: string | null; garbage_reason?: string; original_index?: number }
 interface Item {
   unique_id: string
   episode_start?: number
@@ -287,7 +287,7 @@ onMounted(loadMediaItems)
           <div v-if="it.filteredChapters && it.filteredChapters.length" class="chapter-section">
             <h6>{{ t("slicing.chapters.active", { count: it.filteredChapters.length }) }}</h6>
             <div class="chapter-list">
-              <span v-for="(ch, i) in it.filteredChapters" :key="'f' + i" class="chapter-pill chapter-active">{{ ch.time }} ({{ ch.title }})</span>
+              <span v-for="(ch, i) in it.filteredChapters" :key="'f' + i" class="chapter-pill chapter-active">{{ ch.time }} ({{ ch.title ?? t("slicing.chapter.untitled") }})</span>
             </div>
           </div>
           <!-- мусорные главы -->
@@ -295,13 +295,13 @@ onMounted(loadMediaItems)
             <h6>{{ t("slicing.chapters.garbage", { count: it.garbageChapters.length }) }}</h6>
             <div class="chapter-list">
               <span v-for="(ch, i) in it.garbageChapters" :key="'g' + i" class="chapter-pill chapter-garbage" :title="reasonText(ch.garbage_reason)">
-                {{ ch.time }} ({{ ch.title }}) <i class="pi pi-times-circle" />
+                {{ ch.time }} ({{ ch.title ?? t("slicing.chapter.untitled") }}) <i class="pi pi-times-circle" />
               </span>
             </div>
           </div>
           <!-- все главы без фильтрации -->
           <div v-if="!it.filteredChapters && !it.garbageChapters" class="chapter-list">
-            <span v-for="(ch, i) in it.chapters" :key="i" class="chapter-pill">{{ ch.time }} ({{ ch.title }})</span>
+            <span v-for="(ch, i) in it.chapters" :key="i" class="chapter-pill">{{ ch.time }} ({{ ch.title ?? t("slicing.chapter.untitled") }})</span>
           </div>
 
           <!-- управление фильтрацией -->
@@ -316,7 +316,7 @@ onMounted(loadMediaItems)
             <div class="chapter-checkbox-list">
               <div v-for="(ch, i) in it.chapters" :key="'s' + i" class="chk-row">
                 <input :id="`ch-${it.unique_id}-${i}`" v-model="it.selectedChapters" type="checkbox" :value="i" />
-                <label :for="`ch-${it.unique_id}-${i}`">{{ ch.time }} — {{ ch.title }}</label>
+                <label :for="`ch-${it.unique_id}-${i}`">{{ ch.time }} — {{ ch.title ?? t("slicing.chapter.untitled") }}</label>
               </div>
             </div>
             <div class="chapter-selection-actions">

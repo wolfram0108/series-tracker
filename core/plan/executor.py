@@ -14,6 +14,7 @@ import asyncio
 from dataclasses import dataclass, field, replace
 from typing import Callable
 
+from ..reasons import reason
 from .planner import Goal, Group, Op, Plan, plan, video_op
 from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
 
@@ -407,8 +408,8 @@ class SeriesSync:
                     need.op.id for need in needs if need.task.exception() is not None or need.task.result() is None)})
                 return None
             if op.batch:
-                outcome = (entry.batch.outcomes.get(op.id, Passing("партия не выполнена")) if sent
-                           else Passing("шаг заменён планом, сделанным после него"))
+                outcome = (entry.batch.outcomes.get(op.id, Passing(reason("batch_not_done"))) if sent
+                           else Passing(reason("step_replaced")))
             else:
                 try:
                     outcome = await self.do(op, results_of(steps))

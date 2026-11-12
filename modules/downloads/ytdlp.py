@@ -475,7 +475,7 @@ async def _download_playlist(video_url: str, full_output_path: str, on_progress:
     the same listing of segments."""
     await storage.call(os.makedirs, os.path.dirname(full_output_path), exist_ok=True)
     if await storage.call(os.path.exists, full_output_path):
-        return True, "файл уже существует"
+        return True, reason("file_already_there")
     await on_progress({"method": "hls"})
     done, seconds, tolerance = (False, ""), 0.0, HOLE_S
     if fetcher is not None:
@@ -576,7 +576,7 @@ async def _download_owned(video_url: str, full_output_path: str, on_progress: Pr
                           announced: float | None = None, max_height: int | None = None) -> tuple[bool, str]:
     await storage.call(os.makedirs, os.path.dirname(full_output_path), exist_ok=True)
     if await storage.call(os.path.exists, full_output_path):
-        return True, "файл уже существует"
+        return True, reason("file_already_there")
 
     if progressive:
         await on_progress({"method": "ranged"})

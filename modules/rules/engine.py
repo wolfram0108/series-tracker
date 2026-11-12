@@ -188,8 +188,8 @@ def _parse_blocks(raw: str | None) -> list[dict]:
     return blocks
 
 
-def _suffix_block_index(blocks: list[dict], kinds: tuple[str, ...], label: str,
-                        where: str) -> int | None:
+def _suffix_block_index(blocks: list[dict], kinds: tuple[str, ...], block: str,
+                        place: str) -> int | None:
     """Index of the attachment block (range, +/-) when it hangs on a number.
 
     One attachment per template, standing right after the only number:
@@ -199,16 +199,16 @@ def _suffix_block_index(blocks: list[dict], kinds: tuple[str, ...], label: str,
     if not indices:
         return None
     if len(indices) > 1:
-        raise ValueError(reason("block_repeated", where=where, label=label))
+        raise ValueError(reason("block_repeated", place=place, block=block))
     idx = indices[0]
     if idx == 0:
-        raise ValueError(reason("block_first", label=label))
+        raise ValueError(reason("block_first", block=block))
     if blocks[idx - 1].get("type") != "number":
-        raise ValueError(reason("block_after_number", label=label, type=str(blocks[idx - 1].get("type"))))
+        raise ValueError(reason("block_after_number", block=block, after=str(blocks[idx - 1].get("type"))))
     if any(b.get("type") == "number" for b in blocks[idx + 1:]):
-        raise ValueError(reason("block_after_last_number", label=label, where=where))
+        raise ValueError(reason("block_after_last_number", block=block, place=place))
     if sum(1 for b in blocks if b.get("type") == "number") != 1:
-        raise ValueError(reason("block_one_number", label=label))
+        raise ValueError(reason("block_one_number", block=block))
     return idx
 
 
@@ -335,7 +335,7 @@ def _compile_rule(rule: dict) -> CompiledRule:
                 raise ValueError(reason("modifier_in_condition"))
             range_check: ConditionRangeCheck | None = None
 
-            r_idx = _suffix_block_index(blocks, ("range",), "Диапазон", "условии")
+            r_idx = _suffix_block_index(blocks, ("range",), "range", "condition")
             if r_idx is not None:
                 intervals = parse_range_spec(blocks[r_idx].get("value"))
                 range_check = ConditionRangeCheck(intervals=intervals)
@@ -367,7 +367,7 @@ def _compile_rule(rule: dict) -> CompiledRule:
                                           raw_value=raw_pattern))
         else:  # extract_*
             blocks = _parse_blocks(raw_pattern)
-            _suffix_block_index(blocks, MODIFIER_TYPES, "±", "действии")
+            _suffix_block_index(blocks, MODIFIER_TYPES, "modifier", "action")
             regex = _blocks_to_regex(blocks, capture_numbers=True, allow_range=False)
             modifiers: list[int | None] = []
             for i, block in enumerate(blocks):

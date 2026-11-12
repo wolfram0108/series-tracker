@@ -60,14 +60,14 @@ async def run_ffmpeg(source: str, start: str, duration: str | None,
     усыновлятор обойдёт; при любом неуспехе tmp сносится."""
     executable = program("ffmpeg")
     if not executable:
-        return False, "ffmpeg не найден в PATH"
+        return False, reason("program_missing", program="ffmpeg")
     _, ext = os.path.splitext(output)
     tmp = f"{output}.slicing{ext or '.mp4'}"
     try:
         with storage.hold(tmp, output):  # the cut writes until ffmpeg has really ended
             return await _cut(executable, source, start, duration, tmp, output)
     except storage.StorageBusy:
-        return False, "путь занят незавершённой файловой операцией"
+        return False, reason("path_busy")
 
 
 async def _cut(executable: str, source: str, start: str, duration: str | None, tmp: str,
@@ -82,9 +82,9 @@ async def _cut(executable: str, source: str, start: str, duration: str | None, t
         try:
             code, _, stderr = await run_capture(command, timeout=FFMPEG_TIMEOUT)
         except asyncio.TimeoutError:
-            return False, f"ffmpeg не уложился в {FFMPEG_TIMEOUT:.0f} с"
+            return False, reason("program_timed_out", program="ffmpeg", seconds=f"{FFMPEG_TIMEOUT:.0f}")
         if code != 0:
-            return False, stderr.decode("utf-8", "replace").strip()[-500:]
+            return False, reason("program_failed", program="ffmpeg", cause=stderr.decode("utf-8", "replace").strip()[-500:])
         await storage.call(os.replace, tmp, output, owns=(tmp, output))  # atomic publication
         success = True
         return True, ""
