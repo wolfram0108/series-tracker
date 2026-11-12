@@ -610,3 +610,18 @@ async def test_a_file_its_player_takes_that_is_cancelled_stops_the_player(system
     done = (await asyncio.wait_for(sub.queue.get(), 5)).payload
 
     assert done["ok"] is False and await _wait(lambda: fake.player_stops == [player_target(path)])
+
+
+@pytest.mark.asyncio
+async def test_dash_audio_reaches_the_downloader(system, tmp_path):
+    bus, fake, dl, probe = system
+    fake.stream_replies['app://banri/1'] = {
+        'handled': True, 'stream_url': 'https://cdn/video.mp4', 'audio_url': 'https://cdn/audio.mp4',
+        'headers': {'Referer': 'https://player/'}, 'progressive': False, 'playlist': False}
+    (done,) = await _fetch(probe, bus, 1, jobs=[
+        {'key': 'dub:1', 'url': 'app://banri/1', 'path': str(tmp_path / 'dash.mp4'), 'series_id': 3}])
+    assert done['ok']
+    kw = dl.kwargs['https://cdn/video.mp4']
+    assert kw['audio_url'] == 'https://cdn/audio.mp4'
+    assert kw['headers'] == {'Referer': 'https://player/'}
+    assert not kw.get('progressive') and not kw.get('playlist')

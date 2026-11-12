@@ -143,3 +143,18 @@ async def test_the_search_gives_the_cards_as_the_application_gives_them(world):
     assert (page.pages, page.total) == (1, 1)
     assert page.cards == [{"id": 1522016, "name": "万界独尊", "sub": "", "year": "2021", "area": "内地", "class": "动漫",
                            "remarks": "更新至497集", "blurb": "…", "pic": "https://pic.model/1.jpg"}]
+
+
+async def test_a_refusal_by_status_keeps_the_words_of_the_parser_and_tells_its_daily_quota():
+    model = Model()
+    quota = {"code": 429, "msg": "当天限额已超限（该套餐今日已播放 25002/25000 次）。"}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json=quota) if request.url.path == "/api/v1/vod/parse" else model.handle(request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        client = AppMnClient(AppProfile("appmn", "米诺", "appmn", SETTINGS), lambda: http)
+        with pytest.raises(AppError) as refused:
+            await client.resolve("duanju", "dj-1")
+    assert refused.value.status == 403 and refused.value.daily_quota
+    assert json.loads(refused.value.reason)["message"] == quota["msg"]

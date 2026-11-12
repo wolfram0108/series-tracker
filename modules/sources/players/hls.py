@@ -1,8 +1,9 @@
 """The frame of an HLS stream, read from its picture: the playlist (the variant of the highest bandwidth when it is a master
 one), the head of the first segment of its film (a block a host put before it from elsewhere is no part of the film, as
 the downloader has it: core/hls_playlist.py), decrypted when the playlist names an AES-128 key, given to ffprobe. A
-segment that is a whole file (a playlist of one MP4) is read as a file, by its address. A film whose first segment shows
-no picture is a file its store has damaged: the answer says what the host served for it.
+segment that is a whole file (a playlist of one MP4) is measured from its bounded header first, with a seekable network
+probe as a fallback. When a prefix has no picture, a larger bounded prefix is tried. An exhausted prefix or a failed probe is inconclusive; a complete small body with no
+picture is reported as missing media.
 
 A host may say nothing true of the frame of what it serves (the label of a list, the name of a line of an application), so
 the players whose streams are playlists measure it here, one way for all of them.
@@ -17,7 +18,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from core.ffprobe import film_stream, probe, streams_of
+from core.ffprobe import film_stream, probe
 from core.hls_playlist import without_insertions
 
 from .contract import Answer, Kind, Reading
@@ -36,6 +37,9 @@ def waiting(seconds: float) -> httpx.Timeout:
 
 # Enough of a segment to hold its first key frame with the parameters of the picture; the rest of it is not fetched.
 HEAD_BYTES = 256 * 1024
+MAX_HEAD_BYTES = 1024 * 1024
+# Leading MP4 track metadata may be larger than a TS prefix, but never read an arbitrary movie-sized box.
+FILE_HEADER_BYTES = 8 * 1024 * 1024
 MEASURE_TIMEOUT_S = 30.0
 
 TS_PACKET = 188
@@ -53,6 +57,31 @@ def container_of(head: bytes) -> str | None:
         return "flv"
     return None
 
+
+def file_head_size(head: bytes, minimum: int) -> int:
+    """A bounded file prefix: a leading MP4 index, or enough Matroska/TS data to reach the video headers."""
+    container = container_of(head)
+    if container in ("matroska", "mpegts"):
+        return max(minimum, MAX_HEAD_BYTES)
+    if container != "mp4":
+        return minimum
+    pos = 0
+    while pos + 8 <= len(head):
+        size, kind = int.from_bytes(head[pos:pos + 4], "big"), head[pos + 4:pos + 8]
+        header = 8
+        if size == 1:
+            if pos + 16 > len(head):
+                break
+            size, header = int.from_bytes(head[pos + 8:pos + 16], "big"), 16
+        if size < header:
+            break
+        end = pos + size
+        if kind == b"moov":
+            return max(minimum, end) if end <= FILE_HEADER_BYTES else minimum
+        if kind == b"mdat" or end > len(head):
+            break
+        pos = end
+    return minimum
 
 
 _ATTRIBUTE = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
@@ -131,18 +160,31 @@ def _headers(referer: str, extra: dict[str, str] | None = None) -> dict[str, str
     return sent
 
 
+def probe_args(headers: dict[str, str]) -> list[str]:
+    """The headers of a stream as ffprobe sends them: its agent once (the stream's own, else ours), the rest as lines."""
+    agent = next((value for name, value in headers.items() if name.lower() == "user-agent"), USER_AGENT)
+    lines = "".join(f"{name}: {value}\r\n" for name, value in headers.items() if name.lower() != "user-agent")
+    return ["-user_agent", agent, *(["-headers", lines] if lines else [])]
+
+
 async def _served(http: httpx.AsyncClient, url: str, referer: str, limit: int | None = None,
                   headers: dict[str, str] | None = None) -> tuple[bytes, str]:
     """The body a host serves at an address (its head when `limit` is given) and the type it announces. `headers` are
     those of the stream: its segments, its key and its initialisation are asked as its playlist is."""
     sent = _headers(referer, {**(headers or {}), **({"Range": f"bytes=0-{limit - 1}"} if limit else {})})
     try:
-        response = await http.get(url, headers=sent, follow_redirects=True, timeout=waiting(REQUEST_TIMEOUT_S))
+        async with http.stream("GET", url, headers=sent, follow_redirects=True,
+                               timeout=waiting(REQUEST_TIMEOUT_S)) as response:
+            if response.status_code not in (200, 206):
+                raise MeasureError(Answer(response.status_code, "", retry_after(response), final_url=str(response.url)))
+            body = bytearray()
+            async for chunk in response.aiter_bytes():
+                body.extend(chunk if limit is None else chunk[:max(0, limit - len(body))])
+                if limit is not None and len(body) >= limit:
+                    break
+            return bytes(body), response.headers.get("content-type", "")
     except httpx.HTTPError as exc:
         raise MeasureError(Answer(None, error=f"{type(exc).__name__}: {urlsplit(url).hostname}")) from exc
-    if response.status_code not in (200, 206):
-        raise MeasureError(Answer(response.status_code, "", retry_after(response), final_url=str(response.url)))
-    return (response.content[:limit] if limit else response.content), response.headers.get("content-type", "")
 
 
 async def _bytes(http: httpx.AsyncClient, url: str, referer: str, limit: int | None = None,
@@ -163,37 +205,54 @@ async def measure_head(http: httpx.AsyncClient, head: Head, referer: str,
     the video (a store that took a part of a file away serves a stub of a few hundred bytes for it): the error says what
     the host served. Every request of the measure carries the headers of the stream, as the download of it does: a host
     that wants them for the playlist wants them for the segment."""
-    data, kind = await _served(http, head.segment, referer, HEAD_BYTES, headers)
-    size = len(data)
-    if not head.init and container_of(data) not in (None, "mpegts"):
-        # A playlist may list a whole file as its segment (an MP4, its index at its end): its picture is read as a
-        # file's, by its address, not from the head of a transport stream.
-        sent = _headers(referer, headers)
-        agent = next(value for name, value in sent.items() if name.lower() == "user-agent")
-        lines = "".join(f"{name}: {value}\r\n" for name, value in sent.items() if name.lower() != "user-agent")
-        streams, _said = await probe(head.segment, input_args=[
-            "-user_agent", agent, *(["-headers", lines] if lines else [])], timeout=MEASURE_TIMEOUT_S)
+    key, init = None, None
+    for limit in (HEAD_BYTES, MAX_HEAD_BYTES):
+        data, kind = await _served(http, head.segment, referer, limit, headers)
+        size = len(data)
+        whole_file = head.method == "NONE" and not head.init and container_of(data) not in (None, "mpegts")
+        if whole_file:
+            # Some playlists contain a complete MP4 rather than TS fragments. Its leading index can be measured
+            # locally too; the network probe is only needed when that bounded prefix cannot describe the video.
+            wanted = file_head_size(data, len(data))
+            if wanted > len(data):
+                extra = 65536 if container_of(data) == "mp4" else 0
+                data, _kind = await _served(http, head.segment, referer, min(FILE_HEADER_BYTES, wanted + extra), headers)
+            streams, said = await probe("pipe:0", data=data, timeout=MEASURE_TIMEOUT_S)
+            film = film_stream(streams or [])
+            if film is not None and film.get("height"):
+                return int(film["height"])
+            # A complete file can have its index at the end: preserve the seekable network fallback.
+            streams, said = await probe(head.segment, input_args=probe_args(_headers(referer, headers)),
+                                        timeout=MEASURE_TIMEOUT_S)
+        else:
+            if head.method == "AES-128":
+                if key is None:
+                    key = await _bytes(http, head.key, referer, headers=headers)
+                if len(key) != 16:
+                    raise MeasureError(Answer(200, reading=Reading(Kind.NO_FILE, 200, message="invalid AES-128 key")))
+                data = decrypted(data, key, head.iv if head.iv is not None else head.sequence.to_bytes(16, "big"))
+            if head.init:
+                if init is None:
+                    init = await _bytes(http, head.init, referer, headers=headers)
+                data = init + data
+            streams, said = await probe("pipe:0", input_args=[] if head.init else ["-f", "mpegts"], data=data,
+                                        timeout=MEASURE_TIMEOUT_S)
         film = film_stream(streams or [])
         if film is not None and film.get("height"):
             return int(film["height"])
-    if head.method == "AES-128":
-        key = await _bytes(http, head.key, referer, headers=headers)
-        data = decrypted(data, key, head.iv if head.iv is not None else head.sequence.to_bytes(16, "big"))
-    if head.init:
-        data = await _bytes(http, head.init, referer, headers=headers) + data
-    streams = await streams_of("pipe:0", input_args=[] if head.init else ["-f", "mpegts"], data=data,
-                               timeout=MEASURE_TIMEOUT_S)
-    film = film_stream(streams or [])
-    try:
-        height = int(film["height"]) if film is not None else None
-    except (KeyError, TypeError, ValueError):
-        height = None
-    if not height:
-        # The host answered and what it serves is no video: its final word on the file, the same at every ask.
-        raise MeasureError(Answer(200, reading=Reading(Kind.NOT_FOUND, 200, message=(
-            f"the host {urlsplit(head.segment).hostname} served no picture in the segment: {kind or 'no type'}, "
-            f"{size} bytes"))))
-    return height
+        if streams is None:
+            # A failed probe is no proof that the host's video is absent.
+            raise MeasureError(Answer(None, error=said.replace(head.segment, urlsplit(head.segment).hostname or "")))
+        if whole_file:
+            raise MeasureError(Answer(200, reading=Reading(Kind.NO_FILE, 200, message=(
+                said.replace(head.segment, urlsplit(head.segment).hostname or "") or "no picture in the file"))))
+        if size < limit:
+            break
+        # A full prefix without a video header is inconclusive: ask for a larger, still bounded prefix of this segment.
+    state = Kind.NOT_FOUND if size < limit else Kind.NO_FILE
+    raise MeasureError(Answer(200, reading=Reading(state, 200, message=(
+        f"the host {urlsplit(head.segment).hostname} served no picture in the segment: {kind or 'no type'}, "
+        f"{size} bytes"))))
 
 
 async def measured(http: httpx.AsyncClient, playlist: str, referer: str, measure: Measure | None,

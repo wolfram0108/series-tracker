@@ -37,7 +37,9 @@ from ..apps.lines import LineRegistry
 from ..policy import settle
 from ..term import Term
 from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
-from .hls import MEASURE_TIMEOUT_S, Measure, container_of, is_playlist, measure_head, measured, waiting
+from .dash import UnsupportedDash, is_dash, tracks
+from .hls import (MEASURE_TIMEOUT_S, Measure, container_of, file_head_size, is_playlist, measure_head, measured,
+                  probe_args, waiting)
 from .http import USER_AGENT, retry_after
 from .vk_files import pick_file
 
@@ -47,6 +49,8 @@ logger = logging.getLogger("sources")
 PEEK_BYTES = 4096
 # The range asked of the address of a stream: a playlist of thousands of segments fits whole, a file is not taken.
 PLAYLIST_BYTES = 8 * 1024 * 1024
+# A resolver's daily allowance belongs to its line, not each of its thousands of episodes. Probe for recovery later.
+QUOTA_RECHECK_S = 60.0
 _DIRECT = re.compile(r"\.(m3u8|mp4)(?:$|\?)", re.I)
 
 
@@ -61,6 +65,7 @@ class Served:
     (`answer` is what the host said: its status, its failure, or what it served instead)."""
     kind: str
     answer: Answer = Answer(None)
+    head: bytes = b""
 
 
 async def served_as(http: httpx.AsyncClient, address: str, headers: dict[str, str]) -> Served:
@@ -77,16 +82,23 @@ async def served_as(http: httpx.AsyncClient, address: str, headers: dict[str, st
             async for chunk in response.aiter_bytes():
                 head += chunk
                 if not playlist and len(head) >= PEEK_BYTES:
-                    playlist = is_playlist(head[:PEEK_BYTES].decode("utf-8", "replace"))
+                    playlist = is_playlist(head[:PEEK_BYTES].decode("utf-8", "replace")) or is_dash(head)
                     # Of a file, as much of its head as tells a notice of the host from an episode (core/notices.py).
-                    if not playlist and len(head) >= max(PEEK_BYTES, notices.head_bytes()):
+                    if not playlist and len(head) >= file_head_size(head, max(PEEK_BYTES, notices.head_bytes())):
                         break
+                if len(head) > PLAYLIST_BYTES:
+                    return Served("", Answer(200, reading=Reading(Kind.NO_FILE, 200,
+                                         message="stream manifest exceeds the size limit")))
             # A range the host kept to cuts a playlist longer than it: the whole of it is then asked by the measure.
             cut = response.status_code == 206 and len(head) >= PLAYLIST_BYTES
     except AnswerTooLarge as exc:
         return Served("", Answer(None, error=f"{type(exc).__name__}: the host ignores the range of a head"))
     except httpx.HTTPError as exc:
         return Served("", Answer(None, error=f"{type(exc).__name__}: {urlsplit(address).hostname}"))
+    if is_dash(head):
+        if cut:
+            return Served("", Answer(200, reading=Reading(Kind.NO_FILE, 200, message="DASH manifest is incomplete")))
+        return Served("dash", Answer(200, head.decode("utf-8-sig", "replace"), final_url=final))
     if is_playlist(head[:PEEK_BYTES].decode("utf-8", "replace")):
         return Served("playlist", Answer(None) if cut else Answer(200, head.decode("utf-8", "replace"), final_url=final))
     if container_of(head) is not None:
@@ -96,17 +108,24 @@ async def served_as(http: httpx.AsyncClient, address: str, headers: dict[str, st
             return Served("", Answer(200, reading=Reading(Kind.NOT_FOUND, 200, message=(
                 f"the host {urlsplit(address).hostname} served its notice «{notice.id}» instead of the episode: "
                 f"{notice.words}"))))
-        return Served("file")
+        return Served("file", head=head)
     return Served("", Answer(200, reading=Reading(Kind.NO_FILE, 200, message=(
         f"the host {urlsplit(address).hostname} served no stream: {kind or 'no type'}, «{_excerpt(head)}»"))))
 
 
-async def measure_file_frame(address: str, headers: dict[str, str]) -> Answer:
+async def measure_file_frame(address: str, headers: dict[str, str], *, head: bytes = b"") -> Answer:
     """The frame of a file at its address, as ffprobe reads it with the headers of its line; what ffprobe said when it
     could not read it."""
-    sent = "".join(f"{key}: {value}\r\n" for key, value in headers.items())
-    streams, said = await probe(address, input_args=["-user_agent", USER_AGENT, *(["-headers", sent] if sent else [])],
-                                timeout=MEASURE_TIMEOUT_S)
+    if head:
+        # Fast-start MP4s carry their track parameters in the bytes already fetched to recognise the container.
+        # Reuse those bytes before asking ffprobe to open another network connection to the same file.
+        streams, _said = await probe("pipe:0", data=head, input_args=["-probesize", str(len(head))],
+                                     timeout=MEASURE_TIMEOUT_S)
+        film = film_stream(streams or [])
+        if film is not None and film.get("height"):
+            height = int(film["height"])
+            return Answer(200, reading=Reading(Kind.PLAYABLE, 200, (height,), files=((height, address),)))
+    streams, said = await probe(address, input_args=probe_args(headers), timeout=MEASURE_TIMEOUT_S)
     film = film_stream(streams or [])
     if film is None or not film.get("height"):
         cause = said.replace(address, urlsplit(address).hostname or "").strip() or "no picture in the file"
@@ -137,7 +156,7 @@ class AppPlayer:
     stream_headers: dict[str, str] = {}
 
     def __init__(self, client: AppClient, measure: Measure | None = None,
-                 measure_file: Callable[[str, dict[str, str]], Awaitable[Answer]] | None = None, *,
+                 measure_file: Callable[..., Awaitable[Answer]] | None = None, *,
                  registry: LineRegistry | None = None, clock: Callable[[], float] = time.monotonic,
                  term: Term | None = None) -> None:
         self.client = client
@@ -149,6 +168,10 @@ class AppPlayer:
         self.term = term if term is not None else Term()
         # (line, token) -> (address a parser gave, when): what was parsed serves the asks of the episode within the term.
         self._parsed: dict[tuple[str, str], tuple[AppStream, float]] = {}
+        self._quotas: dict[str, tuple[AppError, float]] = {}
+        # The agent the application's own player plays its streams with (`player_agent` of the profile): some CDNs of
+        # the applications refuse any other. A header the application gave with the stream stays as it is.
+        self.agent = str(client.profile.settings.get("player_agent") or "")
 
     # --- the link of a row ------------------------------------------------------------------------------------
 
@@ -182,12 +205,37 @@ class AppPlayer:
             return None
         return found[0]
 
+    def playback(self, headers: dict[str, str]) -> dict[str, str]:
+        """The headers every request of a stream of this application carries, as its own player sends them."""
+        if not self.agent or any(name.lower() == "user-agent" for name in headers):
+            return headers
+        return {**headers, "User-Agent": self.agent}
+
+    def refusal_for(self, link: str) -> Reading | None:
+        """A recently confirmed daily quota; a still usable parsed address needs no resolver allowance."""
+        found = self.parts(link)
+        if found is None or self._kept(*found) is not None:
+            return None
+        held = self._quotas.get(found[0])
+        if held is not None and self._clock() < held[1]:
+            return Reading(Kind.RESTRICTED, 200, message=held[0].reason)
+        return None
+
     async def address(self, line: str, item: str, card: str = "") -> AppStream:
         """The stream of an episode: what the application gave for it within the term, else what it gives now."""
         kept = self._kept(line, item)
         if kept is not None:
             return kept
-        got = await self.client.resolve(line, item, card)
+        held = self._quotas.get(line)
+        if held is not None and self._clock() < held[1]:
+            raise held[0]
+        self._quotas.pop(line, None)
+        try:
+            got = await self.client.resolve(line, item, card)
+        except AppError as exc:
+            if exc.daily_quota:
+                self._quotas[line] = (exc, self._clock() + QUOTA_RECHECK_S)
+            raise
         self._parsed[(line, item)] = (got, self._clock())
         return got
 
@@ -201,9 +249,11 @@ class AppPlayer:
             try:
                 got = await self.address(line, item, urlsplit(ref.url).path.strip("/"))
             except AppError as exc:
-                return Answer(200, reading=Reading(Kind.NO_ANSWER if exc.transient else Kind.NO_FILE, 200,
-                                                   message=exc.reason))
-            answer = await self._served(http, got.address, got.headers, measure)
+                kind = (Kind.RESTRICTED if exc.daily_quota else Kind.HTTP_ERROR if exc.status is not None
+                        else Kind.NO_ANSWER if exc.transient else Kind.NO_FILE)
+                return Answer(exc.status or 200, retry_after=exc.retry_after,
+                              reading=Reading(kind, exc.status or 200, message=exc.reason))
+            answer = await self._served(http, got.address, self.playback(got.headers), measure)
             if self.read(answer).kind is Kind.PLAYABLE:
                 return answer
             # An address that gave no stream serves no later ask: the next one has the application parse the episode anew.
@@ -222,14 +272,60 @@ class AppPlayer:
                              measure: bool) -> Answer:
         """What the host serves at the address of a stream: a file or a playlist, measured or only seen to be there."""
         served = await served_as(http, address, headers)
+        if served.kind == "dash":
+            try:
+                found = tracks(served.answer.text, served.answer.final_url or address)
+            except UnsupportedDash as exc:
+                return Answer(200, reading=Reading(Kind.NO_FILE, 200, message=str(exc)))
+            if not measure:
+                return Answer(200, reading=Reading(Kind.PLAYABLE, 200, files=((0, address),)))
+            measured_tracks = await self._dash_files(http, found.videos, headers)
+            if isinstance(measured_tracks, Answer):
+                return measured_tracks
+            audio = await self._dash_audio(http, found.audio, headers)
+            if audio is not None:
+                return audio
+            heights = tuple(sorted({height for height, _ in measured_tracks}))
+            return Answer(200, reading=Reading(Kind.PLAYABLE, 200, heights,
+                                               files=tuple((height, address) for height in heights)))
         if served.kind == "file":
             if not measure:
                 return Answer(200, reading=Reading(Kind.PLAYABLE, 200, files=((0, address),)))
-            return await self._measure_file(address, headers)
+            return await self._measure_file(address, headers, head=served.head)
         if served.kind == "playlist":
             return await measured(http, address, "", self._measure if measure else None, headers,
                                   fetched=served.answer if served.answer.status else None)
         return served.answer
+
+    async def _dash_files(self, http: httpx.AsyncClient, videos: tuple[str, ...], headers: dict[str, str]
+                          ) -> tuple[tuple[int, str], ...] | Answer:
+        files = []
+        for address in videos:
+            served = await served_as(http, address, headers)
+            if served.kind != "file":
+                return served.answer if not served.kind else Answer(200, reading=Reading(
+                    Kind.NO_FILE, 200, message="DASH: video track is not a complete media file"))
+            answer = await self._measure_file(address, headers, head=served.head)
+            if self.read(answer).kind is not Kind.PLAYABLE:
+                return answer
+            files.extend(self.read(answer).files)
+        return tuple(files)
+
+    async def _dash_audio(self, http: httpx.AsyncClient, address: str, headers: dict[str, str]) -> Answer | None:
+        """A working picture alone is no playable DASH episode: its audio has a signature of its own. A refused audio
+        answers the ask as the video would: the next ask has the application parse the episode anew (`fetch`)."""
+        served = await served_as(http, address, headers)
+        if served.kind != "file":
+            reading = self.read(served.answer) if not served.kind else Reading(Kind.NO_FILE, 200)
+            return Answer(served.answer.status, retry_after=served.answer.retry_after, reading=Reading(
+                reading.kind, reading.status, message="DASH audio: " + (reading.message or "no media file")))
+        streams, _ = await probe("pipe:0", data=served.head, input_args=["-probesize", str(len(served.head))],
+                                 timeout=MEASURE_TIMEOUT_S)
+        if not any(stream.get("codec_type") == "audio" for stream in streams or []):
+            streams, _ = await probe(address, input_args=probe_args(headers), timeout=MEASURE_TIMEOUT_S)
+        if any(stream.get("codec_type") == "audio" for stream in streams or []):
+            return None
+        return Answer(200, reading=Reading(Kind.NO_FILE, 200, message="DASH audio: no readable audio track"))
 
     def read(self, answer: Answer) -> Reading:
         if answer.reading is not None:
@@ -251,8 +347,25 @@ class AppPlayer:
             raise StreamUnavailable(reason("player_failed", player=self.label, cause=verdict.reading.message
                                            or verdict.reading.kind.value), verdict.exhausted)
         kept = self._kept(*found)
-        headers = kept.headers if kept is not None else {}
+        headers = self.playback(kept.headers if kept is not None else {})
         served = await served_as(http, picked[1], headers)
+        if served.kind == "dash":
+            try:
+                found_tracks = tracks(served.answer.text, served.answer.final_url or picked[1])
+            except UnsupportedDash as exc:
+                raise StreamUnavailable(reason("player_failed", player=self.label, cause=str(exc))) from exc
+            files = await self._dash_files(http, found_tracks.videos, headers)
+            if isinstance(files, Answer):
+                cause = self.read(files)
+            elif (video := pick_file(files, max_height)) is None:
+                cause = Reading(Kind.NO_FILE, message="DASH: no measured video track")
+            elif (refused := await self._dash_audio(http, found_tracks.audio, headers)) is not None:
+                cause = self.read(refused)
+            else:
+                return {"stream_url": video[1], "audio_url": found_tracks.audio, "headers": headers,
+                        "progressive": False, "playlist": False}
+            raise StreamUnavailable(reason("player_failed", player=self.label, cause=cause.message or cause.kind.value),
+                                    cause.kind in {Kind.NO_ANSWER, Kind.HTTP_ERROR})
         if not served.kind:
             cause = self.read(served.answer)
             raise StreamUnavailable(reason("player_failed", player=self.label, cause=cause.message or cause.kind.value),

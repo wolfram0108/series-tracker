@@ -19,12 +19,15 @@ import secrets
 import time
 import zlib
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 import httpx
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.padding import PKCS7
 
 from core.reasons import reason
+
+from ..players.http import retry_after
 
 from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream
 
@@ -38,6 +41,12 @@ SEARCH_LIMIT = 50
 LIST_SEPARATOR = "$$$"
 ITEM_SEPARATOR = "#"
 _DIRECT = re.compile(r"\.(m3u8|mp4)(?:$|\?)", re.I)
+
+
+def parser_message(words: object) -> str:
+    """A server-side parser error may contain a long signed URL before its useful refusal message."""
+    return re.sub(r'''https?://[^\s`"'<>]+''', lambda match: urlsplit(match[0]).hostname or "[host]",
+                  str(words or ""))[:500]
 
 
 def encrypt(plain: bytes, key: bytes, iv: bytes) -> bytes:
@@ -87,6 +96,7 @@ class App99Client:
         self._token = ""
         self._system: dict | None = None
         self._opening = asyncio.Lock()
+        self._generation = 0
 
     # --- the wire ---------------------------------------------------------------------------------------------
 
@@ -103,7 +113,7 @@ class App99Client:
         began = time.monotonic()
         try:
             response = await self._http().post(settings["host"].rstrip("/") + path, content=body.encode(),
-                                               headers=headers, timeout=REQUEST_TIMEOUT_S)
+                                               headers=headers, timeout=httpx.Timeout(REQUEST_TIMEOUT_S, connect=8.0))
         except httpx.HTTPError as exc:
             logger.info("приложение %s, %s: нет ответа — %s (%.1f с)", self.profile.name, path, type(exc).__name__,
                         time.monotonic() - began)
@@ -112,14 +122,15 @@ class App99Client:
             logger.info("приложение %s, %s: статус %d (%.1f с)", self.profile.name, path, response.status_code,
                         time.monotonic() - began)
             raise AppError(reason("app_status", app=self.profile.label, status=response.status_code),
-                           response.status_code >= 500 or response.status_code == 429)
+                           response.status_code >= 500 or response.status_code == 429,
+                           status=response.status_code, retry_after=retry_after(response))
         try:
             answer = unseal(response.text, self._key)
         except (ValueError, UnicodeError, TypeError) as exc:
             logger.info("приложение %s, %s: ответ не расшифрован (%.1f с)", self.profile.name, path, time.monotonic() - began)
             raise AppError(reason("app_answer_broken", app=self.profile.label, step=path)) from exc
         logger.info("приложение %s, %s: код %s %s (%.1f с)", self.profile.name, path, answer.get("code"),
-                    answer.get("msg") or "", time.monotonic() - began)
+                    parser_message(answer.get("msg")), time.monotonic() - began)
         return answer
 
     async def _open(self) -> dict:
@@ -147,25 +158,30 @@ class App99Client:
                 raise AppError(reason("app_answer_broken", app=self.profile.label, step=login))
             self._token = str(info["user_token"] or "")
             self._system = system
+            self._generation += 1
             return system
 
     def _refused(self, answer: dict, path: str) -> None:
         if answer.get("code") != 0:
-            raise AppError(reason("app_refused", app=self.profile.label, step=path, message=str(answer.get("msg") or "")))
+            raise AppError(reason("app_refused", app=self.profile.label, step=path, message=parser_message(answer.get("msg"))))
 
     async def call(self, path: str, fields: dict, *, renew: bool = True) -> dict:
         """One request in the session. A refusal of a request of the catalog opens the session again once (a guest
         session ends at the application's will); the second refusal is the answer. A parser that refuses a link says so
         of the link (`renew` false): its refusal is the answer at once."""
         await self._open()
+        generation = self._generation
         answer = await self._post(path, fields)
         if answer.get("code") == 0:
             return answer
         if not renew:
             self._refused(answer, path)
-        logger.info("приложение %s: отказ на %s (%s) — сессия открывается заново", self.profile.name, path,
+        logger.info("приложение %s: отказ на %s (%s) — запрос повторяется после проверки сессии", self.profile.name, path,
                     answer.get("msg"))
-        self._system = None
+        # Several catalogue requests can be refused under the same expired session. A late refusal must not
+        # discard the replacement another request has already opened, or each card starts another guest login.
+        if self._generation == generation:
+            self._system = None
         await self._open()
         answer = await self._post(path, fields)
         self._refused(answer, path)
@@ -196,7 +212,7 @@ class App99Client:
         if not isinstance(address, str) or not address.startswith(("http://", "https://")):
             # The parser answers with the code of success and no address: its refusal is in `msg`, often empty.
             raise AppError(reason("app_no_stream", app=self.profile.label, parser=str(parser),
-                                  message=str(answer.get("msg") or "")[:300]))
+                                  message=parser_message(answer.get("msg"))))
         return address
 
     # --- what every protocol gives (apps/__init__.py) -------------------------------------------------------------
@@ -236,7 +252,7 @@ class App99Client:
             return AppStream(token, headers)
         parsers = [each.get("id") for each in (await self.system()).get("parser_api") or [] if isinstance(each, dict)]
         allowed = [part.strip() for part in str(player.get("parseUrl") or "").split(",") if part.strip()]
-        refusals = []
+        refusals, errors = [], []
         for parser in [each for each in parsers if not allowed or str(each) in allowed]:
             try:
                 return AppStream(await self.parse(parser, token), headers)
@@ -246,7 +262,13 @@ class App99Client:
                 if exc.transient:
                     raise
                 refusals.append(str(parser))
-        raise AppError(reason("app_no_parser", app=self.profile.label, line=line, tried=", ".join(refusals) or "—"))
+                errors.append(exc)
+        # Exhaustion of one parser must not hide a working alternative listed by this line. Only when all allowed
+        # parsers explicitly exhausted their daily quota does the whole line carry that refusal.
+        if errors and all(error.daily_quota for error in errors):
+            raise errors[-1]
+        raise AppError(reason("app_no_parser", app=self.profile.label, line=line, tried=", ".join(refusals) or "—",
+                              **({"last_error": errors[-1].reason} if errors else {})))
 
     async def search_page(self, query: str, page: int) -> AppPage:
         answer = await self.search(query, page)

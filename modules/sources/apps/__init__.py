@@ -15,13 +15,28 @@ from typing import Mapping, Protocol
 SCHEME = "app"
 
 
+def daily_quota(message: str) -> bool:
+    """Only an explicit exhausted daily allowance, not a generic refusal or a statement of the plan's limit."""
+    return bool(re.search(r"今日|当天|每日", message) and (re.search(r"已达|已超", message) or
+                re.search(r"超过(?:今日|当天|每日).{0,12}(?:限制|限额|上限).{0,12}(?:明日|明天)再试", message))
+                and re.search(r"次数|点数|限额|上限|限制", message)) or bool(
+                    re.search(r"(?:daily\s+(?:limit|quota)|quota)\s+(?:(?:is|has been)\s+)?(?:exceeded|exhausted)", message, re.I))
+
+
 class AppError(RuntimeError):
     """The application refused or could not be asked: a coded reason; `transient` marks causes that may pass."""
 
-    def __init__(self, why: str, transient: bool = False) -> None:
+    def __init__(self, why: str, transient: bool = False, *, status: int | None = None,
+                 retry_after: float | None = None) -> None:
         super().__init__(why)
         self.reason = why
         self.transient = transient
+        self.status, self.retry_after = status, retry_after
+        try:
+            message = json.loads(why).get("message", "")
+        except (ValueError, AttributeError):
+            message = ""
+        self.daily_quota = daily_quota(str(message))
 ENV_PREFIX = "ST_APP_"
 
 
@@ -38,7 +53,8 @@ def profiles_of(environ: Mapping[str, str]) -> list[AppProfile]:
     """The applications the environment describes: `ST_APP_<NAME>` holds a JSON object with `label` (the name the
     application shows), `latin` (that name in Latin letters), `protocol` and the settings of the protocol; a value that is
     no such object is a fault of the environment and stops the start. Both names are required: the owner tells the
-    applications apart by the Latin one, so no application is shown by its own name alone."""
+    applications apart by the Latin one, so no application is shown by its own name alone. `player_agent`, of any
+    protocol, is the agent the application's own player asks its streams with (players/app_lines.py)."""
     found = []
     for key, value in sorted(environ.items()):
         if not key.startswith(ENV_PREFIX) or not value.strip():
@@ -46,8 +62,9 @@ def profiles_of(environ: Mapping[str, str]) -> list[AppProfile]:
         data = json.loads(value)
         if not isinstance(data, dict) or not all(data.get(each) for each in ("protocol", "label", "latin")):
             raise ValueError(f"{key}: an application needs a JSON object with `protocol`, `label` and `latin`")
+        settings = {k: json.dumps(v) if isinstance(v, (list, dict)) else str(v) for k, v in data.items()}
         found.append(AppProfile(name=key[len(ENV_PREFIX):].lower(), label=f"{data['label']} ({data['latin']})",
-                                protocol=str(data["protocol"]), settings={k: str(v) for k, v in data.items()}))
+                                protocol=str(data["protocol"]), settings=settings))
     return found
 
 

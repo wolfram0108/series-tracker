@@ -32,6 +32,8 @@ import httpx
 
 from core.reasons import reason
 
+from ..players.http import retry_after
+
 from . import AppCardData, AppError, AppLine, AppPage, AppProfile, AppStream, advertised_headers, listed_lines, parsed_address
 
 logger = logging.getLogger("sources")
@@ -91,10 +93,10 @@ class AppMnClient:
         try:
             if payload is None:
                 response = await self._http().get(self._settings["host"].rstrip("/") + path, params=params,
-                                                  headers=self.headers(session), timeout=REQUEST_TIMEOUT_S)
+                                                  headers=self.headers(session), timeout=httpx.Timeout(REQUEST_TIMEOUT_S, connect=8.0))
             else:
                 response = await self._http().post(self._settings["host"].rstrip("/") + path, json=payload,
-                                                   headers=self.headers(session), timeout=REQUEST_TIMEOUT_S)
+                                                   headers=self.headers(session), timeout=httpx.Timeout(REQUEST_TIMEOUT_S, connect=8.0))
         except httpx.HTTPError as exc:
             raise AppError(reason("app_unreachable", app=self.profile.label, error=type(exc).__name__), True) from exc
         try:
@@ -103,12 +105,18 @@ class AppMnClient:
             answer = None
         logger.info("приложение %s, %s: статус %s, код %s (%.1f с)", self.profile.name, path, response.status_code,
                     answer.get("code") if isinstance(answer, dict) else "—", time.monotonic() - began)
+        if response.status_code != 200:
+            raise self._status(response, str(answer.get("msg") or "") if isinstance(answer, dict) else "")
         if not isinstance(answer, dict):
-            if response.status_code != 200:
-                raise AppError(reason("app_status", app=self.profile.label, status=response.status_code),
-                               response.status_code >= 500 or response.status_code == 429)
             raise AppError(reason("app_answer_broken", app=self.profile.label, step=path))
         return answer
+
+    def _status(self, response: httpx.Response, words: str) -> AppError:
+        """A refusal by status keeps what the application said with it: a daily quota is told by those words."""
+        return AppError(reason("app_status", app=self.profile.label, status=response.status_code,
+                               **({"message": words[:300]} if words.strip() else {})),
+                        response.status_code >= 500 or response.status_code == 429,
+                        status=response.status_code, retry_after=retry_after(response))
 
     def _data(self, answer: dict, path: str):
         if str(answer.get("code")) != ACCEPTED:
@@ -172,7 +180,7 @@ class AppMnClient:
             raise AppError(reason("app_answer_broken", app=self.profile.label, step="/api/v1/vod/ticket")) from exc
         began = time.monotonic()
         try:
-            response = await self._http().get(address, headers=self.headers(), timeout=REQUEST_TIMEOUT_S, follow_redirects=True)
+            response = await self._http().get(address, headers=self.headers(), timeout=httpx.Timeout(REQUEST_TIMEOUT_S, connect=8.0), follow_redirects=True)
         except httpx.HTTPError as exc:
             raise AppError(reason("app_unreachable", app=self.profile.label, error=type(exc).__name__), True) from exc
         try:
@@ -184,9 +192,8 @@ class AppMnClient:
                     "адрес" if target else f"без адреса: {words[:120] or '—'}", time.monotonic() - began)
         if target and response.status_code == 200:
             return AppStream(target, {"User-Agent": self.headers()["User-Agent"], **advertised_headers(said)})
-        if not words.strip() and response.status_code != 200:
-            raise AppError(reason("app_status", app=self.profile.label, status=response.status_code),
-                           response.status_code >= 500 or response.status_code == 429)
+        if response.status_code != 200:
+            raise self._status(response, words)
         raise AppError(reason("app_no_stream", app=self.profile.label, parser=line, message=words[:300]),
                        transient=not words.strip())
 

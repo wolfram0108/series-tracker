@@ -501,9 +501,9 @@ class SourcesModule(BaseModule):
 
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}
-        reply: {handled, stream_url, headers, progressive, playlist} | {handled, error, transient}.
+        reply: {handled, stream_url, headers, progressive, playlist, audio_url?} | {handled, error, transient}.
         `progressive` marks one ready file that a server may be asked for in parts; `playlist` an HLS playlist that is
-        downloaded by its segments.
+        downloaded by its segments. `audio_url` pairs a complete video file with its separate audio file.
 
         `error` means the URL belongs to a player that has no stream for it:
         the caller must not hand the page to a generic downloader."""
@@ -521,6 +521,7 @@ class SourcesModule(BaseModule):
                 "progressive": bool(stream_info.get("progressive")),
                 "playlist": bool(stream_info.get("playlist")),
                 "player_fetch": bool(stream_info.get("player_fetch")),
+                **({"audio_url": stream_info["audio_url"]} if stream_info.get("audio_url") else {}),
             }
         return {"handled": False}
 

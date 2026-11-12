@@ -32,6 +32,8 @@ import httpx
 
 from core.reasons import reason
 
+from ..players.http import retry_after
+
 from . import AppCardData, AppError, AppLine, AppPage, AppProfile, AppStream, listed_lines
 from .appdrama import field, fields
 
@@ -83,7 +85,7 @@ class YunDuoClient:
     async def _asked(self, method: str, path: str, **sent) -> httpx.Response:
         began = time.monotonic()
         try:
-            response = await self._http().request(method, self._base() + path, timeout=REQUEST_TIMEOUT_S,
+            response = await self._http().request(method, self._base() + path, timeout=httpx.Timeout(REQUEST_TIMEOUT_S, connect=8.0),
                                                   follow_redirects=True, **sent)
         except httpx.HTTPError as exc:
             raise AppError(reason("app_unreachable", app=self.profile.label, error=type(exc).__name__), True) from exc
@@ -91,7 +93,8 @@ class YunDuoClient:
                     time.monotonic() - began)
         if response.status_code != 200:
             raise AppError(reason("app_status", app=self.profile.label, status=response.status_code),
-                           response.status_code >= 500 or response.status_code == 429)
+                           response.status_code >= 500 or response.status_code == 429,
+                           status=response.status_code, retry_after=retry_after(response))
         return response
 
     async def call(self, path: str, params: dict[str, str]) -> dict:

@@ -85,10 +85,11 @@ class StreamPlayer(Protocol):
     def owns(self, url: str) -> bool: ...
 
     async def stream(self, url: str, http: "httpx.AsyncClient", max_height: int | None, pacer: Any) -> dict:
-        """{stream_url, headers, progressive?, playlist?} of the best file within `max_height` (the best of all without
+        """{stream_url, headers, progressive?, playlist?, audio_url?} of the best file within `max_height` (the best of all without
         it). What the file is decides how it is downloaded (modules/downloads/limits.py): `progressive` a ready file, asked
         in parts; `playlist` an HLS playlist, by its segments; a stream that is neither is read by ffmpeg over one
-        connection. Raises StreamUnavailable when the player owns the link but has no stream for it now."""
+        connection. `audio_url` pairs a complete video file with a separate audio file, using the same headers.
+        Raises StreamUnavailable when the player owns the link but has no stream for it now."""
         ...
 
 

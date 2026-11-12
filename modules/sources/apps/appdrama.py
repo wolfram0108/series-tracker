@@ -1,8 +1,8 @@
 """The API of the applications of the AppDrama family (华谊, 橘汁): protobuf over HTTP, the fields of a request AES-ECB under
 the data key, the device described in a header AES-CBC under the key of the parameters, signed by RSA.
 
-The host of the API is what the navigator of the application says (`host`, a JSON `{domain}`), or the fallback host. A
-session begins with the key of the zone (`/api/v5/find/app/zone`, signed by the public key of the profile); every request
+The API host comes from the prototype's `site` navigator (legacy profiles call the navigator `host`), or the fallback.
+A prototype profile may also pin the API with a nonempty `host` beside `site`. A session begins with the key of the zone (`/api/v5/find/app/zone`, signed by the public key of the profile); every request
 after it is signed by that key. A request is the query of its fields with the time, AES-ECB under `dataKey`, prefixed
 with a random string and cut into two fields of a protobuf with a random string, the time and a fake field. An answer is
 a protobuf `{1: code, 2: msg, 3: data}`; code 200 is the answer, any other a refusal with its message. The card of a
@@ -24,6 +24,7 @@ import struct
 import time
 import uuid
 from typing import Callable
+from urllib.parse import urlsplit
 
 import httpx
 from cryptography.hazmat.primitives import serialization
@@ -33,6 +34,7 @@ from cryptography.hazmat.primitives.padding import PKCS7
 
 from core.reasons import reason
 
+from ..players.http import retry_after
 from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream
 
 logger = logging.getLogger("sources")
@@ -40,9 +42,15 @@ logger = logging.getLogger("sources")
 # A safeguard above the longest answer measured: the parser of a line (videoUsableUrl of 橘汁 vod_1080) answers in
 # 8.6–28.3 s (2026-11-11); a safeguard under it would take a slow answer for none.
 REQUEST_TIMEOUT_S = 60.0
+CONNECT_TIMEOUT_S = 8.0
 SEARCH_PAGE = 50
 AGENT = "okhttp/3.12.1"
 SUCCESS = 200
+
+
+def request_timeout() -> httpx.Timeout:
+    """Allow a slow resolver response without spending a minute establishing a connection."""
+    return httpx.Timeout(REQUEST_TIMEOUT_S, connect=CONNECT_TIMEOUT_S)
 
 
 # --- the codec ------------------------------------------------------------------------------------------------------
@@ -232,12 +240,13 @@ class AppDramaClient:
         began = time.monotonic()
         try:
             response = await self._http().post(self._host + path, content=body, headers=self.headers(),
-                                               timeout=REQUEST_TIMEOUT_S)
+                                               timeout=request_timeout())
         except httpx.HTTPError as exc:
             raise AppError(reason("app_unreachable", app=self.profile.label, error=type(exc).__name__), True) from exc
         if response.status_code != 200:
             raise AppError(reason("app_status", app=self.profile.label, status=response.status_code),
-                           response.status_code >= 500 or response.status_code == 429)
+                           response.status_code >= 500 or response.status_code == 429,
+                           status=response.status_code, retry_after=retry_after(response))
         try:
             code, message, data = answer_of(response.content)
         except (IndexError, struct.error) as exc:
@@ -262,12 +271,32 @@ class AppDramaClient:
             self._zone = "".join(str(_first(found, number, "") or "") for number in (2, 3, 4, 5))
 
     async def _discover(self) -> str:
-        try:
-            response = await self._http().get(self._settings["host"], timeout=REQUEST_TIMEOUT_S)
-            domain = response.json().get("domain") if response.status_code == 200 else None
-        except (httpx.HTTPError, ValueError, AttributeError):
-            domain = None
-        return str(domain or self._settings["fallback"]).rstrip("/")
+        """Read the prototype's `site` navigator, or the legacy profile's `host` navigator.
+
+        With `site`, a nonempty `host` is a fixed API address, as in the standalone client. Only HTTP(S) domains
+        announced by the navigator are usable; a broken navigator falls back to the configured API address.
+        """
+        site = self._settings.get("site", "")
+        host = self._settings.get("host", "")
+        if site and host:
+            return host.rstrip("/")
+        if isinstance(site, str) and site.startswith("["):
+            try:
+                site = json.loads(site)
+            except ValueError:
+                site = []
+        candidates = site if isinstance(site, list) else [site or host]
+        for candidate in candidates:
+            if not isinstance(candidate, str) or not candidate:
+                continue
+            try:
+                response = await self._http().get(candidate, timeout=request_timeout(), follow_redirects=True)
+                domain = response.json().get("domain") if response.status_code == 200 else None
+                if isinstance(domain, str) and urlsplit(domain).scheme in ("http", "https") and urlsplit(domain).hostname:
+                    return domain.rstrip("/")
+            except (httpx.HTTPError, ValueError, AttributeError):
+                continue
+        return str(self._settings["fallback"]).rstrip("/")
 
     async def call(self, path: str, params: dict) -> bytes:
         """One request in the session; a refusal is an error with the application's message."""

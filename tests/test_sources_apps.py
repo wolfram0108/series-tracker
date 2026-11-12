@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 
 import httpx
 import pytest
@@ -205,9 +204,18 @@ def test_the_registry_of_an_application_admits_its_lines_and_says_why_it_refused
     assert LineRegistry.load("other", str(tmp_path)).admitted == frozenset()
 
 
-async def test_a_card_of_many_episodes_is_measured_at_the_pace_of_twenty_to_thirty_rows_a_second():
-    """Every answer of the application and of its CDN takes half a second, as the live ones do: the rows of a card are
-    asked side by side at the pace of the read, not one after another."""
+async def test_a_card_is_measured_at_the_accepted_pace_of_the_applications():
+    """The rows of a card are asked side by side, at most APP_IN_FLIGHT at once and one start every APP_INTERVAL_S: a
+    cold catalogue does not turn into a burst at the resolver. The pace runs on a clock of the test, not on real time."""
+    from modules.sources.policy import AdaptivePacer
+    from modules.sources.sites.apps import site as app_site
+    now, starts = [0.0], []
+
+    async def advance(seconds: float) -> None:
+        now[0] += seconds
+        await asyncio.sleep(0)
+
+    active, peak = 0, 0
     model = App99Model(parsers=[9])
     model.line("BLU", "蓝光", parsers="9")
     items = [(f"第{n}集", f"tok{n}") for n in range(1, 201)]
@@ -216,21 +224,29 @@ async def test_a_card_of_many_episodes_is_measured_at_the_pace_of_twenty_to_thir
         model.parses[(9, f"tok{n}")] = f"{CDN}e{n}/index.m3u8"
 
     async def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal active, peak
         if str(request.url).startswith(HOST):
             if request.url.path.endswith("/app/vodParser"):
-                await asyncio.sleep(0.5)
+                starts.append(now[0])
+                active += 1
+                peak = max(peak, active)
+                try:
+                    await asyncio.sleep(0.005)
+                finally:
+                    active -= 1
             return model.handle(request)
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.005)
         return httpx.Response(200, text=PLAYLIST)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         player = AppPlayer(App99Client(profile(), lambda: http), measure=lambda *_: _height(1080), registry=admitting("BLU"))
         site = AppSite(player, AppLines([player]))
-        began = time.monotonic()
+        site.pacer = AdaptivePacer(app_site.APP_INTERVAL_S, ceiling_s=2.0, clock=lambda: now[0], sleep=advance)
         draft = await site.read("app://banri/1", ReadContext(http, lambda *_: None))
-        rate = len(draft.rows) / (time.monotonic() - began)
     assert [row.heights for row in draft.rows] == [[1080]] * 200
-    assert 20 <= rate <= 30, rate
+    assert 1 < peak <= app_site.APP_IN_FLIGHT == 8
+    gaps = [later - earlier for earlier, later in zip(starts, starts[1:])]
+    assert len(starts) == 200 and min(gaps) >= app_site.APP_INTERVAL_S - 1e-9 and app_site.APP_INTERVAL_S == 0.25
 
 
 async def test_an_answer_that_is_not_final_is_asked_again_and_a_row_ends_with_its_frame_or_as_an_absent_episode():
@@ -464,7 +480,7 @@ async def test_a_stream_is_what_its_host_serves_by_its_signature_and_a_row_witho
     http, asked = world(model)
     files: list[str] = []
 
-    async def measure_file(address, _headers):
+    async def measure_file(address, _headers, *, head=b""):
         files.append(address)
         return Answer(200, reading=Reading(Kind.PLAYABLE, 200, (1080,), files=((1080, address),)))
 
@@ -495,6 +511,8 @@ async def test_a_playlist_whose_segment_is_a_whole_mp4_is_measured_as_a_file_by_
 
     async def probe(address, *, input_args=None, timeout=0, data=None):
         probed.append((address, list(input_args or [])))
+        if address == "pipe:0":
+            return None, "index is at the end of the file"
         return [{"codec_type": "video", "height": 2160}, {"codec_type": "audio"}], ""
 
     monkeypatch.setattr(hls, "probe", probe)
@@ -504,7 +522,7 @@ async def test_a_playlist_whose_segment_is_a_whole_mp4_is_measured_as_a_file_by_
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         height = await hls.measure_head(http, hls.Head("https://store.model/v/film.mp4?sign=1", 0), "")
-    assert height == 2160 and probed[0][0] == "https://store.model/v/film.mp4?sign=1"
+    assert height == 2160 and [x[0] for x in probed] == ["pipe:0", "https://store.model/v/film.mp4?sign=1"]
 
 
 async def test_a_file_ffprobe_cannot_open_says_what_ffprobe_said_not_that_it_holds_no_picture():

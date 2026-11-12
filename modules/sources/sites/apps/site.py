@@ -15,7 +15,7 @@ last table measured on itself (`frame: measured`) keeps its frame and is not ask
 asks only the episodes that are new and the ones that were absent.
 
 A row of the table is a video with its frame, or the absence of the episode on its line: there is no row left "not
-measured". Every row is asked at the pace the read of a card keeps (`ROWS_PER_SECOND`) under the policy of every player
+measured". Every row is asked at the pace its protocol supports under the policy of every player
 (policy.py: an unsure answer is asked again, the application parsing the episode anew, the pause a host names is kept).
 A row whose answer stayed unsure while the whole card was being asked (no answer, a host too busy, a refusal a parser
 words at one request and not at the next) is looked at again when the rest is done: an answer under the load of the
@@ -37,23 +37,30 @@ from urllib.parse import urlsplit
 
 from core.contracts import RowState, TableRow
 from core.reasons import reason
+from core.retry import Budget
 
 from ...players.contract import Kind, PlayerRef
-from ...policy import Pacer, Verdict, settle
+from ...policy import AdaptivePacer, Pacer, Verdict, settle
 from ...apps import SCHEME, card_address
 from ...apps import AppError
 from ...players.app_lines import AppLines, AppPlayer
-from ...players.asking import CALM_IN_FLIGHT, look_again
+from ...players.asking import look_again
 from .. import PHASE_PLAYERS, PHASE_RECHECK, PHASE_RELEASE, ReadContext, SiteError, TableDraft
 from ..recent import last_of_each
 
 logger = logging.getLogger("sources")
 
-# The pace the owner asked of the read of a card: a card of thousands of episodes is measured in minutes.
+# The legacy pace of protocols outside the five applications covered by the bounded read policy below.
 ROWS_PER_SECOND = 25
 # A row is asked, read and measured in about three seconds: four seconds of rows at that pace in flight at most, so that a
 # host that slows down holds back the asks instead of piling them up.
 ROWS_IN_FLIGHT = ROWS_PER_SECOND * 4
+# Banri, Huayi, Juzi, AppMN and YunDuo resolve and measure each row remotely. Bound the whole operation across
+# simultaneous cards and rechecks; a fast catalogue response is no evidence that its resolver or CDN tolerates a burst.
+PACED_PROTOCOLS = frozenset({"app99", "appdrama", "appmn", "yunduo"})
+APP_IN_FLIGHT = 8
+APP_INTERVAL_S = 0.25
+APP_BUDGET = Budget(limit_s=180.0)
 
 
 class AppSite:
@@ -66,8 +73,10 @@ class AppSite:
         self.client = player.client
         self.name, self.label = player.name, player.label
         self.domains = (player.name,)
-        self.pacer = Pacer(1 / ROWS_PER_SECOND)
-        self.in_flight = asyncio.Semaphore(ROWS_IN_FLIGHT)
+        paced = self.client.profile.protocol in PACED_PROTOCOLS
+        self.pacer = (AdaptivePacer(APP_INTERVAL_S, ceiling_s=2.0) if paced else Pacer(1 / ROWS_PER_SECOND))
+        self.budget = APP_BUDGET if paced else None
+        self.in_flight = asyncio.Semaphore(APP_IN_FLIGHT if paced else ROWS_IN_FLIGHT)
 
     def configure(self, **_wiring) -> None:
         """The card is read through the application's API alone: the wiring of the module gives it nothing."""
@@ -151,16 +160,20 @@ class AppSite:
         done = 0
         ctx.progress(PHASE_PLAYERS, 0, len(asked))
 
-        async def ask(line, link, flight: asyncio.Semaphore) -> tuple[str, Verdict | Exception]:
+        async def ask(line, link) -> tuple[str, Verdict | Exception]:
             try:
-                async with flight:
-                    return link, await settle(line, PlayerRef(line.name, link), ctx.http, card_url, pacer=self.pacer)
+                async with self.in_flight:
+                    refused = self.player.refusal_for(link)
+                    if refused is not None:
+                        return link, Verdict(refused, 0, False)
+                    return link, await settle(line, PlayerRef(line.name, link), ctx.http, card_url,
+                                              budget=self.budget, pacer=self.pacer)
             except Exception as exc:  # noqa: BLE001 - one row cannot take the others with it
                 return link, exc
 
         async def first(line, link) -> tuple[str, Verdict | Exception]:
             nonlocal done
-            answer = await ask(line, link, self.in_flight)
+            answer = await ask(line, link)
             done += 1
             ctx.progress(PHASE_PLAYERS, done, len(asked))
             return answer
@@ -168,10 +181,9 @@ class AppSite:
         said = dict(await asyncio.gather(*(first(line, link) for line, link in asked)))
         # The rows left unsure are looked at again when the rest is done, line by line and cause by cause.
         line_of = {link: line for line, link in asked}
-        calm = asyncio.Semaphore(CALM_IN_FLIGHT)
 
         async def again(link: str) -> Verdict | Exception:
-            return (await ask(line_of[link], link, calm))[1]
+            return (await ask(line_of[link], link))[1]
 
         await look_again(said, again, lambda link: line_of[link].code,
                          told=lambda current, total: ctx.progress(PHASE_RECHECK, current, total),

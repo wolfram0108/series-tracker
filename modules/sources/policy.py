@@ -86,8 +86,8 @@ class Pacer:
 
     async def wait(self) -> None:
         async with self._lock:
-            delay = self._next_at - self._clock()
-            if delay > 0:
+            while (delay := self._next_at - self._clock()) > 0:
+                # Another request can extend a shared cooldown while this waiter is asleep.
                 await self._sleep(delay)
             self._next_at = self._clock() + self._interval()
 
@@ -101,11 +101,16 @@ class AdaptivePacer(Pacer):
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> None:
         super().__init__(lambda: self.interval, clock=clock, sleep=sleep)
         self.interval, self._ceiling, self._factor = interval_s, max(ceiling_s, interval_s), factor
+        self._floor = interval_s
 
     def slow_down(self, hold_s: float = 0.0) -> None:
         self.interval = min(self.interval * self._factor, self._ceiling)
         if hold_s > 0:
             self._next_at = max(self._next_at, self._clock() + hold_s)
+
+    def recovered(self) -> None:
+        """A confirmed stream lets later rows gradually return to the normal pace."""
+        self.interval = max(self._floor, self.interval / self._factor)
 
 
 def busy(status: int | None) -> bool:
@@ -144,6 +149,12 @@ async def settle(player: Player, ref: PlayerRef, http: httpx.AsyncClient, page_u
         began = clock()
         answer = await player.fetch(ref, http, page_url)
         reading = player.read(answer)
+        if isinstance(pacer, AdaptivePacer) and (reading.kind is Kind.NO_ANSWER or
+                reading.kind is Kind.HTTP_ERROR and status_is_transient(reading.status)):
+            # The whole application backs off, including new rows, not only the row that was refused.
+            pacer.slow_down(answer.retry_after or 0.0)
+        elif isinstance(pacer, AdaptivePacer) and reading.kind is Kind.PLAYABLE:
+            pacer.recovered()
         # Every answer of a player, with what it said, is in the log: a verdict alone hides why it was unsure.
         logger.info("плеер %s, %s: попытка %d — %s, статус %s, %s (%.1f с)", player.name, ref.url, tries,
                     reading.kind.value, reading.status or answer.status,
