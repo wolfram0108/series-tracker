@@ -20,6 +20,7 @@ files and the service's own code where it has it.
 from __future__ import annotations
 
 import asyncio
+import glob
 import hashlib
 import json
 import logging
@@ -224,6 +225,14 @@ class ReverseBody(BaseModel):
 
 # The trace of a pair the service turned down: a decision that went the way of `abort` (modules/conform/module.py).
 REFUSED = [{"kind": "decision", "verdict": ABORT}]
+TMP_DIR = "_tmp"  # the folder of the service's temporary files beside the sources of a job (conform/tmpfiles.py)
+
+
+def _rmdir_if_empty(path: str) -> None:
+    try:
+        os.rmdir(path)
+    except OSError:
+        pass  # absent, or holding a run of another job
 
 
 class Daemon:
@@ -240,6 +249,9 @@ class Daemon:
         self.hold = False
         self.made = threading.Event()
         self.bodies: list[dict] = []  # every job body the daemon was sent, in order
+        self._seq = 0  # the number of the last job: a removed job's number is not given again
+        self.sources: dict[str, list[str]] = {}  # the files each job was given
+        self.roots: dict[str, list[str]] = {}  # the run folders of each job still running
         app = FastAPI()
         self.app = app
 
@@ -287,6 +299,13 @@ class Daemon:
         def cancel(job_id: str) -> dict:
             if self.jobs.pop(job_id, None) is None:
                 raise HTTPException(status_code=404)
+            # As the real service removes a record (conform/queue.py `_drop_files`): every run folder under `_tmp`
+            # beside the sources of the job goes, whichever job it is of.
+            for folder in {os.path.dirname(source) for source in self.sources.pop(job_id, ())}:
+                base = os.path.join(folder, TMP_DIR)
+                for root in (glob.glob(os.path.join(glob.escape(base), "pair_*")) if os.path.isdir(base) else ()):
+                    shutil.rmtree(root, ignore_errors=True)
+                _rmdir_if_empty(base)
             return {"cancelled": job_id}
 
     def _answer_of(self, label: str | None) -> str | None:
@@ -306,22 +325,44 @@ class Daemon:
     def client(self) -> DaemonClient:
         return DaemonClient("http://daemon.model", httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app)))
 
-    def _job(self, kind: str, label: str | None, dubs: list[str], results: list[dict]) -> dict:
-        job_id = f"m{len(self.jobs) + 1:05d}"
+    def _job(self, kind: str, label: str | None, dubs: list[str], results: list[dict], sources: list[str] = ()) -> dict:
+        """A job of these results. While it runs, its run folder lies under `_tmp` beside each of its `sources`, as the
+        real service keeps its temporary files; a job whose run folder is gone by its end fails on it."""
+        self._seq += 1
+        job_id = f"m{self._seq:05d}"
         job = {"id": job_id, "kind": kind, "label": label, "status": "done", "progress": 1.0, "dubs": dubs,
                "results": results, "error": None}
+        self.sources[job_id] = list(sources)
+        self.roots[job_id] = sorted({os.path.join(os.path.dirname(source), TMP_DIR, f"pair_{job_id}")
+                                     for source in sources})
+        for root in self.roots[job_id]:
+            os.makedirs(root, exist_ok=True)
         if self.hold:
             job.update(status="running", progress=0.5, results=[], held=results)
+        else:
+            job["results"] = self._end(job_id, results)
         self.jobs[job_id] = job
         self.made.set()
         return job
+
+    def _end(self, job_id: str, results: list[dict]) -> list[dict]:
+        """What a job made at its end: nothing, when a run folder of it was removed under it. Its run folders go."""
+        gone = [root for root in self.roots.pop(job_id, []) if not os.path.isdir(root)]
+        if gone:
+            results = [{"dub": each["dub"], "ok": False, "out_path": None, "suspect": [], "critical": [], "trace": [],
+                        "error": f"[Errno 2] No such file or directory: '{gone[0]}/dub.f16'"} for each in results]
+        for source in self.sources.get(job_id, ()):
+            base = os.path.join(os.path.dirname(source), TMP_DIR)
+            shutil.rmtree(os.path.join(base, f"pair_{job_id}"), ignore_errors=True)
+            _rmdir_if_empty(base)
+        return results
 
     def release(self) -> list[dict]:
         """The jobs held end now, with what they made."""
         ended = []
         for job in self.jobs.values():
             if "held" in job:
-                job.update(status="done", progress=1.0, results=job.pop("held"))
+                job.update(status="done", progress=1.0, results=self._end(job["id"], job.pop("held")))
                 ended.append(job)
         return ended
 
@@ -351,7 +392,7 @@ class Daemon:
                             # refused: its trace holds the decision `abort`, as the real service writes it.
                             "trace": REFUSED if not ok and answer != "crash" else [],
                             "error": None if ok else "сбой сервиса" if answer == "crash" else "звук озвучки не совпал с картинкой"})
-        return self._job("episode", body.label, body.dubs, results)
+        return self._job("episode", body.label, body.dubs, results, [body.ref, *body.dubs])
 
     def _cut(self, body: ReverseBody, episode: str) -> dict:
         os.makedirs(body.out_dir, exist_ok=True)  # the service makes the folder it writes in
@@ -370,7 +411,8 @@ class Daemon:
                       "critical": ["критично"] if answer == "critical" else [], "error": None,
                       "from_ref_s": 1.0, "from_dub_s": 0.0}
         # The service labels the job of each episode by the folder of the episode: the key the caller finds it by.
-        return self._job("reverse", os.path.basename(os.path.dirname(episode)), [episode], [result])
+        return self._job("reverse", os.path.basename(os.path.dirname(episode)), [episode], [result],
+                         [body.compilation, episode])
 
 
 class Crash(Exception):

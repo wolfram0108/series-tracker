@@ -81,8 +81,8 @@ class StreamingDaemon(Daemon):
                         yield _event("conform.changed", {"items": items})
             return StreamingResponse(stream(), media_type="text/event-stream")
 
-    def _job(self, kind, label, dubs, results):
-        job = super()._job(kind, label, dubs, results)
+    def _job(self, kind, label, dubs, results, sources=()):
+        job = super()._job(kind, label, dubs, results, sources)
         self._tell(job)
         return job
 

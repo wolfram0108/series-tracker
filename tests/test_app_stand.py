@@ -318,6 +318,30 @@ async def test_a_voice_over_taken_from_the_next_source_goes_in_the_one_job_of_it
     assert sorted(track["group"] for track in asset["tracks"]) == ["AnimeVost", "Kansai"]
 
 
+async def test_a_record_removed_while_another_job_of_the_series_runs_takes_none_of_its_files(stand):
+    """The service keeps its temporary files beside the sources of a job and removes every one of them beside the sources
+    of a job whose record goes. The user removes the record of a job of a sync before while a job of the series runs:
+    the running job keeps its files — every job has its sources in a folder of its own — and its voice-over is made."""
+    series_id = await series_of(stand, (1,))
+    await stand.sync(series_id)
+    (before,) = stand.daemon.jobs
+    stand.site.episode("ref", 2)
+    stand.site.episode("dub", 2, height=480)
+    stand.later()
+    stand.daemon.made.clear()
+    stand.daemon.hold = True
+    ended = stand.bus.subscribe("scan.run.changed")
+    await stand.call("POST", f"/api/series/{series_id}/scan")
+    await asyncio.wait_for(asyncio.to_thread(stand.daemon.made.wait), STAND_LIMIT_S)
+    await stand.call("DELETE", f"/api/conform/jobs/{before}")
+    stand.daemon.hold = False
+    stand.daemon.release()
+    await stand._run_end(ended, series_id)
+    view = await stand.check(series_id)
+    assert all([track["group"] for track in asset["tracks"]] == ["AnimeVost"] for asset in view["assets"]), view
+    assert len(view["assets"]) == 2 and not view["failures"], view
+
+
 def programs_with(name: str) -> list[str]:
     """The programs running now whose command line names `name` (a download caught in its middle)."""
     found = []

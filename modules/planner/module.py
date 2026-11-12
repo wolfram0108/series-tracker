@@ -18,6 +18,9 @@ Steps of the graph, each through its owner:
       by its track (`dub_atracks`); its end is `conform.job.finished`. A result is taken by `ok`. A plan made again
       while the episode waits (a voice-over failed and its next source is downloaded) keeps it one job: the voice-overs
       of the plan in force go together (core/plan/executor.Batch); only a job already sent is not joined.
+      Every source of a job (its video, its voice-overs, the episode and the picture of a cut) is in the job's own folder,
+      a hard link to the file: the service keeps its temporary files beside the sources of a job and removes all of them
+      beside the sources of a job whose record goes, so two jobs never share a folder of sources.
   cut: `conform.reverse` with the single video of the episode; its end is `conform.job.finished`.
   A job is keyed by its sync (plan_runs.started_at) and what it does: a sync taken up after a stop finds its job by the
       key (conform.job.find) and takes its end instead of sending it again. When a job ends, what it was given (copies,
@@ -393,11 +396,23 @@ class BusSync(SeriesSync):
                     os.remove(path)
         await storage.call(shed)
 
-    async def _copy(self, source: str, folder: str) -> str:
+    async def _own(self, source: str, target: str) -> str:
+        """A source of a job at its place in the job's own folder: a hard link (a file of the library or a download is
+        never rewritten in place, only replaced), a copy where no link can be made. The service keeps its temporary
+        files beside the sources of a job and removes them all with the job's record: a folder of sources two jobs
+        shared lost the files of the one running with the record of the other."""
+        folder = os.path.dirname(target)
         await storage.call(os.makedirs, folder, exist_ok=True)
-        target = os.path.join(folder, os.path.basename(source))
-        await storage.call(shutil.copyfile, source, target, timeout=COPY_TIMEOUT_S, owns=(folder,))
+        try:
+            await storage.call(os.link, source, target, owns=(folder,))
+        except FileExistsError:
+            pass  # the job taken up again: its folder has the source already
+        except OSError:
+            await storage.call(shutil.copyfile, source, target, timeout=COPY_TIMEOUT_S, owns=(folder,))
         return target
+
+    async def _copy(self, source: str, folder: str) -> str:
+        return await self._own(source, os.path.join(folder, os.path.basename(source)))
 
     def _job_key(self, *what) -> str:
         """The key of a job of the service: the sync it belongs to and what it does. A stop and the start after it make
@@ -464,17 +479,12 @@ class BusSync(SeriesSync):
             way = op.subject[1]
             if way.kind == "download":
                 dub, stream = results[f"dub:{way.dub}"].file, 0
-                if not dub.startswith(self.downloads_dir):
-                    dub = await self._copy(dub, os.path.join(folder, "dub"))
-            else:  # out of a file of the library: copied once, each voice-over a name of its own (a link to the copy)
+                dub = await self._copy(dub, os.path.join(folder, "dub"))
+            else:  # out of a file of the library: each voice-over a name of its own, all of one file the same inode
                 path, stream = await self.files.source_of(way.container, way.dub, way.own)
-                dub = os.path.join(folder, "dub", sanitize_name(way.voice) + os.path.splitext(path)[1])
-                if path in copied:
-                    await storage.call(os.link, copied[path], dub)
-                else:
-                    await storage.call(os.makedirs, os.path.dirname(dub), exist_ok=True)
-                    await storage.call(shutil.copyfile, path, dub, timeout=COPY_TIMEOUT_S, owns=(folder,))
-                    copied[path] = dub
+                dub = await self._own(copied.get(path, path),
+                                      os.path.join(folder, "dub", sanitize_name(way.voice) + os.path.splitext(path)[1]))
+                copied.setdefault(path, dub)
             dubs.append(dub)
             streams.append(stream)
         return await self.m.job(key, "conform.submit", body={
@@ -505,6 +515,7 @@ class BusSync(SeriesSync):
                 picture_atrack = await self.files.stream_of(way.picture, way.picture.video.id, True)
             else:
                 picture, picture_atrack = results[f"picture:{way.row.id}"].file, 0
+            picture = await self._copy(picture, os.path.join(folder, "picture"))
             found = await self.m.job(key, "conform.reverse", body={
                 "compilation": picture, "compilation_atrack": picture_atrack,
                 "episodes": [{"path": episode, "atrack": atrack}], "out_dir": places["out_dir"], "label": label})
