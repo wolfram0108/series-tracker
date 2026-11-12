@@ -11,8 +11,7 @@ does them through its modules, the simulator through its models."""
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from .planner import Goal, Group, Op, Plan, plan, video_op
@@ -83,6 +82,26 @@ class Work:
     op: Op
     task: "asyncio.Future"
     left: bool = False  # a step before it failed: it was not tried
+    batch: "Batch | None" = None  # the piece of work it goes in, for a step of a batch
+
+
+@dataclass(eq=False)
+class Batch:
+    """The steps of one batch that go as one piece of work, across the plans of a sync: until it is sent, its members are
+    the steps of the plan in force (a step a later plan replaced leaves it, the step that replaced it joins), so a plan
+    made again while an episode waits for its video sends the episode as one job still. Once sent it changes no more."""
+
+    members: list[Work]
+    arrived: dict[int, bool] = field(default_factory=dict)  # id of a member -> it was ready
+    settled: asyncio.Event = field(default_factory=asyncio.Event)
+    outcomes: dict = field(default_factory=dict)
+    sent: bool = False
+
+    def holds(self, entry: Work) -> bool:
+        return any(member is entry for member in self.members)
+
+    def complete(self) -> bool:
+        return not self.sent and all(id(member) in self.arrived for member in self.members)
 
 
 def video_of(goal: Goal, results: dict[str, Made]) -> Video:
@@ -293,6 +312,8 @@ class SeriesSync:
         build_failed: set[str] = set()
         work: dict[str, Work] = {}  # the steps of the plan in force, by their ids
         every: list[Work] = []  # every step this sync began, the ones a later plan no longer asks among them
+        batches: dict[str, Batch] = {}  # the batch of each key not sent yet, or the last one sent
+        sends: list[asyncio.Task] = []  # the pieces of work of batches a new plan completed (no member was arriving)
         news: list[tuple[str, tuple]] = []  # what the steps learned since the plan in force was made
         told = asyncio.Event()  # a step learned something: the plan is made again
         applies: dict[asyncio.Task, tuple[Plan, Group]] = {}
@@ -324,47 +345,70 @@ class SeriesSync:
                 return kept[op.id]
 
             fresh = [op for op in plan_.ops if not keeps(op)]
-            # A batch starts once every step of it is ready or left behind (a step before it failed): the ready ones go
-            # as one piece of work, and each step takes its own outcome out of it.
-            sizes = Counter(op.batch for op in fresh if op.batch)
-            batch = {"sizes": sizes, "arrived": {key: [] for key in sizes},
-                     "settled": {key: asyncio.Event() for key in sizes}, "outcomes": {}}
             steps = {op.id: work[op.id] for op in plan_.ops if kept[op.id]}
             for op in fresh:
                 steps[op.id] = Work(op, None)
                 every.append(steps[op.id])
+            regroup(plan_, steps)
             for op in fresh:
-                steps[op.id].task = asyncio.ensure_future(
-                    one(steps[op.id], [steps[need] for need in op.needs], plan_, steps, batch))
+                steps[op.id].task = asyncio.ensure_future(one(steps[op.id], [steps[need] for need in op.needs], plan_, steps))
             return steps
 
-        async def batch_of(entry: Work, ready: bool, steps: dict[str, Work], batch: dict) -> None:
-            op = entry.op
-            batch["arrived"][op.batch].append(op if ready else None)
-            if len(batch["arrived"][op.batch]) == batch["sizes"][op.batch]:
-                try:
-                    members = [each for each in batch["arrived"][op.batch] if each is not None]
-                    if members:
-                        batch["outcomes"].update(await self.do_batch(members, results_of(steps)))
-                finally:
-                    batch["settled"][op.batch].set()
-            await batch["settled"][op.batch].wait()
+        def regroup(plan_: Plan, steps: dict[str, Work]) -> None:
+            """A batch starts once every step of it in the plan in force is ready or left behind (a step before it
+            failed): the ready ones go as one piece of work, and each step takes its own outcome out of it. A batch not
+            sent yet takes the steps of the new plan; the steps of one sent have their outcome there, and the new steps
+            of its key make the next batch."""
+            for key in dict.fromkeys(op.batch for op in plan_.ops if op.batch):
+                members = [steps[op.id] for op in plan_.ops if op.batch == key]
+                batch = batches.get(key)
+                if batch is None or batch.sent:
+                    members = [each for each in members if each.batch is None or not each.batch.sent]
+                    if not members:
+                        continue
+                    batch = batches[key] = Batch(members)
+                else:
+                    batch.members = members
+                for each in members:
+                    each.batch = batch
+                if batch.complete():  # the steps it still waited for were replaced by steps that already arrived
+                    sends.append(asyncio.ensure_future(send(batch)))
 
-        async def one(entry: Work, needs: list[Work], plan_: Plan, steps: dict[str, Work], batch: dict) -> Made | None:
+        async def send(batch: Batch) -> None:
+            batch.sent = True
+            try:
+                ready = [member.op for member in batch.members if batch.arrived[id(member)]]
+                if ready:
+                    batch.outcomes.update(await self.do_batch(ready, results_of(work)))
+            finally:
+                batch.settled.set()
+
+        async def batch_of(entry: Work, ready: bool) -> bool:
+            """The step arrives at its batch and waits for it; False for a step a later plan replaced (it is not sent)."""
+            batch = entry.batch
+            if batch is None or not batch.holds(entry):
+                return False
+            batch.arrived[id(entry)] = ready
+            if batch.complete():
+                await send(batch)
+            await batch.settled.wait()
+            return True
+
+        async def one(entry: Work, needs: list[Work], plan_: Plan, steps: dict[str, Work]) -> Made | None:
             op = entry.op
             for need in needs:
                 await asyncio.wait({need.task})
             ready = all(need.task.exception() is None and need.task.result() is not None for need in needs)
             await self.trace("step", {"op": op.id, "kind": op.kind, "slot": op.slot, "ready": ready})
-            if op.batch:
-                await batch_of(entry, ready, steps, batch)
+            sent = await batch_of(entry, ready) if op.batch else False
             if not ready:
                 entry.left = True
                 await self.trace("done", {"op": op.id, "outcome": "left", "why": sorted(
                     need.op.id for need in needs if need.task.exception() is not None or need.task.result() is None)})
                 return None
             if op.batch:
-                outcome = batch["outcomes"].get(op.id, Passing("партия не выполнена"))
+                outcome = (entry.batch.outcomes.get(op.id, Passing("партия не выполнена")) if sent
+                           else Passing("шаг заменён планом, сделанным после него"))
             else:
                 try:
                     outcome = await self.do(op, results_of(steps))
@@ -491,13 +535,13 @@ class SeriesSync:
                     if all(op in results for op in group.ops):
                         applies[asyncio.ensure_future(apply(made, group, results))] = (made, group)
             # The steps a later plan no longer asked end on their own: nothing of the sync works after it.
-            await asyncio.wait({entry.task for entry in every}) if every else None
-            for entry in every:
-                entry.task.result()
+            await asyncio.wait({*(entry.task for entry in every), *sends}) if every or sends else None
+            for task in [*(entry.task for entry in every), *sends]:
+                task.result()
         except BaseException:
-            for task in [*watchers, *applies, *(entry.task for entry in every if entry.task is not None)]:
+            for task in [*watchers, *applies, *sends, *(entry.task for entry in every if entry.task is not None)]:
                 task.cancel()
-            await asyncio.gather(*watchers, *applies, *(entry.task for entry in every if entry.task is not None),
+            await asyncio.gather(*watchers, *applies, *sends, *(entry.task for entry in every if entry.task is not None),
                                  return_exceptions=True)
             raise
         results = results_of(work)

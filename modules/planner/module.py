@@ -15,7 +15,9 @@ Steps of the graph, each through its owner:
       service; its end is the event `downloads.fetch.finished` of the key.
   align: one `conform.submit` per episode — its reference once and every voice-over of it that came, once none of them
       is still being downloaded (a voice-over that did not come holds none back); a voice-over out of a file of the library
-      by its track (`dub_atracks`); its end is `conform.job.finished`. A result is taken by `ok`.
+      by its track (`dub_atracks`); its end is `conform.job.finished`. A result is taken by `ok`. A plan made again
+      while the episode waits (a voice-over failed and its next source is downloaded) keeps it one job: the voice-overs
+      of the plan in force go together (core/plan/executor.Batch); only a job already sent is not joined.
   cut: `conform.reverse` with the single video of the episode; its end is `conform.job.finished`.
   A job is keyed by its sync (plan_runs.started_at) and what it does: a sync taken up after a stop finds its job by the
       key (conform.job.find) and takes its end instead of sending it again. When a job ends, what it was given (copies,

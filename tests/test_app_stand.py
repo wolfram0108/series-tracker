@@ -280,6 +280,44 @@ async def test_the_voice_overs_of_an_episode_go_to_the_service_as_one_job_and_on
     assert sorted(track["group"] for track in asset["tracks"]) == ["AnimeVost", "Kansai"]
 
 
+async def test_a_voice_over_taken_from_the_next_source_goes_in_the_one_job_of_its_episode(stand):
+    """The plan is made again while an episode waits for its video (a voice-over failed, its next source is downloaded):
+    the voice-overs of the episode still go to the service as one job, the one kept from the plan before with the one the
+    new plan gave."""
+    stand.site.release("ref", "AniStar")
+    stand.site.release("dub", "AnimeVost")
+    stand.site.release("dub2", "AnimeVost")
+    stand.site.release("d2", "Kansai")
+    truth = truth_of(1, 1)
+    whole = os.path.join(stand.site.root, "whole.mp4")
+    await asyncio.to_thread(stand.codec.make, whole, [truth])
+    await asyncio.to_thread(subprocess.run, ["ffmpeg", "-v", "error", "-y", "-i", whole, "-t", "0.25", "-c", "copy",
+                                             os.path.join(stand.site.root, f"dub-ep1-truth{truth}-file.mp4")],
+                            check=True, timeout=60)
+    for slug in ("ref", "dub", "dub2", "d2"):
+        stand.site.episode(slug, 1, height=720 if slug == "ref" else 480)
+    await stand.configure(["AniStar", "AnimeVost", "Kansai"])
+    series_id = await stand.series("Сериал", ["ref", "dub", "dub2", "d2"])
+    # The video of the episode comes last: it is held until every voice-over, the one of the next source too, has ended.
+    stand.host.hold.add(f"ref-ep1-truth{truth}-file.mp4")
+    finished = stand.bus.subscribe("downloads.fetch.finished")
+    sync = asyncio.ensure_future(stand.sync(series_id))
+    voices = []
+    while len(voices) < 3:  # the broken file, Kansai, the next source of AnimeVost
+        payload = (await asyncio.wait_for(finished.queue.get(), STAND_LIMIT_S)).payload
+        if "видео" not in os.path.basename(payload["path"]):
+            voices.append(payload["ok"])
+    assert sorted(voices) == [False, True, True], voices
+    stand.host.hold.clear()
+    stand.host.released.set()
+    view = await asyncio.wait_for(sync, STAND_LIMIT_S)
+    (job,) = stand.daemon.jobs.values()
+    assert len(job["dubs"]) == 2, list(stand.daemon.jobs.values())
+    await stand.check(series_id)
+    (asset,) = view["assets"]
+    assert sorted(track["group"] for track in asset["tracks"]) == ["AnimeVost", "Kansai"]
+
+
 def programs_with(name: str) -> list[str]:
     """The programs running now whose command line names `name` (a download caught in its middle)."""
     found = []
