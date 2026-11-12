@@ -3,8 +3,12 @@ that plays like any file. Such a clip has a frame and a length of its own, so ne
 of a downloaded file tells it from an episode by itself.
 
 A notice is known by the hash of the head of its file, as the owner's prototypes know it (source-prototypes,
-sourcekit/notices.json); a short file is not taken for a notice by its length. The registry holds hashes only: the
-clip itself is a host's answer and stays out of the repository.
+sourcekit/notices.json). The registry holds hashes only: the clip itself is a host's answer and stays out of the
+repository.
+
+A file of an episode shorter than `EPISODE_MIN_S` is broken whatever it shows (the owner's rule): no episode is that
+short, and a host that broke an upload serves seconds of it — a studio's intro of 6 s in place of an episode of 7 min.
+Its length is no measure of a match: the alignment service finds an episode of minutes in a compilation of hours.
 """
 from __future__ import annotations
 
@@ -26,6 +30,15 @@ NOTICES: tuple[Notice, ...] = (
     Notice("moli-quota-20261111", 65536, "5f0e39e035cac70f502fe72f4407853bacc258fc9b08a55ff7e7b46f9c3c8702",
            "the parser's limit of attempts is spent"),
 )
+
+
+EPISODE_MIN_S = 60.0
+
+
+def too_short(seconds: float) -> bool:
+    """Whether a file of an episode is too short to be one; a length that could not be read judges nothing. The limit is
+    read when asked: the test world, whose episodes last a second, has a limit of its own scale."""
+    return 0 < seconds < EPISODE_MIN_S
 
 
 def head_bytes() -> int:

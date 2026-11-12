@@ -3,6 +3,7 @@ the player and the alignment service as models — the full circle of the plan o
 import asyncio
 import json
 import os
+import subprocess
 
 import pytest
 
@@ -229,6 +230,34 @@ async def test_a_voice_over_the_service_refused_to_align_is_passed_over_until_th
     await stand.check(series_id)
     assert [track["group"] for track in view["assets"][0]["tracks"]] == ["AnimeVost"] and not view["failures"]
     assert "error" not in (await stand.call("GET", f"/api/series/{series_id}"))["statuses"]
+
+
+async def test_a_voice_over_file_shorter_than_any_episode_is_broken_and_the_next_source_gives_it(stand):
+    """A host broke the upload of an episode (a studio's intro of seconds in place of it): the file is whole and as long as
+    the host says, and shorter than any episode (core/notices.EPISODE_MIN_S, of the scale of the stand). Its download
+    fails, nothing of it reaches the service, and the same voice-over comes from the next source."""
+    stand.site.release("ref", "AniStar")
+    stand.site.release("dub", "AnimeVost")
+    stand.site.release("dub2", "AnimeVost")
+    truth = truth_of(1, 1)
+    broken = os.path.join(stand.site.root, f"dub-ep1-truth{truth}-file.mp4")
+    whole = os.path.join(stand.site.root, "whole.mp4")
+    await asyncio.to_thread(stand.codec.make, whole, [truth])
+    await asyncio.to_thread(subprocess.run, ["ffmpeg", "-v", "error", "-y", "-i", whole, "-t", "0.25", "-c", "copy", broken],
+                            check=True, timeout=60)
+    for slug in ("ref", "dub", "dub2"):
+        stand.site.episode(slug, 1)
+    await stand.configure(["AniStar", "AnimeVost"])
+    series_id = await stand.series("Сериал", ["ref", "dub", "dub2"])
+    view = await stand.sync(series_id)
+    await stand.check(series_id)
+    # The service was asked once: for the voice-over of the next source.
+    sent = [dub for job in stand.daemon.jobs.values() for dub in job.get("dubs") or []]
+    assert len(sent) == 1, sent
+    ((failure,), (asset,)) = view["failures"], view["assets"]
+    (track,) = asset["tracks"]
+    assert failure["kind"] == "download" and failure["covered"] and track["group"] == "AnimeVost", view
+    assert track["row"] != failure["row"], (track, failure)
 
 
 async def test_the_voice_overs_of_an_episode_go_to_the_service_as_one_job_and_one_that_did_not_come_holds_none_back(stand):

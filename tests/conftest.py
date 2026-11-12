@@ -54,6 +54,13 @@ def hosts_are_not_paced_in_tests(monkeypatch):
         monkeypatch.setattr(importlib.import_module(module_name), name, value)
 
 
+@pytest.fixture(autouse=True)
+def episodes_of_the_test_world(monkeypatch):
+    """The files of the test world hold an episode in a second: the shortest episode is of that scale (core/notices.py)."""
+    from core import notices
+    monkeypatch.setattr(notices, "EPISODE_MIN_S", 0.5)
+
+
 @pytest.fixture
 def db_path(tmp_path):
     """An empty database at the head of the schema; a test that needs rows of its own defines its own `db_path`."""

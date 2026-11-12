@@ -34,6 +34,8 @@ Events out:
       again (a playlist is continued from the segments it got), and a fetch that spent its attempts failed. `transient`
       is only a failure that said nothing of the source (a module of ours did not answer, a name was busy): the owner
       asks the same source again at its next round; any other failure is the source's, and the owner goes to the next.
+      A file that came is no episode when it is a clip the host served in its place (core/notices.py: known by its head,
+      a way that broke) or shorter than any episode (`EPISODE_MIN_S`, a minute: an upload the host broke, its last word).
   downloads.queue.changed {tasks, count} - the cards changed, on the beat of core/clock while a download goes, and when an
       interface connects (gateway.sse.clients): SSE download_queue_update. The cards live with the sync of their series
       (scan.run.changed): while it runs every card is kept; at its end only a failed card and a finished one whose plan
@@ -52,7 +54,7 @@ import traceback
 
 from core import BaseModule, notices, storage
 from core.clock import beat_while
-from core.ffprobe import film_stream, streams_of
+from core.ffprobe import duration_of, film_stream, streams_of
 from core.contracts import RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, WorkWithdrawn
 from core.db import Database
 from core.envelope import Envelope
@@ -465,6 +467,11 @@ class DownloadsModule(BaseModule):
                     # The file is a clip the host served instead of the episode (core/notices.py): no episode, and the
                     # way to it may open again (a quota of a day).
                     return False, f"источник отдал уведомление «{notice.id}» вместо серии", Failed.BROKEN
+                seconds = await duration_of(path)
+                if notices.too_short(seconds):
+                    # The host broke the upload of the episode: the file is all there is, an attempt again gets it again.
+                    return False, (f"источник отдал файл длиной {seconds:.1f} с — серия не бывает короче "
+                                   f"{notices.EPISODE_MIN_S:.0f} с, файл сломан"), Failed.FINAL
             return done, failure, None if done else kind_of(failure)
 
         budget = _download_budget()

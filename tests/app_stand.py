@@ -483,6 +483,7 @@ class AppStand:
         self.daemon_http = Served(self.daemon.app)
         self.library = os.path.join(root, "library")
         self.db_path = migrated(os.path.join(root, "app.db"))
+        self.profiles: dict[str, int] = {}  # the profile of each voice-over: two sources of one voice-over share it
         # The time of day as the sources tell the age of a table by it: a scenario moves it to let a page be read again.
         self.now = datetime.now(timezone.utc)
 
@@ -539,8 +540,11 @@ class AppStand:
 
     async def profile(self, voice: str) -> int:
         """A profile of rules, as the user makes one for a source: «Серия N» numbers the row, and the voice-over of the
-        source is the tag the rule gives it (the constructor alone names a voice-over)."""
+        source is the tag the rule gives it (the constructor alone names a voice-over). Made once for a voice-over."""
+        if voice in self.profiles:
+            return self.profiles[voice]
         made = await self.call("POST", "/api/parser-profiles", {"name": f"серии {voice}"})
+        self.profiles[voice] = made["id"]
         single = json.dumps([{"type": "text", "value": "Серия "}, {"type": "number"}], ensure_ascii=False)
         span = json.dumps([{"type": "text", "value": "Серии "}, {"type": "number"}, {"type": "text", "value": "-"},
                            {"type": "number"}], ensure_ascii=False)

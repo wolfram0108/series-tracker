@@ -548,6 +548,24 @@ async def test_a_downloaded_clip_the_host_served_instead_of_the_episode_is_no_fi
     assert dl.started.count("https://site/#cvh=9") == 3 and not os.path.exists(path)
 
 
+@pytest.mark.asyncio
+async def test_a_downloaded_file_shorter_than_any_episode_is_broken_at_once(system, tmp_path, monkeypatch):
+    """A host that broke the upload of an episode serves seconds of it (a studio's intro of 6 s): shorter than any episode
+    (core/notices.EPISODE_MIN_S), the file is broken — the source's last word, asked once, and what it wrote goes."""
+    from core import notices
+
+    async def six_seconds(path, **kw):
+        return 6.0
+
+    monkeypatch.setattr(notices, "EPISODE_MIN_S", 60.0)
+    monkeypatch.setattr("modules.downloads.module.duration_of", six_seconds)
+    bus, _, dl, probe = system
+    path = str(tmp_path / "s.mp4")
+    (done,) = await _fetch(probe, bus, 1, jobs=[{"key": "dub:s", "url": "https://site/#cvh=8", "path": path, "series_id": 3}])
+    assert done["ok"] is False and "6.0 с" in done["error"] and done["transient"] is False, done
+    assert dl.started.count("https://site/#cvh=8") == 1 and not os.path.exists(path)
+
+
 # --- a file its player downloads itself (Alloha) -----------------------------------------------------------------------
 
 PLAYER_LINK = "https://old.yummyani.me/catalog/item/x#alloha=https%3A%2F%2Falloha.test%2F%3Ftoken_movie%3D1"
