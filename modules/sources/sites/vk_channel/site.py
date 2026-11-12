@@ -215,6 +215,8 @@ class VkChannelSite:
 
     async def _rows(self, videos: list[dict], channel_url: str, ctx: ReadContext) -> list[TableRow]:
         """A row per video. The steps come from the files the listing gave; what it gave none for is asked of the VK player."""
+        if "vk" in ctx.off:
+            return []  # the player of the channel is switched off: nothing is asked, the core keeps its rows of the last read
         refs = {key_of(video): self._ref(video) for video in videos if heights_of(video) is None}
         asked = {}
         sought = [ref for ref in refs.values() if ref is not None]

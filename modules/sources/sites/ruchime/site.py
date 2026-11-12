@@ -92,7 +92,7 @@ class RuchimeSite:
         """The rows of the players of the pages (one ref per entry, the page its part), then the rows of the catalogs the
         pages show; and the catalogs that could not be read."""
         pacer = self.players.pacer
-        page_players = [player for player in self.players if not player.series_scope]
+        page_players = [player for player in self.players if not player.series_scope and player.name not in ctx.off]
         sources: dict[str, list[tuple[int, dict, EpisodePage]]] = {player.name: [] for player in page_players}
         for index, (entry, page) in enumerate(zip(listed, pages)):
             for player in page_players:

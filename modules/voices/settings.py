@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Mapping
 
-from core.contracts.voices import LANGUAGES
+from core.contracts.voices import LANGUAGES, PLAYERS_OFF_KEY
 from core.voice_names import NO_GROUPS, Groups, usable_groups
 
 # Source priority, most preferred first; empirical, by bitrate. The first one wins a resolution tie.
@@ -14,8 +14,8 @@ DEFAULT_PRIORITY = ("alloha", "vk", "cvh", "allvideo", "vibix", "kodik")
 PREFIX = "voices."
 PRIORITY_KEY = "voices.source_priority"
 VOICE_GROUPS_KEY = "voices.groups"
-# The players of the order switched off for every source: their rows stay in the tables and go to no layout.
-PLAYERS_OFF_KEY = "voices.players_off"
+# The players of the order switched off for every source: they are not asked, their rows of the last read stay in the
+# tables and go to no layout.
 PLAYER_GROUPS_KEY = "voices.player_groups"
 MAX_TEMP_KEY = "voices.max_temp_episodes"
 # Stage 12: the height the file of a compilation is downloaded at for its cuts (0 or unset: the best it has). A check of

@@ -101,8 +101,11 @@ class TableReader:
     def __init__(self, repo: SourcesRepository, sites: SiteRegistry, publish: Publish,
                  http: Callable[[], httpx.AsyncClient], *, players: PlayerRegistry, clock: Callable[[], datetime] = utc_now,
                  term: Term | None = None, safeguard_s: float = TABLE_READ_S, recent: int | None = None,
-                 holding: Callable[[], AbstractAsyncContextManager] | None = None) -> None:
+                 holding: Callable[[], AbstractAsyncContextManager] | None = None,
+                 off: Callable[[], frozenset[str]] | None = None) -> None:
         self._repo, self._sites, self._publish, self._http, self._players = repo, sites, publish, http, players
+        # The players switched off for every source, as they are when a read begins.
+        self._off = off if off is not None else (lambda: frozenset())
         self._clock, self._safeguard_s, self._recent = clock, safeguard_s, recent
         self._term = term if term is not None else Term()
         # What a read holds for its whole length (the browser of the module, kept between the rows of the page).
@@ -255,8 +258,9 @@ class TableReader:
                                                         rate=pace.rate(phase, current)).model_dump(mode="json"))
 
         stored = (await self._repo.stored(key)).table
+        off = self._off()
         context = ReadContext(http=self._http(), progress=progress, recent=self._recent, fresh=fresh,
-                              last_rows=tuple(stored.rows) if stored is not None else ())
+                              last_rows=tuple(stored.rows) if stored is not None else (), off=off)
         limit = asyncio.timeout(self._safeguard_s)
         try:
             async with limit:
@@ -272,6 +276,11 @@ class TableReader:
             seen.add(row.key)
         # Which video each row is, read by its player from its link: the one place a table learns it, whatever site read it.
         rows = [row.model_copy(update={"video": self._players.video_of(row.player, row.link)}) for row in draft.rows]
+        # A player switched off was not asked: its rows of the last read stay as they were (a file downloaded from one of
+        # them must not look withdrawn by a source nobody asked), and it adds no new one.
+        if stored is not None and off:
+            have = {row.key for row in rows}
+            rows += [row for row in stored.rows if row.player in off and row.key not in have]
         if draft.unread:
             rows = rows + await self._kept(key, rows, draft.unread)
         return ReleaseTable(url=key, site=site.name, names=draft.names, title=draft.title, site_voice=draft.site_voice, channel=draft.channel,

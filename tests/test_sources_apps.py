@@ -204,6 +204,35 @@ def test_the_registry_of_an_application_admits_its_lines_and_says_why_it_refused
     assert LineRegistry.load("other", str(tmp_path)).admitted == frozenset()
 
 
+async def test_a_line_switched_off_in_the_order_of_sources_is_not_read_at_all_and_its_rows_of_the_last_read_stay(caplog):
+    """The owner switched a line off for every source: nothing of it is asked — no parser, no playlist, no segment —
+    and the read says so; the rows of its last read are kept as they were by the core of the reads (tests/test_table_off.py)."""
+    model = card_world()
+    model.parses[(9, "CO4K_tok1")] = f"{CDN}d/1.m3u8"
+    playlists = {f"{CDN}{name}": PLAYLIST for name in ("a/index.m3u8", "b/index.m3u8", "d/1.m3u8")}
+    http, asked = world(model, playlists)
+    heads: list[str] = []
+
+    async def measure(_http, head, _referer, _headers=None):
+        heads.append(head.segment)
+        return 1080
+
+    async with http:
+        player = AppPlayer(App99Client(profile(), lambda: http), measure, registry=admitting("ffm3u8", "CO4K"))
+        site = AppSite(player, AppLines([player]))
+        with caplog.at_level("INFO", logger="sources"):
+            draft = await site.read("app://banri/219017", ReadContext(http, lambda *_: None, off=frozenset({"line:CO4K"})))
+        assert [row.key for row in draft.rows] == ["banri:ffm3u8:1", "banri:ffm3u8:2"]
+        assert sorted(asked) == sorted(f"{CDN}{name}" for name in ("a/index.m3u8", "b/index.m3u8"))
+        assert all(not str(fields.get("url", "")).startswith("CO4K_") for _path, fields in model.calls)
+        assert any("линии отключены в порядке источников и не читаются — CO4K" in record.getMessage()
+                   for record in caplog.records)
+        # A card whose every line is off is no failed card: it has no row to read.
+        every = await site.read("app://banri/219017", ReadContext(http, lambda *_: None,
+                                                                   off=frozenset({"line:CO4K", "line:ffm3u8"})))
+        assert every.rows == []
+
+
 async def test_a_card_is_measured_at_the_accepted_pace_of_the_applications():
     """The rows of a card are asked side by side, at most APP_IN_FLIGHT at once and one start every APP_INTERVAL_S: a
     cold catalogue does not turn into a burst at the resolver. The pace runs on a clock of the test, not on real time."""

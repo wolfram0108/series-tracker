@@ -98,10 +98,13 @@ class AppSite:
         except AppError as exc:
             raise SiteError(exc.reason) from exc
         ctx.progress(PHASE_RELEASE, 1, 1)
-        lines, passed = [], []
+        lines, passed, off = [], [], []
         for each in card.lines:
             if not self.player.registry.admits(each.code):
                 passed.append(f"{each.code} ({self.player.registry.why_not(each.code)})")
+                continue
+            if self.lines.line(each.code).name in ctx.off:
+                off.append(each.code)
                 continue
             fields = {"app": self.name, "line": each.code, "line_name": each.name,
                       "parsers": each.parsers, "stream": "playlist" if each.listed else "parser"}
@@ -112,6 +115,9 @@ class AppSite:
         if passed:
             logger.info("приложение %s, карточка %s: линии не признаны и не читаются — %s", self.name, self._card(card_url),
                         "; ".join(passed))
+        if off:
+            logger.info("приложение %s, карточка %s: линии отключены в порядке источников и не читаются — %s", self.name,
+                        self._card(card_url), ", ".join(off))
         frames = await self._frames(card_url, lines, ctx)
         rows: list[TableRow] = []
         absent: dict[str, list[str]] = {}
@@ -135,7 +141,8 @@ class AppSite:
             logger.warning("приложение %s, карточка %s: серий без видео — %s", self.name, self._card(card_url),
                            "; ".join(f"{code}: {len(labels)} ({', '.join(labels[:12])}{'…' if len(labels) > 12 else ''})"
                                      for code, labels in absent.items()))
-        if not rows:
+        # A card whose every line was switched off has no row to read: that is no failure of the card.
+        if not rows and not off:
             raise SiteError(reason("no_players_empty", site=self.player.label))
         title = " · ".join(part for part in (self.label, card.names[0] + (f" ({card.year})" if card.year else "")
                                              if card.names else "") if part)

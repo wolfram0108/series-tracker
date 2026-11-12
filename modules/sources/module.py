@@ -70,6 +70,9 @@ Events (owner: sources):
                                                         (rows by state, frames, the causes of the rows without a video)
 Events in: settings.changed {key: sources_term_hours} — the term of what the sources answered (term.py): the tables of
 pages, the listings of VK channels and the addresses parsers of applications gave are current for that many hours.
+settings.changed {key: voices.players_off} — the players the owner switched off for every source: a read asks none of
+them (ReadContext.off) and keeps their rows of the last read as they were; a player switched on is asked at the next
+read of a page (the term, or a read the user asks for).
 A failed read is not retried by itself and a consumer does not ask again on `failed`: the next request after a
 failure begins a new read. Only a complete table is ever published. A stop in the middle of a read is no verdict:
 the state `reading` is stored and `on_start` begins the read again.
@@ -88,6 +91,7 @@ httpx; astar / anilibria_tv — общий Playwright-пул (_browser_html,
 """
 from __future__ import annotations
 
+import json
 import asyncio
 import base64
 import os
@@ -99,6 +103,7 @@ import httpx
 
 from core import BaseModule, compute, ids
 from core import storage
+from core.contracts.voices import PLAYERS_OFF_KEY
 from core.contracts import (AppCard, AppResults, AppSearchReply, AppSearchRequest, ParsedDomains, PlayerFacts, PlayerPlace,
                             PlayersListReply, PlayersListRequest, SiteResolveRequest,
                             SourcesSettingsView, TableGetRequest, TrackerMirrors)
@@ -188,6 +193,8 @@ class SourcesModule(BaseModule):
         self.apps: list[AppPlayer] = []
         # One term of what the sources answered for every reader of the module; the setting changes it for all at once.
         self.term = Term()
+        # The players switched off for every source (the setting of the voices module, kept here as the event says it).
+        self.players_off: frozenset[str] = frozenset()
         for profile in apps:
             client = APP_PROTOCOLS.get(profile.protocol)
             if client is None:
@@ -211,7 +218,7 @@ class SourcesModule(BaseModule):
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
             players=self.players, clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent, term=self.term,
-            holding=self.browsers.held)
+            holding=self.browsers.held, off=lambda: self.players_off)
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(
@@ -250,6 +257,11 @@ class SourcesModule(BaseModule):
             stored = None
         self._set_term(stored)
         try:
+            players_off = (await self.request("settings.value.get", {"key": PLAYERS_OFF_KEY})).get("value")
+        except Exception:  # noqa: BLE001 - a setting that cannot be read leaves every player asked, as the term stays at its default
+            players_off = None
+        self._set_players_off(players_off)
+        try:
             await self.tables.resume()
         except Exception:  # noqa: BLE001 — the other duties of the module do not wait for the table reads
             # Consumers ask for their tables again when they start; a page left marked "reading" is read at the next ask.
@@ -275,6 +287,19 @@ class SourcesModule(BaseModule):
     async def on_settings_changed(self, env: Envelope) -> None:
         if env.payload.get("key") == TERM_KEY:
             self._set_term(env.payload.get("value"))
+        elif env.payload.get("key") == PLAYERS_OFF_KEY:
+            self._set_players_off(env.payload.get("value"))
+
+    def _set_players_off(self, value) -> None:
+        """The players a setting names: a JSON list of names; anything else leaves every player asked."""
+        try:
+            names = json.loads(value) if value not in (None, "") else []
+        except (TypeError, ValueError):
+            names = None
+        if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+            self.log.warning("отключённые плееры «%s»: не список имён, опрашиваются все", value)
+            names = []
+        self.players_off = frozenset(names)
 
     def _set_term(self, value) -> None:
         hours = hours_of(value) if value not in (None, "") else DEFAULT_HOURS

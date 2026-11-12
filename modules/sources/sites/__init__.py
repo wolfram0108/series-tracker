@@ -50,6 +50,9 @@ class ReadContext:
     # The rows of the last complete table of the page: what a player said of a link that names its video for good (the
     # frame of a playlist) is taken from here instead of being asked again.
     last_rows: tuple[TableRow, ...] = ()
+    # The players the owner switched off for every source (their names in the order of sources: `kodik`, `line:CO4K`):
+    # a site asks none of them and lists no new row of them; the core keeps their rows of the last read as they were.
+    off: frozenset[str] = frozenset()
 
 
 class TableDraft(BaseModel):

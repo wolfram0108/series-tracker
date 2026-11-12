@@ -145,6 +145,10 @@ class DubsSnapshot(BaseModel):
 # as `voices.language.<code>`.
 LANGUAGES = ("rus", "eng", "chi", "jpn", "kor")
 
+# The setting of the players of the order switched off for every source (a JSON list of their names): the voices module
+# keeps it, the sources module reads it so that a switched-off player is not asked at all.
+PLAYERS_OFF_KEY = "voices.players_off"
+
 
 class VoiceSettingsDraft(BaseModel):
     """What the settings screen of the voices sends: the order of the sources, the players of it switched off, the groups

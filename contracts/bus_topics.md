@@ -61,7 +61,7 @@
 | `scan.reference.changed` — `ReferenceChanged`: референс серии целиком (поля `Reference`: `season`, `episode`, `part`, `mark`, `source_id`, `row_key`, `player`, `voice_group`, `height`, `reason`) и `series_id` | scan | voices, gateway | `reference_changed` |
 | `scan.plan.updated {series_id}` — план пересчитан (загрузку не запускает) | scan | downloads | — |
 | `scan.status.changed` | scan | gateway | `scanner_status_update` |
-| `settings.changed {key, value}` | settings | downloads, scan, sources (`sources_term_hours`) | — |
+| `settings.changed {key, value}` | settings | downloads, scan, sources (`sources_term_hours`; `voices.players_off` — плееры, отключённые в «Порядке источников»: чтение таблицы их не опрашивает, их строки прошлого чтения остаются как были) | — |
 | `trackerauth.credentials.changed {service}` | trackerauth | torrents | — |
 | `torrents.queue.changed {count, tasks}` | torrents | scan (0 → следующий проход), gateway | `agent_queue_update` |
 | `torrents.progress.changed {tasks}` | torrents | gateway | `torrent_progress_update` |

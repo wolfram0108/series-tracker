@@ -103,7 +103,7 @@ async def read_catalogs(players: PlayerRegistry, pages: Iterable[tuple[str, Mapp
     for page_url, refs in pages:
         for player in players:
             ref = refs.get(player.name)
-            if not player.series_scope or ref is None:
+            if not player.series_scope or ref is None or player.name in ctx.off:
                 continue
             part = catalog_part(player, ref)
             chosen.setdefault(part, (player, ref, page_url))
@@ -139,6 +139,8 @@ async def read_catalogs(players: PlayerRegistry, pages: Iterable[tuple[str, Mapp
 async def rows_of_catalogs(catalogs: Sequence[Catalog | Listed], ctx: ReadContext, pacer, asked: AskCount) -> list[TableRow]:
     rows: list[TableRow] = []
     for catalog in catalogs:
+        if catalog.player.name in ctx.off:
+            continue
         found = await catalog_rows(catalog.player, catalog.entries, ctx.http, catalog.page_url, pacer, on_asked=asked,
                                    known=getattr(catalog, "known", None))
         part = getattr(catalog, "part", "")
@@ -151,7 +153,7 @@ async def table_rows(players: PlayerRegistry, pages: Iterable[tuple[str, Mapping
     """The rows of a site: of every catalog its pages show, then of the videos it lists itself; each video asked of its
     player. The catalogs that cannot be read are the unread parts of the page."""
     catalogs = await read_catalogs(players, pages, ctx, names)
-    every: list[Catalog | Listed] = [*catalogs.read, *(each for each in listed if each.entries)]
+    every: list[Catalog | Listed] = [*catalogs.read, *(each for each in listed if each.entries and each.player.name not in ctx.off)]
     asked = AskCount(ctx, sum(len(each.entries) for each in every))
     ctx.progress(PHASE_PLAYERS, 0, asked.total)
     return Body(await rows_of_catalogs(every, ctx, players.pacer, asked), catalogs.unread)
