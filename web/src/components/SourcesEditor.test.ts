@@ -12,7 +12,7 @@ vi.mock("../composables/sourceAddress")
 const PAGE = "https://1.ruchime.org/release/test"
 const stored = (over: Partial<SeriesSource> = {}): SeriesSource => ({
   id: 7, series_id: 1, position: 0, url: PAGE, source_type: "web_video", parser_profile_id: null,
-  vibix_season: null, players_off: [], color: 0, ...over,
+  vibix_season: null, players_off: [], rows_per_line: "all", color: 0, ...over,
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile", title: "", read_at: "2026-11-01T10:00:00Z", players: [
@@ -217,5 +217,23 @@ describe("SourcesEditor", () => {
     expect(w.emitted("change")).toBeUndefined()
     await fields[1].trigger("focusout")
     expect(w.emitted("change")?.[0]).toEqual([7, { url: "https://vkvideo.ru/@kino|второй" }])
+  })
+
+  it("limits the rows of each line of a card of an application, sends only a value that is a limit, and shows it to no other source", async () => {
+    const card = itemOfSource(stored({ url: "app://banri/219017", rows_per_line: "10" }), null, null)
+    const w = mountEditor([card])
+    const input = w.find(".source-rows input")
+    expect((input.element as HTMLInputElement).value).toBe("10")
+    await input.setValue("-10")
+    await input.trigger("focusout")
+    expect(w.emitted("change")?.[0]).toEqual([7, { rowsPerLine: "-10" }])
+    await input.setValue("ALL")
+    await input.trigger("focusout")
+    expect(w.emitted("change")?.[1]).toEqual([7, { rowsPerLine: "all" }])
+    await input.setValue("десять")
+    await input.trigger("focusout")
+    expect(w.emitted("change")).toHaveLength(2)
+    expect(w.find(".source-rows .source-reason").text()).toBe(t("sources.rows.invalid"))
+    expect(mountEditor().find(".source-rows").exists()).toBe(false)
   })
 })

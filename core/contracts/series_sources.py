@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SourceType(StrEnum):
@@ -30,8 +30,15 @@ class SeriesSource(BaseModel):
     parser_profile_id: int | None = None
     vibix_season: int | None = None
     players_off: list[str] = Field(default_factory=list)
+    # How many rows of each line of a card an application source reads: `all`, `N` (the first N) or `-N` (the last N).
+    rows_per_line: str = "all"
     # The colour of the source in its series (0–15 of the palette of the interface): given once when it comes, kept by it.
     color: int = 0
+
+    @field_validator("rows_per_line", mode="before")
+    @classmethod
+    def _none_is_all(cls, value):
+        return "all" if value is None else value
 
 
 class SourceEvent(BaseModel):

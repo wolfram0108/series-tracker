@@ -120,7 +120,7 @@ async def sync_tables(sources: Sequence[SeriesSource], ask: Ask, signals: TableS
 
 async def _sync_source(source: SeriesSource, ask: Ask, signals: TableSignals, safeguard_s: float) -> SourceSync:
     since = signals.mark()
-    request = TableGetRequest(url=source.url, refresh=True)
+    request = TableGetRequest(url=source.url, refresh=True, rows=source.rows_per_line)
     try:
         reply = TableGetReply.model_validate(
             await ask("sources.table.get", request.model_dump(mode="json")))
@@ -142,6 +142,9 @@ async def _sync_source(source: SeriesSource, ask: Ask, signals: TableSignals, sa
             return SourceSync(source.id, reply.url, "ready")
         else:
             failure = verdict.reason or reason("scan_step_failed", step="sources.table.get")
+    elif reply.state == TableState.ABSENT:
+        # A page of an application nobody has read waits for the user's read: the sync has nothing of it to wait for.
+        failure = reason("table_not_read", url=reply.url)
     elif failure is None:
         failure = reason("scan_step_failed", step="sources.table.get")
     held = reply.table is not None and reply.table.complete

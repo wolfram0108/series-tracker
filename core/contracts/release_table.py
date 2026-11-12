@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 LINE_SEPARATOR = " | "
 # What a read of a page does, told for its dump (modules/sources/table.py tells it, modules/runlog keeps it):
@@ -155,6 +155,14 @@ class TableGetRequest(BaseModel):
 
     url: str
     refresh: bool = True
+    # How many rows of each line of a card an application source reads (core/row_limit.py): the setting of the source
+    # the read is for; a site that reads no lines ignores it. None is all.
+    rows: str = "all"
+
+    @field_validator("rows", mode="before")
+    @classmethod
+    def _none_is_all(cls, value):
+        return "all" if value is None else value
 
 
 class TableGetReply(BaseModel):

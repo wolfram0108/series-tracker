@@ -570,6 +570,18 @@ class AppStand:
         """Time passes: the tables of the pages are older than their term, the next sync reads the site again."""
         self.now += timedelta(hours=hours)
 
+    async def read_card(self, url: str) -> None:
+        """The user's read of a card of an application, as the button of its source asks it: the first read of a card
+        waits for it, and nothing but it begins one."""
+        key = (await self.module("sources").request("sources.site.resolve", {"url": url}))["canonical_url"]
+        ended = self.bus.subscribe("sources.table.ready", "sources.table.failed")
+        await self.call("POST", "/api/sources/read", {"url": url})
+        while True:
+            packet = await asyncio.wait_for(ended.queue.get(), STAND_LIMIT_S)
+            if packet.payload.get("url") == key:
+                assert packet.topic == "sources.table.ready", packet.payload
+                return
+
     async def sync(self, series_id: int) -> dict:
         """A sync as the window starts it, to its end: the run of the series closes when the planner has no work left."""
         ended = self.bus.subscribe("scan.run.changed")

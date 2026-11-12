@@ -105,7 +105,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/sources/read", response_model=OkResponse, responses=_ERR1)
     async def read_source(body: TableReadRequest):
         """Read the page now, whatever the age of its table (the hour of a table is the term of a sync, not of a user)."""
-        gw.send_command("sources.table.read", body.model_dump(mode="json"))
+        gw.send_command("sources.table.read", body.model_dump(mode="json", exclude_none=True))
         return {"success": True}
 
     @r.post("/api/sources/cancel", response_model=ReadCancelled, responses=_ERR1)
@@ -113,7 +113,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """Stop the read of the page going now (the user stopped it on the card of the source): it ends failed, the last
         table serves, and it is not begun again at the start."""
         try:
-            done = await gw.request("sources.table.cancel", body.model_dump(mode="json"))
+            done = await gw.request("sources.table.cancel", body.model_dump(mode="json", exclude_none=True))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
         return {"success": True, "cancelled": bool(done.get("cancelled"))}

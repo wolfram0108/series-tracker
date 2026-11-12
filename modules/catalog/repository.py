@@ -30,7 +30,7 @@ _WRITABLE = {"name", "name_en", "site", "save_path", "season", "quality",
              "ignored_seasons", "ignored_episodes"}
 
 _SOURCE_COLUMNS = ("id, series_id, position, url, source_type, parser_profile_id, "
-                   "vibix_season, players_off, color")
+                   "vibix_season, players_off, rows_per_line, color")
 
 # The colours of the palette of the interface a source may take.
 COLORS = 16
@@ -41,9 +41,9 @@ _FREE_COLOR = ("(SELECT COALESCE(MIN(color), (SELECT COUNT(*) FROM series_source
                f"{COLORS}) FROM ({_EVERY_COLOR}) WHERE color NOT IN (SELECT color FROM series_sources WHERE series_id=?))")
 
 _ADD_SOURCE = ("INSERT INTO series_sources (series_id, position, url, source_type, parser_profile_id, "
-               "vibix_season, players_off, color) "
+               "vibix_season, players_off, rows_per_line, color) "
                "VALUES (?, COALESCE(?, (SELECT MAX(position) + 1 FROM series_sources WHERE series_id=?), 0), "
-               f"?, ?, ?, ?, ?, {_FREE_COLOR})")
+               f"?, ?, ?, ?, ?, ?, {_FREE_COLOR})")
 
 
 def _source(row: dict) -> dict:
@@ -59,7 +59,8 @@ def _stored(values: dict) -> dict:
 def _add_source_args(series_id: int, values: dict) -> tuple:
     stored = _stored(values)
     return (series_id, stored.get("position"), series_id, stored["url"], stored["source_type"],
-            stored["parser_profile_id"], stored["vibix_season"], stored["players_off"], series_id, series_id)
+            stored["parser_profile_id"], stored["vibix_season"], stored["players_off"], stored["rows_per_line"],
+            series_id, series_id)
 
 
 def _refusal(exc: sqlite3.IntegrityError, values: dict) -> Exception:

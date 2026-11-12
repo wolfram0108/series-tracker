@@ -50,6 +50,9 @@ class ReadContext:
     # The rows of the last complete table of the page: what a player said of a link that names its video for good (the
     # frame of a playlist) is taken from here instead of being asked again.
     last_rows: tuple[TableRow, ...] = ()
+    # How many rows of each line of an application card to read (core/row_limit.py: `all`, `N` the first N, `-N` the last
+    # N); a site that reads no lines ignores it. The core keeps the rows of the earlier read that this one did not take.
+    rows: str = "all"
     # The players the owner switched off for every source (their names in the order of sources: `kodik`, `line:CO4K`):
     # a site asks none of them and lists no new row of them; the core keeps their rows of the last read as they were.
     off: frozenset[str] = frozenset()

@@ -43,7 +43,7 @@ describe("useSourceDrafts", () => {
     expect(drafts.items.value[0]).toMatchObject({ sourceType: "web_video", url: PAGE, profileId: null })
     expect(drafts.items.value[0].view.state).toBe("reading")
     expect(drafts.bodies.value).toEqual([{
-      url: PAGE, source_type: "web_video", parser_profile_id: null, vibix_season: null, players_off: [],
+      url: PAGE, source_type: "web_video", parser_profile_id: null, vibix_season: null, players_off: [], rows_per_line: "all",
     }])
   })
 
@@ -203,7 +203,7 @@ describe("useSourceDrafts", () => {
     await drafts.add(PAGE)
     const key = drafts.items.value[0].id
     await drafts.reread(key)
-    expect(readPageNow).toHaveBeenCalledWith(PAGE)
+    expect(readPageNow).toHaveBeenCalledWith(PAGE, "all")
     expect(drafts.items.value[0].view.state).toBe("reading")
     preview.mockResolvedValueOnce(page({ state: "ready", summary }))
     useSourceTablesStore().applyReady({ url: PAGE, read_at: "2026-11-01T10:00:00Z" })

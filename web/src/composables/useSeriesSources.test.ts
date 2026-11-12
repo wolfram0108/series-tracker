@@ -16,7 +16,7 @@ vi.mock("./outputCalls")
 const PAGE = "https://1.ruchime.org/release/test"
 const source = (over: Partial<SeriesSource> = {}): SeriesSource => ({
   id: 7, series_id: 1, position: 0, url: PAGE, source_type: "web_video", parser_profile_id: null,
-  vibix_season: null, players_off: [], color: 0, ...over,
+  vibix_season: null, players_off: [], rows_per_line: "all", color: 0, ...over,
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile", title: "",
@@ -104,7 +104,7 @@ describe("useSeriesSources", () => {
     const sources = setup("video", [channel])
     await flushPromises()
     await sources.reread(7)
-    expect(calls.readPageNow).toHaveBeenCalledWith("https://vk.com/video/@c|Тайтл")
+    expect(calls.readPageNow).toHaveBeenCalledWith("https://vk.com/video/@c|Тайтл", "all")
     vi.mocked(calls.readPageNow).mockResolvedValueOnce({ ok: false, text: "Нет связи с сервером" })
     await sources.reread(7)
     expect(sources.error.value).toBe("Нет связи с сервером")

@@ -56,8 +56,8 @@ export function previewAddress(body: {
 }
 
 /** Reads the page now, whatever the age of its table; how the read goes and where it ends come as events. */
-export function readPageNow(url: string): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/sources/read", { body: { url } }))
+export function readPageNow(url: string, rows = "all"): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/sources/read", { body: { url, rows } }))
 }
 
 /** Stops the read of the page going now: it ends failed, the last table serves; the end comes as an event. */

@@ -144,6 +144,7 @@ class SourceDraft(RequestModel):
     parser_profile_id: int | None = None
     vibix_season: int | None = None
     players_off: list[str] = Field(default_factory=list)
+    rows_per_line: str | None = None
 
 
 class SourceAdd(SourceDraft):
@@ -157,12 +158,13 @@ class SourceChange(RequestModel):
     parser_profile_id: int | None = None
     vibix_season: int | None = None
     players_off: list[str] | None = None
+    rows_per_line: str | None = None
     position: int | None = None
 
     @model_validator(mode="after")
     def _only_a_choice_may_be_cleared(self):
         # The profile and the Vibix season are choices that can be taken back; the rest of the fields always has a value.
-        for name in ("url", "players_off", "position"):
+        for name in ("url", "players_off", "rows_per_line", "position"):
             if name in self.model_fields_set and getattr(self, name) is None:
                 raise ValueError(f"{name} cannot be cleared")
         return self
@@ -287,6 +289,8 @@ class TableReadRequest(RequestModel):
     """Read the page of an address now."""
 
     url: str
+    # How many rows of each line of an application card to read: `all`, `N` (the first N) or `-N` (the last N); none is all.
+    rows: str | None = None
 
 
 class RulesTestRequest(RequestModel):

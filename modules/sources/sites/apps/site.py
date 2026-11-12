@@ -46,6 +46,7 @@ from ...apps import AppError
 from ...players.app_lines import AppLines, AppPlayer
 from ...players.asking import look_again
 from .. import PHASE_PLAYERS, PHASE_RECHECK, PHASE_RELEASE, ReadContext, SiteError, TableDraft
+from core.row_limit import limit_of, limited
 from ..recent import last_of_each
 
 logger = logging.getLogger("sources")
@@ -61,6 +62,8 @@ class AppSite:
     """The cards of one application, read through its API."""
 
     source_type = "web_video"
+    # The first read of a card waits for the user (the button to read it); the core of the reads asks no more of it.
+    first_read_by_user = True
 
     def __init__(self, player: AppPlayer, lines: AppLines) -> None:
         self.player, self.lines = player, lines
@@ -108,8 +111,9 @@ class AppSite:
                 continue
             fields = {"app": self.name, "line": each.code, "line_name": each.name,
                       "parsers": each.parsers, "stream": "playlist" if each.listed else "parser"}
-            listed = last_of_each([(item.place, item.label, item.token) for item in each.items],
-                                  lambda _item: each.code, ctx.recent)
+            items = [(item.place, item.label, item.token) for item in each.items]
+            limit = limit_of(ctx.rows)
+            listed = limited(items, limit) if limit is not None else last_of_each(items, lambda _item: each.code, ctx.recent)
             if listed:
                 lines.append((self.lines.line(each.code), fields, listed))
         if passed:

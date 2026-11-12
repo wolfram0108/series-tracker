@@ -57,6 +57,17 @@ watch(() => props.item.url, (url) => {
   query.value = parts.query
 }, { immediate: true })
 
+// The rows of each line of an application card a read takes: `all`, `10` (the first ten), `-10` (the last ten). It is
+// edited as text and sent when the field is left, and a value that is none of them is not sent.
+const rows = ref("")
+watch(() => props.item.rowsPerLine, (value) => { rows.value = value }, { immediate: true })
+const rowsValid = computed(() => /^(all|-?[1-9][0-9]*)?$/i.test(rows.value.trim()))
+
+function commitRows(): void {
+  const value = rows.value.trim().toLowerCase() || "all"
+  if (rowsValid.value && value !== props.item.rowsPerLine) emit("change", { rowsPerLine: value })
+}
+
 // A channel is read whole and only the query keeps its videos: an address without one is not sent.
 function commitChannel(): void {
   if (!vkQuery(query.value)) return
@@ -127,7 +138,15 @@ async function copyAddress(): Promise<void> {
           </button>
         </div>
       </StGroup>
-      <StGroup v-else>
+      <div v-if="appCard" class="stack source-rows" @focusout="commitRows" @keyup.enter="commitRows">
+        <StGroup>
+          <StIcon icon="pi pi-list" />
+          <StInput v-model="rows" :label="t('sources.rows.label')" />
+        </StGroup>
+        <small v-if="rowsValid" class="muted">{{ t("sources.rows.hint") }}</small>
+        <small v-else class="source-reason">{{ t("sources.rows.invalid") }}</small>
+      </div>
+      <StGroup v-if="!isChannel && !appCard">
         <StIcon icon="pi pi-link" />
         <div class="constructor-item item-floating-label"><input class="item-input" :value="item.url" readonly /></div>
         <div class="constructor-item url-actions">

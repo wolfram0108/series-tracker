@@ -640,7 +640,7 @@ class CompositionModule(BaseModule):
         return table, reply.reason if reply.state == TableState.FAILED else None, reply.url
 
     async def _table_reply(self, source: SeriesSource, begin: bool) -> TableGetReply:
-        request = TableGetRequest(url=source.url, refresh=begin)
+        request = TableGetRequest(url=source.url, refresh=begin, rows=source.rows_per_line)
         return await self._ask("sources.table.get", request.model_dump(mode="json"), model=TableGetReply)
 
     async def _players_off(self, snapshot: RunSnapshot | None = None) -> frozenset[str]:

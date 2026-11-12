@@ -102,7 +102,7 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (typed.kind === "other") return refused(t("sources.add.notSite"))
     const { sourceType, url } = typed
     const done = await act(() => createSource(seriesId, draftBody({
-      url, sourceType, profileId: null, vibixSeason: null, playersOff: [],
+      url, sourceType, profileId: null, vibixSeason: null, playersOff: [], rowsPerLine: "all",
     })))
     if (done) await load()
     return done
@@ -118,6 +118,7 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     ...(patch.profileId !== undefined && { parser_profile_id: patch.profileId }),
     ...(patch.vibixSeason !== undefined && { vibix_season: patch.vibixSeason }),
     ...(patch.playersOff !== undefined && { players_off: patch.playersOff }),
+    ...(patch.rowsPerLine !== undefined && { rows_per_line: patch.rowsPerLine }),
   })
 
   async function change(id: string | number, patch: DraftPatch): Promise<void> {
@@ -139,7 +140,7 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     const source = sources.value.find((each) => each.id === Number(id))
     if (!source) return
     error.value = ""
-    const answer = await readPageNow(source.url)
+    const answer = await readPageNow(source.url, source.rows_per_line ?? "all")
     if (!answer.ok) error.value = answer.text
   }
 

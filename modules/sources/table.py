@@ -26,6 +26,7 @@ from core.contracts.release_table import TABLE_TRACE
 from core.deadlines import TABLE_READ_S
 from core.logging import get_logger
 from core.reasons import EXTERNAL, describe, parse, reason
+from core.row_limit import limit_of
 
 from .players.registry import PlayerRegistry
 from .repository import SourcesRepository, Stored
@@ -95,6 +96,21 @@ async def _nothing():
     yield
 
 
+def _merged(old: list[TableRow], new: list[TableRow], off: frozenset[str], limited_read: bool) -> list[TableRow]:
+    """The rows of a read that did not ask everything: the earlier rows in their places, each replaced by its new row when
+    this read took it, and kept as it was when it did not (a player switched off, a line read in part); the new rows that
+    were not there come after them in the order the site listed them. The row of a player asked and no longer listed is
+    gone, as in any read."""
+    taken = {row.key: row for row in new}
+    merged = []
+    for row in old:
+        if row.key in taken:
+            merged.append(taken.pop(row.key))
+        elif limited_read or row.player in off:
+            merged.append(row)
+    return merged + [row for row in new if row.key in taken]
+
+
 class TableReader:
     """Answers for the table of a page, and reads the page when its table is missing or past its term."""
 
@@ -130,8 +146,11 @@ class TableReader:
                 return self._as_it_is(key, stored)
             if table is not None and self._fresh(table):
                 return TableGetReply(url=key, state=TableState.READY, table=table)
+            if table is None and getattr(site, "first_read_by_user", False):
+                # A page nobody has read waits for the user's read: nothing but the user's command begins it.
+                return self._as_it_is(key, stored)
             if key not in self._reading:
-                self._launch(site, key)
+                self._launch(site, key, rows=request.rows)
             return TableGetReply(url=key, state=TableState.READING, table=table)
 
     def _as_it_is(self, key: str, stored: Stored) -> TableGetReply:
@@ -156,7 +175,7 @@ class TableReader:
             return
         site, key = found
         if key not in self._reading:
-            self._launch(site, key, fresh=True)
+            self._launch(site, key, fresh=True, rows=request.rows)
 
     async def cancel(self, url: str) -> bool:
         """Stop the read of a page the user does not want any more: the read ends failed (`read_cancelled`), so it is
@@ -184,6 +203,11 @@ class TableReader:
                 found = self._resolve(page["url"])
                 if found is None:
                     await self._conclude_unreadable(page["url"], page["site"])
+                elif getattr(found[0], "first_read_by_user", False):
+                    # A read of a page that waits for the user is not begun again by a start: its rows are the user's to ask.
+                    problem = reason("read_cancelled")
+                    await self._repo.mark_failed(found[1], found[0].name, problem)
+                    self._publish(FAILED_TOPIC, TableFailed(url=found[1], reason=problem).model_dump(mode="json"))
                 elif found[1] not in self._reading:
                     self._launch(*found)
 
@@ -211,14 +235,14 @@ class TableReader:
     def _stamp(self) -> str:
         return self._clock().astimezone(timezone.utc).isoformat()
 
-    def _launch(self, site: Site, key: str, *, fresh: bool = False) -> None:
+    def _launch(self, site: Site, key: str, *, fresh: bool = False, rows: str = "all") -> None:
         """Claim the page for one read; no await between the check of the caller and this, so the claim is exclusive."""
-        task = asyncio.create_task(self._run(site, key, fresh), name=f"sources.table:{key}")
+        task = asyncio.create_task(self._run(site, key, fresh, rows), name=f"sources.table:{key}")
         self._reading[key] = task
         # A net for a task that ends without concluding (a stop): the page must not stay claimed.
         task.add_done_callback(lambda done: self._reading.pop(key, None) if self._reading.get(key) is done else None)
 
-    async def _run(self, site: Site, key: str, fresh: bool) -> None:
+    async def _run(self, site: Site, key: str, fresh: bool, rows: str = "all") -> None:
         table: ReleaseTable | None = None
         problem: str | None = None
         began = time.monotonic()
@@ -226,7 +250,7 @@ class TableReader:
         try:
             await self._repo.mark_reading(key, site.name, self._stamp())
             async with self._holding():
-                table = await self._read(site, key, fresh)
+                table = await self._read(site, key, fresh, rows)
         except asyncio.CancelledError:
             if key not in self._cancelled:
                 raise  # a stop of the process: the page stays `reading` and is read again at the start
@@ -250,7 +274,7 @@ class TableReader:
             self._log.warning("table of %s not read: %s", key, describe(problem))
             self._publish(FAILED_TOPIC, TableFailed(url=key, reason=problem or "").model_dump(mode="json"))
 
-    async def _read(self, site: Site, key: str, fresh: bool) -> ReleaseTable:
+    async def _read(self, site: Site, key: str, fresh: bool, spec: str = "all") -> ReleaseTable:
         pace = Pace()
 
         def progress(phase: str, current: int, total: int) -> None:
@@ -260,7 +284,7 @@ class TableReader:
         stored = (await self._repo.stored(key)).table
         off = self._off()
         context = ReadContext(http=self._http(), progress=progress, recent=self._recent, fresh=fresh,
-                              last_rows=tuple(stored.rows) if stored is not None else (), off=off)
+                              last_rows=tuple(stored.rows) if stored is not None else (), off=off, rows=spec)
         limit = asyncio.timeout(self._safeguard_s)
         try:
             async with limit:
@@ -276,11 +300,11 @@ class TableReader:
             seen.add(row.key)
         # Which video each row is, read by its player from its link: the one place a table learns it, whatever site read it.
         rows = [row.model_copy(update={"video": self._players.video_of(row.player, row.link)}) for row in draft.rows]
-        # A player switched off was not asked: its rows of the last read stay as they were (a file downloaded from one of
-        # them must not look withdrawn by a source nobody asked), and it adds no new one.
-        if stored is not None and off:
-            have = {row.key for row in rows}
-            rows += [row for row in stored.rows if row.player in off and row.key not in have]
+        # What this read did not ask stays as the last read left it: a player switched off was not asked (a file downloaded
+        # from one of its rows must not look withdrawn by a source nobody asked), and a read of the first or the last
+        # rows of each line did not take the others. A read of the whole page replaces the table.
+        if stored is not None and (off or limit_of(context.rows) is not None):
+            rows = _merged(stored.rows, rows, off, limit_of(context.rows) is not None)
         if draft.unread:
             rows = rows + await self._kept(key, rows, draft.unread)
         return ReleaseTable(url=key, site=site.name, names=draft.names, title=draft.title, site_voice=draft.site_voice, channel=draft.channel,

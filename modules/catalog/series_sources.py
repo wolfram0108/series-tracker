@@ -5,6 +5,7 @@ No bus and no database here, so that the repository and the module apply the sam
 from __future__ import annotations
 
 from core.contracts import SeriesKind, SeriesSource, SourceType
+from core.row_limit import normalized
 from core.reasons import reason
 
 # The columns that left `series`: the first four live in a source now, the last one went with its feature.
@@ -12,7 +13,7 @@ from core.reasons import reason
 REMOVED_FIELDS = ("url", "source_type", "parser_profile_id", "vk_search_mode", "vk_quality_priority")
 
 # What a caller may write to a source; `id` and `series_id` belong to the table.
-SOURCE_FIELDS = ("position", "url", "source_type", "parser_profile_id", "vibix_season", "players_off")
+SOURCE_FIELDS = ("position", "url", "source_type", "parser_profile_id", "vibix_season", "players_off", "rows_per_line")
 
 
 def kind_of_type(source_type: str) -> str:
@@ -55,6 +56,10 @@ def checked_fields(fields: dict, stored: dict | None = None) -> dict:
         raise ValueError(reason("source_url_empty"))
     if model.vibix_season is not None and model.vibix_season < 1:
         raise ValueError(reason("vibix_season_from_one"))
+    rows = normalized(model.rows_per_line)
+    if rows is None:
+        raise ValueError(reason("rows_per_line_invalid", value=str(model.rows_per_line)[:40]))
+    model = model.model_copy(update={"rows_per_line": rows})
     values = model.model_dump(mode="json")
     values["players_off"] = list(dict.fromkeys(values["players_off"]))
     names = tuple(fields) if stored else tuple(name for name in SOURCE_FIELDS

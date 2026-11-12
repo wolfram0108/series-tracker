@@ -3788,6 +3788,11 @@ export interface components {
             /** Players Off */
             players_off?: string[];
             /**
+             * Rows Per Line
+             * @default all
+             */
+            rows_per_line: string;
+            /**
              * Color
              * @default 0
              */
@@ -3865,6 +3870,8 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[];
+            /** Rows Per Line */
+            rows_per_line?: string | null;
             /** Position */
             position?: number | null;
         };
@@ -3881,6 +3888,8 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[] | null;
+            /** Rows Per Line */
+            rows_per_line?: string | null;
             /** Position */
             position?: number | null;
         };
@@ -3898,6 +3907,8 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[];
+            /** Rows Per Line */
+            rows_per_line?: string | null;
         };
         /**
          * SourceStatus
@@ -3991,6 +4002,8 @@ export interface components {
         TableReadRequest: {
             /** Url */
             url: string;
+            /** Rows */
+            rows?: string | null;
         };
         /**
          * TableState

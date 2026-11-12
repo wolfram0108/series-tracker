@@ -233,6 +233,28 @@ async def test_a_line_switched_off_in_the_order_of_sources_is_not_read_at_all_an
         assert every.rows == []
 
 
+async def test_a_card_is_read_by_the_first_or_the_last_rows_of_each_of_its_lines():
+    model = card_world()
+    model.parses[(9, "CO4K_tok1")] = f"{CDN}d/1.m3u8"
+    model.parses[(9, "CO4K_pv")] = f"{CDN}c/pv.m3u8"
+    http, _asked = world(model, {f"{CDN}{name}": PLAYLIST for name in ("a/index.m3u8", "b/index.m3u8", "c/pv.m3u8", "d/1.m3u8")})
+
+    async def measure(_http, _head, _referer, _headers=None):
+        return 720
+
+    async with http:
+        player = AppPlayer(App99Client(profile(), lambda: http), measure, registry=admitting("ffm3u8", "CO4K"))
+        site = AppSite(player, AppLines([player]))
+        keys = {}
+        for rows in ("1", "-1", "all", ""):
+            draft = await site.read("app://banri/219017", ReadContext(http, lambda *_: None, rows=rows))
+            keys[rows] = [row.key for row in draft.rows]
+    # The rows of each line apart, in the order the application lists its episodes: the first, the last, all of them.
+    assert keys["1"] == ["banri:ffm3u8:1", "banri:CO4K:1"]
+    assert keys["-1"] == ["banri:ffm3u8:2", "banri:CO4K:3"]
+    assert keys["all"] == keys[""] == ["banri:ffm3u8:1", "banri:ffm3u8:2", "banri:CO4K:1", "banri:CO4K:2", "banri:CO4K:3"]
+
+
 async def test_a_card_is_measured_at_the_accepted_pace_of_the_applications():
     """The rows of a card are asked side by side, at most APP_IN_FLIGHT at once and one start every APP_INTERVAL_S: a
     cold catalogue does not turn into a burst at the resolver. The pace runs on a clock of the test, not on real time."""

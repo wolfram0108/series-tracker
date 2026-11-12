@@ -16,6 +16,7 @@ interface Draft {
   profileId: number | null
   vibixSeason: number | null
   playersOff: string[]
+  rowsPerLine: string
   /** The address the core names the page with in its events; known after the first preview. */
   canonical: string
   summary: SourceSummary | null
@@ -28,7 +29,7 @@ interface Draft {
   handled: PageStatus | null
 }
 
-export type DraftPatch = Partial<Pick<SourceItem, "url" | "profileId" | "vibixSeason" | "playersOff">>
+export type DraftPatch = Partial<Pick<SourceItem, "url" | "profileId" | "vibixSeason" | "playersOff" | "rowsPerLine">>
 /** `kind`: the address is no site's, so it is not a video source (the window goes on as with a torrent). */
 export type AddOutcome = { kind: "added" } | { kind: "other" } | { kind: "refused"; text: string }
 
@@ -52,6 +53,7 @@ export function useSourceDrafts() {
     profileId: draft.profileId,
     vibixSeason: draft.vibixSeason,
     playersOff: draft.playersOff,
+    rowsPerLine: draft.rowsPerLine,
     color: null,
     view: viewOf({
       summary: draft.summary, playersOff: draft.playersOff, rows: draft.rows, live: tables.forUrl(draft.canonical),
@@ -117,7 +119,7 @@ export function useSourceDrafts() {
       }
       const draft: Draft = {
         key: `draft-${++counter}`, url, sourceType, profileId: null, vibixSeason: null,
-        playersOff: [], canonical: "", summary: null, rows: [], names: [], asked: { state: "reading" }, handled: null,
+        playersOff: [], rowsPerLine: "all", canonical: "", summary: null, rows: [], names: [], asked: { state: "reading" }, handled: null,
       }
       drafts.value.push(draft)
       await ask(drafts.value[drafts.value.length - 1], true)
@@ -160,7 +162,7 @@ export function useSourceDrafts() {
     error.value = ""
     draft.asked = { state: "reading" }
     draft.handled = tables.forUrl(draft.canonical)
-    const answer = await readPageNow(draft.url)
+    const answer = await readPageNow(draft.url, draft.rowsPerLine)
     if (!answer.ok) {
       error.value = answer.text
       draft.asked = { state: "failed", reason: null }

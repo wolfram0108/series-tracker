@@ -91,7 +91,7 @@ async def test_a_series_is_given_with_its_kind_and_its_sources(system):
     assert [s["id"] for s in two["sources"]] == list(video.source_ids)
     assert two["sources"][0] == {"id": video.source_ids[0], "series_id": video.series_id, "position": 0,
                                  "url": RUCHIME, "source_type": "web_video", "parser_profile_id": 2,
-                                 "vibix_season": 2, "players_off": ["vk"], "color": 0}
+                                 "vibix_season": 2, "players_off": ["vk"], "rows_per_line": "all", "color": 0}
     assert two["sources"][1]["url"] == VK
     for each in (*one["sources"], *two["sources"]):
         assert list(each) == list(SeriesSource.model_fields)
@@ -164,6 +164,8 @@ async def test_a_field_of_the_series_is_still_updated(system):
     ({"url": RUCHIME, "source_type": "ftp"}, "source_type"),
     ({"url": "  ", "source_type": "web_video"}, "url"),
     ({"url": RUCHIME, "source_type": "web_video", "vibix_season": 0}, "vibix_season"),
+    ({"url": RUCHIME, "source_type": "web_video", "rows_per_line": "десять"}, "rows_per_line_invalid"),
+    ({"url": RUCHIME, "source_type": "web_video", "rows_per_line": "0"}, "rows_per_line_invalid"),
     ({"url": RUCHIME, "source_type": "web_video", "series_id": 5}, "series_id"),
     ({"url": RUCHIME, "source_type": "web_video", "player": "vk"}, "player"),
 ])
@@ -318,7 +320,7 @@ async def test_a_source_is_added_at_the_end_and_announced(system):
                                              "changed": []})]
     assert added == {"id": reply["id"], "series_id": made.series_id, "position": 1, "url": RUCHIME,
                      "source_type": "web_video", "parser_profile_id": 2,
-                     "vibix_season": None, "players_off": ["vk"], "color": 1}
+                     "vibix_season": None, "players_off": ["vk"], "rows_per_line": "all", "color": 1}
 
 
 @pytest.mark.asyncio
@@ -356,6 +358,21 @@ async def test_a_source_of_a_missing_series_or_a_missing_profile_is_refused(syst
 
 
 # --- changing a source ----------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_source_keeps_the_rows_per_line_it_was_given_as_all_n_or_minus_n_and_refuses_another_value(system):
+    _, probe = system
+    made = await create_series(probe, sources=[source(url="app://banri/1", source_type="web_video")])
+    assert (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[0]["rows_per_line"] == "all"
+    for given, stored in (("10", "10"), ("-10", "-10"), (" ALL ", "all"), ("", "all"), (None, "all")):
+        reply = await probe.request("catalog.sources.update", {"source_id": made.source_id,
+                                                               "fields": {"rows_per_line": given}}, timeout=5)
+        assert reply["applied"] in ({"rows_per_line": stored}, {})
+        assert (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[0]["rows_per_line"] == stored
+    with pytest.raises(BusRequestError, match="rows_per_line_invalid"):
+        await probe.request("catalog.sources.update", {"source_id": made.source_id,
+                                                       "fields": {"rows_per_line": "1.5"}}, timeout=5)
+
 
 @pytest.mark.asyncio
 async def test_update_applies_what_changed_and_announces_it_once(system):

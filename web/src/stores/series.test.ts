@@ -77,7 +77,7 @@ describe("seriesStore merge-логика", () => {
 describe("the sources of a series in the store", () => {
   beforeEach(() => setActivePinia(createPinia()))
   const source = (id: number, position: number) =>
-    ({ id, series_id: 1, position, url: `https://a/${id}`, source_type: "web_video" as const, color: id, parser_profile_id: null, vibix_season: null })
+    ({ id, series_id: 1, position, url: `https://a/${id}`, source_type: "web_video" as const, color: id, parser_profile_id: null, vibix_season: null, rows_per_line: "all" })
 
   it("takes a source added or changed from the packet, in the order of the series, and drops one that went", () => {
     const store = useSeriesStore()

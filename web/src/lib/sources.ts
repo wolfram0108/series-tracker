@@ -67,6 +67,8 @@ export interface SourceItem {
   profileId: number | null
   vibixSeason: number | null
   playersOff: string[]
+  /** How many rows of each line of an application card a read takes: `all`, `N` (the first N) or `-N` (the last N). */
+  rowsPerLine: string
   /** The colour the catalog gave the source in its series (0–15 of the palette); none for a draft not saved yet. */
   color: number | null
   view: SourceView
@@ -378,13 +380,14 @@ export function siteOf(address: string): string {
 }
 
 /** The body of a new source for `POST /api/series` and `POST /api/series/{id}/sources`. */
-export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profileId" | "vibixSeason" | "playersOff">): SourceDraft {
+export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profileId" | "vibixSeason" | "playersOff" | "rowsPerLine">): SourceDraft {
   return {
     url: item.url,
     source_type: item.sourceType,
     parser_profile_id: item.profileId,
     vibix_season: item.vibixSeason,
     players_off: item.playersOff,
+    rows_per_line: item.rowsPerLine,
   }
 }
 
@@ -400,6 +403,7 @@ export function itemOfSource(
     profileId: source.parser_profile_id ?? null,
     vibixSeason: source.vibix_season ?? null,
     playersOff,
+    rowsPerLine: source.rows_per_line ?? "all",
     color: source.color ?? null,
     view: viewOf({
       summary, playersOff, live,

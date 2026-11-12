@@ -66,3 +66,16 @@ async def test_a_page_that_is_ready_at_once_has_no_progress_to_tell():
     signals = TableSignals(announce=told.append)
     [synced] = await sync_tables([source()], asking(TableState.READY), signals)
     assert synced.state == "ready" and told == []
+
+
+async def test_a_page_nobody_has_read_waits_for_the_user_and_the_sync_goes_on_without_it_and_asks_with_the_rows_of_the_source():
+    asked = []
+
+    async def ask(topic, payload):
+        asked.append(payload)
+        return {"url": PAGE, "state": TableState.ABSENT.value}
+
+    card = SeriesSource(id=1, series_id=7, url=PAGE, source_type="web_video", parser_profile_id=1, rows_per_line="-10")
+    [synced] = await sync_tables([card], ask, TableSignals(announce=lambda _each: None), safeguard_s=1)
+    assert synced.state == "skipped" and '"code":"table_not_read"' in synced.reason
+    assert asked == [{"url": PAGE, "refresh": True, "rows": "-10"}]

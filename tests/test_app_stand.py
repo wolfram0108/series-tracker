@@ -425,6 +425,7 @@ async def test_a_card_whose_parser_gives_a_video_at_an_address_without_an_extens
     series = await stand.call("POST", "/api/series", {
         "name": "Сериал", "name_en": "Serial", "site": "banri", "save_path": stand.library,
         "sources": [{"url": "app://banri/219017", "source_type": "web_video", "parser_profile_id": made["id"]}]})
+    await stand.read_card("app://banri/219017")  # the first read of a card of an application is the user's
     await stand.sync(series["series_id"])
     view = await stand.check(series["series_id"])
     (asset,) = view["assets"]
