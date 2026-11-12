@@ -53,3 +53,6 @@ data/
 
 # Backups of the working data taken before a migration or a risky change
 backups/
+
+# Local agent settings and keys
+/.claude/
