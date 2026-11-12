@@ -169,6 +169,10 @@ class AppPlayer:
         # (line, token) -> (address a parser gave, when): what was parsed serves the asks of the episode within the term.
         self._parsed: dict[tuple[str, str], tuple[AppStream, float]] = {}
         self._quotas: dict[str, tuple[AppError, float]] = {}
+        # The lines another application parses when this one's own parser says no: line -> (its client, its line); and
+        # until when the asks of such a line go straight to it, its own parser having said no a moment ago.
+        self.through: dict[str, tuple[AppClient, str]] = {}
+        self._detours: dict[str, float] = {}
         # The agent the application's own player plays its streams with (`player_agent` of the profile): some CDNs of
         # the applications refuse any other. A header the application gave with the stream stays as it is.
         self.agent = str(client.profile.settings.get("player_agent") or "")
@@ -227,26 +231,47 @@ class AppPlayer:
         kept = self._kept(line, item)
         if kept is not None:
             return kept
+        got = await self._parsed_now(line, item, card)
+        self._parsed[(line, item)] = (got, self._clock())
+        return got
+
+    async def _parsed_now(self, line: str, item: str, card: str) -> AppStream:
+        route = self.through.get(line)
+        if route is not None and self._clock() < self._detours.get(line, 0.0):
+            return await self._detour(route, line, item)
         held = self._quotas.get(line)
         if held is not None and self._clock() < held[1]:
             raise held[0]
         self._quotas.pop(line, None)
         try:
-            got = await self.client.resolve(line, item, card)
+            return await self.client.resolve(line, item, card)
         except AppError as exc:
+            if route is not None and not exc.transient:
+                # The own parser said no: the line goes to the other application's parser for the term, and the own one
+                # is asked again after it (one ask of the refusing parser a minute, not one for each episode).
+                logger.info("приложение %s, линия %s: собственный разбор отказал (%s), разбирает %s", self.name, line,
+                            exc.reason[:160], route[0].profile.name)
+                self._detours[line] = self._clock() + QUOTA_RECHECK_S
+                return await self._detour(route, line, item)
             if exc.daily_quota:
                 self._quotas[line] = (exc, self._clock() + QUOTA_RECHECK_S)
             raise
-        self._parsed[(line, item)] = (got, self._clock())
-        return got
+
+    async def _detour(self, route: tuple[AppClient, str], line: str, item: str) -> AppStream:
+        client, code = route
+        return await client.resolve(code, item, "")
 
     async def fetch(self, ref: PlayerRef, http: httpx.AsyncClient, page_url: str, *, measure: bool = True) -> Answer:
         found = self.parts(ref.url)
         if found is None:
             return Answer(200, reading=Reading(Kind.NOT_PLAYER, 200, message="not a link of the application"))
         line, item = found
-        # An address kept from an earlier parse that is no longer served is parsed anew, once, within the same ask.
-        for _ in range(2 if self._kept(line, item) is not None else 1):
+        # An address kept from an earlier parse that is no longer served is parsed anew, once, within the same ask; so is
+        # the address of a line another application parses, when the host served no stream at it (a notice in place of the
+        # episode is an answer of success to the application's own parser).
+        routed = line in self.through
+        for _ in range(2 if routed or self._kept(line, item) is not None else 1):
+            detoured = routed and self._clock() < self._detours.get(line, 0.0)
             try:
                 got = await self.address(line, item, urlsplit(ref.url).path.strip("/"))
             except AppError as exc:
@@ -259,6 +284,10 @@ class AppPlayer:
                 return answer
             # An address that gave no stream serves no later ask: the next one has the application parse the episode anew.
             self._parsed.pop((line, item), None)
+            if routed and not detoured and self.read(answer).kind is not Kind.NO_ANSWER:
+                logger.info("приложение %s, линия %s: адрес собственного разбора не дал потока (%s), разбирает %s", self.name,
+                            line, self.read(answer).kind.value, self.through[line][0].profile.name)
+                self._detours[line] = self._clock() + QUOTA_RECHECK_S
         return answer
 
     async def _served(self, http: httpx.AsyncClient, address: str, headers: dict[str, str], measure: bool) -> Answer:

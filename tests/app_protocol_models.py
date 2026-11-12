@@ -1,5 +1,5 @@
 """Models of the video applications of every protocol the service reads besides App99 and AppDrama, for the stand of the
-whole application (tests/app_stand.py): AppGet (茉莉), Gulu (咕噜), YunDuo (布布) and AppMN (米诺). Each answers by its
+whole application (tests/app_stand.py): AppGet (茉莉), Gulu (咕噜), YunDuo (布布), AppMN (米诺) and AppV7 (小猪). Each answers by its
 protocol as its client asks it (modules/sources/apps/<protocol>.py) — the keys, the sealing, the session, the ticket —
 with the cards a scenario gives it: a card is a name and one line of episodes, each episode a token whose stream is an
 address on the host of the stand. Nothing here is a snapshot of a real answer."""
@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from modules.sources.apps import AppProfile
 from modules.sources.apps.appdrama import field, fields
 from modules.sources.apps.appget import encrypt
+from modules.sources.apps.appv7 import api_key
 from modules.sources.apps.gulu import cbc, first, message, opened, sealed, session_key
 
 
@@ -205,4 +206,42 @@ class AppMnModel(_Model):
             return httpx.Response(200, json={"code": 1, "data": {"ticket": ticket}})
         if path == "/api/v1/vod/parse":
             return httpx.Response(200, json={"code": 200, "url": self.streams[dict(parse_qsl(request.url.query.decode()))["url"]]})
+        return httpx.Response(404)
+
+
+# --- AppV7 (小猪): a request sealed by AES-CBC under the key of the build, a card whose line names its parser ---------------
+
+class AppV7Model(_Model):
+    API, PARSER = "https://appv7.model/v7/logs", "https://appv7-parser.model/p?url="
+    BUILD = {"package": "pk", "build_time": "1700000000", "salt": "salt"}
+
+    def profile(self) -> AppProfile:
+        return AppProfile("xiaozhu", "小猪", "appv7", {
+            "label": "小猪", "protocol": "appv7", "api": self.API, "version": "1.0", "version_number": "1",
+            "platform_version": "13", "card_identity": json.dumps({"app": "model"}), **self.BUILD})
+
+    def owns(self, url: str) -> bool:
+        return url.startswith((self.API, self.PARSER))
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.asked.append(str(request.url))
+        if request.method == "GET":
+            # The parser is asked with the token the secret method sealed.
+            return httpx.Response(200, json={"code": 200, "url": self.streams[request.url.params["url"].removeprefix("sealed-")]})
+        wire = base64.b64decode(request.content)
+        body = json.loads(cbc(wire[16:], api_key(self.BUILD), wire[:16], decrypt=True))
+        method, data = body["method"], body["data"]
+        if method == "video_detail":
+            card = self.cards.get(data["id"])
+            if card is None:
+                return httpx.Response(200, json={"code": 0, "msg": "视频不存在", "data": None})
+            return httpx.Response(200, json={"code": 1, "data": {"vod_info": {
+                "vod_id": card.number, "vod_name": card.name, "vod_year": "2021", "vod_url_with_player": [{
+                    "code": card.line, "name": card.line, "parse_api": self.PARSER, "parse_secret": True,
+                    "url": "#".join(f"{label}${token}" for label, token in card.items)}]}}})
+        if method == "search":
+            return httpx.Response(200, json={"code": 1, "data": [
+                {"vod_id": card.number, "vod_name": card.name, "vod_year": "2021"} for card in self.cards.values()]})
+        if method == "secret_parse_api_url":
+            return httpx.Response(200, json={"code": 1, "data": "sealed-" + data["url"]})
         return httpx.Response(404)

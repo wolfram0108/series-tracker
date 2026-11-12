@@ -40,7 +40,7 @@ from core.reasons import reason
 from core.retry import Budget
 
 from ...players.contract import Kind, PlayerRef
-from ...policy import AdaptivePacer, Pacer, Verdict, settle
+from ...policy import AdaptivePacer, Verdict, settle
 from ...apps import SCHEME, card_address
 from ...apps import AppError
 from ...players.app_lines import AppLines, AppPlayer
@@ -50,14 +50,8 @@ from ..recent import last_of_each
 
 logger = logging.getLogger("sources")
 
-# The legacy pace of protocols outside the five applications covered by the bounded read policy below.
-ROWS_PER_SECOND = 25
-# A row is asked, read and measured in about three seconds: four seconds of rows at that pace in flight at most, so that a
-# host that slows down holds back the asks instead of piling them up.
-ROWS_IN_FLIGHT = ROWS_PER_SECOND * 4
-# Banri, Huayi, Juzi, AppMN and YunDuo resolve and measure each row remotely. Bound the whole operation across
+# Every application resolves and measures each row remotely, whatever its protocol. Bound the whole operation across
 # simultaneous cards and rechecks; a fast catalogue response is no evidence that its resolver or CDN tolerates a burst.
-PACED_PROTOCOLS = frozenset({"app99", "appdrama", "appmn", "yunduo"})
 APP_IN_FLIGHT = 8
 APP_INTERVAL_S = 0.25
 APP_BUDGET = Budget(limit_s=180.0)
@@ -73,10 +67,9 @@ class AppSite:
         self.client = player.client
         self.name, self.label = player.name, player.label
         self.domains = (player.name,)
-        paced = self.client.profile.protocol in PACED_PROTOCOLS
-        self.pacer = (AdaptivePacer(APP_INTERVAL_S, ceiling_s=2.0) if paced else Pacer(1 / ROWS_PER_SECOND))
-        self.budget = APP_BUDGET if paced else None
-        self.in_flight = asyncio.Semaphore(APP_IN_FLIGHT if paced else ROWS_IN_FLIGHT)
+        self.pacer = AdaptivePacer(APP_INTERVAL_S, ceiling_s=2.0)
+        self.budget = APP_BUDGET
+        self.in_flight = asyncio.Semaphore(APP_IN_FLIGHT)
 
     def configure(self, **_wiring) -> None:
         """The card is read through the application's API alone: the wiring of the module gives it nothing."""

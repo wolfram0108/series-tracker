@@ -35,7 +35,7 @@ from core import container as mkv
 from core.db import Database
 from app99_model import HOST as APP_HOST, App99Model, Card, Line, profile as app_profile
 from alloha_model import PROFILE as ALLOHA_PROFILE, AllohaModel
-from app_protocol_models import AppGetModel, AppMnModel, GuluModel, YunDuoModel
+from app_protocol_models import AppGetModel, AppMnModel, AppV7Model, GuluModel, YunDuoModel
 from appdrama_model import DramaModel, Video as DramaVideo
 from plan_disk import Codec, Daemon, Host, _run
 from plan_world import truth_of
@@ -174,8 +174,8 @@ HLS_KEY = bytes(range(16))
 
 # The application of each protocol on the stand, and the code of its one admitted line: a line is one player whichever
 # application lists it, so each has a code of its own here.
-APP_OF = {"appdrama": "huayi", "appget": "moli", "gulu": "gulu", "yunduo": "yunduo", "appmn": "appmn"}
-LINE_OF = {"huayi": "DRAMA", "moli": "MOLI", "gulu": "GULU", "yunduo": "YUNDUO", "appmn": "MINUO"}
+APP_OF = {"appdrama": "huayi", "appget": "moli", "gulu": "gulu", "yunduo": "yunduo", "appmn": "appmn", "appv7": "xiaozhu"}
+LINE_OF = {"huayi": "DRAMA", "moli": "MOLI", "gulu": "GULU", "yunduo": "YUNDUO", "appmn": "MINUO", "xiaozhu": "XIAOZHU"}
 
 
 class Site:
@@ -199,11 +199,12 @@ class Site:
             json.dump({"app": "banri", "admitted": {"BLU": {}}, "refused": {}}, registry)
         # The applications of every other protocol the service reads, each with one admitted line of its own code.
         self.drama = DramaModel()
-        self.others = {"appget": AppGetModel(), "gulu": GuluModel(), "yunduo": YunDuoModel(), "appmn": AppMnModel()}
+        self.others = {"appget": AppGetModel(), "gulu": GuluModel(), "yunduo": YunDuoModel(), "appmn": AppMnModel(),
+                       "appv7": AppV7Model()}
         # A title of yummyani.me and its player Alloha (tests/alloha_model.py), the CDN of which serves an HLS of the host.
         self.alloha = AllohaModel(voices={})
         self.yummy: dict[str, tuple[int, str, list[dict]]] = {}
-        for name in ("huayi", "moli", "gulu", "yunduo", "appmn"):
+        for name in ("huayi", "moli", "gulu", "yunduo", "appmn", "xiaozhu"):
             with open(os.path.join(self.app_lines, f"{name}.json"), "w", encoding="utf-8") as registry:
                 json.dump({"app": name, "admitted": {LINE_OF[name]: {}}, "refused": {}}, registry)
 

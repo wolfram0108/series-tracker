@@ -8,6 +8,9 @@ episode); any other line is refused, with the reason of the episode or the rows 
 address of a stream: the episodes, their frames, sound, length, size and the speed of their download.
 
     .venv/bin/python tools/analyzers/app_lines_registry.py <app>   →   modules/sources/apps/admitted/<app>.json
+
+The lines the owner tested and stated are not made here: they are in `admitted/confirmed.json`, which this tool never
+writes, and the registry of the service (apps/lines.py) takes them as admitted.
 """
 from __future__ import annotations
 

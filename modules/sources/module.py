@@ -116,8 +116,9 @@ from .apps.app99 import App99Client
 from .apps.appdrama import AppDramaClient
 from .apps.appget import AppGetClient
 from .apps.appmn import AppMnClient
+from .apps.appv7 import AppV7Client
 from .apps.gulu import GuluClient
-from .apps.lines import LineRegistry
+from .apps.lines import LineRegistry, routes_of
 from .apps.yunduo import YunDuoClient
 from .delivery import Delivery
 from .parsers import SourceParseError
@@ -130,7 +131,7 @@ from .players.registry import PlayerRegistry
 from .players.streams import resolve_stream
 from .sites import Site, SiteError, SiteRegistry
 from .sites.apps import AppSite
-from .sites.apps.site import ROWS_IN_FLIGHT
+from .sites.apps.site import APP_IN_FLIGHT
 from .sites.builtin import builtin_sites
 from .table import TableReader, utc_now
 
@@ -140,13 +141,13 @@ VK_API_BASE = "https://api.vk.com/method/"
 
 # The clients of the protocols of the video applications, by the `protocol` of a profile (modules/sources/apps).
 APP_PROTOCOLS = {"app99": App99Client, "appdrama": AppDramaClient, "appget": AppGetClient, "gulu": GuluClient,
-                 "yunduo": YunDuoClient, "appmn": AppMnClient}
+                 "yunduo": YunDuoClient, "appmn": AppMnClient, "appv7": AppV7Client}
 
 # The connections the client of the sources opens and keeps open between requests. A read of a card of an application
-# has up to ROWS_IN_FLIGHT rows going, each one request at a time: kept as many, a row asks over an open connection
-# instead of a new TCP and TLS handshake (measured on 半日: a row 5.2 s with the 20 httpx keeps, 2.8 s with 100), and as
-# many again are left to the reads of the other sources going at the same time.
-CONNECTIONS = httpx.Limits(max_connections=2 * ROWS_IN_FLIGHT, max_keepalive_connections=2 * ROWS_IN_FLIGHT,
+# has up to APP_IN_FLIGHT rows going, each one request at a time, and the applications read side by side: kept for the
+# rows of a dozen of them, a row asks over an open connection instead of a new TCP and TLS handshake (measured on 半日:
+# a row 5.2 s with 20 kept, 2.8 s with 100), and as many again are left to the reads of the other sources.
+CONNECTIONS = httpx.Limits(max_connections=2 * 12 * APP_IN_FLIGHT, max_keepalive_connections=2 * 12 * APP_IN_FLIGHT,
                            keepalive_expiry=30.0)
 
 class SourcesModule(BaseModule):
@@ -193,6 +194,12 @@ class SourcesModule(BaseModule):
                 raise ValueError(f"application {profile.name}: unknown protocol {profile.protocol!r}")
             self.apps.append(AppPlayer(client(profile, lambda: self._http),
                                        registry=LineRegistry.load(profile.name, app_lines_dir), term=self.term))
+        # A line of an application that another one parses when its own parser says no (apps/routes.json), where that
+        # other application is configured.
+        clients = {each.name: each.client for each in self.apps}
+        for each in self.apps:
+            each.through = {line: (clients[name], code) for line, (name, code) in routes_of(each.name).items()
+                            if name in clients}
         # One player of the lines of every application: a line is one player whichever application lists it.
         self.lines = AppLines(self.apps)
         if self.apps:
