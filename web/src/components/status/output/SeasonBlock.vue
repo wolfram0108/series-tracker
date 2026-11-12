@@ -8,6 +8,7 @@ import {
   type SourceMark as Mark,
 } from "../../../lib/output"
 import { useCardGrid } from "../../../composables/useCardGrid"
+import { useShownCells } from "../../../composables/useShownCells"
 import { sharing } from "../../../lib/sharing"
 import VoiceOrder from "../VoiceOrder.vue"
 import { badgeOf, cutOf, cutOverride, membersOf, memberOf, takes, type CompilationView, type CutItem } from "../../../lib/compilations"
@@ -19,7 +20,9 @@ import PowerSwitch from "./PowerSwitch.vue"
 
 // A season: its header (the state of its videos and voice-overs, the order of the tracks of its containers, its settings)
 // and its episodes as cards or tiles. How many cards a row holds follows the tracks and the number of episodes of the
-// season and the width the grid has now (lib/output.ts: perRowOf); an opened episode unfolds below its row.
+// season and the width the grid has now (lib/output.ts: perRowOf); an opened episode unfolds below its row. A card is
+// built when it comes near the view (composables/useShownCells.ts): a season of hundreds of episodes builds its rows on
+// screen, the others are shells of the size of a card until then.
 const props = withDefaults(defineProps<{
   season: number
   /** The episodes shown (a filter may hide some); `total` is how many the season has. */
@@ -101,6 +104,7 @@ const voicesText = computed(() => (Object.entries(meters.value.voices) as [keyof
   .filter(([, count]) => count > 0).map(([state, count]) => t(`output.meter.${state}`, { n: count })).join(" · "))
 
 const { grid, ruler, wide, columns, layout } = useCardGrid(() => props.mode, () => order.value.length, () => props.total)
+const { built, shell } = useShownCells(grid)
 
 // The height of the reference each episode has now: a compilation no higher than it is not cut, whatever the layout says.
 const heights = computed(() => new Map(props.episodes.map((view) => [view.episode,
@@ -169,11 +173,15 @@ function step(by: number): void {
         <GroupOutline :grid="grid" :layout="layout + episodes.length + (opened ? 1 : 0)" :groups="selection" />
         <template v-for="item in items" :key="item.view.episode">
           <EpisodeCard
-            v-if="mode === 'cards'" :view="item.view" :cells="item.cells" :status="item.status" :marks="marks"
+            v-if="mode === 'cards' && (built(item.view.episode) || props.opened === item.view.episode)" :view="item.view" :cells="item.cells" :status="item.status" :marks="marks"
             :file="wide ? item.file : undefined" :open="opened?.view.episode === item.view.episode" :busy="busy"
             :badge="memberOf(members, season, item.view.episode)" selectable :selected="chosen.has(item.view.episode)"
             @open="toggleOpen(item.view.episode)" @select="emit('select', item.view.episode, $event)"
             @switch="emit('switch-episode', item.view.episode, $event)"
+          />
+          <div
+            v-else-if="mode === 'cards'" :ref="shell(item.view.episode)" class="episode-card card-shell" :data-season="season"
+            :data-episode="item.view.episode" aria-hidden="true"
           />
           <button
             v-else type="button" class="episode-tile" :data-episode="item.view.episode"

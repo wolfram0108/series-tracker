@@ -26,6 +26,12 @@
 .season-grid.is-tiles { grid-template-columns: repeat(auto-fill, minmax(2.25rem, 1fr)); gap: 0.25rem; }
 /* The width of the smallest card: a strip of six tracks and the padding around it (TrackStrip, EpisodeCard). */
 .grid-ruler { position: absolute; visibility: hidden; pointer-events: none; inline-size: calc(6 * 1.25rem + 5 * 0.125rem + 1.4rem); }
+/* A card not built yet (composables/useShownCells.ts): the size and the corners of a card, so that the grid, its outline and
+   the scroll stand as they will when it is built. */
+.card-shell {
+  box-sizing: border-box; block-size: calc(3 * var(--card-row) + 2 * 0.3rem + 2 * var(--card-pad));
+  border-radius: calc(var(--card-row) * var(--round) + var(--card-pad)); background: var(--bg-light);
+}
 .episode-tile {
   all: unset; box-sizing: border-box; position: relative; overflow: hidden; block-size: 1.6rem; border-radius: calc(1.6rem * var(--round)); cursor: pointer;
   display: grid; place-items: center; font-size: 0.65rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
