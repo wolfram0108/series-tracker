@@ -22,12 +22,19 @@ Query:
       sent (or the daemon asked to come back later) and asking again soon may work. `uncertain`: the request
       was sent and nothing well-formed came back, so the daemon may have the job; the caller keeps the key
       and asks conform.job.find, it does not send again.
-  conform.settings.get {} -> ConformSettingsView {url, work_dir, work_dir_remote, clear_finished}: what applies now.
+  conform.settings.get {} -> ConformSettingsView {url, work_dir, work_dir_remote, clear_finished, params, domain}: what
+      applies now.
       `clear_finished` (the setting conform.clear_finished, "true" or "false", written by the pipeline flag
       `/api/settings/conform_clear_finished` of the debug tab): a job that ended and whose result was taken leaves the
       daemon's history on its own, unless it ended in an error; off, the history keeps it until the owner deletes it.
   conform.settings.set {url, work_dir, work_dir_remote} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
       through settings.values.set_many and taken at once, or refused with coded problems and nothing written.
+  conform.params.set ConformParams {audio_method, drift_speed_pct, keep_tmp, fill_silence, extend_edges} ->
+      ConformSettingsSaved: how the daemon is asked to align (settings conform.audio_method, conform.drift_speed_pct,
+      conform.keep_tmp, conform.fill_silence, conform.extend_edges; never stored: MuQ, the daemon's drift, no
+      checkpoints, the cuts filled, the edges extended), checked against what the daemon says it accepts
+      (`GET /conform/settings`: the view's `domain`; unknown while the daemon has not said: refused) and written whole;
+      every job sent after it carries it (an episode: all but `extend_edges`; a compilation: all but `fill_silence`).
   conform.reverse ReverseSubmit {compilation, compilation_atrack?, episodes: [{path, atrack}], out_dir, label?} ->
       ReverseReply {outcome, jobs, reason?, retry} (stages 12 and 14): the picture of one video (a compilation, or a
       single episode higher than the markup reference) laid onto the timeline of the single video of each episode, one
@@ -80,7 +87,8 @@ from typing import Any
 import httpx
 
 from core import BaseModule, BusRequestError
-from core.contracts import (AlignmentJob, ConformSettingsDraft, ConformSettingsSaved, DubResult, JobKind, JobStatus,
+from core.contracts import (AlignmentJob, ConformParams, ConformSettingsDraft, ConformSettingsSaved, DubResult, JobKind,
+                            JobStatus,
                             ReverseReply, ReverseSubmit, SubmitOutcome,
                             SubmitReply)
 from core.envelope import Envelope
@@ -89,7 +97,7 @@ from core.reasons import describe, reason
 from .client import DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
 from . import settings as conform_settings
 from .paths import reverse, roots, translate, workspace
-from .settings import CLEAR_KEY, REMOTE_DIR_KEY, URL_KEY, WORK_DIR_KEY, mapping_of
+from .settings import PREFIX, REMOTE_DIR_KEY, URL_KEY, WORK_DIR_KEY, mapping_of
 
 BACKOFF_START_S = 2.0
 BACKOFF_MAX_S = 30.0
@@ -150,7 +158,6 @@ def split_label(label: str | None) -> tuple[str | None, str | None]:
 
 
 # The meter of the audio layer of every job (the service's `audio_method`: band or muq): the owner's choice.
-AUDIO_METHOD = "muq"
 
 
 def finished_view(job: dict[str, Any], to_local: dict[str, str]) -> dict[str, Any]:
@@ -201,6 +208,7 @@ class ConformModule(BaseModule):
         self.handle("conform.plot", self.on_plot)
         self.handle("conform.settings.get", self.on_settings_get)
         self.handle("conform.settings.set", self.on_settings_set)
+        self.handle("conform.params.set", self.on_params_set)
         self.handle("conform.job.find", self.on_job_find)
         self.handle("conform.job.keys", self.on_job_keys)
         self.handle("gateway.sse.clients", self.on_clients)
@@ -216,8 +224,17 @@ class ConformModule(BaseModule):
             return None
         return reply.get("value")
 
-    async def _path_map(self) -> dict[str, str]:
-        return mapping_of(await self._stored(WORK_DIR_KEY), await self._stored(REMOTE_DIR_KEY))
+    async def _values(self) -> dict[str, str | None]:
+        """Every setting of the module in one read."""
+        try:
+            reply = await self.request("settings.values.by_prefix", {"prefix": PREFIX})
+        except (BusRequestError, asyncio.TimeoutError):
+            return {}
+        return reply.get("values") or {}
+
+    async def _path_map(self, values: dict[str, str | None] | None = None) -> dict[str, str]:
+        values = await self._values() if values is None else values
+        return mapping_of(values.get(WORK_DIR_KEY), values.get(REMOTE_DIR_KEY))
 
     async def on_settings_get(self, env: Envelope) -> dict:
         return (await self._settings_view()).model_dump(mode="json")
@@ -227,7 +244,8 @@ class ConformModule(BaseModule):
         problems = conform_settings.check(draft)
         if not problems:
             draft = conform_settings.clean(draft)
-            await self.request("settings.values.set_many", {"values": conform_settings.stored(draft)})
+            await self.request("settings.values.set_many", {"values": {
+                **conform_settings.stored(draft), **conform_settings.next_revision(await self._values())}})
             await self._use_address(draft.url)
         view = await self._settings_view()
         if not problems:
@@ -235,10 +253,26 @@ class ConformModule(BaseModule):
             self.publish_event("conform.settings.changed", view.model_dump(mode="json"))
         return ConformSettingsSaved(saved=not problems, problems=problems, settings=view).model_dump(mode="json")
 
+    async def on_params_set(self, env: Envelope) -> dict:
+        """How the daemon is asked to align, checked against what it says it accepts and written whole, or refused with
+        coded problems and nothing written; the next job takes it."""
+        params = ConformParams.model_validate(env.payload)
+        problems = conform_settings.check_params(params, self._domain())
+        if not problems:
+            await self.request("settings.values.set_many", {"values": {
+                **conform_settings.stored_params(params), **conform_settings.next_revision(await self._values())}})
+        view = await self._settings_view()
+        if not problems:
+            self.log.info("conform: параметры выравнивания сохранены: %s", params.model_dump(mode="json"))
+            self.publish_event("conform.settings.changed", view.model_dump(mode="json"))
+        return ConformSettingsSaved(saved=not problems, problems=problems, settings=view).model_dump(mode="json")
+
+    def _domain(self):
+        return conform_settings.domain_of(self._daemon.get("params"))
+
     async def _settings_view(self):
         url = self._client.base_url if self._client is not None else ""
-        return conform_settings.view(url, await self._stored(WORK_DIR_KEY) or "", await self._stored(REMOTE_DIR_KEY) or "",
-                                     await self._stored(CLEAR_KEY))
+        return conform_settings.view(url, await self._values(), self._domain())
 
     async def _use_address(self, url: str) -> None:
         """Point the bridge at another daemon, or at none: the feed of the old one ends, the picture starts over."""
@@ -260,11 +294,12 @@ class ConformModule(BaseModule):
                                            retry=False).model_dump()
         payload = env.payload
         label = payload.get("label") or ""
-        mapping = await self._path_map()
+        values = await self._values()
+        mapping = await self._path_map(values)
         if not mapping:
             return SubmitReply.unavailable(reason("conform_no_work_dir"), retry=False).model_dump()
         try:  # before anything is sent: a problem here is a certain refusal
-            body = self._request_body(payload, mapping)
+            body = self._request_body(payload, mapping, conform_settings.params_of(values))
         except ValueError as exc:
             self.log.warning("conform: задача %s отклонена: %s", label, describe(str(exc)))
             return SubmitReply.rejected(str(exc)).model_dump()
@@ -293,7 +328,8 @@ class ConformModule(BaseModule):
         if not self._daemon.get("up"):
             return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE,
                                 reason=reason("conform_down", error=self._daemon.get("error") or "")).model_dump()
-        mapping = await self._path_map()
+        values = await self._values()
+        mapping = await self._path_map(values)
         if not mapping:
             return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=reason("conform_no_work_dir")).model_dump()
         keys = [split_label(os.path.basename(os.path.dirname(each.path)))[1] for each in request.episodes]
@@ -302,9 +338,9 @@ class ConformModule(BaseModule):
                 raise ValueError(reason("conform_reverse_no_key"))
             body = {"compilation": translate(request.compilation, mapping),
                     "episodes": [translate(each.path, mapping) for each in request.episodes],
-                    "out_dir": translate(request.out_dir, mapping), "extend_edges": True, "keep_tmp": False,
-                    "label": label, "ref_atrack": request.compilation_atrack,
-                    "dub_atracks": [each.atrack for each in request.episodes], "audio_method": AUDIO_METHOD}
+                    "out_dir": translate(request.out_dir, mapping), "label": label,
+                    "ref_atrack": request.compilation_atrack, "dub_atracks": [each.atrack for each in request.episodes],
+                    **conform_settings.compilation_fields(conform_settings.params_of(values))}
         except ValueError as exc:
             self.log.warning("conform: разбор %s отклонён: %s", label, describe(str(exc)))
             return ReverseReply(outcome=SubmitOutcome.REJECTED, reason=str(exc)).model_dump()
@@ -325,12 +361,13 @@ class ConformModule(BaseModule):
         return ReverseReply(outcome=SubmitOutcome.ACCEPTED, jobs=named).model_dump()
 
     @staticmethod
-    def _request_body(payload: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any]:
+    def _request_body(payload: dict[str, Any], mapping: dict[str, str],
+                      params: ConformParams = conform_settings.DEFAULTS) -> dict[str, Any]:
         return {"ref": translate(payload["ref"], mapping),
                 "dubs": [translate(path, mapping) for path in payload["dubs"]],
                 "out_dir": translate(payload["out_dir"], mapping),
                 "cache_dir": translate(payload["cache_dir"], mapping),
-                "keep_tmp": False, "label": job_label(payload.get("label"), payload.get("key")), "audio_method": AUDIO_METHOD,
+                "label": job_label(payload.get("label"), payload.get("key")), **conform_settings.episode_fields(params),
                 # A voice-over that is a container gives the track of its number (a track aligned out of an old file).
                 **({"dub_atracks": [int(each) for each in payload["dub_atracks"]]} if payload.get("dub_atracks") else {}),
                 # A reference that is a container holds several tracks: the alignment listens to the video's own sound.
@@ -450,6 +487,8 @@ class ConformModule(BaseModule):
                 self._daemon = {"up": True, "error": None, **await self._client.info()}
                 self._publish()
                 self.publish_event("conform.daemon.up", {})
+                # What the daemon accepts is part of the settings screen: an open one learns it now.
+                self.publish_event("conform.settings.changed", (await self._settings_view()).model_dump(mode="json"))
                 self.log.info("conform: подключён к демону %s", self._client.base_url)
                 async for name, payload in self._client.events():
                     delay = self._backoff_start

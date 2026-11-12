@@ -239,6 +239,7 @@ class Daemon:
         # a job is made.
         self.hold = False
         self.made = threading.Event()
+        self.bodies: list[dict] = []  # every job body the daemon was sent, in order
         app = FastAPI()
         self.app = app
 
@@ -250,8 +251,15 @@ class Daemon:
         def device() -> dict:
             return {"device": "cpu", "gpu": False, "name": "model"}
 
+        @app.get("/conform/settings")
+        def settings() -> dict:
+            # What the daemon accepts for the fields of its jobs, in the form of its GET /conform/settings.
+            return {"limit": 4, "active": 0, "params": {"drift_speed_pct": {"min": 0.25, "max": 10.0, "default": 1.25},
+                                                         "audio_method": {"values": ["band", "muq"], "default": "band"}}}
+
         @app.post("/conform/enqueue")
         def enqueue(body: EnqueueBody) -> dict:
+            self.bodies.append(body.model_dump())
             job = self._align(body)
             if any(self._answer_for(body.label, dub) == "lost" for dub in body.dubs):
                 raise HTTPException(status_code=502, detail="no answer")
@@ -259,6 +267,7 @@ class Daemon:
 
         @app.post("/conform/reverse")
         def reverse(body: ReverseBody) -> list[dict]:
+            self.bodies.append(body.model_dump())
             jobs = [self._cut(body, episode) for episode in body.episodes]
             if self._answer_of(body.label) == "lost":
                 raise HTTPException(status_code=502, detail="no answer")

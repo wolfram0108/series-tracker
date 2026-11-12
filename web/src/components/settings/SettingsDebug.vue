@@ -7,6 +7,7 @@ import { useToast } from "primevue/usetoast"
 import StGroup from "../StGroup.vue"
 import StSelect from "../StSelect.vue"
 import DatabaseViewerModal from "./DatabaseViewerModal.vue"
+import SettingsConformServer from "./SettingsConformServer.vue"
 import { api } from "../../api/client"
 import { sanitizePath } from "../../lib/fsnames"
 import { t } from "../../i18n"
@@ -266,6 +267,8 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <SettingsConformServer />
 
     <!-- База данных -->
     <div class="modern-fieldset">

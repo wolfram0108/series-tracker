@@ -3,7 +3,6 @@ import { ref, onMounted } from "vue"
 import StGroup from "../StGroup.vue"
 import StIcon from "../StIcon.vue"
 import StInput from "../StInput.vue"
-import SettingsConformServer from "./SettingsConformServer.vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 
@@ -60,14 +59,11 @@ async function load() {
   if (d.tmdb) configured.value.tmdb = !!d.tmdb.configured
 }
 
-const conform = ref<{ save: () => Promise<boolean> } | null>(null)
-
 async function save(): Promise<boolean> {
   const ok = await request(api.POST("/api/auth", { body: creds.value } as never), {
     errorMessage: "Ошибка сохранения настроек авторизации",
   })
-  const conformSaved = (await conform.value?.save()) ?? true
-  return ok !== null && conformSaved
+  return ok !== null
 }
 
 onMounted(load)
@@ -135,6 +131,5 @@ defineExpose({ save })
       </div>
     </div>
 
-    <SettingsConformServer ref="conform" />
   </div>
 </template>

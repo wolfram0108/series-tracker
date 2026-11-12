@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 
+import asyncio
+
 import pytest
 
 from core import BaseModule, Bus, Runner
@@ -29,7 +31,11 @@ class Settings(BaseModule):
 
     def register(self):
         self.handle("settings.value.get", self.on_get)
+        self.handle("settings.values.by_prefix", self.on_prefix)
         self.handle("settings.values.set_many", self.on_set_many)
+
+    async def on_prefix(self, env):
+        return {"values": {key: value for key, value in self.values.items() if key.startswith(env.payload["prefix"])}}
 
     async def on_get(self, env):
         return {"key": env.payload["key"], "value": self.values.get(env.payload["key"])}
@@ -41,6 +47,12 @@ class Settings(BaseModule):
 
 class Probe(BaseModule):
     name = "probe"
+
+
+# What the service asked before the parameters were settings: what a store with none of them gives.
+DEFAULT_PARAMS = {"audio_method": "muq", "drift_speed_pct": None, "keep_tmp": False, "fill_silence": True, "extend_edges": True}
+DOMAIN = {"audio_method": {"values": ["band", "muq"], "default": "band"},
+          "drift_speed_pct": {"min": 0.25, "max": 10.0, "default": 1.25}}
 
 
 async def bridge(stored=None, default_url=""):
@@ -73,7 +85,8 @@ async def test_nothing_stored_the_address_of_the_environment_applies_and_no_fold
     _, _, probe, made, runner = await bridge(default_url="http://env:8787")
     try:
         view = await probe.request("conform.settings.get", {}, timeout=3)
-        assert view == {"url": "http://env:8787", "work_dir": "", "work_dir_remote": "", "clear_finished": False}
+        assert view == {"url": "http://env:8787", "work_dir": "", "work_dir_remote": "", "clear_finished": False,
+                        "params": DEFAULT_PARAMS, "domain": None, "revision": 0}
         assert [c.base_url for c in made] == ["http://env:8787"]
         assert await probe.request("conform.workspace", {}, timeout=3) == {"downloads": "", "conform": ""}
     finally:
@@ -101,12 +114,13 @@ async def test_a_saved_address_is_written_announced_and_taken_at_once():
     try:
         saved = await probe.request("conform.settings.set", draft("http://new:9000/", HERE + "/").model_dump(), timeout=5)
         assert saved["saved"] is True and saved["problems"] == [] and saved["settings"] == {
-            "url": "http://new:9000", "work_dir": HERE, "work_dir_remote": THERE, "clear_finished": False}
+            "url": "http://new:9000", "work_dir": HERE, "work_dir_remote": THERE, "clear_finished": False,
+            "params": DEFAULT_PARAMS, "domain": None, "revision": 1}
         assert settings.values == {"conform.url": "http://new:9000", "conform.work_dir": HERE,
-                                   "conform.work_dir_remote": THERE}
+                                   "conform.work_dir_remote": THERE, "conform.revision": "1"}
         assert [c.base_url for c in made] == ["http://env:8787", "http://new:9000"]
         assert made[0].closed is True and made[1].closed is False
-        assert (await changed.queue.get()).payload["url"] == "http://new:9000"
+        assert (await announced(changed, lambda view: view["url"] == "http://new:9000"))["url"] == "http://new:9000"
         assert await probe.request("conform.workspace", {}, timeout=3) == {
             "downloads": f"{HERE}/downloads", "conform": f"{HERE}/conform"}
     finally:
@@ -183,3 +197,65 @@ def test_a_saved_address_reaches_every_open_screen_by_the_stream_and_the_screen_
     assert name == "conform_settings_update"
     assert f"`{name}`" in (root / "contracts" / "sse_contract.md").read_text(encoding="utf-8")
     assert f'"{name}"' in (root / "web" / "src" / "composables" / "useRealtime.ts").read_text(encoding="utf-8")
+
+
+
+# --- how the daemon is asked to align --------------------------------------------------------------------------------
+
+async def announced(changed, matches, seconds: float = 3.0) -> dict:
+    """The announced view that matches: the bridge also announces the view when the daemon connects."""
+    async def first() -> dict:
+        while True:
+            view = (await changed.queue.get()).payload
+            if matches(view):
+                return view
+    return await asyncio.wait_for(first(), seconds)
+
+
+def params(**changes) -> dict:
+    return {**DEFAULT_PARAMS, **changes}
+
+
+@pytest.mark.asyncio
+async def test_the_parameters_are_checked_against_what_the_daemon_accepts_and_written_whole():
+    bus, settings, probe, made, runner = await bridge(default_url="http://env:8787")
+    changed = bus.subscribe("conform.settings.changed")
+    try:
+        # The daemon has not said what it accepts: nothing can be checked, nothing is written.
+        unknown = await probe.request("conform.params.set", params(audio_method="band"), timeout=5)
+        assert unknown["saved"] is False and [p["detail"]["code"] for p in unknown["problems"]] == ["conform_params_unknown"]
+        assert settings.values == {}
+
+        probe_bridge = next(each for each in runner.modules if each.name == "conform")
+        probe_bridge._daemon["params"] = DOMAIN
+        wrong = await probe.request("conform.params.set", params(audio_method="dsp", drift_speed_pct=11.0), timeout=5)
+        assert [p["field"] for p in wrong["problems"]] == ["audio_method", "drift_speed_pct"] and settings.values == {}
+
+        saved = await probe.request("conform.params.set", params(audio_method="band", drift_speed_pct=2.5, keep_tmp=True,
+                                                                 fill_silence=False, extend_edges=False), timeout=5)
+        assert saved["saved"] is True and saved["settings"]["params"] == params(
+            audio_method="band", drift_speed_pct=2.5, keep_tmp=True, fill_silence=False, extend_edges=False)
+        assert saved["settings"]["domain"] == {"audio_methods": ["band", "muq"], "audio_default": "band",
+                                               "drift_min": 0.25, "drift_max": 10.0, "drift_default": 1.25}
+        assert settings.values == {"conform.audio_method": "band", "conform.drift_speed_pct": "2.5",
+                                   "conform.keep_tmp": "true", "conform.fill_silence": "false",
+                                   "conform.extend_edges": "false", "conform.revision": "1"}
+        assert (await announced(changed, lambda view: view["params"]["audio_method"] == "band"))["params"]["keep_tmp"]
+    finally:
+        await runner.stop()
+
+
+def test_the_jobs_carry_the_parameters_each_its_own_and_a_drift_of_none_is_the_daemons():
+    from modules.conform import settings as conform_settings
+    chosen = conform_settings.params_of({"conform.audio_method": "band", "conform.drift_speed_pct": "2.5",
+                                         "conform.keep_tmp": "true", "conform.fill_silence": "false",
+                                         "conform.extend_edges": "false"})
+    assert conform_settings.episode_fields(chosen) == {"audio_method": "band", "keep_tmp": True, "fill_silence": False,
+                                                       "drift_speed_pct": 2.5}
+    assert conform_settings.compilation_fields(chosen) == {"audio_method": "band", "keep_tmp": True,
+                                                           "extend_edges": False, "drift_speed_pct": 2.5}
+    # Nothing stored, or a stored value of another kind: what the service asked before.
+    assert conform_settings.params_of({"conform.drift_speed_pct": "fast", "conform.keep_tmp": "maybe"}).model_dump() == \
+        DEFAULT_PARAMS
+    assert conform_settings.episode_fields(conform_settings.DEFAULTS) == {"audio_method": "muq", "keep_tmp": False,
+                                                                         "fill_silence": True}

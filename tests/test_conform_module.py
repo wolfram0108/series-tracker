@@ -28,7 +28,7 @@ PATH_MAP = {"conform.work_dir": "/nas", "conform.work_dir_remote": "/mnt/meganas
 
 
 class Settings(BaseModule):
-    """Answers settings.value.get from a dict."""
+    """Answers settings.value.get and settings.values.by_prefix from a dict."""
 
     name = "settings"
 
@@ -38,6 +38,10 @@ class Settings(BaseModule):
 
     def register(self):
         self.handle("settings.value.get", self.on_get)
+        self.handle("settings.values.by_prefix", self.on_prefix)
+
+    async def on_prefix(self, env):
+        return {"values": {key: value for key, value in self.values.items() if key.startswith(env.payload["prefix"])}}
 
     async def on_get(self, env):
         return {"key": env.payload["key"], "value": self.values.get(env.payload["key"])}
@@ -221,6 +225,9 @@ def stream_of(frames: str) -> DaemonClient:
             return httpx.Response(200, json={"status": "ok", "version": "0.1.0"})
         if request.url.path == "/conform/device":
             return httpx.Response(200, json={"device": "cuda", "name": "RTX 3090", "gpu": True})
+        if request.url.path == "/conform/settings":
+            return httpx.Response(200, json={"limit": 4, "active": 0, "params": {"drift_speed_pct": {
+                "min": 0.25, "max": 10.0, "default": 1.25}, "audio_method": {"values": ["band", "muq"], "default": "band"}}})
         return httpx.Response(404)
     return DaemonClient("http://daemon.test/", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
 
@@ -242,8 +249,9 @@ async def test_client_yields_only_the_conform_events_and_skips_noise():
 
 @pytest.mark.asyncio
 async def test_client_info_joins_health_and_device():
-    assert await stream_of("").info() == {"version": "0.1.0", "device": "cuda", "gpu": True,
-                                          "gpu_name": "RTX 3090"}
+    assert await stream_of("").info() == {"version": "0.1.0", "device": "cuda", "gpu": True, "gpu_name": "RTX 3090",
+                                          "params": {"drift_speed_pct": {"min": 0.25, "max": 10.0, "default": 1.25},
+                                                     "audio_method": {"values": ["band", "muq"], "default": "band"}}}
 
 
 
@@ -591,9 +599,9 @@ async def submit_through_the_wire(respond):
     bridge._daemon["up"] = True
 
     async def named():  # no settings module here: the storage as the owner would have named it
-        return {PATH_MAP["conform.work_dir"]: PATH_MAP["conform.work_dir_remote"]}
+        return dict(PATH_MAP)
 
-    bridge._path_map = named
+    bridge._values = named
     try:
         return await bridge.on_submit(Envelope("conform.submit", "query", SUBMIT | {"key": "k1"}))
     finally:

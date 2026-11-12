@@ -145,11 +145,12 @@ class UiStand(AppStand):
         page = self.page
         work = os.path.join(self.root, "work")
         connected = self.bus.subscribe("conform.daemon.up")
-        await self.settings("Авторизация")
+        await self.settings("Отладка")
         await page.get_by_label(text("conform.settings.url")).fill(self.daemon_http.url)
         await page.get_by_label(text("conform.settings.local")).fill(work)
         await page.get_by_label(text("conform.settings.daemon")).fill(work)
-        await page.get_by_role("button", name="Сохранить").click()
+        # The block of the alignment server writes its address and folders when a field is left or Enter is pressed.
+        await page.get_by_label(text("conform.settings.daemon")).press("Enter")
         await asyncio.wait_for(connected.queue.get(), 30)
         await expect(page.get_by_text(text("agents.conform.daemon.up"))).to_be_visible()
         await page.locator(f".st-tab[title='{text('settings.tab.voices')}']").click()

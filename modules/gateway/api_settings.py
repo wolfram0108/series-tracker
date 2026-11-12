@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 from core import logging as core_logging
-from core.contracts import (LINE_FIELDS, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView,
+from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView,
                             PlayersListReply, VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
 from core.reasons import reason
 
@@ -221,6 +221,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def conform_settings():
         """The address of the alignment server and the path map as they apply now."""
         return await gw.request("conform.settings.get", {})
+
+    @r.put("/api/conform/params", response_model=ConformSettingsSaved)
+    async def save_conform_params(params: ConformParams):
+        """How the daemon is asked to align: written whole or refused with coded reasons (`saved: false`)."""
+        return await gw.request("conform.params.set", params.model_dump(mode="json"))
 
     @r.put("/api/conform/settings", response_model=ConformSettingsSaved)
     async def save_conform_settings(draft: ConformSettingsDraft):

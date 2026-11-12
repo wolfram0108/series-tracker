@@ -34,10 +34,11 @@ def test_fuses_nest_the_outer_one_never_fires_before_an_inner_one():
 
 
 def test_a_topic_that_asks_others_in_turn_lives_longer_than_all_of_them_together():
-    steps = 3 * deadline_of("settings.value.get") + deadline_of("settings.values.set_many")
+    steps = 2 * deadline_of("settings.values.by_prefix") + deadline_of("settings.values.set_many")
     assert deadline_of("conform.settings.set") == QUICK_S + steps
     assert deadline_of("conform.settings.set", units=2) == 2 * (QUICK_S + steps)
-    assert all(deadline_of("conform.settings.set") > deadline_of(step) for step in ("settings.value.get", "settings.values.set_many"))
+    assert all(deadline_of("conform.settings.set") > deadline_of(step)
+               for step in ("settings.values.by_prefix", "settings.values.set_many"))
 
 
 def test_a_nested_topic_with_a_step_that_has_no_fuse_has_none(monkeypatch):

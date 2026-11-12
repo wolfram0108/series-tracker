@@ -1505,6 +1505,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conform/params": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Conform Params
+         * @description How the daemon is asked to align: written whole or refused with coded reasons (`saved: false`).
+         */
+        put: operations["save_conform_params_api_conform_params_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/debug_flags": {
         parameters: {
             query?: never;
@@ -2284,6 +2304,23 @@ export interface components {
             readonly in_output: boolean;
         };
         /**
+         * ConformDomain
+         * @description What the daemon accepts, as it states it (`GET /conform/settings`): its audio methods and the default, the range
+         *     and the default of the drift speed.
+         */
+        ConformDomain: {
+            /** Audio Methods */
+            audio_methods: string[];
+            /** Audio Default */
+            audio_default: string;
+            /** Drift Min */
+            drift_min: number;
+            /** Drift Max */
+            drift_max: number;
+            /** Drift Default */
+            drift_default: number;
+        };
+        /**
          * ConformJobChange
          * @description The reply to the stop or deletion of a job of the alignment service.
          */
@@ -2292,6 +2329,27 @@ export interface components {
             done: boolean;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * ConformParams
+         * @description How the daemon is asked to align (the fields of its jobs): the meter of the audio layer (`audio_method`), how fast
+         *     the laid sound may follow a drift (`drift_speed_pct`, %/s; None: the daemon's own default), whether the data of an
+         *     episode stays in its cache for a rerun (`keep_tmp`, the checkpoints), whether the silence left in a voice-over where
+         *     something was cut is filled with the reference's sound (`fill_silence`; a job of an episode only), and whether the
+         *     reference cut out of a compilation covers the whole episode or only the stretch the compilation covers
+         *     (`extend_edges`; a job of a compilation only). A save replaces all five.
+         */
+        ConformParams: {
+            /** Audio Method */
+            audio_method: string;
+            /** Drift Speed Pct */
+            drift_speed_pct?: number | null;
+            /** Keep Tmp */
+            keep_tmp: boolean;
+            /** Fill Silence */
+            fill_silence: boolean;
+            /** Extend Edges */
+            extend_edges: boolean;
         };
         /**
          * ConformSettingsDraft
@@ -2320,7 +2378,7 @@ export interface components {
         /**
          * ConformSettingsView
          * @description The reply of `conform.settings.get`: what applies now, every value stated. `clear_finished` is read here and
-         *     written by the pipeline flag of the debug tab.
+         *     written by the pipeline flag of the debug tab. `domain` is what the daemon accepts, None while it has not said.
          */
         ConformSettingsView: {
             /** Url */
@@ -2331,6 +2389,13 @@ export interface components {
             work_dir_remote: string;
             /** Clear Finished */
             clear_finished: boolean;
+            params: components["schemas"]["ConformParams"];
+            domain?: components["schemas"]["ConformDomain"] | null;
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
         };
         /** CreatedSeries */
         CreatedSeries: {
@@ -8266,6 +8331,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ConformSettingsDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConformSettingsSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_conform_params_api_conform_params_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConformParams"];
             };
         };
         responses: {

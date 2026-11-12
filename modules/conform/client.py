@@ -75,7 +75,17 @@ class DaemonClient:
         device = (await self._http.get(f"{self.base_url}/conform/device",
                                        timeout=REQUEST_TIMEOUT_S)).json()
         return {"version": health.get("version"), "device": device.get("device"),
-                "gpu": bool(device.get("gpu")), "gpu_name": device.get("name")}
+                "gpu": bool(device.get("gpu")), "gpu_name": device.get("name"), "params": await self._params()}
+
+    async def _params(self) -> Any:
+        """What the daemon accepts for the fields of its jobs (`params` of `GET /conform/settings`); None from a daemon
+        that does not say it (an older one answers 404): the parameters then cannot be checked and are not saved."""
+        response = await self._http.get(f"{self.base_url}/conform/settings", timeout=REQUEST_TIMEOUT_S)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        data = _json(response)
+        return data.get("params") if isinstance(data, dict) else None
 
     async def _body_fields(self, route: str = "/conform/enqueue") -> frozenset[str] | None:
         """What a body of the route may carry, read once from the daemon's schema; an unreadable schema is asked again later."""

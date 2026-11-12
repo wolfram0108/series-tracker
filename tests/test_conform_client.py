@@ -26,6 +26,8 @@ def daemon(openapi, seen):
             return httpx.Response(200, json={"version": "0.1.0"})
         if request.url.path == "/conform/device":
             return httpx.Response(200, json={"device": "cuda", "gpu": True, "name": "RTX"})
+        if request.url.path == "/conform/settings":
+            return httpx.Response(200, json={"limit": 4, "active": 0, "params": {}})
         seen.setdefault("bodies", []).append(json.loads(request.content))
         return httpx.Response(200, json={"id": "cf1"})
     return DaemonClient("http://daemon.test", httpx.AsyncClient(transport=httpx.MockTransport(handler)))

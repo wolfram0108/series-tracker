@@ -88,8 +88,10 @@ _FUSES: dict[str, float] = {
 # counts once for each place it is awaited; a step repeated for every unit of the request is scaled with `units`).
 _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
     "conform.job.get": (STANDARD_S, ("settings.value.get", "settings.value.get")),
-    "conform.settings.get": (QUICK_S, ("settings.value.get",) * 3),
-    "conform.settings.set": (QUICK_S, ("settings.value.get",) * 3 + ("settings.values.set_many",)),
+    "conform.settings.get": (QUICK_S, ("settings.values.by_prefix",)),
+    "conform.settings.set": (QUICK_S, ("settings.values.by_prefix", "settings.values.set_many",
+                                       "settings.values.by_prefix")),
+    "conform.params.set": (QUICK_S, ("settings.values.by_prefix", "settings.values.set_many", "settings.values.by_prefix")),
     "composition.queues.get": (QUICK_S, ("voices.settings.get",)),
     # The view of the plan reads the table of the series; the files of a series also look for a journal in its folder.
     "planner.series.get": (STANDARD_S, ("catalog.series.get", "composition.get", "voices.settings.get")),

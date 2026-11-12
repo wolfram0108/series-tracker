@@ -13,7 +13,7 @@ from .compilation import (Absence, CompilationEpisode, CompilationRef, Compilati
                           parse_compilation_key)
 from .downloads import (STAGES, AttemptLine, DownloadCard, DownloadNeed, DownloadVariant, Figures, StageView)
 from .packing import PACK_STAGES, JournalStep, PackCard, PackFigures, PackJournal, PackStageView, PackTrack
-from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
+from .conform_settings import ConformDomain, ConformParams, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
 from .output_settings import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, MARKUP_ALLOW, MARKUP_ORDER, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, GroupQueue, GroupVariant, PlayerVariant, Queue, QueueRow, QueueView, QueuesGet, QueuesReply, EffectiveLever, EpisodeSettings, LeverSpec,
                               Level, LevelSettings, SettingRecord, SettingsReset, SettingsSet,
                               TargetKind, ValueShape, group_target, parse_group_target, parse_variant_target, variant_target)
@@ -36,7 +36,7 @@ __all__ = ["AppCard", "AppResults", "AppSearchReply", "AppSearchRequest", "PACK_
            "COMPILATION_MEMBER", "COMPILATION_TAKE", "Action", "NotAllowed", "allowed", "refusal", "require", "variant_state", "LEVER_FORMS", "WORK_WITHDRAWN", "WorkWithdrawn", "RUN_CHANGED", "WORK_STATE", "RunChanged", "RunSnapshot", "Slot", "WorkState", "slot_of", "AlignmentJob", "DubResult", "JobKind", "JobStatus", "ReverseEpisode", "ReverseReply", "ReverseSubmit", "SubmitOutcome", "SubmitReply", "DubEvent",
            "DubEventStatus", "DubHint", "DubItem", "DubRecord", "DubsSnapshot", "DubState", "DubStatus", "Reason", "SnapshotItem", "SettingProblem", "VoiceSettingsDraft",
            "VoiceSettingsSaved", "VoiceSettingsView", "DubsScope", "ConformSettingsDraft", "ConformSettingsSaved",
-           "ConformSettingsView",
+           "ConformSettingsView", "ConformDomain", "ConformParams",
            "LINE_SEPARATOR", "ParsedDomains", "PlayerFacts", "PlayerPlace", "PlayersListReply", "PlayersListRequest", "SourcesSettingsView", "TrackerMirrors", "ReleaseTable", "RowState", "RowVoice", "SiteResolveReply", "SiteResolveRequest", "TableFailed", "TableGetReply", "TableGetRequest",
            "SeriesReadProgress", "TableProgress", "TableReady", "TableRow", "TableState", "UnreadPart", "line_of", "place_of", "LINE_FIELDS",
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
