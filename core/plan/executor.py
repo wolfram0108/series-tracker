@@ -25,6 +25,12 @@ class Passing(Exception):
     """A step failed for this sync only (the network, an answer that never came): no record, tried again next time."""
 
 
+class Crashed(Passing):
+    """The service took this very pair (a voice-over onto a video, a picture onto an episode) and fell on it: it judged
+    nothing of the pair, so nothing is recorded, but the attempt is passed over for this sync like a download that did not
+    come, and the plan goes on with the next source (3.7). Waiting for the service would only repeat the same fall."""
+
+
 @dataclass(frozen=True)
 class Made:
     """What a step made: `value` (a Video, a Track, the row of a voice-over, None for a compilation) and its file.
@@ -53,15 +59,17 @@ class Synced:
 def judged(result: dict | None, *, cut: bool) -> str | None:
     """The file a job of the alignment service made, by the service's own verdict: an aligned track is taken by `ok` (what
     it found critical is a mark, the track is in step); a cut needs `ok` and nothing critical. A pair the service looked at
-    and turned down (`refused`) is a failure (None, recorded); any other end — a crash in the service, no result — said
-    nothing of the pair and is a failure of the moment (`Passing`)."""
+    and turned down (`refused`) is a failure (None, recorded). A pair the service fell on (its result is there, with no
+    file and no decision of its gates) said nothing of the voice-over: it is `Crashed`, passed over for this sync with the
+    next source taken. No result at all (the job did not come to the pair, the answer never came) says nothing of the pair
+    either, and the service may only be late: `Passing`, the episode waits for it unchanged."""
     if result is None:
         raise Passing
     if result.get("ok") and result.get("out_path"):
         return None if cut and result.get("critical") else result["out_path"]
     if result.get("refused"):
         return None
-    raise Passing
+    raise Crashed
 
 
 def same_work(before: Op, op: Op) -> bool:
@@ -225,10 +233,11 @@ class SeriesSync:
         self.commands: frozenset = frozenset()
         self.passing: set[str] = set()
         self.reasons: dict[str, str] = {}  # why a step failed for the moment, by its id
-        # Downloads that failed for this sync only (a network error, a player that does not answer): passed over in the
-        # plans of this sync like the recorded ones (3.7: a row not downloaded — the next source), never written, tried
-        # again by the next sync. An alignment or a cut the service crashed on or never answered is no such failure:
-        # its episode waits for the service unchanged.
+        # Attempts that failed for this sync only: a download (a network error, a player that does not answer) and an
+        # alignment or a cut the service fell on (`Crashed`). They are passed over in the plans of this sync like the
+        # recorded ones (3.7: a row that did not come — the next source), never written, tried again by the next sync
+        # that still lacks what they were for. An alignment or a cut whose answer never came is no such failure: its
+        # episode waits for the service unchanged.
         self.skipped: set[tuple] = set()
         # The rows whose video this sync downloaded anew to another length (`Made.retimed`): the tracks the library holds
         # aligned to them are given to the plans of the sync as aligned to the file before, which is no longer the video.
@@ -421,7 +430,8 @@ class SeriesSync:
                     self.passing.add(op.id)
                     self.reasons[op.id] = str(outcome.args[0]) if outcome.args else ""
                     problems.extend(each for each in problems_of(plan_, {op.id}, self.reasons) if each not in problems)
-                    attempt = attempt_of(op, results_of(steps)) if op.kind in DOWNLOADS else None
+                    passed_over = op.kind in DOWNLOADS or isinstance(outcome, Crashed)
+                    attempt = attempt_of(op, results_of(steps)) if passed_over else None
                     if attempt is not None and attempt not in self.failed and attempt not in self.skipped:
                         news.append(("moment", attempt))
                         told.set()

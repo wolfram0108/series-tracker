@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from typing import Iterable
 
 from core.contracts import PlannerView
-from core.plan.executor import DOWNLOADS, Made, Passing, SeriesSync, video_of
+from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, video_of
 from core.plan.planner import OFF, Goal, Plan, own_track, plan, switched_off, voice_of
 from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
 from modules.planner.view import view_of
@@ -66,10 +66,12 @@ class World(SeriesSync):
     failed: set[tuple] = field(default_factory=set)  # attempts that failed: the planner passes over them
     align_fails: set[tuple[Slot, str]] = field(default_factory=set)
     # The answers of the service by (episode, voice-over): "mismatch" fails and is recorded; "suspect" and "critical" are
-    # taken (marks of the track); "crash" (the service judged nothing) and "lost" (the answer never came) fail for this sync
-    # only. A cut by episode: "critical" (no cut: recorded) or "lost".
+    # taken (marks of the track); "crash" (the service fell on the pair and judged nothing: the source is passed over for
+    # this sync, the next one is taken) and "lost" (the answer never came: the episode waits) fail for this sync only.
+    # A cut by episode: "critical" (no cut: recorded), "crash" or "lost".
     answers: dict[tuple[Slot, str], str] = field(default_factory=dict)
     cut_answers: dict[Slot, str] = field(default_factory=dict)
+    crashes: set[RowId] = field(default_factory=set)  # the voice-over rows the service falls on, whatever they are laid onto
     transient: set[RowId] = field(default_factory=set)  # downloads that fail for this sync only (a network error)
     containers: dict[str, Container] = field(default_factory=dict)
     online: dict[int, tuple[OnlineRow, ...]] = field(default_factory=dict)  # source id -> last complete read
@@ -125,6 +127,7 @@ class World(SeriesSync):
         self.align_fails.clear()
         self.answers.clear()
         self.cut_answers.clear()
+        self.crashes.clear()
         self.read_fails.clear()
         self.reset_failures()
 
@@ -197,6 +200,8 @@ class World(SeriesSync):
             answer = self.cut_answers.get(op.slot)
             if answer == "lost":
                 raise Passing
+            if answer == "crash":
+                raise Crashed
             if answer == "critical" or not set(truth) <= set(inside):
                 return None  # the single episode is not in the compilation: nothing matches
             video = Video(way.row.id, way.snapshot, op.slot, ref2.timeline, cut_of=way.row.id)
@@ -215,8 +220,10 @@ class World(SeriesSync):
                    else self.content[way.container.video.key] if way.own
                    else self.content[("track", way.container.name, way.dub)])
             answer = self.answers.get((goal.slot, way.voice))
-            if answer in ("lost", "crash"):
+            if answer == "lost":
                 raise Passing
+            if answer == "crash" or way.dub in self.crashes:
+                raise Crashed
             if (goal.slot, way.voice) in self.align_fails or answer == "mismatch" or \
                     not set(self.content[video.key]) <= set(dub):
                 return None  # a compilation as a voice-over holds the episode among others (Д-19)

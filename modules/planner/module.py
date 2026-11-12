@@ -29,7 +29,10 @@ Steps of the graph, each through its owner:
       conform.clear_finished takes a job that ended with every result out of the history at the end of its sync.
   build and apply: here, by core/plan/files (the container with its provenance, the journal in the folder of the series).
 A failure the service judged is recorded and the plan is counted again from the same snapshot; a failure of the moment
-(the network, a service that is down, an answer that never came) is no record and is tried at the next sync.
+(the network, a service that is down, an answer that never came) is no record and is tried at the next sync. A pair the
+service fell on (its result is there, with no file and no decision of its gates: an exception in it) judged nothing, so it is
+no record either, but its source is passed over for this sync like a download that did not come, and the plan goes on with
+the next source; where there is none, the episode is built without that voice-over and the next sync tries it again.
 
 Queries:
   planner.sync {series_id, download?} -> {accepted}: the sync of a series is recorded and starts; it is a work of the run
@@ -99,7 +102,7 @@ from core.ffprobe import END_SLACK_S, duration_of
 from core.fsnames import sanitize_name
 from core.ignored import parse_memory
 from core.reasons import describe, reason
-from core.plan.executor import DOWNLOADS, Made, Passing, SeriesSync, judged, video_of
+from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, judged, video_of
 from core.plan.files import Library, as_in_file, container_json, container_of, label_of
 from core.plan.inputs import assets_against, choices_of, online_of
 from core.plan.marks import references_of
@@ -119,6 +122,13 @@ WORK = "planner"  # the folder of the planner's work inside the work folder of t
 # The containers built at one time, whatever series they are of: the episodes of a sync are built as each is ready, the
 # machine of the service holds 4 GB and the library lies on a network disk. A container that waits is `queued` in its card.
 BUILDS_AT_ONCE = 2
+
+
+def _fate_of(passing: Passing) -> str:
+    """What the sync does with a step the service did not bring to an end, for the log."""
+    if isinstance(passing, Crashed):
+        return "источник пропущен в этой синхронизации (берётся следующий), неудача не записана"
+    return "повторится при следующей синхронизации"
 
 
 def _row_key(row: RowId) -> list:
@@ -453,10 +463,10 @@ class BusSync(SeriesSync):
             why = (result or {}).get("error") or ended.get("error") or reason("daemon_no_result")
             try:
                 made = judged(result, cut=False)
-            except Passing:
-                self.m.log.warning("%s %s: выравнивание не сделано, повторится при следующей синхронизации: сбой "
-                                   "сервиса в задаче %s: %s", label, way.voice, job_id, describe(why))
-                outcomes[op.id] = Passing(reason("daemon_job_failed", job=job_id, cause=why))
+            except Passing as passing:
+                self.m.log.warning("%s %s: выравнивание не сделано: сбой сервиса в задаче %s: %s; %s", label, way.voice,
+                                   job_id, describe(why), _fate_of(passing))
+                outcomes[op.id] = type(passing)(reason("daemon_job_failed", job=job_id, cause=why))
                 continue
             if made is None:
                 what = "критичные замечания" if result and result.get("ok") else why
@@ -528,10 +538,10 @@ class BusSync(SeriesSync):
         why = (result or {}).get("error") or ended.get("error") or reason("daemon_no_result")
         try:
             out = judged(result, cut=True)
-        except Passing:
-            self.m.log.warning("%s: разбор не сделан, повторится при следующей синхронизации: сбой сервиса в задаче %s: %s",
-                               label, job_id, describe(why))
-            raise Passing(reason("daemon_job_failed", job=job_id, cause=why)) from None
+        except Passing as passing:
+            self.m.log.warning("%s: разбор не сделан: сбой сервиса в задаче %s: %s; %s", label, job_id, describe(why),
+                               _fate_of(passing))
+            raise type(passing)(reason("daemon_job_failed", job=job_id, cause=why)) from None
         self.jobs.append((job_id, out is not None and ended.get("status") == "done"))
         if out is None:
             what = "критичные замечания" if result and result.get("ok") else why

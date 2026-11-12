@@ -332,7 +332,7 @@ async def test_the_packing_is_told_container_by_container_and_what_waits_stays_i
     assert done["figures"]["steps_of"] and done["figures"]["steps_done"] == done["figures"]["steps_of"]
     assert any(card["figures"]["progress"] is not None for picture in pictures for card in picture if card["status"] == "build")
     episode(neighbours, 2, 1)
-    neighbours.daemon.answers["Сериал s01e02 G1"] = "crash"
+    neighbours.daemon.answers["Сериал s01e02 G1"] = "empty"  # the job did not come to the pair: the episode waits
     await sync(world)
     last = None
     while not told.queue.empty():
@@ -505,19 +505,63 @@ async def test_the_voice_overs_the_user_switched_off_are_named_by_the_goal_of_th
 
 async def test_an_alignment_the_service_crashed_in_is_written_to_the_log_with_its_reason(world, caplog):
     """A crash in the service is no failure of the voice-over, and nobody but the service knows its reason: the log says
-    which episode and voice-over, why, and that the next sync tries again."""
+    which episode and voice-over, why, and that the source is passed over for this sync with no failure recorded."""
     neighbours, planner, _ = world
     episode(neighbours, 1, 1)
     neighbours.daemon.answers["Сериал s01e01 G1"] = "crash"
     with caplog.at_level("WARNING", logger="planner"):
         await sync(world)
     said = [record.getMessage() for record in caplog.records if record.name == "planner"]
-    assert any("Сериал s01e01 G1" in each and "сбой сервиса" in each and "повторится" in each for each in said), said
+    assert any("Сериал s01e01 G1" in each and "сбой сервиса" in each and "пропущен" in each and "не записана" in each
+               for each in said), said
 
 
 async def test_work_that_failed_for_the_moment_is_the_outcome_of_the_sync_and_an_error_of_the_series_until_it_comes_off(world):
-    """The service crashed in the alignment: no failure (the next sync tries again), but the outcome of the sync says what
-    and why, and the card of the series shows an error and the work waiting; the next sync that makes it clears both."""
+    """The service's job ended with no result for the pair: no failure (the next sync tries again), but the outcome of the
+    sync says what and why, and the card of the series shows an error and the work waiting; the next sync that makes it
+    clears both."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    neighbours.daemon.answers["Сериал s01e01 G1"] = "empty"
+    told = planner.bus.subscribe("series.status.contribution")
+    await sync(world)
+    view = await planner.request("planner.series.get", {"series_id": SERIES})
+    (problem,) = view["problems"]
+    assert (problem["slot"], problem["kind"], problem["voice"]) == ([1, 1], "align", "G1") and "daemon_no_result" in problem["reason"]
+    assert view["failures"] == []
+    last = None
+    while not told.queue.empty():
+        last = (await told.queue.get()).payload["flags"]
+    assert last["error"] and last["waiting"] and not last["ready"]  # the file waits for its voice-over: nothing built
+    neighbours.daemon.answers.clear()
+    await sync(world)
+    view = await planner.request("planner.series.get", {"series_id": SERIES})
+    assert view["problems"] == [] and len(view["assets"]) == 1
+    while not told.queue.empty():
+        last = (await told.queue.get()).payload["flags"]
+    assert not last["error"] and not last["waiting"] and last["ready"]
+
+
+async def test_a_pair_the_service_fell_on_goes_on_with_the_next_source_in_the_same_sync(world):
+    """The service falls on the first row of a voice-over laid onto the video: nothing is recorded, the next row is
+    downloaded and aligned in the same sync (a job of its own), the file is built with it and the series owes nothing."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    neighbours.put(3, "g1cvh", 1, group="G1", player="cvh")
+    # The file of the first row taken is named for the voice-over plainly; the one of the next row takes a key after it.
+    neighbours.daemon.answers["Сериал s01e01 G1.mp4"] = "crash"
+    view = await sync(world)
+    stored = await check(world)
+    (container,) = stored.values()
+    assert [track["snapshot"]["group"] for track in container["tracks"]] == ["G1"]
+    assert view["failures"] == [] and view["problems"] == []
+    assert len(neighbours.daemon.bodies) == 2
+
+
+async def test_a_pair_the_service_fell_on_with_no_other_source_builds_the_file_without_the_voice_and_says_so(world):
+    """The same fall with no other row of the voice-over: the file is built without it, nothing is recorded, the outcome
+    says what is lacking and why and the card of the series shows an error and the work waiting; the next sync, with the
+    service well again, aligns the voice-over and clears both."""
     neighbours, planner, _ = world
     episode(neighbours, 1, 1)
     neighbours.daemon.answers["Сериал s01e01 G1"] = "crash"
@@ -530,11 +574,13 @@ async def test_work_that_failed_for_the_moment_is_the_outcome_of_the_sync_and_an
     last = None
     while not told.queue.empty():
         last = (await told.queue.get()).payload["flags"]
-    assert last["error"] and last["waiting"] and not last["ready"]  # the file waits for its voice-over: nothing built
+    assert last["error"] and last["waiting"] and last["ready"]  # the file is there without the voice-over
     neighbours.daemon.answers.clear()
     await sync(world)
     view = await planner.request("planner.series.get", {"series_id": SERIES})
-    assert view["problems"] == [] and len(view["assets"]) == 1
+    assert view["problems"] == []
+    (container,) = (await check(world)).values()
+    assert [track["snapshot"]["group"] for track in container["tracks"]] == ["G1"]
     while not told.queue.empty():
         last = (await told.queue.get()).payload["flags"]
     assert not last["error"] and not last["waiting"] and last["ready"]

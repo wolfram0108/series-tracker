@@ -237,8 +237,8 @@ def _rmdir_if_empty(path: str) -> None:
 
 class Daemon:
     """A model of the alignment service on the protocol of the real one. `answers` by the label of a job: "mismatch",
-    "critical", "suspect", "crash" (the service failed and judged nothing) or "lost" (the job is made, the answer never
-    comes)."""
+    "critical", "suspect", "crash" (the service fell on the pair and judged nothing), "empty" (the job ends with no result
+    for the voice-over: it did not come to the pair) or "lost" (the job is made, the answer never comes)."""
 
     def __init__(self, codec: Codec) -> None:
         self.codec = codec
@@ -378,6 +378,8 @@ class Daemon:
         results = []
         for dub, stream in zip(body.dubs, tracks):
             answer = self._answer_for(body.label, dub)
+            if answer == "empty":
+                continue  # the job ended without coming to this pair
             # The voice-over is laid onto the video where its sound is the episode of the picture: the whole of an
             # episode, or its stretch of a compilation (Д-19).
             sounds = [self.codec.sound(dub, stream, second) for second in range(max(1, self.codec.seconds(dub)))]

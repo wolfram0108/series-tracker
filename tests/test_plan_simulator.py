@@ -398,6 +398,58 @@ def test_a_download_that_failed_for_the_moment_and_was_made_by_the_next_source_i
     assert [(problem[1], problem[2]) for problem in step.problems] == [("download_dub", "G2")]
 
 
+def test_a_pair_the_service_fell_on_goes_on_with_the_next_source_in_the_same_sync():
+    """The service falls on the first row of a voice-over laid onto the video (an exception in it, no judgement): nothing
+    is recorded, the row is passed over for this sync and the next source is downloaded and aligned in it; the episode is
+    applied with that voice-over, the outcome owes nothing, and the next sync does not try the first row again — the
+    voice-over is in the file."""
+    world = World()
+    episode_with_dubs(world, 1, 0)
+    world.put(3, "g1cvh", 1, group="G1", player="cvh")
+    world.put(2, "g1kodik", 1, group="G1", player="kodik")
+    world.crashes = {RowId(3, "g1cvh", "g1cvh")}
+    step = world.sync("пара упала в службе, следующая строка есть")
+    world.check(step)
+    assert [track.dub.row_key for track in container_of(world, 1).tracks] == ["g1kodik"]
+    assert not world.failed and not step.replanned and step.problems == ()
+    step = world.sync("следующая синхронизация")
+    world.check(step)
+    assert not step.plan.ops
+
+
+def test_a_pair_the_service_fell_on_with_no_next_source_leaves_the_voice_out_and_is_tried_next_time():
+    """The same fall with no other row of the voice-over: the episode does not wait for it, the outcome says what is
+    lacking and nothing is recorded; the next sync, with the service well again, aligns it."""
+    world = World()
+    episode_with_dubs(world, 1, 0)
+    world.put(3, "g1cvh", 1, group="G1", player="cvh")
+    world.crashes = {RowId(3, "g1cvh", "g1cvh")}
+    step = world.sync("пара упала в службе, другой строки нет")
+    world.check(step)
+    assert container_of(world, 1).tracks == () and not world.failed
+    assert [(problem[1], problem[2]) for problem in step.problems] == [("align", "G1")]
+    world.crashes = set()
+    step = world.sync("служба больше не падает")
+    world.check(step)
+    assert [track.group for track in container_of(world, 1).tracks] == ["G1"] and step.problems == ()
+
+
+def test_a_cut_the_service_fell_on_is_no_record_and_comes_next_time():
+    """A cut the service fell on judged nothing of the compilation: the episode takes its single video for this sync,
+    nothing is recorded, and the next sync cuts it again."""
+    world = World()
+    world.put(1, "single3", 3, group=REF, player="cvh")
+    world.put(4, "comp", 1, end=5, group=REF, height=2160)
+    world.cut_answers[(1, 3)] = "crash"
+    step = world.sync("разбор: служба упала")
+    world.check(step)
+    assert container_of(world, 3).video.cut_of is None and not world.failed and not step.replanned
+    world.cut_answers.clear()
+    step = world.sync("служба больше не падает")
+    world.check(step)
+    assert container_of(world, 3).video.cut_of is not None
+
+
 def test_delete_of_a_track_takes_it_away_and_an_online_one_comes_back():
     """Н-3: «Удалить» does not switch off: the row is online and comes back by download."""
     world = World()
@@ -472,8 +524,9 @@ def test_a_file_lost_from_disk_is_made_again_and_an_offline_voice_in_it_is_gone(
 @pytest.mark.parametrize("answer", ["suspect", "critical", "mismatch", "crash", "lost"])
 def test_every_answer_of_the_alignment(answer):
     """suspect and critical are taken (marks of the track: it is in step); mismatch, the service's verdict, is recorded and
-    the voice-over is left out (the old file keeps its track); a crash of the service and a lost answer judged nothing and
-    are tried again at the next sync."""
+    the voice-over is left out (the old file keeps its track); a crash of the service on the pair judged nothing: nothing is
+    recorded, the voice-over is left out for this sync like a mismatch and tried again at the next; a lost answer judged
+    nothing and the group waits for it."""
     world = World()
     episode_with_dubs(world, 1, 2)
     world.put(1, "ref1hd", 1, group=REF, height=1080, video="ref1hd")
@@ -483,12 +536,18 @@ def test_every_answer_of_the_alignment(answer):
     shown = [track.group for track in container_of(world, 1).tracks]
     if answer in ("suspect", "critical"):
         assert shown == ["G1", "G2"] and len(world.containers) == 1
-    elif answer in ("lost", "crash"):
+    elif answer == "lost":
         assert container_of(world, 1).video.snapshot.height == 720  # nothing applied: the group waits for the answer
         assert not step.replanned
         world.answers.clear()
         world.check(world.sync("ответ пришёл"))
         assert [track.group for track in container_of(world, 1).tracks] == ["G1", "G2"]
+    elif answer == "crash":
+        assert shown == ["G1"] and any(each.off and len(each.tracks) == 2 for each in world.containers.values())
+        assert not step.replanned and not world.failed  # the pair is no failure of the voice-over: nothing is recorded
+        world.answers.clear()
+        world.check(world.sync("служба больше не падает"))
+        assert [track.group for track in container_of(world, 1).tracks] == ["G1", "G2"] and len(world.containers) == 1
     else:
         assert shown == ["G1"] and any(each.off and len(each.tracks) == 2 for each in world.containers.values())
 
