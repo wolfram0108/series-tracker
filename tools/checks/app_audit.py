@@ -310,7 +310,14 @@ async def catalog(app, client, inventory, output):
             write(destination, record)
 
 
-async def sample(app, client, http, inventory, output, count, workers=8, retry_audit_timeouts=False, retry_probe_timeouts=False):
+def listed(registry, line_code, all_lines=False):
+    """Whether a line is measured: the lines in the list of the application (its registry, with the lines the owner
+    stated), or every line of the card when the survey is asked for all of them."""
+    return all_lines or registry.admits(line_code)
+
+
+async def sample(app, client, http, inventory, output, count, workers=8, retry_audit_timeouts=False, retry_probe_timeouts=False,
+                 all_lines=False):
     player = AppPlayer(client)
     registry = LineRegistry.load(app)
     done_path = output / f'episodes-{app}.jsonl'
@@ -344,6 +351,8 @@ async def sample(app, client, http, inventory, output, count, workers=8, retry_a
                 continue
             card = card_from(record['card_data'])
             for line in card.lines:
+                if not listed(registry, line.code, all_lines):
+                    continue
                 selected = spaced(line.items, count)
                 priority = list(dict.fromkeys([0, len(selected) - 1, len(selected) // 2, *range(len(selected))])) if selected else []
                 for sample_index, position in enumerate(priority):
@@ -405,7 +414,7 @@ async def main(args):
         fingerprint.update(path.relative_to(ROOT).as_posix().encode())
         fingerprint.update(path.read_bytes())
     append(output / 'runs.jsonl', dict(at=time.time(), phase=args.phase, apps=args.apps, count=args.count, match=args.match,
-                                     max_http_rps=args.max_rps, per_host_interval_s=0.6, http_in_flight=16,
+                                     max_http_rps=args.max_rps, all_lines=args.all_lines, per_host_interval_s=0.6, http_in_flight=16,
                                      workers_per_source=args.workers, ffprobe_in_flight=2,
                                      retry_audit_timeouts=args.retry_audit_timeouts, retry_probe_timeouts=args.retry_probe_timeouts,
                                      source_code_sha256=fingerprint.hexdigest()))
@@ -417,7 +426,8 @@ async def main(args):
             await asyncio.gather(*(catalog(app, client, inventory, output) for app, client in clients.items()))
         if args.phase in ('sample', 'all'):
             await asyncio.gather(*(sample(app, client, http, inventory, output, args.count, args.workers,
-                                         args.retry_audit_timeouts, args.retry_probe_timeouts) for app, client in clients.items()))
+                                         args.retry_audit_timeouts, args.retry_probe_timeouts, args.all_lines)
+                                   for app, client in clients.items()))
 
 
 if __name__ == '__main__':
@@ -439,6 +449,8 @@ if __name__ == '__main__':
                         help='maximum HTTP starts per second across all sources (ffprobe has its own two-process cap)')
     parser.add_argument('--workers', type=int, choices=(4, 8, 16), default=8,
                         help='episode tasks per source; the shared transport still limits HTTP concurrency to 16')
+    parser.add_argument('--all-lines', action='store_true',
+                        help='measure every line of a card, not only the lines in the list of the application (its registry)')
     parser.add_argument('--retry-audit-timeouts', action='store_true',
                         help='retry only previously unfinished measurements stopped by the audit wall-clock guard')
     parser.add_argument('--retry-probe-timeouts', action='store_true',

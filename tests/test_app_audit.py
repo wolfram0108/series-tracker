@@ -433,3 +433,32 @@ def test_the_report_is_made_of_the_records_of_a_survey_for_every_application_it_
     assert [(row['app'], row['line'], row['tested'], row['playable'], row['heights']) for row in lines] == [
         ('mtq', 'JD4K', '3', '2', '2160'), ('xiaozhu', 'JD4K', '3', '2', '2160')]
     assert 'mtq: каталогов 1/1' in (out / 'results' / 'series-list.txt').read_text()
+
+
+async def test_the_survey_measures_only_the_lines_in_the_list_of_the_application_unless_asked_for_all(tmp_path):
+    import json
+    from modules.sources.apps import AppProfile
+    from modules.sources.apps.lines import LineRegistry
+    registry = LineRegistry(frozenset({'JD4K'}))
+    assert audit.listed(registry, 'JD4K') and not audit.listed(registry, 'NBY') and audit.listed(registry, 'NBY', True)
+
+    out = tmp_path / 'out'
+    (out / 'discovery').mkdir(parents=True)
+    (out / 'catalog').mkdir()
+    (out / 'discovery' / 'mtq-1.json').write_text(json.dumps({'state': 'found', 'selected': ['7']}))
+    items = [{'place': place, 'label': str(place), 'token': f't{place}'} for place in range(1, 4)]
+    (out / 'catalog' / 'mtq-7.json').write_text(json.dumps({'state': 'ok', 'card_data': {'names': ['x'], 'year': '', 'lines': [
+        {'code': code, 'name': code, 'listed': False, 'parsers': '', 'items': items} for code in ('JD4K', 'NBY', 'BBA')]}}))
+
+    class Client:
+        profile = AppProfile('mtq', 'mtq', 'appv7', {})
+
+        async def resolve(self, line, token, card=''):
+            raise AppError(reason('app_no_parser', app='mtq', line=line, tried='—'))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(404))) as http:
+        for all_lines, expected in ((False, {'JD4K'}), (True, {'JD4K', 'NBY', 'BBA'})):
+            (out / 'episodes-mtq.jsonl').unlink(missing_ok=True)
+            await audit.sample('mtq', Client(), http, [{'id': 1}], out, 1, all_lines=all_lines)
+            measured = {json.loads(row)['line'] for row in (out / 'episodes-mtq.jsonl').read_text().splitlines()}
+            assert measured == expected, all_lines

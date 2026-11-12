@@ -9,7 +9,8 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from app_audit import daily_quota, spaced
+from app_audit import daily_quota, listed, spaced
+from modules.sources.apps.lines import LineRegistry
 
 
 def read(path, default=None):
@@ -74,9 +75,10 @@ def apps_of(root):
     return sorted({path.name.rsplit('-', 1)[0] for path in (root / 'discovery').glob('*.json')})
 
 
-def report(root, inventory_path, count=25):
+def report(root, inventory_path, count=25, all_lines=False):
     inventory = [r for r in read(inventory_path) if r['chinese']]
     APPS = apps_of(root)
+    registries = {app: LineRegistry.load(app) for app in APPS}
     observations = []
     for app in APPS:
         path = root / f'episodes-{app}.jsonl'
@@ -103,6 +105,8 @@ def report(root, inventory_path, count=25):
                     catalog_errors.append(card)
                     continue
                 for line in catalog['card_data']['lines']:
+                    if not listed(registries[app], line['code'], all_lines):
+                        continue
                     sample = spaced(line['items'], count)
                     places = {r['place'] for r in sample}
                     rows = [r for r in observations if r['app'] == app and r['card'] == card
@@ -206,5 +210,6 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--inventory', type=Path, required=True)
     parser.add_argument('--count', type=int, default=25, choices=range(1, 31))
+    parser.add_argument('--all-lines', action='store_true', help='the lines outside the list of an application too')
     args = parser.parse_args()
-    report(args.output, args.inventory, args.count)
+    report(args.output, args.inventory, args.count, args.all_lines)
