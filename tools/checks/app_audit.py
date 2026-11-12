@@ -39,11 +39,14 @@ CONTEXT = contextvars.ContextVar('audit_context', default={})
 
 
 def spaced(items, count=25):
-    """Include both ends and distribute the remaining observations across the complete line."""
+    """Include both ends and distribute the remaining observations across the complete line; a sample of one is the last
+    position, the newest episode."""
     if len(items) <= count:
         return list(items)
-    if count < 2:
-        raise ValueError('a sample needs at least two positions')
+    if count == 1:
+        return [items[-1]]
+    if count < 1:
+        raise ValueError('a sample needs at least one position')
     return [items[round(i * (len(items) - 1) / (count - 1))] for i in range(count)]
 
 
@@ -431,7 +434,7 @@ if __name__ == '__main__':
     parser.add_argument('--match', choices=('exact', 'contains'), default='exact',
                         help='cards of a series: named exactly as it, or with its name inside theirs')
     parser.add_argument('--phase', choices=('discover', 'catalog', 'sample', 'all'), required=True)
-    parser.add_argument('--count', type=int, choices=range(2, 31), default=25)
+    parser.add_argument('--count', type=int, choices=range(1, 31), default=25)
     parser.add_argument('--max-rps', type=int, choices=range(1, 9), default=4,
                         help='maximum HTTP starts per second across all sources (ffprobe has its own two-process cap)')
     parser.add_argument('--workers', type=int, choices=(4, 8, 16), default=8,

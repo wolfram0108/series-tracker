@@ -43,6 +43,13 @@ def test_a_sample_of_ten_has_both_ends_and_no_repeat(size):
     assert selected[0] == 0 and selected[-1] == size - 1
 
 
+@pytest.mark.parametrize('size', [0, 1, 2, 47])
+def test_a_sample_of_one_is_the_newest_episode(size):
+    assert audit.spaced(list(range(size)), 1) == ([size - 1] if size else [])
+    with pytest.raises(ValueError):
+        audit.spaced(list(range(5)), 0)
+
+
 CARDS = [{'id': 1, 'name': '万界独尊'}, {'id': 2, 'name': '万界独尊 第二季'}, {'id': 3, 'name': '万界独尊（动态漫）'},
          {'id': 4, 'name': '丹道至尊'}, {'id': 5, 'name': None}]
 

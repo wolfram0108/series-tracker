@@ -205,6 +205,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--inventory', type=Path, required=True)
-    parser.add_argument('--count', type=int, default=25, choices=range(2, 31))
+    parser.add_argument('--count', type=int, default=25, choices=range(1, 31))
     args = parser.parse_args()
     report(args.output, args.inventory, args.count)
