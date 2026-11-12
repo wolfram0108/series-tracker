@@ -193,11 +193,11 @@ async def test_an_episode_switched_off_on_its_card_hides_its_file_and_on_again_s
     await ui.shot("29-switch-on-its-way")
     await page.locator(".episode-card[data-episode='1'] .power-switch").click()
     release.set()
-    await expect(second).to_have_class(re.compile(r"\bis-off\b"))
+    await expect(second).to_have_attribute("data-state", "off")
     await page.unroute("**/output/switch", held)
     assert len(sent) == 1
     await ui.press_sync(series_id)
-    await expect(second).to_have_class(re.compile(r"\bis-off\b"))
+    await expect(second).to_have_attribute("data-state", "off")
     await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
     assert [name.endswith(".mkv.off") for name in ui.files()] == [False, True]
     await ui.check(series_id)
