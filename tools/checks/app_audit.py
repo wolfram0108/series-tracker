@@ -28,18 +28,13 @@ from dotenv import dotenv_values
 
 from core.http_limits import BoundedTransport
 from modules.sources.apps import AppCardData, AppError, AppItem, AppLine, daily_quota, profiles_of
-from modules.sources.apps.app99 import App99Client
-from modules.sources.apps.appdrama import AppDramaClient
-from modules.sources.apps.appmn import AppMnClient
-from modules.sources.apps.yunduo import YunDuoClient
 from modules.sources.apps.lines import LineRegistry
+from modules.sources.module import APP_PROTOCOLS
 from modules.sources.players.app_lines import AppPlayer
 from modules.sources.players.contract import PlayerRef
 from modules.sources.policy import AdaptivePacer
 from modules.sources.players.http import retry_after
 
-APPS = ('banri', 'huayi', 'appmn', 'yunduo', 'juzi')
-CLIENTS = {'app99': App99Client, 'appdrama': AppDramaClient, 'appmn': AppMnClient, 'yunduo': YunDuoClient}
 CONTEXT = contextvars.ContextVar('audit_context', default={})
 
 
@@ -244,7 +239,18 @@ def norm(name):
     return re.sub(r'[\s：:！!··（）()\-]', '', name).lower()
 
 
-async def discover(app, client, inventory, output):
+def chosen(candidates, query, known, match='exact'):
+    """The cards a series is read through and how they were chosen: its links in production, else the cards named as the
+    series — exactly (`exact`) or with its name inside theirs (`contains`: other seasons and versions come with it)."""
+    if known:
+        return list(dict.fromkeys(known)), 'production_link'
+    wanted = norm(query)
+    same = (lambda name: norm(name or '') == wanted) if match == 'exact' else (lambda name: wanted in norm(name or ''))
+    found = [str(x['id']) for x in candidates if same(x['name'])]
+    return list(dict.fromkeys(found)), ('exact_name' if match == 'exact' else 'name_contains') if found else 'unmatched'
+
+
+async def discover(app, client, inventory, output, match='exact'):
     failures = 0
     blocked = ''
     for series in inventory:
@@ -264,10 +270,8 @@ async def discover(app, client, inventory, output):
             candidates = [{k: c.get(k) for k in ('id', 'name', 'sub', 'year', 'area', 'class', 'remarks')} for c in page.cards]
             record.update(candidates=candidates, pages=page.pages, total=page.total)
             known = [urlsplit(x['url']).path.strip('/') for x in series['sources'] if x['url'].startswith(f'app://{app}/')]
-            exact = [str(x['id']) for x in candidates if norm(x['name'] or '') == norm(series['query'])]
-            selected = known or exact
-            record['selected'] = list(dict.fromkeys(selected))
-            record['selection'] = 'production_link' if known else 'exact_name' if exact else 'unmatched'
+            selected, record['selection'] = chosen(candidates, series['query'], known, match)
+            record['selected'] = selected
             record['state'] = 'found' if selected else 'needs_matching' if candidates else 'not_found'
             record['attempted'] = True
             failures = 0
@@ -397,15 +401,15 @@ async def main(args):
     for path in sorted((ROOT / 'modules/sources').rglob('*.py')):
         fingerprint.update(path.relative_to(ROOT).as_posix().encode())
         fingerprint.update(path.read_bytes())
-    append(output / 'runs.jsonl', dict(at=time.time(), phase=args.phase, apps=args.apps, count=args.count,
+    append(output / 'runs.jsonl', dict(at=time.time(), phase=args.phase, apps=args.apps, count=args.count, match=args.match,
                                      max_http_rps=args.max_rps, per_host_interval_s=0.6, http_in_flight=16,
                                      workers_per_source=args.workers, ffprobe_in_flight=2,
                                      retry_audit_timeouts=args.retry_audit_timeouts, retry_probe_timeouts=args.retry_probe_timeouts,
                                      source_code_sha256=fingerprint.hexdigest()))
     async with httpx.AsyncClient(transport=SurveyTransport(output, args.max_rps), follow_redirects=True) as http:
-        clients = {p.name: CLIENTS[p.protocol](p, lambda: http) for p in profiles if p.name in args.apps}
+        clients = {p.name: APP_PROTOCOLS[p.protocol](p, lambda: http) for p in profiles if not args.apps or p.name in args.apps}
         if args.phase in ('discover', 'all'):
-            await asyncio.gather(*(discover(app, client, inventory, output) for app, client in clients.items()))
+            await asyncio.gather(*(discover(app, client, inventory, output, args.match) for app, client in clients.items()))
         if args.phase in ('catalog', 'all'):
             await asyncio.gather(*(catalog(app, client, inventory, output) for app, client in clients.items()))
         if args.phase in ('sample', 'all'):
@@ -423,9 +427,11 @@ if __name__ == '__main__':
     parser.add_argument('--env', required=True)
     parser.add_argument('--inventory', required=True)
     parser.add_argument('--output', required=True)
-    parser.add_argument('--apps', nargs='+', choices=APPS, default=list(APPS))
+    parser.add_argument('--apps', nargs='+', help='applications to read; by default every one `ST_APP_*` describes')
+    parser.add_argument('--match', choices=('exact', 'contains'), default='exact',
+                        help='cards of a series: named exactly as it, or with its name inside theirs')
     parser.add_argument('--phase', choices=('discover', 'catalog', 'sample', 'all'), required=True)
-    parser.add_argument('--count', type=int, choices=range(20, 31), default=25)
+    parser.add_argument('--count', type=int, choices=range(2, 31), default=25)
     parser.add_argument('--max-rps', type=int, choices=range(1, 9), default=4,
                         help='maximum HTTP starts per second across all sources (ffprobe has its own two-process cap)')
     parser.add_argument('--workers', type=int, choices=(4, 8, 16), default=8,
@@ -435,3 +441,4 @@ if __name__ == '__main__':
     parser.add_argument('--retry-probe-timeouts', action='store_true',
                         help='recheck prior ffprobe timeouts, e.g. after improving bounded MP4 header reads')
     asyncio.run(main(parser.parse_args()))
+    print('APP_AUDIT_DONE')

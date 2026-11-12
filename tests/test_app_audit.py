@@ -36,6 +36,30 @@ def test_sparse_sample_covers_whole_line_without_duplicates(size):
             assert max(gaps) - min(gaps) <= 1
 
 
+@pytest.mark.parametrize('size', [9, 10, 11, 193, 700])
+def test_a_sample_of_ten_has_both_ends_and_no_repeat(size):
+    selected = audit.spaced(list(range(size)), 10)
+    assert len(selected) == min(10, size) and len(selected) == len(set(selected))
+    assert selected[0] == 0 and selected[-1] == size - 1
+
+
+CARDS = [{'id': 1, 'name': '万界独尊'}, {'id': 2, 'name': '万界独尊 第二季'}, {'id': 3, 'name': '万界独尊（动态漫）'},
+         {'id': 4, 'name': '丹道至尊'}, {'id': 5, 'name': None}]
+
+
+def test_cards_of_a_series_are_its_links_else_the_cards_named_exactly_or_containing_its_name():
+    assert audit.chosen(CARDS, '万界独尊', ['9'], 'contains') == (['9'], 'production_link')
+    assert audit.chosen(CARDS, '万界独尊', [], 'exact') == (['1'], 'exact_name')
+    assert audit.chosen(CARDS, '万界独尊', [], 'contains') == (['1', '2', '3'], 'name_contains')
+    assert audit.chosen(CARDS, '没有的名字', [], 'contains') == ([], 'unmatched')
+    assert audit.chosen([], '万界独尊', [], 'exact') == ([], 'unmatched')
+
+
+def test_the_audit_reads_every_protocol_the_service_reads():
+    from modules.sources.module import APP_PROTOCOLS
+    assert audit.APP_PROTOCOLS is APP_PROTOCOLS and {'appv7', 'gulu', 'appget', 'app99'} <= set(APP_PROTOCOLS)
+
+
 @pytest.mark.parametrize('words,expected', [
     ('包月套餐，有效期 30 天，每日限额 25000，当前错误：当天限额已超限', True),
     ('访问受限：已达到今日最大请求点数限制 (30000点)。', True),
@@ -364,3 +388,41 @@ async def test_concurrent_expired_catalogue_requests_share_one_replacement_guest
         cards = await asyncio.gather(*(client.detail('1') for _ in range(8)))
     assert len(cards) == 8 and all(c['name'] == 'Title' for c in cards)
     assert model.sessions == 2, 'one replacement session must serve all requests refused under the old one'
+
+
+def test_the_report_is_made_of_the_records_of_a_survey_for_every_application_it_read(tmp_path):
+    """The whole path of the report on the records of a survey made by hand: discovery, catalogue, episodes."""
+    import csv
+    import json
+    import sys
+    tools = str(Path(__file__).resolve().parents[1] / 'tools/checks')
+    sys.path.insert(0, tools)
+    try:
+        spec_ = importlib.util.spec_from_file_location('audit_report', Path(tools) / 'app_audit_report.py')
+        made = importlib.util.module_from_spec(spec_)
+        spec_.loader.exec_module(made)
+    finally:
+        sys.path.remove(tools)
+    inventory = tmp_path / 'inventory.json'
+    inventory.write_text(json.dumps([{'id': 1, 'name': '万界独尊', 'query': '万界独尊', 'season': 1, 'chinese': True,
+                                      'sources': []}]))
+    out = tmp_path / 'out'
+    (out / 'discovery').mkdir(parents=True)
+    (out / 'catalog').mkdir()
+    items = [{'place': place, 'label': str(place), 'token': f't{place}'} for place in range(1, 4)]
+    for app in ('mtq', 'xiaozhu'):
+        (out / 'discovery' / f'{app}-1.json').write_text(json.dumps({'state': 'found', 'selected': ['7']}))
+        (out / 'catalog' / f'{app}-7.json').write_text(json.dumps({'state': 'ok', 'card_data': {
+            'names': ['万界独尊'], 'year': '2021', 'lines': [{'code': 'JD4K', 'name': 'JD4K', 'listed': False,
+                                                                  'parsers': '', 'items': items}]}}))
+        rows = [dict(app=app, series_id=1, card='7', line='JD4K', place=item['place'], label=item['label'], line_total=3,
+                     admitted=True, at=1.0, kind='playable' if item['place'] != 2 else 'not_found', status=200,
+                     heights=[2160] if item['place'] != 2 else [], reason='', attempted=True, seconds=1.0) for item in items]
+        (out / f'episodes-{app}.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in rows))
+    made.report(out, inventory, 3)
+    assert made.apps_of(out) == ['mtq', 'xiaozhu']
+    with (out / 'results' / 'series-lines.csv').open(encoding='utf-8-sig') as stored:
+        lines = list(csv.DictReader(stored))
+    assert [(row['app'], row['line'], row['tested'], row['playable'], row['heights']) for row in lines] == [
+        ('mtq', 'JD4K', '3', '2', '2160'), ('xiaozhu', 'JD4K', '3', '2', '2160')]
+    assert 'mtq: каталогов 1/1' in (out / 'results' / 'series-list.txt').read_text()

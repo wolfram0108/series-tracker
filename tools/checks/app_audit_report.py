@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from app_audit import APPS, daily_quota, spaced
+from app_audit import daily_quota, spaced
 
 
 def read(path, default=None):
@@ -69,8 +69,14 @@ def text_file(path, text):
     temporary.replace(path)
 
 
+def apps_of(root):
+    """The applications a survey read: those it found cards of, by the names of its discovery files."""
+    return sorted({path.name.rsplit('-', 1)[0] for path in (root / 'discovery').glob('*.json')})
+
+
 def report(root, inventory_path, count=25):
     inventory = [r for r in read(inventory_path) if r['chinese']]
+    APPS = apps_of(root)
     observations = []
     for app in APPS:
         path = root / f'episodes-{app}.jsonl'
@@ -166,13 +172,13 @@ def report(root, inventory_path, count=25):
                                                                      sum(r['planned'] for r in app_lines)))
     text_file(destination / 'summary.json', json.dumps(summary, ensure_ascii=False, indent=2))
     text = ['ВЫБОРОЧНАЯ ПРОВЕРКА КИТАЙСКИХ ИСТОЧНИКОВ', summary['generated'], '',
-            'На каждой доступной линии выбрано до 25 серий равномерно по всему списку, включая первую и последнюю.',
+            f'На каждой доступной линии выбрано до {count} серий равномерно по всему списку, включая первую и последнюю.',
             'Доля успехов относится только к реально проверенным позициям. Она не означает долю рабочих серий во всём каталоге.',
             'Пропуски из-за подтверждённой квоты или недоступного хоста не считаются проверенными отказами.',
             'Проверяется получение потока и измерение разрешения; полная загрузка каждой серии не выполняется.',
             'При недоступности API наличие и качество конкретных сериалов установить нельзя.', '']
     for app, data in summary['sources'].items():
-        text.append(f"{app}: каталогов {data['with_catalog']}/24; линий {data['lines']}; "
+        text.append(f"{app}: каталогов {data['with_catalog']}/{len(inventory)}; линий {data['lines']}; "
                     f"проверено {data['tested']}, с видео {data['playable']}; "
                     f"пропущено по квоте {data['quota_skipped']}, по хосту {data['host_skipped']}; "
                     f"ожидают проверки {data['pending']}.")
@@ -199,6 +205,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--inventory', type=Path, required=True)
-    parser.add_argument('--count', type=int, default=25, choices=range(20, 31))
+    parser.add_argument('--count', type=int, default=25, choices=range(2, 31))
     args = parser.parse_args()
     report(args.output, args.inventory, args.count)
