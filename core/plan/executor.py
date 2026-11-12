@@ -367,13 +367,15 @@ class SeriesSync:
         def regroup(plan_: Plan, steps: dict[str, Work]) -> None:
             """A batch starts once every step of it in the plan in force is ready or left behind (a step before it
             failed): the ready ones go as one piece of work, and each step takes its own outcome out of it. A batch not
-            sent yet takes the steps of the new plan; the steps of one sent have their outcome there, and the new steps
-            of its key make the next batch."""
+            sent yet takes the steps of the new plan that no batch sent; the steps of one sent have their outcome there and
+            join no other, and the new steps of its key make the next batch."""
             for key in dict.fromkeys(op.batch for op in plan_.ops if op.batch):
-                members = [steps[op.id] for op in plan_.ops if op.batch == key]
+                # A step a batch sent has its outcome in that batch: it is no member of the batch that waits for the
+                # download of another source (it would never arrive there, and the batch would never be sent).
+                members = [each for each in (steps[op.id] for op in plan_.ops if op.batch == key)
+                           if each.batch is None or not each.batch.sent]
                 batch = batches.get(key)
                 if batch is None or batch.sent:
-                    members = [each for each in members if each.batch is None or not each.batch.sent]
                     if not members:
                         continue
                     batch = batches[key] = Batch(members)

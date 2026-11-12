@@ -72,6 +72,16 @@ class World(SeriesSync):
     answers: dict[tuple[Slot, str], str] = field(default_factory=dict)
     cut_answers: dict[Slot, str] = field(default_factory=dict)
     crashes: set[RowId] = field(default_factory=set)  # the voice-over rows the service falls on, whatever they are laid onto
+    # A safeguard, not a way to wait: a sync that does not end in this many seconds is a hang, and fails as one.
+    guard: float = 60.0
+    # The downloads that take time: a row held waits at a gate that opens once every held row is waiting at it, so the plans
+    # made again by then are made while the other downloads still run. A fall of the service listed in `crash_after` comes
+    # only after the held row it names began to wait (the falls of several episodes come one after another, as jobs end).
+    slow: set[RowId] = field(default_factory=set)
+    crash_after: dict[Slot, RowId] = field(default_factory=dict)
+    _gate: object = None
+    _waiting: int = 0
+    _reached: dict = field(default_factory=dict)
     transient: set[RowId] = field(default_factory=set)  # downloads that fail for this sync only (a network error)
     containers: dict[str, Container] = field(default_factory=dict)
     online: dict[int, tuple[OnlineRow, ...]] = field(default_factory=dict)  # source id -> last complete read
@@ -128,6 +138,8 @@ class World(SeriesSync):
         self.answers.clear()
         self.cut_answers.clear()
         self.crashes.clear()
+        self.slow.clear()
+        self.crash_after.clear()
         self.read_fails.clear()
         self.reset_failures()
 
@@ -159,7 +171,8 @@ class World(SeriesSync):
                      enumerate(row for source in sorted(self.online) for row in self.online[source]))
         self.commands = self.choices.delete
         self.fetched = Counter()
-        synced = asyncio.run(SeriesSync.sync(self, rows, self.choices))
+        self._gate, self._waiting, self._reached = None, 0, {}
+        synced = asyncio.run(asyncio.wait_for(SeriesSync.sync(self, rows, self.choices), self.guard))
         twice = [row for row, count in self.fetched.items() if count > 1]
         assert not twice, f"rows downloaded twice in one sync: {twice}"
         inputs = synced.inputs
@@ -177,7 +190,22 @@ class World(SeriesSync):
     def _truth(self, key: tuple) -> tuple[int, ...]:
         return self.content[key]
 
+    async def _hold(self, row: RowId) -> None:
+        self._reached.setdefault(row, asyncio.Event()).set()
+        self._waiting += 1
+        gate = self._gate = self._gate or asyncio.Event()
+        if self._waiting >= len(self.slow):
+            gate.set()
+        await gate.wait()
+
+    async def _after(self, slot: Slot) -> None:
+        row = self.crash_after.get(slot)
+        if row is not None:
+            await self._reached.setdefault(row, asyncio.Event()).wait()
+
     async def do(self, op, results):
+        if op.kind in DOWNLOADS and op.subject.id in self.slow:
+            await self._hold(op.subject.id)
         if op.kind in DOWNLOADS and op.subject.id in self.transient:
             raise Passing
         if op.kind in DOWNLOADS and op.subject.id not in self.download_fails:
@@ -223,6 +251,7 @@ class World(SeriesSync):
             if answer == "lost":
                 raise Passing
             if answer == "crash" or way.dub in self.crashes:
+                await self._after(goal.slot)
                 raise Crashed
             if (goal.slot, way.voice) in self.align_fails or answer == "mismatch" or \
                     not set(self.content[video.key]) <= set(dub):

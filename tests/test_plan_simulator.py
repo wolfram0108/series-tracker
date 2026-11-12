@@ -434,6 +434,31 @@ def test_a_pair_the_service_fell_on_with_no_next_source_leaves_the_voice_out_and
     assert [track.group for track in container_of(world, 1).tracks] == ["G1"] and step.problems == ()
 
 
+def test_episodes_remade_one_after_another_while_the_downloads_of_the_others_run_all_send_their_alignment():
+    """The service falls on the first source of a voice-over of three episodes, one after another, each fall remaking the
+    plan while the downloads of the next sources of the episodes before it still run. Every episode sends the alignment
+    of its next source (a step an earlier job of the episode ended is no member of the batch that waits for the download)
+    and the sync ends: a step left waiting for a step that has ended is a hang."""
+    world = World()
+    world.guard = 20.0
+    cvh = lambda episode: RowId(3, f"g1cvh{episode}", f"g1cvh{episode}")
+    kodik = lambda episode: RowId(2, f"g1kodik{episode}", f"g1kodik{episode}")
+    for episode in (1, 2, 3):
+        world.put(1, f"ref{episode}", episode, group=REF)
+        world.put(2, f"g2e{episode}", episode, group="G2", player="kodik")
+        world.put(3, f"g1cvh{episode}", episode, group="G1", player="cvh")
+        world.put(2, f"g1kodik{episode}", episode, group="G1", player="kodik")
+    world.crashes = {cvh(episode) for episode in (1, 2, 3)}
+    world.slow = {kodik(episode) for episode in (1, 2, 3)}
+    world.crash_after = {(1, 2): kodik(1), (1, 3): kodik(2)}
+    step = world.sync("три серии: сбой службы один за другим")
+    world.check(step)
+    for episode in (1, 2, 3):
+        assert [track.dub.row_key for track in container_of(world, episode).tracks if track.group == "G1"] == \
+            [f"g1kodik{episode}"]
+    assert not world.failed and step.problems == ()
+
+
 def test_a_cut_the_service_fell_on_is_no_record_and_comes_next_time():
     """A cut the service fell on judged nothing of the compilation: the episode takes its single video for this sync,
     nothing is recorded, and the next sync cuts it again."""
