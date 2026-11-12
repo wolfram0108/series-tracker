@@ -43,7 +43,7 @@ class Unasked(str):
 
 # How the programs that fail only in words say that a file is not to be had: a private or removed video (yt-dlp, the
 # words of ytdlp.py for it), an address the host has nothing at (yt-dlp, ffmpeg, the reader of a playlist).
-_FINAL_WORDS = ("недоступно", "приватн", "video unavailable", "private video",
+_FINAL_WORDS = ("video unavailable", "private video",
                 "http error 404", "http error 410", "server returned 404", "server returned 410")
 
 

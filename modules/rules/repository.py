@@ -9,6 +9,7 @@ import json
 import sqlite3
 
 from core.db import Database
+from core.reasons import reason
 
 
 def _set_conditions(conn: sqlite3.Connection, rule_id: int,
@@ -53,8 +54,7 @@ class RulesRepository:
     async def create_profile(self, name: str) -> int:
         if await self._db.fetch_one(
                 "SELECT id FROM parser_profiles WHERE name=?", (name,)):
-            raise ValueError(f"Профиль парсера с именем '{name}' уже "
-                             "существует.")
+            raise ValueError(reason("profile_name_taken", name=name))
         return await self._db.insert(
             "INSERT INTO parser_profiles (name) VALUES (?)", (name,))
 
@@ -68,8 +68,7 @@ class RulesRepository:
                 "SELECT id FROM parser_profiles WHERE name=? AND id<>?",
                 (data["name"], profile_id))
             if dup:
-                raise ValueError(f"Профиль парсера с именем "
-                                 f"'{data['name']}' уже существует.")
+                raise ValueError(reason("profile_name_taken", name=data["name"]))
             await self._db.execute(
                 "UPDATE parser_profiles SET name=? WHERE id=?",
                 (data["name"], profile_id))

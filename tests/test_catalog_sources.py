@@ -9,7 +9,7 @@ import pytest
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.contracts import SeriesSource, SourceEvent
 from core.db import Database
-from core.reasons import parse
+from core.reasons import code_of, parse, relayed
 from modules.catalog import CatalogModule
 from modules.catalog.repository import CatalogRepository
 from modules.catalog.series_sources import REMOVED_FIELDS, kind_of
@@ -129,7 +129,7 @@ async def test_a_series_without_a_source_is_refused(system, sources):
 async def test_create_names_a_removed_field_instead_of_ignoring_it(system, name):
     _, probe = system
     given = data(sources=[source()], **{name: "x"})
-    with pytest.raises(BusRequestError, match=f"'{name}'"):
+    with pytest.raises(BusRequestError, match=f'"field":"{name}"'):
         await probe.request("catalog.series.create", {"data": given}, timeout=5)
     assert await probe.request("catalog.series.list", {}, timeout=5) == []
 
@@ -139,7 +139,8 @@ async def test_create_names_a_removed_field_instead_of_ignoring_it(system, name)
 async def test_update_names_a_removed_field_instead_of_ignoring_it(system, name):
     _, probe = system
     made = await create_series(probe)
-    with pytest.raises(BusRequestError, match=f"'{name}'"):
+    refused = "series_sources_not_written" if name == "sources" else f'"field":"{name}"'
+    with pytest.raises(BusRequestError, match=refused):
         await probe.request("catalog.series.update", {
             "series_id": made.series_id, "fields": {"season": "2", name: "x"}}, timeout=5)
     # a refused update changes nothing, not even the fields that were fine
@@ -279,10 +280,10 @@ async def test_a_caller_that_names_its_series_cannot_reach_a_source_of_another(s
                                                          source(url=VK, source_type="vk_video")])
     other = await create_series(probe, name="2", sources=[source(url=RUCHIME, source_type="web_video")])
     foreign = other.source_ids[0]
-    with pytest.raises(BusRequestError, match="не найден"):
+    with pytest.raises(BusRequestError, match="source_not_in_series"):
         await probe.request("catalog.sources.update", {"source_id": foreign, "series_id": mine.series_id,
                                                        "fields": {"vibix_season": 2}}, timeout=5)
-    with pytest.raises(BusRequestError, match="не найден"):
+    with pytest.raises(BusRequestError, match="source_not_in_series"):
         await probe.request("catalog.sources.remove", {"source_id": foreign, "series_id": mine.series_id}, timeout=5)
     assert len(await probe.request("catalog.sources.list", {"series_id": other.series_id}, timeout=5)) == 1
     done = await probe.request("catalog.sources.update", {"source_id": mine.source_ids[0], "series_id": mine.series_id,
@@ -295,7 +296,7 @@ async def test_a_caller_that_names_its_series_cannot_reach_a_source_of_another(s
 @pytest.mark.asyncio
 async def test_the_sources_of_a_missing_series_are_an_error_not_an_empty_list(system):
     _, probe = system
-    with pytest.raises(BusRequestError, match="не найден"):
+    with pytest.raises(BusRequestError, match="series_not_found"):
         await probe.request("catalog.sources.list", {"series_id": 99}, timeout=5)
 
 
@@ -345,7 +346,7 @@ async def test_the_same_address_may_stand_in_two_series(system):
 async def test_a_source_of_a_missing_series_or_a_missing_profile_is_refused(system):
     _, probe = system
     made = await create_series(probe, sources=[source(url=RUCHIME, source_type="web_video")])
-    with pytest.raises(BusRequestError, match="не найден"):
+    with pytest.raises(BusRequestError, match="series_not_found"):
         await probe.request("catalog.sources.add", {"series_id": 99, "source": source()}, timeout=5)
     with pytest.raises(BusRequestError) as refused:
         await probe.request("catalog.sources.add", {
@@ -421,12 +422,12 @@ async def test_update_refuses_what_a_source_cannot_hold(system):
 
     assert code_of(await attempt({"url": VK})) == "source_exists"
     assert code_of(await attempt({"parser_profile_id": 77})) == "profile_not_found"
-    assert "'series_id'" in str(await attempt({"series_id": 2}))
-    assert "'id'" in str(await attempt({"id": 2}))
+    assert code_of(str(await attempt({"series_id": 2}))) == "source_field_unknown"
+    assert parse(relayed(str(await attempt({"id": 2}))))["params"]["field"] == "id"
     assert "source_type" in str(await attempt({"source_type": "ftp"}))
     assert "vibix_season" in str(await attempt({"vibix_season": 0}))
     assert drain(sub) == []
-    with pytest.raises(BusRequestError, match="не найден"):
+    with pytest.raises(BusRequestError, match="source_not_found"):
         await probe.request("catalog.sources.update", {"source_id": 999, "fields": {"position": 1}}, timeout=5)
 
 
@@ -470,7 +471,7 @@ async def test_a_source_is_removed_and_announced_until_one_is_left(system):
     with pytest.raises(BusRequestError) as refused:
         await probe.request("catalog.sources.remove", {"source_id": third}, timeout=5)
     assert code_of(refused.value) == "last_source"
-    with pytest.raises(BusRequestError, match="не найден"):
+    with pytest.raises(BusRequestError, match="source_not_found"):
         await probe.request("catalog.sources.remove", {"source_id": second}, timeout=5)
 
 

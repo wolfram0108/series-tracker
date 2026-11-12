@@ -161,7 +161,7 @@ class AllohaPlayer:
     @asynccontextmanager
     async def _session(self) -> AsyncIterator[AllohaSession]:
         if self._profile is None:
-            raise AllohaRefused("нет профиля клиента Alloha (ST_ALLOHA_FINGERPRINT, ST_ALLOHA_USER_AGENT)")
+            raise AllohaRefused(reason("alloha_no_profile"))
         http = self._client(self._profile)
         session = AllohaSession(self._profile, http, media=lambda: self._client(self._profile))
         try:
@@ -175,13 +175,13 @@ class AllohaPlayer:
         answers 404, or the list of its files has no such episode)."""
         parsed = parse_link(link)
         if parsed is None:
-            raise AllohaRefused("не ссылка Alloha")
+            raise AllohaRefused(reason("not_alloha_link"))
         page_url, iframe = parsed
         try:
             page = await session.document(_absolute(iframe), _parent(page_url))
         except AllohaRefused as exc:
             if exc.status == 404:
-                return "", Reading(Kind.NOT_FOUND, 404, message="the player has no such video")
+                return "", Reading(Kind.NOT_FOUND, 404, message=reason("alloha_no_video"))
             raise
         catalog = catalog_of(page)
         reading = _in_catalog(catalog, _named(iframe))[0] if catalog is not None else None
@@ -208,7 +208,7 @@ class AllohaPlayer:
         """A download of Alloha is the player's own (`transfer`): the answer names the link and that the player takes it."""
         if self._profile is None:
             raise StreamUnavailable(reason("player_failed", player=self.label,
-                                           cause="нет профиля клиента Alloha"), False)
+                                           cause=reason("alloha_no_profile")), False)
         return {"stream_url": url, "player_fetch": True}
 
     async def transfer(self, url: str, target: str, max_height: int | None, connections: int,
@@ -219,15 +219,15 @@ class AllohaPlayer:
         async with self._session() as session:
             page, settled = await self._opened(session, url)
             if settled is not None:
-                raise AllohaRefused(settled.message or "у плеера нет этой серии", status=settled.status, final=True)
+                raise AllohaRefused(settled.message or reason("alloha_no_episode"), status=settled.status, final=True)
             await self._asks.wait()
             tracks = tracks_of(await session.answer(page))
             if not tracks:
-                raise AllohaRefused("у плеера нет файлов этой серии", final=True)
+                raise AllohaRefused(reason("alloha_no_files"), final=True)
             voice = tracks[0].audio_id
             fitting = [each for each in tracks if each.audio_id == voice and (not max_height or each.height <= max_height)]
             if not fitting:
-                raise AllohaRefused(f"у плеера нет файла не выше {max_height}p", final=True)
+                raise AllohaRefused(reason("alloha_no_height", height=f"{max_height}p"), final=True)
             track = max(fitting, key=lambda each: each.height)
             await session.authorize(page)
             await session.play(track, _connector(session.http))

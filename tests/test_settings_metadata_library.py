@@ -122,7 +122,7 @@ async def test_metadata_search_formats_results(system, monkeypatch):
 @pytest.mark.asyncio
 async def test_metadata_without_token_fails_loudly(system):
     _, _, modules = system
-    with pytest.raises(BusRequestError, match="токен TMDB"):
+    with pytest.raises(BusRequestError, match="tmdb_token_missing"):
         await _probe(modules).request("metadata.search",
                                       {"query": "x"}, timeout=5)
 
@@ -172,11 +172,11 @@ async def test_library_allowed_roots_enforced(db_path, tmp_path):
         ok = await probe.request("library.directories.list",
                                  {"path": str(tmp_path)}, timeout=5)
         assert ok["path"] == str(tmp_path)
-        with pytest.raises(BusRequestError, match="запрещён"):
+        with pytest.raises(BusRequestError, match="path_forbidden"):
             await probe.request("library.directories.list",
                                 {"path": "/etc"}, timeout=5)
         # обход через .. нормализуется ДО проверки
-        with pytest.raises(BusRequestError, match="запрещён"):
+        with pytest.raises(BusRequestError, match="path_forbidden"):
             await probe.request("library.directories.list",
                                 {"path": f"{tmp_path}/../../etc"}, timeout=5)
     finally:
@@ -186,7 +186,7 @@ async def test_library_allowed_roots_enforced(db_path, tmp_path):
 @pytest.mark.asyncio
 async def test_library_missing_path(system):
     _, _, modules = system
-    with pytest.raises(BusRequestError, match="не каталог"):
+    with pytest.raises(BusRequestError, match="not_directory"):
         await _probe(modules).request("library.directories.list",
                                       {"path": "/нет/такого"}, timeout=5)
 

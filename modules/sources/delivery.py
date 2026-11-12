@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 from urllib.parse import urlparse
 
+from core.reasons import describe, reason
+
 from . import hosts, parsers
 from .parsers import SourceParseError, SourceRefusedError
 
@@ -40,7 +42,7 @@ class Delivered:
 
 def _accept_page(raw: str | bytes) -> str:
     if isinstance(raw, bytes):
-        raise SourceParseError("ожидалась страница, приехал файл")
+        raise SourceParseError(reason("expected_page_got_file"))
     return raw
 
 
@@ -50,7 +52,7 @@ def _accept_torrent(raw: str | bytes) -> bytes:
     # Metainfo is a bencoded dict with an 'info' key — the only answer
     # that proves a file arrived rather than the site's own page.
     if not (raw.startswith(b"d") and b"4:info" in raw):
-        raise SourceParseError("ответ не является .torrent (bencode)")
+        raise SourceParseError(reason("not_torrent_file"))
     return raw
 
 
@@ -58,7 +60,7 @@ def _accept_json(raw: str | bytes) -> Any:
     try:
         return json.loads(raw)
     except (TypeError, ValueError) as exc:
-        raise SourceParseError(f"ответ не JSON: {exc}") from exc
+        raise SourceParseError(reason("answer_not_json", cause=str(exc))) from exc
 
 
 _ACCEPTORS: dict[str, Callable[[Any], Any]] = {
@@ -92,17 +94,15 @@ class Delivery:
             except SourceRefusedError:
                 raise  # no other host changes this answer (daily limit)
             except Exception as exc:
-                attempts.append(f"{urlparse(attempt_url).netloc}: {exc}")
-                self._log.warning("%s: хост не сработал — %s", service,
-                                  attempts[-1])
+                attempts.append(reason("host_failed", host=urlparse(attempt_url).netloc, cause=str(exc)))
+                self._log.warning("%s: хост не сработал — %s", service, describe(attempts[-1]))
                 continue
             if attempt_url != url:
                 self._log.info("%s: доставлено с %s (в ссылке — %s)", service,
                                urlparse(attempt_url).netloc,
                                urlparse(url).netloc)
             return Delivered(attempt_url, value)
-        raise SourceParseError(
-            f"{service}: не сработал ни один хост ({'; '.join(attempts)})")
+        raise SourceParseError(reason("no_host_worked", service=service, causes=attempts))
 
     async def _deliver(self, service: str, url: str, transport: str,
                        timeout: int,

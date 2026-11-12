@@ -13,7 +13,7 @@ from typing import Awaitable, Callable
 
 import httpx
 
-from core.reasons import reason
+from core.reasons import describe, reason
 from core.retry import Budget, retrying
 
 from .players.contract import Answer, Kind, Player, PlayerRef, Reading
@@ -146,7 +146,8 @@ async def settle(player: Player, ref: PlayerRef, http: httpx.AsyncClient, page_u
         reading = player.read(answer)
         # Every answer of a player, with what it said, is in the log: a verdict alone hides why it was unsure.
         logger.info("плеер %s, %s: попытка %d — %s, статус %s, %s (%.1f с)", player.name, ref.url, tries,
-                    reading.kind.value, reading.status or answer.status, reading.message or answer.error or "—",
+                    reading.kind.value, reading.status or answer.status,
+                    describe(reading.message or answer.error or "") or "—",
                     clock() - began)
         return answer, reading
 

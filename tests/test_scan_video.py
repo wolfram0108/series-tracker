@@ -15,7 +15,7 @@ from core import BaseModule, Bus, BusRequestError, Runner
 from core.contracts import RUN_CHANGED, TableState
 from core.db import Database
 from core.envelope import Envelope
-from core.reasons import parse
+from core.reasons import parse, reason
 from modules.catalog import CatalogModule
 from modules.scan import ScanModule
 from scan_support import STUCK_S, Page, World, migrated_db
@@ -352,8 +352,8 @@ async def test_the_folder_a_save_planned_is_moved_first_and_the_sync_works_in_it
 
 
 async def test_a_move_that_fails_fails_the_sync_before_anything_else_is_done(rig):
-    rig.world.move_error = "перемещение между разными дисками не поддерживается"
-    with pytest.raises(BusRequestError, match="разными дисками"):
+    rig.world.move_error = reason("move_cross_device")
+    with pytest.raises(BusRequestError, match="move_cross_device"):
         await rig.run()
     assert rig.world.order == [f"library.relocation.apply {rig.series_id}"]
     carrier = rig.query("SELECT status FROM scan_tasks WHERE series_id=?", (rig.series_id,))

@@ -10,7 +10,7 @@ import pytest
 from core import BaseModule, Bus, Runner
 from core.contracts.availability import Action, NotAllowed, refusal
 from core.db import Database
-from core.reasons import parse
+from core.reasons import parse, reason
 from modules.catalog import CatalogModule
 from modules.gateway import GatewayModule
 from modules.library import LibraryModule
@@ -219,7 +219,7 @@ async def test_series_details_and_404(system):
 
     resp = await client.get("/api/series/777")
     assert resp.status_code == 404
-    assert resp.json() == {"error": "Сериал не найден"}
+    assert resp.json() == {"error": reason("series_not_found")}
 
 
 # --- создание и удаление ----------------------------------------------------------
@@ -322,7 +322,7 @@ async def test_add_series_rejects_relative_save_path(system):
         "sources": [{"url": "http://kinozal.tv/details.php?id=10", "source_type": "torrent"}]})
 
     assert resp.status_code == 400
-    assert "абсолютн" in resp.json()["error"]
+    assert "save_path_relative" in resp.json()["error"]
 
 
 @pytest.mark.asyncio

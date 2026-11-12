@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from core import BusRequestError
+from core.reasons import code_of, reason, relayed
 from .routing import admitted
 
 from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, FailuresReset, OkResponse, SyncCancelled,
@@ -28,18 +29,22 @@ def _iso(value):
     return value.replace(" ", "T", 1) if isinstance(value, str) else value
 
 
+# Refusals of a state that does not allow the change: the table of what is allowed, or a relocation under way.
+_CONFLICT_CODES = frozenset({"not_allowed", "move_in_progress"})
+
+
 def _error_response(exc: BusRequestError, *, with_success: bool = True):
     msg = str(exc)
     if "LookupError" in msg:
-        code, text = 404, "Сериал не найден"
-    elif "уже выполняется" in msg or "not_allowed" in msg:
-        code, text = 409, msg.split(": ", 1)[-1]
+        code, text = 404, reason("series_not_found")
+    elif code_of(msg) in _CONFLICT_CODES:
+        code, text = 409, relayed(msg)
     elif "LibraryError" in msg:
-        code, text = 400, msg.split(": ", 1)[-1]
+        code, text = 400, relayed(msg)
     elif "ValueError" in msg:
-        code, text = 400, msg.split(": ", 1)[-1]
+        code, text = 400, relayed(msg)
     else:
-        code, text = 500, msg
+        code, text = 500, relayed(msg)
     body = {"success": False, "error": text} if with_success \
         else {"error": text}
     return JSONResponse(body, status_code=code)
@@ -154,7 +159,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True,
-                "message": "Задача на обновление принята в обработку."}
+                "message": reason("series_update_accepted")}
 
     @r.delete("/api/series/{series_id}", response_model=OkResponse,
               response_model_exclude_none=True, responses=_ERRORS)
@@ -194,7 +199,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         enabled = data.get("enabled")
         if enabled is None:
             return JSONResponse(
-                {"success": False, "error": "Параметр 'enabled' не указан"},
+                {"success": False, "error": reason("param_missing", name="enabled")},
                 status_code=400)
         try:
             async with admitted(gw, series_id):
@@ -213,7 +218,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         seasons = data.get("seasons")
         if seasons is None:
             return JSONResponse(
-                {"success": False, "error": "Параметр 'seasons' не указан"},
+                {"success": False, "error": reason("param_missing", name="seasons")},
                 status_code=400)
         try:
             async with admitted(gw, series_id):
@@ -236,7 +241,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         episodes = data.get("episodes")
         if episodes is None:
             return JSONResponse(
-                {"success": False, "error": "Параметр 'episodes' не указан"},
+                {"success": False, "error": reason("param_missing", name="episodes")},
                 status_code=400)
         try:
             async with admitted(gw, series_id):
@@ -268,8 +273,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             result = await gw.request("scan.series.run", {
                 "series_id": series_id, **({} if download else {"download": False})})
         except BusRequestError as exc:
-            msg = str(exc).split(": ", 1)[-1]
-            code = 409 if "not_allowed" in msg else 500
+            msg = relayed(str(exc))
+            code = 409 if code_of(str(exc)) == "not_allowed" else 500
             return JSONResponse({"success": False, "error": msg},
                                 status_code=code)
         return {"success": True, **result}
@@ -281,7 +286,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             done = await gw.request("scan.run.cancel", {"series_id": series_id})
         except BusRequestError as exc:
-            return JSONResponse({"success": False, "error": str(exc).split(": ", 1)[-1]}, status_code=500)
+            return JSONResponse({"success": False, "error": relayed(str(exc))}, status_code=500)
         return {"success": True, "cancelled": bool(done.get("cancelled"))}
 
     @r.post("/api/series/{series_id}/failures/reset", response_model=FailuresReset, responses=_ERRORS)

@@ -12,7 +12,9 @@ import pytest
 
 from core import BaseModule, Bus, Runner, storage
 from core.db import Database
+from core.reasons import code_of, parse, reason
 from modules.downloads import DownloadsModule
+from modules.downloads.failure import Final
 from modules.downloads.ytdlp import player_target
 from settle import settle, wait_until
 from schema_db import migrated
@@ -108,7 +110,7 @@ class FakeDownloader:
             if self.gate:
                 await self.gate.wait()
             if url in self.fail_urls:
-                return False, "видео недоступно или приватно"
+                return False, Final(reason("video_unavailable"))
             if self.timeouts.get(url, 0):
                 self.timeouts[url] -= 1
                 return False, "ffmpeg direct download: Connection timed out"
@@ -212,7 +214,7 @@ async def test_fetch_failure_is_reported_and_leaves_no_partial_file(system, tmp_
     dl.fail_urls.add("https://site/#kodik=1")
     (done,) = await _fetch(probe, bus, 1, jobs=[
         {"key": "dub:9", "url": "https://site/#kodik=1", "path": path, "series_id": 3}])
-    assert done["ok"] is False and "приватно" in done["error"] and done["transient"] is False
+    assert done["ok"] is False and parse(done["error"])["code"] == "video_unavailable" and done["transient"] is False
     assert not os.path.exists(path)
 
 
@@ -233,7 +235,7 @@ async def test_fetch_unreachable_sources_is_an_error_not_a_blind_download(system
     fake.stream_raises.add("https://site/#cvh=3")
     (done,) = await _fetch(probe, bus, 1, jobs=[
         {"key": "dub:3", "url": "https://site/#cvh=3", "path": str(tmp_path / "b.mp4"), "series_id": 3}])
-    assert done["ok"] is False and "поток не получен" in done["error"] and dl.started == []
+    assert done["ok"] is False and parse(done["error"])["code"] == "stream_not_got" and dl.started == []
     # Our own module did not answer: nothing was learnt of the source, and its owner asks it again at the next round.
     assert done["transient"] is True
 
@@ -439,7 +441,7 @@ async def test_fetch_cancel_by_key_drops_only_that_job(system, tmp_path):
     assert await probe.request("downloads.cancel", {"task_id": "fetch:file:0"}, timeout=5) == {"cancelled": True}
     # The owner of the cancelled fetch hears it end, failed.
     stopped = (await asyncio.wait_for(finished.queue.get(), 5)).payload
-    assert (stopped["key"], stopped["ok"], stopped["error"]) == ("file:0", False, "отменено пользователем")
+    assert (stopped["key"], stopped["ok"], stopped["error"]) == ("file:0", False, reason("cancelled_by_user"))
     # The slot of the cancelled job goes to the queued one; the other running job is untouched.
     assert await _wait(lambda: "https://site/#cvh=2" in dl.started)
     dl.gate.set()
@@ -452,7 +454,7 @@ async def test_fetch_rejects_a_relative_path(system):
     bus, _, dl, probe = system
     (done,) = await _fetch(probe, bus, 1, jobs=[
         {"key": "dub:7", "url": "https://site/#cvh=7", "path": "rel/x.mp4", "series_id": 3}])
-    assert done["ok"] is False and "абсолютным" in done["error"] and dl.started == []
+    assert done["ok"] is False and code_of(done["error"]) == "save_path_relative" and dl.started == []
 
 
 @pytest.mark.asyncio
@@ -562,7 +564,7 @@ async def test_a_downloaded_file_shorter_than_any_episode_is_broken_at_once(syst
     bus, _, dl, probe = system
     path = str(tmp_path / "s.mp4")
     (done,) = await _fetch(probe, bus, 1, jobs=[{"key": "dub:s", "url": "https://site/#cvh=8", "path": path, "series_id": 3}])
-    assert done["ok"] is False and "6.0 с" in done["error"] and done["transient"] is False, done
+    assert done["ok"] is False and parse(done["error"])["params"]["seconds"] == "6.0" and done["transient"] is False, done
     assert dl.started.count("https://site/#cvh=8") == 1 and not os.path.exists(path)
 
 

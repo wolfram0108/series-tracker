@@ -34,6 +34,8 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from core.reasons import reason
+
 # Форма входа Kinozal: action может быть со слешем и в любых кавычках.
 _LOGIN_FORM_RE = re.compile(r"""action=['"]?/?takelogin\.php""", re.I)
 
@@ -71,8 +73,7 @@ class KinozalProvider:
             timeout=15)
         resp.raise_for_status()
         if "takelogin.php" in resp.url:
-            raise TrackerLoginError(f"Kinozal ({domain}) не принял логин — "
-                                    "проверьте учётные данные")
+            raise TrackerLoginError(reason("kinozal_login_rejected", domain=domain))
 
     def is_logged_out(self, resp: requests.Response) -> bool:
         # форма входа: action="/takelogin.php" | "takelogin.php" | '...'
@@ -120,11 +121,8 @@ class RutrackerProvider:
             # говорим об этом прямо, а не «логин не принят»: причина
             # разная и лечение разное (проверить пароль ≠ войти руками).
             if "cap_sid" in page.text or "cap_code" in page.text:
-                raise TrackerLoginError(
-                    f"RuTracker ({domain}) требует капчу при входе — "
-                    "автоматический вход невозможен, нужен ручной")
-            raise TrackerLoginError(f"RuTracker ({domain}) не выдал "
-                                    "bb_session — логин не принят")
+                raise TrackerLoginError(reason("rutracker_captcha", domain=domain))
+            raise TrackerLoginError(reason("rutracker_login_rejected", domain=domain))
 
     def is_logged_out(self, resp: requests.Response) -> bool:
         jar = getattr(resp, "cookies", None)
@@ -197,8 +195,7 @@ class VkProvider:
 
     def login(self, session: requests.Session, credentials: dict,
               url: str) -> None:
-        raise TrackerLoginError(
-            "VK: токен статичен, релогин невозможен — проверьте Access Token")
+        raise TrackerLoginError(reason("vk_token_static"))
 
     def is_logged_out(self, resp: requests.Response) -> bool:
         return False  # ошибки API приходят JSON-ом, их разбирает sources

@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterator
 
 from .logging import get_logger
+from .reasons import reason
 
 # Wait limits by the weight of the call: a metadata call, the removal of a tree, a move across directories.
 DEFAULT_TIMEOUT_S = 30.0
@@ -111,7 +112,7 @@ def acquire(*paths: str) -> Hold:
     ignore = _mine.get()
     for name in names:
         if _taken(name, ignore):
-            raise StorageBusy(f"путь занят незавершённой файловой операцией: {name}")
+            raise StorageBusy(reason("storage_busy", path=name))
     token = next(_tokens)
     hold = _holds[token] = Hold(token, names)
     return hold
@@ -148,7 +149,8 @@ async def call(fn: Callable[..., Any], *args: Any, timeout: float = DEFAULT_TIME
     try:
         return await asyncio.wait_for(asyncio.shield(future), timeout)
     except asyncio.TimeoutError:
-        raise StorageTimeout(f"хранилище не ответило за {timeout:.0f} с: {getattr(fn, '__name__', fn)}") from None
+        raise StorageTimeout(reason("storage_timeout", seconds=round(timeout),
+                                    op=str(getattr(fn, "__name__", fn)))) from None
 
 
 def remove_file(path: str) -> bool:

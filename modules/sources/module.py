@@ -107,7 +107,7 @@ from core.db import Database
 from core.envelope import Envelope
 from core.http_limits import bounded_client
 from core.logging import get_logger
-from core.reasons import reason
+from core.reasons import describe, reason
 
 from . import anilibria, delivery, parsers
 from .browser_pool import BrowserPool
@@ -315,7 +315,7 @@ class SourcesModule(BaseModule):
         url = env.payload["url"]
         tracker = await self.repo.resolve(url)
         if not tracker:
-            raise SourceParseError(f"трекер не распознан по URL: {url}")
+            raise SourceParseError(reason("tracker_unknown_url", url=url))
         service = tracker["canonical_name"]
         lock = self._locks.setdefault(service, asyncio.Lock())
         async with lock:
@@ -357,7 +357,7 @@ class SourcesModule(BaseModule):
             return await self._parse_page(service, url, mirrors, parse,
                                           transport="browser")
 
-        raise SourceParseError(f"нет реализации для трекера {service}")
+        raise SourceParseError(reason("tracker_no_impl", service=service))
 
     # --- браузерный пул (astar/anilibria_tv, Р-9): modules/sources/browser_pool.py ---------
 
@@ -531,7 +531,7 @@ class SourcesModule(BaseModule):
         url, target = env.payload["url"], env.payload["target"]
         player = next((each for each in self.players if each.owns(url) and hasattr(each, "transfer")), None)
         if player is None:
-            return {"ok": False, "error": "ссылку не скачивает ни один плеер", "final": True}
+            return {"ok": False, "error": reason("no_player_downloads"), "final": True}
 
         async def told(figures: dict) -> None:
             self.publish_event("sources.video.progress", {"target": target, **figures})
@@ -543,10 +543,10 @@ class SourcesModule(BaseModule):
             done = await work
         except asyncio.CancelledError:
             if work.cancelled():
-                return {"ok": False, "error": "загрузка остановлена", "final": False}
+                return {"ok": False, "error": reason("download_stopped"), "final": False}
             raise
         except AllohaRefused as exc:
-            self.log.warning("%s: загрузка плеером не удалась: %s", os.path.basename(target), exc)
+            self.log.warning("%s: загрузка плеером не удалась: %s", os.path.basename(target), describe(str(exc)))
             return {"ok": False, "error": str(exc), "final": exc.final}
         finally:
             self._transfers.pop(target, None)

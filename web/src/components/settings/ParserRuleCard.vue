@@ -7,6 +7,7 @@ import { t } from "../../i18n"
 import ParserPatternEditor, { type PatternBlock } from "./ParserPatternEditor.vue"
 import type { TableRow } from "../../lib/ruleTable"
 import { actionLabel, actionOptions, conditionOptions, fieldText, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
+import { reasonText } from "../../lib/reason"
 
 // Карточка одного правила профиля парсера. Шапка (имя + управление) и
 // тело (условия «ЕСЛИ» с конструктором паттернов + действия «ТО»).
@@ -98,7 +99,7 @@ function getAssignActionLabel(actionType: string): string {
         <span
           v-if="rule.valid === false"
           class="rule-invalid-badge"
-          :title="rule.error || t('rules.rule.disabled.title')"
+          :title="reasonText(rule.error) || t('rules.rule.disabled.title')"
         >{{ t("rules.rule.disabled.label") }}</span>
       </div>
       <div class="rule-controls">

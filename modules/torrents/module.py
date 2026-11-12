@@ -85,6 +85,7 @@ from core import BaseModule, BusRequestError, storage, torrent_profile_id
 from core.contracts import SeriesKind
 from core.db import Database
 from core.envelope import Envelope
+from core.reasons import reason, relayed
 from core.retry import UNTIMED, Budget, retrying
 
 from . import pipeline, selection
@@ -108,8 +109,8 @@ _QUEUED_STATES = {"queuedDL"}
 # перенос) считала их «загрузкой» — карточка врала; теперь это флаг
 # error. Тексты — для модалки статуса.
 _ERROR_STATES = {
-    "error": "qBittorrent: ошибка раздачи — проверьте путь сохранения",
-    "missingFiles": "qBittorrent: файлы недоступны или перемещены",
+    "error": reason("qbt_error"),
+    "missingFiles": reason("qbt_files_missing"),
 }
 
 # Категория qBit для транзиентных preview-раздач (добор метаданных magnet при
@@ -303,13 +304,12 @@ class TorrentsModule(BaseModule):
             verdict = await self.qbt.add_torrent_file(content, save_path,
                                                       paused=paused)
         else:
-            raise TorrentParseError("нужен magnet или content_b64")
+            raise TorrentParseError(reason("torrent_need_link"))
 
         torrent_hash = await self.qbt.find_hash(candidates)
         if torrent_hash is None:
-            raise RuntimeError(
-                f"торрент не появился в qBittorrent после добавления "
-                f"(ответ API: {verdict}, кандидаты: {candidates})")
+            raise RuntimeError(reason("qbt_torrent_not_appeared", verdict=verdict,
+                                      candidates=candidates))
         existed = verdict == "fails"  # Fails. + найден по hash = уже был
         if existed:
             self.log.info("торрент %s уже существовал в qBittorrent",
@@ -336,8 +336,7 @@ class TorrentsModule(BaseModule):
             elif item.get("link"):
                 await self._preview_fetch_file(tid, item["link"])
             else:
-                self._emit_preview_failed(
-                    tid, None, "у раздачи нет ни magnet, ни ссылки на .torrent")
+                self._emit_preview_failed(tid, None, reason("preview_no_link"))
 
     async def _preview_fetch_file(self, tid, link: str) -> None:
         """A .torrent by its link: sources gives the file (cache, polite pauses to the tracker), the file
@@ -347,9 +346,10 @@ class TorrentsModule(BaseModule):
                 "sources.torrent_file.get",
                 {"url": link, "torrent_id": tid})
         except (BusRequestError, asyncio.TimeoutError) as exc:
-            self._emit_preview_failed(
-                tid, None, "не удалось скачать .torrent: "
-                + (str(exc).split(": ", 1)[-1] or "нет ответа"))
+            detail = relayed(str(exc))
+            failed = (reason("preview_torrent_download_failed", detail=detail) if detail
+                      else reason("preview_torrent_no_answer"))
+            self._emit_preview_failed(tid, None, failed)
             return
         self._preview_parse_torrent(tid, reply["content_b64"])
 
@@ -366,7 +366,7 @@ class TorrentsModule(BaseModule):
         except Exception as exc:  # noqa: BLE001 — предпросмотр не валит систему
             self.log.warning("preview .torrent %s: %s", tid, exc)
             self._emit_preview_failed(
-                tid, None, f"не удалось разобрать .torrent: {exc}")
+                tid, None, reason("preview_torrent_unreadable", detail=str(exc)))
 
     async def _preview_fetch_magnet(self, tid, magnet: str) -> None:
         """A magnet gets its metadata from the swarm through qBit. A paused torrent does not fetch it (checked),
@@ -393,7 +393,7 @@ class TorrentsModule(BaseModule):
         added = False
         try:
             if self.qbt is None:
-                self._emit_preview_failed(tid, ih, "qBittorrent не настроен")
+                self._emit_preview_failed(tid, ih, reason("qbt_not_configured"))
                 return
             save_path = await self._preview_save_path_get()
             await self.qbt.add_magnet(magnet, save_path, paused=False,
@@ -401,15 +401,14 @@ class TorrentsModule(BaseModule):
             added = True
             files = await self._preview_poll_files(ih, timeout=25.0)
             if files is None:
-                self._emit_preview_failed(
-                    tid, ih, "метаданные не получены (нет сидов?)")
+                self._emit_preview_failed(tid, ih, reason("preview_no_metadata"))
                 return
             data = {"name": None, "files": files}
             self._preview_cache[ih] = data
             self._emit_preview_ready(tid, ih, data)
         except Exception as exc:  # noqa: BLE001 — предпросмотр не валит систему
             self.log.warning("preview magnet %s: %s", ih[:8], exc)
-            self._emit_preview_failed(tid, ih, f"ошибка добора: {exc}")
+            self._emit_preview_failed(tid, ih, reason("preview_fetch_failed", detail=str(exc)))
         finally:
             if added:
                 await self._preview_cleanup(ih)
@@ -472,9 +471,9 @@ class TorrentsModule(BaseModule):
             "torrent_id": tid, "infohash": ih,
             "name": data.get("name"), "files": data.get("files") or []})
 
-    def _emit_preview_failed(self, tid, ih, reason: str) -> None:
+    def _emit_preview_failed(self, tid, ih, failure: str) -> None:
         self.publish_event("torrents.preview.failed", {
-            "torrent_id": tid, "infohash": ih, "reason": reason})
+            "torrent_id": tid, "infohash": ih, "reason": failure})
 
     # --- commands ------------------------------------------------------------------
 
@@ -675,8 +674,7 @@ class TorrentsModule(BaseModule):
         таблицей torrent_files владеем мы)."""
         row = await self.repo.torrent_by_hash(env.payload["qb_hash"])
         if not row:
-            raise LookupError(
-                f"торрент {env.payload['qb_hash'][:8]} не найден в БД")
+            raise LookupError(reason("torrent_not_in_db", qb_hash=env.payload["qb_hash"][:8]))
         await self.repo.upsert_files(row["id"], env.payload["files"])
         # Состав раздачи сменился (новый релиз, переприменение правил) —
         # проекция памяти восстанавливает выбор пользователя на новых

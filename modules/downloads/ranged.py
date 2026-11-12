@@ -14,7 +14,10 @@ from typing import Awaitable, Callable
 import httpx
 
 from core import storage
+from core.reasons import reason
 from core.retry import UNTIMED, Budget, retrying
+
+from .failure import GONE, Final
 
 ProgressCb = Callable[[dict], Awaitable[None]]
 
@@ -58,13 +61,13 @@ async def _probe(client: httpx.AsyncClient, url: str, headers: dict) -> int:
     try:
         async with client.stream("GET", url, headers={**headers, "Range": "bytes=0-0"}) as response:
             if response.status_code != 206:
-                raise RangeUnsupported(f"сервер ответил {response.status_code} на запрос части файла")
+                raise RangeUnsupported(reason("range_status", status=response.status_code))
             found = _CONTENT_RANGE.fullmatch(response.headers.get("content-range", "").strip())
             if found is None or int(found.group(1)) <= 0:
-                raise RangeUnsupported("в ответе нет размера файла")
+                raise RangeUnsupported(reason("range_no_size"))
             return int(found.group(1))
     except httpx.HTTPError as exc:
-        raise _Failed(f"network error: {type(exc).__name__}") from exc
+        raise _Failed(reason("network_error", cause=type(exc).__name__)) from exc
 
 
 async def _fetch_part(client: httpx.AsyncClient, url: str, headers: dict, first: int, last: int) -> bytes:
@@ -79,12 +82,14 @@ async def _fetch_part(client: httpx.AsyncClient, url: str, headers: dict, first:
                     data = await response.aread()
                     if len(data) == expected:
                         return data, ""
-                    return None, f"network error: часть {first}-{last} получена на {len(data)} из {expected} байт"
+                    return None, reason("part_short", first=first, last=last, got=len(data), expected=expected)
                 if status in _TRANSIENT_STATUSES or status >= 500:
-                    return None, f"HTTP error {status}: часть {first}-{last}"
-                raise _Failed(f"HTTP error {status}: часть {first}-{last} не отдана по диапазону")
+                    return None, reason("part_refused", status=status, first=first, last=last)
+                # A host that says a part is not there for good ends the download as the source's last word.
+                refused = reason("part_not_served", status=status, first=first, last=last)
+                raise _Failed(Final(refused) if status in GONE else refused)
         except httpx.HTTPError as exc:
-            return None, f"network error: {type(exc).__name__}"
+            return None, reason("network_error", cause=type(exc).__name__)
 
     (data, problem), _attempts, _exhausted = await retrying(
         ask, final=lambda got: got[0] is not None,
@@ -124,10 +129,10 @@ async def download_ranged(url: str, headers: dict, tmp_path: str, on_progress: P
             return await _fetch_all(client, url, headers, tmp_path, on_progress, threads)
     except _Failed as exc:
         await storage.discard(tmp_path)
-        return False, str(exc)
+        return False, exc.args[0]  # the typed words: a Final one must keep its kind
     except OSError as exc:  # the disk or the share refused a write
         await storage.discard(tmp_path)
-        return False, f"ошибка записи файла: {exc}"
+        return False, reason("file_write_failed", cause=str(exc))
     except (RangeUnsupported, asyncio.CancelledError):
         await storage.discard(tmp_path)
         raise

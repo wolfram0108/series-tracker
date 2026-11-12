@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from core.reasons import code_of, parse
 from modules.downloads import ranged, ytdlp
 
 URL = "https://cdn.test/file?sig=1"
@@ -124,7 +125,7 @@ async def test_a_part_that_never_comes_ends_the_download_and_leaves_no_file_and_
 async def test_a_part_that_comes_short_is_not_taken_for_whole(tmp_path):
     (ok, error), out = await fetch(Server(bytes(25), short=True), tmp_path)
 
-    assert not ok and "из" in error
+    assert not ok and code_of(error) == "part_short"
     assert not os.path.exists(out)
 
 
@@ -205,7 +206,7 @@ async def test_a_file_that_cannot_be_read_after_the_parts_is_not_published(tmp_p
             patch.object(ytdlp, "_announced_length", AsyncMock(return_value=60.0)):
         ok, error = await ytdlp.download(URL, out, noop, progressive=True)
 
-    assert not ok and "не читается" in error
+    assert not ok and parse(error)["code"] in ("file_unreadable", "cut_unreadable")
     assert not os.path.exists(out) and not os.path.exists(out + ".download.mp4")
 
 

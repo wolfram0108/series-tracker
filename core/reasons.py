@@ -28,6 +28,19 @@ def parse(stored: str | None) -> dict[str, Any] | None:
     return {"code": EXTERNAL, "params": {"text": stored}}
 
 
+def relayed(error: str | None) -> str:
+    """The reason a relayed exception carries (`Type: <reason>`, core/module.py), without the name of its type: what an
+    answer to the interface gives. A text with no such prefix is the reason itself."""
+    head, separator, tail = (error or "").partition(": ")
+    return tail if separator and head.isidentifier() else (error or "")
+
+
+def code_of(error: str | None) -> str | None:
+    """The code of a reason as an error text carries it: `Type: {json}` for a relayed exception, or the JSON alone."""
+    found = parse(relayed(error))
+    return found["code"] if found else None
+
+
 def describe(stored: str | None) -> str:
     """A reason for a log line: the code with its facts, nested reasons included."""
     found = parse(stored)

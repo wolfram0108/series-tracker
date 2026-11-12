@@ -25,7 +25,7 @@ from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGe
 from core.contracts.release_table import TABLE_TRACE
 from core.deadlines import TABLE_READ_S
 from core.logging import get_logger
-from core.reasons import describe, reason
+from core.reasons import EXTERNAL, describe, parse, reason
 
 from .players.registry import PlayerRegistry
 from .repository import SourcesRepository, Stored
@@ -38,6 +38,12 @@ FAILED_TOPIC = "sources.table.failed"
 # What a read does, told as it happens for its dump (modules/runlog): `begin` when a page is taken for a read, `end`
 # with what the read came to — how long it took and what every player of the page gave.
 TRACE_TOPIC = TABLE_TRACE
+
+
+def _cause(exc: Exception) -> str:
+    """The cause of a failed read: a coded reason of ours travels as it is; any other error says its type and words."""
+    text = str(exc)
+    return text if parse(text)["code"] != EXTERNAL else f"{type(exc).__name__}: {text}"
 
 
 def read_summary(table: ReleaseTable) -> dict:
@@ -228,7 +234,7 @@ class TableReader:
             problem = exc.reason
         except Exception as exc:  # noqa: BLE001 — an unexpected failure is a failed read, not a silent task death
             self._log.exception("reading %s failed unexpectedly", key)
-            problem = reason("read_failed", cause=f"{type(exc).__name__}: {exc}")
+            problem = reason("read_failed", cause=_cause(exc))
         async with self._gate:
             problem = await self._settle(site, key, table, problem)
             self._reading.pop(key, None)
@@ -297,7 +303,7 @@ class TableReader:
                 return None
             except Exception as exc:  # noqa: BLE001 — a table that cannot be stored is a failed read
                 self._log.exception("table of %s could not be stored", key)
-                problem = reason("read_failed", cause=f"{type(exc).__name__}: {exc}")
+                problem = reason("read_failed", cause=_cause(exc))
         problem = problem or reason("read_failed")
         try:
             await self._repo.mark_failed(key, site.name, problem)

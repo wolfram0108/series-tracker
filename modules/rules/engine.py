@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.reasons import reason
+
 EXTRACT_KEYS = {
     "extract_single": "episode",
     "extract_season": "season",
@@ -62,10 +64,10 @@ def parse_assigned_range(raw: str | None) -> tuple[int, int]:
     episode, and «Назначить номер серии» gives it). The numbers are the constructor's alone: the table is not read for them."""
     found = _RANGE_DASH_PAT.match((raw or "").strip())
     if not found:
-        raise ValueError(f"диапазон должен быть вида «109-110»: {raw!r}")
+        raise ValueError(reason("range_shape", raw=str(raw or "")))
     start, end = int(found.group(1)), int(found.group(2))
     if start >= end:
-        raise ValueError(f"начало диапазона должно быть меньше конца: {raw!r}")
+        raise ValueError(reason("range_order", raw=str(raw or "")))
     return start, end
 
 
@@ -76,10 +78,10 @@ def parse_range_spec(raw: str | None) -> list[tuple[int, int]]:
     Raises ValueError for empty or malformed input.
     """
     if not raw or not raw.strip():
-        raise ValueError("диапазон не может быть пустым")
+        raise ValueError(reason("range_empty"))
     parts = [p.strip() for p in raw.split(",") if p.strip()]
     if not parts:
-        raise ValueError("диапазон не может быть пустым")
+        raise ValueError(reason("range_empty"))
 
     intervals: list[tuple[int, int]] = []
 
@@ -95,7 +97,7 @@ def parse_range_spec(raw: str | None) -> list[tuple[int, int]]:
             val = int(m_single.group(1))
             intervals.append((val, val))
             continue
-        raise ValueError(f"некорректный элемент диапазона: {part!r}")
+        raise ValueError(reason("range_item", part=part))
 
     intervals.sort()
     merged: list[tuple[int, int]] = []
@@ -121,7 +123,7 @@ def _or_groups(blocks: list[dict]) -> dict[int, list[int]]:
             continue
         around = blocks[index - 1:index] + blocks[index + 1:index + 2]
         if index == 0 or len(around) < 2 or any(each.get("type") != "text" for each in around):
-            raise ValueError("блок «или» должен стоять между двумя блоками «Текст»")
+            raise ValueError(reason("or_place"))
     groups: dict[int, list[int]] = {}
     index = 0
     while index < len(blocks):
@@ -130,7 +132,7 @@ def _or_groups(blocks: list[dict]) -> dict[int, list[int]]:
             while members[-1] + 2 < len(blocks) and blocks[members[-1] + 1].get("type") == "or":
                 members.append(members[-1] + 2)
             if any(not (blocks[member].get("value") or "") for member in members):
-                raise ValueError("у текста рядом с блоком «или» пустое значение")
+                raise ValueError(reason("or_text_empty"))
             groups[index] = members
             index = members[-1] + 1
         else:
@@ -146,7 +148,7 @@ def _blocks_to_regex(blocks: list[dict], *, capture_numbers: bool,
     for index, block in enumerate(blocks):
         b_type = block.get("type")
         if b_type not in BLOCK_TYPES:
-            raise ValueError(f"неизвестный тип блока: {b_type!r}")
+            raise ValueError(reason("block_unknown", type=str(b_type)))
         if index in groups:
             # One place of the title, any of the texts: a group that captures nothing, so the numbers keep their order.
             parts.append("(?:" + "|".join(re.escape(blocks[member]["value"]) for member in groups[index]) + ")")
@@ -157,7 +159,7 @@ def _blocks_to_regex(blocks: list[dict], *, capture_numbers: bool,
             continue  # Number modifiers are evaluated in actions, not part of regex pattern
         elif b_type == "range":
             if not allow_range:
-                raise ValueError("блок «Диапазон» недопустим в действиях «ТО»")
+                raise ValueError(reason("range_in_action"))
             continue  # Range filters are evaluated in condition checks, not part of regex pattern
         elif b_type == "text":
             parts.append(re.escape(block.get("value", "")))
@@ -172,17 +174,17 @@ def _blocks_to_regex(blocks: list[dict], *, capture_numbers: bool,
         elif b_type == "end_of_line":
             parts.append(r"$")
         else:
-            raise ValueError(f"тип блока не поддерживается: {b_type!r}")
+            raise ValueError(reason("block_unknown", type=str(b_type)))
     regex = "".join(parts)
     if not regex:
-        raise ValueError("пустой шаблон")
+        raise ValueError(reason("template_empty"))
     return regex
 
 
 def _parse_blocks(raw: str | None) -> list[dict]:
     blocks = json.loads(raw or "")
     if not isinstance(blocks, list):
-        raise ValueError("шаблон — не список блоков")
+        raise ValueError(reason("template_not_list"))
     return blocks
 
 
@@ -197,19 +199,16 @@ def _suffix_block_index(blocks: list[dict], kinds: tuple[str, ...], label: str,
     if not indices:
         return None
     if len(indices) > 1:
-        raise ValueError(f"в одном {where} может быть только один блок «{label}»")
+        raise ValueError(reason("block_repeated", where=where, label=label))
     idx = indices[0]
     if idx == 0:
-        raise ValueError(f"блок «{label}» не может стоять первым — "
-                         "он должен следовать за числом")
+        raise ValueError(reason("block_first", label=label))
     if blocks[idx - 1].get("type") != "number":
-        raise ValueError(f"блок «{label}» должен следовать сразу за блоком «Число», "
-                         f"а не {blocks[idx - 1].get('type')!r}")
+        raise ValueError(reason("block_after_number", label=label, type=str(blocks[idx - 1].get("type"))))
     if any(b.get("type") == "number" for b in blocks[idx + 1:]):
-        raise ValueError(f"блок «{label}» должен стоять после последнего числа "
-                         f"в {where}")
+        raise ValueError(reason("block_after_last_number", label=label, where=where))
     if sum(1 for b in blocks if b.get("type") == "number") != 1:
-        raise ValueError(f"в шаблоне с блоком «{label}» должно быть ровно одно число")
+        raise ValueError(reason("block_one_number", label=label))
     return idx
 
 
@@ -281,28 +280,28 @@ def table_rules(rule: dict) -> list[dict]:
     of writing the table and mean nothing here."""
     table = rule["rule_table"]
     if not isinstance(table, dict):
-        raise ValueError("таблица повреждена")
+        raise ValueError(reason("table_broken"))
     a_type = table.get("action_type")
     if a_type not in ACTION_TYPES:
-        raise ValueError(f"неизвестный тип действия: {a_type!r}")
+        raise ValueError(reason("action_unknown", type=str(a_type)))
     rows = table.get("rows")
     if not isinstance(rows, list) or not rows:
-        raise ValueError("в таблице нет строк")
+        raise ValueError(reason("table_empty"))
     expanded = []
     for number, row in enumerate(rows, 1):
         blocks = row.get("if") if isinstance(row, dict) else None
         if not blocks:
-            raise ValueError(f"строка {number}: пустое условие «ЕСЛИ»")
+            raise ValueError(reason("table_row_if_empty", number=number))
         then = row.get("then")
         if a_type == "exclude":
             pattern = "[]"
         elif a_type in ASSIGN_TYPES:
             pattern = str(then if then is not None else "").strip()
             if not pattern:
-                raise ValueError(f"строка {number}: пустое значение «ТО»")
+                raise ValueError(reason("table_row_then_empty", number=number))
         else:
             if not then:
-                raise ValueError(f"строка {number}: пустой шаблон «ТО»")
+                raise ValueError(reason("table_row_template_empty", number=number))
             pattern = json.dumps(then, ensure_ascii=False)
         expanded.append({
             "id": rule["id"], "name": f"{rule['name']} · {number}",
@@ -320,7 +319,7 @@ def _compile_table(rule: dict) -> list[CompiledRule]:
         try:
             compiled.append(_compile_rule(row_rule))
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"строка {number}: {exc}") from exc
+            raise ValueError(reason("table_row", number=number, detail=str(exc))) from exc
     return compiled
 
 
@@ -329,11 +328,11 @@ def _compile_rule(rule: dict) -> CompiledRule:
     for cond in rule.get("conditions", []):
         ctype = cond.get("condition_type")
         if ctype not in CONDITION_TYPES:
-            raise ValueError(f"неизвестный тип условия: {ctype!r}")
+            raise ValueError(reason("condition_type_unknown", type=str(ctype)))
         try:
             blocks = _parse_blocks(cond["pattern"])
             if any(b.get("type") in MODIFIER_TYPES for b in blocks):
-                raise ValueError("блок «±» допустим только в действиях «ТО»")
+                raise ValueError(reason("modifier_in_condition"))
             range_check: ConditionRangeCheck | None = None
 
             r_idx = _suffix_block_index(blocks, ("range",), "Диапазон", "условии")
@@ -345,7 +344,7 @@ def _compile_rule(rule: dict) -> CompiledRule:
                 regex = _blocks_to_regex(blocks, capture_numbers=False, allow_range=True)
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             # Решение Б: битое условие делает НЕИСПРАВНЫМ всё правило.
-            raise ValueError(f"условие повреждено: {exc}") from exc
+            raise ValueError(reason("condition_broken", detail=str(exc))) from exc
 
         conditions.append(CompiledCondition(
             regex=re.compile(regex, re.IGNORECASE),
@@ -358,7 +357,7 @@ def _compile_rule(rule: dict) -> CompiledRule:
         a_type = action.get("action_type")
         raw_pattern = action.get("action_pattern", "[]")
         if a_type not in ACTION_TYPES:
-            raise ValueError(f"неизвестный тип действия: {a_type!r}")
+            raise ValueError(reason("action_unknown", type=str(a_type)))
         if a_type == "exclude":
             actions.append(CompiledAction(action_type="exclude"))
         elif a_type in ASSIGN_TYPES:
@@ -382,9 +381,8 @@ def _compile_rule(rule: dict) -> CompiledRule:
                         try:
                             value = int(nxt.get("value", 0))
                         except (ValueError, TypeError):
-                            raise ValueError(
-                                f"нечисловое значение блока «{sign}»: "
-                                f"{nxt.get('value')!r}") from None
+                            raise ValueError(reason(
+                                "modifier_not_number", sign=sign, value=str(nxt.get("value")))) from None
                         mod = value if nxt["type"] == "add" else -value
                 modifiers.append(mod)
             actions.append(CompiledAction(
@@ -414,7 +412,7 @@ def validate_rule(data: dict) -> None:
     try:
         _compile_any(rule)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"шаблоны правила — некорректный JSON: {exc}") from exc
+        raise ValueError(reason("rule_json", detail=str(exc))) from exc
 
 
 # --- выполнение -----------------------------------------------------------------
@@ -541,12 +539,10 @@ def _run_actions(title: str, rule: CompiledRule,
                     extracted.pop("end", None)
                 produced = True
             except (ValueError, TypeError):
-                errors.append(f"правило «{rule.name}»: нечисловое значение "
-                              f"{a_type}: {action.raw_value!r}")
+                errors.append(reason("rule_number_bad", rule=rule.name, action=a_type, value=str(action.raw_value)))
         else:  # extract_*: у каждого действия СВОЙ матч и СВОИ группы (фикс А)
             if action.regex is None:
-                errors.append(f"правило «{rule.name}»: действие {a_type!r} "
-                              "без шаблона")
+                errors.append(reason("rule_no_template", rule=rule.name, action=a_type))
                 continue
             match = action.regex.search(title)
             if not match:
@@ -557,9 +553,7 @@ def _run_actions(title: str, rule: CompiledRule,
             if a_type == "extract_range":
                 if len(numbers) > 1 and numbers[1] < numbers[0]:
                     # Swapping the bounds would hide a wrong template; the line stays without a range.
-                    errors.append(f"правило «{rule.name}»: обратный диапазон "
-                                  f"{numbers[0]}-{numbers[1]} (конец меньше "
-                                  "начала) не извлечён")
+                    errors.append(reason("rule_range_reversed", rule=rule.name, start=numbers[0], end=numbers[1]))
                     continue
                 if numbers and put_extracted("start", numbers[0]):
                     produced = True

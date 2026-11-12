@@ -250,5 +250,5 @@ async def test_series_list_no_state_column_and_statuses(system):
 async def test_series_get_unknown_is_error(system):
     from core import BusRequestError
     _, probe = system
-    with pytest.raises(BusRequestError, match="не найден"):
+    with pytest.raises(BusRequestError, match="series_not_found"):
         await probe.request("catalog.series.get", {"series_id": 99}, timeout=5)

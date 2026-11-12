@@ -170,7 +170,7 @@ class RulesModule(BaseModule):
         repeated = sorted(key for key, n in Counter(
             line.key for line in request.lines).items() if n > 1)
         if repeated:
-            raise ValueError(f"Ключи строк повторяются в одном запросе: {repeated}")
+            raise ValueError(reason("apply_keys_repeated", keys=repeated))
         if request.rules is None:
             profile = await self._profile(request.profile_id)
         else:  # the profile as a run took it: what was saved since does not count for that run
@@ -295,8 +295,7 @@ class RulesModule(BaseModule):
         p = env.payload
         series = p["series"]
         if p.get("profile_id") is None:
-            raise ValueError("Не указан profile_id: профиль торрента "
-                             "берётся из его источника, не из сериала.")
+            raise ValueError(reason("torrent_profile_missing"))
         profile = await self._profile(int(p["profile_id"]))
         extracted = process_title(profile,
                                   p["file_basename"]).get("extracted") or {}

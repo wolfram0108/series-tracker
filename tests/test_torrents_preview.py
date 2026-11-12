@@ -7,6 +7,7 @@ import pytest
 
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.db import Database
+from core.reasons import parse, reason
 from modules.catalog import CatalogModule
 from modules.torrents import TorrentsModule
 
@@ -132,7 +133,8 @@ async def test_a_torrent_that_sources_could_not_give_fails_by_the_module_with_a_
     probe.send_command("torrents.preview.fetch", {"items": [{"torrent_id": "t2", "link": "https://t.test/2.torrent"}]})
     topic, payload = await outcome(outcomes)
     assert topic == "torrents.preview.failed"
-    assert payload == {"torrent_id": "t2", "infohash": None, "reason": "не удалось скачать .torrent: трекер не отвечает"}
+    assert payload == {"torrent_id": "t2", "infohash": None,
+                       "reason": reason("preview_torrent_download_failed", detail="трекер не отвечает")}
 
 
 @pytest.mark.asyncio
@@ -142,7 +144,7 @@ async def test_a_file_that_is_no_torrent_fails_with_the_reason_of_the_parse(syst
     probe.send_command("torrents.preview.fetch", {"items": [{"torrent_id": "t3", "link": "https://t.test/3.torrent"}]})
     topic, payload = await outcome(outcomes)
     assert topic == "torrents.preview.failed" and payload["torrent_id"] == "t3"
-    assert payload["reason"].startswith("не удалось разобрать .torrent")
+    assert parse(payload["reason"])["code"] == "preview_torrent_unreadable"
 
 
 @pytest.mark.asyncio

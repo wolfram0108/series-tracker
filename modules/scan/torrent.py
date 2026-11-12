@@ -7,6 +7,7 @@ orchestration around it (the lock of the series, the status, the resume after a 
 from __future__ import annotations
 
 from core import BusRequestError, ids
+from core.reasons import reason
 from core.contracts import SeriesSource
 
 from .errors import ScanAborted, ScanError
@@ -43,7 +44,7 @@ class TorrentScan:
 
         parsed = await self._request("sources.parse", {"url": source.url})
         if series_id in self._aborted:
-            raise ScanAborted(f"сериал {series_id} удалён во время скана")
+            raise ScanAborted(reason("series_deleted_in_scan", series_id=series_id))
         plan_items = self.plan(series, parsed, active)
         if not plan_items:
             self._log.info("сериал %d: новых раздач нет", series_id)
@@ -102,7 +103,7 @@ class TorrentScan:
         try:
             for idx, item in enumerate(plan_items):
                 if series_id in self._aborted:
-                    raise ScanAborted(f"сериал {series_id} удалён во время скана")
+                    raise ScanAborted(reason("series_deleted_in_scan", series_id=series_id))
                 if str(idx) in results:
                     continue  # done before the failure
                 st = item["site_torrent"]
@@ -118,7 +119,7 @@ class TorrentScan:
                 await self._repo.update_results(task_id, results)
 
             if not results:
-                raise ScanError("не удалось добавить ни одной раздачи")
+                raise ScanError(reason("torrent_none_added"))
 
             created = 0
             for idx_str, res in results.items():

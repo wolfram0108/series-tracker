@@ -31,6 +31,7 @@ from core import NO_HANDLER, BaseModule, BusRequestError, sanitize_path, storage
 from core.contracts import SeriesKind
 from core.db import Database
 from core.envelope import Envelope
+from core.reasons import reason
 
 from .repository import LibraryRepository
 
@@ -73,7 +74,7 @@ class LibraryModule(BaseModule):
             return
         if not any(path == root or path.startswith(root.rstrip("/") + "/")
                    for root in self._allowed_roots):
-            raise LibraryError(f"доступ к пути запрещён: {path}")
+            raise LibraryError(reason("path_forbidden", path=path))
 
     @staticmethod
     def _list_dirs_sync(path: str) -> list[dict]:
@@ -91,11 +92,11 @@ class LibraryModule(BaseModule):
         path = os.path.normpath(raw)
         self._check_allowed(path)
         if not await storage.call(os.path.isdir, path):
-            raise LibraryError(f"не каталог или не существует: {path}")
+            raise LibraryError(reason("not_directory", path=path))
         try:
             items = await storage.call(self._list_dirs_sync, path)
         except PermissionError as exc:
-            raise LibraryError(f"нет доступа к каталогу: {path}") from exc
+            raise LibraryError(reason("path_no_access", path=path)) from exc
         return {"path": path, "items": items}
 
     # --- перемещение (Р-17) ----------------------------------------------------------
@@ -107,14 +108,13 @@ class LibraryModule(BaseModule):
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
         if series_id in self._relocations or await self.repo.moving(series_id):
-            raise LibraryError("перемещение сериала уже выполняется")
+            raise LibraryError(reason("move_in_progress"))
         if new_path == series["save_path"]:
             if await self.repo.drop_plan(series_id):
                 self.publish_event("library.relocation.planned", {"series_id": series_id, "new_path": None})
             return {"new_path": None}
         if not os.path.isabs(new_path):
-            raise LibraryError(
-                "путь сохранения должен быть абсолютным (например, /nas/...)")
+            raise LibraryError(reason("save_path_relative", path=new_path))
         self._check_allowed(os.path.normpath(new_path))
         await storage.call(self._check_same_device, series["save_path"], new_path)
         await self.repo.plan(series_id, new_path)
@@ -152,8 +152,7 @@ class LibraryModule(BaseModule):
         new_parent = os.path.dirname(new_path)
         if os.path.exists(old_path) and os.path.exists(new_parent):
             if os.stat(old_path).st_dev != os.stat(new_parent).st_dev:
-                raise LibraryError(
-                    "перемещение между разными дисками не поддерживается")
+                raise LibraryError(reason("move_cross_device"))
 
     async def _execute(self, task: dict) -> None:
         series_id = task["series_id"]
@@ -176,7 +175,7 @@ class LibraryModule(BaseModule):
                           old_base, new_base)
             self.publish_event("library.relocation.finished", {
                 "series_id": series_id, "success": True,
-                "message": "Сериал успешно перемещен."})
+                "message": reason("relocation_done")})
         except Exception as exc:
             # The plan stays with its error: the next sync makes the move again (a moved file is skipped).
             self.log.exception("перемещение сериала %d не удалось",

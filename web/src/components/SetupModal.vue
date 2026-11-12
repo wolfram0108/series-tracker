@@ -8,6 +8,7 @@ import { api } from "../api/client"
 import { t } from "../i18n"
 import { useAuthStore } from "../stores/auth"
 import { useBodyScrollLock } from "../composables/useBodyScrollLock"
+import { reasonText } from "../lib/reason"
 
 // Модалка первого запуска: создание администратора (имя, пароль, повтор).
 // Валидация — рамкой StGroup; причина/ошибка — плашкой ПОД карточкой
@@ -65,7 +66,7 @@ async function submit(): Promise<void> {
       emit("done")
       return
     }
-    notice.value = (error as unknown as { error?: string } | null)?.error ||
+    notice.value = reasonText((error as unknown as { error?: string } | null)?.error) ||
       t("setup.error.create")
   } catch {
     notice.value = t("common.networkDown")

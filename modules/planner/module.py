@@ -98,6 +98,7 @@ from core.envelope import Envelope
 from core.ffprobe import END_SLACK_S, duration_of
 from core.fsnames import sanitize_name
 from core.ignored import parse_memory
+from core.reasons import describe, reason
 from core.plan.executor import DOWNLOADS, Made, Passing, SeriesSync, judged, video_of
 from core.plan.files import Library, as_in_file, container_json, container_of, label_of
 from core.plan.inputs import assets_against, choices_of, online_of
@@ -276,7 +277,7 @@ class BusSync(SeriesSync):
             raise
         except Exception as exc:  # noqa: BLE001 - one step that breaks is a step of the moment, not the end of the sync
             self.m.log.exception("сериал %d: шаг %s не выполнен", self.series["id"], op.id)
-            raise Passing(f"внутренняя ошибка: {exc}") from None
+            raise Passing(reason("internal_error", cause=str(exc))) from None
         raise AssertionError(op.kind)
 
     async def do_batch(self, ops, results):
@@ -293,7 +294,7 @@ class BusSync(SeriesSync):
             return {op.id: passing for op in ops}
         except Exception as exc:  # noqa: BLE001 - the job that breaks is a step of the moment, not the end of the sync
             self.m.log.exception("сериал %d: выравнивание %s не выполнено", self.series["id"], ops[0].batch)
-            return {op.id: Passing(f"внутренняя ошибка: {exc}") for op in ops}
+            return {op.id: Passing(reason("internal_error", cause=str(exc))) for op in ops}
         finally:
             self._flag("aligning", -1)
 
@@ -354,10 +355,10 @@ class BusSync(SeriesSync):
         if not finished.get("ok"):
             if finished.get("transient"):
                 self.m.log.warning("сериал %d: загрузка %s не удалась, повторится при следующей синхронизации: %s",
-                                   self.series["id"], op.id, finished.get("error"))
-                raise Passing(f"загрузка не удалась: {finished.get('error')}")
+                                   self.series["id"], op.id, describe(finished.get("error") or ""))
+                raise Passing(reason("download_not_done", cause=finished.get("error") or ""))
             self.m.log.warning("сериал %d: загрузка %s не удалась, записано как неудача: %s", self.series["id"], op.id,
-                               finished.get("error"))
+                               describe(finished.get("error") or ""))
             return None
         if op.kind == "download_video":
             return Made(Video(row.id, row.snapshot(), row.slot, row.id), path, retimed=await self._retimed(row.id, path))
@@ -449,13 +450,13 @@ class BusSync(SeriesSync):
         for name, op in of_dub.items():
             way = op.subject[1]
             result = by_dub.get(name)
-            why = (result or {}).get("error") or ended.get("error") or "сервис не дал результата"
+            why = (result or {}).get("error") or ended.get("error") or reason("daemon_no_result")
             try:
                 made = judged(result, cut=False)
             except Passing:
                 self.m.log.warning("%s %s: выравнивание не сделано, повторится при следующей синхронизации: сбой "
-                                   "сервиса в задаче %s: %s", label, way.voice, job_id, why)
-                outcomes[op.id] = Passing(f"сбой сервиса в задаче {job_id}: {why}")
+                                   "сервиса в задаче %s: %s", label, way.voice, job_id, describe(why))
+                outcomes[op.id] = Passing(reason("daemon_job_failed", job=job_id, cause=why))
                 continue
             if made is None:
                 what = "критичные замечания" if result and result.get("ok") else why
@@ -524,13 +525,13 @@ class BusSync(SeriesSync):
         job_id, ended = found
         await self._shed(folder, places["out_dir"])
         result = next(iter(ended.get("results") or []), None)
-        why = (result or {}).get("error") or ended.get("error") or "сервис не дал результата"
+        why = (result or {}).get("error") or ended.get("error") or reason("daemon_no_result")
         try:
             out = judged(result, cut=True)
         except Passing:
             self.m.log.warning("%s: разбор не сделан, повторится при следующей синхронизации: сбой сервиса в задаче %s: %s",
-                               label, job_id, why)
-            raise Passing(f"сбой сервиса в задаче {job_id}: {why}") from None
+                               label, job_id, describe(why))
+            raise Passing(reason("daemon_job_failed", job=job_id, cause=why)) from None
         self.jobs.append((job_id, out is not None and ended.get("status") == "done"))
         if out is None:
             what = "критичные замечания" if result and result.get("ok") else why
@@ -821,7 +822,7 @@ class PlannerModule(BaseModule):
         key = str(env.payload["id"])
         card = self.packing.cards.get(key)
         if card is None or card.status not in ("done", "failed"):
-            raise LookupError(f"карточка упаковки {key} не найдена или упаковка идёт")
+            raise LookupError(reason("pack_card_not_found", key=key))
         self.packing.forget(key)
         await self.repo.drop_pack_cards([key])
         self.pack_publish()
@@ -916,7 +917,7 @@ class PlannerModule(BaseModule):
             return await self._job(key, topic, body)
         except Passing as passing:
             self.log.warning("%s: выравнивание не сделано, повторится при следующей синхронизации: %s", label,
-                             passing.args[0] if passing.args else "ответа сервиса нет")
+                             describe(str(passing.args[0])) if passing.args else "ответа сервиса нет")
             raise
 
     async def _job(self, key: str, topic: str, body: dict) -> tuple[str, dict] | None:
@@ -924,24 +925,25 @@ class PlannerModule(BaseModule):
         try:
             if topic == "conform.submit":
                 reply = SubmitReply.model_validate(await self.request(topic, body))
-                outcome, reason, job_id = reply.outcome, reply.reason, reply.job_id
+                outcome, refusal, job_id = reply.outcome, reply.reason, reply.job_id
             else:
                 reply = await self.request(topic, body)
-                outcome, reason = SubmitOutcome(reply["outcome"]), reply.get("reason")
+                outcome, refusal = SubmitOutcome(reply["outcome"]), reply.get("reason")
                 job_id = next(iter((reply.get("jobs") or {}).values()), None)
         except (BusRequestError, asyncio.TimeoutError) as exc:
             if NO_HANDLER in str(exc):
                 raise Passing from None
-            outcome, reason, job_id = SubmitOutcome.UNCERTAIN, str(exc), None
+            outcome, refusal, job_id = SubmitOutcome.UNCERTAIN, str(exc), None
         if outcome is SubmitOutcome.UNCERTAIN and job_id is None:
             found = await self.request("conform.job.find", {"key": key})
             job_id = found.get("job_id")
             if not job_id:
-                raise Passing(f"задачу не удалось ни поставить, ни найти: {reason}")
+                raise Passing(reason("daemon_job_lost", cause=str(refusal)))
         elif outcome is SubmitOutcome.UNAVAILABLE:
-            raise Passing(f"сервис недоступен: {reason}")
+            raise Passing(reason("conform_down", error=str(refusal)))
         elif outcome is SubmitOutcome.REJECTED:
-            self.log.warning("%s: задача отклонена сервисом выравнивания, записано как неудача: %s", label, reason)
+            self.log.warning("%s: задача отклонена сервисом выравнивания, записано как неудача: %s", label,
+                             describe(str(refusal)))
             return None
         return await self.attach(job_id)
 
@@ -1030,7 +1032,7 @@ class PlannerModule(BaseModule):
         finally:
             self._jobs.pop(job_id, None)
         if ended.get("removed") or ended.get("status") in ("cancelled", "gone"):
-            raise Passing(f"задача {job_id} снята в сервисе")
+            raise Passing(reason("daemon_job_removed", job=job_id))
         return job_id, ended
 
     async def sweep(self, series_ids=None) -> None:

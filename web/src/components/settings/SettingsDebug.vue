@@ -14,6 +14,7 @@ import { t, type MessageKey } from "../../i18n"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { useScannerStore } from "../../stores/scanner"
+import { reasonText } from "../../lib/reason"
 
 // Вкладка «Отладка»: сканер, сохранённые пути, флаги/параметры конвейера,
 // просмотр и очистка БД. Контракт проверен по modules/gateway/api_settings.py.
@@ -184,7 +185,7 @@ async function clearTable() {
     { errorMessage: t("debug.db.clear.failed") },
   )) as { success?: boolean; message?: string } | null
   if (data?.success) {
-    toast.add({ severity: "success", summary: t("debug.db.toast"), detail: data.message || t("debug.db.clear.done"), life: 3000 })
+    toast.add({ severity: "success", summary: t("debug.db.toast"), detail: reasonText(data.message) || t("debug.db.clear.done"), life: 3000 })
   }
 }
 

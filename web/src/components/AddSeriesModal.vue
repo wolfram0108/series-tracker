@@ -372,7 +372,7 @@ async function searchTMDB() {
     if (res?.success) {
       tmdbResults.value = res.results ?? []
     } else {
-      toast.add({ severity: "warn", summary: "TMDB", detail: t("seriesForm.tmdbSearchFailed", { error: res?.error ?? t("add.unknown") }), life: 4000 })
+      toast.add({ severity: "warn", summary: "TMDB", detail: t("seriesForm.tmdbSearchFailed", { error: reasonText(res?.error) || t("add.unknown") }), life: 4000 })
     }
   } finally {
     tmdbLoading.value = false

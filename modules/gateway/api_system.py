@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 from core.contracts import DownloadCard, PackCard
-from core.reasons import reason
+from core.reasons import reason, relayed
 
 from .schemas import ConformJobChange, ErrorOnly, ErrorResponse, OkResponse, QueueTask, ScannerStatus
 
@@ -50,10 +50,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             "force_replace": data.get("debug_force_replace", False)})
         if not reply["started"]:
             return JSONResponse(
-                {"success": False, "error": "Сканирование уже запущено."},
+                {"success": False, "error": reason("scan_all_running")},
                 status_code=409)
         return {"success": True,
-                "message": "Сканирование всех сериалов запущено."}
+                "message": reason("sync_all_started")}
 
     @r.get("/api/agent/queue", response_model=list[QueueTask])
     async def agent_queue():
@@ -79,10 +79,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             reply = await gw.request("downloads.queue.clear", {})
         except BusRequestError as exc:
-            return JSONResponse({"success": False, "error": str(exc)},
+            return JSONResponse({"success": False, "error": relayed(str(exc))},
                                 status_code=500)
         return {"success": True,
-                "message": f"Удалено {reply['deleted']} задач из очереди."}
+                "message": reason("queue_tasks_removed", count=reply["deleted"])}
 
     @r.get("/api/pack/queue", response_model=list[PackCard])
     async def pack_queue():
@@ -102,7 +102,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             await gw.request("planner.pack.remove", {"id": card_id})
         except BusRequestError as exc:
             msg = str(exc)
-            return JSONResponse({"success": False, "error": msg.split(": ", 1)[-1]},
+            return JSONResponse({"success": False, "error": relayed(msg)},
                                 status_code=404 if "LookupError" in msg else 500)
         return {"success": True}
 
@@ -115,7 +115,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             await gw.request("downloads.card.remove", {"id": card_id})
         except BusRequestError as exc:
             msg = str(exc)
-            return JSONResponse({"success": False, "error": msg.split(": ", 1)[-1]},
+            return JSONResponse({"success": False, "error": relayed(msg)},
                                 status_code=404 if "LookupError" in msg else 500)
         return {"success": True}
 
@@ -132,9 +132,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             msg = str(exc)
             code = 404 if "LookupError" in msg else 409 if msg.startswith("NotAllowed") else 500
             return JSONResponse(
-                {"success": False, "error": msg.split(": ", 1)[-1]},
+                {"success": False, "error": relayed(msg)},
                 status_code=code)
-        return {"success": True, "message": "Загрузка отменена."}
+        return {"success": True, "message": reason("download_stopped_by_user")}
 
     @r.delete("/api/conform/jobs/{job_id}", response_model=ConformJobChange, responses={502: {"model": ErrorOnly}})
     async def conform_job_delete(job_id: str):
@@ -154,7 +154,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             reply = await gw.request("conform.plot", {"job_id": job_id, "name": name})
         except BusRequestError as exc:
-            return JSONResponse({"error": str(exc).split(": ", 1)[-1]}, status_code=502)
+            return JSONResponse({"error": relayed(str(exc))}, status_code=502)
         if not reply["found"]:
             return JSONResponse({"error": reason("conform_plot_missing")}, status_code=404)
         return Response(base64.b64decode(reply["data"]), media_type="image/png",

@@ -36,8 +36,7 @@ def refuse_mixed_kinds(source_types: list[str]) -> None:
 def refuse_removed_fields(fields: dict) -> None:
     for name in REMOVED_FIELDS:
         if name in fields:
-            raise ValueError(f"поле сериала '{name}' удалено: источники задаются полем sources "
-                             f"и запросами catalog.sources.*")
+            raise ValueError(reason("series_field_removed", field=name))
 
 
 def checked_fields(fields: dict, stored: dict | None = None) -> dict:
@@ -47,15 +46,15 @@ def checked_fields(fields: dict, stored: dict | None = None) -> dict:
     the caller did not choose; a stored one comes back with the fields given, validated as part of the whole.
     """
     if not isinstance(fields, dict):
-        raise ValueError("источник задаётся словарём полей")
+        raise ValueError(reason("source_not_dict"))
     unknown = sorted(set(fields) - set(SOURCE_FIELDS))
     if unknown:
-        raise ValueError(f"поле источника '{unknown[0]}' неизвестно; допустимы: {', '.join(SOURCE_FIELDS)}")
+        raise ValueError(reason("source_field_unknown", field=unknown[0], allowed=", ".join(SOURCE_FIELDS)))
     model = SeriesSource.model_validate({**(stored or {"id": 0, "series_id": 0}), **fields})
     if not model.url.strip():
-        raise ValueError("url: адрес источника не может быть пустым")
+        raise ValueError(reason("source_url_empty"))
     if model.vibix_season is not None and model.vibix_season < 1:
-        raise ValueError("vibix_season: сезоны каталога Vibix считаются с 1")
+        raise ValueError(reason("vibix_season_from_one"))
     values = model.model_dump(mode="json")
     values["players_off"] = list(dict.fromkeys(values["players_off"]))
     names = tuple(fields) if stored else tuple(name for name in SOURCE_FIELDS

@@ -105,14 +105,14 @@ async def test_what_a_source_does_not_let_change_is_refused_by_the_model(tmp_pat
 
 
 async def test_a_source_of_another_series_is_not_found_under_this_one_by_the_catalog(tmp_path):
-    refusal = LookupError("источник 9 не найден у сериала 1")
+    refusal = LookupError(reason("source_not_in_series", source_id=9, series_id=1))
     answers = {"catalog.sources.update": refusal, "catalog.sources.remove": refusal}
     async with serving(tmp_path, answers) as (client, owners, _, spy):
         changed = await client.put("/api/series/1/sources/9", json={"vibix_season": 2})
         removed = await client.delete("/api/series/1/sources/9")
     for response in (changed, removed):
         assert response.status_code == 404 and response.json() == {
-            "success": False, "error": "источник 9 не найден у сериала 1"}
+            "success": False, "error": reason("source_not_in_series", source_id=9, series_id=1)}
     # Whose source it is, is the catalog's to say: both commands carry the series of the path.
     assert owners.asked("catalog.sources.update")[0]["series_id"] == 1
     assert owners.asked("catalog.sources.remove") == [{"series_id": 1, "source_id": 9}]

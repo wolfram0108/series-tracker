@@ -98,7 +98,7 @@ async def test_refresh_of_a_torrent_series_fetches_the_release_before_the_plan(t
 async def test_the_composition_of_an_unknown_series_is_not_found(tmp_path):
     async with serving(tmp_path, {"catalog.series.get": LookupError("сериал 9 не найден")}) as (client, _, _, _):
         response = await client.get("/api/series/9/composition")
-    assert response.status_code == 404 and response.json() == {"error": "Сериал не найден"}
+    assert response.status_code == 404 and response.json() == {"error": reason("series_not_found")}
 
 
 # --- the references ----------------------------------------------------------------------------------

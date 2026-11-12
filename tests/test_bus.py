@@ -186,7 +186,7 @@ async def test_request_without_handler_fails_fast():
     client = ClientModule(bus)
     await client.start()
     try:
-        with pytest.raises(BusRequestError, match="нет обработчика"):
+        with pytest.raises(BusRequestError, match="no_handler"):
             await client.request("никого.нет.дома", timeout=2)
     finally:
         await client.stop()

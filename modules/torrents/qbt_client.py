@@ -17,6 +17,7 @@ from typing import Any, Optional
 import httpx
 
 from core.logging import get_logger
+from core.reasons import reason
 from core.retry import UNTIMED, Budget, retrying
 
 
@@ -57,12 +58,10 @@ class QbtClient:
         resp = await self._http.post("/api/v2/auth/login", data={
             "username": self._username, "password": self._password})
         if not resp.is_success or resp.text.strip() == "Fails.":
-            raise QbtAuthError(
-                f"qBittorrent отверг логин (HTTP {resp.status_code})")
+            raise QbtAuthError(reason("qbt_login_rejected", status=resp.status_code))
         check = await self._http.get("/api/v2/app/webapiVersion")
         if check.status_code != 200:
-            raise QbtAuthError(
-                f"логин принят, но сессия не работает (HTTP {check.status_code})")
+            raise QbtAuthError(reason("qbt_session_broken", status=check.status_code))
         # Имена эндпоинтов паузы зависят от поколения API:
         # WebAPI ≥ 2.11 (qBittorrent 5.x) — stop/start, старше — pause/resume.
         api = check.text.strip()
@@ -104,8 +103,8 @@ class QbtClient:
             on_retry=lambda got, attempt, _pause: self.log.warning(
                 "ошибка %s %s (попытка %d/%d): %s", method, path, attempt, self._retries, got))
         if not isinstance(result, httpx.Response):
-            raise QbtError(f"{method} {path}: не удалось за {attempts} "
-                           f"попыток ({result})")
+            raise QbtError(reason("qbt_retries_exhausted", method=method, path=path,
+                                  attempts=attempts, detail=str(result)))
         if result.status_code == 404:
             return None
         if result.status_code == 409 and conflict_ok:

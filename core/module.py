@@ -25,14 +25,14 @@ from .contracts.availability import NotAllowed
 from .deadlines import deadline_of
 from .envelope import Envelope
 from .logging import get_logger
-from .reasons import EXTERNAL, describe, parse
+from .reasons import EXTERNAL, describe, parse, reason
 
 Handler = Callable[[Envelope], Awaitable[Any]]
 
 REPLY_PREFIX = "_reply"
 ERROR_KEY = "_bus_error"
-# The words a request to a topic nobody handles fails with: a caller tells "no such module in this process" by them.
-NO_HANDLER = "нет обработчика"
+# The code a request to a topic nobody handles fails with: a caller tells "no such module in this process" by it.
+NO_HANDLER = "no_handler"
 
 # The kinds of an answer that refuses rather than fails: a missing entity, a state that does not allow, a refused value.
 _REFUSALS = ("LookupError", "NotAllowed", "ValueError")
@@ -169,7 +169,7 @@ class BaseModule:
             delivered = self.bus.publish(env)
             if delivered == 0:
                 unanswerable = True
-                raise BusRequestError(f"{NO_HANDLER} для query '{topic}'")
+                raise BusRequestError(reason(NO_HANDLER, topic=topic))
             return await asyncio.wait_for(fut, timeout)
         finally:
             self._pending.pop(env.correlation_id, None)

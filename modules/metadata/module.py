@@ -21,6 +21,7 @@ from core import BaseModule, BusRequestError
 from core.contracts import SeriesKind
 from core.db import Database
 from core.envelope import Envelope
+from core.reasons import reason
 
 from .repository import MetadataRepository
 
@@ -58,7 +59,7 @@ class MetadataModule(BaseModule):
                                    {"key": "tmdb_token"})
         token = reply["value"]
         if not token:
-            raise TmdbError("токен TMDB не настроен")
+            raise TmdbError(reason("tmdb_token_missing"))
         return {"accept": "application/json",
                 "Authorization": f"Bearer {token}"}
 

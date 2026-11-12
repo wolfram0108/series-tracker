@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from core import NO_HANDLER, BusRequestError
 from core.admission import Admission
 from core.admission import current as current_admission
+from core.reasons import code_of, relayed
 
 
 
@@ -33,8 +34,8 @@ def refusal(exc: BusRequestError, status: int | None = None, *, with_success: bo
     message = str(exc)
     if status is None:
         status = (404 if message.startswith("LookupError") else 409 if message.startswith("NotAllowed")
-                  else 400 if message.startswith("ValueError") else 503 if message.startswith(NO_HANDLER) else 500)
-    text = message.split(": ", 1)[-1]
+                  else 400 if message.startswith("ValueError") else 503 if code_of(message) == NO_HANDLER else 500)
+    text = relayed(message)
     body = {"success": False, "error": text} if with_success else {"error": text}
     return JSONResponse(body, status_code=status)
 
@@ -51,7 +52,7 @@ async def admitted(gw: Any, series_id: int) -> AsyncIterator[None]:
     try:
         await gw.request("scan.edit.begin", {"series_id": series_id, "token": token})
     except BusRequestError as exc:
-        if NO_HANDLER not in str(exc):
+        if code_of(str(exc)) != NO_HANDLER:
             raise  # refused: the owner answered, nothing was granted
         yield  # no runs in this process: nothing to hold off
         return

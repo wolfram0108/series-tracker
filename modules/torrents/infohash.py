@@ -16,6 +16,8 @@ import base64
 import hashlib
 from urllib.parse import parse_qs, urlparse
 
+from core.reasons import reason
+
 
 class TorrentParseError(ValueError):
     """Невалидный .torrent / magnet или неподдерживаемый формат."""
@@ -26,7 +28,7 @@ class TorrentParseError(ValueError):
 def _decode(data: bytes, pos: int) -> tuple[object, int]:
     """Декодирует значение с позиции pos, возвращает (значение, конец)."""
     if pos >= len(data):
-        raise TorrentParseError("неожиданный конец данных")
+        raise TorrentParseError(reason("torrent_truncated"))
     ch = data[pos:pos + 1]
     if ch == b"i":  # целое: i<число>e
         end = data.index(b"e", pos)
@@ -42,7 +44,7 @@ def _decode(data: bytes, pos: int) -> tuple[object, int]:
         while data[pos:pos + 1] != b"e":
             key, pos = _decode(data, pos)
             if not isinstance(key, bytes):
-                raise TorrentParseError("ключ словаря — не строка")
+                raise TorrentParseError(reason("torrent_bad_key"))
             value_start = pos
             value, pos = _decode(data, pos)
             result[key] = (value, value_start, pos)  # значение + спан
@@ -52,9 +54,9 @@ def _decode(data: bytes, pos: int) -> tuple[object, int]:
         length = int(data[pos:colon])
         start = colon + 1
         if start + length > len(data):
-            raise TorrentParseError("строка выходит за пределы данных")
+            raise TorrentParseError(reason("torrent_string_overflow"))
         return data[start:start + length], start + length
-    raise TorrentParseError(f"неизвестный маркер bencode: {ch!r}")
+    raise TorrentParseError(reason("torrent_bad_marker", marker=ch.decode("latin-1")))
 
 
 def infohash_candidates(content: bytes) -> list[str]:
@@ -71,9 +73,9 @@ def infohash_candidates(content: bytes) -> list[str]:
     try:
         top, _ = _decode(content, 0)
     except (ValueError, IndexError) as exc:
-        raise TorrentParseError(f"не удалось разобрать bencode: {exc}") from exc
+        raise TorrentParseError(reason("torrent_bencode_broken", detail=str(exc))) from exc
     if not isinstance(top, dict) or b"info" not in top:
-        raise TorrentParseError("в .torrent отсутствует секция info")
+        raise TorrentParseError(reason("torrent_no_info"))
     info, start, end = top[b"info"]
     info_bytes = content[start:end]
     v1 = hashlib.sha1(info_bytes).hexdigest()
@@ -98,9 +100,9 @@ def torrent_file_list(content: bytes) -> tuple[str | None, list[dict]]:
     try:
         top, _ = _decode(content, 0)
     except (ValueError, IndexError) as exc:
-        raise TorrentParseError(f"не удалось разобрать bencode: {exc}") from exc
+        raise TorrentParseError(reason("torrent_bencode_broken", detail=str(exc))) from exc
     if not isinstance(top, dict) or b"info" not in top:
-        raise TorrentParseError("в .torrent отсутствует секция info")
+        raise TorrentParseError(reason("torrent_no_info"))
     info = top[b"info"][0]  # _decode хранит значение словаря как (value, start, end)
 
     def _val(d: dict, key: bytes):
@@ -132,11 +134,10 @@ def infohash_from_magnet(link: str) -> str:
     """Infohash v1 (hex, нижний регистр) из magnet-ссылки."""
     parsed = urlparse(link)
     if parsed.scheme != "magnet":
-        raise TorrentParseError("не magnet-ссылка")
+        raise TorrentParseError(reason("magnet_not_magnet"))
     for xt in parse_qs(parsed.query).get("xt", []):
         if xt.startswith("urn:btmh:"):
-            raise TorrentParseError(
-                "magnet формата BitTorrent v2 (btmh) не поддерживается")
+            raise TorrentParseError(reason("magnet_v2_unsupported"))
         if not xt.startswith("urn:btih:"):
             continue
         value = xt[len("urn:btih:"):]
@@ -144,13 +145,13 @@ def infohash_from_magnet(link: str) -> str:
             try:
                 bytes.fromhex(value)
             except ValueError as exc:
-                raise TorrentParseError(f"невалидный hex-hash: {value}") from exc
+                raise TorrentParseError(reason("magnet_hash_invalid", value=value)) from exc
             return value.lower()
         if len(value) == 32:  # base32 (старые ссылки)
             try:
                 raw = base64.b32decode(value.upper())
             except Exception as exc:
-                raise TorrentParseError(f"невалидный base32-hash: {value}") from exc
+                raise TorrentParseError(reason("magnet_hash_invalid", value=value)) from exc
             return raw.hex()
-        raise TorrentParseError(f"hash неожиданной длины {len(value)}: {value}")
-    raise TorrentParseError("в magnet-ссылке нет urn:btih")
+        raise TorrentParseError(reason("magnet_hash_length", length=len(value)))
+    raise TorrentParseError(reason("magnet_no_hash"))

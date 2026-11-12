@@ -19,7 +19,7 @@ async def test_a_stalled_call_ends_the_wait_with_a_timeout_while_others_still_ru
     started = time.monotonic()
     stalled = asyncio.create_task(storage.call(time.sleep, 1.5, timeout=0.2))
     assert await storage.call(lambda: "fast", timeout=5) == "fast"
-    with pytest.raises(storage.StorageTimeout, match="хранилище не ответило"):
+    with pytest.raises(storage.StorageTimeout, match="storage_timeout"):
         await stalled
     assert time.monotonic() - started < 1.0
 

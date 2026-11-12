@@ -246,7 +246,7 @@ async def test_a_single_without_a_part_is_part_one_where_the_player_and_the_voic
 async def test_a_repeated_key_is_refused_and_nothing_is_answered(system):
     probe = system.probe
     profile = await new_profile(probe)
-    with pytest.raises(BusRequestError, match="повторяются.*'a'"):
+    with pytest.raises(BusRequestError, match="apply_keys_repeated"):
         await probe.request("rules.apply", {"profile_id": profile, "lines": [
             {"key": "a", "text": "один"}, {"key": "b", "text": "два"}, {"key": "a", "text": "три"}]}, timeout=5)
 
@@ -291,7 +291,7 @@ async def test_a_range_is_answered_as_start_and_end_and_a_reversed_one_as_an_err
     assert (results["up"]["start"], results["up"]["end"], results["up"]["errors"]) == (5, 10, [])
     down = results["down"]
     assert (down["start"], down["end"], down["episode"]) == (None, None, None)
-    assert len(down["errors"]) == 1 and "обратный диапазон 10-5" in down["errors"][0]
+    assert len(down["errors"]) == 1 and "rule_range_reversed" in down["errors"][0]
 
 
 @pytest.mark.asyncio
@@ -310,7 +310,7 @@ async def test_a_broken_rule_is_reported_with_every_answer_and_the_others_still_
 @pytest.mark.asyncio
 async def test_the_old_topics_are_gone(system):
     for topic in ("rules.test", "rules.cache.invalidate"):
-        with pytest.raises(BusRequestError, match="нет обработчика"):
+        with pytest.raises(BusRequestError, match="no_handler"):
             await system.probe.request(topic, {}, timeout=5)
 
 
@@ -406,7 +406,7 @@ async def test_a_refused_change_is_not_announced(system):
     probe = system.probe
     profile = await new_profile(probe)
     sub = system.bus.subscribe("rules.profile.changed")
-    with pytest.raises(BusRequestError, match="неизвестный тип действия"):
+    with pytest.raises(BusRequestError, match="action_unknown"):
         await new_rule(probe, profile, "опечатка", [{"action_type": "assign_voiceoverr", "action_pattern": "X"}])
     assert drain(sub) == []
 
@@ -542,7 +542,7 @@ async def test_the_torrent_profile_is_required_and_not_taken_from_the_series(sys
     profile = await new_profile(probe)
     await new_rule(probe, profile, "серия", [extract("extract_single", "E", "N")])
     for extra in ({}, {"profile_id": None}):
-        with pytest.raises(BusRequestError, match="profile_id"):
+        with pytest.raises(BusRequestError, match="torrent_profile_missing"):
             await torrent_name(probe, card(kind="torrent", parser_profile_id=profile), "Show.E05.mkv", **extra)
 
 
@@ -685,7 +685,7 @@ async def test_a_database_refusal_the_catalog_does_not_explain_is_passed_on_as_i
 async def test_a_profile_is_not_deleted_when_the_catalog_cannot_be_asked(system_without_catalog):
     probe = system_without_catalog.probe
     profile, _ = await profile_with_rules(probe)
-    with pytest.raises(BusRequestError, match="нет обработчика"):
+    with pytest.raises(BusRequestError, match="no_handler"):
         await probe.request("rules.profiles.delete", {"profile_id": profile}, timeout=5)
     assert stored(system_without_catalog.db_path, profile) == {"profiles": 1, "rules": 2, "conditions": 2}
 
@@ -724,7 +724,7 @@ async def test_an_assigned_range_is_answered_as_start_and_end_for_the_lines_the_
 async def test_a_rule_with_a_wrong_assigned_range_is_not_saved(system):
     probe = system.probe
     profile = await new_profile(probe)
-    with pytest.raises(BusRequestError, match="диапазон"):
+    with pytest.raises(BusRequestError, match="range_order"):
         await new_rule(probe, profile, "склейка", [assign("assign_range", "110-109")])
 
 
@@ -763,7 +763,7 @@ async def test_a_table_with_an_empty_row_is_refused_and_nothing_is_saved(system)
     profile = await new_profile(probe)
     table = voices_table("AniStar")
     table["rows"].append({"if": [], "then": "HORIZON"})
-    with pytest.raises(BusRequestError, match="строка 2: пустое условие"):
+    with pytest.raises(BusRequestError, match="table_row_if_empty"):
         await probe.request("rules.rules.add", {"profile_id": profile, "data": {"name": "Озвучки", "rule_table": table}},
                             timeout=5)
     assert await probe.request("rules.rules.list", {"profile_id": profile}, timeout=5) == []

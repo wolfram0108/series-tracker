@@ -5,6 +5,7 @@ from collections import Counter
 import pytest
 
 from core import Bus, BusRequestError
+from core.reasons import reason
 from modules.gateway import GatewayModule
 from modules.gateway.routing import refusal
 
@@ -41,7 +42,7 @@ def test_a_route_of_several_methods_serves_each_of_them(schema, path):
 @pytest.mark.parametrize("message,status", [
     ("LookupError: сериал 1 не найден", 404),
     ("ValueError: {\"code\":\"last_source\"}", 400),
-    ("нет обработчика для query 'composition.get'", 503),
+    (reason("no_handler", topic="composition.get"), 503),
     ("RuntimeError: boom", 500)])
 def test_a_refusal_of_a_module_is_an_http_status_by_its_kind(message, status):
     assert refusal(BusRequestError(message)).status_code == status

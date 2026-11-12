@@ -28,11 +28,12 @@ from urllib.parse import urlsplit
 from core import storage
 from core.ffprobe import duration_of, readable_length
 from core.proc import LOST, REAP_TIMEOUT_S, exited, program, run_capture, spawn, stop
+from core.reasons import reason
 from core.retry import UNTIMED, Budget, retrying
 
 from . import hls_native, ranged
 from . import failure
-from .failure import Failed, Unasked, kind_of
+from .failure import Failed, Final, Unasked, kind_of
 
 ProgressCb = Callable[[dict], Awaitable[None]]
 
@@ -83,7 +84,7 @@ _WARNING_LINE = re.compile(
 
 # A child a signal ended was interrupted (the service stops: systemd signals every process of it at once, before the module
 # cancels its work); it says nothing of the source, and the download goes on when it is asked again.
-INTERRUPTED = "прервано сигналом"
+INTERRUPTED = "interrupted_by_signal"
 
 
 def _interrupted(returncode: int | None, tail: str) -> bool:
@@ -205,9 +206,9 @@ async def _next_line(proc, program: str, started: float, total: float | None = N
     try:
         line = await asyncio.wait_for(proc.stdout.readline(), failure.SILENCE_S)
     except asyncio.TimeoutError:
-        raise _Silent(f"{program}: нет прогресса {failure.SILENCE_S:.0f} с (timeout)") from None
+        raise _Silent(reason("program_silent", program=program, seconds=f"{failure.SILENCE_S:.0f}")) from None
     if total is not None and time.monotonic() - started > total:
-        raise _Silent(f"{program}: загрузка дольше {total:.0f} с (timeout)")
+        raise _Silent(reason("program_too_long", program=program, seconds=f"{total:.0f}"))
     return line
 
 
@@ -317,7 +318,7 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
                                   on_progress: ProgressCb, announced: float | None = None) -> tuple[bool, str]:
     executable = program("ffmpeg")
     if not executable:
-        return False, Unasked("ffmpeg не найден в PATH")
+        return False, Unasked(reason("program_missing", program="ffmpeg"))
     duration = announced if announced is not None else await _probe_duration_ffprobe(stream_url, headers)
     tmp_out = full_output_path + ".download.mp4"
     await on_progress({"phase": "download", "progress": 0, "eta": 0, "speed": 0.0})
@@ -379,22 +380,25 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
         got = await _local_duration(tmp_out)
         if got <= 0 or short_of(got, duration):
             await storage.discard(tmp_out)
-            cause = f", отказов CDN на сегментах: {len(set(refused))}, первый №{refused[0]}" if refused else ""
-            return False, (f"обрыв: скачано {got:.0f} с из ожидаемых ~{duration:.0f} с{cause} — "
-                           "неполная загрузка")
+            if refused:
+                return False, reason("cut_short_refused", got=f"{got:.0f}", expected=f"{duration:.0f}",
+                                     refusals=len(set(refused)), first=refused[0])
+            return False, reason("cut_short", got=f"{got:.0f}", expected=f"{duration:.0f}")
         await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))
         await on_progress({"phase": "download", "progress": 100, "eta": 0, "speed": 0.0})
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
     if _interrupted(code, tail):
-        return False, Unasked(f"{INTERRUPTED}: ffmpeg direct download: {last or code}")
-    return False, f"ffmpeg direct download: {last or code}"
+        return False, Unasked(reason(INTERRUPTED, program="ffmpeg direct download", cause=str(last or code)))
+    return False, reason("program_failed", program="ffmpeg direct download", cause=str(last or code))
 
 
 def _unavailable_error(error: str) -> bool:
+    # A refusal we named ourselves is typed Final; the words are the English of yt-dlp's own errors.
+    if isinstance(error, Final):
+        return True
     lowered = (error or "").lower()
-    return ("недоступно" in lowered or "приватн" in lowered
-            or "video unavailable" in lowered or "private video" in lowered)
+    return "video unavailable" in lowered or "private video" in lowered
 
 
 async def download(video_url: str, full_output_path: str,
@@ -424,7 +428,7 @@ async def download(video_url: str, full_output_path: str,
 
     The words of a failure tell what it says of the source (modules/downloads/failure.py)."""
     if not os.path.isabs(full_output_path):
-        return False, "путь сохранения должен быть абсолютным"
+        return False, reason("save_path_relative")
     try:
         with storage.hold(full_output_path):
             if playlist:
@@ -436,7 +440,7 @@ async def download(video_url: str, full_output_path: str,
                                          announced=announced, max_height=max_height)
             return await _as_long_as_announced(done, full_output_path, announced, on_progress)
     except storage.StorageBusy:  # an operation on this name has not ended: a file written now could be lost
-        return False, Unasked("путь занят незавершённой файловой операцией")
+        return False, Unasked(reason("path_busy"))
 
 
 def short_of(got: float, announced: float) -> bool:
@@ -540,12 +544,12 @@ async def _as_long_as_announced(done: tuple[bool, str], path: str, announced: fl
         await on_progress({"phase": "check", "got_seconds": got})
     if got <= 0:
         await storage.discard(path)
-        return False, "обрыв: скачанный файл не читается — неполная загрузка"
+        return False, reason("cut_unreadable")
     if announced <= 0:
-        return False, "обрыв: источник не сообщил длину видео, полнота не проверена — загрузка повторится"
+        return False, reason("length_unstated")
     if announced > 0 and got < announced - tolerance:
         await storage.discard(path)
-        return False, f"обрыв: скачано {got:.0f} с из ожидаемых ~{announced:.0f} с — неполная загрузка"
+        return False, reason("cut_short", got=f"{got:.0f}", expected=f"{announced:.0f}")
     return done
 
 
@@ -561,7 +565,7 @@ async def _download_ranged_file(video_url: str, headers: dict, full_output_path:
         return False, error
     if await _local_duration(tmp_out) <= 0:
         await storage.discard(tmp_out)
-        return False, "обрыв: скачанный файл не читается"
+        return False, reason("file_unreadable")
     await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))
     await on_progress({"phase": "download", "progress": 100, "eta": 0, "speed": 0.0})
     return True, ""
@@ -618,7 +622,7 @@ async def _phase_download(video_url: str, full_output_path: str,
     (False, error)."""
     executable = program("yt-dlp")
     if not executable:
-        return False, Unasked("yt-dlp не найден в PATH")
+        return False, Unasked(reason("program_missing", program="yt-dlp"))
     out_template = full_output_path + ".download.%(ext)s"
 
     proc = await spawn(
@@ -654,18 +658,19 @@ async def _phase_download(video_url: str, full_output_path: str,
     if stopped:
         return False, stopped
     if code != 0 and _interrupted(code, tail):
-        return False, Unasked(f"{INTERRUPTED}: yt-dlp завершился с кодом {code}")
+        return False, Unasked(reason(INTERRUPTED, program="yt-dlp",
+                                     cause=reason("program_exit_code", program="yt-dlp", code=code)))
     # A lost status says nothing: the file yt-dlp left is judged by what follows (the remux and the check of its length).
     if code not in (0, LOST):
         error = _ytdlp_error(
-            tail, f"yt-dlp завершился с кодом {code}")
+            tail, reason("program_exit_code", program="yt-dlp", code=code))
         if "Video unavailable" in tail or "Private video" in tail:
-            error = "видео недоступно или приватно"
+            error = Final(reason("video_unavailable"))
         return False, error
 
     raw = await storage.call(_download_artifact, full_output_path)
     if raw is None:
-        return False, "yt-dlp не оставил файл после загрузки"
+        return False, reason("program_no_file", program="yt-dlp")
     return raw
 
 
@@ -677,7 +682,7 @@ async def _phase_remux(raw: str, full_output_path: str,
     yt-dlp (надёжно), не из промежуточного TS (находка 52)."""
     executable = program("ffmpeg")
     if not executable:
-        return False, Unasked("ffmpeg не найден в PATH")
+        return False, Unasked(reason("program_missing", program="ffmpeg"))
     await on_progress({"phase": "remux", "progress": 0, "eta": 0,
                        "speed": 0.0})
 
@@ -739,5 +744,5 @@ async def _phase_remux(raw: str, full_output_path: str,
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
     if _interrupted(code, tail):
-        return False, Unasked(f"{INTERRUPTED}: ffmpeg remux: {last or code}")
-    return False, f"ffmpeg remux: {last or code}"
+        return False, Unasked(reason(INTERRUPTED, program="ffmpeg remux", cause=str(last or code)))
+    return False, reason("program_failed", program="ffmpeg remux", cause=str(last or code))

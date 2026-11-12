@@ -18,7 +18,7 @@ from core import BusRequestError
 from core import logging as core_logging
 from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView,
                             PlayersListReply, VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
-from core.reasons import reason
+from core.reasons import code_of, reason, relayed
 
 from .routing import refusal, route_per_method
 from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse, ParsedUrl, ParseUrlRequest
@@ -27,33 +27,33 @@ from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse, Parsed
 _ERR = {c: {"model": ErrorResponse} for c in (400, 403, 404, 409, 500)}
 _ERR1 = {c: {"model": ErrorOnly} for c in (400, 403, 404, 500)}
 
-# Группы логирования новой системы (UI рендерит список из ответа —
-# структура с бэкенда, как в оригинале).
+# The groups of logging the window lists: a code of each section and the modules in it; the window words both
+# (`logs.section.<code>`, `logs.module.<name>` of its catalog).
 LOGGING_MODULES = {
-    "Ядро и шлюз": [
-        {"name": "gateway", "description": "HTTP/SSE-шлюз: запросы фронта и трансляция событий."},
-        {"name": "catalog", "description": "Каталог сериалов: CRUD, агрегатор статусов и занятости."},
-        {"name": "settings", "description": "Хранилище настроек (ключ-значение)."},
-        {"name": "auth", "description": "Вход администратора и смена пароля."},
-        {"name": "runlog", "description": "Дамп каждой синхронизации: все сообщения шины и строки журнала прогона."},
+    "core": [
+        {"name": "gateway"},
+        {"name": "catalog"},
+        {"name": "settings"},
+        {"name": "auth"},
+        {"name": "runlog"},
     ],
-    "Конвейер": [
-        {"name": "scan", "description": "Синхронизация и скан: планировщик, референсы, план загрузки."},
-        {"name": "torrents", "description": "qBittorrent и торрент-конвейер (стадии обработки)."},
-        {"name": "downloads", "description": "Загрузка видео (yt-dlp), очередь и прогресс."},
-        {"name": "planner", "description": "План видео-сериала: актив, загрузки, выравнивание, сборка контейнеров."},
-        {"name": "slicing", "description": "Нарезка компиляций ffmpeg по главам."},
-        {"name": "renaming", "description": "Переименование файлов и переобработка имён."},
-        {"name": "library", "description": "Медиатека: каталоги и перемещение сериалов."},
-        {"name": "voices", "description": "Озвучки: группы, загрузка и дорожки рядом с референсом."},
-        {"name": "conform", "description": "Выравнивание озвучек: связь с демоном track-muxer."},
+    "pipeline": [
+        {"name": "scan"},
+        {"name": "torrents"},
+        {"name": "downloads"},
+        {"name": "planner"},
+        {"name": "slicing"},
+        {"name": "renaming"},
+        {"name": "library"},
+        {"name": "voices"},
+        {"name": "conform"},
     ],
-    "Источники и метаданные": [
-        {"name": "sources", "description": "Парсеры трекеров, таблицы страниц сайтов и плееры."},
-        {"name": "trackerauth", "description": "Авторизация на трекерах, сессии и куки."},
-        {"name": "rules", "description": "Движок правил и форматирование имён."},
-        {"name": "composition", "description": "Раскладка сериала и настройки выхода."},
-        {"name": "metadata", "description": "TMDB: поиск и привязки сериалов."},
+    "sources": [
+        {"name": "sources"},
+        {"name": "trackerauth"},
+        {"name": "rules"},
+        {"name": "composition"},
+        {"name": "metadata"},
     ],
 }
 
@@ -61,6 +61,9 @@ LOGGING_MODULES = {
 DB_EXCLUDED_TABLES = {"auth", "tracker_sessions"}
 
 AUTH_SERVICES = ("qbittorrent", "kinozal", "vk", "rutracker")
+
+# Refusals of the library about a path: the path is forbidden, or the folder cannot be read.
+_FORBIDDEN_PATH_CODES = frozenset({"path_forbidden", "path_no_access"})
 
 
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
@@ -250,7 +253,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             if not module:
                 return JSONResponse(
                     {"success": False,
-                     "error": "Module name not specified"}, status_code=400)
+                     "error": reason("module_missing")}, status_code=400)
             await gw.request("settings.value.set", {
                 "key": f"debug_enabled_{module}",
                 "value": str(data.get("enabled")).lower()})
@@ -275,13 +278,13 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         query = data.get("query")
         if not query:
             return JSONResponse(
-                {"success": False, "error": "Query is required"},
+                {"success": False, "error": reason("query_missing")},
                 status_code=400)
         try:
             reply = await gw.request("metadata.search", {"query": query})
         except BusRequestError as exc:
             return JSONResponse(
-                {"success": False, "error": str(exc).split(": ", 1)[-1]},
+                {"success": False, "error": relayed(str(exc))},
                 status_code=400)
         return {"success": True, "results": reply["results"]}
 
@@ -293,7 +296,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                      {"tmdb_id": tmdb_id})
         except BusRequestError as exc:
             return JSONResponse(
-                {"success": False, "error": str(exc).split(": ", 1)[-1]},
+                {"success": False, "error": relayed(str(exc))},
                 status_code=404)
         return {"success": True, **reply}
 
@@ -309,11 +312,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         data = await request.json()
         mirrors = data.get("mirrors")
         if mirrors is None:
-            return JSONResponse({"error": "Список зеркал не предоставлен"},
+            return JSONResponse({"error": reason("mirrors_missing")},
                                 status_code=400)
         await gw.request("sources.tracker.set_mirrors", {
             "tracker_id": tracker_id, "mirrors": mirrors})
-        return {"success": True, "message": "Список зеркал обновлен."}
+        return {"success": True, "message": reason("mirrors_saved")}
 
     # --- каталоги -------------------------------------------------------------------
 
@@ -323,8 +326,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return await gw.request("library.directories.list",
                                     {"path": path})
         except BusRequestError as exc:
-            msg = str(exc).split(": ", 1)[-1]
-            code = 403 if ("запрещ" in msg or "нет доступа" in msg) else 400
+            msg = relayed(str(exc))
+            code = 403 if code_of(str(exc)) in _FORBIDDEN_PATH_CODES else 400
             return JSONResponse({"error": msg}, status_code=code)
 
     # --- конструктор правил -----------------------------------------------------------
@@ -341,7 +344,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         name = data.get("name")
         if not name:
             return JSONResponse(
-                {"success": False, "error": "Имя профиля не указано"},
+                {"success": False, "error": reason("profile_name_missing")},
                 status_code=400)
         try:
             reply = await gw.request("rules.profiles.create",
@@ -357,7 +360,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         data = await request.json()
         if not data.get("name"):
             return JSONResponse(
-                {"success": False, "error": "Новое имя не указано"},
+                {"success": False, "error": reason("profile_new_name_missing")},
                 status_code=400)
         try:
             await gw.request("rules.profiles.update", {
@@ -497,7 +500,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def database_table(table_name: str):
         tables = await asyncio.to_thread(_db_tables)
         if table_name in DB_EXCLUDED_TABLES or table_name not in tables:
-            return JSONResponse({"error": "Доступ к этой таблице запрещен"},
+            return JSONResponse({"error": reason("table_forbidden")},
                                 status_code=403)
 
         def read_table() -> list[dict]:
@@ -517,13 +520,13 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         table_name = data.get("table_name")
         if not table_name:
             return JSONResponse(
-                {"success": False, "error": "Имя таблицы не указано"},
+                {"success": False, "error": reason("table_name_missing")},
                 status_code=400)
         tables = await asyncio.to_thread(_db_tables)
         if table_name in DB_EXCLUDED_TABLES or table_name not in tables:
             return JSONResponse(
                 {"success": False,
-                 "error": f"Не удалось очистить таблицу '{table_name}'."},
+                 "error": reason("table_clear_failed", table=table_name)},
                 status_code=500)
 
         def clear() -> None:
@@ -535,6 +538,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         await asyncio.to_thread(clear)
         gw.log.warning("админ-вкладка БД: таблица '%s' очищена", table_name)
         return {"success": True,
-                "message": f"Таблица '{table_name}' успешно очищена."}
+                "message": reason("table_cleared", table=table_name)}
 
     return r

@@ -359,7 +359,7 @@ class CompositionModule(BaseModule):
     async def on_recompute(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
         if series_id in self._deleted:
-            raise LookupError(f"сериал {series_id} не найден")
+            raise LookupError(reason("series_not_found", series_id=series_id))
         if env.payload.get("snapshot") is not None:
             self._snapshots[series_id] = RunSnapshot.model_validate(env.payload["snapshot"])
         self._schedule(series_id, ordered=True)
@@ -369,7 +369,7 @@ class CompositionModule(BaseModule):
         flight.waiters.append((flight.started + 1, answer))
         outcome: _Outcome = await answer
         if series_id in self._deleted:
-            raise LookupError(f"сериал {series_id} не найден")
+            raise LookupError(reason("series_not_found", series_id=series_id))
         if outcome.failure is not None:
             raise ValueError(outcome.failure)
         return {"rev": outcome.rev, "changed": outcome.changed}
@@ -449,7 +449,7 @@ class CompositionModule(BaseModule):
         await self.request("catalog.series.get", {"series_id": series_id})
         async with self._lock(series_id):
             if series_id in self._deleted:
-                raise LookupError(f"сериал {series_id} не найден")
+                raise LookupError(reason("series_not_found", series_id=series_id))
             stored = await self.repo.stored(series_id)
             before = settings.canonical(stored.records)
             after = change(before)
@@ -570,7 +570,7 @@ class CompositionModule(BaseModule):
                 if answer.done():
                     continue
                 if series_id in self._deleted:
-                    answer.set_exception(LookupError(f"сериал {series_id} не найден"))
+                    answer.set_exception(LookupError(reason("series_not_found", series_id=series_id)))
                 else:
                     answer.cancel()
             flight.waiters.clear()

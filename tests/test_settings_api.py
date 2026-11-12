@@ -162,7 +162,7 @@ async def test_parse_url_of_an_address_nobody_reads_says_so_in_the_words_of_sour
     _, _, client = system
     resp = await client.post("/api/parse_url", json={"url": "http://nowhere.test/page"})
     assert resp.status_code == 400
-    assert "трекер не распознан" in resp.json()["error"]
+    assert parse(resp.json()["error"])["code"] == "tracker_unknown_url"
 
 
 @pytest.mark.asyncio
@@ -343,7 +343,7 @@ async def test_parser_rule_rejects_unknown_vocabulary(system):
                                        [{"action_type": "assign_voiceoverr",
                                          "action_pattern": "X"}])})
     assert resp.status_code == 400
-    assert "неизвестный тип действия" in resp.json()["error"]
+    assert "action_unknown" in resp.json()["error"]
 
     # опечатка в типе условия
     resp = await client.post(f"/api/parser-profiles/{profile_id}/rules",
@@ -352,7 +352,7 @@ async def test_parser_rule_rejects_unknown_vocabulary(system):
                                                    "pattern": '[{"type":'
                                                '"text","value":"x"}]'}]})
     assert resp.status_code == 400
-    assert "неизвестный тип условия" in resp.json()["error"]
+    assert "condition_type_unknown" in resp.json()["error"]
 
     # корректное правило принимается
     resp = await client.post(f"/api/parser-profiles/{profile_id}/rules",
@@ -372,7 +372,7 @@ async def test_parser_rule_rejects_unknown_vocabulary(system):
                                 [{"action_type": "assign_voiceoverr",
                                   "action_pattern": "X"}])})
     assert resp.status_code == 400
-    assert "неизвестный тип действия" in resp.json()["error"]
+    assert "action_unknown" in resp.json()["error"]
 
 
 @pytest.mark.asyncio

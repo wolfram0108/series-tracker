@@ -80,7 +80,7 @@ def test_magnet_base32():
 
 
 def test_magnet_v2_rejected_explicitly():
-    with pytest.raises(TorrentParseError, match="btmh"):
+    with pytest.raises(TorrentParseError, match='"code":"magnet_v2_unsupported"'):
         infohash_from_magnet("magnet:?xt=urn:btmh:1220" + "a" * 64)
 
 

@@ -17,6 +17,7 @@ from typing import Awaitable, Callable
 from urllib.parse import urljoin
 
 from core import storage
+from core.reasons import reason
 
 from .alloha_session import AllohaRefused, AllohaSession
 
@@ -64,13 +65,13 @@ def playlist_of(text: str, base: str) -> Playlist:
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("#EXT-X-KEY") and _attributes(line).get("METHOD", "NONE") != "NONE":
-            raise AllohaRefused("плейлист Alloha зашифрован", final=True)
+            raise AllohaRefused(reason("alloha_playlist_encrypted"), final=True)
         if line.startswith("#EXT-X-BYTERANGE"):
-            raise AllohaRefused("плейлист Alloha из частей сегментов", final=True)
+            raise AllohaRefused(reason("alloha_playlist_parts"), final=True)
         if line.startswith("#EXT-X-MAP"):
             uri = urljoin(base, _attributes(line).get("URI", ""))
             if init is not None and uri != init:
-                raise AllohaRefused("плейлист Alloha меняет init-сегмент", final=True)
+                raise AllohaRefused(reason("alloha_playlist_init_changed"), final=True)
             init = uri
         elif line.startswith("#EXTINF"):
             duration = float(line.split(":", 1)[1].split(",", 1)[0] or 0)
@@ -80,7 +81,7 @@ def playlist_of(text: str, base: str) -> Playlist:
             segments.append((urljoin(base, line), duration or 0.0))
             duration = None
     if not ended or not segments:
-        raise AllohaRefused("плейлист Alloha не конечный или пустой")
+        raise AllohaRefused(reason("alloha_playlist_unfinished"))
     return Playlist(init, tuple(segments))
 
 
@@ -88,11 +89,11 @@ async def _media(session: AllohaSession, url: str, client=None) -> bytes:
     response = await session._ok("GET", url, headers=session.media_headers(), client=client)
     kind = (response.headers.get("Content-Type") or "").lower()
     if any(each in kind for each in _TEXT_TYPES):
-        raise AllohaRefused(f"вместо сегмента ответ {kind}")
+        raise AllohaRefused(reason("alloha_segment_answer", kind=kind))
     body = response.content
     announced = response.headers.get("Content-Length")
     if not body or (announced and not response.headers.get("Content-Encoding") and len(body) != int(announced)):
-        raise AllohaRefused("сегмент не той длины, что объявил хост")
+        raise AllohaRefused(reason("alloha_segment_length"))
     return body
 
 
@@ -108,12 +109,12 @@ async def playlist(session: AllohaSession, url: str) -> Playlist:
         response = await session._ok("GET", url, headers=session.media_headers())
         text = response.content.decode("utf-8-sig", errors="replace")
         if not text.lstrip().startswith("#EXTM3U"):
-            raise AllohaRefused("по адресу потока Alloha не плейлист HLS")
+            raise AllohaRefused(reason("alloha_not_hls"))
         child = variant_of(text, str(response.url))
         if child is None:
             return playlist_of(text, str(response.url))
         url = child
-    raise AllohaRefused("плейлист Alloha вложен глубже четырёх", final=True)
+    raise AllohaRefused(reason("alloha_playlist_nested"), final=True)
 
 
 async def transfer(session: AllohaSession, listed: Playlist, target: str, connections: int,
@@ -190,5 +191,5 @@ async def transfer(session: AllohaSession, listed: Playlist, target: str, connec
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
     if flushed != count:
-        raise AllohaRefused(f"взято сегментов {flushed} из {count}")
+        raise AllohaRefused(reason("alloha_segments_taken", taken=flushed, count=count))
 

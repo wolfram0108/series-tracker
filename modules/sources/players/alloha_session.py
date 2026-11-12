@@ -29,6 +29,7 @@ from typing import Any, Awaitable, Callable, Mapping
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
 from core import clock
+from core.reasons import reason
 
 LANGUAGE = "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
 # Safeguards of one request of the host or the CDN and of the first `edge_hash`, as the prototype held them.
@@ -203,14 +204,16 @@ class AllohaSession:
             return await (client or self.http).request(method, url, headers={**self._base(), **(headers or {})},
                                                        timeout=REQUEST_TIMEOUT_S, **kw)
         except Exception as exc:  # noqa: BLE001 - every failure of the way is a refusal with its kind
-            raise AllohaRefused(f"{urlsplit(url).hostname}: {type(exc).__name__}") from exc
+            raise AllohaRefused(reason("host_request_failed", host=urlsplit(url).hostname,
+                                       cause=type(exc).__name__)) from exc
 
     async def _ok(self, method: str, url: str, **kw):
         response = await self.request(method, url, **kw)
         if response.status_code >= 400:
             blocked = response.headers.get("x-vd") or ""
-            raise AllohaRefused(f"{urlsplit(url).hostname}: статус {response.status_code}"
-                                + (f", x-vd={blocked}" if blocked else ""), status=response.status_code,
+            words = (reason("host_status_blocked", host=urlsplit(url).hostname, status=response.status_code, blocked=blocked)
+                     if blocked else reason("host_status", host=urlsplit(url).hostname, status=response.status_code))
+            raise AllohaRefused(words, status=response.status_code,
                                 final=response.status_code in (404, 410) and not blocked)
         return response
 
@@ -228,7 +231,7 @@ class AllohaSession:
         """The answer of the host to the ask of the files of the episode the document shows, signed afresh."""
         seed, active = _meta(page, "viewporti"), _active_id(page)
         if not seed or not active:
-            raise AllohaRefused("документ плеера без viewporti или fileList")
+            raise AllohaRefused(reason("player_doc_no_viewport"))
         self.active_id, self.view = active, _user_param(page)
         token = parse_qs(urlsplit(self.iframe).query).get("token", [""])[0]
         response = await self._ok(
@@ -239,9 +242,9 @@ class AllohaSession:
         try:
             data = json.loads(response.content)
         except ValueError as exc:
-            raise AllohaRefused("ответ плеера не JSON") from exc
+            raise AllohaRefused(reason("player_answer_not_json")) from exc
         if not isinstance(data, dict):
-            raise AllohaRefused("ответ плеера не объект")
+            raise AllohaRefused(reason("player_answer_not_object"))
         self.socket_url, self.socket_key = str(data.get("pnr") or ""), str(data.get("pnk") or "")
         return data
 
@@ -250,11 +253,11 @@ class AllohaSession:
         script = next((each for each in re.findall(r"""<script\b[^>]*\bsrc=["']([^"']+)["']""", page)
                        if re.search(r"/app\.[^/]+\.js", each)), None)
         if script is None:
-            raise AllohaRefused("документ плеера без скрипта app.*.js")
+            raise AllohaRefused(reason("player_doc_no_script"))
         text = (await self._ok("GET", urljoin(self.iframe, script), headers={"Referer": self.iframe})).text
         keys = set(re.findall(r"""['"]([A-Za-z0-9]{340,420})['"]""", text))
         if len(keys) != 1:
-            raise AllohaRefused(f"в скрипте плеера ключей доступа {len(keys)}, а не один")
+            raise AllohaRefused(reason("player_script_keys", count=len(keys)))
         self.authorizations = "Bearer " + keys.pop()
 
     # --- playing ------------------------------------------------------------------------------------------------------
@@ -279,21 +282,21 @@ class AllohaSession:
     async def play(self, track: Track, connect: Callable[..., Awaitable[Any]]) -> None:
         """The socket opened, the start said, the first `edge_hash` taken; then the socket is kept saying it plays."""
         if not self.socket_url or not self.socket_key:
-            raise AllohaRefused("ответ плеера без адреса сокета")
+            raise AllohaRefused(reason("player_answer_no_socket"))
         self._track, self._started = track, time.monotonic()
         url = self.socket_url + ("&" if "?" in self.socket_url else "?") + urlencode(
             {"sid": self.socket_key, "v": "2.1", "t": int(self._clock() * 1000)})
         try:
             self._ws = await connect(url, headers={**self._base(), "Origin": self.origin})
         except Exception as exc:  # noqa: BLE001 - a socket that did not open is a refusal of the way
-            raise AllohaRefused(f"сокет плеера не открылся: {type(exc).__name__}") from exc
+            raise AllohaRefused(reason("socket_not_opened", cause=type(exc).__name__)) from exc
         for kind in ("playback_start", "resumed"):
             await self._ws.send_str(self._said(kind))
         self._tasks.append(asyncio.ensure_future(self._listen()))
         try:
             await asyncio.wait_for(self._edge_came.wait(), EDGE_TIMEOUT_S)
         except asyncio.TimeoutError as exc:
-            raise AllohaRefused(self.error or f"сокет плеера не дал edge_hash за {EDGE_TIMEOUT_S:.0f} с") from exc
+            raise AllohaRefused(self.error or reason("socket_no_edge", seconds=f"{EDGE_TIMEOUT_S:.0f}")) from exc
         if self.error:
             raise AllohaRefused(self.error)
         self._tasks.append(asyncio.ensure_future(self._keep_playing()))
@@ -312,7 +315,7 @@ class AllohaSession:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a socket that closed ends the transfer: no old edge is used blindly
-            self.error = f"сокет плеера закрылся: {type(exc).__name__}"
+            self.error = reason("socket_closed", cause=type(exc).__name__)
             self._edge_came.set()
 
     async def _keep_playing(self) -> None:
@@ -323,7 +326,7 @@ class AllohaSession:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            self.error = f"сокет плеера: {type(exc).__name__}"
+            self.error = reason("socket_failed", cause=type(exc).__name__)
 
     # --- the reports of the player ------------------------------------------------------------------------------------
 
@@ -348,7 +351,7 @@ class AllohaSession:
     async def report(self, duration: float) -> None:
         """The reports of a player that starts: the startup events, the two statistics, then a heartbeat every 10 s."""
         if not self.view.get("token"):
-            raise AllohaRefused("документ плеера без токена событий")
+            raise AllohaRefused(reason("player_doc_no_events_token"))
         self.duration = duration
         self._view_id, self._request_id = uuid.uuid4().hex, uuid.uuid4().hex
         self._init_at = int(self._clock() * 1000)
@@ -385,7 +388,7 @@ class AllohaSession:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            self.error = f"отчёт плеера: {exc}"
+            self.error = reason("player_report_failed", cause=str(exc))
 
     async def close(self) -> None:
         for task in self._tasks:

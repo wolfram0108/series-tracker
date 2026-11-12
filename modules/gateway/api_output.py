@@ -14,6 +14,7 @@ from typing import Literal
 from pydantic import BaseModel, ValidationError
 
 from core import BusRequestError
+from core.reasons import reason, relayed
 from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitch, PlanDelete, PlannerView,
                             PlanRowRef, QueuesGet, QueuesReply, Reference, SeriesKind, SettingsReset, SettingsSet,
                             VoiceOrderSet, VoiceTitleSet)
@@ -59,7 +60,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             series = await gw.request("catalog.series.get", {"series_id": series_id})
         except BusRequestError:
-            return JSONResponse({"error": "Сериал не найден"}, status_code=404)
+            return JSONResponse({"error": reason("series_not_found")}, status_code=404)
         try:
             if series["kind"] == SeriesKind.VIDEO:
                 return await gw.request("composition.get", CompositionGetRequest(
@@ -70,7 +71,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 await gw.request("scan.series.prepare", {"series_id": series_id})
             plan = await gw.request("torrents.composition", {"series_id": series_id, "refresh": refresh})
         except BusRequestError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": relayed(str(exc))}, status_code=500)
         for item in plan:
             sd = item.get("source_data")
             if sd:

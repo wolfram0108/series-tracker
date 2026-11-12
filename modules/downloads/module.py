@@ -58,7 +58,7 @@ from core.ffprobe import duration_of, film_stream, streams_of
 from core.contracts import RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, WorkWithdrawn
 from core.db import Database
 from core.envelope import Envelope
-from core.reasons import reason
+from core.reasons import describe, reason
 from core.retry import UNTIMED, Budget, retrying
 
 from . import ytdlp
@@ -234,12 +234,12 @@ class DownloadsModule(BaseModule):
             self._fetch_queue = [job for job in self._fetch_queue if job["key"] != key]
             for job in waiting:
                 self.cards.finished(job["need_key"], False)
-                self._finished(job, False, "отменено пользователем", False)
+                self._finished(job, False, reason("cancelled_by_user"), False)
         elif key in self._fetch_active:
             self._cancelled.add(key)
             self._fetch_active[key][0].cancel()
         else:
-            raise LookupError(f"загрузка {key} не найдена")
+            raise LookupError(reason("fetch_not_found", key=key))
         self._announce_queue()
         return {"cancelled": True}
 
@@ -247,7 +247,7 @@ class DownloadsModule(BaseModule):
         waiting, self._fetch_queue = self._fetch_queue, []
         for job in waiting:
             self.cards.finished(job["need_key"], False)
-            self._finished(job, False, "очередь очищена пользователем", False)
+            self._finished(job, False, reason("queue_cleared_by_user"), False)
         self._announce_queue()
         return {"deleted": len(waiting)}
 
@@ -296,7 +296,7 @@ class DownloadsModule(BaseModule):
         """The user removes a card that stayed after its sync."""
         key = str(env.payload["id"])
         if key not in self.cards.cards or key in {job["need_key"] for job in [*self._fetch_queue, *self._fetch_jobs.values()]}:
-            raise LookupError(f"карточка загрузки {key} не найдена или загрузка идёт")
+            raise LookupError(reason("card_not_removable", key=key))
         self.cards.forget(key)
         await self.repo.drop_cards([key])
         self._announce_queue()
@@ -347,14 +347,14 @@ class DownloadsModule(BaseModule):
                         bool(reply.get("playlist")) or by_player, by_player)
         except Exception as exc:
             if not await ytdlp_fallback():
-                return url, None, (f"поток не получен: {exc}", Failed.UNASKED), False, False, False
+                return url, None, (reason("stream_not_got", cause=str(exc)), Failed.UNASKED), False, False, False
             self.log.debug("sources.video.stream не обработан для %s: %s", url, exc)
         return url, None, None, False, False, False
 
     async def on_fetch(self, env: Envelope) -> None:
         job = {k: env.payload.get(k) for k in ("key", "url", "path", "max_height", "series_id", "whole", "ytdlp")}
         if not (job["path"] or "").startswith("/"):
-            self._finished(job, False, "путь сохранения должен быть абсолютным", False)
+            self._finished(job, False, reason("save_path_relative"), False)
             return
         if job["key"] in self._fetch_active or any(queued["key"] == job["key"] for queued in self._fetch_queue):
             return
@@ -466,12 +466,12 @@ class DownloadsModule(BaseModule):
                 if notice is not None:
                     # The file is a clip the host served instead of the episode (core/notices.py): no episode, and the
                     # way to it may open again (a quota of a day).
-                    return False, f"источник отдал уведомление «{notice.id}» вместо серии", Failed.BROKEN
+                    return False, reason("source_notice", notice=notice.id), Failed.BROKEN
                 seconds = await duration_of(path)
                 if notices.too_short(seconds):
                     # The host broke the upload of the episode: the file is all there is, an attempt again gets it again.
-                    return False, (f"источник отдал файл длиной {seconds:.1f} с — серия не бывает короче "
-                                   f"{notices.EPISODE_MIN_S:.0f} с, файл сломан"), Failed.FINAL
+                    return False, reason("episode_file_too_short", seconds=f"{seconds:.1f}",
+                                         minimum=f"{notices.EPISODE_MIN_S:.0f}"), Failed.FINAL
             return done, failure, None if done else kind_of(failure)
 
         budget = _download_budget()
@@ -479,7 +479,8 @@ class DownloadsModule(BaseModule):
 
         def report(result: tuple[bool, str, Failed | None], attempt: int, pause: float) -> None:
             self.cards.attempt_failed(need_key)
-            self.log.warning("загрузка %s: %s — повтор %d/%d через %.0f с", key, result[1], attempt, budget.attempts, pause)
+            self.log.warning("загрузка %s: %s — повтор %d/%d через %.0f с", key, describe(result[1]), attempt,
+                             budget.attempts, pause)
 
         stopped = False
         try:
@@ -488,12 +489,12 @@ class DownloadsModule(BaseModule):
         except asyncio.CancelledError:
             stopped = key not in self._cancelled
             if not stopped:
-                error, said = "отменено пользователем", Failed.FINAL
+                error, said = reason("cancelled_by_user"), Failed.FINAL
             else:
                 raise
         except Exception as exc:  # noqa: BLE001 - one failed fetch must not take the module down
             self.log.exception("сбой загрузки %s", key)
-            ok, error, said = False, f"внутренняя ошибка: {exc}", Failed.UNASKED
+            ok, error, said = False, reason("internal_error", cause=str(exc)), Failed.UNASKED
         finally:
             await self.places.leave(turn)  # a fetch stopped before it asked its stream holds no later one
             # The place of the fetch is given back whatever happens to what it wrote: a place kept by a fetch that ended
@@ -527,11 +528,12 @@ class DownloadsModule(BaseModule):
                 self.spawn(self.request("sources.video.fetch.stop", {"target": target}))
                 raise
             except Exception as exc:  # noqa: BLE001 - a player that did not answer said nothing of the source
-                return False, Unasked(f"плеер не ответил о загрузке: {exc}"), 0.0, 0.0
+                return False, Unasked(reason("player_fetch_silent", cause=str(exc))), 0.0, 0.0
             finally:
                 self._player_progress.pop(target, None)
             if not reply.get("ok"):
-                words = f"загрузка плеером: {reply.get('error') or 'отказ'}"
+                words = reason("player_fetch_failed", cause=reply["error"]) if reply.get("error") \
+                    else reason("player_fetch_refused")
                 return False, Final(words) if reply.get("final") else words, 0.0, 0.0
             return True, "", float(reply.get("seconds") or 0), float(reply.get("longest") or 0)
         return fetch
@@ -572,7 +574,7 @@ class DownloadsModule(BaseModule):
                                      key, SILENCE_FUSE_S, awaited(run))
                     run.cancel()
                     await asyncio.gather(run, return_exceptions=True)
-                    return False, f"нет признаков жизни {SILENCE_FUSE_S:.0f} с"
+                    return False, reason("no_signs_of_life", seconds=f"{SILENCE_FUSE_S:.0f}")
         finally:
             if beat is not None:
                 beat.cancel()  # a download cancelled in the middle of the wait leaves no watch behind

@@ -8,6 +8,7 @@ import { api } from "../api/client"
 import { t } from "../i18n"
 import { useAuthStore } from "../stores/auth"
 import { useBodyScrollLock } from "../composables/useBodyScrollLock"
+import { reasonText } from "../lib/reason"
 
 // Модалка входа администратора (Этап 1). Блокирующая. Приложение
 // однопользовательское — логин не вводят, показываем имя уже созданного
@@ -47,7 +48,7 @@ async function submit(): Promise<void> {
       emit("logged-in")
       return
     }
-    notice.value = (error as unknown as { error?: string } | null)?.error ||
+    notice.value = reasonText((error as unknown as { error?: string } | null)?.error) ||
       t("login.error.wrong")
   } catch {
     notice.value = t("common.networkDown")

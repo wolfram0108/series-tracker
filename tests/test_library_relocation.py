@@ -210,7 +210,7 @@ async def test_a_plan_is_refused_while_a_move_is_made(system):
         conn.execute("INSERT INTO relocation_tasks (series_id, new_path, "
                      "status) VALUES (2, '/x', 'in_progress')")
         conn.commit()
-    with pytest.raises(BusRequestError, match="уже выполняется"):
+    with pytest.raises(BusRequestError, match="move_in_progress"):
         await plan(probe, new_dir)
 
 

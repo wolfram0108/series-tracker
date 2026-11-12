@@ -60,7 +60,7 @@ def test_kinozal_parse_page():
 
 
 def test_kinozal_parse_garbage_raises():
-    with pytest.raises(parsers.SourceParseError, match="дата"):
+    with pytest.raises(parsers.SourceParseError, match="kinozal_no_date"):
         parsers.kinozal_parse("<html><title>x</title></html>",
                               "https://kinozal.me/details.php?id=1")
 
@@ -72,7 +72,7 @@ def test_rutracker_guest_page_fails_loudly():
                 encoding="utf-8").read()
     # гостям не видна дата регистрации — парсер обязан сказать об этом
     # явно, а не выдать первую попавшуюся «похожую на дату» строку
-    with pytest.raises(parsers.SourceParseError, match="нужен логин"):
+    with pytest.raises(parsers.SourceParseError, match="rutracker_no_date"):
         parsers.rutracker_parse(html, "https://rutracker.org/forum/viewtopic.php?t=1")
 
 

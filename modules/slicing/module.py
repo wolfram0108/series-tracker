@@ -39,6 +39,7 @@ from core import storage
 from core.proc import program, run_capture
 from core.db import Database
 from core.envelope import Envelope
+from core.reasons import reason
 
 from . import chapters as ch
 from .repository import SlicingRepository
@@ -140,7 +141,7 @@ class SlicingModule(BaseModule):
     async def _item_or_fail(self, unique_id: str) -> dict:
         item = await self.repo.get_item(unique_id)
         if not item:
-            raise LookupError(f"медиа-элемент {unique_id} не найден")
+            raise LookupError(reason("media_item_not_found", unique_id=unique_id))
         return item
 
     @staticmethod
@@ -184,7 +185,7 @@ class SlicingModule(BaseModule):
     async def on_chapters_mark(self, env: Envelope) -> dict:
         item = await self._item_or_fail(env.payload["unique_id"])
         if not item.get("chapters"):
-            raise ValueError("главы не найдены в БД — сначала получите их")
+            raise ValueError(reason("chapters_not_loaded"))
         chapters = json.loads(item["chapters"])
         marked = ch.mark_manually(chapters, env.payload["garbage_indices"])
         filtered = [c for c in marked if not c["is_garbage"]]
@@ -204,10 +205,9 @@ class SlicingModule(BaseModule):
         if item.get("slicing_status") not in ("none",
                                               "completed_with_errors",
                                               "error"):
-            raise RuntimeError("задача на нарезку уже в очереди или была "
-                               "успешно завершена")
+            raise RuntimeError(reason("slicing_already_queued"))
         if not item.get("chapters"):
-            raise ValueError("главы не найдены — сначала получите их")
+            raise ValueError(reason("chapters_not_loaded"))
         chapters = json.loads(item["chapters"])
         garbage_indices = env.payload.get("garbage_indices") or []
         if garbage_indices:
@@ -217,9 +217,8 @@ class SlicingModule(BaseModule):
             filtered = ch.filter_chapters(chapters)
         expected = self._expected_count(item)
         if len(filtered) != expected:
-            raise ValueError(
-                f"число отфильтрованных глав ({len(filtered)}) не "
-                f"совпадает с ожидаемым ({expected})")
+            raise ValueError(reason("chapters_count_mismatch", filtered=len(filtered),
+                                    expected=expected))
         # Исходника может не быть (удалён после прошлой нарезки, а дети
         # позже пропали): нарезать нечего — возвращаем компиляцию в
         # дозагрузку и просим пользователя повторить нарезку после
@@ -275,14 +274,13 @@ class SlicingModule(BaseModule):
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
             if not item.get("final_filename"):
-                raise FileNotFoundError(
-                    f"у элемента {uid} нет пути к исходному файлу")
+                raise FileNotFoundError(reason("slicing_no_source_path", unique_id=uid))
             source = os.path.join(series["save_path"],
                                   item["final_filename"])
             chapters = json.loads(item.get("chapters_filtered")
                                   or item["chapters"])
             if not await storage.call(os.path.exists, source):
-                raise FileNotFoundError(f"исходник не найден: {source}")
+                raise FileNotFoundError(reason("slicing_source_missing", path=source))
 
             progress = task["progress_chapters"]
             if isinstance(progress, str):
@@ -321,8 +319,8 @@ class SlicingModule(BaseModule):
                 finally:
                     self._current_ffmpeg = None
                 if not ok:
-                    raise RuntimeError(
-                        f"ffmpeg, эпизод {episode}: {error}")
+                    raise RuntimeError(reason("slicing_ffmpeg_failed", episode=episode,
+                                              detail=str(error)))
                 await self.repo.add_sliced_file(series_id, uid, episode,
                                                 out_rel)
                 progress[str(episode)] = "completed"
@@ -431,8 +429,7 @@ class SlicingModule(BaseModule):
         item = await self._item_or_fail(env.payload["unique_id"])
         if (item.get("slicing_status") or "none") not in (
                 "completed", "completed_with_errors"):
-            raise RuntimeError("исходник можно удалить только у нарезанной "
-                               "компиляции")
+            raise RuntimeError(reason("source_delete_not_sliced"))
         if not item.get("final_filename"):
             return {"deleted": False, "reason": "no_source"}
         series = await self.request("catalog.series.get",

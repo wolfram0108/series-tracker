@@ -26,6 +26,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import BaseModule, BusRequestError
+from core.reasons import reason
 from core.contracts import (CompositionChanged, CompositionFailed, PackJournal, PlannerView,
                             SeriesReadProgress, SourceChanged, TableFailed, TableProgress, TableReady)
 
@@ -55,7 +56,7 @@ class AuthGateMiddleware:
             await self.app(scope, receive, send)
             return
         response = JSONResponse({"authenticated": False,
-                                 "error": "Требуется вход"}, status_code=401)
+                                 "error": reason("login_required")}, status_code=401)
         await response(scope, receive, send)
 
 
@@ -438,7 +439,7 @@ class GatewayModule(BaseModule):
         @app.exception_handler(Exception)
         async def _unhandled(_request, _exc):  # noqa: ANN001
             self.log.exception("необработанная ошибка HTTP")
-            return JSONResponse({"error": "Внутренняя ошибка сервера"},
+            return JSONResponse({"error": reason("server_error")},
                                 status_code=500)
 
         return app

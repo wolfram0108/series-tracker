@@ -7,6 +7,7 @@ import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { t, tn } from "../../i18n"
 import { stateLabel } from "../../lib/states"
+import { reasonText } from "../../lib/reason"
 
 // Вкладка «Нарезка» — порт ChapterManager. Компиляции в плане/обработанные
 // слайсером, операции над главами: проверить оглавление (ffprobe), фильтр,
@@ -146,7 +147,7 @@ async function fetchFilteredChapters(it: Item) {
       it.chapters = data.chapters ?? it.chapters
       it.filteredChapters = data.filtered_chapters ?? null
       it.garbageChapters = data.garbage_chapters ?? null
-      it.statusMessage = data.status_message ?? null
+      it.statusMessage = data.status_message ? reasonText(data.status_message) : null
       toast.add({ severity: "success", summary: t("history.col.chapters"), detail: t("slicing.toast.filtered"), life: 2500 })
     }
   } finally {
@@ -179,7 +180,7 @@ async function applyManualFilter(it: Item) {
     it.chapters = data.chapters ?? it.chapters
     it.filteredChapters = data.filtered_chapters ?? null
     it.garbageChapters = data.garbage_chapters ?? null
-    it.statusMessage = data.status_message ?? null
+    it.statusMessage = data.status_message ? reasonText(data.status_message) : null
     it.showChapterSelection = false
     toast.add({ severity: "success", summary: t("history.col.chapters"), detail: t("slicing.toast.manualApplied"), life: 2500 })
   }
@@ -202,7 +203,7 @@ async function createSlicingTask(it: Item) {
   }
   if (data.source_missing) {
     it.slicing_status = prev
-    toast.add({ severity: "warn", summary: t("status.tab.slicing"), detail: data.message ?? t("slicing.toast.sourceMissingDownload"), life: 4000 })
+    toast.add({ severity: "warn", summary: t("status.tab.slicing"), detail: reasonText(data.message) || t("slicing.toast.sourceMissingDownload"), life: 4000 })
     return
   }
   toast.add({ severity: "success", summary: t("status.tab.slicing"), detail: t("slicing.toast.created"), life: 3000 })
@@ -230,7 +231,7 @@ async function createSlicingTaskWithFilter(it: Item) {
   }
   if (data.source_missing) {
     it.slicing_status = prev
-    toast.add({ severity: "warn", summary: t("status.tab.slicing"), detail: data.message ?? t("slicing.toast.sourceMissing"), life: 4000 })
+    toast.add({ severity: "warn", summary: t("status.tab.slicing"), detail: reasonText(data.message) || t("slicing.toast.sourceMissing"), life: 4000 })
     return
   }
   toast.add({ severity: "success", summary: t("status.tab.slicing"), detail: t("slicing.toast.createdFiltered"), life: 3000 })
@@ -247,7 +248,7 @@ async function deleteSource(it: Item) {
   )) as { message?: string } | null
   if (data !== null) {
     it.final_filename = null
-    toast.add({ severity: "success", summary: t("slicing.toast.deleted"), detail: data.message ?? t("slicing.toast.sourceDeleted"), life: 3000 })
+    toast.add({ severity: "success", summary: t("slicing.toast.deleted"), detail: reasonText(data.message) || t("slicing.toast.sourceDeleted"), life: 3000 })
   }
 }
 
@@ -293,7 +294,7 @@ onMounted(loadMediaItems)
           <div v-if="it.garbageChapters && it.garbageChapters.length" class="chapter-section">
             <h6>{{ t("slicing.chapters.garbage", { count: it.garbageChapters.length }) }}</h6>
             <div class="chapter-list">
-              <span v-for="(ch, i) in it.garbageChapters" :key="'g' + i" class="chapter-pill chapter-garbage" :title="ch.garbage_reason">
+              <span v-for="(ch, i) in it.garbageChapters" :key="'g' + i" class="chapter-pill chapter-garbage" :title="reasonText(ch.garbage_reason)">
                 {{ ch.time }} ({{ ch.title }}) <i class="pi pi-times-circle" />
               </span>
             </div>

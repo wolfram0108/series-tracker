@@ -32,6 +32,7 @@ from core import storage
 from core.hls_playlist import Insertion, without_insertions  # noqa: F401 - the words of the downloader too
 from core.http_limits import bounded_client
 from core.proc import exited, spawn, stop
+from core.reasons import reason
 
 from . import failure as failure_words
 from .failure import GONE, Final
@@ -103,12 +104,12 @@ def absolute(text: str, base: str) -> tuple[str, float, float]:
             segments += 1
         out.append(line)
     if not segments:
-        raise PlaylistError("плейлист: в нём нет сегментов", final=True)
+        raise PlaylistError(reason("playlist_empty"), final=True)
     if "#EXT-X-ENDLIST" not in out:
-        raise PlaylistError("плейлист не закончен (нет #EXT-X-ENDLIST): это не запись, а трансляция", final=True)
+        raise PlaylistError(reason("playlist_live"), final=True)
     unsupported = methods - {"NONE", "AES-128"}
     if unsupported:
-        raise PlaylistError(f"плейлист: шифрование {', '.join(sorted(unsupported))} не расшифровывается", final=True)
+        raise PlaylistError(reason("playlist_encryption", methods=", ".join(sorted(unsupported))), final=True)
     return "\n".join(out) + "\n", seconds, longest
 
 
@@ -155,22 +156,22 @@ async def snapshot(url: str, headers: dict, path: str) -> Snapshot:
             try:
                 response = await http.get(base, headers=headers)
             except httpx.HTTPError as exc:
-                raise PlaylistError(f"плейлист не получен: {type(exc).__name__}") from exc
+                raise PlaylistError(reason("playlist_unreachable", cause=type(exc).__name__)) from exc
             if response.status_code != 200:
-                raise PlaylistError(f"плейлист не получен: статус {response.status_code}",
+                raise PlaylistError(reason("playlist_status", status=response.status_code),
                                     final=response.status_code in GONE)
             text, base = response.text, str(response.url)
             if not text.lstrip("﻿").lstrip().startswith("#EXTM3U"):
                 # What the host served instead is the reason's own fact: a page, a refusal in words, a file.
                 served = " ".join(text[:120].split())
-                raise PlaylistError(f"по адресу потока не плейлист HLS: {response.headers.get('content-type') or 'без типа'}, "
-                                    f"{len(response.content)} байт, начало «{served}»")
+                raise PlaylistError(reason("playlist_not_hls", content_type=response.headers.get("content-type") or "—",
+                                           size=len(response.content), served=served))
             variants = _variants(text, base)
             if not variants:
                 break
             base = max(variants)[2]
         else:
-            raise PlaylistError("плейлист: вложенность вариантов глубже четырёх", final=True)
+            raise PlaylistError(reason("playlist_nested"), final=True)
     text, dropped = without_insertions(text, base)
     for each in dropped:
         logger.warning("%s: из потока вырезана вставка с %s — %d сегм., %.1f с", os.path.basename(path), each.origin,
@@ -203,7 +204,7 @@ async def fetch(snap: Snapshot, headers: dict, target: str, fragments: int, on_p
             try:
                 line = await asyncio.wait_for(proc.stdout.readline(), failure_words.SILENCE_S)
             except asyncio.TimeoutError:
-                failure = f"загрузчик сегментов: нет прогресса {failure_words.SILENCE_S:.0f} с (timeout)"
+                failure = reason("segments_silent", seconds=f"{failure_words.SILENCE_S:.0f}")
                 break
             if not line:
                 break
@@ -228,7 +229,8 @@ async def fetch(snap: Snapshot, headers: dict, target: str, fragments: int, on_p
             code = await stop(proc)
     # The worker tells that every segment is in the file; its code is no proof alone (a lost status says nothing).
     if failure or not transferred:
-        words = "загрузчик сегментов: " + ("; ".join(errors[-2:]) or failure or f"код {code}")
+        detail = "; ".join(errors[-2:]) or failure
+        words = reason("segments_failed", detail=detail) if detail else reason("segments_exit", code=code)
         return False, Final(words) if gone else words
     return True, ""
 

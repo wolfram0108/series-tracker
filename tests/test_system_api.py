@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from core import BaseModule, Bus, Runner
+from core.reasons import reason
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.gateway import GatewayModule
@@ -107,7 +108,7 @@ async def test_scan_all_409_when_running(system):
     scan._scan_all_running = True
     resp = await client.post("/api/scanner/scan_all", json={})
     assert resp.status_code == 409
-    assert resp.json()["error"] == "Сканирование уже запущено."
+    assert resp.json()["error"] == reason("scan_all_running")
 
 
 @pytest.mark.asyncio
@@ -143,7 +144,7 @@ async def test_queue_endpoints(system):
 
     resp = await client.post("/api/downloads/queue/clear")
     assert resp.json() == {"success": True,
-                           "message": "Удалено 3 задач из очереди."}
+                           "message": reason("queue_tasks_removed", count=3)}
 
     # /api/agent/reset удалён (находка 23) — точки больше нет
     resp = await client.post("/api/agent/reset")

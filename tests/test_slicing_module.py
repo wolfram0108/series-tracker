@@ -11,6 +11,7 @@ import pytest
 
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.db import Database
+from core.reasons import parse, reason
 from modules.slicing import SlicingModule
 from modules.slicing import chapters as ch
 from modules.slicing.module import run_ffmpeg
@@ -49,7 +50,7 @@ def test_chapter_duration_by_interval_not_start_time():
     assert filtered == ["1 Серия", "2 Серия", "3 Серия"]
     garbage = {g["title"]: g["garbage_reason"]
                for g in ch.garbage_chapters(chapters)}
-    assert "Врезка" in garbage and "сек" in garbage["Врезка"]
+    assert parse(garbage["Врезка"]) == {"code": "chapter_too_short", "params": {"seconds": 10}}
 
 
 def test_mark_manually():
@@ -58,7 +59,7 @@ def test_mark_manually():
     marked = ch.mark_manually(chapters, [1])
     assert marked[0]["is_garbage"] is False
     assert marked[1]["is_garbage"] is True
-    assert marked[1]["garbage_reason"] == "Отмечено вручную"
+    assert marked[1]["garbage_reason"] == reason("chapter_marked_by_hand")
 
 
 def test_time_helpers():
@@ -404,7 +405,7 @@ async def test_error_is_carrier_and_retryable(system):
 async def test_task_create_validates_chapter_count(system):
     _, _, _, probe, db_path, _ = system
     _add_compilation(db_path, chapters=CHAPTERS[:2])  # 2 главы на 3 эпизода
-    with pytest.raises(BusRequestError, match="не совпадает"):
+    with pytest.raises(BusRequestError, match='"code":"chapters_count_mismatch"'):
         await probe.request("slicing.task.create", {"unique_id": "comp1"},
                             timeout=10)
 
@@ -629,7 +630,7 @@ async def test_source_delete_already_absent(system):
 async def test_source_delete_rejects_unsliced(system):
     _, _, _, probe, db_path, _ = system
     _add_compilation(db_path, slicing_status="none", filename="comp.mp4")
-    with pytest.raises(BusRequestError, match="нарезанной"):
+    with pytest.raises(BusRequestError, match='"code":"source_delete_not_sliced"'):
         await probe.request("slicing.source.delete",
                             {"unique_id": "comp1"}, timeout=10)
 
@@ -711,7 +712,7 @@ async def test_chapters_check_does_not_block_slicing(tmp_path):
         assert reply["created"] is True
 
         # активная задача → повторный запуск отвергается
-        with pytest.raises(BusRequestError, match="уже"):
+        with pytest.raises(BusRequestError, match='"code":"slicing_already_queued"'):
             await probe.request("slicing.task.create",
                                 {"unique_id": "comp1"}, timeout=10)
     finally:

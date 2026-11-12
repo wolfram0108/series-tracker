@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
+from core.reasons import reason
+
 from . import dates
 
 
@@ -32,11 +34,10 @@ def raise_not_a_torrent(text: str) -> None:
     """Трекер ответил страницей вместо файла — назвать причину.
     Известные причины — из разбора старого qbittorrent.py."""
     if "Вы использовали доступное Вам количество торрент-файлов" in text:
-        raise SourceRefusedError(
-            "достигнут суточный лимит скачиваний на трекере")
+        raise SourceRefusedError(reason("tracker_daily_limit"))
     if "Вам необходимо включить JavaScript" in text:
-        raise SourceParseError("трекер требует JavaScript")
-    raise SourceParseError("трекер вернул страницу вместо .torrent")
+        raise SourceParseError(reason("tracker_needs_js"))
+    raise SourceParseError(reason("tracker_page_instead"))
 
 
 def _release(link=None, magnet=None, date_marker=None, episodes=None,
@@ -72,11 +73,11 @@ def kinozal_parse(html: str, url: str) -> dict:
                           banner.get_text(strip=True))
             raw_date = m.group(1) if m else None
     if not raw_date:
-        raise SourceParseError("Kinozal: дата обновления не найдена")
+        raise SourceParseError(reason("kinozal_no_date"))
 
     link_tag = soup.find("a", href=lambda h: h and "download.php?id=" in h)
     if not link_tag:
-        raise SourceParseError("Kinozal: ссылка download.php не найдена")
+        raise SourceParseError(reason("kinozal_no_link"))
     m = re.search(r"(download\.php\?id=\d+)", link_tag["href"])
     href = m.group(1) if m else link_tag["href"].lstrip("/")
     link = f"{parsed.scheme}://dl.{parsed.netloc}/{href}"
@@ -104,13 +105,11 @@ def rutracker_parse(html: str, url: str) -> dict:
             attach.get_text())
         raw_date = m.group(1) if m else None
     if not raw_date:
-        raise SourceParseError(
-            "RuTracker: дата регистрации не найдена в таблице attach "
-            "(гостевая сессия? нужен логин)")
+        raise SourceParseError(reason("rutracker_no_date"))
 
     dl = soup.find("a", class_="dl-stub")
     if not dl or dl.get("href", "").startswith("magnet:"):
-        raise SourceParseError("RuTracker: ссылка a.dl-stub не найдена")
+        raise SourceParseError(reason("rutracker_no_link"))
     href = dl["href"]
     if not href.startswith("http"):
         if "dl.php" in href and "/forum/" not in href:
@@ -201,7 +200,7 @@ def anilibria_tv_parse(html: str, url: str) -> dict:
 
     table = soup.find("table", id="publicTorrentTable")
     if not table:
-        raise SourceParseError("Anilibria.TV: таблица publicTorrentTable не найдена")
+        raise SourceParseError(reason("anilibria_tv_no_table"))
 
     releases = []
     for row in table.find_all("tr"):

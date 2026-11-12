@@ -13,6 +13,7 @@ from core.db import Database
 from modules.catalog import CatalogModule
 from modules.torrents import TorrentsModule
 from modules.torrents import pipeline as pl
+from core.reasons import parse
 from series_factory import insert_series
 from settle import settle, wait_until
 from schema_db import migrated
@@ -729,7 +730,7 @@ async def test_qbit_error_state_is_error_not_downloading(system):
             "SELECT status, error_message FROM torrent_progress "
             "WHERE qb_hash='h9'").fetchone()
     assert status == "error"
-    assert "путь сохранения" in msg
+    assert parse(msg)["code"] == "qbt_error"
 
 
 @pytest.mark.asyncio

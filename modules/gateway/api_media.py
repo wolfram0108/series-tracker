@@ -13,6 +13,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from core import BusRequestError
+from core.reasons import code_of, reason, relayed
 
 from .routing import admitted, refusal
 
@@ -32,10 +33,10 @@ def _iso(value):
 def _media_error(exc: BusRequestError):
     """LookupError → 404, RuntimeError («уже…») → 409, ValueError → 400."""
     msg = str(exc)
-    text = msg.split(": ", 1)[-1]
+    text = relayed(msg)
     if "LookupError" in msg:
         code = 404
-    elif "RuntimeError" in msg and "уже" in msg:
+    elif code_of(msg) == "slicing_already_queued":
         code = 409
     elif "ValueError" in msg:
         code = 400
@@ -68,10 +69,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                     {"unique_id": unique_id})
         except BusRequestError as exc:
             if "LookupError" in str(exc):
-                return JSONResponse({"error": "Медиа-элемент не найден"},
+                return JSONResponse({"error": reason("media_not_found")},
                                     status_code=404)
             return JSONResponse(
-                {"error": "Не удалось получить оглавление"}, status_code=500)
+                {"error": reason("chapters_failed")}, status_code=500)
 
     @r.post("/api/media-items/{unique_id}/chapters/filtered",
             response_model=DynamicObject, responses=_ERR1)
@@ -81,10 +82,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                      {"unique_id": unique_id})
         except BusRequestError as exc:
             if "LookupError" in str(exc):
-                return JSONResponse({"error": "Медиа-элемент не найден"},
+                return JSONResponse({"error": reason("media_not_found")},
                                     status_code=404)
             return JSONResponse(
-                {"error": "Не удалось отфильтровать оглавление"},
+                {"error": reason("chapters_filter_failed")},
                 status_code=500)
         return _with_status_message(reply)
 
@@ -95,7 +96,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         indices = data.get("garbage_indices", [])
         if not isinstance(indices, list):
             return JSONResponse(
-                {"error": "garbage_indices должен быть списком"},
+                {"error": reason("garbage_not_list")},
                 status_code=400)
         try:
             reply = await gw.request("slicing.chapters.mark", {
@@ -110,18 +111,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         got = len(reply.get("filtered_chapters") or [])
         expected = reply["expected_count"]
         if got == expected:
-            reply["status_message"] = (
-                f"Количество отфильтрованных глав ({got}) совпало "
-                "с ожидаемым.")
+            reply["status_message"] = reason("chapters_count_match", got=got)
         else:
-            reply["status_message"] = (
-                f"Количество отфильтрованных глав ({got}) НЕ совпадает "
-                f"с ожидаемым ({expected}).")
+            reply["status_message"] = reason("chapters_count_differs", got=got, expected=expected)
         return reply
 
-    _SOURCE_MISSING_MSG = ("Исходник отсутствует, отправлен в загрузку. "
-                           "Запустите нарезку повторно после завершения "
-                           "загрузки.")
+    _SOURCE_MISSING_MSG = reason("slicing_source_sent_to_download")
 
     @r.post("/api/media-items/{unique_id}/slice", response_model=OkResponse,
             response_model_exclude_none=True, responses=_ERR)
@@ -135,7 +130,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return {"success": False, "source_missing": True,
                     "message": _SOURCE_MISSING_MSG}
         return {"success": True,
-                "message": "Задача на нарезку успешно создана."}
+                "message": reason("slicing_task_created")}
 
     @r.post("/api/media-items/{unique_id}/slice-with-filter",
             response_model=OkResponse, response_model_exclude_none=True,
@@ -152,8 +147,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return {"success": False, "source_missing": True,
                     "message": _SOURCE_MISSING_MSG}
         return {"success": True,
-                "message": "Задача на нарезку с фильтрацией успешно "
-                           "создана.",
+                "message": reason("slicing_task_created_filtered"),
                 "filtered_chapters_count": reply["chapters"]}
 
     @r.post("/api/media-items/{unique_id}/delete-source",
@@ -167,9 +161,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return _media_error(exc)
         if reply.get("deleted"):
             return {"success": True,
-                    "message": "Исходный файл компиляции удалён."}
+                    "message": reason("slicing_source_deleted")}
         return {"success": True, "deleted": False,
-                "message": "Исходный файл уже отсутствует."}
+                "message": reason("slicing_source_already_gone")}
 
     @r.post("/api/media-items/{unique_id}/verify-sliced-files",
             response_model=DynamicObject, responses=_ERR1)
@@ -180,12 +174,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError as exc:
             if "LookupError" in str(exc):
                 return JSONResponse(
-                    {"error": "Родительский медиа-элемент не найден"},
+                    {"error": reason("parent_media_not_found")},
                     status_code=404)
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": relayed(str(exc))}, status_code=500)
         if reply["status"] == "none":
-            reply["message"] = ("Записи о нарезанных файлах не найдены, "
-                                "статус сброшен.")
+            reply["message"] = reason("sliced_records_missing")
         return reply
 
     @r.post("/api/series/{series_id}/deep-adoption", response_model=OkResponse,
@@ -199,7 +192,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True,
-                "message": f"Усыновлено компиляций: {reply.get('adopted', 0)}."}
+                "message": reason("compilations_adopted", count=reply.get("adopted", 0))}
 
     # --- rename preview ---------------------------------------------------------------
 
@@ -210,7 +203,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return await gw.request("renaming.preview",
                                     {"series_id": series_id})
         except BusRequestError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": relayed(str(exc))}, status_code=500)
 
     # --- переобработки ----------------------------------------------------------------
 
@@ -224,7 +217,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True,
-                "message": "Файлы приведены к правилам синхронизацией."}
+                "message": reason("files_follow_rules")}
 
     # --- имена для теста парсера ----------------------------------------------------
 

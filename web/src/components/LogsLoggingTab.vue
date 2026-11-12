@@ -3,18 +3,21 @@ import { ref, onMounted } from "vue"
 import ToggleSwitch from "primevue/toggleswitch"
 import { useToast } from "primevue/usetoast"
 import { api } from "../api/client"
-import { t } from "../i18n"
+import { hasMessage, t, type MessageKey } from "../i18n"
 import { useApi } from "../composables/useApi"
 
 // "Setup" tab of the logs window: the detail of the logs per group of modules (the master switch of a group turns on
 // the debug log of all its modules). Contract: GET /api/settings/debug_flags, POST {module, enabled}.
 
-interface Mod { name: string; description: string; enabled: boolean }
+interface Mod { name: string; enabled: boolean }
 
 const { request } = useApi()
 const toast = useToast()
 const loading = ref(true)
 const groups = ref<Record<string, Mod[]>>({})
+// The core names a section and a module by its code; the catalog words them, and a code it does not know shows as it came.
+const sectionText = (code: string): string => hasMessage(`logs.section.${code}`) ? t(`logs.section.${code}` as MessageKey) : code
+const moduleText = (name: string): string => hasMessage(`logs.module.${name}`) ? t(`logs.module.${name}` as MessageKey) : ""
 
 async function load() {
   loading.value = true
@@ -62,13 +65,13 @@ onMounted(load)
       <div class="logging-groups">
         <div v-for="(mods, g) in groups" :key="g" class="modern-fieldset">
           <div class="fieldset-header logging-group-header">
-            <span class="fieldset-title">{{ g }}</span>
+            <span class="fieldset-title">{{ sectionText(String(g)) }}</span>
             <ToggleSwitch :model-value="groupOn(mods)" @update:model-value="toggleGroup(g, mods, $event)" />
           </div>
           <div class="fieldset-content">
             <ul class="module-list">
               <li v-for="m in mods" :key="m.name">
-                <strong>{{ m.name }}</strong><span class="muted"> — {{ m.description }}</span>
+                <strong>{{ m.name }}</strong><span v-if="moduleText(m.name)" class="muted"> — {{ moduleText(m.name) }}</span>
               </li>
             </ul>
           </div>

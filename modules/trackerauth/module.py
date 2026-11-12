@@ -49,6 +49,7 @@ import requests
 from core import BaseModule
 from core.db import Database
 from core.envelope import Envelope
+from core.reasons import reason
 
 from . import cf_challenge
 from .providers import PROVIDERS, TrackerLoginError
@@ -123,7 +124,7 @@ class TrackerauthModule(BaseModule):
     async def _credentials(self, service: str) -> dict:
         row = await self.repo.get_credentials(service)
         if not row:
-            raise TrackerLoginError(f"в БД нет учётных данных для {service}")
+            raise TrackerLoginError(reason("tracker_no_credentials", service=service))
         return row
 
     async def _get_session(self, service: str, url: str) -> requests.Session:
@@ -168,9 +169,9 @@ class TrackerauthModule(BaseModule):
         domain = provider.normalize_domain(url)
         since_last = time.monotonic() - self._last_login.get(service, -1e9)
         if since_last < LOGIN_MIN_INTERVAL:
-            raise TrackerLoginError(
-                f"логин на {service} был {since_last:.0f} с назад — повторный "
-                f"раньше {LOGIN_MIN_INTERVAL:.0f} с запрещён (rate-limit)")
+            raise TrackerLoginError(reason("tracker_login_rate_limited", service=service,
+                                           seconds=round(since_last),
+                                           interval=round(LOGIN_MIN_INTERVAL)))
         credentials = await self._credentials(service)
         # Клирэнс антибот-защиты переживает смену логина: он про клиента,
         # а не про учётку. Иначе каждый релогин тянул бы за собой лишний
@@ -203,7 +204,7 @@ class TrackerauthModule(BaseModule):
         p = env.payload
         service = p["service"]
         if service not in PROVIDERS:
-            raise TrackerLoginError(f"неизвестный трекер: {service}")
+            raise TrackerLoginError(reason("tracker_unknown", service=service))
         url = p["url"]
         lock = self._locks.setdefault(service, asyncio.Lock())
         async with lock:  # одна операция на трекер за раз — не давим сервис
@@ -221,8 +222,7 @@ class TrackerauthModule(BaseModule):
                 resp = await self._with_clearance(service, url, session,
                                                   provider, fetch)
                 if provider.is_logged_out(resp):
-                    raise TrackerLoginError(
-                        f"{service}: после релогина всё ещё разлогинены")
+                    raise TrackerLoginError(reason("tracker_still_logged_out", service=service))
             domain = provider.normalize_domain(url)
             await self.repo.save_cookies(service, domain, session,
                                      logged_in=False)
@@ -243,8 +243,7 @@ class TrackerauthModule(BaseModule):
             return await operation()
         except cf_challenge.ChallengeSeen as exc:
             raise cf_challenge.ChallengeError(
-                f"{service}: челлендж пройден, но сайт всё ещё "
-                "не пускает") from exc
+                reason("tracker_challenge_refused", service=service)) from exc
 
     async def _pass_challenge(self, service: str, url: str,
                               session: requests.Session, provider) -> None:
@@ -258,9 +257,8 @@ class TrackerauthModule(BaseModule):
         since_last = time.monotonic() - self._last_challenge.get(service, -1e9)
         if since_last < CHALLENGE_MIN_INTERVAL:
             raise cf_challenge.ChallengeError(
-                f"{service}: челлендж проходили {since_last:.0f} с назад — "
-                f"повторный раньше {CHALLENGE_MIN_INTERVAL:.0f} с запрещён "
-                "(rate-limit)")
+                reason("tracker_challenge_rate_limited", service=service,
+                       seconds=round(since_last), interval=round(CHALLENGE_MIN_INTERVAL)))
         target = getattr(provider, "challenge_url", lambda u: u)(url)
         self.log.info("%s: антибот-челлендж — проходим браузером", service)
         user_agent, cookies = await cf_challenge.solve(target)

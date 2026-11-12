@@ -19,6 +19,7 @@ from modules.sources.players.alloha_session import AllohaRefused, borth_tail, pr
 from modules.sources.players.contract import Kind, PlayerRef, StreamUnavailable
 from alloha_model import HOST, KEY, PROFILE, AllohaModel, document
 from sources_support import STEP_LIMIT_S, within
+from core.reasons import code_of
 
 PAGE = "https://old.yummyani.me/catalog/item/lyubov-pod-gipnozom"
 IFRAME = ("//alloha.yani.tv/?token_movie=8bf4&translation=158&season=1&episode=5&token=8b55"
@@ -134,7 +135,7 @@ async def test_a_refusal_of_the_files_is_unsure_and_names_its_status_and_no_prof
     bare = unset.read(await unset.fetch(episode_ref(1), None, PAGE))
 
     assert (refused.kind, refused.status) == (Kind.HTTP_ERROR, 404)
-    assert bare.kind is Kind.NO_ANSWER and "профиля" in bare.message
+    assert bare.kind is Kind.NO_ANSWER and code_of(bare.message) == "alloha_no_profile"
     with pytest.raises(StreamUnavailable) as raised:
         await unset.stream(episode_ref(1).url, None, 720, None)
     assert raised.value.transient is False

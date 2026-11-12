@@ -170,12 +170,12 @@ async def test_login_rate_limit_protects_tracker(system, transport):
         if "takelogin.php" in req.url else _login_form(req.url))
 
     # первый fetch: протухло → релогин → всё ещё страница логина → ошибка
-    with pytest.raises(BusRequestError, match="разлогинены"):
+    with pytest.raises(BusRequestError, match='"code":"tracker_still_logged_out"'):
         await probe.request("trackerauth.fetch", {
             "service": "kinozal", "url": KZ_URL}, timeout=5)
 
     # второй fetch сразу же: релогин запрещён rate-limit'ом
-    with pytest.raises(BusRequestError, match="rate-limit"):
+    with pytest.raises(BusRequestError, match='"code":"tracker_login_rate_limited"'):
         await probe.request("trackerauth.fetch", {
             "service": "kinozal", "url": KZ_URL}, timeout=5)
 
@@ -205,7 +205,7 @@ async def test_failed_login_does_not_consume_rate_limit(system, transport):
     # второе зеркало сразу же: rate-limit НЕ блокирует — логин реально
     # вызывается (дальше «разлогинены», т.к. транспорт всё ещё отдаёт
     # форму входа; до бага здесь была бы ошибка rate-limit)
-    with pytest.raises(BusRequestError, match="разлогинены"):
+    with pytest.raises(BusRequestError, match='"code":"tracker_still_logged_out"'):
         await probe.request("trackerauth.fetch", {
             "service": "kinozal",
             "url": "https://kinozal.tv/details.php?id=1"}, timeout=5)
@@ -329,11 +329,11 @@ async def test_challenge_rate_limit_protects_from_browser_loop(system,
     transport.handler = lambda req: _challenge(req.url)
     monkeypatch.setattr(ta_module.cf_challenge, "solve", _solver(calls, "UA"))
 
-    with pytest.raises(BusRequestError, match="не пускает"):
+    with pytest.raises(BusRequestError, match='"code":"tracker_challenge_refused"'):
         await probe.request("trackerauth.fetch", {
             "service": "rutracker", "url": RT_URL}, timeout=10)
 
-    with pytest.raises(BusRequestError, match="rate-limit"):
+    with pytest.raises(BusRequestError, match='"code":"tracker_challenge_rate_limited"'):
         await probe.request("trackerauth.fetch", {
             "service": "rutracker", "url": RT_URL}, timeout=10)
     assert calls["solves"] == 1, "второй заход отсечён лимитом, браузер не поднят"

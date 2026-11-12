@@ -9,6 +9,7 @@ import json
 
 import pytest
 
+from core.reasons import parse, reason
 from modules.rules import compile_profile, process_title, validate_rule
 
 
@@ -82,7 +83,7 @@ def test_fix_b_broken_condition_disables_rule_loudly():
 
     assert len(profile.invalid_rules) == 1
     assert profile.invalid_rules[0]["name"] == "битое"
-    assert "условие повреждено" in profile.invalid_rules[0]["error"]
+    assert "condition_broken" in profile.invalid_rules[0]["error"]
     # здоровое правило работает, битое не применяется (а не «ширеет»)
     result = process_title(profile, "серия 3")
     assert result["extracted"] == {"episode": 3}
@@ -211,13 +212,13 @@ def test_parse_range_spec_valid():
 
 def test_parse_range_spec_invalid():
     from modules.rules.engine import parse_range_spec
-    with pytest.raises(ValueError, match="не может быть пустым"):
+    with pytest.raises(ValueError, match="range_empty"):
         parse_range_spec("")
-    with pytest.raises(ValueError, match="не может быть пустым"):
+    with pytest.raises(ValueError, match="range_empty"):
         parse_range_spec("   ")
-    with pytest.raises(ValueError, match="некорректный элемент"):
+    with pytest.raises(ValueError, match="range_item"):
         parse_range_spec("abc")
-    with pytest.raises(ValueError, match="некорректный элемент"):
+    with pytest.raises(ValueError, match="range_item"):
         parse_range_spec("1-abc")
 
 
@@ -304,7 +305,7 @@ def test_range_rejected_with_explicit_compilation_pattern():
               conditions=[cond])
     ])
     assert len(profile.invalid_rules) == 1
-    assert "должно быть ровно одно число" in profile.invalid_rules[0]["error"]
+    assert "block_one_number" in profile.invalid_rules[0]["error"]
 
 
 def test_range_list_intervals():
@@ -337,28 +338,28 @@ def test_range_foolproofing_validations():
     p1 = compile_profile(1, [_rule(1, "r1", [{"action_type": "exclude"}],
                                    conditions=[_cond(b_first)])])
     assert len(p1.invalid_rules) == 1
-    assert "не может стоять первым" in p1.invalid_rules[0]["error"]
+    assert "block_first" in p1.invalid_rules[0]["error"]
 
     # 2. Range block follows text rather than number
     b_after_text = [{"type": "number"}, {"type": "text", "value": " "}, {"type": "range", "value": "1-10"}]
     p2 = compile_profile(1, [_rule(1, "r2", [{"action_type": "exclude"}],
                                    conditions=[_cond(b_after_text)])])
     assert len(p2.invalid_rules) == 1
-    assert "должен следовать сразу за блоком «Число»" in p2.invalid_rules[0]["error"]
+    assert "block_after_number" in p2.invalid_rules[0]["error"]
 
     # 3. Range block is not after the last number (another number follows)
     b_mid_num = [{"type": "number"}, {"type": "range", "value": "1-10"}, {"type": "number"}]
     p3 = compile_profile(1, [_rule(1, "r3", [{"action_type": "exclude"}],
                                    conditions=[_cond(b_mid_num)])])
     assert len(p3.invalid_rules) == 1
-    assert "после последнего числа" in p3.invalid_rules[0]["error"]
+    assert "block_after_last_number" in p3.invalid_rules[0]["error"]
 
     # 4. Invalid range value
     b_broken = [{"type": "number"}, {"type": "range", "value": "не_числа"}]
     p4 = compile_profile(1, [_rule(1, "r4", [{"action_type": "exclude"}],
                                    conditions=[_cond(b_broken)])])
     assert len(p4.invalid_rules) == 1
-    assert "некорректный элемент диапазона" in p4.invalid_rules[0]["error"]
+    assert "range_item" in p4.invalid_rules[0]["error"]
 
 
 # --- reversed range: not extracted, the reason goes to errors -----------------------
@@ -379,7 +380,8 @@ def test_reversed_range_is_not_extracted_and_says_why():
     assert result["extracted"] == {}, "bounds must not be swapped silently"
     assert result["events"] == []
     assert len(result["errors"]) == 1
-    assert "обратный диапазон 10-5" in result["errors"][0] and "«диапазон»" in result["errors"][0]
+    assert parse(result["errors"][0])["code"] == "rule_range_reversed"
+    assert parse(result["errors"][0])["params"] == {"rule": "диапазон", "start": 10, "end": 5}
 
 
 def test_equal_bounds_are_a_range_of_one_episode():
@@ -428,7 +430,7 @@ def test_modifier_must_follow_number():
         _rule(1, "сдвиг", [_extract("extract_single", "серия ", ("add", "5"), "N")])
     ])
     assert len(profile.invalid_rules) == 1
-    assert "должен следовать сразу за блоком «Число»" in profile.invalid_rules[0]["error"]
+    assert "block_after_number" in profile.invalid_rules[0]["error"]
 
 
 def test_modifier_cannot_stand_first():
@@ -436,7 +438,7 @@ def test_modifier_cannot_stand_first():
         _rule(1, "сдвиг", [_extract("extract_single", ("add", "5"))])
     ])
     assert len(profile.invalid_rules) == 1
-    assert "не может стоять первым" in profile.invalid_rules[0]["error"]
+    assert "block_first" in profile.invalid_rules[0]["error"]
 
 
 def test_modifier_must_follow_last_number():
@@ -444,7 +446,7 @@ def test_modifier_must_follow_last_number():
         _rule(1, "сдвиг", [_extract("extract_single", "N", ("add", "5"), "N")])
     ])
     assert len(profile.invalid_rules) == 1
-    assert "после последнего числа" in profile.invalid_rules[0]["error"]
+    assert "block_after_last_number" in profile.invalid_rules[0]["error"]
 
 
 def test_modifier_rejected_in_condition():
@@ -452,7 +454,7 @@ def test_modifier_rejected_in_condition():
         _rule(1, "условие", [], conditions=[_cond([{"type": "number"}, {"type": "add", "value": "5"}])])
     ])
     assert len(profile.invalid_rules) == 1
-    assert "допустим только в действиях «ТО»" in profile.invalid_rules[0]["error"]
+    assert "modifier_in_condition" in profile.invalid_rules[0]["error"]
 
 
 def test_only_one_modifier_per_action():
@@ -460,7 +462,7 @@ def test_only_one_modifier_per_action():
         _rule(1, "сдвиг", [_extract("extract_single", "N", ("add", "5"), ("add", "3"))])
     ])
     assert len(profile.invalid_rules) == 1
-    assert "может быть только один блок «±»" in profile.invalid_rules[0]["error"]
+    assert "block_repeated" in profile.invalid_rules[0]["error"]
 
 
 def test_range_rejected_in_action():
@@ -468,7 +470,7 @@ def test_range_rejected_in_action():
         _rule(1, "диапазон", [_extract("extract_single", "N", ("range", "1-10"))])
     ])
     assert len(profile.invalid_rules) == 1
-    assert "недопустим в действиях «ТО»" in profile.invalid_rules[0]["error"]
+    assert "range_in_action" in profile.invalid_rules[0]["error"]
 
 
 def test_attachment_rejected_with_several_numbers():
@@ -478,7 +480,7 @@ def test_attachment_rejected_with_several_numbers():
                                                      {"type": "range", "value": "1-10"}])])
     ])
     assert len(profile.invalid_rules) == 1
-    assert "должно быть ровно одно число" in profile.invalid_rules[0]["error"]
+    assert "block_one_number" in profile.invalid_rules[0]["error"]
 
 
 def test_modifier_rejected_with_several_numbers():
@@ -486,7 +488,7 @@ def test_modifier_rejected_with_several_numbers():
         _rule(1, "сдвиг", [_extract("extract_single", "N", "N", ("add", "5"))])
     ])
     assert len(profile.invalid_rules) == 1
-    assert "должно быть ровно одно число" in profile.invalid_rules[0]["error"]
+    assert "block_one_number" in profile.invalid_rules[0]["error"]
 
 
 def test_modifier_rejected_in_extract_range_with_two_numbers():
@@ -496,7 +498,7 @@ def test_modifier_rejected_in_extract_range_with_two_numbers():
         _rule(1, "диапазон серий", [_extract("extract_range", "N", "-", "N", ("add", "5"))])
     ])
     assert len(profile.invalid_rules) == 1
-    assert "должно быть ровно одно число" in profile.invalid_rules[0]["error"]
+    assert "block_one_number" in profile.invalid_rules[0]["error"]
 
 
 def test_non_numeric_modifier_value_rejected():
@@ -504,7 +506,7 @@ def test_non_numeric_modifier_value_rejected():
         _rule(1, "сдвиг", [_extract("extract_single", "N", ("add", "abc"))])
     ])
     assert len(profile.invalid_rules) == 1
-    assert "нечисловое значение блока" in profile.invalid_rules[0]["error"]
+    assert "modifier_not_number" in profile.invalid_rules[0]["error"]
 
 
 def test_range_filter_compilation_separators():
@@ -535,7 +537,7 @@ def test_attachment_with_single_number_allowed():
 
 
 def test_validate_rule_rejects_misplaced_modifier():
-    with pytest.raises(ValueError, match="должен следовать сразу за блоком «Число»"):
+    with pytest.raises(ValueError, match="block_after_number"):
         validate_rule({
             "name": "сдвиг",
             "action_pattern": json.dumps([_extract("extract_single", "серия ", ("add", "5"), "N")],
@@ -593,7 +595,7 @@ def test_range_resolution_marker_symmetrical_protection():
         _rule(1, "exclude 1-100", [{"action_type": "exclude"}], conditions=[cond_explicit])
     ])
     assert len(profile_explicit.invalid_rules) == 1
-    assert "должно быть ровно одно число" in profile_explicit.invalid_rules[0]["error"]
+    assert "block_one_number" in profile_explicit.invalid_rules[0]["error"]
 
 
 def test_range_disallowed_in_actions_loudly():
@@ -604,19 +606,19 @@ def test_range_disallowed_in_actions_loudly():
     ])
     profile = compile_profile(1, [bad_action_rule])
     assert len(profile.invalid_rules) == 1
-    assert "недопустим в действиях «ТО»" in profile.invalid_rules[0]["error"]
+    assert "range_in_action" in profile.invalid_rules[0]["error"]
 
 
 # --- словарь конструктора: неизвестные значения не принимаются --------------------
 
 def test_unknown_action_type_rejected_by_validation():
-    with pytest.raises(ValueError, match="неизвестный тип действия"):
+    with pytest.raises(ValueError, match="action_unknown"):
         validate_rule({"name": "r", "action_pattern": json.dumps(
             [{"action_type": "assign_voiceoverr", "action_pattern": "X"}])})
 
 
 def test_unknown_condition_type_rejected_by_validation():
-    with pytest.raises(ValueError, match="неизвестный тип условия"):
+    with pytest.raises(ValueError, match="condition_type_unknown"):
         validate_rule({"name": "r",
                        "conditions": [_cond(_blocks("S01"), ctype="Contains")]})
 
@@ -636,7 +638,7 @@ def test_unknown_action_type_disables_rule_not_profile():
               conditions=[_cond(_blocks("S01"))])])
     assert profile.rules == []
     assert len(profile.invalid_rules) == 1
-    assert "неизвестный тип действия" in profile.invalid_rules[0]["error"]
+    assert "action_unknown" in profile.invalid_rules[0]["error"]
     assert process_title(profile, "Some.Show.S01E02")["excluded"] is False
 
 
@@ -828,7 +830,7 @@ def test_or_captures_nothing_so_the_number_after_it_is_the_one_extracted():
     ("", OR, "текст"),
 ])
 def test_or_out_of_place_or_with_an_empty_text_is_refused_on_saving(specs):
-    with pytest.raises(ValueError, match="или"):
+    with pytest.raises(ValueError, match="or_"):
         validate_rule({"conditions": [_cond(_blocks(*specs))]})
 
 
@@ -882,13 +884,13 @@ def test_a_table_answers_every_title_as_its_rows_written_as_ordinary_rules_do(ac
 
 
 @pytest.mark.parametrize("table,error", [
-    ({"action_type": "assign_voiceover", "rows": []}, "в таблице нет строк"),
+    ({"action_type": "assign_voiceover", "rows": []}, "table_empty"),
     ({"action_type": "assign_voiceover", "rows": [{"if": _blocks("V:A"), "then": "A"}, {"if": [], "then": "B"}]},
-     "строка 2: пустое условие «ЕСЛИ»"),
-    ({"action_type": "assign_voiceover", "rows": [{"if": _blocks("V:A"), "then": "  "}]}, "строка 1: пустое значение «ТО»"),
-    ({"action_type": "extract_single", "rows": [{"if": _blocks("N"), "then": []}]}, "строка 1: пустой шаблон «ТО»"),
-    ({"action_type": "rename", "rows": [{"if": _blocks("V:A"), "then": "A"}]}, "неизвестный тип действия"),
-    ({"action_type": "assign_range", "rows": [{"if": _blocks("V:A"), "then": "9-3"}]}, "строка 1:"),
+     "table_row_if_empty"),
+    ({"action_type": "assign_voiceover", "rows": [{"if": _blocks("V:A"), "then": "  "}]}, "table_row_then_empty"),
+    ({"action_type": "extract_single", "rows": [{"if": _blocks("N"), "then": []}]}, "table_row_template_empty"),
+    ({"action_type": "rename", "rows": [{"if": _blocks("V:A"), "then": "A"}]}, "action_unknown"),
+    ({"action_type": "assign_range", "rows": [{"if": _blocks("V:A"), "then": "9-3"}]}, "table_row"),
 ])
 def test_a_table_with_a_row_it_cannot_apply_is_refused_on_saving_with_the_number_of_the_row(table, error):
     with pytest.raises(ValueError, match=error):
@@ -899,7 +901,7 @@ def test_a_broken_table_is_disabled_whole_and_the_other_rules_still_work():
     broken = _table(5, "Озвучки", "assign_voiceover", [{"if": _blocks("V:A"), "then": "A"}, {"if": [], "then": "B"}])
     episode = _rule(9, "серия", [_extract("extract_single", "Серия", "_", "N")], [_cond(_blocks("Серия", "_", "N"))])
     profile = compile_profile(1, [broken, episode])
-    assert profile.invalid_rules == [{"rule_id": 5, "name": "Озвучки", "error": "строка 2: пустое условие «ЕСЛИ»"}]
+    assert profile.invalid_rules == [{"rule_id": 5, "name": "Озвучки", "error": reason("table_row_if_empty", number=2)}]
     assert process_title(profile, "Серия 4 | V:A")["extracted"] == {"episode": 4}
 
 

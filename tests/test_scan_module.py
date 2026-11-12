@@ -384,7 +384,7 @@ async def test_the_torrent_is_read_at_the_address_of_its_source(system):
 @pytest.mark.asyncio
 async def test_a_torrent_series_without_a_profile_is_refused(system):
     _, fake, probe, db_path = system
-    with pytest.raises(BusRequestError, match="не назначен профиль"):
+    with pytest.raises(BusRequestError, match="scan_no_profile"):
         await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
     assert fake.parsed_urls == []
     with sqlite3.connect(db_path) as conn:
@@ -400,7 +400,7 @@ async def test_prepare_refuses_a_series_of_video_sources(db_path):
     bus, fake, scan, probe, runner = _system_factory(db_path)
     await runner.start()
     try:
-        with pytest.raises(BusRequestError, match="только для торрентов"):
+        with pytest.raises(BusRequestError, match="prepare_torrent_only"):
             await probe.request("scan.series.prepare", {"series_id": 3}, timeout=10)
     finally:
         await runner.stop()

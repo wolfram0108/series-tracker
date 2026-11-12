@@ -13,6 +13,7 @@ import { actionLabel, actionOptions, fieldText, isAssign, isExtract, isNumberAss
 import type { EditableRule } from "./ParserRuleCard.vue"
 import ParserPatternEditor from "./ParserPatternEditor.vue"
 import PatternPalette from "./PatternPalette.vue"
+import { reasonText } from "../../lib/reason"
 
 // A rule of the kind «Таблица»: rows of «ЕСЛИ» → «ТО» under one action chosen for the whole column. Each row is what an
 // ordinary rule of one condition «содержит» and one action is; the core reads the rows in their order at the place of
@@ -164,7 +165,7 @@ function setAction(value: string): void {
         <i class="pi rule-toggle-icon" :class="toggleIcon" />
         <i class="pi pi-table rule-kind" :title="t('rules.table.kind')" />
         <input v-model="rule.name" type="text" class="rule-name-input" :placeholder="t('rules.rule.namePlaceholder')" @click.stop />
-        <span v-if="rule.valid === false" class="rule-invalid-badge" :title="rule.error || t('rules.rule.disabled.title')">
+        <span v-if="rule.valid === false" class="rule-invalid-badge" :title="reasonText(rule.error) || t('rules.rule.disabled.title')">
           {{ t("rules.rule.disabled.label") }}
         </span>
         <span class="rule-rows">{{ t("rules.table.rows", { count: table.rows.length }) }}</span>

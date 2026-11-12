@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
+from core.reasons import reason
 
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
@@ -49,10 +50,10 @@ def kinozal_date(raw: str, *, now: datetime | None = None) -> str:
         day, month_name, year = date_part.split()
         month = _MONTHS_FULL.get(month_name)
         if not month:
-            raise DateParseError(f"неизвестный месяц: {month_name!r}")
+            raise DateParseError(reason("date_month_unknown", month=month_name))
         return f"{day.zfill(2)}.{month}.{year} {time_part}:00"
     except (IndexError, ValueError) as exc:
-        raise DateParseError(f"дата Kinozal не разобрана: {raw!r}") from exc
+        raise DateParseError(reason("date_unreadable", site="Kinozal", raw=raw)) from exc
 
 
 def rutracker_date(raw: str) -> str:
@@ -61,11 +62,11 @@ def rutracker_date(raw: str) -> str:
         r"(\d{1,2})-([А-Яа-яA-Za-zёЁ]{3})-(\d{2})\s+(\d{1,2}:\d{2})",
         raw.strip())
     if not match:
-        raise DateParseError(f"дата RuTracker не разобрана: {raw!r}")
+        raise DateParseError(reason("date_unreadable", site="RuTracker", raw=raw))
     day, month_name, year2, hhmm = match.groups()
     month = _MONTHS_SHORT.get(month_name.lower())
     if not month:
-        raise DateParseError(f"неизвестный месяц: {month_name!r}")
+        raise DateParseError(reason("date_month_unknown", month=month_name))
     year = ("20" if int(year2) < 50 else "19") + year2
     return f"{day.zfill(2)}.{month}.{year} {hhmm}:00"
 
@@ -83,7 +84,7 @@ def anilibria_tv_date(iso: str) -> str:
     try:
         return datetime.fromisoformat(iso).strftime("%d.%m.%Y %H:%M:%S")
     except (ValueError, TypeError) as exc:
-        raise DateParseError(f"дата Anilibria.TV не разобрана: {iso!r}") from exc
+        raise DateParseError(reason("date_unreadable", site="Anilibria.TV", raw=iso)) from exc
 
 
 def astar_date(raw: str) -> str:
@@ -91,4 +92,4 @@ def astar_date(raw: str) -> str:
     try:
         return datetime.strptime(raw.strip(), "%d-%m-%Y").strftime("%d.%m.%Y")
     except ValueError as exc:
-        raise DateParseError(f"дата Astar не разобрана: {raw!r}") from exc
+        raise DateParseError(reason("date_unreadable", site="Astar", raw=raw)) from exc

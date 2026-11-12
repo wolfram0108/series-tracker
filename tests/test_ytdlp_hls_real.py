@@ -10,6 +10,7 @@ import threading
 
 import pytest
 
+from core.reasons import parse
 from modules.downloads import ytdlp
 
 pytestmark = pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="needs ffmpeg and ffprobe")
@@ -80,5 +81,5 @@ async def test_a_segment_refused_fewer_times_than_ffmpeg_looks_leaves_a_whole_fi
 async def test_a_segment_refused_for_good_ends_the_stream_short_and_the_download_is_incomplete(serve, tmp_path):
     target = str(tmp_path / "e.mp4")
     ok, error = await ytdlp._download_direct_ffmpeg(serve(10 ** 6), {"Referer": "x"}, target, noop)
-    assert not ok and "обрыв" in error and "№3" in error
+    assert not ok and parse(error)["code"] == "cut_short_refused" and parse(error)["params"]["first"] == 3
     assert not os.path.exists(target) and not os.path.exists(target + ".download.mp4")

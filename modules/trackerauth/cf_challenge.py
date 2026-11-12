@@ -49,6 +49,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from core.reasons import reason
+
 CLEARANCE_COOKIE = "cf_clearance"
 CHALLENGE_HEADER = "cf-mitigated"
 
@@ -115,6 +117,5 @@ async def solve(url: str, *, timeout: float = SOLVE_TIMEOUT
                 user_agent = await page.evaluate("navigator.userAgent")
                 return user_agent, cookies
             await page.wait_for_timeout(int(POLL_INTERVAL * 1000))
-    raise ChallengeError(
-        f"челлендж на {domain} не пройден за {timeout:.0f} с: "
-        f"куки {CLEARANCE_COOKIE} нет")
+    raise ChallengeError(reason("challenge_not_passed", domain=domain,
+                                seconds=round(timeout), cookie=CLEARANCE_COOKIE))

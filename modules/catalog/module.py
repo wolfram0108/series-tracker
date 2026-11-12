@@ -106,8 +106,7 @@ def fs_safe(fields: dict) -> dict:
         if isinstance(out.get(key), str):
             out[key] = sanitize_path(out[key])
             if out[key] and not os.path.isabs(out[key]):
-                raise ValueError(
-                    "путь сохранения должен быть абсолютным (например, /nas/...)")
+                raise ValueError(reason("save_path_relative", path=out[key]))
     for key in _NAME_FIELDS:
         if isinstance(out.get(key), str):
             out[key] = sanitize_name(out[key])
@@ -186,8 +185,7 @@ class CatalogModule(BaseModule):
         """save_path — наша колонка; library пишет её после перемещения."""
         path = sanitize_path(env.payload["save_path"])
         if not os.path.isabs(path):
-            raise ValueError(
-                "путь сохранения должен быть абсолютным (например, /nas/...)")
+            raise ValueError(reason("save_path_relative", path=path))
         await self.repo.set_save_path(env.payload["series_id"], path)
         return {"ok": True}
 
@@ -221,7 +219,7 @@ class CatalogModule(BaseModule):
         series_id = env.payload["series_id"]
         row = await self.repo.get_series(series_id)
         if row is None:
-            raise LookupError(f"сериал {series_id} не найден")
+            raise LookupError(reason("series_not_found", series_id=series_id))
         row["statuses"] = self.agg.statuses(series_id)
         row["is_busy"] = bool(self._busy.get(series_id))
         return row
@@ -255,9 +253,9 @@ class CatalogModule(BaseModule):
         self._require_free(series_id)
         refuse_removed_fields(fields)
         if "sources" in fields:
-            raise ValueError("поле сериала 'sources' не пишется: источники меняются запросами catalog.sources.*")
+            raise ValueError(reason("series_sources_not_written"))
         if await self.repo.get_series(series_id) is None:
-            raise LookupError(f"сериал {series_id} не найден")
+            raise LookupError(reason("series_not_found", series_id=series_id))
         applied = await self.repo.update_series(series_id, fs_safe(fields))
         if applied:
             # Дельта для SSE series_updated: применённые поля + обязательные
@@ -271,7 +269,7 @@ class CatalogModule(BaseModule):
     async def on_series_delete(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
         if await self.repo.get_series(series_id) is None:
-            raise LookupError(f"сериал {series_id} не найден")
+            raise LookupError(reason("series_not_found", series_id=series_id))
         await self.repo.delete_series(series_id)
         self.agg.forget(series_id)
         self._busy.pop(series_id, None)
@@ -337,17 +335,17 @@ class CatalogModule(BaseModule):
 
     async def _require_series(self, series_id: int) -> None:
         if not await self.repo.series_exists(series_id):
-            raise LookupError(f"сериал {series_id} не найден")
+            raise LookupError(reason("series_not_found", series_id=series_id))
 
     async def _require_own(self, stored: dict, series_id: int | None) -> None:
         """A caller that names the series it works in must not reach a source of another one."""
         if series_id is not None and stored["series_id"] != series_id:
-            raise LookupError(f"источник {stored['id']} не найден у сериала {series_id}")
+            raise LookupError(reason("source_not_in_series", source_id=stored["id"], series_id=series_id))
 
     async def _require_source(self, source_id: int) -> dict:
         source = await self.repo.get_source(source_id)
         if source is None:
-            raise LookupError(f"источник {source_id} не найден")
+            raise LookupError(reason("source_not_found", source_id=source_id))
         return source
 
     async def _publish_source(self, what: str, series_id: int, source_id: int, changed: list[str] | None = None) -> None:

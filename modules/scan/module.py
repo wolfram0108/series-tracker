@@ -136,7 +136,7 @@ def _torrent_source(series: dict) -> SeriesSource:
     """The source of a torrent series: the address and the profile of a torrent live in the source (Д-38)."""
     found = torrent_source(series)
     if found is None:
-        raise ScanError(f"у сериала «{series.get('name')}» нет торрент-источника")
+        raise ScanError(reason("torrent_source_missing", name=series.get("name")))
     return SeriesSource.model_validate(found)
 
 
@@ -422,7 +422,7 @@ class ScanModule(BaseModule):
 
     def _alive(self, series_id: int) -> None:
         if series_id in self._aborted:
-            raise ScanAborted(f"сериал {series_id} удалён во время скана")
+            raise ScanAborted(reason("series_deleted_in_scan", series_id=series_id))
 
     async def _step(self, topic: str, payload: dict, *, units: int = 1):
         """A request of a synchronization: any failure of it is the one signal that the step failed."""
@@ -430,7 +430,7 @@ class ScanModule(BaseModule):
             return await self.request(topic, payload, units=units)
         except (BusRequestError, asyncio.TimeoutError) as exc:
             if "LookupError" in str(exc):
-                raise ScanAborted(f"сериал {payload.get('series_id')} удалён во время скана") from exc
+                raise ScanAborted(reason("series_deleted_in_scan", series_id=payload.get("series_id"))) from exc
             self.log.error("синхронизация: запрос %s не выполнен: %s: %s", topic, type(exc).__name__, exc)
             raise SyncFailed(reason("scan_step_failed", step=topic)) from exc
 
@@ -513,9 +513,7 @@ class ScanModule(BaseModule):
                 await self._take_snapshot(series, intent)
                 self._announce_run(series_id, True)
             elif not _torrent_source(series).parser_profile_id:
-                raise ScanError(
-                    f"для сериала «{series.get('name')}» не назначен "
-                    "профиль правил")
+                raise ScanError(reason("scan_no_profile"))
             # Прошлая ошибка сбрасывается новым сканом (Р-11).
             await self.repo.delete_error_tasks(series_id)
             series = await self._relocate(series)
@@ -581,7 +579,7 @@ class ScanModule(BaseModule):
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
             if series.get("kind") == "video":
-                raise ScanError("подготовка состава — только для торрентов")
+                raise ScanError(reason("prepare_torrent_only"))
             await self.repo.delete_error_tasks(series_id)
             result = await self._torrents.scan(series, _torrent_source(series), False, prepare=True)
             self._contribute(series_id, scanning=False, error=False)

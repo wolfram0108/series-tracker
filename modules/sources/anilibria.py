@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
+from core.reasons import reason
+
 from . import dates
 from .parsers import SourceParseError, _release
 
@@ -19,7 +21,7 @@ _ALIAS_RE = re.compile(r"/(?:release|anime/releases/release)/([^/?#]+)")
 def alias_from_url(url: str) -> str:
     m = _ALIAS_RE.search(url)
     if not m:
-        raise SourceParseError(f"Anilibria: alias не извлечён из URL {url!r}")
+        raise SourceParseError(reason("anilibria_no_alias", url=url))
     return m.group(1)
 
 

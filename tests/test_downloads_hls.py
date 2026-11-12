@@ -12,11 +12,15 @@ import subprocess
 import pytest
 
 from core import storage
+from core.reasons import parse, reason
 from modules.downloads import hls_native, ytdlp
 from modules.downloads import failure
 from modules.downloads.failure import Failed, kind_of
 from modules.downloads.hls_worker import transport_stream
 from plan_disk import Codec, Host, _run
+
+# The codes of a download that ended short or unreadable (modules/downloads/ytdlp.py).
+CUT_CODES = {"cut_short", "cut_short_refused", "cut_unreadable", "length_unstated", "file_unreadable"}
 
 PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452") + bytes(200)
 KEY = bytes(range(16))
@@ -125,7 +129,7 @@ async def test_a_worker_of_segments_that_goes_silent_is_given_up_by_the_one_fuse
         host.hold.add("show/seg1.ts")
         out = str(tmp_path / "lib" / "e1.mp4")
         ok, why = await asyncio.wait_for(ytdlp.download(host.url(name), out, noop, playlist=True, threads=1), 30)
-        assert not ok and "нет прогресса 1 с" in why and kind_of(why) is Failed.BROKEN, why
+        assert not ok and parse(why)["params"]["detail"] == reason("segments_silent", seconds="1") and kind_of(why) is Failed.BROKEN, why
     finally:
         host.close()
 
@@ -137,7 +141,7 @@ async def test_a_refused_segment_is_never_skipped_the_download_fails_and_leaves_
         host.missing.add("show/seg2.ts")
         out = str(tmp_path / "lib" / "e1.mp4")
         ok, why = await ytdlp.download(host.url(name), out, noop, playlist=True, threads=4, resumable=True)
-        assert not ok and "загрузчик сегментов" in why
+        assert not ok and parse(why)["code"] in ("segments_failed", "segments_exit")
         # The host said the segment is not there: its last word on the file, and nothing is kept to be continued.
         assert kind_of(why) is Failed.FINAL
         assert os.listdir(tmp_path / "lib") == []
@@ -152,7 +156,7 @@ async def test_a_segment_cut_in_its_middle_is_a_broken_way_and_the_next_ask_cont
         host.cut["show/seg2.ts"] = 100  # every ask of the first download: the downloader gives the segment up
         out = str(tmp_path / "lib" / "e1.mp4")
         ok, why = await ytdlp.download(host.url(name), out, noop, playlist=True, threads=1, resumable=True)
-        assert not ok and "загрузчик сегментов" in why
+        assert not ok and parse(why)["code"] in ("segments_failed", "segments_exit")
         assert kind_of(why) is Failed.BROKEN, why
         assert any(each.endswith(".download.ts.part") for each in os.listdir(tmp_path / "lib")), "what was got stays"
         before = len(host.served)
@@ -274,7 +278,7 @@ async def test_a_stream_its_player_took_is_put_into_the_container_and_taken_only
         assert float(probe(out)["format"]["duration"]) == pytest.approx(4, abs=0.5)
         assert sorted(os.listdir(tmp_path / "lib")) == ["e1.mp4"], "no leftover of the download stays"
     else:
-        assert "обрыв" in why and os.listdir(tmp_path / "lib") == []
+        assert parse(why)["code"] in CUT_CODES and os.listdir(tmp_path / "lib") == []
 
 
 async def test_a_stream_its_player_refused_is_its_failure_with_what_it_says_of_the_source_and_leaves_nothing(tmp_path):

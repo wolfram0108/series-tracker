@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from core import BusRequestError
+from core.reasons import reason
 
 # Защита от перебора: на IP — окно неудач и временный бан (in-memory;
 # одно-процессное приложение, отдельного хранилища не нужно). Реальный IP
@@ -54,7 +55,7 @@ def build_router(gw):
         if wait > 0:
             return JSONResponse(
                 {"success": False,
-                 "error": f"Слишком много попыток. Повторите через {int(wait) + 1} с."},
+                 "error": reason("too_many_attempts", seconds=int(wait) + 1)},
                 status_code=429)
         data = await request.json()
         username = (data.get("username") or "").strip()
@@ -64,12 +65,12 @@ def build_router(gw):
                 "auth.login", {"username": username, "password": password})
         except BusRequestError:
             return JSONResponse(
-                {"success": False, "error": "Сервис аутентификации недоступен."},
+                {"success": False, "error": reason("auth_unavailable")},
                 status_code=503)
         if not reply.get("ok"):
             limiter.record_fail(ip, now)
             return JSONResponse(
-                {"success": False, "error": "Неверный логин или пароль."},
+                {"success": False, "error": reason("login_wrong")},
                 status_code=401)
         limiter.reset(ip)
         request.session["user"] = username
@@ -103,11 +104,11 @@ def build_router(gw):
             exists = (await gw.request("auth.exists", {})).get("exists")
         except BusRequestError:
             return JSONResponse(
-                {"success": False, "error": "Сервис аутентификации недоступен."},
+                {"success": False, "error": reason("auth_unavailable")},
                 status_code=503)
         if exists:
             return JSONResponse(
-                {"success": False, "error": "Администратор уже настроен."},
+                {"success": False, "error": reason("admin_configured")},
                 status_code=403)
         data = await request.json()
         username = (data.get("username") or "").strip()
@@ -115,13 +116,13 @@ def build_router(gw):
         if not username or len(password) < 8:
             return JSONResponse(
                 {"success": False,
-                 "error": "Укажите имя и пароль не короче 8 символов."},
+                 "error": reason("setup_incomplete", min=8)},
                 status_code=400)
         reply = await gw.request(
             "auth.password.set", {"username": username, "password": password})
         if not reply.get("ok"):
             return JSONResponse(
-                {"success": False, "error": "Не удалось создать администратора."},
+                {"success": False, "error": reason("admin_create_failed")},
                 status_code=400)
         request.session["user"] = username
         return {"success": True, "username": username}
@@ -138,20 +139,20 @@ def build_router(gw):
         user = request.session.get("user")
         if not user:
             return JSONResponse(
-                {"success": False, "error": "Требуется вход."},
+                {"success": False, "error": reason("login_required")},
                 status_code=401)
         data = await request.json()
         new = data.get("new") or ""
         if len(new) < 8:
             return JSONResponse(
                 {"success": False,
-                 "error": "Новый пароль не короче 8 символов."},
+                 "error": reason("new_password_short", min=8)},
                 status_code=400)
         reply = await gw.request(
             "auth.password.set", {"username": user, "password": new})
         if not reply.get("ok"):
             return JSONResponse(
-                {"success": False, "error": "Не удалось сменить пароль."},
+                {"success": False, "error": reason("password_change_failed")},
                 status_code=400)
         return {"success": True}
 

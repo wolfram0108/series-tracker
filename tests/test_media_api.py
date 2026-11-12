@@ -18,6 +18,7 @@ from modules.slicing import SlicingModule
 from series_factory import insert_series
 from settle import settle
 from schema_db import migrated
+from core.reasons import reason
 
 CHAPTERS = [
     {"time": "00:01:00", "title": "Серия 1"},
@@ -187,7 +188,7 @@ async def test_chapters_filtered_status_message(system):
     body = resp.json()
     assert body["expected_count"] == 3
     assert len(body["filtered_chapters"]) == 3
-    assert "совпало" in body["status_message"]
+    assert body["status_message"] == reason("chapters_count_match", got=3)
 
 
 @pytest.mark.asyncio
