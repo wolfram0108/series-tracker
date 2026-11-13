@@ -221,7 +221,8 @@ def parsed_address(answer: object, key: str = "url") -> tuple[str, str]:
         code = said.get("code")
         if said.get("success") in (False, "false") or (code is not None and str(code).lower() not in _PARSED):
             return "", words or f"code {code}"
-    target = answer.get(key) or inner.get(key)
+    # The address stands under the key the parser names, or is the whole `data` of its answer.
+    target = answer.get(key) or inner.get(key) or (answer["data"] if isinstance(answer.get("data"), str) else None)
     return (target, words) if isinstance(target, str) and target.startswith(("http://", "https://")) else ("", words)
 
 

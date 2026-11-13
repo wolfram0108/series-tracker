@@ -1,11 +1,12 @@
 """Models of the video applications of every protocol the service reads besides App99 and AppDrama, for the stand of the
-whole application (tests/app_stand.py): AppGet (茉莉), Gulu (咕噜), YunDuo (布布), AppMN (米诺), AppV7 (小猪) and the public shares of 139 Cloud. Each answers by its
+whole application (tests/app_stand.py): AppGet (茉莉), Gulu (咕噜), YunDuo (布布), AppMN (米诺), AppV7 (小猪), the Android client of Bubu and the public shares of 139 Cloud. Each answers by its
 protocol as its client asks it (modules/sources/apps/<protocol>.py) — the keys, the sealing, the session, the ticket —
 with the cards a scenario gives it: a card is a name and one line of episodes, each episode a token whose stream is an
 address on the host of the stand. Nothing here is a snapshot of a real answer."""
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import zlib
 from dataclasses import dataclass, field as dataclass_field
@@ -14,6 +15,7 @@ from urllib.parse import parse_qsl
 import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from modules.sources.apps import AppProfile
 from modules.sources.apps.appdrama import field, fields
@@ -280,4 +282,65 @@ class Share139Model(_Model):
         if method == "getContentInfoFromOutLink":
             token = body["getContentInfoFromOutLinkReq"]["contentId"]
             return httpx.Response(200, json={"code": "0", "data": {"contentInfo": {"presentURL": self.streams[token]}}})
+        return httpx.Response(404)
+
+
+# --- Bubu (布布, Android): signed GET requests, answers sealed by AES-GCM under a key of the build ----------------------------
+
+class BubuModel(_Model):
+    HOST = "https://bubu.model"
+    BUILD = {"id": "aid-model", "v": 8, "avn": "1.6.1", "finger": "finger-model", "sk": "sk-model"}
+    KEYS = [bytes(range(16)).hex(), bytes(range(16, 32)).hex()]
+    KEY_HEADER = "mcg821-a"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.words: dict[str, tuple[int, str]] = {}  # token -> (code, words) the service answers its decode with
+        self.devices: set[str] = set()
+        self.key_number = 1
+
+    def profile(self) -> AppProfile:
+        return AppProfile("bubu", "布布安卓", "bubu", {
+            "label": "布布安卓", "protocol": "bubu", "host": self.HOST, **{k: str(v) for k, v in self.BUILD.items()},
+            "response_keys": json.dumps(self.KEYS), "device_id": "11111111-2222-3333-4444-555555555555"})
+
+    def owns(self, url: str) -> bool:
+        return url.startswith(self.HOST)
+
+    def sealed(self, payload: dict, *, status: int = 200, number: int | None = None) -> httpx.Response:
+        number = self.key_number if number is None else number
+        nonce = bytes(range(12))
+        body = nonce + AESGCM(bytes.fromhex(self.KEYS[number])).encrypt(nonce, json.dumps(payload, ensure_ascii=False).encode(), None)
+        return httpx.Response(status, content=body, headers={self.KEY_HEADER: str(number)})
+
+    def signed(self, headers) -> bool:
+        build = self.BUILD
+        value = (f"finger={build['finger']}&id={build['id']}&nonce={headers['x-nonc']}&sk={build['sk']}"
+                 f"&time={headers['x-time']}&v={build['v']}")
+        prefix = hashlib.sha256(headers["x-device-id"].encode()).hexdigest()[:8].upper()
+        return headers["x-sign"] == hashlib.sha256(value.encode()).hexdigest().upper() and headers["x-nonc"].startswith(prefix)
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.asked.append(str(request.url))
+        if not self.signed(request.headers):
+            # What the service says to a request signed by a profile that is not the official build's.
+            return self.sealed({"code": 458, "msg": "LOGIN_USERNAME_EMPTY"}, status=458)
+        self.devices.add(request.headers["x-device-id"])
+        path, params = request.url.path.removeprefix("/api.php/app"), dict(request.url.params)
+        if path == "/vod/get_detail":
+            card = self.cards.get(int(params["vod_id"]))
+            if card is None:
+                return self.sealed({"code": 200, "msg": "ok", "data": []})
+            return self.sealed({"code": 200, "msg": "ok", "data": {
+                "vod_id": card.number, "vod_name": card.name, "vod_year": "2021", "vod_play_from": card.line,
+                "vod_play_url": "#".join(f"{label}${token}" for label, token in card.items)}})
+        if path == "/search/index":
+            return self.sealed({"code": 200, "msg": "ok", "pageCount": 1, "total": len(self.cards), "data": [
+                {"vod_id": card.number, "vod_name": card.name, "vod_year": "2021"} for card in self.cards.values()]})
+        if path == "/decode/url/":
+            token = params["url"]
+            if token in self.words:
+                code, words = self.words[token]
+                return self.sealed({"code": code, "msg": words})
+            return self.sealed({"code": 1, "msg": "解码成功", "data": self.streams[token]})
         return httpx.Response(404)
