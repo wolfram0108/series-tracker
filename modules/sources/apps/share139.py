@@ -68,6 +68,9 @@ ACCESSIBLE_FOR_S, REFUSED_FOR_S = 300.0, 120.0
 # An index that refused or failed is not asked again for this long.
 SOURCE_COOLDOWN_S = 600.0
 INDEX_ANSWER_AT_MOST = 2 * 1024 * 1024
+# An index answers in a second or two when it is up: one that does not in this time is down for this search (the window of the
+# search waits for it), and is not asked again for SOURCE_COOLDOWN_S.
+INDEX_TIMEOUT_S = 10.0
 _VIDEO = re.compile(r"\.(?:mp4|mkv|m4v|avi|ts)$", re.I)
 _PARTS = re.compile(r"(\d+)")
 _GONE = re.compile(r"不存在|取消|已失效|已过期|deleted|expired", re.I)
@@ -413,6 +416,8 @@ class Share139Client:
                 answered += 1
             except AppError as exc:
                 errors.append(describe(exc.reason))
+                logger.warning("приложение %s, поиск «%s»: индекс %s не ответил — %s", self.profile.name, query,
+                               spec.get("channel") or urlsplit(str(spec.get("url"))).hostname, describe(exc.reason))
                 if exc.transient or exc.status in (401, 403, 429):
                     self._cooldowns[identity] = self._clock() + SOURCE_COOLDOWN_S
         result = Found(self._clock() + (FOUND_FOR_S if found else NOTHING_FOUND_FOR_S), tuple(found.values()), tuple(errors),
@@ -446,7 +451,7 @@ class Share139Client:
         began = time.monotonic()
         try:
             async with self._http().stream("GET", address, headers=headers, follow_redirects=False,
-                                           timeout=httpx.Timeout(REQUEST_TIMEOUT_S, connect=8.0)) as response:
+                                           timeout=httpx.Timeout(INDEX_TIMEOUT_S, connect=5.0)) as response:
                 logger.info("приложение %s, поиск в %s: статус %s (%.1f с)", self.profile.name, address.host, response.status_code,
                             time.monotonic() - began)
                 if response.status_code != 200:
