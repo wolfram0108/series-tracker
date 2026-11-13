@@ -72,11 +72,13 @@ class PlannerRepository:
         return await self._db.execute("DELETE FROM plan_commands WHERE series_id=? AND command=?",
                                       (series_id, _key(command)))
 
-    async def begin_run(self, series_id: int, download: bool) -> None:
+    async def begin_run(self, series_id: int, download: bool, scope: dict | None = None) -> None:
+        """The sync of the series is written down with what it covers (`scope`: none, the whole series), so that a restart
+        takes it up as it was."""
         await self._db.execute(
-            "INSERT INTO plan_runs (series_id, download, started_at) VALUES (?, ?, ?) "
-            "ON CONFLICT (series_id) DO UPDATE SET download=excluded.download",
-            (series_id, int(download), datetime.now(timezone.utc).isoformat()))
+            "INSERT INTO plan_runs (series_id, download, started_at, scope) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (series_id) DO UPDATE SET download=excluded.download, scope=excluded.scope",
+            (series_id, int(download), datetime.now(timezone.utc).isoformat(), None if scope is None else _key(scope)))
 
     async def run_started(self, series_id: int) -> str:
         """When the sync under way began: the same after a stop, so its work is known again by it."""
@@ -90,7 +92,8 @@ class PlannerRepository:
         return await self._db.fetch_one("SELECT 1 FROM plan_runs WHERE series_id=?", (series_id,)) is not None
 
     async def runs(self) -> list[dict]:
-        return await self._db.fetch_all("SELECT series_id, download FROM plan_runs ORDER BY series_id")
+        return [{**row, "scope": json.loads(row["scope"]) if row["scope"] else None} for row in await self._db.fetch_all(
+            "SELECT series_id, download, scope FROM plan_runs ORDER BY series_id")]
 
     async def save_outcome(self, series_id: int, problems: list[dict]) -> None:
         """The outcome of the last sync: the work that failed for the moment; a sync that left none clears it."""

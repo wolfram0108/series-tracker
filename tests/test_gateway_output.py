@@ -76,6 +76,18 @@ async def test_the_reset_of_failed_attempts_is_a_change_of_the_series_and_starts
     assert topics(spy) == ["scan.edit.begin", "planner.failures.forget", "scan.edit.end"]
 
 
+async def test_a_scan_may_name_the_season_or_the_episode_it_covers_and_an_episode_alone_is_refused(tmp_path):
+    answers = {"scan.series.run": {"changed": False}}
+    async with serving(tmp_path, answers) as (client, owners, _, _):
+        whole = await client.post("/api/series/1/scan")
+        episode = await client.post("/api/series/1/scan", json={"season": 1, "episode": 3})
+        season = await client.post("/api/series/1/scan?download=false", json={"season": 2})
+        alone = await client.post("/api/series/1/scan", json={"episode": 3})
+    assert whole.status_code == episode.status_code == season.status_code == 200 and alone.status_code == 422
+    assert owners.asked("scan.series.run") == [{"series_id": 1}, {"series_id": 1, "season": 1, "episode": 3},
+                                               {"series_id": 1, "download": False, "season": 2}]
+
+
 async def test_the_reset_of_failed_attempts_may_name_the_level_it_is_of_and_an_unknown_level_is_refused(tmp_path):
     answers = {"planner.failures.forget": {"reset": 1}}
     async with serving(tmp_path, answers) as (client, owners, _, _):

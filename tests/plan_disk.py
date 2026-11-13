@@ -465,7 +465,7 @@ class DiskWorld(World):
 
     # --- a sync ----------------------------------------------------------------------------------------------------
 
-    def sync(self, title: str = ""):
+    def sync(self, title: str = "", scope=None):
         # The snapshot is the disk: a file the table names and the disk has not is gone from the table.
         gone = [name for name in self.containers if not os.path.exists(self.library(name))]
         for name in gone:
@@ -483,7 +483,7 @@ class DiskWorld(World):
             self.daemon.answers[f"{label_of(slot)} {voice}"] = "mismatch"
         for slot, answer in self.cut_answers.items():
             self.daemon.answers[f"cut {label_of(slot)}"] = answer
-        return super().sync(title)
+        return super().sync(title, scope)
 
     def _sounds(self, path: str) -> tuple[int, ...]:
         return tuple(self.codec.sound(path, 0, second) for second in range(max(1, self.codec.seconds(path))))

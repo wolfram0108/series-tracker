@@ -35,9 +35,13 @@ no record either, but its source is passed over for this sync like a download th
 the next source; where there is none, the episode is built without that voice-over and the next sync tries it again.
 
 Queries:
-  planner.sync {series_id, download?} -> {accepted}: the sync of a series is recorded and starts; it is a work of the run
-      of the sync (scan), told by `work.series.state` (owner `planner`). Without download no step runs: only what needs no
-      work is applied (names, `.off`, removals the plan owes).
+  planner.sync {series_id, download?, season?, episode?} -> {accepted}: the sync of a series is recorded and starts; it is
+      a work of the run of the sync (scan), told by `work.series.state` (owner `planner`). Without download no step runs:
+      only what needs no work is applied (names, `.off`, removals the plan owes). With a season (and an episode of it) the
+      sync covers it alone (SyncScope): the plan is counted for the whole series and shown whole, and what is carried out is
+      the groups of the plan that hold a place of the scope — the episodes and files that share work go together (the
+      episode of a compilation brings the compilation, its download and every cut on it); nothing of the other groups is
+      done, applied, removed or hidden. The scope is written with the run (plan_runs.scope): a restart takes it up as it was.
   planner.sync.cancel {series_id} -> {cancelled}: the user stops the sync of the series: its downloads (work.withdrawn),
       its jobs of the service (cancelled, taken out of the history), the build aside stop; the episodes it applied by
       then stay applied (each group of the plan is put in place and written as soon as its own steps have ended),
@@ -96,7 +100,7 @@ from core import NO_HANDLER, BaseModule, BusRequestError, compute, storage
 from core import container as mkv
 from core.clock import beat_while
 from core.dump import plain
-from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView, SeriesSource, SourceType, SubmitOutcome,
+from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView, SyncScope, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
 from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
 from core.envelope import Envelope
@@ -177,11 +181,13 @@ def _sizes(files: Library, names: list[str]) -> dict[str, float]:
 class BusSync(SeriesSync):
     """The sync of one series with the service's workers (see the module)."""
 
-    def __init__(self, module: "PlannerModule", series: dict, download: bool) -> None:
+    def __init__(self, module: "PlannerModule", series: dict, download: bool, scope: SyncScope | None = None) -> None:
         super().__init__()
         self.m = module
         self.series = series
         self.download = download
+        self.scope = scope
+        self.holds = None if scope is None else scope.holds
         self.files = Library(series["save_path"])
         self.downloads_dir = ""
         self.conform_dir = ""
@@ -666,21 +672,22 @@ class PlannerModule(BaseModule):
     async def on_sync(self, env: Envelope) -> dict:
         series_id = int(env.payload["series_id"])
         download = bool(env.payload.get("download", True))
+        scope = SyncScope.of(env.payload)  # a season or an episode of it; none: the whole series
         if series_id in self._runs and not self._runs[series_id].done():
             return {"accepted": False, "reason": "planner_sync_running"}
-        await self.repo.begin_run(series_id, download)
-        self._start(series_id, download)
+        await self.repo.begin_run(series_id, download, None if scope is None else scope.named())
+        self._start(series_id, download, scope)
         return {"accepted": True}
 
-    def _start(self, series_id: int, download: bool) -> None:
-        self._runs[series_id] = self.spawn(self._sync(series_id, download), name=f"planner.sync:{series_id}")
+    def _start(self, series_id: int, download: bool, scope: SyncScope | None = None) -> None:
+        self._runs[series_id] = self.spawn(self._sync(series_id, download, scope), name=f"planner.sync:{series_id}")
         self._announce_work(series_id, True)
 
-    async def _sync(self, series_id: int, download: bool) -> None:
+    async def _sync(self, series_id: int, download: bool, scope: SyncScope | None = None) -> None:
         try:
             series = await self.request("catalog.series.get", {"series_id": series_id})
             await self.repo.drop_pack_cards(self.packing.sync_started(series_id))
-            sync = self._syncs[series_id] = BusSync(self, series, download)
+            sync = self._syncs[series_id] = BusSync(self, series, download, scope)
             sync.run_mark = await self.repo.run_started(series_id)
             await self._recover(series)
             await self._load(series_id, sync)
@@ -879,7 +886,7 @@ class PlannerModule(BaseModule):
         resumed = set()
         for run in await self.repo.runs():
             self.log.info("сериал %d: синхронизация плана, прерванная остановкой, продолжается", run["series_id"])
-            self._start(run["series_id"], bool(run["download"]))
+            self._start(run["series_id"], bool(run["download"]), SyncScope.of(run["scope"]))
             resumed.add(run["series_id"])
         # Records of jobs removed while the process was stopped take their folders now.
         try:

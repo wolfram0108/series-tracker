@@ -188,6 +188,44 @@ async def test_the_command_of_a_synchronization_is_written_before_its_table_is_w
     assert tasks_of(rig) == []
 
 
+async def test_the_scope_of_a_synchronization_is_written_with_its_command_and_goes_to_the_planner(rig):
+    """A sync of a season or of an episode reads the tables of the sources as the sync of the series does; the planner is told
+    the scope, and a restart finds it in the command."""
+    rig.world.pages[URL1] = Page(TableState.READING, held=False)
+    run = rig.start_run(season=1, episode=3)
+    await rig.world.asked.get()
+    assert [json.loads(each["results_data"])["scope"] for each in tasks_of(rig)] == [{"season": 1, "episode": 3}]
+    rig.world.finish(URL1)
+    await asyncio.wait_for(run, STUCK_S)
+    await rig.run(season=2)
+    await rig.run()
+    assert rig.world.payloads["planner.sync"] == [
+        {"series_id": rig.series_id, "download": True, "season": 1, "episode": 3},
+        {"series_id": rig.series_id, "download": True, "season": 2},
+        {"series_id": rig.series_id, "download": True}]
+
+
+async def test_a_command_found_at_a_restart_goes_on_as_the_sync_of_its_scope_not_of_the_series(rig):
+    with sqlite3.connect(rig.db_path) as conn:
+        conn.execute("INSERT INTO scan_tasks (series_id, status, task_data, results_data) VALUES (?, 'processing', '[]', ?)",
+                     (rig.series_id, json.dumps({"video_sync": True, "download": True, "scope": {"season": 1, "episode": 2}})))
+        conn.commit()
+    again = await build(rig.db_path, series_id=rig.series_id, source_ids=rig.source_ids)
+    try:
+        again.bus.publish(Envelope(topic="system.started", kind="event"))
+        await no_task_left(again)
+        assert again.world.payloads["planner.sync"] == [
+            {"series_id": again.series_id, "download": True, "season": 1, "episode": 2}]
+    finally:
+        await again.runner.stop()
+
+
+async def test_an_episode_without_its_season_is_refused_before_anything_is_asked(rig):
+    with pytest.raises(Exception) as refused:
+        await rig.run(episode=3)
+    assert "episode" in str(refused.value) and rig.world.order == []
+
+
 async def test_a_synchronization_that_fails_leaves_its_command_as_the_error_of_the_series_and_one_record_only(rig):
     rig.world.recompute_error = "boom"
     with pytest.raises(BusRequestError):

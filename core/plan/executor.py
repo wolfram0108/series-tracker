@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from ..reasons import reason
-from .planner import Goal, Group, Op, Plan, plan, video_op
+from .planner import Goal, Group, Op, Plan, plan, restricted, video_op
 from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
 
 DOWNLOADS = ("download_video", "download_dub", "download_picture")
@@ -226,6 +226,9 @@ class SeriesSync:
     «Удалить» waiting; a subclass does the steps (`do`), makes the files of a group (`stage`) and writes the result
     (`commit`)."""
 
+    # The places a sync covers (`holds(slot)`), none for the whole series: the plan of the sync keeps the groups that hold one.
+    holds: Callable[[Slot], bool] | None = None
+
     def __init__(self, namer: Callable | None = None) -> None:
         self.namer = namer
         self.containers: dict[str, Container] = {}
@@ -304,7 +307,8 @@ class SeriesSync:
     async def plan_of(self, inputs: Inputs) -> Plan:
         first = plan(inputs, self.namer)
         namer = await self.namer_for(first)
-        return first if namer is self.namer else plan(inputs, namer)
+        made = first if namer is self.namer else plan(inputs, namer)
+        return made if self.holds is None else restricted(made, self.holds)
 
     async def sync(self, online: tuple[OnlineRow, ...], choices: Choices) -> Synced:
         # A command is of a file: a file that is gone takes its command with it.

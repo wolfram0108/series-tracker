@@ -168,3 +168,30 @@ class PlanForget(BaseModel):
             return True
         return any((self.season is None or slot[0] == self.season) and (self.episode is None or slot[1] == self.episode)
                    for slot in failure["episodes"])
+
+
+class SyncScope(BaseModel):
+    """What a sync of a video series covers when it is not the whole series: a season, or an episode of it. The plan of the
+    series is counted whole, and what is carried out is the groups of the plan that hold a place of the scope — the episodes
+    and files that share work go together, so the episode of a compilation brings the compilation, its download and every cut
+    laid on it. The work of the other groups waits for their own sync; their files are not touched."""
+
+    season: int
+    episode: int | None = None
+
+    @classmethod
+    def of(cls, payload: dict | None) -> "SyncScope | None":
+        """The scope a request names (`season`, `episode`), none when it names none; an episode without its season is no scope."""
+        found = payload or {}
+        if found.get("season") is None:
+            if found.get("episode") is not None:
+                raise ValueError("an episode is of a season")
+            return None
+        return cls(season=int(found["season"]), episode=None if found.get("episode") is None else int(found["episode"]))
+
+    def holds(self, slot) -> bool:
+        """Whether a place of the plan ([season, episode] or [season, episode, part]) is of the scope."""
+        return slot[0] == self.season and (self.episode is None or slot[1] == self.episode)
+
+    def named(self) -> dict:
+        return {"season": self.season, **({} if self.episode is None else {"episode": self.episode})}

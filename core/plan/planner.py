@@ -152,6 +152,16 @@ class Plan:
         return next((each for each in self.goals if each.slot == slot), None)
 
 
+def restricted(made: Plan, holds: Callable[[Slot], bool]) -> Plan:
+    """The plan of a sync that covers a part of the series: the goals stay all (the window shows the series as it is, the
+    plan of an episode is read from them), the steps and the groups are those of the groups that hold a place `holds` says
+    is of the scope. A group is the episodes and files that share work, so a step of one group never needs a step of another:
+    nothing of the others is done, applied, removed or hidden."""
+    groups = tuple(group for group in made.groups if any(holds(slot) for slot in group.slots))
+    wanted = {op for group in groups for op in group.ops}
+    return Plan(made.goals, tuple(op for op in made.ops if op.id in wanted), groups)
+
+
 def voice_of(group: str | None, dub: RowId) -> str:
     """The key of a voice-over in a container: its group; an unknown voice-over is a voice of its own row."""
     return group if group is not None else f"?{dub.source_id}:{dub.row_key}:{dub.video}"

@@ -10,7 +10,12 @@ Queries:
   scan.runs.get → {runs: [{series_id, snapshot}], as_of} — the open runs of syncs as their commands are written (an
       executor that starts again takes them before its works: И-60), as of the generation `as_of` of the announcements of
       runs (RunChanged.seq): a series whose announcement is newer than that is told by the announcement, not by the reading.
-  scan.series.run {series_id, force_replace?, download?} → {changed, ...}. changed tells whether anything was
+  scan.series.run {series_id, force_replace?, download?, season?, episode?} → {changed, ...}. With a season (and an
+      episode of it) the sync of a video series covers it alone (SyncScope): the tables of every source are read and the
+      layout is counted as for the whole series, and the planner carries out the groups of its plan that hold the scope (a
+      compilation with its cuts goes whole); the series is busy for all of it. A series of another kind refuses it
+      (`scope_video_only`). The scope is written with the command: a restart takes the sync up as it was.
+      changed tells whether anything was
       actually changed: torrent — tasks were created; video — the references or the rows of the plan differ from
       what they were before the run. A video series answers {kind: "video", changed, sources: [{source_id, url,
       state: ready | stale | skipped, reason}], references: {by_level, own, other_player, none, unfit}, in_plan}.
@@ -73,7 +78,7 @@ from datetime import datetime, timedelta, timezone
 
 from core import NO_HANDLER, BaseModule, BusRequestError, torrent_source
 from core.deadlines import EDIT_STUCK_S, TABLE_WAIT_S
-from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, OutputSwitch, RunChanged, SeriesSource, Slot, WorkState)
+from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, OutputSwitch, RunChanged, SeriesSource, Slot, SyncScope, WorkState)
 from core.db import Database
 from core.envelope import Envelope
 from core.ignored import parse_memory
@@ -239,8 +244,13 @@ class ScanModule(BaseModule):
         # download=False — «полный процесс без загрузки» (сохранение свойств
         # VK-серии): пере-скан по профилю + переименование + усыновление, но
         # БЕЗ постановки новых загрузок (контракт «Сохранить → усыновление»).
-        return await self._run_series(int(p["series_id"]), bool(force),
-                                      download=p.get("download", True))
+        series_id = int(p["series_id"])
+        scope = SyncScope.of(p)  # a season, or an episode of it: the sync covers it alone (a video series)
+        if scope is not None:
+            series = await self.request("catalog.series.get", {"series_id": series_id})
+            if series.get("kind") != "video":
+                raise ScanError(reason("scope_video_only"))
+        return await self._run_series(series_id, bool(force), download=p.get("download", True), scope=scope)
 
     async def on_media_list(self, env: Envelope) -> list[dict]:
         """Состав медиа-элементов серии (владелец строк — scan, Р-12);
@@ -425,13 +435,13 @@ class ScanModule(BaseModule):
             raise SyncFailed(reason("scan_step_failed", step=topic)) from exc
 
     async def _run_series(self, series_id: int, force: bool = False,
-                          download: bool = True, resume: int | None = None) -> dict:
+                          download: bool = True, resume: int | None = None, scope: SyncScope | None = None) -> dict:
         """A scan of one series, a task of its own: a stop of it by the user (scan.run.cancel) stops it alone, not the
         pass over all series it may be a part of."""
         # Refused or taken at once, in the handler: a second scan of the series is refused from this moment on.
         self._require_idle(series_id)
         self._running.add(series_id)
-        passing = self.spawn(self._pass_series(series_id, force, download, resume), name=f"scan.pass:{series_id}")
+        passing = self.spawn(self._pass_series(series_id, force, download, resume, scope), name=f"scan.pass:{series_id}")
         self._passes[series_id] = passing
         try:
             return await passing
@@ -474,7 +484,8 @@ class ScanModule(BaseModule):
             self.log.info("сериал %d: синхронизация остановлена пользователем", series_id)
         return {"cancelled": stopped}
 
-    async def _pass_series(self, series_id: int, force: bool, download: bool, resume: int | None) -> dict:
+    async def _pass_series(self, series_id: int, force: bool, download: bool, resume: int | None,
+                           scope: SyncScope | None = None) -> dict:
         """The command is written down before anything is waited for, so that a restart finds it: a video synchronization
         is a task of `scan_tasks` until it ends (`resume` is the task a restart found)."""
         try:
@@ -487,7 +498,8 @@ class ScanModule(BaseModule):
         intent = resume
         try:
             if intent is None:
-                intent = await self.repo.create_task(series_id, [], {"video_sync": True, "download": download})
+                intent = await self.repo.create_task(series_id, [], {
+                    "video_sync": True, "download": download, **({} if scope is None else {"scope": scope.named()})})
             self._owned.add(intent)
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
@@ -508,7 +520,7 @@ class ScanModule(BaseModule):
             await self.repo.delete_error_tasks(series_id)
             series = await self._relocate(series)
             if video:
-                result = await self._sync_video(series, download)
+                result = await self._sync_video(series, download, scope)
                 await self._hold_run(series_id, intent)
                 intent = None  # the run keeps the command now: it ends when the works of the run end
             else:
@@ -630,8 +642,10 @@ class ScanModule(BaseModule):
 
     # --- video branch: synchronisation and the plan of references ----------------------------------
 
-    async def _sync_video(self, series: dict, download: bool) -> dict:
-        """Tables of all sources -> layout -> references and plan -> (with download) the download and the voice-overs.
+    async def _sync_video(self, series: dict, download: bool, scope: SyncScope | None = None) -> dict:
+        """Tables of all sources -> layout -> references and plan -> (with download) the download and the voice-overs. A sync
+        of a season or of an episode reads the tables of every source and counts the layout as the sync of the series does;
+        only what the planner carries out is the scope's (planner.sync).
 
         Each step starts on the signal that the one before it ended, and any step that fails fails the scan."""
         series_id = series["id"]
@@ -649,7 +663,8 @@ class ScanModule(BaseModule):
         # these tables, does its work and applies it once, at its end (modules/planner). Without download it applies only
         # what needs no work.
         self._alive(series_id)
-        accepted = await self._step("planner.sync", {"series_id": series_id, "download": download})
+        accepted = await self._step("planner.sync", {"series_id": series_id, "download": download,
+                                                     **({} if scope is None else scope.named())})
         return {"kind": "video", "changed": bool((accepted or {}).get("accepted")),
                 "sources": [each.as_dict() for each in tables]}
 
@@ -807,7 +822,7 @@ class ScanModule(BaseModule):
             return
         try:
             await self._run_series(series_id, download=bool(task["results_data"].get("download", True)),
-                                   resume=task["id"])
+                                   resume=task["id"], scope=SyncScope.of(task["results_data"].get("scope")))
         except Exception:  # noqa: BLE001 - the failure is kept as the error task of the series
             self.log.exception("возобновление синхронизации сериала %d не удалось", series_id)
 

@@ -15,7 +15,7 @@ from core import BusRequestError
 from core.reasons import code_of, reason, relayed
 from .routing import admitted
 
-from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, FailuresReset, FailuresResetBody, OkResponse, SyncCancelled,
+from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, FailuresReset, FailuresResetBody, OkResponse, SyncCancelled, SyncScopeBody,
                       QueueTask, SeriesCreate, SeriesObject, SeriesUpdate)
 
 # Общая документация веток ошибок (отдаются через JSONResponse, на них
@@ -265,13 +265,16 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             response_model_exclude_none=True,
             responses={409: {"model": ErrorResponse},
                        500: {"model": ErrorResponse}})
-    async def scan_series(series_id: int, download: bool = True):
+    async def scan_series(series_id: int, body: SyncScopeBody | None = None, download: bool = True):
         """Синхронный скан одной серии, как в оригинале: HTTP ждёт
         результата; force_replace scan берёт из настройки отладки.
-        download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается."""
+        download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается.
+        С телом (сезон, серия сезона) — синхронизация в рамках сезона или серии видео-сериала: источники те же, исполняется
+        то, что касается области (серия компиляции приводит всю компиляцию); сериал занят на всё время."""
         try:
             result = await gw.request("scan.series.run", {
-                "series_id": series_id, **({} if download else {"download": False})})
+                "series_id": series_id, **({} if download else {"download": False}),
+                **(body.model_dump(exclude_none=True) if body is not None else {})})
         except BusRequestError as exc:
             msg = relayed(str(exc))
             code = 409 if code_of(str(exc)) == "not_allowed" else 500

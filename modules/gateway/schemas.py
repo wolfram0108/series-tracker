@@ -45,6 +45,12 @@ class SyncCancelled(ApiModel):
     cancelled: bool = False
 
 
+class SyncScopeBody(RequestModel):
+    """What a sync of the series covers when it is not all of it: a season, or an episode of it (the sync of a video series)."""
+    season: int
+    episode: int | None = None
+
+
 class FailuresResetBody(RequestModel):
     """The level whose failed attempts are reset: a season, an episode of it, a voice-over group, the cuts out of compilations.
     Without a body, the whole series."""

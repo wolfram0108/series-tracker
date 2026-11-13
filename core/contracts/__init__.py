@@ -52,8 +52,9 @@ __all__ = ["AppCard", "AppResults", "AppSearchReply", "AppSearchRequest", "PACK_
            "GroupsResolveReply", "GroupsResolveRequest"]
 
 from .planner import (PlanAsset, PlanAssetTrack, PlanAssetVideo, PlanCommand, PlanDelete, PlanEpisode,  # noqa: E402
-                      PlanFailure, PlanForget, PlanGoalTrack, PlanGoalVideo, PlannerView, PlanProblem, PlanRowRef, PlanSnapshot)
+                      PlanFailure, PlanForget, PlanGoalTrack, PlanGoalVideo, PlannerView, PlanProblem, PlanRowRef, PlanSnapshot,
+                      SyncScope)
 
 __all__ += ["PlanAsset", "PlanAssetTrack", "PlanAssetVideo", "PlanCommand", "PlanDelete", "PlanEpisode", "PlanFailure",
-            "PlanProblem", "PlanForget",
+            "PlanProblem", "PlanForget", "SyncScope",
             "PlanGoalTrack", "PlanGoalVideo", "PlannerView", "PlanRowRef", "PlanSnapshot"]

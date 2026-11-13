@@ -15,7 +15,7 @@ import pytest
 from core import BaseModule, Bus, Runner
 from core import container as mkv
 from core.contracts import (VOICE_TAKE, CompositionReply, CompositionRow, EffectiveLever, EpisodeSettings, Level,
-                            RowState, group_target)
+                            RowState, SyncScope, group_target)
 from core.db import Database
 from core.envelope import Envelope
 from core.plan.files import container_json, container_of
@@ -214,12 +214,12 @@ async def world(tmp_path):
     neighbours.close()
 
 
-async def sync(world, download: bool = True) -> dict:
-    """One sync; the view it answers is the plan the sync froze, as the window is told when the sync starts (a sync
-    without download tells nothing: the view is the plan as the tables give it)."""
+async def sync(world, download: bool = True, **scope) -> dict:
+    """One sync (of the series, or of the `season` and `episode` named); the view it answers is the plan the sync froze, as the
+    window is told when the sync starts (a sync without download tells nothing: the view is the plan as the tables give it)."""
     neighbours, planner, _ = world
     told = planner.bus.subscribe("planner.series.changed")
-    assert (await planner.request("planner.sync", {"series_id": SERIES, "download": download}))["accepted"]
+    assert (await planner.request("planner.sync", {"series_id": SERIES, "download": download, **scope}))["accepted"]
     await settle(planner.bus, planner, neighbours, seconds=120)
     while not told.queue.empty():
         view = (await told.queue.get()).payload
@@ -340,6 +340,60 @@ async def test_the_packing_is_told_container_by_container_and_what_waits_stays_i
     assert [(card["episode"], card["status"], card["waited"]) for card in last] == [("s01e02", "failed", True)]
     assert [card.id for card in await planner.repo.pack_cards()] == [last[0]["id"]]
 
+
+
+async def test_a_sync_of_an_episode_carries_out_its_group_alone_and_shows_the_series_whole(world):
+    """The plan is of the series and is shown whole; what is carried out is the groups that hold the episode — the files of
+    the other episodes are not made, not renamed, not removed."""
+    neighbours, planner, db_path = world
+    episode(neighbours, 1, 1)
+    episode(neighbours, 2, 1)
+    neighbours.put(1, "ref21", 1, group=REF, season=2)
+    neighbours.put(2, "g1e21", 1, group="G1", player="kodik", season=2)
+    view = await sync(world, season=1, episode=2)
+    assert sorted(each["slot"] for each in view["episodes"]) == [[1, 1], [1, 2], [2, 1]]  # the window sees the series whole
+    assert sorted(each["video"]["episode"] for each in table(db_path).values()) == [[1, 2]]
+    stored = await check(world)
+    assert len(stored) == 1
+    # A season: its groups, and nothing of the others.
+    await sync(world, season=2)
+    assert sorted(each["video"]["episode"] for each in table(db_path).values()) == [[1, 2], [2, 1]]
+    # The rest is the next sync of the series, which finds the files made before as they are.
+    before = {name: data for name, data in table(db_path).items()}
+    await sync(world)
+    stored = await check(world)
+    assert sorted(each["video"]["episode"] for each in stored.values()) == [[1, 1], [1, 2], [2, 1]]
+    assert all(stored[name] == data for name, data in before.items())
+
+
+async def test_a_sync_of_an_episode_cut_out_of_a_compilation_downloads_the_compilation_and_makes_that_episode_only(world):
+    """What the episode needs is carried out whole — the download of the compilation, the cut laid on the picture of its
+    single, the build — and the episodes the compilation is cut for otherwise, and one apart from it, wait for their sync."""
+    neighbours, planner, db_path = world
+    neighbours.put(1, "single1", 1, group=REF, player="cvh")
+    neighbours.put(1, "single2", 2, group=REF, player="cvh")
+    neighbours.put(4, "comp", 1, end=2, group=REF, height=2160)
+    neighbours.put(1, "single4", 4, group=REF, player="cvh")
+    await sync(world, season=1, episode=1)
+    stored = await check(world)
+    assert sorted(each["video"]["episode"] for each in stored.values()) == [[1, 1]]
+    assert {each["video"]["cut_of"]["row_key"] for each in stored.values()} == {"comp"}
+    await sync(world, season=1, episode=2)
+    stored = await check(world)
+    assert sorted(each["video"]["episode"] for each in stored.values()) == [[1, 1], [1, 2]]
+    assert {each["video"]["cut_of"]["row_key"] for each in stored.values()} == {"comp"}
+
+
+async def test_the_scope_of_a_sync_is_written_with_its_run_and_an_episode_without_its_season_is_no_scope(world):
+    _, planner, _ = world
+    await planner.repo.begin_run(SERIES, True, {"season": 1, "episode": 2})
+    assert await planner.repo.runs() == [{"series_id": SERIES, "download": 1, "scope": {"season": 1, "episode": 2}}]
+    await planner.repo.begin_run(SERIES, True)
+    assert (await planner.repo.runs())[0]["scope"] is None
+    await planner.repo.end_run(SERIES)
+    with pytest.raises(ValueError):
+        SyncScope.of({"episode": 2})
+    assert SyncScope.of({}) is None and SyncScope.of({"season": 1}).holds([1, 7, 2]) and not SyncScope.of({"season": 1, "episode": 2}).holds([1, 3])
 
 
 async def test_a_cut_out_of_a_compilation_by_the_service(world):

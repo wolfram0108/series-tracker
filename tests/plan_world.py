@@ -10,13 +10,14 @@ apply every group whose operations all succeeded. After each sync `check()` hold
 from __future__ import annotations
 
 import asyncio
+import random
 from collections import Counter
 from dataclasses import dataclass, field, replace
-from typing import Iterable
+from typing import Callable, Iterable
 
-from core.contracts import PlannerView
+from core.contracts import PlannerView, SyncScope
 from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, video_of
-from core.plan.planner import OFF, Goal, Plan, own_track, plan, switched_off, voice_of
+from core.plan.planner import OFF, Goal, Plan, own_track, plan, restricted, switched_off, voice_of
 from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
 from modules.planner.view import view_of
 
@@ -55,6 +56,8 @@ class Step:
     problems: tuple[tuple, ...] = ()
     # The asset the last plan of the sync was made on: the groups applied before it are in it as they were applied.
     planned_on: tuple[Container, ...] = ()
+    # The places the sync covered (a season, an episode of it), none for the whole series.
+    holds: Callable[[Slot], bool] | None = None
 
 
 @dataclass
@@ -146,7 +149,7 @@ class World(SeriesSync):
     def settle(self, syncs: int = 4) -> Step:
         """After `calm`, the series comes to rest: within a few syncs the plan has nothing left to do."""
         for number in range(syncs):
-            step = self.sync(f"успокоение {number + 1}")
+            step = self.sync(f"успокоение {number + 1}")  # the whole series: the scope of an earlier sync is not kept
             self.check(step)
             if not step.plan.ops and not any(group.remove or group.hide for group in step.plan.groups):
                 return step
@@ -160,7 +163,9 @@ class World(SeriesSync):
 
     # --- one synchronization -------------------------------------------------------------------------------------
 
-    def sync(self, title: str = "") -> Step:
+    def sync(self, title: str = "", scope: tuple[int, int | None] | None = None) -> Step:
+        """One sync of the series, or of a season (and an episode of it) when `scope` names them."""
+        self.holds = None if scope is None else SyncScope(season=scope[0], episode=scope[1]).holds
         for source_id, table in self.site.items():
             if source_id not in self.read_fails:
                 self.online[source_id] = tuple(each.row for each in table)
@@ -179,7 +184,7 @@ class World(SeriesSync):
         self.choose(delete=self.commands)
         step = Step(title, inputs.online, synced.before, synced.plan, tuple(sorted(synced.failed)), synced.applied,
                     tuple(sorted(self.containers.values(), key=lambda each: each.name)), inputs.choices, self.choices,
-                    inputs.failed, synced.replanned, synced.problems, inputs.containers)
+                    inputs.failed, synced.replanned, synced.problems, inputs.containers, self.holds)
         self.history.append(step)
         return step
 
@@ -295,6 +300,8 @@ class World(SeriesSync):
     def check(self, step: Step | None = None) -> None:
         step = step or self.history[-1]
         again = plan(Inputs(step.online, step.planned_on, step.choices, step.failed_rows))
+        if step.holds is not None:
+            again = restricted(again, step.holds)
         assert repr(again) == repr(step.plan), "the plan is not a function of its inputs"
         # Whatever the plan is, the window is told it in the terms of its contract.
         PlannerView.model_validate(view_of(0, self, step.plan, running=False, rows=step.online))
@@ -382,19 +389,32 @@ class World(SeriesSync):
         # One visible file per episode, by the number the file stands under (what the media server sees).
         visible = Counter(each.video.episode for each in step.after if not each.off)  # the number its file was built for
         assert all(count == 1 for count in visible.values()), f"two visible files of an episode: {visible}"
-        # When every group was applied the library shows exactly the goals; anything else is hidden.
-        if all(group.slots in step.applied for group in step.plan.groups):
+        # A sync of a season or of an episode leaves the files of the other places as they were: no group of its plan names
+        # them, and nothing of them is made, renamed, removed or hidden.
+        if step.holds is not None:
+            named = {name for group in step.plan.groups
+                     for name in (*group.remove, *(old for old, _ in group.hide), *(name for _, name in group.kept))}
+            for container in step.before:
+                if container.name not in named and not step.holds(_slot_of_video(container.video, online)):
+                    assert container in step.after, f"{container.name}: a file of another place changed in a sync of a part"
+        # When every group was applied the library shows exactly the goals; anything else is hidden. (A sync of a part
+        # applies the groups it covers: the rest of the library is for the sync of the series.)
+        if step.holds is None and all(group.slots in step.applied for group in step.plan.groups):
             shown = {each.name for each in step.after if not each.off}
             assert shown == {goal.name for goal in step.plan.goals if not goal.off}, shown
         if not step.failed:
             fixpoint = plan(Inputs(step.online, step.after, step.choices_after or step.choices, step.failed_rows))
+            covered = None  # the places of the groups a sync of a part carried out: what it leaves for the others is no work of its own
+            if step.holds is not None:
+                covered = {slot for group in step.plan.groups for slot in group.slots}
+                fixpoint = restricted(fixpoint, lambda slot: slot in covered)
             assert not fixpoint.ops, f"after a sync that did everything the plan still has work: {[op.id for op in fixpoint.ops]}"
             assert not any(group.remove or group.hide for group in fixpoint.groups), "after a sync files still move"
             # The sounds of every visible file, the own sound of its video among them, follow the order of its season.
             order = (step.choices_after or step.choices).groups
             markups = {goal.name: goal.markup for goal in fixpoint.goals}
             for container in step.after:
-                if container.off:
+                if container.off or (covered is not None and _slot_of_video(container.video, online) not in covered):
                     continue
                 places = {voice: place for place, voice in enumerate(order.get(_slot_of_video(container.video, online)[0], ()))}
                 sounds = [voice_of(track.group, track.dub) for track in container.tracks]
@@ -447,6 +467,8 @@ class Chaos:
         self.groups = groups or self.GROUPS
         self.actions = actions or self.ACTIONS
         self.serial = 0
+        # What each sync covers is drawn apart from the changes: the histories of a seed are the same whatever the scopes.
+        self.scoper = random.Random(str(rng.getstate()))
 
     def _rows(self) -> list[tuple[int, SiteRow]]:
         return [(source, each) for source, rows in sorted(self.world.site.items()) for each in rows]
@@ -597,7 +619,10 @@ class Chaos:
         """`steps` changes and faults, a sync and the checks after each; then the faults stop and the series must rest."""
         for number in range(steps):
             action = self.step()
-            self.world.check(self.world.sync(f"{number}: {action}"))
+            # A sync of the series, of a season, or of an episode: what the others hold is as it was, whichever it is.
+            scope = self.scoper.choice((None, None, (self.scoper.choice(self.seasons), None),
+                                        (self.scoper.choice(self.seasons), self.scoper.choice(self.episodes))))
+            self.world.check(self.world.sync(f"{number}: {action}", scope))
             self.world.read_fails.clear()
             self.world.transient.clear()
         self.world.calm()
