@@ -22,7 +22,7 @@ export const goalTrack = (voice: string, kind: "reuse" | "download" | "realign" 
 
 export const goal = (slot: number[], video: Schemas["PlanGoalVideo"],
                      tracks: Schemas["PlanGoalTrack"][] = []): Schemas["PlanEpisode"] => ({
-  slot, name: slot.join(":"), off: false, video, tracks, markup: null,
+  slot, name: slot.join(":"), off: false, video, tracks, markup: null, markup_variant: null,
 })
 
 export const assetTrack = (voice: string, row: Ref, online: boolean | null = true,
@@ -34,5 +34,5 @@ export const asset = (name: string, row: Ref, tracks: Schemas["PlanAssetTrack"][
                       episode: number[] = [1], video: Partial<Schemas["PlanAssetVideo"]> = {}): Schemas["PlanAsset"] => ({
   name, off: false, episode,
   video: { source: "", player: "vibix", group: null, height: 1080, link: "", label: "", row, cut_of: cutOf, online: true, ...video },
-  tracks,
+  tracks, timeline: null,
 })

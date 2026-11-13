@@ -188,31 +188,58 @@ export function planFiles(view: PlannerView | undefined, keyOf: CompilationKey =
   })
 }
 
-/** Where a video or a voice-over of a file comes from, as a variant of a queue is told: its source and its player. */
-export interface Held { source_id: number; player: string }
+/** Where a video or a voice-over of a file comes from, as a variant of a queue is told: its source and its player, and for the
+ *  video — a queue of single videos has a variant for each voice-over of one source and player — its voice-over. */
+export interface Held { source_id: number; player: string; group?: string }
+
+/** Whether a variant of a queue is the one `held` names: one source, one player, and, where the held one names it, one voice-over.
+ *  The place every queue asks this: the mark «в файле», the reference the plan takes, the row of the file shown first. */
+export const isVariantOf = (held: Held | null | undefined, row: { group: string; source_id: number; player: string }): boolean =>
+  held != null && row.source_id === held.source_id && row.player === held.player && (held.group == null || row.group === held.group)
 
 /** What the file of an episode holds now — the fact, as against what the order of a queue or the plan chooses: the source and
  *  the player of its video (of the picture, for a cut) and of each of its voice-overs by group, the own sound of the video
  *  among them. None for an episode with no file. */
-export interface HeldFile { video: Held; tracks: Record<string, Held> }
+export interface HeldFile {
+  video: Held
+  tracks: Record<string, Held>
+  /** The variant of the queue of the markup reference whose timeline the video lies on; none the plan does not tell. */
+  timeline: Held | null
+}
 
 export function heldFile(view: PlannerView | undefined, season: number, episode: number, part: number | null = null): HeldFile | null {
   const asset = (view?.assets ?? []).find((each) => !each.off && each.episode[0] === season && each.episode[1] === episode
     && partOf(each.episode) === part)
   if (!asset) return null
-  const video: Held = { source_id: (asset.video.cut_of ?? asset.video.row).source_id, player: asset.video.player }
+  const video: Held = { source_id: (asset.video.cut_of ?? asset.video.row).source_id, player: asset.video.player,
+    ...(asset.video.label || asset.video.group ? { group: asset.video.label || asset.video.group! } : {}) }
   const tracks: Record<string, Held> = {}
   if (asset.video.group) tracks[asset.video.group] = video
   for (const track of asset.tracks ?? []) tracks[track.group ?? ""] = { source_id: track.row.source_id, player: track.player }
-  return { video, tracks }
+  const line = asset.timeline
+  return { video, tracks, timeline: line ? { source_id: line.source_id, player: line.player, group: line.group } : null }
 }
 
 /** The variant the plan takes for the reference of an episode now: its source and its player (the single video whose
  *  timeline a cut is laid on, for a cut). None while the plan takes none: the queue is then read as the order says. */
 export function takenReference(view: PlannerView | undefined, season: number, episode: number, part: number | null = null): Held | null {
   const found = (view?.references ?? []).find((each) => each.season === season && each.episode === episode && (each.part ?? null) === part)
-  return found?.source_id != null && found.player ? { source_id: found.source_id, player: found.player } : null
+  return found?.source_id != null && found.player
+    ? { source_id: found.source_id, player: found.player, ...(found.voice_group ? { group: found.voice_group } : {}) } : null
 }
+
+/** The variant of the queue of the markup reference the plan takes for an episode; none while the episode follows its reference. */
+export function takenMarkup(view: PlannerView | undefined, season: number, episode: number, part: number | null = null): Held | null {
+  const goal = (view?.episodes ?? []).find((each) => each.slot[0] === season && each.slot[1] === episode && partOf(each.slot) === part)
+  const variant = goal?.markup_variant
+  return variant ? { source_id: variant.source_id, player: variant.player, group: variant.group } : null
+}
+
+/** What the plan takes for an episode: the variant of its reference and the one of its markup reference. */
+export interface Taken { reference: Held | null; markup: Held | null }
+
+export const takenOf = (view: PlannerView | undefined, season: number, episode: number, part: number | null = null): Taken =>
+  ({ reference: takenReference(view, season, episode, part), markup: takenMarkup(view, season, episode, part) })
 
 /** The cuts of the episodes out of their compilations: done when the file holds a cut video, planned or under way while
  *  the plan cuts it, failed when the cut failed. */

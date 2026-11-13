@@ -15,7 +15,7 @@ import { liveEntries, liveFrom } from "../lib/live"
 import { useSeriesStore } from "../stores/series"
 import { usePlanStore } from "../stores/plan"
 import { useLayoutStore } from "../stores/layout"
-import { fileOf, heldFile, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, takenReference, trackOf, type CompilationKey, type Held, type HeldFile } from "../lib/plan"
+import { fileOf, heldFile, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, takenOf as takenIn, trackOf, type CompilationKey, type HeldFile, type Taken } from "../lib/plan"
 import type { SameGroups } from "../lib/same"
 import {
   deleteFromPlan, fetchPlan, fetchQueues, resetFailures,
@@ -183,7 +183,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
   /** What the file of an episode holds now (lib/plan.ts `heldFile`), for the window of the episode. */
   const heldOf = (season: number, episode: number, part: number | null = null): HeldFile | null => heldFile(plan.forSeries(seriesId), season, episode, part)
-  const takenOf = (season: number, episode: number, part: number | null = null): Held | null => takenReference(plan.forSeries(seriesId), season, episode, part)
+  const takenOf = (season: number, episode: number, part: number | null = null): Taken => takenIn(plan.forSeries(seriesId), season, episode, part)
   const queuesOf = (season: number | null, episode: number | null = null, compilation: string | null = null): Queues | undefined =>
     levelQueues.value[queueKey(season, episode, compilation)]
   const reloadQueues = (): void => {

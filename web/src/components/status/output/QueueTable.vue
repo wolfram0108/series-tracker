@@ -3,7 +3,7 @@ import Button from "primevue/button"
 import { computed, ref, watch } from "vue"
 import { t } from "../../../i18n"
 import type { QueueName, QueueRow, SourceMark as Mark } from "../../../lib/output"
-import type { Held } from "../../../lib/plan"
+import { isVariantOf, type Held } from "../../../lib/plan"
 import { heldFirst, joined, left, rowKey, sizeOf, split, type SameGroups } from "../../../lib/same"
 import OrderList from "../../OrderList.vue"
 import SameMenu, { type SameItem } from "./SameMenu.vue"
@@ -38,25 +38,24 @@ const keyOf = rowKey
 const withSame = computed(() => props.queue !== "voice")
 // The rows as they are shown. The list is made anew only when the rows or the variant the file holds change: a window that
 // draws again with the same file is given the same list (the list of the order the user dragged waits on it for the core).
-const heldKey = computed(() => props.held ? `${props.held.source_id}\u0000${props.held.player}` : "")
+const heldKey = computed(() => props.held ? JSON.stringify([props.held.source_id, props.held.player, props.held.group ?? null]) : "")
 const shown = computed(() => {
   if (!withSame.value || !heldKey.value) return props.rows
-  const [source, ...player] = heldKey.value.split("\u0000")
-  return heldFirst(props.rows, { source_id: Number(source), player: player.join("\u0000") })
+  const [source_id, player, group] = JSON.parse(heldKey.value) as [number, string, string | null]
+  return heldFirst(props.rows, { source_id, player, ...(group === null ? {} : { group }) })
 })
 
 // The head of the queue: the variant the plan takes (what the user's order only wishes comes second), else the first one taken.
 const headOf = (rows: readonly QueueRow[]): QueueRow | undefined => {
-  const taken = props.queue === "reference" ? props.taken : null
-  return (taken ? rows.find((each) => each.allowed && each.source_id === taken.source_id && each.player === taken.player) : undefined)
-    ?? rows.find((each) => each.allowed)
+  const taken = props.taken
+  return rows.find((each) => each.allowed && isVariantOf(taken, each)) ?? rows.find((each) => each.allowed)
 }
 const isFirst = (row: QueueRow, rows: readonly QueueRow[]): boolean => headOf(rows) === row
 
 const markOf = (row: QueueRow, rows: readonly QueueRow[]): string => !row.allowed ? t("output.queue.skipped")
   : isFirst(row, rows) ? t(props.queue === "reference" ? "output.queue.reference"
     : props.queue === "markup" ? "output.queue.markup" : "output.queue.taken") : ""
-const isHeld = (row: QueueRow): boolean => props.held != null && row.source_id === props.held.source_id && row.player === props.held.player
+const isHeld = (row: QueueRow): boolean => isVariantOf(props.held, row)
 const height = (row: QueueRow): string => row.height == null ? "—"
   : t(props.level ? "output.heightUpTo" : "output.height", { height: row.height })
 const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" : t(`output.level.${row.allowed_level}`)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fileOf, heldFile, planCuts, planDubs, planFiles, seasonVoiceOrders, takenReference, trackOf } from "./plan"
+import { fileOf, heldFile, isVariantOf, planCuts, planDubs, planFiles, seasonVoiceOrders, takenMarkup, takenOf, takenReference, trackOf } from "./plan"
 import { liveFrom } from "./live"
 import { asset, assetTrack, goal, goalTrack, goalVideo, planView, rowRef } from "./plan.fixtures"
 
@@ -273,8 +273,9 @@ describe("heldFile", () => {
     })
     // The plan wants the voice-over from cvh; the file holds the one of kodik, and the own sound of the video is its group's.
     expect(heldFile(view, 1, 1)).toEqual({
-      video: { source_id: 7, player: "line:bfzym3u8" },
-      tracks: { "Китайский": { source_id: 7, player: "line:bfzym3u8" }, "ПВА ШОУ": { source_id: 90, player: "kodik" } },
+      video: { source_id: 7, player: "line:bfzym3u8", group: "Китайский" },
+      tracks: { "Китайский": { source_id: 7, player: "line:bfzym3u8", group: "Китайский" }, "ПВА ШОУ": { source_id: 90, player: "kodik" } },
+      timeline: null,
     })
     expect(heldFile(view, 1, 2)).toBeNull()
     expect(heldFile(undefined, 1, 1)).toBeNull()
@@ -284,7 +285,7 @@ describe("heldFile", () => {
     const view = planView({ assets: [
       asset("S01E02.mp4", rowRef(7, "pic2"), [], rowRef(4, "comp"), [1, 2], { player: "vk" }),
       { ...asset("S01E03.mp4", rowRef(7, "r3"), [], null, [1, 3]), off: true }] })
-    expect(heldFile(view, 1, 2)?.video).toEqual({ source_id: 4, player: "vk" })
+    expect(heldFile(view, 1, 2)?.video).toMatchObject({ source_id: 4, player: "vk" })
     expect(heldFile(view, 1, 3)).toBeNull()
   })
 })
@@ -297,6 +298,8 @@ describe("takenReference", () => {
     const view = planView({ references: [reference({ source_id: 7, player: "line:duanju" }), reference({ episode: 2, source_id: 5, player: "vk" })] })
     expect(takenReference(view, 1, 1)).toEqual({ source_id: 7, player: "line:duanju" })
     expect(takenReference(view, 1, 2)).toEqual({ source_id: 5, player: "vk" })
+    expect(takenReference(planView({ references: [reference({ source_id: 7, player: "cvh", voice_group: "AniLiberty" })] }), 1, 1))
+      .toEqual({ source_id: 7, player: "cvh", group: "AniLiberty" })
   })
 
   it("is none for an episode the plan takes no video for, a part nobody asked for, or no plan", () => {
@@ -305,5 +308,42 @@ describe("takenReference", () => {
     expect(takenReference(view, 1, 3)).toBeNull()
     expect(takenReference(view, 1, 3, 2)).toEqual({ source_id: 7, player: "vk" })
     expect(takenReference(undefined, 1, 1)).toBeNull()
+  })
+})
+
+describe("isVariantOf", () => {
+  const row = (group: string, source_id = 1, player = "cvh") => ({ group, source_id, player })
+
+  it("is the same source and player, and the same voice-over where the held one names it: one source and player give a variant for each", () => {
+    expect(isVariantOf({ source_id: 1, player: "cvh", group: "AniLiberty" }, row("AniLiberty"))).toBe(true)
+    expect(isVariantOf({ source_id: 1, player: "cvh", group: "AniLiberty" }, row("Студийный Огурчик"))).toBe(false)
+    expect(isVariantOf({ source_id: 1, player: "cvh", group: "AniLiberty" }, row("AniLiberty", 2))).toBe(false)
+    expect(isVariantOf({ source_id: 1, player: "cvh", group: "AniLiberty" }, row("AniLiberty", 1, "kodik"))).toBe(false)
+  })
+
+  it("leaves the voice-over out where the held one names none (a queue of one voice-over), and is no variant of nothing", () => {
+    expect(isVariantOf({ source_id: 1, player: "cvh" }, row("Whatever"))).toBe(true)
+    expect(isVariantOf(null, row("A"))).toBe(false)
+    expect(isVariantOf(undefined, row("A"))).toBe(false)
+  })
+})
+
+describe("the markup reference in the plan", () => {
+  it("is the variant the plan takes for an episode, none while the episode follows its reference", () => {
+    const view = planView({ episodes: [
+      { ...goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "a.mkv")), markup_variant: { group: "Оригинал", source_id: 3, player: "cvh" } },
+      goal([1, 2], goalVideo("asset", rowRef(7, "r2"), "b.mkv"))] })
+    expect(takenMarkup(view, 1, 1)).toEqual({ source_id: 3, player: "cvh", group: "Оригинал" })
+    expect(takenMarkup(view, 1, 2)).toBeNull()
+    expect(takenMarkup(view, 1, 9)).toBeNull()
+    expect(takenOf(view, 1, 1)).toEqual({ reference: null, markup: { source_id: 3, player: "cvh", group: "Оригинал" } })
+  })
+
+  it("has the variant the file lies on as the timeline of its held file, none for a file the plan tells nothing of", () => {
+    const view = planView({ assets: [
+      { ...asset("S01E01.mp4", rowRef(7, "pic"), [], rowRef(4, "comp"), [1, 1], { player: "vk" }), timeline: { group: "Оригинал", source_id: 3, player: "cvh" } },
+      asset("S01E02.mp4", rowRef(7, "r2"), [], null, [1, 2], { player: "vk" })] })
+    expect(heldFile(view, 1, 1)?.timeline).toEqual({ source_id: 3, player: "cvh", group: "Оригинал" })
+    expect(heldFile(view, 1, 2)?.timeline).toBeNull()
   })
 })

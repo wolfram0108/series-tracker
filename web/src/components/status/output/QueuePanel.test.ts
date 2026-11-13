@@ -125,3 +125,39 @@ describe("the variants the user declared equal", () => {
     expect(w.findAll(".variant-row")[0].find(".pill").text()).toBe(t("output.queue.reference"))
   })
 })
+
+describe("one source and player give a variant for each voice-over: the file and the plan mark one of them", () => {
+  const voices = ["AniLiberty", "Студийный Огурчик", "OnWave"].map((group) => ({ ...row("cvh"), group }))
+
+  it("marks «в файле» on the voice-over of the video the file holds and on no other of the same source and player", () => {
+    const w = mount(QueuePanel, { props: { queue: "reference", level: "episode", marks: {}, held: { source_id: 55, player: "cvh", group: "OnWave" },
+      view: { order_level: "default", same_level: "default", rows: voices } } })
+    const rows = w.findAll(".variant-row")
+    expect(rows.map((each) => each.find(".queue-held").exists())).toEqual([false, false, true])
+  })
+
+  it("stands the reference on the voice-over the plan takes, and nowhere else", () => {
+    const w = mount(QueuePanel, { props: { queue: "reference", level: "episode", marks: {}, taken: { source_id: 55, player: "cvh", group: "Студийный Огурчик" },
+      view: { order_level: "default", same_level: "default", rows: voices } } })
+    expect(w.findAll(".variant-row").map((each) => each.find(".pill-primary").exists())).toEqual([false, true, false])
+  })
+
+  it("marks the file's row in the queue of a voice-over by source and player alone: its voice-over is the queue's", () => {
+    const w = mount(QueuePanel, { props: { queue: "voice", level: "episode", marks: {}, held: { source_id: 55, player: "cvh" },
+      view: { order_level: "default", same_level: "default", rows: [row("cvh"), row("kodik")] } } })
+    expect(w.findAll(".variant-row").map((each) => each.find(".queue-held").exists())).toEqual([true, false])
+  })
+})
+
+describe("the queue of the markup reference says what the plan takes and what the file lies on", () => {
+  it("stands «эталон» on the variant the plan takes and «в файле» on the one the file lies on, whatever their places", () => {
+    const rows = ["cvh", "kodik", "vk"].map((player) => row(player))
+    const w = mount(QueuePanel, { props: { queue: "markup", level: "episode", marks: {}, follows: false,
+      held: { source_id: 55, player: "vk" }, taken: { source_id: 55, player: "kodik" },
+      view: { order_level: "season", same_level: "default", rows } } })
+    const shown = w.findAll(".variant-row")
+    expect(shown.map((each) => each.find(".pill-primary").exists())).toEqual([false, true, false])
+    expect(shown[1].find(".pill-primary").text()).toBe(t("output.queue.markup"))
+    expect(shown.map((each) => each.find(".queue-held").exists())).toEqual([false, false, true])
+  })
+})

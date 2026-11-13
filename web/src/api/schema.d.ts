@@ -3045,6 +3045,8 @@ export interface components {
             video: components["schemas"]["PlanAssetVideo"];
             /** Tracks */
             tracks?: components["schemas"]["PlanAssetTrack"][];
+            /** @default null */
+            timeline: components["schemas"]["PlanVariant"] | null;
         };
         /** PlanAssetTrack */
         PlanAssetTrack: {
@@ -3173,6 +3175,8 @@ export interface components {
              * @default null
              */
             markup: string | null;
+            /** @default null */
+            markup_variant: components["schemas"]["PlanVariant"] | null;
         };
         /**
          * PlanFailure
@@ -3340,6 +3344,18 @@ export interface components {
              * @default
              */
             video: string;
+        };
+        /**
+         * PlanVariant
+         * @description A variant of a queue of single videos: a voice-over at a player of a source, as the window lists it.
+         */
+        PlanVariant: {
+            /** Group */
+            group: string;
+            /** Source Id */
+            source_id: number;
+            /** Player */
+            player: string;
         };
         /** PlannerView */
         PlannerView: {

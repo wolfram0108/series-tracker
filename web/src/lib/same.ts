@@ -1,4 +1,5 @@
 import type { QueueRow } from "./output"
+import { isVariantOf, type Held } from "./plan"
 
 // Variants of a queue the user declared equal (Р-99): the groups the rows stand in and what each edit of them makes of the
 // value of the lever `reference.same` / `markup.same` — a list of groups, each a list of the variants as an order names them.
@@ -51,9 +52,9 @@ export const sizeOf = (rows: readonly QueueRow[], number: number): number => row
 /** The queue as it is tried: of the rows of one group the one the file holds comes first (of equals what it holds stays); the
  *  groups and the other rows keep the places the core gave them. The very list when nothing moves: a list of the same rows is
  *  not a new queue to the list that holds the order the user dragged until the core answers. */
-export function heldFirst(rows: QueueRow[], held: { source_id: number; player: string } | null | undefined): QueueRow[] {
+export function heldFirst(rows: QueueRow[], held: Held | null | undefined): QueueRow[] {
   if (!held) return rows
-  const first = rows.findIndex((row) => row.same != null && row.source_id === held.source_id && row.player === held.player)
+  const first = rows.findIndex((row) => row.same != null && isVariantOf(held, row))
   if (first < 0) return rows
   const number = rows[first].same
   const at = rows.findIndex((row) => row.same === number)

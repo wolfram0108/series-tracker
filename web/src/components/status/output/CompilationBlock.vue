@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import type { Queues } from "../../../composables/outputCalls"
-import type { Held, HeldFile } from "../../../lib/plan"
+import type { HeldFile, Taken } from "../../../lib/plan"
 import type { SameGroups } from "../../../lib/same"
 import { useCardGrid } from "../../../composables/useCardGrid"
 import { sharing } from "../../../lib/sharing"
@@ -39,7 +39,7 @@ const props = withDefaults(defineProps<{
   /** What the file of the opened episode holds now: the fact its queues are read against. */
   held?: HeldFile | null
   /** The variant the plan takes for the reference of the opened episode. */
-  taken?: Held | null
+  taken?: Taken | null
   busy?: boolean
 }>(), { mode: "cards", opened: null, busy: false, taken: null })
 
@@ -90,7 +90,7 @@ const cutCounts = computed(() => {
   }
   return counts
 })
-const taken = computed(() => items.value.filter((item) => item.each.member).length)
+const takenCount = computed(() => items.value.filter((item) => item.each.member).length)
 const share = (count: number, all: number): string => `${all === 0 ? 0 : (count * 100) / all}%`
 const cutText = computed(() => (Object.entries(cutCounts.value) as [CutState, number][])
   .filter(([, count]) => count > 0).map(([state, count]) => t("state.count", { state: stateWord(CUT_STATES[state]), n: count })).join(" · "))
@@ -136,14 +136,14 @@ const rows = computed<CompilationRow[]>(() => {
       <div class="season-meters">
         <div class="meter">
           <span class="meter-name">{{ t("output.meter.episodes") }}</span>
-          <span class="meter-bar"><span data-state="align" :style="{ inlineSize: share(taken, items.length) }" /></span>
-          <span class="meter-text">{{ t("output.meter.taken", { n: taken, total: items.length }) }}</span>
+          <span class="meter-bar"><span data-state="align" :style="{ inlineSize: share(takenCount, items.length) }" /></span>
+          <span class="meter-text">{{ t("output.meter.taken", { n: takenCount, total: items.length }) }}</span>
         </div>
-        <div v-if="taken" class="meter">
+        <div v-if="takenCount" class="meter">
           <span class="meter-name">{{ t("output.meter.cut") }}</span>
           <span class="meter-bar">
             <span v-for="(count, state) in cutCounts" :key="state" :class="`is-${state === 'ready' ? 'done' : state}`"
-                  :style="{ inlineSize: share(count, taken) }" />
+                  :style="{ inlineSize: share(count, takenCount) }" />
           </span>
           <span class="meter-text">{{ cutText }}</span>
         </div>

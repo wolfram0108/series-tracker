@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import type { Held, HeldFile, ShownVoice } from "../../../lib/plan"
+import type { HeldFile, ShownVoice, Taken } from "../../../lib/plan"
 import type { SameGroups } from "../../../lib/same"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
@@ -41,7 +41,7 @@ const props = withDefaults(defineProps<{
   /** What the file of the opened episode holds now: the fact its queues are read against. */
   held?: HeldFile | null
   /** The variant the plan takes for the reference of the opened episode. */
-  taken?: Held | null
+  taken?: Taken | null
   busy?: boolean
   /** The compilations of the season (stage 12): their outline behind the cards and their letters on them. */
   compilations?: CompilationView[]
