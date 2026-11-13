@@ -14,7 +14,7 @@ import SourcesEditor from "./SourcesEditor.vue"
 import { api } from "../api/client"
 import { t, tn } from "../i18n"
 import { reasonText } from "../lib/reason"
-import { joinVkAddress, siteOf, sourceTypeOf, splitVkAddress, titlesOf, vkQuery } from "../lib/sources"
+import { joinVkAddress, siteOf, sourceTypeOf, splitVkAddress, titlesOf, vkQuery, type SourceAddress } from "../lib/sources"
 import { useApi } from "../composables/useApi"
 import { useSSE } from "../composables/useSSE"
 import { useSourceDrafts } from "../composables/useSourceDrafts"
@@ -74,6 +74,9 @@ const candidate = ref("")
 const candidateChannel = ref(false)
 const candidateQuery = ref("")
 const kind = computed<"video" | "torrent">(() => (sourceItems.value.length ? "video" : "torrent"))
+// The test of the rules offers the addresses and the queries of the sources the series is made of, as they stand now.
+const draftAddresses = async (): Promise<SourceAddress[]> =>
+  sourceItems.value.map((item) => ({ url: item.url, vk: item.sourceType === "vk_video" }))
 // How the first source is added: by an address (a page of a site or of a tracker), or by a card a video application found.
 const firstMode = ref<"address" | "apps">("address")
 const trackerInfo = ref<TrackerInfo | null>(null)
@@ -769,6 +772,7 @@ onBeforeUnmount(() => {
         :test-initial-titles="namingTitles"
         :test-initial-url="kind === 'video' ? sourceItems[0].url : ''"
         :test-first="true"
+        :load-sources="kind === 'video' ? draftAddresses : undefined"
         @update:profile-id="kind === 'torrent' && (newSeries.parser_profile_id = $event)"
       />
     </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue"
+import { ref, computed, watch } from "vue"
 import Button from "primevue/button"
 import ModalShell from "./ModalShell.vue"
 import SettingsAgents from "./settings/SettingsAgents.vue"
@@ -16,6 +16,13 @@ import { t } from "../i18n"
 const emit = defineEmits<{ (e: "close"): void }>()
 
 const tab = ref<"auth" | "account" | "sources" | "parser" | "voices" | "agents" | "debug">("auth")
+
+// The rules are built when their tab is first shown and kept to the close of the window: what was typed in the test stays
+// when another tab is open (the same section of the window of a series).
+const parserBuilt = ref(false)
+watch(tab, (next) => {
+  if (next === "parser") parserBuilt.value = true
+})
 
 // ссылка на активную вкладку с методом save() (для кнопки в футере)
 const tabRef = ref<{ save?: () => Promise<boolean> } | null>(null)
@@ -66,8 +73,8 @@ const tabs = [
     <SettingsSources v-else-if="tab === 'sources'" />
     <SettingsAgents v-else-if="tab === 'agents'" />
     <SettingsDebug v-else-if="tab === 'debug'" />
-    <SettingsParser v-else-if="tab === 'parser'" />
     <SettingsVoices v-else-if="tab === 'voices'" />
+    <SettingsParser v-if="parserBuilt" v-show="tab === 'parser'" />
 
     <template #footer>
       <Button

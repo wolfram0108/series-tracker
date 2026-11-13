@@ -47,4 +47,21 @@ describe("the status window", () => {
     // A tab once built stays as it was left: going back to it reads nothing anew.
     expect(built()).toEqual(["status-properties", "status-output", "status-history"])
   })
+
+  it("keeps the rules as they were left when another tab is open: only the close of the window ends them", async () => {
+    client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", kind: "video" } }))
+    mounted = mount(StatusModal, { props: { seriesId: 40 }, global: { stubs: Object.fromEntries(STUBS.map((name) => [name, true])) } })
+    await flushPromises()
+    const open = async (title: string) => {
+      await mounted!.findAll(".st-tab").find((each) => each.attributes("title") === title)!.trigger("click")
+    }
+    await open(t("rules.tab"))
+    const rules = mounted.find("settings-parser-stub").element
+    await open("История")
+    await open("Свойства")
+    expect(mounted.find("settings-parser-stub").element).toBe(rules)  // the same element: not built again
+    expect((rules as HTMLElement).style.display).toBe("none")
+    await open(t("rules.tab"))
+    expect((rules as HTMLElement).style.display).not.toBe("none")
+  })
 })

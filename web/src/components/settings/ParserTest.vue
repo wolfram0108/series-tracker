@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue"
+import PickDropdown from "../PickDropdown.vue"
 import Button from "primevue/button"
 import StGroup from "../StGroup.vue"
 import StIcon from "../StIcon.vue"
@@ -8,7 +9,7 @@ import { useRulesTest } from "../../composables/useRulesTest"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 import { cardState, excludingRule, firedText, pillsOf, resolutionBadge } from "../../lib/rulesTest"
-import { progressText } from "../../lib/sources"
+import { progressText, testOffers, type SourceAddress, type TestOffers } from "../../lib/sources"
 import { stateLabel } from "../../lib/states"
 
 // The test of a profile: the rows of a page (a site, or a channel of VK) or the file names of a series, or titles
@@ -16,11 +17,33 @@ import { stateLabel } from "../../lib/states"
 
 // initialTitles: filled by the add window with the files of the release. initialUrl: the chosen web source, so that
 // the page read is exactly that voice-over's.
-const props = defineProps<{ profileId: number; initialTitles?: string[]; initialUrl?: string }>()
+const props = defineProps<{
+  profileId: number
+  initialTitles?: string[]
+  initialUrl?: string
+  /** The sources of the series the test is for, as the series has them now; without it the fields offer nothing to paste. */
+  loadSources?: () => Promise<SourceAddress[]>
+}>()
 // The lines in the field as they stand: the quick templates of a rule «Таблица» are made of them.
 const emit = defineEmits<{ lines: [lines: string[]] }>()
 
 const test = useRulesTest(() => props.profileId)
+// The rows of the cards are the answers of the profile: another profile has none of them. What was typed stays.
+watch(() => props.profileId, () => test.clear())
+
+// What the fields offer to paste is asked when a list opens: a source added meanwhile is in it.
+const offers = ref<TestOffers>({ addresses: [], queries: [] })
+async function loadOffers(): Promise<void> {
+  offers.value = testOffers(props.loadSources ? await props.loadSources() : [])
+}
+const addressItems = computed(() => offers.value.addresses.map((each) => ({ value: each.label, label: each.label })))
+const queryItems = computed(() => offers.value.queries.map((each) => ({ value: each, label: each })))
+function pickAddress(label: string): void {
+  const found = offers.value.addresses.find((each) => each.label === label)
+  if (!found) return
+  address.value = found.address
+  if (found.query !== null) query.value = found.query
+}
 
 const address = ref("")
 const query = ref("")
@@ -80,8 +103,16 @@ function runTest(): Promise<void> {
           <StGroup>
             <StIcon :icon="dbId ? 'pi pi-database' : 'pi pi-globe'" />
             <StInput v-model="address" :label="t('rulesTest.field.address')" />
+            <PickDropdown
+              v-if="loadSources" :items="addressItems" :title="t('rulesTest.pick.address')" :empty="t('rulesTest.pick.addressEmpty')"
+              :load="loadOffers" :min-width="420" @select="pickAddress"
+            />
             <StIcon icon="pi pi-search" />
             <StInput v-model="query" :label="t('rulesTest.field.query')" />
+            <PickDropdown
+              v-if="loadSources" :items="queryItems" :title="t('rulesTest.pick.query')" :empty="t('rulesTest.pick.queryEmpty')"
+              :load="loadOffers" :min-width="420" @select="query = $event"
+            />
             <div class="constructor-item item-button-group">
               <button
                 class="btn-icon btn-search btn-text-icon"

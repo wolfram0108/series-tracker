@@ -115,5 +115,16 @@ export function useRulesTest(profileId: () => number) {
     return null
   }
 
-  return { lines, state, reason, error, progress, fetched, readPage, runLines, loadFilenames }
+  /** Forgets the answers of the profile that was tried: another profile answers the same rows otherwise. What the window holds
+   *  (the address, the lines of the field) is the window's own and stays. An answer still on its way is of the old profile. */
+  function clear(): void {
+    asking += 1
+    page = null
+    lines.value = []
+    reason.value = null
+    error.value = ""
+    state.value = "idle"
+  }
+
+  return { lines, state, reason, error, progress, fetched, readPage, runLines, loadFilenames, clear }
 }

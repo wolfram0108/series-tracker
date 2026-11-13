@@ -370,6 +370,39 @@ export function joinVkAddress(channel: string, query: string): string {
   return `${channel.trim().replace(/\\/g, "/")}|${vkQuery(query)}`
 }
 
+/** The address of a source of a series as the series keeps it, and whether it is a channel of VK (`channel|query`). */
+export interface SourceAddress {
+  url: string
+  vk: boolean
+}
+
+/** What the test of a profile offers to put into its fields from the sources of a series: each source by its address (a
+ *  channel of VK is put as the link of the channel, with its query into the field of the queries), and each query a channel
+ *  of the series has, once. */
+export interface TestOffers {
+  addresses: { label: string; address: string; query: string | null }[]
+  queries: string[]
+}
+
+export function testOffers(sources: readonly SourceAddress[]): TestOffers {
+  const addresses: TestOffers["addresses"] = []
+  const queries: string[] = []
+  const seen = new Set<string>()
+  for (const { url, vk } of sources) {
+    if (seen.has(url)) continue
+    seen.add(url)
+    if (!vk) {
+      addresses.push({ label: url, address: url, query: null })
+      continue
+    }
+    const { channel, query } = splitVkAddress(url)
+    const terms = vkQuery(query)
+    addresses.push({ label: url, address: channel, query: terms || null })
+    if (terms && !queries.includes(terms)) queries.push(terms)
+  }
+  return { addresses, queries }
+}
+
 /** The host of a source address (the channel part of a VK address), as the series keeps it in `site`. */
 export function siteOf(address: string): string {
   try {

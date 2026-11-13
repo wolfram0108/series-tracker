@@ -10,6 +10,8 @@ import StatusHistory from "./status/StatusHistory.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
+import { fetchSources } from "../composables/sourceCalls"
+import type { SourceAddress } from "../lib/sources"
 import { useSeriesStore, type Series } from "../stores/series"
 import { t } from "../i18n"
 
@@ -53,6 +55,13 @@ async function load() {
     { errorMessage: t("status.notFound") },
   )) as Series | null
   if (data) series.value = data
+}
+
+// The sources of the series as the core has them now: the test of the rules offers their addresses and queries to paste.
+// A torrent series has no page to read in its source, so its test offers nothing.
+async function sourceAddresses(): Promise<SourceAddress[]> {
+  const listed = await fetchSources(props.seriesId)
+  return listed.ok ? listed.data.map((source) => ({ url: source.url, vk: source.source_type === "vk_video" })) : []
 }
 
 async function save() {
@@ -122,7 +131,11 @@ onMounted(load)
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
       />
-      <SettingsParser v-if="tab === 'parser'" />
+      <SettingsParser
+        v-if="built.has('parser')"
+        v-show="tab === 'parser'"
+        :load-sources="isVideo ? sourceAddresses : undefined"
+      />
       <StatusHistory v-if="built.has('history')" v-show="tab === 'history'" :series-id="seriesId" :kind="series.kind ?? 'torrent'" />
     </template>
 

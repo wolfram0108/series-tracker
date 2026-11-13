@@ -1,91 +1,36 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from "vue"
+import { computed, ref } from "vue"
 import { api } from "../api/client"
-import { computeDropStyle, type DropStyle } from "../composables/useDropAnchor"
+import PickDropdown from "./PickDropdown.vue"
 import { t } from "../i18n"
 
-// Выбор сохранённого пути (Настройки → Отладка → «Сохранённые пути»).
-// Встраивается в input-constructor-group поля пути компактной кнопкой-
-// шевроном без подписи. Сам выбор не хранит: при клике по пути эмитит
-// готовое значение (select). Если задан catalogName («Имя (год)
-// [tmdbid-XXXX]»), он дописывается в конец через слэш — порт логики
-// legacy SavedPathDropdown.js (choose()).
-// Список — через <Teleport to="body"> (position:fixed, useDropAnchor):
-// не обрезается overflow'ом предков; прижат к правому краю триггера.
+// The choice of a saved path (Settings → Debug → saved paths) in the group of the field of a path. It keeps no choice:
+// a click on a path emits the value ready for the field. A catalog name («Name (year) [tmdbid-XXXX]»), when given, is
+// added to the end of the path after a slash.
 const props = withDefaults(defineProps<{ catalogName?: string }>(), { catalogName: "" })
 const emit = defineEmits<{ (e: "select", value: string): void }>()
 
 interface SavedPath { id: number; path: string }
-const open = ref(false)
 const paths = ref<SavedPath[]>([])
-const root = ref<HTMLElement | null>(null)
-const list = ref<HTMLElement | null>(null)
-const dropStyle = ref<DropStyle | null>(null)
 
-function reposition() {
-  if (root.value) dropStyle.value = computeDropStyle(root.value, { align: "right", minWidth: 320 })
-}
-function onMove() {
-  if (open.value) reposition()
-}
-
-async function loadPaths() {
+async function loadPaths(): Promise<void> {
   try {
     const { data } = await api.GET("/api/settings/saved_paths")
     const wrapped = data as unknown as { paths?: SavedPath[] } | null
     if (wrapped && Array.isArray(wrapped.paths)) paths.value = wrapped.paths
   } catch {
-    // Тихо: список просто пуст, ручной ввод пути не блокируется.
+    // A list that cannot be had is empty: typing the path by hand stays open.
   }
 }
 
-async function toggle() {
-  if (open.value) {
-    open.value = false
-    return
-  }
-  await loadPaths()
-  reposition()
-  open.value = true
-}
+const items = computed(() => paths.value.map((each) => ({ value: each.path, label: each.path })))
 
-function choose(base: string) {
+function choose(base: string): void {
   const name = (props.catalogName || "").trim()
-  const full = name ? base.replace(/\/+$/, "") + "/" + name : base
-  emit("select", full)
-  open.value = false
+  emit("select", name ? base.replace(/\/+$/, "") + "/" + name : base)
 }
-
-function onOutside(e: MouseEvent) {
-  const t = e.target as Node
-  if (open.value && !root.value?.contains(t) && !list.value?.contains(t)) open.value = false
-}
-onMounted(() => {
-  document.addEventListener("click", onOutside, true)
-  window.addEventListener("scroll", onMove, true)
-  window.addEventListener("resize", onMove)
-})
-onBeforeUnmount(() => {
-  document.removeEventListener("click", onOutside, true)
-  window.removeEventListener("scroll", onMove, true)
-  window.removeEventListener("resize", onMove)
-})
 </script>
 
 <template>
-  <div
-    ref="root"
-    class="constructor-item saved-path-trigger"
-    :class="{ open }"
-    :title="t('savedPaths.title')"
-    @click.stop="toggle"
-  >
-    <i class="pi pi-chevron-down chevron" />
-    <Teleport to="body">
-      <div v-if="open" ref="list" class="options-list" :style="dropStyle ?? undefined">
-        <div v-if="!paths.length" class="path-combo-empty">{{ t("savedPaths.empty") }}</div>
-        <div v-for="p in paths" :key="p.id" class="option" @click.stop="choose(p.path)">{{ p.path }}</div>
-      </div>
-    </Teleport>
-  </div>
+  <PickDropdown :items="items" :title="t('savedPaths.title')" :empty="t('savedPaths.empty')" :load="loadPaths" @select="choose" />
 </template>

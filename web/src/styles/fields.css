@@ -69,19 +69,20 @@
   pointer-events: none;
   background-color: var(--color-gray-100);
 }
-/* кнопка-шеврон выбора сохранённого пути (порт .saved-path-trigger) */
-.saved-path-trigger {
+/* The chevron button of a list of ready values in the group of a field (components/PickDropdown.vue). */
+.pick-trigger {
   width: 44px;
   justify-content: center;
   cursor: pointer;
   color: var(--color-gray-600);
   transition: color 0.2s ease;
 }
-.saved-path-trigger:hover,
-.saved-path-trigger.open { color: var(--color-blue); }
-.saved-path-trigger .chevron { margin-left: 0; }
-/* список прижат к правому краю триггера (он в конце группы), ширина — фикс. */
-.path-combo-empty { padding: 0.75rem 1rem; color: var(--text-muted); }
+.pick-trigger:hover,
+.pick-trigger.open { color: var(--color-blue); }
+.pick-trigger .chevron { margin-left: 0; }
+/* The list is pressed to the right edge of its trigger; a long value (an address) wraps instead of widening the list. */
+.pick-empty { padding: 0.75rem 1rem; color: var(--text-muted); }
+.pick-list .option { white-space: normal; overflow-wrap: anywhere; }
 .item-input {
   flex-grow: 1;
   background: none;

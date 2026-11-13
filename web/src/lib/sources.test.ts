@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   coverageOf, draftBody, itemOfSource, joinVkAddress, pageHost, phaseText, placeOf, profileOptions, progressText,
-  readEnded, seasonPositions, siteOf, sourceCaption, sourceTypeOf, spanText, splitVkAddress, stepsLines, summaryOf, togglePlayer,
+  readEnded, seasonPositions, siteOf, sourceCaption, sourceTypeOf, spanText, splitVkAddress, stepsLines, summaryOf, testOffers, togglePlayer,
   titlesOf, viewOf, voicesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
 } from "./sources"
 import type { PageStatus } from "../stores/sourceTables"
@@ -278,5 +278,29 @@ describe("titlesOf", () => {
     expect(titlesOf(["Только русское"])).toEqual({ ru: "Только русское", en: "" })
     expect(titlesOf(["鬥破蒼穹", "Doupo Cangqiong"])).toEqual({ ru: "", en: "Doupo Cangqiong" })
     expect(titlesOf([])).toEqual({ ru: "", en: "" })
+  })
+})
+
+describe("testOffers", () => {
+  it("offers each source by its address, a channel of VK by its link with its query apart, and every query once", () => {
+    const offers = testOffers([
+      { url: "https://dunhuatv.ru/17.html", vk: false },
+      { url: "https://vkvideo.ru/@kino|тайтл/второй", vk: true },
+      { url: "https://vkvideo.ru/@other|тайтл/второй", vk: true },
+      { url: "https://vkvideo.ru/@kino|третий", vk: true },
+      { url: "https://dunhuatv.ru/17.html", vk: false },
+    ])
+    expect(offers.addresses).toEqual([
+      { label: "https://dunhuatv.ru/17.html", address: "https://dunhuatv.ru/17.html", query: null },
+      { label: "https://vkvideo.ru/@kino|тайтл/второй", address: "https://vkvideo.ru/@kino", query: "тайтл/второй" },
+      { label: "https://vkvideo.ru/@other|тайтл/второй", address: "https://vkvideo.ru/@other", query: "тайтл/второй" },
+      { label: "https://vkvideo.ru/@kino|третий", address: "https://vkvideo.ru/@kino", query: "третий" },
+    ])
+    expect(offers.queries).toEqual(["тайтл/второй", "третий"])
+  })
+
+  it("offers nothing for a series without sources, and no query for sites that have none", () => {
+    expect(testOffers([])).toEqual({ addresses: [], queries: [] })
+    expect(testOffers([{ url: "app://banri/219047", vk: false }]).queries).toEqual([])
   })
 })

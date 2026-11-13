@@ -15,6 +15,7 @@ import { useConfirm } from "../../composables/useConfirm"
 import { api } from "../../api/client"
 import { t } from "../../i18n"
 import { isExtract } from "../../lib/ruleVocabulary"
+import type { SourceAddress } from "../../lib/sources"
 
 // Вкладка «Фильтры VK» окна Настроек — конфигуратор профилей парсера.
 // Аккордеон трёх шагов (профили / правила / тест), как в оригинале
@@ -32,6 +33,8 @@ const props = defineProps<{
   testInitialTitles?: string[]
   testInitialUrl?: string
   testFirst?: boolean
+  /** The sources of the series the section stands in (its fields of the test offer them); none in the settings. */
+  loadSources?: () => Promise<SourceAddress[]>
 }>()
 const emit = defineEmits<{ (e: "update:profileId", v: number | null): void }>()
 
@@ -493,10 +496,10 @@ onMounted(() => {
         </button>
         <div v-show="openStep === 'test'" class="accordion-body">
           <ParserTest
-            :key="selectedProfileId"
             :profile-id="selectedProfileId"
             :initial-titles="testInitialTitles"
             :initial-url="testInitialUrl"
+            :load-sources="loadSources"
             @lines="testLines = $event"
           />
         </div>

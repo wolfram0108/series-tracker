@@ -160,4 +160,18 @@ describe("useRulesTest", () => {
     expect(await test.loadFilenames(3)).toBeNull()
     expect(test.error.value).toBe("Нет связи с сервером")
   })
+
+  it("forgets the answers of the profile it tried, and an answer still on its way is not taken in", async () => {
+    site()
+    let late!: (answer: ReturnType<typeof ok<RulesTestReply>>) => void
+    vi.mocked(calls.testProfile).mockReturnValueOnce(new Promise((resolve) => { late = resolve }))
+    const test = useRulesTest(() => 5)
+    const reading = test.readPage(PAGE, "")
+    await flushPromises()
+    test.clear()
+    late(ok(reply({ lines: [line("a", "Серия 1", 1)] })))
+    await reading
+    expect(test.lines.value).toEqual([])
+    expect(test.state.value).toBe("idle")
+  })
 })
