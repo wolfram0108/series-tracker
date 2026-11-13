@@ -46,11 +46,13 @@ Queries:
       each group of a level, in the order the core tries their variants (`core.variant_queue`), with the value and the
       level of every lever of the level that acts on them (`queues.py`). The order of players is asked of voices. Also the
       queue of the markup reference (stage 14) and `markup_follows`: with no `markup.order` on the chain of levels it is
-      the queue of the reference itself.
+      the queue of the reference itself. The variants the user declared equal (Р-99, the levers `reference.same` and
+      `markup.same`: lists of groups of variants) stand in the queue as one place, and a row of a group carries its number
+      (`QueueRow.same`, by where the group first stands) and the level the groups come from (`same_level`).
   composition.settings.set {series_id, season?, episode?, lever, target?, value} → {ok}: sets the value of a lever
       at a level. Refused with ValueError(reason) — `unknown_lever`, `bad_target` or `bad_value` — and nothing is stored.
       The first edit of the markup reference on a level that follows the reference writes the queue shown (the order of
-      the reference and the variants it leaves out) with the edit, in one write.
+      the reference, the variants it leaves out and the groups of equal variants it shows) with the edit, in one write.
   composition.settings.reset {series_id, season?, episode?, lever?, target?, queue?} → {ok}: the levers of the level
       (or the one named, or those of the queue named) go back to the level above. Refused the same way when the lever or
       the target is not the registry's.
@@ -103,7 +105,7 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from core import BaseModule, compute
-from core.contracts import (COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, REFERENCE_ORDER, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+from core.contracts import (COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ORDER, REFERENCE_SAME, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
@@ -394,7 +396,7 @@ class CompositionModule(BaseModule):
             if not compilations.fits(stored.rows, settings.canonical(stored.records), record.season, record.episode,
                                      record.value, _source_order(stored)):
                 raise ValueError(reason("compilation_not_better"))
-        if record.lever in (MARKUP_ORDER, MARKUP_ALLOW):
+        if record.lever in (MARKUP_ORDER, MARKUP_ALLOW, MARKUP_SAME):
             return await self._set_markup(record)
         return await self._edit(record.series_id, lambda records: settings.apply_set(records, record))
 
@@ -413,6 +415,10 @@ class CompositionModule(BaseModule):
                 {"group": row.group, "source_id": row.source_id, "player": row.player} for row in shown.rows]))
             copied += [SettingRecord(**scope, lever=MARKUP_ALLOW, target=variant_target(row.group, row.source_id, row.player),
                                      value=False) for row in shown.rows if not row.allowed]
+            # The variants the reference's queue shows as equal are equal in the queue that is made its own.
+            same = queues.same_groups(shown.rows)
+            if same:
+                copied.append(SettingRecord(**scope, lever=MARKUP_SAME, value=same))
 
         def change(records):
             for each in copied:
@@ -430,15 +436,18 @@ class CompositionModule(BaseModule):
     async def _require_pickable(self, record: SettingsSet) -> None:
         """A variant is put into the order of the reference, or of a group, only where the table of what is allowed lets
         it: the same rule the window lists the variants of a queue by."""
-        if not isinstance(record.value, list) or not record.value or record.lever not in (REFERENCE_ORDER, MARKUP_ORDER,
-                                                                                          VOICE_ORDER):
+        if not isinstance(record.value, list) or not record.value or record.lever not in (
+                REFERENCE_ORDER, MARKUP_ORDER, VOICE_ORDER, REFERENCE_SAME, MARKUP_SAME):
             return
-        single = record.lever in (REFERENCE_ORDER, MARKUP_ORDER)
+        single = record.lever in (REFERENCE_ORDER, MARKUP_ORDER, REFERENCE_SAME, MARKUP_SAME)
         action = availability.Action.CHOOSE_REFERENCE if single else availability.Action.PREFER_VARIANT
         stored = await self.repo.stored(record.series_id)
         # The state is that of the level the setting is for, as the window shows it: the lines of that season or episode.
         lines = availability.lines_of_level(stored.rows, record.season, record.episode)
-        for item in record.value:
+        # The groups of equal variants are lists of variants: each variant of them is put to the same test as one of an order.
+        items = [item for group in record.value for item in group] if record.lever in (REFERENCE_SAME, MARKUP_SAME) \
+            else record.value
+        for item in items:
             group = item.get("group") if single else parse_group_target(record.target or "")
             found = [row for row in lines if row.voice_label == group and row.source_id == item.get("source_id")
                      and row.player == item.get("player")]

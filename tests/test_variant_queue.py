@@ -4,8 +4,8 @@ come in."""
 import itertools
 
 from core.contracts import Reference, ReferenceMark
-from core.variant_queue import (REFERENCE_RANKING, VOICE_RANKING, Candidate, Order, best, by_player, by_resolution,
-                                by_source, ranked)
+from core.variant_queue import (NO_SAME, REFERENCE_RANKING, VOICE_RANKING, Candidate, Order, Same, best, by_player,
+                                by_resolution, by_source, ranked, ranked_singles, standing, variant_rule)
 from planner_choice import goals
 from scan_support import row
 
@@ -88,3 +88,60 @@ def test_the_voice_over_the_planner_takes_is_the_head_of_its_queue_in_every_orde
         goal = goals([ref_row, *rows], players=PRIORITY, sources=SOURCES)[(1, 1)]
         (way,) = [each for each in goal.tracks if each.voice == "A"]
         assert way.dub.row_key == by_hand(rows, "voice")[0]
+
+
+# --- Р-99: variants declared equal --------------------------------------------------------------------------------------
+
+def variant(each):
+    return (each.voice_label, each.source_id, each.player)
+
+
+def test_the_queue_of_single_videos_without_groups_is_the_queue_the_rule_makes_for_every_order_of_the_rows_and_the_users_order():
+    for preferred in ((), (variant(ROWS[2]),), (variant(ROWS[3]), variant(ROWS[0]))):
+        for rows in itertools.permutations(ROWS):
+            candidates = [Candidate(each, place) for place, each in enumerate(rows)]
+            want = ranked(candidates, ORDER, REFERENCE_RANKING, preferred, lambda each: variant(each.row))
+            assert ranked_singles(candidates, ORDER, preferred) == want
+            assert ranked_singles(candidates, ORDER, preferred, NO_SAME) == want
+
+
+def test_the_groups_of_a_value_are_the_lists_of_two_variants_or_more_a_variant_in_the_first_group_that_names_it():
+    one, two, three = ("A", 1, "vk"), ("A", 2, "vk"), ("B", 3, "cvh")
+    as_item = lambda each: {"group": each[0], "source_id": each[1], "player": each[2]}
+    same = Same.of([[as_item(one), as_item(two)], [as_item(two), as_item(three)], [as_item(three)], "no", [{"group": "A"}], 5])
+    assert same.groups == (frozenset({one, two}),)
+    assert same.members(one) == frozenset({one, two}) and same.members(three) == frozenset({three})
+    assert (same.number_of(two), same.number_of(three)) == (1, None)
+    assert Same.of(None) == NO_SAME and Same.of([]) == NO_SAME
+
+
+def test_a_group_of_equals_stands_where_its_best_member_does_resolution_and_the_place_in_the_layout_still_tell_them_apart():
+    # Players vk, cvh, kodik; sources 7, 3, 5. The row of the player kodik joins the group of the row of the player vk.
+    vk, cvh, kodik = ROWS[4], ROWS[0], ROWS[1]  # 2160p vk (source 5), 1080p cvh (source 3), 1080p kodik (source 7)
+    low_vk = ROWS[2]  # 720p vk (source 5)
+    candidates = [Candidate(each, place) for place, each in enumerate((cvh, kodik, low_vk, vk))]
+    plain = keys(ranked_singles(candidates, ORDER))
+    assert plain == ["e", "a", "b", "c"]
+    same = Same((frozenset({variant(low_vk), variant(kodik)}),))
+    grouped = keys(ranked_singles(candidates, ORDER, (), same))
+    # kodik stands at the place of vk (the better player): ahead of cvh at the same resolution; the 720p row is last: the
+    # resolution decides inside the place of the group.
+    assert grouped == ["e", "b", "a", "c"]
+
+
+def test_the_place_a_user_order_gives_a_group_is_the_first_of_its_members_in_that_order():
+    rows = [ROWS[0], ROWS[1], ROWS[3]]  # a, b, d: all 1080p
+    candidates = [Candidate(each, place) for place, each in enumerate(rows)]
+    preferred = (variant(ROWS[3]), variant(ROWS[0]))
+    assert keys(ranked_singles(candidates, ORDER, preferred)) == ["d", "a", "b"]
+    same = Same((frozenset({variant(ROWS[1]), variant(ROWS[3])}),))
+    # b joins d, the first of the order: it stands before a, which the order names after d.
+    assert keys(ranked_singles(candidates, ORDER, preferred, same)) == ["b", "d", "a"]  # b and d tie: the layout decides
+
+
+def test_the_standing_of_a_variant_is_the_least_of_its_groups_and_its_own_when_it_stands_alone():
+    rule = variant_rule(ORDER)
+    named = lambda each: 0 if each == ("A", 5, "vk") else 9
+    same = Same((frozenset({("A", 5, "vk"), ("B", 3, "kodik")}),))
+    assert standing(("B", 3, "kodik"), same, named, rule) == standing(("A", 5, "vk"), same, named, rule) == (0, 0, 2)
+    assert standing(("B", 3, "kodik"), NO_SAME, named, rule) == (9, 2, 1)

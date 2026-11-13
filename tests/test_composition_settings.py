@@ -34,7 +34,9 @@ def rec(lever, value, season=None, episode=None, target=None, series_id=1) -> Se
 # The levers of compilations (stage 12) have no target: every episode lists them with their defaults.
 COMPILATION_DEFAULTS = [EffectiveLever(lever="compilation.member", target=None, value=None, level=Level.DEFAULT),
                         EffectiveLever(lever="compilation.take", target=None, value=True, level=Level.DEFAULT),
-                        EffectiveLever(lever="markup.order", target=None, value=[], level=Level.DEFAULT)]
+                        EffectiveLever(lever="markup.order", target=None, value=[], level=Level.DEFAULT),
+                        EffectiveLever(lever="reference.same", target=None, value=[], level=Level.DEFAULT),
+                        EffectiveLever(lever="markup.same", target=None, value=[], level=Level.DEFAULT)]
 
 
 def touched_by(before, after, episodes):
@@ -88,10 +90,10 @@ def test_a_lever_with_targets_lists_the_targets_that_have_a_record_on_the_chain_
     records = [rec(ALLOW, False, target=VK), rec(ALLOW, False, season=1, target=KODIK),
                rec(ALLOW, True, season=2, episode=3, target=KODIK), rec(TAKE, False, season=2, target=GROUP)]
     first = levers_of(records, 1, 3)
-    assert {key for key in first if key[0] != CHOICE} == {(ALLOW, VK), (ALLOW, KODIK)}
+    assert {key for key in first if key[0] not in (CHOICE, "reference.same")} == {(ALLOW, VK), (ALLOW, KODIK)}
     assert first[(ALLOW, VK)] == (False, Level.SERIES) and first[(ALLOW, KODIK)] == (False, Level.SEASON)
     second = levers_of(records, 2, 3)
-    assert {key for key in second if key[0] != CHOICE} == {(ALLOW, VK), (ALLOW, KODIK), (TAKE, GROUP)}
+    assert {key for key in second if key[0] not in (CHOICE, "reference.same")} == {(ALLOW, VK), (ALLOW, KODIK), (TAKE, GROUP)}
     assert second[(ALLOW, KODIK)] == (True, Level.EPISODE) and second[(TAKE, GROUP)] == (False, Level.SEASON)
 
 
@@ -448,7 +450,7 @@ def test_the_headers_show_the_series_and_each_season_by_the_value_of_the_level_i
     shown = levels(records, [2, 1, 1])
     assert [each.season for each in shown] == [None, 1, 2]
     by_level = {each.season: {(x.lever, x.target): (x.value, x.level) for x in each.levers
-                              if not x.lever.startswith(("compilation.", "markup."))} for each in shown}
+                              if not x.lever.startswith(("compilation.", "markup.", "reference.same"))} for each in shown}
     assert by_level[None] == {(CHOICE, None): ([], Level.DEFAULT), (TAKE, GROUP): (False, Level.SERIES)}
     assert by_level[1] == {(CHOICE, None): ([], Level.DEFAULT), (TAKE, GROUP): (True, Level.SEASON)}
     assert by_level[2] == {(CHOICE, None): (CHOICE_KODIK, Level.SEASON), (TAKE, GROUP): (False, Level.SERIES)}
@@ -565,3 +567,30 @@ def test_a_conflict_that_cannot_be_settled_is_told_to_whoever_asks():
                rec(PLAYER, [{"source_id": 2, "player": "kodik"}], target=group_target("B"))]
     retarget(records, {"A": "C", "B": "C"}, told.append)
     assert len(told) == 1 and sorted(each.target for each in told[0]) == [group_target("C")] * 2
+
+
+# --- Р-99: groups of equal variants ---------------------------------------------------------------------------------
+
+SAME = "reference.same"
+
+
+def variant(group, source, player):
+    return {"group": group, "source_id": source, "player": player}
+
+
+def test_a_source_that_leaves_takes_its_variants_out_of_the_groups_and_a_group_left_with_one_is_gone():
+    records = [rec(SAME, [[variant("A", 1, "vk"), variant("A", 2, "vk"), variant("A", 3, "vk")],
+                          [variant("A", 1, "cvh"), variant("A", 2, "cvh")]], season=1),
+               rec(SAME, [[variant("A", 1, "vk"), variant("A", 2, "vk")]], season=2)]
+    after = without_source(records, 1)
+    assert [(each.season, each.value) for each in after] == [(1, [[variant("A", 2, "vk"), variant("A", 3, "vk")]])]
+    assert without_source(records, 9) == canonical_of(records)
+
+
+def test_voice_over_groups_that_became_one_make_the_groups_that_share_a_variant_one_group():
+    records = [rec(SAME, [[variant("Неизвестная озвучка 1", 1, "vk"), variant("A", 2, "vk")],
+                          [variant("A", 2, "vk"), variant("B", 3, "vk")]], season=1)]
+    after = retarget(records, {"Неизвестная озвучка 1": "A"})
+    assert [each.value for each in after] == [[[variant("A", 1, "vk"), variant("A", 2, "vk"), variant("B", 3, "vk")]]]
+    alone = [rec(SAME, [[variant("Неизвестная озвучка 1", 1, "vk"), variant("A", 1, "vk")]], season=1)]
+    assert retarget(alone, {"Неизвестная озвучка 1": "A"}) == []  # one variant is no group: the level above speaks again

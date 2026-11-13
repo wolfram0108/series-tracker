@@ -12,6 +12,7 @@ from typing import Mapping
 
 from core.contracts import CompilationRef, CutPicture, Reference, ReferenceMark
 from core.reasons import reason
+from core.variant_queue import NO_SAME
 
 from .planner import Plan
 from .tables import Inputs, OnlineRow, Slot, episode_of
@@ -57,7 +58,9 @@ def references_of(inputs: Inputs, made: Plan,
         mark, why = (ReferenceMark.OWN if episode in choices.own_reference else ReferenceMark.BY_LEVEL), None
         denied = choices.reference_deny.get(episode, frozenset())
         wanted = next((each for each in choices.reference.get(episode, ()) if each not in denied), None)
-        lost = [each for each in singles.get(slot, ()) if ("download", each.id) in inputs.failed]
+        # A variant the user declared equal to the one taken is no loss: it would have given the same video.
+        equals = choices.same.get(episode, NO_SAME).members(variant)
+        lost = [each for each in singles.get(slot, ()) if ("download", each.id) in inputs.failed and each.variant not in equals]
         if goal.off:
             mark = ReferenceMark.OFF
         elif lost and all(each.id != single.timeline for each in lost):
@@ -65,7 +68,7 @@ def references_of(inputs: Inputs, made: Plan,
             mark, why = ReferenceMark.OTHER_PLAYER, reason(
                 "reference_download_failed", taken=snapshot.player, failed=head.player,
                 taken_source=single.timeline.source_id, failed_source=head.id.source_id)
-        elif wanted is not None and variant != wanted:
+        elif wanted is not None and variant not in choices.same.get(episode, NO_SAME).members(wanted):
             mark, why = ReferenceMark.OTHER_PLAYER, reason(
                 "reference_other_player", taken=snapshot.player, missing=wanted[2],
                 taken_source=single.timeline.source_id, missing_source=wanted[1])

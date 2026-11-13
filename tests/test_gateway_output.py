@@ -280,8 +280,8 @@ async def test_a_request_for_the_sources_only_reaches_composition_as_it_is(tmp_p
 
 
 async def test_the_queues_of_a_level_are_the_answer_of_composition(tmp_path):
-    queues = {"series_id": 1, "season": 4, "episode": 11, "compilation": None, "reference": {"rows": [], "order_level": "default"},
-              "groups": [], "markup": {"rows": [], "order_level": "default"}, "markup_follows": True}
+    queues = {"series_id": 1, "season": 4, "episode": 11, "compilation": None, "reference": {"rows": [], "order_level": "default", "same_level": "default"},
+              "groups": [], "markup": {"rows": [], "order_level": "default", "same_level": "default"}, "markup_follows": True}
     async with serving(tmp_path, {"composition.queues.get": queues}) as (client, owners, _, spy):
         response = await client.get("/api/series/1/output/queues", params={"season": 4, "episode": 11})
         alone = await client.get("/api/series/1/output/queues", params={"episode": 11})

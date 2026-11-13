@@ -479,7 +479,7 @@ def rich_standard(url: str = PAGE) -> ReleaseTable:
 
 
 def levers_by_episode(reply: CompositionReply) -> dict:
-    return {(e.season, e.episode): {x.lever: x for x in e.levers if not x.lever.startswith(("compilation.", "markup."))}
+    return {(e.season, e.episode): {x.lever: x for x in e.levers if not x.lever.startswith(("compilation.", "markup.", "reference.same"))}
             for e in reply.settings}
 
 
@@ -624,6 +624,62 @@ async def test_a_command_the_registry_refuses_is_refused_with_its_reason_and_sto
         await s.set(999, "voice.take", True, target=group_target("Рутина"))
     assert "LookupError" in str(caught.value)
     assert s.sql("SELECT COUNT(*) FROM output_settings") == [(0,)] and s.taken(s.changed) == []
+
+
+# --- Р-99: variants declared equal -----------------------------------------------------------------------------------
+
+async def queues_of(s: System, series_id: int, **level) -> QueuesReply:
+    return QueuesReply.model_validate(await s.probe.request(
+        "composition.queues.get", {"series_id": series_id, **level}, timeout=STUCK_S))
+
+
+@pytest.mark.asyncio
+async def test_variants_declared_equal_are_numbered_in_the_queue_of_the_level_that_has_them_and_a_reset_takes_them_apart(system):
+    s = system
+    series_id = await laid_out(s, rich_standard())
+    source_id = only_source(s, series_id)
+    same = [[*choice(source_id, "vk"), *choice(source_id, "kodik")]]
+    assert await s.set(series_id, "reference.same", same, season=1) == {"ok": True}
+    shown = await queues_of(s, series_id, season=1)
+    assert [(each.player, each.same) for each in shown.reference.rows] == [("vk", 1), ("kodik", 1), ("allvideo", None)]
+    assert shown.reference.same_level == Level.SEASON and shown.reference.order_level == Level.DEFAULT
+    assert [each.same for each in (await queues_of(s, series_id)).reference.rows] == [None, None, None]  # the series above has none
+    assert [each.same for each in (await queues_of(s, series_id, season=1, episode=2)).reference.rows] == [1, 1, None]
+    assert await s.reset(series_id, season=1, lever="reference.same") == {"ok": True}
+    assert [each.same for each in (await queues_of(s, series_id, season=1)).reference.rows] == [None, None, None]
+
+
+@pytest.mark.asyncio
+async def test_a_group_of_equal_variants_names_only_variants_the_level_lets_into_the_queue_of_the_reference(system):
+    s = system
+    series_id = await laid_out(s, rich_standard())
+    source_id = only_source(s, series_id)
+    with pytest.raises(BusRequestError):
+        await s.set(series_id, "reference.same", [[*choice(source_id, "vk"), *choice(source_id, "no-such-player")]], season=1)
+    with pytest.raises(BusRequestError) as caught:
+        await s.set(series_id, "reference.same", [choice(source_id, "vk")], season=1)  # a group is a list of variants
+    assert code_of(caught.value) == "bad_value"
+    assert s.sql("SELECT COUNT(*) FROM output_settings") == [(0,)]
+
+
+@pytest.mark.asyncio
+async def test_the_markup_that_follows_the_reference_makes_its_groups_its_own_with_the_queue_at_its_first_edit(system):
+    """Stage 14 and Р-99: the groups the reference's queue shows are the groups of the markup's, as its order and its boxes are,
+    when the first edit makes that queue its own; after it the two stand apart."""
+    s = system
+    series_id = await laid_out(s, rich_standard())
+    source_id = only_source(s, series_id)
+    same = [[*choice(source_id, "vk"), *choice(source_id, "kodik")]]
+    await s.set(series_id, "reference.same", same, season=1)
+    shown = await queues_of(s, series_id, season=1)
+    assert shown.markup_follows and [each.same for each in shown.markup.rows] == [1, 1, None]
+    await s.set(series_id, "markup.allow", False, season=1, target=variant_target("Ruchime", source_id, "allvideo"))
+    shown = await queues_of(s, series_id, season=1)
+    assert not shown.markup_follows and [each.same for each in shown.markup.rows] == [1, 1, None]
+    assert shown.markup.same_level == Level.SEASON
+    await s.reset(series_id, season=1, lever="reference.same")
+    shown = await queues_of(s, series_id, season=1)
+    assert [each.same for each in shown.reference.rows] == [None, None, None] and [each.same for each in shown.markup.rows] == [1, 1, None]
 
 
 # --- M-34: a lever and a consumer added through the registries alone -------------------------------------------------

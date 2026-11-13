@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Sequence
 
-from core.contracts import (MARKUP_ALLOW, MARKUP_ORDER, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE,
-                            CompositionRow, EffectiveLever, GroupQueue, Level, QueueRow, QueueView, RowState, group_target,
-                            variant_target)
-from core.variant_queue import REFERENCE_RANKING, VOICE_RANKING, Candidate, Order, ranked
+from core.contracts import (MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, VOICE_ALLOW,
+                            VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, GroupQueue, Level, QueueRow, QueueView,
+                            RowState, group_target, variant_target)
+from core.variant_queue import VOICE_RANKING, Candidate, Order, Same, ranked, ranked_singles
 
 from .project import spans
 
@@ -60,12 +60,23 @@ class _Level:
                         episodes=spans(number for row in playing for number in _episodes(row, self.episode)),
                         stale=spans(stale), allowed=allowed is not False, allowed_level=level)
 
-    def single_queue(self, order: Order, order_lever: str, allow_lever: str) -> QueueView:
-        """A queue of single videos (the reference, the markup reference) by its order and its flags."""
+    def single_queue(self, order: Order, order_lever: str, allow_lever: str, same_lever: str) -> QueueView:
+        """A queue of single videos (the reference, the markup reference) by its order, its flags and the variants the user
+        declared equal: those that stand in one place of the queue carry the number of their group."""
         order_value, order_level = self.value(order_lever, None, [])
-        found = ranked(self.candidates(single=True), order, REFERENCE_RANKING, _named(order_value, True),
-                       lambda each: (each.row.voice_label, each.row.source_id, each.row.player))
-        return QueueView(rows=[self.row_of(each, allow_lever) for each in found], order_level=order_level)
+        same_value, same_level = self.value(same_lever, None, [])
+        same = Same.of(same_value)
+        found = ranked_singles(self.candidates(single=True), order, _named(order_value, True), same)
+        rows = [self.row_of(each, allow_lever) for each in found]
+        # A group that has two variants or more on the level is numbered, by where it first stands in the queue.
+        listed = [(row.group, row.source_id, row.player) for row in rows]
+        numbers: dict[int, int] = {}
+        for variant in listed:
+            group = same.number_of(variant)
+            if group is not None and group not in numbers and sum(1 for each in listed if each in same.members(variant)) > 1:
+                numbers[group] = len(numbers) + 1
+        rows = [row.model_copy(update={"same": numbers.get(same.number_of(variant))}) for row, variant in zip(rows, listed)]
+        return QueueView(rows=rows, order_level=order_level, same_level=same_level)
 
 
 def build(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever], order: Order, groups: Sequence[str],
@@ -75,7 +86,7 @@ def build(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever], ord
     `lines` are the lines of the level in the order of the layout, `levers` the levers of the level as it inherits them,
     `episode` the episode of an episode level (the episodes of a line are cut to it)."""
     level = _Level(lines, levers, episode)
-    reference = level.single_queue(order, REFERENCE_ORDER, REFERENCE_ALLOW)
+    reference = level.single_queue(order, REFERENCE_ORDER, REFERENCE_ALLOW, REFERENCE_SAME)
     queues: list[GroupQueue] = []
     # A voice-over is queued only for a group: the rows of an unknown voice-over are taken into no work.
     present = {key[0] for key, items in level.by_variant.items() if all(row.grouped for _, row in items)}
@@ -88,6 +99,16 @@ def build(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever], ord
         queues.append(GroupQueue(group=group, rows=[level.row_of(each, VOICE_ALLOW) for each in group_queue],
                                  order_level=order_level, take=take is not False, take_level=take_level))
     return reference, queues
+
+
+def same_groups(rows: Iterable[QueueRow]) -> list[list[dict]]:
+    """The groups of equal variants a queue shows, as the value of a lever `….same`: one list for every number, in the order
+    of the numbers, each variant as the order of the reference names it."""
+    groups: dict[int, list[dict]] = {}
+    for row in rows:
+        if row.same is not None:
+            groups.setdefault(row.same, []).append({"group": row.group, "source_id": row.source_id, "player": row.player})
+    return [groups[number] for number in sorted(groups)]
 
 
 def follows_reference(levers: Iterable[EffectiveLever]) -> bool:
@@ -103,8 +124,9 @@ def markup(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever], or
     levers = list(levers)
     level = _Level(lines, levers, episode)
     if follows_reference(levers):
-        return level.single_queue(order, REFERENCE_ORDER, REFERENCE_ALLOW).model_copy(update={"order_level": Level.DEFAULT}), True
-    return level.single_queue(order, MARKUP_ORDER, MARKUP_ALLOW), False
+        return level.single_queue(order, REFERENCE_ORDER, REFERENCE_ALLOW, REFERENCE_SAME).model_copy(
+            update={"order_level": Level.DEFAULT, "same_level": Level.DEFAULT}), True
+    return level.single_queue(order, MARKUP_ORDER, MARKUP_ALLOW, MARKUP_SAME), False
 
 
 def _named(value: Any, with_group: bool) -> list[tuple]:

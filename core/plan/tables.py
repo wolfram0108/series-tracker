@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping
 
+from core.variant_queue import Same
 from core.voice_names import NO_GROUPS, Groups
 
 # (season, episode), or (season, episode, part) for a part of an episode: the place of one video of the library.
@@ -190,6 +191,10 @@ class Choices:
     # has is the timeline, and a higher video is cut onto it.
     markup: Mapping[Slot, tuple[tuple[str, int, str], ...]] = field(default_factory=dict)
     markup_deny: Mapping[Slot, frozenset[tuple[str, int, str]]] = field(default_factory=dict)
+    # The variants the user declared equal, for the reference and for the markup reference of every episode (Р-99): a group
+    # is one place in its queue, so the video its file holds stays while it is as good as the queue's first.
+    same: Mapping[Slot, Same] = field(default_factory=dict)
+    markup_same: Mapping[Slot, Same] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

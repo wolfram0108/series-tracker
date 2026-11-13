@@ -6,10 +6,11 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Iterable, Mapping, Sequence
 
-from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, MARKUP_ALLOW, MARKUP_ORDER, REFERENCE_ALLOW, REFERENCE_ORDER,
+from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME,
                             VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, Level, RowState, compilation_key,
                             parse_group_target, parse_variant_target)
+from core.variant_queue import Same
 from core.voice_names import Groups
 
 from .tables import Choices, Container, OnlineRow, RowId
@@ -72,15 +73,20 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
     by_key = compilations_of(rows, online)
     reference, reference_deny, voice_orders, voice_deny, voice_off, member = {}, {}, {}, {}, {}, {}
     markup, markup_deny = {}, {}
+    same, markup_same = {}, {}
     own_reference: set = set()
     for season, episode, levers in episodes:
         slot = (season, episode)
         for lever in levers:
-            if lever.lever in (REFERENCE_ORDER, REFERENCE_ALLOW) and lever.level == Level.EPISODE:
+            if lever.lever in (REFERENCE_ORDER, REFERENCE_ALLOW, REFERENCE_SAME) and lever.level == Level.EPISODE:
                 own_reference.add(slot)
             if lever.lever == REFERENCE_ORDER and isinstance(lever.value, list):
                 reference[slot] = tuple((each["group"], each["source_id"], each["player"]) for each in lever.value
                                         if isinstance(each, dict) and {"group", "source_id", "player"} <= set(each))
+            elif lever.lever == REFERENCE_SAME and isinstance(lever.value, list):
+                same[slot] = Same.of(lever.value)
+            elif lever.lever == MARKUP_SAME and isinstance(lever.value, list):
+                markup_same[slot] = Same.of(lever.value)
             elif lever.lever == REFERENCE_ALLOW and lever.value is False and lever.target:
                 variant = parse_variant_target(lever.target)
                 if variant is not None:
@@ -114,4 +120,4 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                    off_episodes=frozenset(off_episodes), off_compilations=off_compilations, reference=reference,
                    reference_deny=reference_deny, voice_order=voice_orders, voice_deny=voice_deny, voice_off=voice_off,
                    member=member, own_reference=frozenset(own_reference), titles=dict(titles or {}), languages=dict(languages or {}),
-                   markup=markup, markup_deny=markup_deny)
+                   markup=markup, markup_deny=markup_deny, same=same, markup_same=markup_same)

@@ -28,22 +28,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-from core.variant_queue import REFERENCE_RANKING, VOICE_RANKING
+from core.variant_queue import NO_SAME, VARIANT_RANKING, VOICE_RANKING, Line, standing
 from core.variant_queue import Candidate as Ranked
-from core.variant_queue import Order
+from core.variant_queue import Order, by_resolution
 
 from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Snapshot, Track, Video, episode_of
 
 RULE = object()  # no word of the user on the compilation of an episode: the rule decides
 
-
-@dataclass(frozen=True)
-class _Row:
-    """What the criteria of the service's rule read of a variant (core/variant_queue)."""
-
-    height: int
-    player: str
-    source_id: int
 
 OFF = ".off"
 HIDDEN = ".hidden-"  # a file nothing carries any more: it stays, out of the media server's sight
@@ -225,7 +217,7 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
 
     def criteria(ranking, height: int, player: str, source_id: int) -> tuple:
         """The service's own criteria (core/variant_queue), the place of the row aside: it is the last tie-break."""
-        item = Ranked(_Row(height, player, source_id), 0)
+        item = Ranked(Line(height, player, source_id), 0)
         return tuple(each(item, order) for each in ranking)
 
     def position(row_id: RowId) -> int:
@@ -291,13 +283,16 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
     off = episode in choices.off_episodes
     wanted = choices.reference.get(episode, ())
     denied = choices.reference_deny.get(episode, frozenset())
+    same = choices.same.get(episode, NO_SAME)
 
     def video_rank(variant: tuple[str, int, str], height: int, held: bool, row_id: RowId, deleted: bool = False) -> tuple:
         """The service's rule for the reference: a video the user deleted comes after every other one (it goes only for
-        another video, В-9); the user's order, then its criteria; of equals what the asset holds stays (a video goes only
-        for a better one); then the place of the row in the layout."""
-        named = wanted.index(variant) if variant in wanted else len(wanted)
-        return (deleted, named, *criteria(REFERENCE_RANKING, height, variant[2], variant[1]), 0 if held else 1,
+        another video, В-9); the user's order, the resolution, then the criteria of the variant — the variants the user
+        declared equal take one place in both —; of equals what the asset holds stays (a video goes only for a better
+        one); then the place of the row in the layout."""
+        named, *by_variant = standing(variant, same, lambda each: wanted.index(each) if each in wanted else len(wanted),
+                                      lambda each: criteria(VARIANT_RANKING, 0, each[2], each[1]))
+        return (deleted, named, *criteria((by_resolution,), height, variant[2], variant[1]), *by_variant, 0 if held else 1,
                 position(row_id), repr(row_id))
 
     def gone(way: VideoWay) -> bool:
@@ -438,10 +433,13 @@ def _markup_of(inputs: Inputs, episode, singles: list[OnlineRow], files: list[Co
         return None
     denied = inputs.choices.markup_deny.get(episode, frozenset())
 
+    same = inputs.choices.markup_same.get(episode, NO_SAME)
+
     def rank(variant: tuple[str, int, str], height: int, player: str, row_id: RowId, held: bool) -> tuple:
-        return (order.index(variant) if variant in order else len(order),
-                *criteria(REFERENCE_RANKING, height, player, row_id.source_id), 0 if held else 1, position(row_id),
-                repr(row_id))
+        named, *by_variant = standing(variant, same, lambda each: order.index(each) if each in order else len(order),
+                                      lambda each: criteria(VARIANT_RANKING, 0, each[2], each[1]))
+        return (named, *criteria((by_resolution,), height, player, row_id.source_id), *by_variant, 0 if held else 1,
+                position(row_id), repr(row_id))
 
     found: list[tuple[tuple, Markup]] = []
     for row in singles:

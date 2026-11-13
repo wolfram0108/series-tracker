@@ -8,8 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, MARKUP_ALLOW, MARKUP_ORDER, REFERENCE_ALLOW,
-                            REFERENCE_ORDER, VOICE_ALLOW,
+from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME,
+                            REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, LeverSpec, Queue, TargetKind, ValueShape, parse_compilation_key,
                             parse_group_target, parse_variant_target)
 
@@ -53,6 +53,30 @@ def _is_order(value: Any, target: TargetKind) -> bool:
     return len(items) == len(value) == len(set(items))
 
 
+def _is_sets(value: Any, target: TargetKind) -> bool:
+    """Groups of variants declared equal: a list of lists of two variants or more, no variant in two places; an empty list is
+    no group. A variant is named by its voice-over group too, as in an order of the reference."""
+    if target != TargetKind.NONE or not isinstance(value, list):
+        return False
+    seen: set[tuple] = set()
+    for group in value:
+        if not isinstance(group, list) or len(group) < 2:
+            return False
+        for item in group:
+            if not _is_item(item, _ITEMS[TargetKind.NONE]):
+                return False
+            key = tuple(sorted(item.items()))
+            if key in seen:
+                return False
+            seen.add(key)
+    return True
+
+
+def _sets_sources(value: Any) -> frozenset[int]:
+    return frozenset(each["source_id"] for group in value if isinstance(group, list) for each in group
+                     if isinstance(each, dict) and _is_id(each.get("source_id"))) if isinstance(value, list) else frozenset()
+
+
 def _order_sources(value: Any) -> frozenset[int]:
     return frozenset(each["source_id"] for each in value if isinstance(each, dict) and _is_id(each.get("source_id"))) \
         if isinstance(value, list) else frozenset()
@@ -67,6 +91,7 @@ def _compilation_sources(value: Any) -> frozenset[int]:
 _ACCEPTS: dict[ValueShape, Callable[[Any, TargetKind], bool]] = {
     ValueShape.FLAG: lambda value, target: _is_flag(value),
     ValueShape.VARIANT_ORDER: _is_order,
+    ValueShape.VARIANT_SETS: _is_sets,
     # The key of a compilation, or "" for none: the episode stands in no compilation by the user's word.
     ValueShape.COMPILATION: lambda value, target: value == "" or parse_compilation_key(value) is not None,
 }
@@ -155,3 +180,7 @@ register(Lever(COMPILATION_TAKE, TargetKind.NONE, ValueShape.FLAG, True, "compos
 # Stage 14: the queue of the markup reference, of the form of the queue of the reference.
 register(Lever(MARKUP_ORDER, TargetKind.NONE, ValueShape.VARIANT_ORDER, [], "planner", Queue.MARKUP, _order_sources))
 register(Lever(MARKUP_ALLOW, TargetKind.VARIANT, ValueShape.FLAG, True, "planner", Queue.MARKUP))
+# Р-99: the variants the user declared equal take one place in the queue; what the file holds stays while it is as good as
+# the queue's first.
+register(Lever(REFERENCE_SAME, TargetKind.NONE, ValueShape.VARIANT_SETS, [], "planner", Queue.REFERENCE, _sets_sources))
+register(Lever(MARKUP_SAME, TargetKind.NONE, ValueShape.VARIANT_SETS, [], "planner", Queue.MARKUP, _sets_sources))

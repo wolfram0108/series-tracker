@@ -33,6 +33,10 @@ COMPILATION_TAKE = "compilation.take"
 # `markup.order` on the episode's chain of levels the markup reference follows the reference.
 MARKUP_ORDER = "markup.order"
 MARKUP_ALLOW = "markup.allow"
+# Variants the user declared equal (Р-99): the variants of a group take one place in the queue of the reference (of the
+# markup reference), so that what the file holds stays while it is as good as the queue's first.
+REFERENCE_SAME = "reference.same"
+MARKUP_SAME = "markup.same"
 
 
 class Level(StrEnum):
@@ -58,6 +62,8 @@ class ValueShape(StrEnum):
     FLAG = "flag"
     VARIANT_ORDER = "variant_order"
     COMPILATION = "compilation"
+    # Groups of variants (a list of lists), as a queue's variants the user declared equal.
+    VARIANT_SETS = "variant_sets"
 
 
 class Queue(StrEnum):
@@ -76,7 +82,7 @@ class Queue(StrEnum):
 LEVER_FORMS: frozenset[tuple[TargetKind, ValueShape]] = frozenset({
     (TargetKind.NONE, ValueShape.VARIANT_ORDER), (TargetKind.GROUP, ValueShape.VARIANT_ORDER),
     (TargetKind.GROUP, ValueShape.FLAG), (TargetKind.VARIANT, ValueShape.FLAG),
-    (TargetKind.NONE, ValueShape.FLAG), (TargetKind.NONE, ValueShape.COMPILATION)})
+    (TargetKind.NONE, ValueShape.FLAG), (TargetKind.NONE, ValueShape.COMPILATION), (TargetKind.NONE, ValueShape.VARIANT_SETS)})
 
 _GROUP_TARGET = re.compile(r"group:(.+)", re.DOTALL)
 
@@ -234,6 +240,9 @@ class QueueRow(BaseModel):
     stale: str = ""
     allowed: bool = True
     allowed_level: Level = Level.DEFAULT
+    # The number of the group of equal variants the row stands in (1, 2… in the order the groups first appear in the queue);
+    # none for a variant that equals no other one the level lists.
+    same: int | None = None
 
 
 class QueueView(BaseModel):
@@ -241,6 +250,8 @@ class QueueView(BaseModel):
 
     rows: list[QueueRow] = Field(default_factory=list)
     order_level: Level = Level.DEFAULT
+    # The level the groups of equal variants come from (the levers `reference.same`, `markup.same`).
+    same_level: Level = Level.DEFAULT
 
 
 class GroupQueue(QueueView):

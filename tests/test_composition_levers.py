@@ -37,7 +37,9 @@ def test_the_levers_of_the_queues_are_registered_with_their_target_shape_default
         ("compilation.member", TargetKind.NONE, ValueShape.COMPILATION, None, "composition", Queue.COMPILATION),
         ("compilation.take", TargetKind.NONE, ValueShape.FLAG, True, "composition", Queue.COMPILATION),
         ("markup.order", TargetKind.NONE, ValueShape.VARIANT_ORDER, [], "planner", Queue.MARKUP),
-        ("markup.allow", TargetKind.VARIANT, ValueShape.FLAG, True, "planner", Queue.MARKUP)]
+        ("markup.allow", TargetKind.VARIANT, ValueShape.FLAG, True, "planner", Queue.MARKUP),
+        ("reference.same", TargetKind.NONE, ValueShape.VARIANT_SETS, [], "planner", Queue.REFERENCE),
+        ("markup.same", TargetKind.NONE, ValueShape.VARIANT_SETS, [], "planner", Queue.MARKUP)]
     assert levers.get("voice.take") is levers.all()[2]
     assert levers.get("nothing.here") is None
 
@@ -74,6 +76,20 @@ def test_the_levers_of_the_queues_are_registered_with_their_target_shape_default
     ("voice.order", [{**VOICE, "group": "Ruchime"}], False),
     ("voice.order", VOICE, False),
     ("voice.order", None, False),
+    # The variants the user declared equal: groups of two or more, a variant in one group only.
+    ("reference.same", [], True),
+    ("reference.same", [[REF, OTHER_REF]], True),
+    ("reference.same", [[REF, OTHER_REF], [{**REF, "player": "kodik"}, {**OTHER_REF, "player": "vk"}]], True),
+    ("markup.same", [[REF, OTHER_REF]], True),
+    ("reference.same", [[REF]], False),
+    ("reference.same", [[]], False),
+    ("reference.same", [[REF, REF]], False),
+    ("reference.same", [[REF, OTHER_REF], [OTHER_REF, {**REF, "player": "vk"}]], False),
+    ("reference.same", [REF, OTHER_REF], False),
+    ("reference.same", [[REF, VOICE]], False),
+    ("reference.same", [[REF, {**OTHER_REF, "extra": 1}]], False),
+    ("reference.same", None, False),
+    ("reference.same", "auto", False),
 ])
 def test_a_lever_takes_only_the_values_of_its_kind(name, value, accepted):
     assert levers.get(name).accepts(value) is accepted
@@ -154,7 +170,7 @@ def test_a_lever_that_is_taken_out_is_gone_and_taking_out_a_missing_one_is_harml
     assert levers.get("fake.volume") is None
     assert [each.name for each in levers.all()] == [
         "reference.order", "reference.allow", "voice.take", "voice.order", "voice.allow", "compilation.member",
-        "compilation.take", "markup.order", "markup.allow"]
+        "compilation.take", "markup.order", "markup.allow", "reference.same", "markup.same"]
 
 
 def test_a_lever_of_a_form_no_window_draws_is_refused_when_it_is_registered():

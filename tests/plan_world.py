@@ -18,7 +18,8 @@ from typing import Callable, Iterable
 from core.contracts import PlannerView, SyncScope
 from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, video_of
 from core.plan.planner import OFF, Goal, Plan, cut_video, own_track, plan, restricted, switched_off, voice_of
-from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
+from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video, episode_of
+from core.variant_queue import Same
 from modules.planner.view import view_of
 
 
@@ -365,6 +366,21 @@ class World(SeriesSync):
                 # A timeline video that cannot be had (its download failed for good) is no height the cut must beat.
                 assert (ref2 is None or video.row.height > ref2.height or not ref2.playable
                         or ("download", ref2.id) in step.failed_rows), f"{goal.name}: a cut no higher than its timeline"
+        # Variants the user declared equal (Р-99): the video a file holds is not given up for a video of its group that is no
+        # higher, unless the user took the held one out (denied, deleted) or the episode takes no new work.
+        for goal in step.plan.goals:
+            same = step.choices.same.get(episode_of(goal.slot))
+            if same is None or goal.off or goal.markup is not None or goal.video.kind != "download":
+                continue
+            new = goal.video.row.variant
+            for held in step.before:
+                shot = held.video.snapshot
+                variant = (shot.variant_label, held.video.id.source_id, shot.player)
+                assert not (_slot_of_video(held.video, online) == goal.slot and held.video.cut_of is None and not held.off
+                            and ("video", held.name) not in deleted and variant != new and new in same.members(variant)
+                            and variant not in step.choices.reference_deny.get(episode_of(goal.slot), frozenset())
+                            and goal.video.row.height <= shot.height), \
+                    f"{goal.name}: the video {variant} of the file is given up for {new} of its own group"
         # A deleted track is never a source of itself: «Удалить» is its removal, not an alignment anew.
         for goal in step.plan.goals:
             for way in goal.tracks:
@@ -582,13 +598,25 @@ class Chaos:
                 world.choose(markup={} if kind == "back" else {**world.choices.markup, (season, episode): (variant,)}
                              if kind == "episode" else {(each, number): (variant,) for each in self.seasons
                                                         for number in self.episodes})
+        elif action in ("same", "same_off"):
+            # The owner declares some variants of the series equal, for every episode or for one, or takes the groups back.
+            variants = sorted({each.row.variant for _, each in rows if not each.row.compilation})
+            if action == "same_off" or len(variants) < 2:
+                world.choose(same={}, markup_same={})
+            else:
+                members = frozenset(rng.sample(variants, min(len(variants), rng.choice((2, 3)))))
+                group = Same((members,))
+                if rng.choice(("series", "episode")) == "series":
+                    world.choose(same={(each, number): group for each in self.seasons for number in self.episodes})
+                else:
+                    world.choose(same={**world.choices.same, (season, episode): group})
         elif action == "put_high":
             # A single video higher than the references: a picture to cut onto the timeline of the markup reference.
             world.put(rng.choice((1, 3)), self._key("h"), episode, season=season, group=rng.choice((self.reference, "A")),
                       player="vk", height=2160)
         elif action == "levers_reset":
             world.choose(reference={}, reference_deny={}, voice_order={}, voice_deny={}, voice_off={}, member={}, markup={},
-                         markup_deny={})
+                         markup_deny={}, same={}, markup_same={})
         elif action == "shuffle_voices":
             voices = [self.reference, *self.groups]
             rng.shuffle(voices)

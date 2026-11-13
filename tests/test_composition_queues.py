@@ -3,7 +3,7 @@ reference is the reference the planner takes, and the head of the queue of a gro
 voice-over (core/plan), for every order the rows of the layout come in, with and without the levers of the user."""
 import itertools
 
-from core.contracts import (REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, EffectiveLever,
+from core.contracts import (REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, EffectiveLever,
                             EpisodeSettings, Level, availability, group_target, variant_target)
 from core.variant_queue import Order
 from core.voice_names import NO_GROUPS
@@ -42,6 +42,15 @@ LEVERS = {
               lever(VOICE_ORDER, [{"source_id": 40, "player": "kodik"}], group_target("AnimeVost"))],
     "denied": [lever(REFERENCE_ALLOW, False, variant_target("AniStar", 39, "vk")),
                lever(VOICE_ALLOW, False, variant_target("ChinaTown", 33, "kodik"))],
+    # Variants declared equal (Р-99): they stand where the best of them does, and the queue still is the planner's.
+    "same": [lever(REFERENCE_SAME, [[{"group": "AniStar", "source_id": 40, "player": "cvh"},
+                                     {"group": "AnimeVost", "source_id": 33, "player": "cvh"},
+                                     {"group": "ChinaTown", "source_id": 33, "player": "kodik"}]])],
+    "same and order": [lever(REFERENCE_ORDER, [{"group": "ChinaTown", "source_id": 40, "player": "kodik"},
+                                               {"group": "AnimeVost", "source_id": 33, "player": "cvh"}]),
+                       lever(REFERENCE_SAME, [[{"group": "AnimeVost", "source_id": 33, "player": "cvh"},
+                                               {"group": "ChinaTown", "source_id": 33, "player": "kodik"},
+                                               {"group": "AniStar", "source_id": 33, "player": "kodik"}]])],
 }
 
 
@@ -63,6 +72,35 @@ def test_the_head_of_the_queue_of_the_reference_is_the_reference_the_planner_tak
             video = goal.video.snapshot
             assert (head.group, head.source_id, head.player) == (
                 video.variant_label, goal.video.timeline.source_id, video.player), name
+
+
+def test_variants_declared_equal_carry_the_number_of_their_group_by_where_the_group_first_stands():
+    first = [{"group": "AniStar", "source_id": 40, "player": "cvh"}, {"group": "AnimeVost", "source_id": 33, "player": "cvh"}]
+    second = [{"group": "ChinaTown", "source_id": 33, "player": "kodik"}, {"group": "AniStar", "source_id": 33, "player": "kodik"}]
+    shown, _ = build(EPISODE, [lever(REFERENCE_SAME, [second, first], level=Level.SERIES)])
+    numbers = [((each.group, each.source_id, each.player), each.same) for each in shown.rows if each.same]
+    # The numbers run in the order the groups first stand in the queue, not in the order the lever lists them.
+    assert [number for _, number in numbers] == sorted(number for _, number in numbers)
+    assert {number for _, number in numbers} == {1, 2} and len(numbers) == 4
+    assert shown.same_level == Level.SERIES
+    assert [each.same for each in build(EPISODE, [])[0].rows] == [None] * len(shown.rows) and build(EPISODE, [])[0].same_level == Level.DEFAULT
+
+
+def test_a_group_of_which_the_level_lists_one_variant_only_is_no_group_there():
+    lone = [{"group": "AniStar", "source_id": 40, "player": "cvh"}, {"group": "AniStar", "source_id": 999, "player": "cvh"}]
+    shown, _ = build(EPISODE, [lever(REFERENCE_SAME, [lone])])
+    assert [each.same for each in shown.rows] == [None] * len(shown.rows)
+
+
+def test_the_groups_a_queue_shows_are_the_value_of_the_lever_that_makes_them():
+    first = [{"group": "AniStar", "source_id": 40, "player": "cvh"}, {"group": "AnimeVost", "source_id": 33, "player": "cvh"}]
+    shown, _ = build(EPISODE, [lever(REFERENCE_SAME, [first])])
+    assert sorted(map(sorted_items, queues.same_groups(shown.rows)[0])) == sorted(map(sorted_items, first))
+    assert queues.same_groups(build(EPISODE, [])[0].rows) == []
+
+
+def sorted_items(item):
+    return tuple(sorted(item.items()))
 
 
 def test_the_head_of_the_queue_of_a_group_is_the_voice_over_the_planner_takes_in_every_order_of_the_rows():

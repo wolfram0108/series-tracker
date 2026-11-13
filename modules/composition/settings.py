@@ -123,6 +123,10 @@ def without_source(records: Sequence[SettingRecord], source_id: int) -> list[Set
             rest = [item for item in each.value if item.get("source_id") != source_id]
             if rest:
                 kept.append(each.model_copy(update={"value": rest}))
+        elif lever.shape == ValueShape.VARIANT_SETS:
+            rest = _regrouped([[item for item in group if item.get("source_id") != source_id] for group in each.value])
+            if rest:
+                kept.append(each.model_copy(update={"value": rest}))
     return canonical(kept)
 
 
@@ -142,7 +146,7 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
             return key
         return compilation_key(renames[found[0]], *found[1:])
 
-    def moved(record: SettingRecord) -> SettingRecord:
+    def moved(record: SettingRecord) -> SettingRecord | None:
         lever = levers.get(record.lever)
         target, value = record.target, record.value
         compilation = renamed_key(record.compilation)
@@ -156,6 +160,12 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
                 and any(isinstance(each, dict) and each.get("group") in renames for each in value)):
             value = _deduplicated([{**each, "group": renames.get(each.get("group"), each.get("group"))}
                                    if isinstance(each, dict) and "group" in each else each for each in value])
+        if lever is not None and lever.shape == ValueShape.VARIANT_SETS and isinstance(value, list) and any(
+                isinstance(item, dict) and item.get("group") in renames for each in value for item in each):
+            value = _regrouped([[{**item, "group": renames.get(item.get("group"), item.get("group"))} for item in each]
+                                for each in value])
+            if not value:
+                return None  # no group is left: the record was a word about those groups, the level above speaks again
         return record if (target, value, compilation) == (record.target, record.value, record.compilation) else \
             record.model_copy(update={"target": target, "value": value, "compilation": compilation})
 
@@ -163,6 +173,8 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
     arrived: dict[tuple, list[SettingRecord]] = {}
     for record in records:
         shifted = moved(record)
+        if shifted is None:
+            continue
         if shifted is record:
             kept.append(shifted)
         else:
@@ -191,6 +203,20 @@ def _deduplicated(items: list) -> list:
         if each not in seen:
             seen.append(each)
     return seen
+
+
+def _regrouped(groups: list[list[dict]]) -> list[list[dict]]:
+    """Groups of equal variants after variants left or were renamed: a variant once, groups that now share a variant one
+    group, a group of fewer than two variants gone."""
+    found: list[list[dict]] = []
+    for group in groups:
+        keys = {tuple(sorted(item.items())) for item in group}
+        meeting = [each for each in found if keys & {tuple(sorted(item.items())) for item in each}]
+        merged = [item for each in [*meeting, group] for item in each]
+        unique = list({tuple(sorted(item.items())): item for item in merged}.values())
+        found = [each for each in found if each not in meeting]
+        found.append(unique)
+    return [group for group in found if len(group) > 1]
 
 
 def _merged(group: list[SettingRecord]) -> SettingRecord | None:
