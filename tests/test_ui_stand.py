@@ -265,7 +265,8 @@ async def test_the_head_of_a_block_says_on_the_left_and_does_on_the_right_nothin
     # The words of the meters of a real season are long (every state of the tracks with its count): the same head with them.
     await heads["season"].locator(".meter-text").evaluate_all(
         "all => all.forEach((e) => { e.textContent = 'готово 1240 · в плане 37 · нет в источниках 3 · ошибок 2' })")
-    for width in (1440, 1100, 1070, 900, 700, 520, 380):
+    await heads["episode"].locator(".detail-file").evaluate("e => { e.textContent = 'Ten Thousand Worlds s01e498 [Китайский] 1080p.mkv' }")
+    for width in (1440, 1100, 1070, 1049, 900, 700, 520, 380):
         await page.set_viewport_size({"width": width, "height": 900})
         for name, head in heads.items():
             await ui.shot_of(head, f"31-{name}-head-{width}")
