@@ -23,7 +23,6 @@ import asyncio
 import base64
 import json
 import logging
-import re
 import time
 from typing import Callable
 from urllib.parse import quote, urlsplit
@@ -34,7 +33,8 @@ from core.reasons import reason
 
 from ..players.http import retry_after
 
-from . import AppCardData, AppError, AppLine, AppPage, AppProfile, AppStream, advertised_headers, listed_lines, parsed_address
+from . import (AppCardData, AppError, AppLine, AppPage, AppProfile, AppStream, advertised_headers, listed_lines, parsed_address,
+               session_ended)
 
 logger = logging.getLogger("sources")
 
@@ -43,8 +43,6 @@ AGENT = "okhttp/4.12.0"
 ACCEPTED = "1"
 # A session is opened anew this long before its end, and no later than a tenth of its life before it.
 SESSION_MARGIN_S = 30.0
-# How the service says a ticket was asked under a session that ended (the client of the application reads the same).
-_SESSION_ENDED = re.compile(r"session.{0,40}(?:expired|invalid|过期|无效)|(?:会话|会话ID).{0,20}(?:过期|无效)", re.I)
 
 
 def ticket_data(ticket: str) -> dict:
@@ -162,7 +160,7 @@ class AppMnClient:
     async def _ticket(self, token: str) -> dict:
         session = await self.session()
         answer = await self.call("/api/v1/vod/ticket", payload={"token": token}, session=session)
-        if _SESSION_ENDED.search(str(answer.get("msg") or "")):
+        if session_ended(None, str(answer.get("msg") or "")):
             answer = await self.call("/api/v1/vod/ticket", payload={"token": token}, session=await self.session(after=session))
         if str(answer.get("code")) != ACCEPTED:
             words = str(answer.get("msg") or "")
