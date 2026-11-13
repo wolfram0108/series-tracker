@@ -15,7 +15,7 @@ import { liveEntries, liveFrom } from "../lib/live"
 import { useSeriesStore } from "../stores/series"
 import { usePlanStore } from "../stores/plan"
 import { useLayoutStore } from "../stores/layout"
-import { fileOf, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, trackOf, type CompilationKey } from "../lib/plan"
+import { fileOf, heldFile, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, trackOf, type CompilationKey, type HeldFile } from "../lib/plan"
 import {
   deleteFromPlan, fetchPlan, fetchQueues, resetFailures,
   cancelSync, resetLever, setLever, setVoiceOrder, setVoiceTitle, switchOutput, syncSeries, type Composition, type MediaFile,
@@ -180,6 +180,8 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     if (answer.ok) levelQueues.value = { ...levelQueues.value, [key]: answer.data }
     else failure.value = answer.text
   }
+  /** What the file of an episode holds now (lib/plan.ts `heldFile`), for the window of the episode. */
+  const heldOf = (season: number, episode: number, part: number | null = null): HeldFile | null => heldFile(plan.forSeries(seriesId), season, episode, part)
   const queuesOf = (season: number | null, episode: number | null = null, compilation: string | null = null): Queues | undefined =>
     levelQueues.value[queueKey(season, episode, compilation)]
   const reloadQueues = (): void => {
@@ -278,6 +280,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
 
   return { composition, references, loading, failure, busy, answer, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
-    sync, retryFailed, retrySeason, retryEpisode, voiceOrders, order, rename, marks, loadQueues, queuesOf, setOrder, setAllowed, setTaken, resetOrder,
+    sync, retryFailed, retrySeason, retryEpisode, voiceOrders, order, rename, marks, loadQueues, queuesOf, heldOf, setOrder, setAllowed, setTaken, resetOrder,
     retry, redo, refetch, compilations, cuts, member, takeCompilation, retryCut, labels }
 }

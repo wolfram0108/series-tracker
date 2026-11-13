@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t } from "../../../i18n"
 import type { QueueName, QueueRow, SourceMark as Mark } from "../../../lib/output"
+import type { Held } from "../../../lib/plan"
 import OrderList from "../../OrderList.vue"
 import SourceMark from "./SourceMark.vue"
 
@@ -14,7 +15,9 @@ const props = withDefaults(defineProps<{
   /** A level that spans episodes: the resolution is the best one there, and the episodes of each variant are shown. */
   level?: boolean
   busy?: boolean
-}>(), { level: false, busy: false })
+  /** The variant the file holds now: the row that is it says so, whatever its place in the order (the order is a wish, the file is what is). */
+  held?: Held | null
+}>(), { level: false, busy: false, held: null })
 
 const emit = defineEmits<{
   (e: "order", rows: QueueRow[]): void
@@ -28,6 +31,7 @@ const isFirst = (row: QueueRow, rows: readonly QueueRow[]): boolean => rows.find
 const markOf = (row: QueueRow, rows: readonly QueueRow[]): string => !row.allowed ? t("output.queue.skipped")
   : isFirst(row, rows) ? t(props.queue === "reference" ? "output.queue.reference"
     : props.queue === "markup" ? "output.queue.markup" : "output.queue.taken") : ""
+const isHeld = (row: QueueRow): boolean => props.held != null && row.source_id === props.held.source_id && row.player === props.held.player
 const height = (row: QueueRow): string => row.height == null ? "—"
   : t(props.level ? "output.heightUpTo" : "output.height", { height: row.height })
 const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" : t(`output.level.${row.allowed_level}`)
@@ -67,6 +71,7 @@ const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" 
           <td v-if="level">{{ row.episodes }}<template v-if="row.stale && row.stale !== row.episodes"> · <span class="stale-episodes">{{ row.stale }}</span></template></td>
           <td class="queue-mark-cell"><span class="queue-mark">
             <span v-if="markOf(row, items)" class="pill" :class="row.allowed ? (queue !== 'voice' ? 'pill-primary' : 'pill-success') : 'pill-secondary'">{{ markOf(row, items) }}</span>
+            <span v-if="isHeld(row)" class="pill pill-info queue-held">{{ t("output.queue.held") }}</span>
             <span v-if="levelOf(row)" class="queue-level">{{ levelOf(row) }}</span>
           </span></td>
         </tr>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import type { Queues } from "../../../composables/outputCalls"
+import type { HeldFile } from "../../../lib/plan"
 import { useCardGrid } from "../../../composables/useCardGrid"
 import { sharing } from "../../../lib/sharing"
 import { t } from "../../../i18n"
@@ -34,6 +35,8 @@ const props = withDefaults(defineProps<{
   mode?: "cards" | "tiles"
   opened?: number | null
   queues?: Queues
+  /** What the file of the opened episode holds now: the fact its queues are read against. */
+  held?: HeldFile | null
   busy?: boolean
 }>(), { mode: "cards", opened: null, busy: false })
 
@@ -168,7 +171,7 @@ const rows = computed<CompilationRow[]>(() => {
           >{{ item.view.episode }}</button>
           <EpisodeDetail
             v-if="opened?.view.episode === item.view.episode" :view="item.view" :cells="item.cells" :status="item.status"
-            :marks="marks" :queues="queues" :busy="busy" :compilations="rows"
+            :marks="marks" :queues="queues" :held="held" :busy="busy" :compilations="rows"
             @close="emit('open', null)" @step="step" @switch="emit('member', item.view.episode, $event ? '' : head.key)"
             @member="emit('member', item.view.episode, $event)" @retry-cut="emit('retry', item.view.episode)"
             @retry-failed="emit('retry-failed', item.view.episode)"

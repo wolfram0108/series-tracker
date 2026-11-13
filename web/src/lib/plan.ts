@@ -188,6 +188,25 @@ export function planFiles(view: PlannerView | undefined, keyOf: CompilationKey =
   })
 }
 
+/** Where a video or a voice-over of a file comes from, as a variant of a queue is told: its source and its player. */
+export interface Held { source_id: number; player: string }
+
+/** What the file of an episode holds now — the fact, as against what the order of a queue or the plan chooses: the source and
+ *  the player of its video (of the picture, for a cut) and of each of its voice-overs by group, the own sound of the video
+ *  among them. None for an episode with no file. */
+export interface HeldFile { video: Held; tracks: Record<string, Held> }
+
+export function heldFile(view: PlannerView | undefined, season: number, episode: number, part: number | null = null): HeldFile | null {
+  const asset = (view?.assets ?? []).find((each) => !each.off && each.episode[0] === season && each.episode[1] === episode
+    && partOf(each.episode) === part)
+  if (!asset) return null
+  const video: Held = { source_id: (asset.video.cut_of ?? asset.video.row).source_id, player: asset.video.player }
+  const tracks: Record<string, Held> = {}
+  if (asset.video.group) tracks[asset.video.group] = video
+  for (const track of asset.tracks ?? []) tracks[track.group ?? ""] = { source_id: track.row.source_id, player: track.player }
+  return { video, tracks }
+}
+
 /** The cuts of the episodes out of their compilations: done when the file holds a cut video, planned or under way while
  *  the plan cuts it, failed when the cut failed. */
 export function planCuts(view: PlannerView | undefined, keyOf: CompilationKey = ownKey): PlanCut[] {

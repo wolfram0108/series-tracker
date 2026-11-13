@@ -31,8 +31,8 @@ export const assetTrack = (voice: string, row: Ref, online: boolean | null = tru
 })
 
 export const asset = (name: string, row: Ref, tracks: Schemas["PlanAssetTrack"][] = [], cutOf: Ref | null = null,
-                      episode: number[] = [1]): Schemas["PlanAsset"] => ({
+                      episode: number[] = [1], video: Partial<Schemas["PlanAssetVideo"]> = {}): Schemas["PlanAsset"] => ({
   name, off: false, episode,
-  video: { source: "", player: "vibix", group: null, height: 1080, link: "", label: "", row, cut_of: cutOf, online: true },
+  video: { source: "", player: "vibix", group: null, height: 1080, link: "", label: "", row, cut_of: cutOf, online: true, ...video },
   tracks,
 })

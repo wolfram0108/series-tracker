@@ -231,6 +231,26 @@ async def test_the_buttons_of_the_head_keep_their_words_while_the_tab_has_room_a
     await ui.shot_of(page.locator("section", has=page.locator(".head-demo")), "29-gallery-head")
 
 
+async def test_the_queues_of_an_episode_say_which_variant_its_file_holds_beside_the_one_the_order_takes_first(ui):
+    """The order of a queue is a wish and the file is what is: after the sync the variant the file holds stands marked «в файле» in
+    the queue of the reference and of each voice-over, whatever its place in the order."""
+    series_id = await series_in_browser(ui, (1, 2))
+    page = ui.page
+    await ui.open_output(SERIES)
+    await ui.press_sync(series_id)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(2)
+    await page.locator(".episode-card[data-episode='1']").dblclick()
+    tabs = page.locator(".episode-detail .st-tabs .st-tab")
+    held = text("output.queue.held")
+    await tabs.nth(1).click()  # the reference
+    await expect(page.locator(".episode-detail .queue-held")).to_have_count(1)
+    await expect(page.locator(".episode-detail .queue-held").first).to_have_text(held)
+    for index in range(3, await tabs.count()):  # a voice-over each
+        await tabs.nth(index).click()
+        await expect(page.locator(".episode-detail .queue-held")).to_have_count(1)
+        await ui.shot_of(page.locator(".episode-detail"), f"32-held-{index}")
+
+
 async def test_the_head_of_a_block_says_on_the_left_and_does_on_the_right_nothing_goes_under_a_button_and_no_button_wraps(ui):
     """The heads of a season and of an episode: what they say takes the room the buttons leave and goes to another line where
     it must; the buttons are one row at every width and never have the text under them."""

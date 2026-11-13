@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import type { ShownVoice } from "../../../lib/plan"
+import type { HeldFile, ShownVoice } from "../../../lib/plan"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
 import {
@@ -37,6 +37,8 @@ const props = withDefaults(defineProps<{
   mode?: "cards" | "tiles"
   opened?: number | null
   queues?: Queues
+  /** What the file of the opened episode holds now: the fact its queues are read against. */
+  held?: HeldFile | null
   busy?: boolean
   /** The compilations of the season (stage 12): their outline behind the cards and their letters on them. */
   compilations?: CompilationView[]
@@ -204,7 +206,7 @@ function step(by: number): void {
           >{{ item.view.episode }}</button>
           <EpisodeDetail
             v-if="opened?.view.episode === item.view.episode" :view="item.view" :cells="item.cells" :status="item.status"
-            :marks="marks" :file="item.file" :queues="queues" :busy="busy"
+            :marks="marks" :file="item.file" :queues="queues" :held="held" :busy="busy"
             @close="emit('open', null)" @step="step" @switch="emit('switch-episode', item.view.episode, $event)"
             @refetch="emit('refetch', item.view.episode, $event)" @retry="emit('retry', item.view.episode, $event)"
             @retry-failed="emit('retry-failed', item.view.episode)" @redo="emit('redo', item.view.episode, $event)"

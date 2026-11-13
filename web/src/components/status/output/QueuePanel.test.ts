@@ -25,3 +25,22 @@ describe("the queue of the markup reference (stage 14)", () => {
     expect(w.emitted("reset")).toHaveLength(1)
   })
 })
+
+describe("what the file holds (the fact) against the order of the queue (the wish)", () => {
+  it("marks the variant the file holds whatever its place in the order, beside the mark of the first one taken", () => {
+    const w = mount(QueuePanel, { props: { queue: "voice", level: "episode", marks: {}, held: { source_id: 55, player: "kodik" },
+      view: { order_level: "default", rows: [row("cvh"), row("kodik")] } } })
+    const rows = w.findAll(".variant-row")
+    expect(rows[0].find(".pill").text()).toBe(t("output.queue.taken"))
+    expect(rows[0].find(".queue-held").exists()).toBe(false)
+    expect(rows[1].find(".queue-held").text()).toBe(t("output.queue.held"))
+  })
+
+  it("marks nothing for an episode with no file or a file that does not hold the voice-over", () => {
+    for (const held of [null, undefined, { source_id: 55, player: "vk" }]) {
+      const w = mount(QueuePanel, { props: { queue: "voice", level: "episode", marks: {}, held,
+        view: { order_level: "default", rows: [row("cvh"), row("kodik")] } } })
+      expect(w.find(".queue-held").exists()).toBe(false)
+    }
+  })
+})

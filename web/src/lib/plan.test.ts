@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fileOf, planCuts, planDubs, planFiles, seasonVoiceOrders, trackOf } from "./plan"
+import { fileOf, heldFile, planCuts, planDubs, planFiles, seasonVoiceOrders, trackOf } from "./plan"
 import { liveFrom } from "./live"
 import { asset, assetTrack, goal, goalTrack, goalVideo, planView, rowRef } from "./plan.fixtures"
 
@@ -260,5 +260,31 @@ describe("the work that failed for the moment in the last sync", () => {
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "a.mkv"), [goalTrack("B", "realign", rowRef(8, "b"))])] })
     expect(planDubs(view, {}, liveFrom([["dub", "1:1:B", "running"]])).map((dub) => dub.state)).toEqual(["running"])
     expect(planDubs(view).map((dub) => dub.state)).toEqual(["planned"])
+  })
+})
+
+describe("heldFile", () => {
+  it("is what the file of the episode holds — its video and each voice-over by source and player — and nothing for an episode with no file", () => {
+    const view = planView({
+      assets: [asset("S01E01.mp4", rowRef(7, "r1"), [assetTrack("ПВА ШОУ", rowRef(90, "kodik:1"), true, { player: "kodik" })], null, [1, 1],
+        { player: "line:bfzym3u8", group: "Китайский" })],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "S01E01.mp4"),
+        [goalTrack("ПВА ШОУ", "download", rowRef(90, "cvh:1"), { player: "cvh" })])],
+    })
+    // The plan wants the voice-over from cvh; the file holds the one of kodik, and the own sound of the video is its group's.
+    expect(heldFile(view, 1, 1)).toEqual({
+      video: { source_id: 7, player: "line:bfzym3u8" },
+      tracks: { "Китайский": { source_id: 7, player: "line:bfzym3u8" }, "ПВА ШОУ": { source_id: 90, player: "kodik" } },
+    })
+    expect(heldFile(view, 1, 2)).toBeNull()
+    expect(heldFile(undefined, 1, 1)).toBeNull()
+  })
+
+  it("takes the compilation of a cut file as the source of its video, and passes over a file that is switched off", () => {
+    const view = planView({ assets: [
+      asset("S01E02.mp4", rowRef(7, "pic2"), [], rowRef(4, "comp"), [1, 2], { player: "vk" }),
+      { ...asset("S01E03.mp4", rowRef(7, "r3"), [], null, [1, 3]), off: true }] })
+    expect(heldFile(view, 1, 2)?.video).toEqual({ source_id: 4, player: "vk" })
+    expect(heldFile(view, 1, 3)).toBeNull()
   })
 })
