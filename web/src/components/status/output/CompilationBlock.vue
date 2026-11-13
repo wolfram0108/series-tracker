@@ -42,6 +42,7 @@ const emit = defineEmits<{
   (e: "switch", off: boolean): void
   (e: "member", episode: number, key: string): void
   (e: "retry", episode: number): void
+  (e: "retry-failed", episode: number): void
   (e: "queue-order", episode: number, queue: QueueName, group: string | null, rows: QueueRow[]): void
   (e: "queue-allow", episode: number, queue: QueueName, row: QueueRow, allowed: boolean): void
   (e: "queue-reset", episode: number, queue: QueueName, group: string | null): void
@@ -166,6 +167,7 @@ const rows = computed<CompilationRow[]>(() => {
             :marks="marks" :queues="queues" :busy="busy" :compilations="rows"
             @close="emit('open', null)" @step="step" @switch="emit('member', item.view.episode, $event ? '' : head.key)"
             @member="emit('member', item.view.episode, $event)" @retry-cut="emit('retry', item.view.episode)"
+            @retry-failed="emit('retry-failed', item.view.episode)"
             @order="(queue, group, list) => emit('queue-order', item.view.episode, queue, group, list)"
             @allow="(queue, row, allowed) => emit('queue-allow', item.view.episode, queue, row, allowed)"
             @reset="(queue, group) => emit('queue-reset', item.view.episode, queue, group)"

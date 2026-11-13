@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
+import Button from "primevue/button"
 import { t } from "../../../i18n"
 import type { Queues } from "../../../composables/outputCalls"
 import type { EpisodeStatus, EpisodeView, QueueName, QueueRow, SourceMark as Mark, TrackCell } from "../../../lib/output"
@@ -37,6 +38,7 @@ const emit = defineEmits<{
   (e: "reset", queue: QueueName, group: string | null): void
   (e: "member", key: string): void
   (e: "retry-cut"): void
+  (e: "retry-failed"): void
 }>()
 
 const tab = ref<string>(props.compilations ? "compilations" : "tracks")
@@ -52,6 +54,8 @@ const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) =
       <span class="pill" :data-state="EPISODE_STATES[status]">{{ stateLabel(EPISODE_STATES[status]) }}</span>
       <span v-if="file" class="detail-file">{{ file }}</span>
       <span class="detail-grow" />
+      <Button class="do-retry-failed" data-lever :label="t('output.episode.retryFailed')" icon="pi pi-replay" size="small"
+              severity="secondary" :disabled="busy" @click="emit('retry-failed')" />
       <button type="button" class="icon-btn" :aria-label="t('output.episode.prev')" @click="emit('step', -1)"><i class="pi pi-chevron-left" /></button>
       <button type="button" class="icon-btn" :aria-label="t('output.episode.next')" @click="emit('step', 1)"><i class="pi pi-chevron-right" /></button>
       <PowerSwitch

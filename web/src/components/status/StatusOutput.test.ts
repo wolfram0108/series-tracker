@@ -197,6 +197,23 @@ describe("StatusOutput", () => {
     expect(calls.deleteFromPlan).not.toHaveBeenCalled()
   })
 
+  it("resets every failed attempt of the episode opened, as the button of the series does for all of them", async () => {
+    givePlan(planView({
+      assets: [fileOfEpisodeOne()],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"),
+        [goalTrack("AniStar", "download", rowRef(8, "k1"), { player: "kodik" })])],
+      failures: [{ kind: "download", row: rowRef(7, "r1-1"), video: null, voice: null, covered: false }],
+    }))
+    const w = mountOutput()
+    await flushPromises()
+    await w.findAll(".episode-card")[0].trigger("dblclick")
+    await flushPromises()
+    await w.find(".episode-detail .do-retry-failed").trigger("click")
+    await flushPromises()
+    expect(calls.resetFailures).toHaveBeenCalledWith(1, { season: 1, episode: 1 })
+    expect(calls.syncSeries).not.toHaveBeenCalled()
+  })
+
   it("takes a placed voice-over out of its file by the action of the track", async () => {
     givePlan(planView({
       assets: [fileOfEpisodeOne([assetTrack("AniStar", rowRef(8, "k1"), true, { player: "kodik" })])],

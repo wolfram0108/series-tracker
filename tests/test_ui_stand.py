@@ -118,6 +118,31 @@ async def test_a_download_that_failed_is_shown_and_tried_again_after_the_failure
     await ui.check(series_id)
 
 
+async def test_the_reset_of_an_episode_forgets_every_failed_attempt_of_it_and_only_of_it(ui):
+    """The button in the head of an opened episode resets what failed for that episode — as the button of the series does
+    for all of them; the failed attempts of the other episodes stay, and so does what the plan chose because of them."""
+    series_id = await series_in_browser(ui, (1, 2))
+    ui.site.gone("dub", 1)
+    ui.site.gone("dub", 2)
+    page = ui.page
+    await ui.open_output(SERIES)
+    await ui.press_sync(series_id)
+    await expect(page.locator(".episode-card[data-state='failed']")).to_have_count(2)
+    await expect(page.locator(".plan-failures")).to_have_text(text("output.plan.failures", count=2))
+    await page.locator(".episode-card[data-episode='1']").dblclick()
+    button = page.locator(".episode-detail .do-retry-failed")
+    await expect(button).to_have_text(text("output.episode.retryFailed"))
+    await ui.shot("27-reset-of-an-episode")
+    await button.click()
+    await expect(page.locator(".plan-failures")).to_have_text(text("output.plan.failures", count=1))
+    await expect(page.locator(".episode-card[data-episode='2']")).to_have_attribute("data-state", "failed")
+    ui.site.gone("dub", 1, False)
+    await ui.press_sync(series_id)
+    await expect(page.locator(".episode-card[data-episode='1']")).to_have_attribute("data-state", "done")
+    await expect(page.locator(".episode-card[data-episode='2']")).to_have_attribute("data-state", "failed")
+    await ui.check(series_id)
+
+
 async def test_a_download_rebuilt_on_the_next_source_is_one_card_in_the_agents_and_stays_after_the_sync(ui):
     """The voice-over is at two sources and the file of the first is gone: the plan takes the second. The window of agents
     shows one card of the need — the attempt of the first variant, «План перестроен на» the second, its attempt done —

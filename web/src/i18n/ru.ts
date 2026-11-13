@@ -477,6 +477,7 @@ export const ru = {
   "output.episode.prev": "Предыдущая серия",
   "output.episode.next": "Следующая серия",
   "output.episode.close": "Закрыть",
+  "output.episode.retryFailed": "Сбросить неудачные попытки серии",
   "output.episode.card": "Серия {n}: {status}",
   "reason.refetch_no_file": "У серии {episode} сезона {season} нет скачанного референса",
   "reason.refetch_publication_owed": "Публикация файлов сериала не завершена: она закончится при синхронизации",

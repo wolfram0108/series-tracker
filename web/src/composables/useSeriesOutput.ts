@@ -145,6 +145,11 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   // A change of the series like a lever, not a pass: it starts no sync.
   const retryFailed = (): Promise<string | null> => act(() => resetFailures(seriesId), busy)
 
+  // The failed attempts of one episode, all of them — its reference, its voice-overs, its cuts — as the button of the series
+  // resets those of the whole series; the failures of the other episodes stay.
+  const retryEpisode = (season: number, episode: number): Promise<string | null> =>
+    act(() => resetFailures(seriesId, { season, episode }), busy)
+
   // The order of the voice-overs of a season (the tracks of its containers); the new order comes back as an event.
   const order = (season: number, labels: string[]): Promise<string | null> =>
     act(() => setVoiceOrder(seriesId, { season, labels }), busy)
@@ -268,6 +273,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
 
   return { composition, references, loading, failure, busy, answer, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
-    sync, retryFailed, voiceOrders, order, rename, marks, loadQueues, queuesOf, setOrder, setAllowed, setTaken, resetOrder,
+    sync, retryFailed, retryEpisode, voiceOrders, order, rename, marks, loadQueues, queuesOf, setOrder, setAllowed, setTaken, resetOrder,
     retry, redo, refetch, compilations, cuts, member, takeCompilation, retryCut, labels }
 }

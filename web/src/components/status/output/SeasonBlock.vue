@@ -55,6 +55,7 @@ const emit = defineEmits<{
   (e: "voice-title", label: string, title: string): void
   (e: "refetch", episode: number, part: number | null): void
   (e: "retry", episode: number, group: string): void
+  (e: "retry-failed", episode: number): void
   (e: "redo", episode: number, group: string): void
   (e: "queue-order", episode: number, queue: QueueName, group: string | null, rows: QueueRow[]): void
   (e: "queue-allow", episode: number, queue: QueueName, row: QueueRow, allowed: boolean): void
@@ -197,7 +198,7 @@ function step(by: number): void {
             :marks="marks" :file="item.file" :queues="queues" :busy="busy"
             @close="emit('open', null)" @step="step" @switch="emit('switch-episode', item.view.episode, $event)"
             @refetch="emit('refetch', item.view.episode, $event)" @retry="emit('retry', item.view.episode, $event)"
-            @redo="emit('redo', item.view.episode, $event)"
+            @retry-failed="emit('retry-failed', item.view.episode)" @redo="emit('redo', item.view.episode, $event)"
             @order="(queue, group, rows) => emit('queue-order', item.view.episode, queue, group, rows)"
             @allow="(queue, row, allowed) => emit('queue-allow', item.view.episode, queue, row, allowed)"
             @take="(group, taken) => emit('queue-take', item.view.episode, group, taken)"
