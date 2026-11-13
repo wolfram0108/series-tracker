@@ -11,7 +11,7 @@ export interface SeriesRead extends PageProgress {
   url: string
 }
 
-/** The reads the scans wait for, as the core reports them (series_scan_progress), by series and source. A packet with
+/** The reads of the pages of the sources of a series, whoever asked for them, as the core reports them (series_read_progress), by series and source. A packet with
  *  `active` false ends the read of its source; nothing is cleared on a clock. */
 export const useSeriesReadsStore = defineStore("seriesReads", () => {
   const { all: reads, put, drop, clear } = keyed<Record<number, SeriesRead>>()
@@ -35,6 +35,11 @@ export const useSeriesReadsStore = defineStore("seriesReads", () => {
     return Object.values(reads[seriesId] ?? {})
   }
 
+  /** Every read under way, with the series it is of: what the section of the agents lists. */
+  function all(): (SeriesRead & { seriesId: number })[] {
+    return Object.entries(reads).flatMap(([seriesId, bySource]) => Object.values(bySource).map((read) => ({ ...read, seriesId: Number(seriesId) })))
+  }
+
   /** The read furthest from its end: what the card of the series shows while the scan waits. */
   function lead(seriesId: number): SeriesRead | null {
     const all = forSeries(seriesId)
@@ -47,5 +52,5 @@ export const useSeriesReadsStore = defineStore("seriesReads", () => {
     clear()
   }
 
-  return { reads, apply, forSeries, lead, reset }
+  return { reads, apply, forSeries, all, lead, reset }
 })

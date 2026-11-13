@@ -42,14 +42,6 @@ export function formatDuration(seconds: number): string {
     : t("agents.conform.duration.sec", { sec })
 }
 
-export function footText(task: ConformTask): string {
-  if (isActive(task.status) && task.status !== "running" && task.created_at) {
-    const time = new Date(task.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
-    return t("agents.conform.added", { time })
-  }
-  return t("agents.conform.elapsed", { time: formatDuration(task.elapsed_s || 0) })
-}
-
 export type DubState = "result" | "running" | "waiting" | "cancelled"
 export interface DubRow {
   file: string

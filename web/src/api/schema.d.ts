@@ -885,6 +885,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/slicing/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Slicing Queue
+         * @description The cards of the slicing (core/contracts/slicing.py): a task of the queue with the compilation and its episodes.
+         */
+        get: operations["slicing_queue_api_slicing_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pack/queue": {
         parameters: {
             query?: never;
@@ -3856,6 +3876,55 @@ export interface components {
             /** Url */
             url: string;
         };
+        /** SlicingCard */
+        SlicingCard: {
+            /** Id */
+            id: number;
+            /** Series Id */
+            series_id: number;
+            /** Unique Id */
+            unique_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "slicing" | "error";
+            /**
+             * File
+             * @default
+             */
+            file: string;
+            /** Season */
+            season?: number | null;
+            /** Episode Start */
+            episode_start?: number | null;
+            /** Episode End */
+            episode_end?: number | null;
+            /** Episodes */
+            episodes?: components["schemas"]["SlicingEpisode"][];
+            /** Error */
+            error?: string | null;
+            /**
+             * Created At
+             * @default
+             */
+            created_at: string;
+        };
+        /**
+         * SlicingEpisode
+         * @description An episode of the compilation: `done` when its file is cut, `active` the one being cut, `failed` the one the cut
+         *     stopped on.
+         */
+        SlicingEpisode: {
+            /** Number */
+            number: number;
+            /**
+             * State
+             * @default pending
+             * @enum {string}
+             */
+            state: "pending" | "active" | "done" | "failed";
+        };
         /**
          * SourceAdd
          * @description A source added to a series; without `position` it goes to the end of the list.
@@ -4294,8 +4363,9 @@ export interface components {
         };
         /**
          * SeriesReadProgress
-         * @description The event `scan.series.progress`: how far the read of a page is that the scan of a series waits for. `active`
-         *     false says the wait for that source is over (read, failed or given up); the other fields are then those it last had.
+         * @description The event `composition.series.reading`: how far the read of a page of a source of a series is, whoever asked for it
+         *     (a sync, the user, the term). `active` false says the read is over (read or failed); the other fields are then those it
+         *     last had.
          */
         SeriesReadProgress: {
             /** Series Id */
@@ -4333,7 +4403,7 @@ export interface components {
         /** StreamEvent */
         StreamEvent: {
             /** @enum {string} */
-            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_scan_progress" | "conform_queue_update" | "pack_queue_update" | "pack_journal_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
+            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_read_progress" | "conform_queue_update" | "pack_queue_update" | "pack_journal_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
             data: unknown;
         };
     };
@@ -6753,6 +6823,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    slicing_queue_api_slicing_queue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlicingCard"][];
                 };
             };
         };

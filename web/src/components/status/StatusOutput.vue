@@ -63,7 +63,7 @@ const PASS: Record<Filter, (view: EpisodeView) => boolean> = {
   deviations: isDeviation,
   errors: (view) => statusOf(view) === "error",
   partial: (view) => statusOf(view) === "partial",
-  working: (view) => ["down", "align"].includes(statusOf(view)),
+  working: (view) => ["queued", "down", "align", "pack"].includes(statusOf(view)),
   off: (view) => statusOf(view) === "off",
 }
 const all = computed(() => output.seasons.value.flatMap((season) => season.episodes))

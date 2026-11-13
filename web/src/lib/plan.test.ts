@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { fileOf, planCuts, planDubs, planFiles, seasonVoiceOrders, trackOf } from "./plan"
+import { liveFrom } from "./live"
 import { asset, assetTrack, goal, goalTrack, goalVideo, planView, rowRef } from "./plan.fixtures"
 
 describe("planDubs", () => {
@@ -26,11 +27,13 @@ describe("planDubs", () => {
     }])
   })
 
-  it("shows a download as downloading and an alignment as running while the sync runs, and as planned when it does not", () => {
-    const tracks = [goalTrack("A", "download", rowRef(8, "a")), goalTrack("B", "realign", rowRef(8, "b"))]
+  it("shows a voice-over as its work is at while the sync runs: only planned where no work names it, and when the sync does not run", () => {
+    const tracks = [goalTrack("A", "download", rowRef(8, "a")), goalTrack("B", "realign", rowRef(8, "b")), goalTrack("C", "download", rowRef(8, "c"))]
     const view = planView({ episodes: [goal([1, 1], goalVideo("download", rowRef(7, "r1"), "S01E01.mp4"), tracks)] })
-    expect(planDubs({ ...view, running: true }).map((dub) => dub.state)).toEqual(["downloading", "running"])
-    expect(planDubs(view).map((dub) => dub.state)).toEqual(["planned", "planned"])
+    const live = liveFrom([["dub", "1:1:A", "downloading"], ["dub", "1:1:B", "running"]])
+    expect(planDubs({ ...view, running: true }, {}, live).map((dub) => dub.state)).toEqual(["downloading", "running", "planned"])
+    expect(planDubs({ ...view, running: true }).map((dub) => dub.state)).toEqual(["planned", "planned", "planned"])
+    expect(planDubs(view, {}, live).map((dub) => dub.state)).toEqual(["planned", "planned", "planned"])
   })
 
   it("makes a voice-over an error when its download or its alignment failed for its row, and not for another row", () => {
@@ -108,7 +111,9 @@ describe("planFiles", () => {
       ],
     })
     expect(planFiles(view).map((file) => file.status)).toEqual(["error", "pending", "pending"])
-    expect(planFiles({ ...view, failures: [], running: true }).map((file) => file.status)).toEqual(["downloading", "downloading", "downloading"])
+    const live = liveFrom([["video", "1:1", "downloading"], ["video", "1:2", "queued"]])
+    expect(planFiles({ ...view, failures: [], running: true }, undefined, live).map((file) => file.status)).toEqual(["downloading", "queued", "pending"])
+    expect(planFiles({ ...view, failures: [], running: true }).map((file) => file.status)).toEqual(["pending", "pending", "pending"])
   })
 
   it("carries the cut of a held file, and the cut the next build puts in as pending", () => {
@@ -250,9 +255,10 @@ describe("the work that failed for the moment in the last sync", () => {
     expect(planFiles(view).map((file) => file.status)).toEqual(["completed", "error"])
   })
 
-  it("is work under way again while a sync runs", () => {
+  it("is work under way again while a sync runs, as its work says", () => {
     const view = planView({ running: true, problems: [{ slot: [1, 1], kind: "align", voice: "B", reason: "x" }],
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "a.mkv"), [goalTrack("B", "realign", rowRef(8, "b"))])] })
-    expect(planDubs(view).map((dub) => dub.state)).toEqual(["running"])
+    expect(planDubs(view, {}, liveFrom([["dub", "1:1:B", "running"]])).map((dub) => dub.state)).toEqual(["running"])
+    expect(planDubs(view).map((dub) => dub.state)).toEqual(["planned"])
   })
 })

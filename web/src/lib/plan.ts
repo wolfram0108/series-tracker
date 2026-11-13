@@ -1,5 +1,6 @@
 import type { components } from "../api/schema"
 import type { MediaFile } from "../composables/outputCalls"
+import { NO_LIVE, dubKey, slotKey, type Live } from "./live"
 import { spansOf } from "./output"
 
 type Schemas = components["schemas"]
@@ -127,10 +128,11 @@ function failed(view: PlannerView, kind: string, row: PlanRowRef): boolean {
 export type CompilationKey = (row: PlanRowRef) => string
 const ownKey: CompilationKey = (row) => JSON.stringify(row)
 
-/** The voice-overs of every episode: a track the file holds is done; one the plan gets is planned, or under way while
- *  the sync runs; one whose download or alignment failed is an error until the failures are reset. A voice-over of the
- *  order of the season that the plan has no way to get for the episode is absent: the episode is put together in part. */
-export function planDubs(view: PlannerView | undefined, orders: Record<number, readonly string[]> = {}): VoiceDub[] {
+/** The voice-overs of every episode: a track the file holds is done; one the plan gets is planned, or while the sync runs what
+ *  its work is at (`live`: queued, downloading, aligning); one whose download or alignment failed is an error until the
+ *  failures are reset. A voice-over of the order of the season that the plan has no way to get for the episode is absent: the
+ *  episode is put together in part. */
+export function planDubs(view: PlannerView | undefined, orders: Record<number, readonly string[]> = {}, live: Live = NO_LIVE): VoiceDub[] {
   if (!view) return []
   const onlineOf = new Map<string, boolean | null>()
   for (const asset of view.assets ?? []) {
@@ -144,8 +146,8 @@ export function planDubs(view: PlannerView | undefined, orders: Record<number, r
       const problem = track.kind === "reuse" || view.running ? null : problemOf(view, goal.slot, { voice: track.voice })
       if (track.kind === "reuse") state = "done"
       else if (failed(view, "download", track.row) || failed(view, "align", track.row) || problem) state = "error"
-      // The sound of the timeline of a cut comes with its download and needs no alignment.
-      else state = view.running ? (track.kind === "download" || track.kind === "timeline" ? "downloading" : "running") : "planned"
+      // A track no work names yet is only planned, whatever the sync is doing meanwhile.
+      else state = view.running ? live.dubs.get(dubKey(season, episode, track.voice)) ?? "planned" : "planned"
       dubs.push({
         season, episode, part: partOf(goal.slot), voice_key: track.voice, voice_label: track.voice, state,
         source_id: track.row.source_id, player: track.player || null,
@@ -170,14 +172,14 @@ export function planDubs(view: PlannerView | undefined, orders: Record<number, r
 }
 
 /** The video of every episode as a file of the plan: ready when the file holds it, else what its work is at. */
-export function planFiles(view: PlannerView | undefined, keyOf: CompilationKey = ownKey): MediaFile[] {
+export function planFiles(view: PlannerView | undefined, keyOf: CompilationKey = ownKey, live: Live = NO_LIVE): MediaFile[] {
   if (!view) return []
   return (view.episodes ?? []).map((goal) => {
     const row = goal.video.row
     let status = "pending"
     if (goal.video.kind === "asset") status = "completed"
     else if (failed(view, "download", row) || (!view.running && problemOf(view, goal.slot, { video: true }))) status = "error"
-    else if (view.running) status = "downloading"
+    else if (view.running) status = live.videos.get(slotKey(goal.slot[0], goal.slot[1])) ?? "pending"
     const held = (view.assets ?? []).find((asset) => asset.name === goal.video.file)
     const cut = held?.video.cut_of ? { key: keyOf(held.video.cut_of) } : null
     const pending = goal.video.kind === "cut" && goal.video.cut_of ? { key: keyOf(goal.video.cut_of) } : null

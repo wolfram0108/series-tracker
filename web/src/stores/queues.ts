@@ -15,7 +15,7 @@ export interface ConformResult {
   cuts: number | null; suspect: boolean; warnings: string[]; critical: string[]; error: string | null
 }
 export interface ConformTask {
-  id: string; label: string; key: string | null; status: string; progress: number; stage: string; stage_pct: number
+  id: string; label: string; key: string | null; series_id: number | null; status: string; progress: number; stage: string; stage_pct: number
   detail: string; dub_index: number; dub_total: number; cur_dub: string; dubs: string[]; elapsed_s: number
   created_at: string | null; error: string | null; results: ConformResult[]
 }
@@ -23,6 +23,9 @@ export interface ConformPicture {
   daemon: { up: boolean; error?: string | null; version?: string; device?: string; gpu_name?: string }
   tasks: ConformTask[]
 }
+
+/** A task of the slicing of a compilation, with its episodes (core/contracts/slicing.py). */
+export type SlicingCard = components["schemas"]["SlicingCard"]
 
 /** A container a sync builds (pack_queue_update, core/contracts/packing.py). */
 export type PackCard = components["schemas"]["PackCard"]
@@ -36,7 +39,7 @@ export const useQueuesStore = defineStore("queues", () => {
   const agent = shallowRef<QueueTask[]>([]) // agent_queue_update (у задач есть hash)
   const torrents = shallowRef<QueueTask[]>([]) // torrent_progress_update (мониторинг)
   const downloads = shallowRef<DownloadCard[]>([]) // download_queue_update: the cards of the downloads (core/contracts/downloads.py)
-  const slicing = shallowRef<QueueTask[]>([]) // slicing_queue_update (ffmpeg)
+  const slicing = shallowRef<SlicingCard[]>([]) // slicing_queue_update: the cards of the slicing (core/contracts/slicing.py)
   const conform = shallowRef<ConformPicture | null>(null) // conform_queue_update (alignment daemon)
   const pack = shallowRef<PackCard[]>([]) // pack_queue_update (the containers of the episodes)
   const journals = shallowRef<PackJournal[]>([]) // pack_journal_update (the journals being carried out)
@@ -44,7 +47,7 @@ export const useQueuesStore = defineStore("queues", () => {
   const setAgent = (t: QueueTask[]) => (agent.value = t)
   const setTorrents = (t: QueueTask[]) => (torrents.value = t)
   const setDownloads = (t: DownloadCard[]) => (downloads.value = t)
-  const setSlicing = (t: QueueTask[]) => (slicing.value = t)
+  const setSlicing = (t: SlicingCard[]) => (slicing.value = t)
   const setConform = (p: ConformPicture) => (conform.value = p)
   const setPack = (t: PackCard[]) => (pack.value = t)
   const setJournals = (t: PackJournal[]) => (journals.value = t)

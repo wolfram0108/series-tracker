@@ -10,13 +10,14 @@ vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect()
 Element.prototype.scrollIntoView = () => {}  // the active tab is brought into view; jsdom has no layout
 
 import StatusModal from "./StatusModal.vue"
+import AgentsPanel from "./settings/AgentsPanel.vue"
 import { t } from "../i18n"
 
 let mounted: VueWrapper | null = null
 beforeEach(() => setActivePinia(createPinia()))
 afterEach(() => mounted?.unmount())
 
-const STUBS = ["StatusProperties", "StatusComposition", "StatusOutput", "StatusSlicing", "StatusHistory", "SettingsParser"]
+const STUBS = ["StatusProperties", "StatusComposition", "StatusOutput", "StatusSlicing", "StatusHistory", "SettingsParser", "AgentsPanel"]
 
 describe("the status window", () => {
   it.each(["video", "torrent"])("of a %s series has the tab of the VK filters, the configurator of the profiles", async (kind) => {
@@ -63,5 +64,21 @@ describe("the status window", () => {
     expect((rules as HTMLElement).style.display).toBe("none")
     await open(t("rules.tab"))
     expect((rules as HTMLElement).style.display).not.toBe("none")
+  })
+
+  it("has the tab of the agents of this series, built when it is first shown and kept", async () => {
+    client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", kind: "video" } }))
+    mounted = mount(StatusModal, { props: { seriesId: 40 }, global: { stubs: Object.fromEntries(STUBS.map((name) => [name, true])) } })
+    await flushPromises()
+    expect(mounted.find("agents-panel-stub").exists()).toBe(false)
+    const open = async (title: string) => {
+      await mounted!.findAll(".st-tab").find((each) => each.attributes("title") === title)!.trigger("click")
+    }
+    await open(t("status.tab.agents"))
+    const panel = mounted.find("agents-panel-stub")
+    expect(panel.exists()).toBe(true)
+    expect(mounted.findComponent(AgentsPanel).props("seriesId")).toBe(40)
+    await open("История")
+    expect(mounted.find("agents-panel-stub").element).toBe(panel.element)
   })
 })

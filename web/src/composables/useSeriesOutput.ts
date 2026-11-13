@@ -8,6 +8,9 @@ import { nextAnswer, type ChangeAnswer } from "../lib/changeAnswer"
 import { sharing } from "../lib/sharing"
 import { reasonText } from "../lib/reason"
 import { useCompositionStore } from "../stores/composition"
+import { useQueuesStore } from "../stores/queues"
+import { useVoicesStore } from "../stores/voices"
+import { liveEntries, liveFrom } from "../lib/live"
 import { useSeriesStore } from "../stores/series"
 import { usePlanStore } from "../stores/plan"
 import { useLayoutStore } from "../stores/layout"
@@ -31,11 +34,17 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const seriesStore = useSeriesStore()
   // The layout is the window's one copy (stores/layout.ts): the sources of the window read the same one.
   const layouts = useLayoutStore()
+  const queues = useQueuesStore()
+  const voices = useVoicesStore()
+  // What the agents do for the episodes of the series now (lib/live.ts). The queues push the figures of the work with every
+  // packet; the entries are kept as text, so the episodes are counted again only when a state of some work changed.
+  const liveNow = computed(() => JSON.stringify(liveEntries(seriesId, queues.downloads, queues.conform?.tasks ?? [], queues.pack, voices.dubName)))
+  const live = computed(() => liveFrom(JSON.parse(liveNow.value)))
   const composition = computed<Composition | null>(() => layouts.forSeries(seriesId) ?? null)
   // The reference of every episode, and why, is the plan's: it comes with every packet of the plan of the series.
   const references = computed<Reference[]>(() => plan.forSeries(seriesId)?.references ?? [])
   // The files of the plan: the status of the video of a reference is read from them; the plan comes with every push.
-  const files = sharing<MediaFile[]>(() => planFiles(plan.forSeries(seriesId), compilationKey.value))
+  const files = sharing<MediaFile[]>(() => planFiles(plan.forSeries(seriesId), compilationKey.value, live.value))
   // The compilations of the layout by their row: the plan names a compilation by its row, the window by its key.
   const compilationKey = computed<CompilationKey>(() => {
     const keys = new Map((composition.value?.compilations ?? []).map((each) =>
@@ -72,10 +81,11 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     composition.value?.rows ?? [],
     references.value,
     composition.value?.settings ?? [],
-    planDubs(plan.forSeries(seriesId), seasonVoices.value),
+    planDubs(plan.forSeries(seriesId), seasonVoices.value, live.value),
     composition.value?.availability ?? {},
     files.value,
     labels.value,
+    live.value.packs,
   ))
   const levels = computed(() => composition.value?.levels ?? [])
   const sources = computed(() => composition.value?.sources ?? [])

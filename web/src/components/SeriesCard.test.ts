@@ -17,7 +17,7 @@ const series = { id: 40, name: "Владыка", site: "x", statuses: ["scanning
 describe("SeriesCard", () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it("has a pill with the read of the site its scan waits for, the one furthest from its end, until the wait ends", async () => {
+  it("has a pill with the read of the pages of its sources, whoever asked for it: the one furthest from its end, until the read ends", async () => {
     const reads = useSeriesReadsStore()
     const w = mount(SeriesCard, { props: { series } })
     const pill = () => w.findAll(".status-pill").map((each) => each.text()).find((text) => text.includes(" из "))

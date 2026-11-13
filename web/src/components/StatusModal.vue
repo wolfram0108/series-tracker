@@ -8,6 +8,7 @@ import StatusOutput from "./status/StatusOutput.vue"
 import StatusSlicing from "./status/StatusSlicing.vue"
 import StatusHistory from "./status/StatusHistory.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
+import AgentsPanel from "./settings/AgentsPanel.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
 import { fetchSources } from "../composables/sourceCalls"
@@ -35,7 +36,7 @@ const saveLabel = computed(() =>
   saving.value ? t("common.saving") : syncing.value ? t("status.syncing") : t("common.save"))
 const isVideo = computed(() => series.value?.kind === "video")
 
-type TabKey = "properties" | "composition" | "slicing" | "parser" | "history"
+type TabKey = "properties" | "composition" | "slicing" | "parser" | "agents" | "history"
 const tab = ref<TabKey>("properties")
 // A tab is built when it is first shown and kept from then on: a window opened on one tab neither builds the others
 // (the output of a long series is thousands of elements) nor asks the core for what they show.
@@ -45,6 +46,7 @@ const tabs = computed(() => {
   list.push({ value: "composition", label: isVideo.value ? t("output.tab") : t("status.tab.composition"), icon: "pi-sitemap" })
   if (isVideo.value) list.push({ value: "slicing", label: t("status.tab.slicing"), icon: "pi-images" })
   list.push({ value: "parser", label: t("rules.tab"), icon: "pi-filter" })
+  list.push({ value: "agents", label: t("status.tab.agents"), icon: "pi-server" })
   list.push({ value: "history", label: t("status.tab.history"), icon: "pi-history" })
   return list
 })
@@ -136,6 +138,7 @@ onMounted(load)
         v-show="tab === 'parser'"
         :load-sources="isVideo ? sourceAddresses : undefined"
       />
+      <AgentsPanel v-if="built.has('agents')" v-show="tab === 'agents'" :series-id="seriesId" />
       <StatusHistory v-if="built.has('history')" v-show="tab === 'history'" :series-id="seriesId" :kind="series.kind ?? 'torrent'" />
     </template>
 

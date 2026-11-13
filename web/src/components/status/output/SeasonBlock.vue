@@ -81,7 +81,7 @@ const off = computed(() => allOff(props.episodes))
 // The state of the videos (the files of the references) and of the voice-overs of the season, counted as the cards are.
 const meters = computed(() => {
   const video = { loaded: 0, pending: 0, error: 0 }
-  const voices = { done: 0, down: 0, align: 0, wait: 0, absent: 0, off: 0, error: 0 }
+  const voices = { done: 0, down: 0, align: 0, queued: 0, wait: 0, absent: 0, off: 0, error: 0 }
   for (const item of items.value) {
     for (const cell of item.cells) {
       if (cell.isReference) {

@@ -366,7 +366,15 @@ describe("the strip and the state of an episode", () => {
     const status = (each: EpisodeView, order: string[]) => episodeStatus(each, trackCells(each, order))
     expect(status(view("completed", dubOf("B", "done")), ["A", "B"])).toBe("ready")
     expect(status(view("downloading", dubOf("B", "done")), ["A", "B"])).toBe("down")
-    expect(status(view("completed", dubOf("B", "align_queued")), ["A", "B"])).toBe("align")
+    expect(status(view("completed", dubOf("B", "running")), ["A", "B"])).toBe("align")
+    expect(status(view("completed", dubOf("B", "align_queued")), ["A", "B"])).toBe("queued")
+    expect(status(view("completed", dubOf("B", "download_queued")), ["A", "B"])).toBe("queued")
+    // The latest stage under way colours the episode: a container beats an alignment, an alignment a download, a download a wait.
+    expect(status(view("downloading", dubOf("B", "running")), ["A", "B"])).toBe("align")
+    expect(status(view("downloading", dubOf("B", "align_queued")), ["A", "B"])).toBe("down")
+    expect(status({ ...view("completed", dubOf("B", "running")), pack: "pack" }, ["A", "B"])).toBe("pack")
+    expect(status({ ...view("completed", dubOf("B", "done")), pack: "queued" }, ["A", "B"])).toBe("queued")
+    expect(status({ ...view("completed", dubOf("B", "done")), pack: "failed" }, ["A", "B"])).toBe("error")
     expect(status(view("pending", dubOf("B", "planned")), ["A", "B"])).toBe("wait")
     expect(status(view("completed", dubOf("B", "error")), ["A", "B"])).toBe("error")
     // A voice-over no source has is no error: the episode is put together in part.

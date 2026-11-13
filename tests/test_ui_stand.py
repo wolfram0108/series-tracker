@@ -2,7 +2,6 @@
 player and alignment service are models."""
 import asyncio
 import os
-import re
 
 import pytest
 from playwright.async_api import expect
@@ -135,21 +134,50 @@ async def test_a_download_rebuilt_on_the_next_source_is_one_card_in_the_agents_a
     await ui.open_output(SERIES)
     await ui.press_sync(series_id)
     await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
+    downloads = page.locator(".work-card[data-kind='download']")
+    await ui.tab(text("status.tab.agents"))  # the window of the series holds the same section, set to its series
+    await expect(downloads).to_have_count(1)
     await ui.close_settings()
     await ui.settings("Агенты")
-    card = page.locator(".download-card", has=page.locator(".work-replan"))
+    card = downloads.filter(has=page.locator(".work-line-title", has_text=text("download.replan")))
     await expect(card).to_have_count(1)
-    await expect(card).to_have_class(re.compile(r"\bis-done\b"))
+    await expect(card).to_have_attribute("data-state", "done")
     lines = card.locator(".work-line")
     await expect(lines).to_have_count(3)
     await expect(lines.nth(0).locator(".is-failed")).to_have_count(1)
     await expect(lines.nth(1)).to_contain_text(text("download.replan"))
     await expect(lines.nth(2)).to_contain_text(text("state.done"))
     await expect(card.locator(".figure-mark").first).to_be_visible()
-    await expect(page.locator(".download-card")).to_have_count(1)  # the others went with the end of the sync
+    await expect(downloads).to_have_count(1)  # the others went with the end of the sync
     await ui.shot("25-download-rebuilt-card")
-    await card.locator(".work-remove").click()
-    await expect(page.locator(".download-card")).to_have_count(0)
+    await card.locator(".work-action").click()
+    await expect(downloads).to_have_count(0)
+
+
+async def test_an_episode_is_coloured_by_the_work_the_agents_do_for_it_while_the_service_holds_its_alignment(ui):
+    """While the alignment service works on the voice-over, the episode of the output is of the colour of the alignment
+    and the window of the series lists the job of the service in its agents, set to the series; when the service ends the
+    job the episode is ready and the job is no more the colour of the episode."""
+    series_id = await series_in_browser(ui, (1,))
+    ui.daemon.hold = True
+    page = ui.page
+    await ui.open_output(SERIES)
+    ended = ui.bus.subscribe("scan.run.changed")
+    await page.locator(".output-sync").click()
+    await asyncio.wait_for(asyncio.to_thread(ui.daemon.made.wait), STAND_LIMIT_S)
+    episode = page.locator(".episode-card[data-episode='1']")
+    await expect(episode).to_have_attribute("data-state", "align")
+    await ui.tab(text("status.tab.agents"))
+    job = page.locator(".work-card[data-kind='conform']")
+    await expect(job).to_have_count(1)
+    await expect(job).to_have_attribute("data-state", "align")
+    await ui.shot("26-aligning-in-agents")
+    ui.daemon.hold = False
+    ui.daemon.release()
+    await ui._run_end(ended, series_id)
+    await ui.tab(text("output.tab"))
+    await expect(episode).to_have_attribute("data-state", "done")
+    await ui.check(series_id)
 
 
 async def test_a_voice_over_the_service_refused_is_shown_and_aligned_again_by_its_retry(ui):

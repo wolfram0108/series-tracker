@@ -3,6 +3,7 @@
 import { compareNames } from "./collate"
 import { placeOf } from "./sources"
 import type { components } from "../api/schema"
+import type { PackLive } from "./live"
 import type { DubState, VoiceDub } from "./plan"
 import type { MediaFile } from "../composables/outputCalls"
 
@@ -74,6 +75,8 @@ export interface EpisodeView {
   /** The files of the plan that hold the videos of the references of this episode: the status of the video of a
    *  reference is read from them. Only its own: an episode is the same picture while its own files stand as they were. */
   files?: MediaFile[]
+  /** The container of the episode while a sync builds it: queued, being built or put in place, or failed. */
+  pack?: PackLive
   /** The labels of the players of the sources, by `source:player`: a player the episode has no line for is still named. */
   labels?: Record<string, string>
   /** What may be done with an object in each of its states, as the core gives it with the layout. */
@@ -131,6 +134,7 @@ export function joinEpisodes(
   availability: Record<string, string[]> = {},
   files: MediaFile[] = [],
   labels: Record<string, string> = {},
+  packs: ReadonlyMap<string, PackLive> = new Map(),
 ): EpisodeView[] {
   const slots = new Map<string, Slot>()
   const note = (slot: Slot): void => {
@@ -183,6 +187,7 @@ export function joinEpisodes(
         : filesBy.get(keyOf(reference.source_id as number, reference.row_key ?? "")) ?? []))],
       labels,
       availability,
+      ...(packs.has(key) ? { pack: packs.get(key) } : {}),
     }
   })
 }
@@ -497,13 +502,13 @@ export function perRowOf(places: number, tracks: number, episodes: number): numb
 
 /** The state of one track of an episode, as a cell of its strip shows it. */
 /** `absent`: no source has the voice-over for the episode, the normal case of an episode put together in part. */
-export type TrackState = "done" | "down" | "align" | "wait" | "error" | "absent" | "off" | "none"
+export type TrackState = "done" | "down" | "align" | "queued" | "wait" | "error" | "absent" | "off" | "none"
 
 const FILE_STATE: Record<string, TrackState> = {
-  completed: "done", downloading: "down", processing: "down", publishing: "down", pending: "wait", error: "error",
+  completed: "done", downloading: "down", processing: "down", publishing: "down", queued: "queued", pending: "wait", error: "error",
 }
 const DUB_STATE: Record<DubState, TrackState> = {
-  done: "done", downloading: "down", download_queued: "down", align_queued: "align", running: "align", planned: "wait",
+  done: "done", downloading: "down", download_queued: "queued", align_queued: "queued", running: "align", planned: "wait",
   error: "error", absent: "absent", off: "off",
 }
 
@@ -533,16 +538,19 @@ export function trackCells(view: EpisodeView, order: readonly string[]): TrackCe
 }
 
 /** The state of an episode as its card is coloured: switched off; an error anywhere (no reference, a track whose work
- *  failed); work under way (a download, then an alignment); everything done; done but for the voice-overs no source has
- *  (put together in part, which is no error); else waiting. */
-export type EpisodeStatus = "off" | "error" | "down" | "align" | "ready" | "partial" | "wait"
+ *  failed, a container that failed); work under way, the latest stage of it first (the container, an alignment, a download),
+ *  then work that waits its turn; everything done; done but for the voice-overs no source has (put together in part, which is
+ *  no error); else only planned. */
+export type EpisodeStatus = "off" | "error" | "pack" | "align" | "down" | "queued" | "ready" | "partial" | "wait"
 
 export function episodeStatus(view: EpisodeView, cells: readonly TrackCell[]): EpisodeStatus {
   if (isOff(view)) return "off"
   const marks = view.references.map((reference) => reference.mark)
-  if (marks.includes("none") || marks.includes("unfit") || cells.some((cell) => cell.state === "error")) return "error"
-  if (cells.some((cell) => cell.state === "down")) return "down"
+  if (marks.includes("none") || marks.includes("unfit") || view.pack === "failed" || cells.some((cell) => cell.state === "error")) return "error"
+  if (view.pack === "pack") return "pack"
   if (cells.some((cell) => cell.state === "align")) return "align"
+  if (cells.some((cell) => cell.state === "down")) return "down"
+  if (view.pack === "queued" || cells.some((cell) => cell.state === "queued")) return "queued"
   // A voice-over the user switched off is no part of the episode: it neither waits nor makes it partial.
   const present = cells.filter((cell) => cell.state !== "none" && cell.state !== "off")
   if (present.length === 0 || !present.every((cell) => cell.state === "done" || cell.state === "absent")) return "wait"

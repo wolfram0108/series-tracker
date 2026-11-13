@@ -1,7 +1,7 @@
 import { watch } from "vue"
 import { useSSE } from "./useSSE"
 import { useSeriesStore, type Series, type SeriesDelta } from "../stores/series"
-import { useQueuesStore, type ConformPicture, type DownloadCard, type PackCard, type PackJournal, type QueueTask } from "../stores/queues"
+import { useQueuesStore, type ConformPicture, type DownloadCard, type PackCard, type PackJournal, type QueueTask, type SlicingCard } from "../stores/queues"
 import { useScannerStore, type ScannerStatus } from "../stores/scanner"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import { useSeriesReadsStore } from "../stores/seriesReads"
@@ -37,7 +37,7 @@ export function setupRealtime(): void {
   sse.on("agent_queue_update", (d) => queues.setAgent(d as QueueTask[]))
   sse.on("torrent_progress_update", (d) => queues.setTorrents(d as QueueTask[]))
   sse.on("download_queue_update", (d) => queues.setDownloads(d as DownloadCard[]))
-  sse.on("slicing_queue_update", (d) => queues.setSlicing(d as QueueTask[]))
+  sse.on("slicing_queue_update", (d) => queues.setSlicing(d as SlicingCard[]))
   sse.on("conform_queue_update", (d) => queues.setConform(d as ConformPicture))
   sse.on("pack_queue_update", (d) => queues.setPack(d as PackCard[]))
   sse.on("pack_journal_update", (d) => queues.setJournals(d as PackJournal[]))
@@ -50,7 +50,7 @@ export function setupRealtime(): void {
 
   // Reading of site pages and the layout: packets are whole for their part of the screen, nothing is asked back.
   sse.on("sources_table_progress", (d) => tables.applyProgress(d as Schemas["TableProgress"]))
-  sse.on("series_scan_progress", (d) => reads.apply(d as Schemas["SeriesReadProgress"]))
+  sse.on("series_read_progress", (d) => reads.apply(d as Schemas["SeriesReadProgress"]))
   sse.on("sources_table_ready", (d) => tables.applyReady(d as Schemas["TableReady"]))
   sse.on("sources_table_failed", (d) => tables.applyFailed(d as Schemas["TableFailed"]))
   sse.on("composition_changed", (d) => composition.applyChanged(d as Schemas["CompositionChanged"]))

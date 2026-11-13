@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { ConformResult, ConformTask } from "../stores/queues"
-import { dubRows, footText, formatDuration, isAccepted, isActive, resultMetrics, splitTitle, verdictOf } from "./conform"
+import { dubRows, formatDuration, isAccepted, isActive, resultMetrics, splitTitle, verdictOf } from "./conform"
 
 const result = (extra: Partial<ConformResult> = {}): ConformResult => ({
   dub: "a.mp4", plot: null, ok: true, refused: false, skipped: false, resid_ms: 5.7, coverage: 1, cuts: 0, suspect: false,
@@ -8,7 +8,7 @@ const result = (extra: Partial<ConformResult> = {}): ConformResult => ({
 })
 
 const task = (extra: Partial<ConformTask> = {}): ConformTask => ({
-  id: "cf1", label: "Show s01e03", key: null, status: "running", progress: 0.4, stage: "band", stage_pct: 0.1,
+  id: "cf1", label: "Show s01e03", key: null, series_id: 46, status: "running", progress: 0.4, stage: "band", stage_pct: 0.1,
   detail: "", dub_index: 1, dub_total: 2, cur_dub: "a.mp4", dubs: ["a.mp4", "b.mp4"], elapsed_s: 192,
   created_at: "2026-10-30T02:14:00+00:00", error: null, results: [], ...extra,
 })
@@ -61,14 +61,6 @@ describe("formatDuration", () => {
     expect(formatDuration(192)).toBe("3 мин 12 с")
     expect(formatDuration(182)).toBe("3 мин 02 с")
     expect(formatDuration(8)).toBe("8 с")
-  })
-})
-
-describe("footText", () => {
-  it("tells when a waiting job was added and how long a running or an ended one took", () => {
-    expect(footText(task({ status: "queued" })).startsWith("добавлена в ")).toBe(true)
-    expect(footText(task())).toBe("время выполнения: 3 мин 12 с")
-    expect(footText(task({ status: "done", elapsed_s: 8 }))).toBe("время выполнения: 8 с")
   })
 })
 

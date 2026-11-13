@@ -75,12 +75,13 @@ export function stateOf<C extends string>(table: Readonly<Record<C, StateName>>,
 
 /** An episode of the output tab (lib/output.ts episodeStatus). */
 export const EPISODE_STATES: Readonly<Record<EpisodeStatus, StateName>> = {
-  off: "off", error: "failed", down: "download", align: "align", ready: "done", partial: "partial", wait: "planned",
+  off: "off", error: "failed", pack: "pack", align: "align", down: "download", queued: "queued", ready: "done", partial: "partial",
+  wait: "planned",
 }
 
 /** A track of an episode, the track of the reference among them (lib/output.ts trackCells). */
 export const TRACK_STATES: Readonly<Record<TrackState, StateName>> = {
-  done: "done", down: "download", align: "align", wait: "planned", error: "failed", absent: "absent", off: "off",
+  done: "done", down: "download", align: "align", queued: "queued", wait: "planned", error: "failed", absent: "absent", off: "off",
   none: "noRow",
 }
 
