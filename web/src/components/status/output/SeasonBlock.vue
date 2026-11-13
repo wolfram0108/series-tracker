@@ -18,6 +18,7 @@ import GroupOutline from "./GroupOutline.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
 import FoldButton from "../../FoldButton.vue"
+import SyncButton from "../../SyncButton.vue"
 import PowerSwitch from "./PowerSwitch.vue"
 
 // A season: its header (the state of its videos and voice-overs, the order of the tracks of its containers, its settings)
@@ -160,10 +161,11 @@ function step(by: number): void {
           <span class="meter-text">{{ voicesText }}</span>
         </div>
       </div>
-      <FoldButton :label="t('output.settings.season')" icon="pi pi-sliders-h" severity="info" fold="lg" class="season-settings"
+      <FoldButton :label="t('output.settings.season')" icon="pi pi-sliders-h" severity="info" fold="xl" class="season-settings"
                   @click="emit('settings')" />
       <FoldButton :label="t('output.retryFailed')" :hint="t('output.season.retryFailedHint')" icon="pi pi-undo" severity="secondary"
-                  fold="lg" class="do-retry-season" data-lever :disabled="busy" @click="emit('retry-season')" />
+                  fold="xl" class="do-retry-season" data-lever :disabled="busy" @click="emit('retry-season')" />
+      <SyncButton name="season" :scope="{ season }" fold="xl" />
       <PowerSwitch
         :on="!off" :busy="busy" :label="t(off ? 'output.season.enable' : 'output.season.disable')" @toggle="emit('switch-season', !$event)"
       />

@@ -140,7 +140,7 @@ const rows = computed<CompilationRow[]>(() => {
           <span class="meter-text">{{ cutText }}</span>
         </div>
       </div>
-      <FoldButton :label="t('output.compilation.settings')" icon="pi pi-sliders-h" severity="info" fold="lg" class="season-settings"
+      <FoldButton :label="t('output.compilation.settings')" icon="pi pi-sliders-h" severity="info" fold="xl" class="season-settings"
                   @click="emit('settings')" />
       <PowerSwitch :on="view.take" :busy="busy" :label="t(view.take ? 'output.compilation.disable' : 'output.compilation.enable')"
                    @toggle="emit('switch', !$event)" />

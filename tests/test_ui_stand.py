@@ -64,14 +64,14 @@ async def test_remake_and_download_again_wait_for_the_sync_and_can_be_taken_back
     detail = page.locator(".episode-detail")
     pending = page.locator(".plan-pending .plan-command")
 
-    await detail.locator("tr[data-group='AnimeVost'] .track-action.do-redo").click()
+    await detail.locator("tr[data-group='AnimeVost'] .row-action.do-redo").click()
     await expect(pending).to_have_count(1)
     await expect(pending).to_contain_text(text("output.plan.deleteTrack", voice="AnimeVost", name=asset["name"]))
     await ui.shot("10-remake-pending")
     await pending.get_by_role("button", name=text("output.plan.cancel")).click()
     await expect(pending).to_have_count(0)
 
-    await detail.locator("tr[data-group='AnimeVost'] .track-action.do-redo").click()
+    await detail.locator("tr[data-group='AnimeVost'] .row-action.do-redo").click()
     await expect(pending).to_have_count(1)
     aligned = len(ui.daemon.jobs)
     await ui.press_sync(series_id)
@@ -80,7 +80,7 @@ async def test_remake_and_download_again_wait_for_the_sync_and_can_be_taken_back
     assert len(ui.daemon.jobs) == aligned + 1  # the voice-over aligned anew, once
     await ui.check(series_id)
 
-    await detail.locator(".track-action.do-refetch").click()
+    await detail.locator(".row-action.do-refetch").click()
     await expect(pending).to_contain_text(text("output.plan.deleteVideo", name=asset["name"]))
     served = len(ui.host.served)
     await ui.press_sync(series_id)
@@ -188,36 +188,63 @@ async def test_the_buttons_of_the_head_keep_their_words_while_the_tab_has_room_a
         for button in await row.locator("button").all():
             await expect(button).to_be_visible()
             assert await button.get_attribute("aria-label") or (await button.inner_text()).strip(), width
-    # The head of a season is a place of its own: its two buttons keep their words from 56rem of the season and fold under it.
+    # The head of a season is a place of its own: its three buttons keep their words from 66rem of the season and fold under it.
     season = page.locator(".season-block").first
     reset_season = season.locator(".do-retry-season")
     await expect(reset_season).to_have_attribute("aria-label", text("output.season.retryFailedHint"))
-    for width in (1440, 900, 520):
+    for width in (1440, 1100, 900, 520):
         await page.set_viewport_size({"width": width, "height": 900})
         await ui.shot_of(season.locator(".season-head"), f"28-season-head-{width}")
         room = (await season.bounding_box())["width"]
         for label in await season.locator(".season-head .p-button-label").all():
-            if room >= 56 * 16:
+            if room >= 66 * 16:
                 await expect(label).to_be_visible()
             else:
                 await expect(label).to_be_hidden()
         head = await season.locator(".season-head").bounding_box()
+        tops = set()
         for button in await season.locator(".season-head button").all():
             where = await button.bounding_box()
             assert where["x"] + where["width"] <= head["x"] + head["width"] + 1, width
+            tops.add(round(where["y"] / 10))
+        if room >= 40 * 16:  # a head narrower than that wraps its buttons under the meters, as any row of the window does
+            assert len(tops) == 1, f"the buttons of the head of a season are in more than one row at {width}: {tops}"
     # The page of the samples shows the same button in rooms of four widths: each folds at the tier it names.
     await page.set_viewport_size({"width": 1440, "height": 1000})
     await page.goto("/#gallery")
     await page.reload()  # the page of the samples is chosen by the anchor when the application starts
     demo = page.locator(".fold-demo")
-    await expect(demo).to_have_count(4)
+    await expect(demo).to_have_count(5)
     await ui.shot_of(page.locator(".fold-demo").first, "29-gallery-fold-24")
-    for index, rem in enumerate((24, 36, 48, 60)):
-        # Under 42rem every button folds; from 42rem the ones of the middle tier keep their words, the one of the high tier folds
-        # until 56rem; from 56rem all four keep them.
+    for index, rem in enumerate((24, 36, 48, 60, 72)):
+        # Under 42rem every button folds; from 42rem the ones of the middle tier keep their words, the ones of the high tiers
+        # fold until 56rem and 66rem; from 66rem all five keep them.
         shown = await demo.nth(index).locator(".p-button-label:visible").count()
-        assert shown == {24: 0, 36: 0, 48: 3, 60: 4}[rem], (rem, shown)
+        assert shown == {24: 0, 36: 0, 48: 3, 60: 4, 72: 5}[rem], (rem, shown)
     await ui.shot_of(page.locator("section", has=page.locator(".fold-demo")), "29-gallery-fold")
+
+
+async def test_the_sync_of_an_episode_makes_that_episode_alone_the_series_is_busy_and_the_sync_of_the_series_makes_the_rest(ui):
+    """«Синхронизировать» in the head of an opened episode is the pass of the series for that episode: its file is made and the
+    files of the others are not; while it runs the button of every place is the one that stops it; the sync of the series then
+    makes the rest, the file made before staying as it was."""
+    series_id = await series_in_browser(ui, (1, 2))
+    page = ui.page
+    await ui.open_output(SERIES)
+    await page.locator(".episode-card[data-episode='2']").dblclick()
+    sync = page.locator(".episode-detail .episode-sync")
+    await expect(sync).to_have_attribute("aria-label", text("output.episode.syncHint"))
+    await expect(page.locator(".season-block .season-sync")).to_have_attribute("aria-label", text("output.season.syncHint"))
+    await ui.shot("30-episode-sync")
+    await ui.press(series_id, ".episode-detail .episode-sync")
+    assert [name for name in ui.files() if "s01e02" in name] and not [name for name in ui.files() if "s01e01" in name], ui.files()
+    await expect(page.locator(".episode-card[data-episode='2']")).to_have_attribute("data-state", "done")
+    await expect(page.locator(".episode-card[data-episode='1']")).not_to_have_attribute("data-state", "done")
+    made = ui.files()
+    await ui.press_sync(series_id)
+    assert len(ui.files()) == 2 and set(made) <= set(ui.files())
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(2)
+    await ui.check(series_id)
 
 
 async def test_a_download_rebuilt_on_the_next_source_is_one_card_in_the_agents_and_stays_after_the_sync(ui):
@@ -294,7 +321,7 @@ async def test_a_voice_over_the_service_refused_is_shown_and_aligned_again_by_it
     await expect(row.locator(".pill")).to_have_text(state("failed"))
     await ui.shot("21-refused")
     del ui.daemon.answers["Сериал s01e01 AnimeVost"]
-    await row.locator(".track-action.do-retry").click()
+    await row.locator(".row-action.do-retry").click()
     await expect(page.locator(".plan-failures")).to_have_count(0)
     await ui.press_sync(series_id)
     await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
@@ -388,7 +415,7 @@ async def test_a_voice_over_switched_off_in_the_settings_of_the_season_goes_from
     await page.locator(".episode-card").first.dblclick()
     row = page.locator(".episode-detail tr[data-group='AnimeVost']")
     await expect(row.locator(".pill")).to_have_text(state("off"))
-    await expect(row.locator(".track-action")).to_have_count(0)
+    await expect(row.locator(".row-action")).to_have_count(0)
     await ui.shot("32-voice-gone")
 
 

@@ -1,3 +1,4 @@
+import type { SyncScope } from "./syncRun"
 import { computed, onMounted, onUnmounted, ref, watch, type Ref } from "vue"
 import { t } from "../i18n"
 import {
@@ -140,7 +141,8 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const switchTo = (season: number, episodes: number[] | null, off: boolean): Promise<string | null> =>
     act(() => switchOutput(seriesId, { season, ...(episodes === null ? {} : { episodes }), off }), busy)
 
-  const sync = (): Promise<string | null> => act(() => syncSeries(seriesId), syncing)
+  const sync = (scope?: SyncScope): Promise<string | null> =>
+    act(() => scope === undefined ? syncSeries(seriesId) : syncSeries(seriesId, scope), syncing)
   const stop = (): Promise<string | null> => act(() => cancelSync(seriesId), stopping)
   // A change of the series like a lever, not a pass: it starts no sync.
   const retryFailed = (): Promise<string | null> => act(() => resetFailures(seriesId), busy)

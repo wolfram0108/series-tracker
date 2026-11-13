@@ -4,6 +4,7 @@ import { t } from "../../../i18n"
 import type { Queues } from "../../../composables/outputCalls"
 import type { EpisodeStatus, EpisodeView, QueueName, QueueRow, SourceMark as Mark, TrackCell } from "../../../lib/output"
 import FoldButton from "../../FoldButton.vue"
+import SyncButton from "../../SyncButton.vue"
 import CompilationTable, { type CompilationRow } from "./CompilationTable.vue"
 import PowerSwitch from "./PowerSwitch.vue"
 import QueuePanel from "./QueuePanel.vue"
@@ -56,6 +57,7 @@ const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) =
       <span class="detail-grow" />
       <FoldButton :label="t('output.retryFailed')" :hint="t('output.episode.retryFailedHint')" icon="pi pi-undo" severity="secondary"
                   fold="lg" class="do-retry-failed" data-lever :disabled="busy" @click="emit('retry-failed')" />
+      <SyncButton name="episode" :scope="{ season: view.season, episode: view.episode }" fold="lg" />
       <button type="button" class="icon-btn" :aria-label="t('output.episode.prev')" @click="emit('step', -1)"><i class="pi pi-chevron-left" /></button>
       <button type="button" class="icon-btn" :aria-label="t('output.episode.next')" @click="emit('step', 1)"><i class="pi pi-chevron-right" /></button>
       <PowerSwitch

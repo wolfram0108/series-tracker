@@ -73,6 +73,9 @@ async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its
     await found.locator(".app-add").click()
 
     source = page.locator(".source-card").first
+    # A card of an application is read when the user asks (its button), not when it is added.
+    await expect(source.locator(".source-state")).to_have_text(state("notRead"))
+    await source.locator(".source-reread").click()
     # The head names the source as its site does (the application and the title); its field is its address, the one writing
     # a field of an address takes.
     await expect(source.locator(".source-place")).to_have_text("半日 · 万界独尊 (2021)")

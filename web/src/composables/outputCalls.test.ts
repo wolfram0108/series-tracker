@@ -43,6 +43,15 @@ describe("the calls to the output of the core", () => {
     expect(client.POST).toHaveBeenCalledWith("/api/series/{series_id}/scan", { params: { path: { series_id: 1 } } })
   })
 
+  it("names the season or the episode a sync covers, and the whole series when it names none", async () => {
+    client.POST.mockResolvedValue({ data: { success: true } })
+    await syncSeries(1, { season: 1, episode: 3 })
+    expect(client.POST).toHaveBeenLastCalledWith("/api/series/{series_id}/scan", {
+      params: { path: { series_id: 1 } }, body: { season: 1, episode: 3 } })
+    await syncSeries(1)
+    expect(client.POST).toHaveBeenLastCalledWith("/api/series/{series_id}/scan", { params: { path: { series_id: 1 } } })
+  })
+
   it("asks for the reset of the failed attempts by its own path, not for a sync", async () => {
     client.POST.mockResolvedValueOnce({ data: { success: true, reset: 2 } })
     expect(await resetFailures(1)).toEqual({ ok: true, data: { success: true, reset: 2 } })

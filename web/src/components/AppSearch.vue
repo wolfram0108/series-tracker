@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
+import FoldButton from "./FoldButton.vue"
 import StGroup from "./StGroup.vue"
 import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
@@ -82,7 +83,7 @@ function meta(card: AppCard): string {
 </script>
 
 <template>
-  <div class="app-search stack">
+  <div class="app-search stack fold-room">
     <StGroup>
       <StIcon icon="pi pi-search" />
       <StInput v-model="query" class="app-query" :label="t('sources.apps.query')" @keyup.enter="find()" />
@@ -124,15 +125,13 @@ function meta(card: AppCard): string {
         <div class="app-act">
           <span v-if="card.url in added" class="app-added">{{ t("sources.apps.added", { n: added[card.url] }) }}</span>
           <span v-else-if="!card.url" class="muted">{{ t("sources.apps.noAddress") }}</span>
-          <button v-else type="button" class="action-btn btn-add app-add" :disabled="busy" @click="emit('add', card.url)">
-            <i class="pi pi-plus" /><span>{{ t("sources.add.button") }}</span>
-          </button>
+          <FoldButton v-else :label="t('sources.add.button')" icon="pi pi-plus" severity="success" fold="sm" class="app-add"
+                      :disabled="busy" @click="emit('add', card.url)" />
         </div>
       </article>
     </section>
-    <button v-if="anyMore" type="button" class="action-btn btn-search app-more" :disabled="searching" @click="find(nextPage)">
-      <i class="pi pi-angle-down" /><span>{{ t("sources.apps.more") }}</span>
-    </button>
+    <FoldButton v-if="anyMore" :label="t('sources.apps.more')" icon="pi pi-angle-down" severity="info" fold="sm" class="app-more"
+                :disabled="searching" @click="find(nextPage)" />
   </div>
 </template>
 
@@ -179,5 +178,4 @@ function meta(card: AppCard): string {
 .app-reason { color: var(--color-red-1); overflow-wrap: anywhere; }
 .app-more { align-self: flex-start; }
 /* The buttons of a card are those of the head of a source: the main screen's, at the height of a line of text. */
-.app-act .action-btn, .app-more { min-block-size: 2rem; padding-block: 0.25rem; font-size: 0.85rem; white-space: nowrap; }
 </style>

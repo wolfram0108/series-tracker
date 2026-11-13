@@ -64,7 +64,7 @@ const range = (row: CompilationRow) => `${row.view.ref.start}–${row.view.ref.e
           <td>
             <template v-if="row.member && row.cut">
               <span class="pill" :data-state="CUT_STATES[row.cut]">{{ stateWord(CUT_STATES[row.cut]) }}</span>
-              <button v-if="row.cut === 'error'" type="button" class="action-btn btn-scan do-retry-cut" data-lever :disabled="busy"
+              <button v-if="row.cut === 'error'" type="button" class="row-action do-retry-cut" data-lever :disabled="busy"
                       @click="emit('retry')">{{ t("output.cut.retry") }}</button>
             </template>
             <span v-else class="muted">—</span>

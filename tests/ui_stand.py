@@ -295,6 +295,13 @@ class UiStand(AppStand):
         await self.page.mouse.move(box["x"] + box["width"] / 4, box["y"] + box["height"] / 4, steps=12)
         await self.page.mouse.up()
 
+    async def press(self, series_id: int, button: str) -> None:
+        """A button of the sync of a place (the series, a season, an episode: its selector), to the end of the run the service
+        tells."""
+        ended = self.bus.subscribe("scan.run.changed")
+        await self.page.locator(button).click()
+        await self._run_end(ended, series_id)
+
     async def press_sync(self, series_id: int) -> None:
         """«Синхронизировать» in the section «Выход», to the end of the run the service tells (the world's signal: the
         service said it is done); what the screen shows then is the check of the scenario."""

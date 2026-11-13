@@ -31,10 +31,12 @@ export interface MediaFile {
 }
 
 
-/** The sync of the series, the same run the series card starts: tables, plan, download, voice-overs, containers. The core
+/** The sync of the series — or, with a scope, of a season or an episode of it: the same run the series card starts (the tables of
+ * every source are read, the layout is counted), and the core carries out what the scope touches. The core
  * answers when its pass is over; the run goes on with the works it gave out, and what it changes comes as events. */
-export function syncSeries(seriesId: number): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
+export function syncSeries(seriesId: number, scope?: Schemas["SyncScopeBody"]): Promise<Answer<unknown>> {
+  const path = { params: { path: { series_id: seriesId } } }
+  return call(() => api.POST("/api/series/{series_id}/scan", scope === undefined ? path : { ...path, body: scope }), OUTPUT_WORDS)
 }
 
 /** The sync of the series stops: its reads, downloads, jobs of the alignment service and builds; nothing of it is applied.

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import { useToast } from "primevue/usetoast"
+import FoldButton from "./FoldButton.vue"
 import StGroup from "./StGroup.vue"
 import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
@@ -91,7 +92,7 @@ async function copyAddress(): Promise<void> {
 </script>
 
 <template>
-  <article class="source-card">
+  <article class="source-card fold-room">
     <header class="source-head">
       <span class="source-title">
         <SourceMark v-if="place !== undefined && item.color !== null" :mark="{ n: place, color: item.color, place: '' }" />
@@ -103,15 +104,13 @@ async function copyAddress(): Promise<void> {
         </span>
         <span v-if="view.players.length" class="muted">{{ sourceCaption(view.players) }}</span>
         <span class="source-actions">
-          <button v-if="view.state === 'reading'" type="button" class="action-btn btn-scan source-stop" @click="emit('stop')">
-            <i class="pi pi-stop-circle" />{{ t("sources.stopRead") }}
-          </button>
-          <button v-else type="button" class="action-btn btn-scan source-reread" :disabled="busy" @click="emit('reread')">
-            <i class="pi pi-refresh" />{{ t("sources.reread") }}
-          </button>
-          <button type="button" class="action-btn btn-delete source-remove" :disabled="busy" @click="emit('remove')">
-            <i class="pi pi-trash" />{{ t("sources.remove") }}
-          </button>
+          <!-- One place for both: while the page is read the button that reads it again is the one that stops the read. -->
+          <FoldButton v-if="view.state === 'reading'" :label="t('sources.stopRead')" icon="pi pi-stop-circle" severity="danger"
+                      class="source-stop" @click="emit('stop')" />
+          <FoldButton v-else :label="t('sources.reread')" icon="pi pi-refresh" severity="warn" class="source-reread" :disabled="busy"
+                      @click="emit('reread')" />
+          <FoldButton :label="t('sources.remove')" icon="pi pi-trash" severity="danger" class="source-remove" :disabled="busy"
+                      @click="emit('remove')" />
         </span>
       </template>
     </header>
@@ -266,8 +265,6 @@ async function copyAddress(): Promise<void> {
 .source-state { display: inline-flex; align-items: center; gap: var(--space); color: color-mix(in srgb, var(--tone-end) 60%, black); }
 .source-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-inline-start: auto; }
 /* The buttons of the head are those of the main screen at the height of the head of a season. */
-.source-actions .action-btn { min-block-size: 2rem; padding-block: 0.25rem; font-size: 0.85rem; }
-.source-actions .action-btn:disabled { opacity: 0.5; cursor: default; }
 .source-body { padding: var(--space); }
 .source-reason { color: var(--color-red-1); overflow-wrap: anywhere; }
 .muted { color: var(--text-muted); font-size: smaller; }

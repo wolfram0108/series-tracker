@@ -83,7 +83,7 @@ function act(row: (typeof rows.value)[number]): void {
           <span v-if="row.note" class="track-note">{{ row.note }}</span>
         </td>
         <td class="narrow">
-          <button v-if="row.action" type="button" class="track-action" data-lever :class="`do-${row.action}`" :disabled="busy" @click="act(row)">
+          <button v-if="row.action" type="button" class="row-action" data-lever :class="`do-${row.action}`" :disabled="busy" @click="act(row)">
             {{ t(`output.action.${row.action}`) }}
           </button>
           <span v-else class="muted">—</span>
@@ -107,9 +107,4 @@ function act(row: (typeof rows.value)[number]): void {
 .track-note { margin-inline-start: 0.4rem; color: var(--text-muted); }
 .track-offline { margin-inline-start: 0.4rem; color: var(--text-muted); font-style: italic; }
 .muted { color: var(--text-muted); }
-.track-action {
-  border: 1px solid var(--border-color); background: var(--bg-white); border-radius: 8px; padding: 0.25rem 0.6rem;
-  cursor: pointer; color: var(--color-gray-600); font: inherit;
-}
-.track-action:disabled { opacity: 0.5; cursor: default; }
 </style>

@@ -15,6 +15,8 @@ import { useSeriesReadsStore } from "../../stores/seriesReads"
 import { badgeOf, cardStatus, cutOf, cutOverride, cutsBySlot, heldCut, takes, type CompilationView, type CutState } from "../../lib/compilations"
 import CompilationBlock from "./output/CompilationBlock.vue"
 import FoldButton from "../FoldButton.vue"
+import SyncButton from "../SyncButton.vue"
+import { SYNC_RUN } from "../../composables/syncRun"
 import LevelSettings from "./output/LevelSettings.vue"
 import PlanPending from "./output/PlanPending.vue"
 import SeasonBlock from "./output/SeasonBlock.vue"
@@ -41,6 +43,9 @@ const canSync = computed(() => {
   const table = output.composition.value?.availability
   return table ? allowedIn(table, "sync", passing.value ? "scanning" : "idle") : !passing.value
 })
+// Every place of the section that has a button of the sync (the series, a season, an episode) runs and stops the same pass.
+provide(SYNC_RUN, { running: computed(() => busy.value || passing.value), allowed: canSync, stopping: output.stopping,
+  sync: (scope) => output.sync(scope), stop: () => output.stop() })
 const reads = useSeriesReadsStore()
 const reading = computed(() => reads.forSeries(props.seriesId)
   .map((read) => ({ key: read.sourceId, text: t("output.reading", { site: pageHost(read.url), text: progressText(read) }) })))
@@ -177,11 +182,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
                   @click="openSettings(null)" />
       <FoldButton :label="t('output.retryFailed')" :hint="t('output.retryFailedHint')" icon="pi pi-undo" severity="secondary"
                   class="output-retry-failed" :disabled="!canSync" @click="output.retryFailed()" />
-      <!-- One place for both: while the series is synced the button of the sync is the button that stops it. -->
-      <FoldButton v-if="busy || passing" :label="t('output.stop')" :hint="t('sync.stop')" icon="pi pi-stop-circle" severity="danger"
-                  class="output-stop" :disabled="output.stopping.value" @click="output.stop()" />
-      <FoldButton v-else :label="t('output.sync')" icon="pi pi-refresh" severity="warn" class="output-sync" :disabled="!canSync"
-                  @click="output.sync()" />
+      <SyncButton name="output" />
     </div>
     <div v-if="legend.length" class="output-bar output-legend">
       <span class="output-legend-name">{{ t("output.sources") }}</span>

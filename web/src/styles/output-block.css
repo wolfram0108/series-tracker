@@ -8,7 +8,7 @@
 }
 .season-title { font-size: 1rem; font-weight: 600; color: #2c3e50; }
 .season-range { color: var(--text-muted); font-size: 0.8rem; }
-.season-meters { display: flex; flex-wrap: wrap; gap: 0.25rem 1.1rem; flex: 1 1 var(--measure); }
+.season-meters { display: flex; flex-wrap: wrap; gap: 0.25rem 1.1rem; flex: 1 1 14rem; }
 .meter { display: flex; align-items: center; gap: 0.5rem; flex: 1 1 14rem; min-inline-size: 0; }
 .meter-name { flex: none; inline-size: 3.6rem; color: var(--text-muted); font-size: 0.75rem; }
 .meter-bar { display: flex; flex: 1 1 auto; block-size: 0.5rem; border-radius: 4px; overflow: hidden; background: #dee2e6; }

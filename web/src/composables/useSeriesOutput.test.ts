@@ -219,6 +219,8 @@ describe("useSeriesOutput", () => {
     expect(output.failure.value).toBe("Проход уже идёт")
     expect(calls.syncSeries).toHaveBeenCalledWith(1)
 
+    expect(await output.sync({ season: 1, episode: 2 })).toBeNull()
+    expect(calls.syncSeries).toHaveBeenLastCalledWith(1, { season: 1, episode: 2 })
     const syncs = vi.mocked(calls.syncSeries).mock.calls.length
     expect(await output.retryFailed()).toBeNull()
     expect(calls.resetFailures).toHaveBeenCalledWith(1)

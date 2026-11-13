@@ -318,6 +318,8 @@ export interface paths {
          * @description Синхронный скан одной серии, как в оригинале: HTTP ждёт
          *     результата; force_replace scan берёт из настройки отладки.
          *     download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается.
+         *     С телом (сезон, серия сезона) — синхронизация в рамках сезона или серии видео-сериала: источники те же, исполняется
+         *     то, что касается области (серия компиляции приводит всю компиляцию); сериал занят на всё время.
          */
         post: operations["scan_series_api_series__series_id__scan_post"];
         delete?: never;
@@ -4081,6 +4083,16 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * SyncScopeBody
+         * @description What a sync of the series covers when it is not all of it: a season, or an episode of it (the sync of a video series).
+         */
+        SyncScopeBody: {
+            /** Season */
+            season: number;
+            /** Episode */
+            episode?: number | null;
+        };
+        /**
          * TableReadRequest
          * @description Read the page of an address now.
          */
@@ -5172,7 +5184,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SyncScopeBody"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

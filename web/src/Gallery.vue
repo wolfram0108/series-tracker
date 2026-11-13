@@ -151,8 +151,8 @@ const settingsTabs = [
 ]
 // The words around the name of the open tab, which the body shows in bold.
 const settingsBody = tAround("gallery.settings.body", "tab")
-// The widths (rem) of the rooms the folding button is shown in: it folds at the tier it names (30, 42, 56 rem).
-const FOLD_ROOMS = [24, 36, 48, 60]
+// The widths (rem) of the rooms the folding button is shown in: it folds at the tier it names (30, 42, 56, 66 rem).
+const FOLD_ROOMS = [24, 36, 48, 60, 72]
 function settingsLabel(): string {
   return settingsTabs.find((tab) => tab.value === settingsTab.value)?.label ?? ""
 }
@@ -458,7 +458,7 @@ const rtPass = ref("password123")
       </div>
     </section>
 
-    <section>
+    <section class="wide-section">
       <h2>{{ t("gallery.fold.h2") }}</h2>
       <p class="muted small">{{ t("gallery.fold.hint") }}</p>
       <div v-for="width in FOLD_ROOMS" :key="width" class="fold-demo">
@@ -469,6 +469,7 @@ const rtPass = ref("password123")
             <FoldButton :label="t('output.retryFailed')" :hint="t('output.retryFailedHint')" icon="pi pi-undo" severity="secondary" />
             <FoldButton :label="t('output.sync')" icon="pi pi-refresh" severity="warn" />
             <FoldButton :label="t('gallery.fold.late')" :hint="t('gallery.fold.lateHint')" icon="pi pi-check" severity="success" fold="lg" />
+            <FoldButton :label="t('gallery.fold.last')" :hint="t('gallery.fold.lastHint')" icon="pi pi-star" severity="info" fold="xl" />
           </div>
         </div>
       </div>

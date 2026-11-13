@@ -10,7 +10,7 @@ withDefaults(defineProps<{
   icon: string
   hint?: string
   severity?: "secondary" | "info" | "success" | "warn" | "danger" | "contrast" | "help"
-  fold?: "sm" | "md" | "lg"
+  fold?: "sm" | "md" | "lg" | "xl"
 }>(), { hint: undefined, severity: undefined, fold: "md" })
 </script>
 

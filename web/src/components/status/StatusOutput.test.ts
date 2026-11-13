@@ -191,7 +191,7 @@ describe("StatusOutput", () => {
     await flushPromises()
     await w.findAll(".episode-card")[0].trigger("dblclick")
     await flushPromises()
-    await w.find(".track-action.do-retry").trigger("click")
+    await w.find(".row-action.do-retry").trigger("click")
     await flushPromises()
     expect(calls.resetFailures).toHaveBeenCalledWith(1, { season: 1, episode: 1, voice: "AniStar" })
     expect(calls.deleteFromPlan).not.toHaveBeenCalled()
@@ -229,6 +229,33 @@ describe("StatusOutput", () => {
     expect(calls.syncSeries).not.toHaveBeenCalled()
   })
 
+  it("syncs an episode or a season by the button of its head, and the same button stops the pass while it runs", async () => {
+    givePlan(planView({
+      assets: [fileOfEpisodeOne()],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"),
+        [goalTrack("AniStar", "reuse", rowRef(8, "k1"), { player: "kodik" })])],
+    }))
+    const w = mountOutput()
+    await flushPromises()
+    await w.find(".season-block .season-sync").trigger("click")
+    await flushPromises()
+    expect(calls.syncSeries).toHaveBeenLastCalledWith(1, { season: 1 })
+    await w.findAll(".episode-card")[0].trigger("dblclick")
+    await flushPromises()
+    await w.find(".episode-detail .episode-sync").trigger("click")
+    await flushPromises()
+    expect(calls.syncSeries).toHaveBeenLastCalledWith(1, { season: 1, episode: 1 })
+    // While the series is synced the buttons of every place are the one that stops it: none starts another pass.
+    const store = useSeriesStore()
+    store.upsert({ id: 1, name: "Тайтл", site: "x", auto_scan_enabled: true, statuses: ["scanning"] })
+    await flushPromises()
+    expect(w.find(".episode-detail .episode-sync").exists() || w.find(".season-block .season-sync").exists()).toBe(false)
+    vi.mocked(calls.cancelSync).mockResolvedValue(ok({ cancelled: true }))
+    await w.find(".episode-detail .episode-stop").trigger("click")
+    await flushPromises()
+    expect(calls.cancelSync).toHaveBeenCalledWith(1)
+  })
+
   it("takes a placed voice-over out of its file by the action of the track", async () => {
     givePlan(planView({
       assets: [fileOfEpisodeOne([assetTrack("AniStar", rowRef(8, "k1"), true, { player: "kodik" })])],
@@ -239,7 +266,7 @@ describe("StatusOutput", () => {
     await flushPromises()
     await w.findAll(".episode-card")[0].trigger("dblclick")
     await flushPromises()
-    await w.find(".track-action.do-redo").trigger("click")
+    await w.find(".row-action.do-redo").trigger("click")
     await flushPromises()
     expect(calls.deleteFromPlan).toHaveBeenCalledWith(1, { kind: "track", name: "S01E01.mp4", dub: rowRef(8, "k1") })
   })
@@ -253,7 +280,7 @@ describe("StatusOutput", () => {
     await flushPromises()
     await w.findAll(".episode-card")[0].trigger("dblclick")
     await flushPromises()
-    await w.find(".track-action.do-refetch").trigger("click")
+    await w.find(".row-action.do-refetch").trigger("click")
     await flushPromises()
     expect(calls.deleteFromPlan).toHaveBeenCalledWith(1, { kind: "video", name: "S01E01.mp4" })
   })
