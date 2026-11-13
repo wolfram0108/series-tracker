@@ -180,7 +180,7 @@ SSE_MAP: dict[str, Outgoing] = {
     "sources.table.failed": Outgoing("sources_table_failed"),
     "composition.changed": Outgoing("composition_changed"),
     "composition.failed": Outgoing("composition_failed"),
-    "scan.series.progress": Outgoing("series_scan_progress"),
+    "composition.series.reading": Outgoing("series_read_progress"),
     "conform.queue.changed": Outgoing("conform_queue_update", latest=_whole),
     "planner.pack.changed": Outgoing("pack_queue_update", _bare_tasks, latest=_whole),
     "planner.journal.changed": Outgoing("pack_journal_update", lambda payload: payload["journals"], latest=_whole),

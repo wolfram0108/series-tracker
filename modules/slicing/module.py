@@ -38,6 +38,7 @@ from core import BaseModule
 from core import storage
 from core.proc import program, run_capture
 from core.db import Database
+from core.contracts import SlicingCard, SlicingEpisode
 from core.envelope import Envelope
 from core.reasons import reason
 
@@ -593,12 +594,35 @@ class SlicingModule(BaseModule):
                                         env.payload["path"])
 
     async def on_queue_get(self, env: Envelope) -> dict:
-        tasks = await self.repo.all_tasks()
-        return {"tasks": tasks, "count": len(tasks)}
+        cards = await self._cards()
+        return {"tasks": cards, "count": len(cards)}
 
     async def _broadcast_queue(self) -> None:
-        tasks = await self.repo.all_tasks()
-        self.publish_event("slicing.queue.changed", {"tasks": tasks})
+        self.publish_event("slicing.queue.changed", {"tasks": await self._cards()})
+
+    async def _cards(self) -> list[dict]:
+        """The queue as cards (core/contracts/slicing.py): each task with the compilation it cuts and the episodes of it."""
+        cards = []
+        for task in await self.repo.all_tasks():
+            item = await self.repo.get_item(task["media_item_unique_id"]) or {}
+            progress = task["progress_chapters"]
+            if isinstance(progress, str):
+                progress = json.loads(progress or "{}")
+            start, end = item.get("episode_start"), item.get("episode_end")
+            numbers = range(start, end + 1) if start is not None and end is not None else sorted(map(int, progress))
+            # The cut goes in order: the first episode not cut is the one under way, or the one the cut stopped on.
+            unfinished = next((number for number in numbers if progress.get(str(number)) != "completed"), None)
+            episodes = [SlicingEpisode(number=number, state=(
+                "done" if progress.get(str(number)) == "completed"
+                else "failed" if number == unfinished and task["status"] == "error"
+                else "active" if number == unfinished and task["status"] == "slicing" else "pending"))
+                for number in numbers]
+            cards.append(SlicingCard(
+                id=task["id"], series_id=task["series_id"], unique_id=task["media_item_unique_id"], status=task["status"],
+                file=os.path.basename(item.get("final_filename") or ""), season=item.get("season"), episode_start=start, episode_end=end,
+                episodes=episodes, error=task.get("error_message"),
+                created_at=str(task.get("created_at") or "")).model_dump(mode="json"))
+        return cards
 
     async def _contribute(self, series_id: int) -> None:
         flags = await self.repo.series_flags(series_id)

@@ -238,7 +238,8 @@ def _rmdir_if_empty(path: str) -> None:
 class Daemon:
     """A model of the alignment service on the protocol of the real one. `answers` by the label of a job: "mismatch",
     "critical", "suspect", "crash" (the service fell on the pair and judged nothing), "empty" (the job ends with no result
-    for the voice-over: it did not come to the pair) or "lost" (the job is made, the answer never comes)."""
+    for the voice-over: it did not come to the pair) or "lost" (the job is made, the answer never comes). Said for one
+    voice-over of an episode, an answer may begin with "once ": it is given to the first pair only."""
 
     def __init__(self, codec: Codec) -> None:
         self.codec = codec
@@ -317,8 +318,11 @@ class Daemon:
         """The answer told for one voice-over of a job of an episode: by the label of the job and the voice-over its file
         is named by (`Сериал s01e01 AnimeVost`), else the answer of the whole job."""
         name, episode = os.path.basename(dub), re.sub(r"\s+#\S+$", "", label or "")
-        for told, answer in self.answers.items():
+        for told, answer in list(self.answers.items()):
             if told.startswith(episode + " ") and told[len(episode) + 1:] in name:
+                if answer.startswith("once "):  # told for the first pair of the voice-over only: the next one is asked afresh
+                    del self.answers[told]
+                    return answer[len("once "):]
                 return answer
         return self._answer_of(label)
 
@@ -338,7 +342,9 @@ class Daemon:
         for root in self.roots[job_id]:
             os.makedirs(root, exist_ok=True)
         if self.hold:
-            job.update(status="running", progress=0.5, results=[], held=results)
+            # As the real service tells a running job: the voice-over it is on, by its file name, and its place among them.
+            job.update(status="running", progress=0.5, results=[], held=results, cur_dub=os.path.basename(dubs[0]) if dubs else "",
+                       dub_index=1, dub_total=len(dubs))
         else:
             job["results"] = self._end(job_id, results)
         self.jobs[job_id] = job
@@ -388,7 +394,8 @@ class Daemon:
             if ok:
                 out = os.path.join(body.out_dir, f"{os.path.basename(dub)}.a{stream}.flac")
                 _run("-ss", str(sounds.index(picture)), "-i", dub, "-t", "1", "-map", f"0:a:{stream}", "-c:a", "flac", out)
-            results.append({"dub": dub, "ok": ok, "out_path": out, "suspect": ["подозрительно"] if answer == "suspect" else [],
+            # The service names the voice-over of a result by its file name, though it is given the whole path.
+            results.append({"dub": os.path.basename(dub), "ok": ok, "out_path": out, "suspect": ["подозрительно"] if answer == "suspect" else [],
                             "critical": ["критично"] if answer == "critical" else [],
                             # A crash in the service judged nothing; a pair it looked at and did not bring together is
                             # refused: its trace holds the decision `abort`, as the real service writes it.

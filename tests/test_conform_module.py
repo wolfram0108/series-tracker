@@ -9,6 +9,7 @@ import pytest
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.envelope import Envelope
 from modules.conform import ConformModule, DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
+from core.contracts import job_dir, job_key, series_of_job_key
 from modules.conform.module import compact_job, finished_view, job_label, refused_by_service, split_label
 from modules.conform.paths import translate
 from conform_fakes import FakeClient
@@ -75,6 +76,15 @@ def test_the_key_a_label_carries_is_not_part_of_the_label_the_interface_shows():
     assert split_label("S s01e01") == ("S s01e01", None) and split_label(None) == (None, None)
     view = compact_job(job("j1", label="Show s01e02 #aa99"))
     assert (view["label"], view["key"]) == ("Show s01e02", "aa99")
+    assert view["series_id"] is None  # a key of another maker says no series
+
+
+def test_a_job_of_the_planner_says_which_series_it_works_for_by_its_key():
+    key = job_key(46, "3f9a1c4e0b72")
+    assert key == "plan:46:3f9a1c4e0b72" and series_of_job_key(key) == 46
+    assert compact_job(job("j1", label=job_label("Show s01e02", key)))["series_id"] == 46
+    assert [series_of_job_key(each) for each in (None, "", "aa99", "plan:", "plan:x:1", "other:46:1")] == [None] * 6
+    assert job_dir(key) == "3f9a1c4e0b72" and job_dir("aa99") == "aa99"  # the folder of a job is named by its part of the key
 
 
 def test_compact_job_keeps_what_the_interface_shows():

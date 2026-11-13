@@ -6,6 +6,25 @@ from enum import StrEnum
 from pydantic import BaseModel, Field, model_validator
 
 
+def job_key(series_id: int, part: str) -> str:
+    """The key a planner gives a job it sends to the alignment service: `plan:<series>:<part>`. The service keeps it with the
+    job (in the label), so a job found anywhere — the queue, the history, a folder — says which series it works for."""
+    return f"plan:{series_id}:{part}"
+
+
+def job_dir(key: str) -> str:
+    """The name the folder of a job has: its key without the series (`plan:<series>:<part>` → `<part>`). The folder lies in
+    the folder of its series already, and a path of the service holds no colon."""
+    return key.rpartition(":")[2]
+
+
+def series_of_job_key(key: str | None) -> int | None:
+    """The series a job works for, by its key (`job_key`); None for a key of another maker."""
+    head, _, rest = (key or "").partition(":")
+    number, _, _ = rest.partition(":")
+    return int(number) if head == "plan" and number.isdigit() else None
+
+
 class JobStatus(StrEnum):
     """The states of a job in the service, and `gone` for a job the service no longer knows."""
 

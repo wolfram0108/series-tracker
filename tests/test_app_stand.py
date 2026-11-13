@@ -9,6 +9,7 @@ import pytest
 
 from app_stand import STAND_LIMIT_S, AppStand
 from core import container as mkv
+from core.contracts import job_dir
 from core.envelope import Envelope
 from plan_world import truth_of
 
@@ -123,7 +124,8 @@ async def test_a_stop_while_the_service_aligns_takes_its_job_up_again_and_sends_
     assert len(view["assets"]) == 1 and len(stand.daemon.jobs) == 1, list(stand.daemon.jobs.values())
     (job,) = stand.daemon.jobs.values()
     kept = [folder for folder, _, files in os.walk(os.path.join(stand.root, "work")) if files]
-    assert kept and all(job["label"].rsplit("#", 1)[1] in folder for folder in kept), kept
+    assert kept and all(job_dir(job["label"].rsplit("#", 1)[1]) in folder for folder in kept), kept
+    assert all(":" not in folder for folder in kept), kept  # a path of the service holds no colon
     del stand.daemon.jobs[job["id"]]
     stand.bus.publish(Envelope(topic="conform.job.removed", kind="event", payload={"job_id": job["id"]}))
     await stand.bus.settled()

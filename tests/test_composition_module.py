@@ -1628,3 +1628,38 @@ async def test_a_change_of_a_source_that_does_not_change_what_is_read_reads_noth
     assert reads() == before
     await s.counted(lambda: s.catalog.update_source(only_source(s, series_id), players_off=["vk"]))
     assert reads() == before + 1
+
+
+# --- the reads of the pages of the series ------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_how_far_a_read_is_goes_to_the_series_that_own_the_page_whoever_asked_for_it_and_its_end_too(system):
+    s = system
+    series_id = await laid_out(s)
+    source_id = only_source(s, series_id)
+    reading = s.bus.subscribe("composition.series.reading")
+    s.probe.publish_event("sources.table.progress", {"url": OTHER_PAGE, "phase": "episodes", "current": 1, "total": 2})
+    s.probe.publish_event("sources.table.progress", {"url": PAGE, "phase": "episodes", "current": 3, "total": 20, "rate": 1.5})
+    told = await s.next(reading)
+    # The page of no series of ours is nobody's news: the first thing told is the page of the series.
+    assert told == {"series_id": series_id, "source_id": source_id, "url": PAGE, "phase": "episodes", "current": 3,
+                    "total": 20, "rate": 1.5, "active": True}
+    s.probe.publish_event("sources.table.progress", {"url": PAGE, "phase": "episodes", "current": 4, "total": 20, "rate": 1.5})
+    assert (await s.next(reading))["current"] == 4
+    await s.counted(lambda: s.sources.finish(PAGE, standard()))
+    assert await s.next(reading) == {**told, "current": 4, "active": False}
+    s.probe.publish_event("sources.table.ready", {"url": PAGE, "read_at": "2026-11-13T00:00:00+00:00"})
+    await s.composition.idle()
+    assert s.taken(reading) == []  # the end of a read is told once
+
+
+@pytest.mark.asyncio
+async def test_a_read_that_failed_ends_for_the_series_as_one_that_was_read(system):
+    s = system
+    series_id = await laid_out(s)
+    reading = s.bus.subscribe("composition.series.reading")
+    s.probe.publish_event("sources.table.progress", {"url": PAGE, "phase": "players", "current": 2, "total": 9})
+    assert (await s.next(reading))["active"] is True
+    s.probe.publish_event("sources.table.failed", {"url": PAGE, "reason": "why"})
+    ended = await s.next(reading)
+    assert (ended["series_id"], ended["phase"], ended["current"], ended["active"]) == (series_id, "players", 2, False)

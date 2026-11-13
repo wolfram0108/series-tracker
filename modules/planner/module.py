@@ -94,7 +94,7 @@ from core import NO_HANDLER, BaseModule, BusRequestError, compute, storage
 from core import container as mkv
 from core.clock import beat_while
 from core.dump import plain
-from core.contracts import (WORK_WITHDRAWN, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlannerView, SeriesSource, SourceType, SubmitOutcome,
+from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlannerView, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
 from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
 from core.envelope import Envelope
@@ -309,7 +309,7 @@ class BusSync(SeriesSync):
             self._flag("aligning", -1)
 
     def _key(self, op_id: str) -> str:
-        return f"plan:{self.series['id']}:{hashlib.md5(op_id.encode()).hexdigest()[:12]}"
+        return job_key(self.series["id"], hashlib.md5(op_id.encode()).hexdigest()[:12])
 
     def _download_name(self, op, row, key: str) -> str:
         """The file of a download is named for people — the series, the episode, what it is: the queue of the downloads,
@@ -428,7 +428,7 @@ class BusSync(SeriesSync):
     def _job_key(self, *what) -> str:
         """The key of a job of the service: the sync it belongs to and what it does. A stop and the start after it make
         the same job of the same sync, which is found by its key instead of being sent again; the next sync is another."""
-        return hashlib.md5("|".join(map(str, (self.series["id"], self.run_mark, *what))).encode()).hexdigest()[:12]
+        return job_key(self.series["id"], hashlib.md5("|".join(map(str, (self.series["id"], self.run_mark, *what))).encode()).hexdigest()[:12])
 
     async def _align(self, ops, results):
         goal = ops[0].subject[0]
@@ -436,17 +436,14 @@ class BusSync(SeriesSync):
         label = f"{self.series['name']} {label_of(goal.slot)}"
         key = self._job_key("align", goal.slot, timeline,
                             sorted((op.subject[1].voice, repr(op.subject[1].dub)) for op in ops))
-        folder = os.path.join(self.conform_dir, key)
+        folder = os.path.join(self.conform_dir, job_dir(key))
         places = await self.m.request("conform.workspace", {"dub_folder": folder})
         of_dub = {}
         for op in ops:  # the name the file of each voice-over has in the job (the job taken up again has the same)
             way = op.subject[1]
-            if way.kind == "download":
-                name = os.path.basename(results[f"dub:{way.dub}"].file)
-            else:
-                source = (await self.files.source_of(way.container, way.dub, way.own))[0]
-                name = sanitize_name(way.voice) + os.path.splitext(source)[1]
-            of_dub[name] = op
+            source = (results[f"dub:{way.dub}"].file if way.kind == "download"
+                      else (await self.files.source_of(way.container, way.dub, way.own))[0])
+            of_dub[sanitize_name(way.voice) + os.path.splitext(source)[1]] = op
         self.keys.add(key)
         job_id = await self.m.find_job(key)
         found = (await self.m.attach(job_id) if job_id
@@ -488,13 +485,14 @@ class BusSync(SeriesSync):
         dubs, streams, copied = [], [], {}
         for op in ops:
             way = op.subject[1]
+            # Each voice-over is the file of its voice in the job, whatever it came from: the queue of the service and the window
+            # name it by that file. A file of the library is shared by its voice-overs: all of one file the same inode.
             if way.kind == "download":
-                dub, stream = results[f"dub:{way.dub}"].file, 0
-                dub = await self._copy(dub, os.path.join(folder, "dub"))
-            else:  # out of a file of the library: each voice-over a name of its own, all of one file the same inode
+                path, stream = results[f"dub:{way.dub}"].file, 0
+            else:
                 path, stream = await self.files.source_of(way.container, way.dub, way.own)
-                dub = await self._own(copied.get(path, path),
-                                      os.path.join(folder, "dub", sanitize_name(way.voice) + os.path.splitext(path)[1]))
+            dub = await self._own(copied.get(path, path), os.path.join(folder, "dub", sanitize_name(way.voice) + os.path.splitext(path)[1]))
+            if way.kind != "download":
                 copied.setdefault(path, dub)
             dubs.append(dub)
             streams.append(stream)
@@ -509,7 +507,7 @@ class BusSync(SeriesSync):
                 else results[f"row:{way.ref2.row.id}"].file)
         key = self._job_key("cut", op.slot, way.row.id, ref2)
         label = f"{self.series['name']} {label_of(op.slot)}"
-        folder = os.path.join(self.conform_dir, f"{label_of(op.slot)} #{key}")
+        folder = os.path.join(self.conform_dir, f"{label_of(op.slot)} #{job_dir(key)}")
         places = await self.m.request("conform.workspace", {"dub_folder": folder})
         self.keys.add(key)
         job_id = await self.m.find_job(key)
@@ -1054,7 +1052,7 @@ class PlannerModule(BaseModule):
         known = await self.request("conform.job.keys", {})
         if not known.get("reachable"):
             return
-        keys, base = set(known.get("keys") or []), os.path.join(root, WORK)
+        keys, base = {job_dir(key) for key in known.get("keys") or []}, os.path.join(root, WORK)
 
         def sweep() -> None:
             for name in os.listdir(base) if os.path.isdir(base) else ():

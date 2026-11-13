@@ -50,12 +50,9 @@ Events (outgoing):
       the series is busy (Action.EDIT and SYNC are refused, series.busy.contribution {source: sync}) and its plan stays
       as the sync found it: a recount an event asks for is done when the run closes. An open run is kept in scan_tasks
       (phase=working) and taken up again after a restart.
-  scan.series.progress (SeriesReadProgress) — how far the read of a page is that a scan of the series waits for, per
-      source, with the rate; `active` false ends it (read, failed or given up). The card of the series shows it.
 
 Events (incoming):
   sources.table.ready / .failed {url, ...} — the verdicts a synchronization waits for.
-  sources.table.progress (TableProgress) — how far a read is; told again as scan.series.progress for the series waiting.
   torrents.queue.changed {count} — the pipeline is empty: after a full pass the next scan is set when count=0.
 
 Neighbours (all over the bus): catalog.series.get / .list (kind, sources), composition.recompute, sources.table.get,
@@ -76,7 +73,7 @@ from datetime import datetime, timedelta, timezone
 
 from core import NO_HANDLER, BaseModule, BusRequestError, torrent_source
 from core.deadlines import EDIT_STUCK_S, TABLE_WAIT_S
-from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, OutputSwitch, RunChanged, SeriesReadProgress, SeriesSource, TableProgress, Slot, WorkState)
+from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, OutputSwitch, RunChanged, SeriesSource, Slot, WorkState)
 from core.db import Database
 from core.envelope import Envelope
 from core.ignored import parse_memory
@@ -148,7 +145,7 @@ class ScanModule(BaseModule):
         self.repo = ScanRepository(db)
         self._tick = scheduler_tick  # None — без планировщика (тесты)
         self._table_wait_s = table_wait_s
-        self._signals = TableSignals(announce=self._announce_reading)
+        self._signals = TableSignals()
         self._locks: dict[int, asyncio.Lock] = {}
         self._running: set[int] = set()
         self._passes: dict[int, asyncio.Task] = {}  # the pass of the scan of each series, a task of its own
@@ -195,7 +192,6 @@ class ScanModule(BaseModule):
         self.handle("system.started", self.on_system_started)
         self.handle("sources.table.ready", self.on_table_ready)
         self.handle("sources.table.failed", self.on_table_failed)
-        self.handle("sources.table.progress", self.on_table_progress)
         self.handle(WORK_STATE, self.on_work_state)
         self.handle("torrents.queue.changed", self.on_queue_changed)
         self.handle("series.deleted", self.on_series_deleted)
@@ -410,12 +406,6 @@ class ScanModule(BaseModule):
 
     def on_table_failed(self, env: Envelope) -> None:
         self._signals.failed(env.payload["url"], env.payload.get("reason"))
-
-    def on_table_progress(self, env: Envelope) -> None:
-        self._signals.progress(TableProgress.model_validate(env.payload))
-
-    def _announce_reading(self, packet: SeriesReadProgress) -> None:
-        self.publish_event("scan.series.progress", packet.model_dump(mode="json"))
 
     def _lock(self, series_id: int) -> asyncio.Lock:
         return self._locks.setdefault(series_id, asyncio.Lock())

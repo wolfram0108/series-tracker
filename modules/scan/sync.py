@@ -12,7 +12,7 @@ from typing import Any, Awaitable, Callable, Sequence
 
 from core import BusRequestError
 from core.deadlines import TABLE_WAIT_S
-from core.contracts import SeriesReadProgress, SeriesSource, TableGetReply, TableGetRequest, TableProgress, TableState
+from core.contracts import SeriesSource, TableGetReply, TableGetRequest, TableState
 from core.logging import get_logger
 from core.reasons import reason
 
@@ -34,36 +34,13 @@ class TableSignals:
     A verdict is kept with its number, so that one that came between sending a request and getting its answer is
     not lost: the waiter takes the number before it asks (`mark`) and accepts any verdict numbered after it.
 
-    While a scan waits for a page, the progress of its read is told as the progress of that series and source
-    (`announce`, the event `scan.series.progress`): the scan is the one that knows which series waits for which page.
-    The end of the wait, whatever its outcome, is told too (`active` false)."""
+    How far a read is goes to the series that own the page by the layout (`composition.series.reading`), whoever asked
+    for the read: it is not the business of a scan."""
 
-    def __init__(self, announce: Callable[[SeriesReadProgress], None] | None = None) -> None:
+    def __init__(self) -> None:
         self._count = 0
         self._last: dict[str, tuple[int, Verdict]] = {}
         self._waiting: dict[str, list[asyncio.Future]] = {}
-        self._announce = announce
-        self._readers: dict[str, dict[tuple[int, int], SeriesReadProgress]] = {}
-
-    def watch(self, url: str, series_id: int, source_id: int) -> None:
-        self._readers.setdefault(url, {})[(series_id, source_id)] = SeriesReadProgress(
-            series_id=series_id, source_id=source_id, url=url)
-
-    def unwatch(self, url: str, series_id: int, source_id: int) -> None:
-        readers = self._readers.get(url, {})
-        last = readers.pop((series_id, source_id), None)
-        if not readers:
-            self._readers.pop(url, None)
-        if last is not None and self._announce is not None:
-            self._announce(last.model_copy(update={"active": False}))
-
-    def progress(self, packet: TableProgress) -> None:
-        readers = self._readers.get(packet.url, {})
-        for key, last in readers.items():
-            readers[key] = last.model_copy(update={"phase": packet.phase, "current": packet.current,
-                                                   "total": packet.total, "rate": packet.rate})
-            if self._announce is not None:
-                self._announce(readers[key])
 
     def mark(self) -> int:
         return self._count
@@ -131,11 +108,7 @@ async def _sync_source(source: SeriesSource, ask: Ask, signals: TableSignals, sa
         return SourceSync(source.id, reply.url, "ready")
     failure = reply.reason if reply.state == TableState.FAILED else None
     if reply.state == TableState.READING:
-        signals.watch(reply.url, source.series_id, source.id)
-        try:
-            verdict = await signals.verdict(reply.url, since, safeguard_s)
-        finally:
-            signals.unwatch(reply.url, source.series_id, source.id)
+        verdict = await signals.verdict(reply.url, since, safeguard_s)
         if verdict is None:
             failure = reason("table_wait_timeout", url=reply.url)
         elif verdict.ok:

@@ -128,6 +128,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | POST | `/api/scanner/scan_all` | Полный проход по всем сериалам | `SettingsDebug.vue` |
 | GET | `/api/agent/queue` | Очередь торрент-конвейера | — |
 | GET | `/api/downloads/queue` | Очередь загрузок видео | — |
+| GET | `/api/slicing/queue` | Очередь нарезки: карточка на задачу (`SlicingCard`) — сериал, сборник, серии с ходом, причина остановки | `AgentsPanel.vue` |
 | POST | `/api/downloads/queue/clear` | Очистка очереди загрузок | — |
 | POST | `/api/downloads/{task_id}/cancel` | Отмена загрузки: процесс + файл + задача; допустима у задачи в очереди, идущей и обрабатываемой, иначе 409 с причиной `not_allowed` | — |
 
@@ -148,7 +149,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | GET, POST | `/api/settings/debug_flags` | Флаги отладочного логирования | `LogsLoggingTab.vue` |
 | GET | `/api/voices/settings` | Группы озвучек и порядок источников (`VoiceSettingsView`): как действуют сейчас, порядок по умолчанию, отвергнутые сохранённые значения (Р-54) | `SettingsVoices.vue` |
 | GET | `/api/conform/settings` | Адрес демона выравнивания, рабочая папка здесь и на демоне, очистка очереди по завершении (`ConformSettingsView`): как действуют сейчас (Р-57, Р-59) | `SettingsConformServer.vue` |
-| DELETE | `/api/conform/jobs/{job_id}` | Остановить задачу выравнивания, которая ждёт или идёт (запись остаётся со статусом «отменено»), либо удалить запись завершённой: демон снимает свои файлы записи, выходной звук остаётся; ответ `{done: true}`, демон недоступен — 502 с кодом `conform_job_unchanged` (Р-59) | `ConformQueue.vue` |
+| DELETE | `/api/conform/jobs/{job_id}` | Остановить задачу выравнивания, которая ждёт или идёт (запись остаётся со статусом «отменено»), либо удалить запись завершённой: демон снимает свои файлы записи, выходной звук остаётся; ответ `{done: true}`, демон недоступен — 502 с кодом `conform_job_unchanged` (Р-59) | `WorkCard.vue` |
 | GET | `/api/conform/jobs/{job_id}/plot/{name}` | Картинка графика выравнивания (PNG), как её сделал демон; допускается только простое имя `*.png`; нет графика — 404 `conform_plot_missing`, демон недоступен — 502 (Р-59) | `ConformPlotViewer.vue` (адрес картинки) |
 | PUT | `/api/conform/settings` | Адрес и рабочая папка здесь и на демоне целиком (`ConformSettingsDraft` {url, work_dir, work_dir_remote}); при заданном адресе обе папки обязательны; ответ `ConformSettingsSaved`: `saved: true`, новый адрес применён сразу, либо `saved: false` и коды причин, ничего не записано (Р-57, Р-58) | `SettingsConformServer.vue` |
 | PUT | `/api/voices/settings` | Группы и порядок целиком (`VoiceSettingsDraft` {priority, voice_groups}); ответ `VoiceSettingsSaved`: `saved: true` и действующие значения либо `saved: false` и коды причин, ничего не записано. Экран шлёт каждое действие сразу (Р-54) | `SettingsVoices.vue` |
@@ -817,7 +818,7 @@ voice_group, height, reason}`; `mark` — `by_level` | `own` | `other_player` | 
 | `preview_naming_ready` | `torrents.preview.ready` | результат префетча |
 | `preview_naming_failed` | `torrents.preview.failed` | `{torrent_id, infohash, reason}` |
 | `download_queue_update` | `downloads.queue.changed` | массив задач |
-| `slicing_queue_update` | `slicing.queue.changed` | массив задач |
+| `slicing_queue_update` | `slicing.queue.changed` | массив карточек нарезки (`SlicingCard`) |
 | `scanner_status_update` | `scan.status.changed` | статус сканера |
 | `renaming_complete` | `renaming.finished` | `{series_id}` |
 | `relocation_started` | `library.relocation.started` | `{series_id}` |

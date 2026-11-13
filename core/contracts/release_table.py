@@ -259,8 +259,9 @@ class TableProgress(BaseModel):
 
 
 class SeriesReadProgress(BaseModel):
-    """The event `scan.series.progress`: how far the read of a page is that the scan of a series waits for. `active`
-    false says the wait for that source is over (read, failed or given up); the other fields are then those it last had."""
+    """The event `composition.series.reading`: how far the read of a page of a source of a series is, whoever asked for it
+    (a sync, the user, the term). `active` false says the read is over (read or failed); the other fields are then those it
+    last had."""
 
     series_id: int
     source_id: int

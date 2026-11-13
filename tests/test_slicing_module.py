@@ -387,6 +387,12 @@ async def test_error_is_carrier_and_retryable(system):
     assert row[0] == "error" and "битый поток" in row[1]
     assert json.loads(row[2])["11"] == "completed"  # прогресс сохранён
 
+    # the queue tells the card of the task: the series, the compilation, the episodes with the one it stopped on
+    [card] = (await probe.request("slicing.queue.get", {}, timeout=5))["tasks"]
+    assert (card["series_id"], card["status"], card["file"], card["season"], card["episode_start"], card["episode_end"]) == (
+        2, "error", "компиляция.mp4", 1, 11, 13)
+    assert [(each["number"], each["state"]) for each in card["episodes"]] == [(11, "done"), (12, "failed"), (13, "pending")]
+
     # ретрай из error разрешён (контракт роутов) и доделывает остаток
     ffmpeg.fail_episodes.clear()
     await probe.request("slicing.task.create", {"unique_id": "comp1"},

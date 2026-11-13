@@ -548,8 +548,7 @@ async def test_a_pair_the_service_fell_on_goes_on_with_the_next_source_in_the_sa
     neighbours, planner, _ = world
     episode(neighbours, 1, 1)
     neighbours.put(3, "g1cvh", 1, group="G1", player="cvh")
-    # The file of the first row taken is named for the voice-over plainly; the one of the next row takes a key after it.
-    neighbours.daemon.answers["Сериал s01e01 G1.mp4"] = "crash"
+    neighbours.daemon.answers["Сериал s01e01 G1"] = "once crash"  # the first row the service falls on; the next is asked afresh
     view = await sync(world)
     stored = await check(world)
     (container,) = stored.values()

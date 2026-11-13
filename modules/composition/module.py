@@ -56,6 +56,9 @@ Queries:
       the target is not the registry's.
 
 Events (outgoing):
+  composition.series.reading (SeriesReadProgress) — how far the read of a page of a source of a series is, per series and
+      source, with the rate, whoever asked for the read (a sync, the user, the term): the owner of the layout knows which
+      series own the page. `active` false ends it (read or failed), the other fields as it last had them.
   composition.changed {series_id, rev, episodes, summary_only} — the layout, its summaries or the settings changed.
       `rev` grows with every publication; a consumer acts on the latest. `episodes` are the episodes touched (by the
       rows that differ, by the settings that came out differently); empty means the whole series. `summary_only` is
@@ -69,6 +72,8 @@ Events (outgoing):
 Events (incoming) — every one of them only asks for a recount of the series it concerns:
   series.source.added / .updated / .removed {series_id, source_id} — the source began, changed or ended; the table of
       an added or changed source is asked for with a read (the site is not read again within the term of the table)
+  sources.table.progress (TableProgress) — how far a read is: told on as composition.series.reading to the series that
+      own the page
   sources.table.ready {url, read_at} / sources.table.failed {url, reason} — the sources of ours that read that page,
       found by the canonical address `sources.table.get` returned for them. How a page stands, a failed read
       included, is what `sources.table.get` says of it at the recount; nothing of it is kept here
@@ -103,7 +108,7 @@ from core.contracts import (COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, REFE
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
                             QueuesGet, QueuesReply, SourceEvent, SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState,
-                            VoiceOrderSet, VoiceSettingsView, VoiceTitleSet)
+                            VoiceOrderSet, VoiceSettingsView, VoiceTitleSet, SeriesReadProgress, TableProgress)
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
@@ -168,6 +173,8 @@ class CompositionModule(BaseModule):
         # The pages of our sources by canonical address, so that an event of `sources` finds them without a query.
         self._pages: dict[str, dict[int, int]] = {}
         self._page_of: dict[int, str] = {}
+        # The reads told as under way, by series and source: the end of one is told with what it last had.
+        self._reading: dict[tuple[int, int], SeriesReadProgress] = {}
         super().__init__(bus)
 
     def register(self) -> None:
@@ -184,6 +191,7 @@ class CompositionModule(BaseModule):
         self.handle("series.source.added", self.on_source_changed)
         self.handle("series.source.updated", self.on_source_changed)
         self.handle("series.source.removed", self.on_source_changed)
+        self.handle("sources.table.progress", self.on_table_progress)
         self.handle("sources.table.ready", self.on_table_ready)
         self.handle("sources.table.failed", self.on_table_failed)
         self.handle("rules.profile.changed", self.on_profile_changed)
@@ -491,11 +499,29 @@ class CompositionModule(BaseModule):
         fresh = env.topic.endswith(".added") or (env.topic.endswith(".updated") and bool(set(event.changed) & READ_FIELDS))
         self._schedule(event.series_id, (event.source_id,) if fresh else ())
 
+    def on_table_progress(self, env: Envelope) -> None:
+        """How far a read is goes to every series that has a source on that page; a page of no series is nobody's news."""
+        packet = TableProgress.model_validate(env.payload)
+        for source_id, series_id in self._pages.get(packet.url, {}).items():
+            told = SeriesReadProgress(series_id=series_id, source_id=source_id, url=packet.url, phase=packet.phase,
+                                      current=packet.current, total=packet.total, rate=packet.rate)
+            self._reading[(series_id, source_id)] = told
+            self.publish_event("composition.series.reading", told.model_dump(mode="json"))
+
+    def _read_ended(self, url: str) -> None:
+        """The read of a page ended (read or failed): the series that were told of it are told it is over."""
+        for source_id, series_id in self._pages.get(url, {}).items():
+            last = self._reading.pop((series_id, source_id), None)
+            if last is not None:
+                self.publish_event("composition.series.reading", last.model_copy(update={"active": False}).model_dump(mode="json"))
+
     def on_table_ready(self, env: Envelope) -> None:
+        self._read_ended(env.payload["url"])
         self._wake(env.payload["url"])
 
     def on_table_failed(self, env: Envelope) -> None:
         # The verdict is in `sources` before the event goes out; the recount reads it there and asks for no new read.
+        self._read_ended(env.payload["url"])
         self._wake(env.payload["url"])
 
     async def on_profile_changed(self, env: Envelope) -> None:
@@ -729,6 +755,8 @@ class CompositionModule(BaseModule):
         self._pages.setdefault(url, {})[source_id] = series_id
 
     def _unmap(self, source_id: int) -> None:
+        for key in [each for each in self._reading if each[1] == source_id]:
+            self._reading.pop(key)
         url = self._page_of.pop(source_id, None)
         if url is not None:
             self._pages.get(url, {}).pop(source_id, None)

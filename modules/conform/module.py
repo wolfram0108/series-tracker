@@ -71,7 +71,7 @@ Event:
                                           or by the cleanup of this project)
   conform.settings.changed ConformSettingsView   after every save, so that every open interface shows it
 A task is the compact view of one daemon job: id, label (the human part), key (the one the label carries,
-if any), status, progress, stage, stage_pct,
+if any), series_id (the series the key says the job works for: contracts/alignment.py), status, progress, stage, stage_pct,
 detail, dub_index, dub_total, cur_dub, dubs (file names), elapsed_s, error and results[{dub, plot, ok, refused, skipped, resid_ms,
 coverage, cuts, suspect, warnings, critical, error}]; `plot` names the picture of the voice-over's plot, if the daemon made one.
 """
@@ -87,7 +87,7 @@ from typing import Any
 import httpx
 
 from core import BaseModule, BusRequestError
-from core.contracts import (AlignmentJob, ConformParams, ConformSettingsDraft, ConformSettingsSaved, DubResult, JobKind,
+from core.contracts import (AlignmentJob, series_of_job_key, ConformParams, ConformSettingsDraft, ConformSettingsSaved, DubResult, JobKind,
                             JobStatus,
                             ReverseReply, ReverseSubmit, SubmitOutcome,
                             SubmitReply)
@@ -113,6 +113,7 @@ def compact_job(job: dict[str, Any]) -> dict[str, Any]:
     """The part of a daemon job the interface shows; traces, plots and operation logs stay behind."""
     view = {field: job.get(field) for field in _JOB_FIELDS}
     view["label"], view["key"] = split_label(job.get("label"))
+    view["series_id"] = series_of_job_key(view["key"])
     view["dubs"] = [os.path.basename(str(dub)) for dub in job.get("dubs") or []]
     view["results"] = [{
         "dub": result.get("dub"), "plot": plot_of(result),
