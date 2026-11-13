@@ -112,7 +112,7 @@ from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, ju
 from core.plan.files import Library, as_in_file, container_json, container_of, label_of
 from core.plan.inputs import assets_against, choices_of, online_of
 from core.plan.marks import references_of
-from core.plan.planner import Plan, name_of
+from core.plan.planner import Plan, cut_video, name_of
 from core.plan.tables import RowId, Track, Video
 from core.voice_names import Groups
 
@@ -553,7 +553,7 @@ class BusSync(SeriesSync):
             what = "критичные замечания" if result and result.get("ok") else why
             self.m.log.warning("%s: сервис выравнивания отказал в задаче %s, записано как неудача: %s", label, job_id, what)
             return None
-        return Made(Video(way.row.id, way.snapshot, op.slot, way.timeline, cut_of=way.row.id), out)
+        return Made(cut_video(way, op.slot), out)
 
     # --- the files -------------------------------------------------------------------------------------------------
 

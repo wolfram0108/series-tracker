@@ -31,7 +31,8 @@ def container_json(container: Container) -> dict:
     return {"name": container.name, "off": container.off, "video": {
         "id": asdict(container.video.id), "snapshot": asdict(container.video.snapshot),
         "episode": list(container.video.episode), "timeline": asdict(container.video.timeline),
-        "cut_of": row_json(container.video.cut_of)},
+        "cut_of": row_json(container.video.cut_of),
+        **({"timeline_snapshot": asdict(container.video.timeline_snapshot)} if container.video.timeline_snapshot else {})},
         "tracks": [{"dub": asdict(track.dub), "snapshot": asdict(track.snapshot), "episode": list(track.episode),
                     "aligned_to": asdict(track.aligned_to), **({"tag": track.tag} if track.tag else {}),
                     **({"file": track.file} if track.file else {})}
@@ -43,7 +44,8 @@ def container_json(container: Container) -> dict:
 def container_of(data: dict) -> Container:
     video = data["video"]
     return Container(data["name"], Video(RowId(**video["id"]), Snapshot(**video["snapshot"]), tuple(video["episode"]),
-                                         RowId(**video["timeline"]), RowId(**video["cut_of"]) if video["cut_of"] else None),
+                                         RowId(**video["timeline"]), RowId(**video["cut_of"]) if video["cut_of"] else None,
+                                         Snapshot(**video["timeline_snapshot"]) if video.get("timeline_snapshot") else None),
                      tuple(Track(RowId(**track["dub"]), Snapshot(**track["snapshot"]), tuple(track["episode"]),
                                  RowId(**track["aligned_to"]), track.get("tag", ""), track.get("file", ""))
                            for track in data["tracks"]),

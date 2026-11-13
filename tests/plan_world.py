@@ -17,7 +17,7 @@ from typing import Callable, Iterable
 
 from core.contracts import PlannerView, SyncScope
 from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, video_of
-from core.plan.planner import OFF, Goal, Plan, own_track, plan, restricted, switched_off, voice_of
+from core.plan.planner import OFF, Goal, Plan, cut_video, own_track, plan, restricted, switched_off, voice_of
 from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
 from modules.planner.view import view_of
 
@@ -237,7 +237,7 @@ class World(SeriesSync):
                 raise Crashed
             if answer == "critical" or not set(truth) <= set(inside):
                 return None  # the single episode is not in the compilation: nothing matches
-            video = Video(way.row.id, way.snapshot, op.slot, ref2.timeline, cut_of=way.row.id)
+            video = cut_video(way, op.slot)
             self.content[video.key] = truth
             return Made(video)
         if op.kind == "download_dub":
@@ -362,7 +362,9 @@ class World(SeriesSync):
                 assert video.timeline == goal.markup.id, f"{goal.name}: not on the timeline of the markup reference"
             if video.kind == "cut":
                 ref2 = online.get(video.timeline)
-                assert ref2 is None or video.row.height > ref2.height, f"{goal.name}: a cut no higher than its timeline"
+                # A timeline video that cannot be had (its download failed for good) is no height the cut must beat.
+                assert (ref2 is None or video.row.height > ref2.height or not ref2.playable
+                        or ("download", ref2.id) in step.failed_rows), f"{goal.name}: a cut no higher than its timeline"
         # A deleted track is never a source of itself: «Удалить» is its removal, not an alignment anew.
         for goal in step.plan.goals:
             for way in goal.tracks:

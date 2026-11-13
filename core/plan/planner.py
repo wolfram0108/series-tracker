@@ -66,6 +66,13 @@ class VideoWay:
     picture: Container | None = None
 
 
+def cut_video(way: VideoWay, slot: Slot) -> Video:
+    """The video a cut makes: the picture of `way.row` laid on the timeline of `way.ref2`. The file keeps what that timeline
+    was (`Video.timeline_snapshot`): the one place where a made cut is described, whoever makes it."""
+    return Video(way.row.id, way.snapshot, slot, way.timeline, cut_of=way.row.id,
+                 timeline_snapshot=way.ref2.snapshot if way.ref2 is not None else None)
+
+
 @dataclass(frozen=True)
 class TrackWay:
     """How the track of a voice-over is obtained: `reuse` (the track of `container` is aligned to the goal's timeline),
@@ -443,9 +450,11 @@ def _markup_of(inputs: Inputs, episode, singles: list[OnlineRow], files: list[Co
     online = {row.id: row for row in singles}
     for container in files:
         timeline = container.video.timeline
-        # What the timeline is: the video itself, or for a cut the sound of its timeline the file holds.
-        shot = container.video.snapshot if container.video.cut_of is None else next(
-            (track.snapshot for track in container.tracks if track.dub == timeline), None)
+        # What the timeline is: the video itself, or for a cut what the file kept of its timeline, else the sound of its
+        # timeline the file holds (a file made before the timeline was kept).
+        shot = container.video.snapshot if container.video.cut_of is None else (
+            container.video.timeline_snapshot or next(
+                (track.snapshot for track in container.tracks if track.dub == timeline), None))
         if shot is None or shot.group is None:
             continue
         variant = (shot.variant_label, timeline.source_id, shot.player)
@@ -469,7 +478,11 @@ def _cuts(slot, inputs, compilations, singles, candidates, video_rank, denied, m
                    key=lambda way: way.kind != "asset", default=None)
         if ref2 is None:
             return []
-        floor = markup.height
+        # A cut is only of a picture higher than the best the timeline itself gives: a file that holds it lower than its row
+        # is listed now is as high as that row, which the plan may download instead (unless it cannot be downloaded).
+        row = markup.row
+        floor = max(markup.height, row.height if row is not None and row.playable and ("download", row.id) not in inputs.failed
+                    else 0)
     elif held:
         ref2 = min(held, key=lambda each: each[0])[1]
         floor = max(way.snapshot.height for _, way in held)

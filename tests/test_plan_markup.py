@@ -255,6 +255,47 @@ def test_the_sound_of_the_single_video_a_compilation_is_cut_by_is_not_downloaded
     assert op_kinds(step) == ["build", "cut", "download_picture", "download_video"]
 
 
+# --- the timeline a cut file lies on is known by the file ------------------------------------------------------------
+
+def marked_world() -> World:
+    """A series of rows of one voice-over group, with a queue of the markup reference no source of the site has a row for:
+    the timeline of an episode is the one its file lies on, or its own row."""
+    world = World()
+    world.choose(markup={(1, 1): (("AniStar", 3, "cvh"),), (1, 2): (("AniStar", 3, "cvh"),), (2, 3): (("AniStar", 3, "cvh"),)})
+    return world
+
+
+def test_a_cut_file_is_still_on_its_timeline_when_the_source_gave_another_video_behind_that_row():
+    world = marked_world()
+    world.put(1, "r1", 2, group="AniStar", player="vk", height=1080)
+    synced(world, "файл серии")
+    # The compilation of the voice-over group of the reference comes, and the same sync meets the other video of the row.
+    world.put(4, "c1", 1, end=2, group="AniStar", height=2160)
+    world.put(1, "r1", 2, group="AniStar", player="vk", height=1080, video="v3")
+    synced(world, "подмена и компиляция")
+    container = file_of(world, 2)
+    assert container.video.cut_of == row(4, "c1") and container.video.timeline == row(1, "r1")
+    # The file keeps what its timeline was: the sound of it is no track of the file (the picture's voice-over is the same group).
+    assert container.video.timeline_snapshot is not None and container.video.timeline_snapshot.height == 1080
+    assert not container.tracks
+    step = synced(world, "ничего не осталось")
+    assert not step.plan.ops and file_of(world, 2) == container
+
+
+def test_a_cut_file_stays_on_the_timeline_of_a_row_the_source_forgot():
+    world = marked_world()
+    world.put(3, "r1", 3, season=2, group="AniStar", player="cvh", height=1080)
+    synced(world, "файл серии")
+    world.drop(3, "r1")
+    synced(world, "строку забыли")
+    world.put(1, "h5", 3, season=2, group="AniStar", player="vk", height=2160)
+    synced(world, "высокая строка")
+    container = file_of(world, 3)
+    assert container.video.cut_of == row(1, "h5") and container.video.timeline == row(3, "r1")
+    step = synced(world, "ничего не осталось")
+    assert not step.plan.ops and file_of(world, 3) == container
+
+
 # --- random histories around the mark ------------------------------------------------------------------------------
 
 ACTIONS = ("markup", "markup", "put_high", "put_high", "put_ref", "put_dub", "put_comp", "drop", "higher", "swap_video",
@@ -289,7 +330,12 @@ def test_a_markup_the_reference_leaves_out_as_a_picture_is_still_the_timeline():
     assert container.video.timeline == row(MARKUP, "orig1") and container.video.cut_of == row(PICTURE, "pva1")
 
 
-@pytest.mark.parametrize("seed", range(80))
+# The seeds after the first eighty that broke the invariants once (a file of a cut that forgot its timeline, a cut of a picture
+# no higher than the timeline that cannot be downloaded): each stays as a history of its own.
+BROKEN_ONCE = (1191, 1647, 1812, 2105, 2435, 2634, 2715, 4194, 4609, 4674, 5234, 5649, 6136, 6595, 6742, 6841, 7212, 7806)
+
+
+@pytest.mark.parametrize("seed", (*range(80), *BROKEN_ONCE))
 def test_random_histories_around_the_mark_keep_the_invariants_and_come_to_rest(seed):
     world = World()
     world.choose(markup={(season, episode): (("AniStar", 3, "cvh"),) for season in (1, 2) for episode in (1, 2, 3, 4)})

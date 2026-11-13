@@ -104,6 +104,11 @@ class Video:
     episode: Slot
     timeline: RowId
     cut_of: RowId | None = None
+    # What the timeline of a cut was when the file was made: its voice-over group, player and height. The file may hold no
+    # sound of it (the picture's own voice-over is the same group), and a timeline whose row the source no longer lists
+    # or has given another video is known by this alone. Not a part of what the video is; none for a file made before it
+    # was kept.
+    timeline_snapshot: Snapshot | None = field(default=None, compare=False)
 
     @property
     def key(self) -> tuple:

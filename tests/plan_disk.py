@@ -42,6 +42,7 @@ from pydantic import BaseModel, ConfigDict
 from core import container as mkv
 from core.plan.executor import DOWNLOADS, Made, Passing, judged, video_of
 from core.plan.files import Library, container_json, container_of, dub_key, label_of  # noqa: F401
+from core.plan.planner import cut_video
 from core.plan.tables import Track, Video
 from modules.conform.client import DaemonClient, Unconfirmed
 from modules.conform.module import ABORT, finished_view
@@ -253,6 +254,9 @@ class Daemon:
         self._seq = 0  # the number of the last job: a removed job's number is not given again
         self.sources: dict[str, list[str]] = {}  # the files each job was given
         self.roots: dict[str, list[str]] = {}  # the run folders of each job still running
+        # The folders of the runs are made and removed from the threads of the requests: the removal of the empty `_tmp` of one job
+        # must not come between the making of `_tmp` and of the run folder in it of another.
+        self._folders = threading.Lock()
         app = FastAPI()
         self.app = app
 
@@ -302,11 +306,12 @@ class Daemon:
                 raise HTTPException(status_code=404)
             # As the real service removes a record (conform/queue.py `_drop_files`): every run folder under `_tmp`
             # beside the sources of the job goes, whichever job it is of.
-            for folder in {os.path.dirname(source) for source in self.sources.pop(job_id, ())}:
-                base = os.path.join(folder, TMP_DIR)
-                for root in (glob.glob(os.path.join(glob.escape(base), "pair_*")) if os.path.isdir(base) else ()):
-                    shutil.rmtree(root, ignore_errors=True)
-                _rmdir_if_empty(base)
+            with self._folders:
+                for folder in {os.path.dirname(source) for source in self.sources.pop(job_id, ())}:
+                    base = os.path.join(folder, TMP_DIR)
+                    for root in (glob.glob(os.path.join(glob.escape(base), "pair_*")) if os.path.isdir(base) else ()):
+                        shutil.rmtree(root, ignore_errors=True)
+                    _rmdir_if_empty(base)
             return {"cancelled": job_id}
 
     def _answer_of(self, label: str | None) -> str | None:
@@ -339,8 +344,9 @@ class Daemon:
         self.sources[job_id] = list(sources)
         self.roots[job_id] = sorted({os.path.join(os.path.dirname(source), TMP_DIR, f"pair_{job_id}")
                                      for source in sources})
-        for root in self.roots[job_id]:
-            os.makedirs(root, exist_ok=True)
+        with self._folders:
+            for root in self.roots[job_id]:
+                os.makedirs(root, exist_ok=True)
         if self.hold:
             # As the real service tells a running job: the voice-over it is on, by its file name, and its place among them.
             job.update(status="running", progress=0.5, results=[], held=results, cur_dub=os.path.basename(dubs[0]) if dubs else "",
@@ -353,14 +359,15 @@ class Daemon:
 
     def _end(self, job_id: str, results: list[dict]) -> list[dict]:
         """What a job made at its end: nothing, when a run folder of it was removed under it. Its run folders go."""
-        gone = [root for root in self.roots.pop(job_id, []) if not os.path.isdir(root)]
-        if gone:
-            results = [{"dub": each["dub"], "ok": False, "out_path": None, "suspect": [], "critical": [], "trace": [],
-                        "error": f"[Errno 2] No such file or directory: '{gone[0]}/dub.f16'"} for each in results]
-        for source in self.sources.get(job_id, ()):
-            base = os.path.join(os.path.dirname(source), TMP_DIR)
-            shutil.rmtree(os.path.join(base, f"pair_{job_id}"), ignore_errors=True)
-            _rmdir_if_empty(base)
+        with self._folders:
+            gone = [root for root in self.roots.pop(job_id, []) if not os.path.isdir(root)]
+            if gone:
+                results = [{"dub": each["dub"], "ok": False, "out_path": None, "suspect": [], "critical": [], "trace": [],
+                            "error": f"[Errno 2] No such file or directory: '{gone[0]}/dub.f16'"} for each in results]
+            for source in self.sources.get(job_id, ()):
+                base = os.path.join(os.path.dirname(source), TMP_DIR)
+                shutil.rmtree(os.path.join(base, f"pair_{job_id}"), ignore_errors=True)
+                _rmdir_if_empty(base)
         return results
 
     def release(self) -> list[dict]:
@@ -523,7 +530,7 @@ class DiskWorld(World):
                                                     "extend_edges": True, "label": label})
             if result is None:
                 return None
-            video = Video(way.row.id, way.snapshot, op.slot, way.timeline, cut_of=way.row.id)
+            video = cut_video(way, op.slot)
             self.content[video.key] = (await asyncio.to_thread(self.codec.picture, result),)
             return Made(video, result)
         if op.kind == "align":
