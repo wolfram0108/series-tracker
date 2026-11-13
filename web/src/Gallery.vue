@@ -153,6 +153,7 @@ const settingsTabs = [
 const settingsBody = tAround("gallery.settings.body", "tab")
 // The widths (rem) of the rooms the folding button is shown in: it folds at the tier it names (30, 42, 56, 66 rem).
 const FOLD_ROOMS = [24, 36, 48, 60, 72]
+const HEAD_ROOMS = [24, 40, 72]
 function settingsLabel(): string {
   return settingsTabs.find((tab) => tab.value === settingsTab.value)?.label ?? ""
 }
@@ -476,6 +477,26 @@ const rtPass = ref("password123")
     </section>
 
     <section class="wide-section">
+      <h2>{{ t("gallery.head.h2") }}</h2>
+      <p class="muted small">{{ t("gallery.head.hint") }}</p>
+      <div v-for="width in HEAD_ROOMS" :key="width" class="head-demo-wrap">
+        <span class="muted small">{{ t("gallery.fold.room", { width }) }}</span>
+        <div class="fold-room fold-demo-room" :style="{ width: `${width}rem` }">
+          <div class="fold-head head-demo">
+            <div class="fold-said">
+              <strong>{{ t("gallery.head.title") }}</strong>
+              <span class="muted small">{{ t("gallery.head.words") }}</span>
+            </div>
+            <div class="fold-does">
+              <FoldButton :label="t('output.settings.series')" icon="pi pi-sliders-h" severity="info" fold="xl" />
+              <FoldButton :label="t('output.sync')" icon="pi pi-refresh" severity="warn" fold="xl" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wide-section">
       <h2>{{ t("gallery.settings.h2") }}</h2>
       <p class="muted small">{{ t("gallery.settings.hint") }}</p>
       <div class="modern-modal">
@@ -598,6 +619,8 @@ small { color: #888; font-weight: 400; font-size: 0.6em; }
 .muted { color: var(--text-muted); }
 .small { font-size: 0.85rem; }
 .fold-demo { margin-top: 0.75rem; }
+.head-demo-wrap { margin-top: 0.75rem; }
+.head-demo { padding: 0.4rem 0.6rem; background: var(--bg-light); border-radius: 8px; }
 .fold-demo-room { max-width: 100%; border: 1px dashed var(--color-gray-200); border-radius: 8px; padding: 0.5rem; margin-top: 0.25rem; }
 section { margin-top: 28px; border-top: 1px solid var(--color-gray-200); padding-top: 16px; }
 /* секция во всю ширину viewport (демо-окно как modal-xl, вне max-width галереи) */

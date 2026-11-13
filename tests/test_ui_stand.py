@@ -222,6 +222,46 @@ async def test_the_buttons_of_the_head_keep_their_words_while_the_tab_has_room_a
         shown = await demo.nth(index).locator(".p-button-label:visible").count()
         assert shown == {24: 0, 36: 0, 48: 3, 60: 4, 72: 5}[rem], (rem, shown)
     await ui.shot_of(page.locator("section", has=page.locator(".fold-demo")), "29-gallery-fold")
+    # The head of a block in rooms of three widths: the long text goes to a second line, nothing goes under a button.
+    heads = page.locator(".head-demo")
+    await expect(heads).to_have_count(3)
+    for index in range(3):
+        said, does = await heads.nth(index).locator(".fold-said").bounding_box(), await heads.nth(index).locator(".fold-does").bounding_box()
+        assert said["x"] + said["width"] <= does["x"] + 1 or does["y"] >= said["y"] + said["height"] - 1, index
+    await ui.shot_of(page.locator("section", has=page.locator(".head-demo")), "29-gallery-head")
+
+
+async def test_the_head_of_a_block_says_on_the_left_and_does_on_the_right_nothing_goes_under_a_button_and_no_button_wraps(ui):
+    """The heads of a season and of an episode: what they say takes the room the buttons leave and goes to another line where
+    it must; the buttons are one row at every width and never have the text under them."""
+    series_id = await series_in_browser(ui, (1, 2))
+    page = ui.page
+    await page.add_style_tag(content=".p-toast { display: none !important; }")
+    await ui.open_output(SERIES)
+    await ui.press_sync(series_id)
+    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(2)
+    await page.locator(".episode-card[data-episode='1']").dblclick()
+    heads = {"season": page.locator(".season-block .season-head").first, "episode": page.locator(".episode-detail .detail-head")}
+    # The words of the meters of a real season are long (every state of the tracks with its count): the same head with them.
+    await heads["season"].locator(".meter-text").evaluate_all(
+        "all => all.forEach((e) => { e.textContent = 'готово 1240 · в плане 37 · нет в источниках 3 · ошибок 2' })")
+    for width in (1440, 1100, 1070, 900, 700, 520, 380):
+        await page.set_viewport_size({"width": width, "height": 900})
+        for name, head in heads.items():
+            await ui.shot_of(head, f"31-{name}-head-{width}")
+            said, does, box = (await head.locator(".fold-said").bounding_box(), await head.locator(".fold-does").bounding_box(),
+                               await head.bounding_box())
+            # The text is left of the buttons, or (a room too short for both) the buttons are under it: never the text under a button.
+            assert said["x"] + said["width"] <= does["x"] + 1 or does["y"] >= said["y"] + said["height"] - 1, \
+                f"the text of the {name} head goes under its buttons at {width}"
+            assert does["x"] + does["width"] <= box["x"] + box["width"] + 1, f"the buttons of the {name} head leave it at {width}"
+            centres = [(await each.bounding_box())["y"] + (await each.bounding_box())["height"] / 2
+                       for each in await head.locator(".fold-does > *").all()]
+            # One row while the room is 30rem (a phone): a narrower one may need a second line for all the icons.
+            if box["width"] >= 30 * 16:
+                assert max(centres) - min(centres) < 8, f"the buttons of the {name} head are in more than one row at {width}: {centres}"
+            assert await head.locator(".fold-said").evaluate("e => e.scrollWidth <= e.clientWidth + 1"), \
+                f"the text of the {name} head leaves its place at {width}"
 
 
 async def test_the_buttons_of_the_header_of_the_application_keep_their_words_while_it_has_room_and_are_icons_when_it_has_not(ui):

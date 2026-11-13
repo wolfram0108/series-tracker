@@ -141,7 +141,8 @@ function step(by: number): void {
 
 <template>
   <section class="season-block modern-fieldset fold-room" :data-season="season">
-    <header class="season-head">
+    <header class="season-head fold-head">
+      <div class="fold-said">
       <span class="season-title">{{ t("output.season", { n: season }) }}</span>
       <span class="season-range">{{ t("output.season.range", { range, count: episodes.length }) }}</span>
       <div class="season-meters">
@@ -161,6 +162,8 @@ function step(by: number): void {
           <span class="meter-text">{{ voicesText }}</span>
         </div>
       </div>
+      </div>
+      <div class="fold-does">
       <FoldButton :label="t('output.settings.season')" icon="pi pi-sliders-h" severity="info" fold="xl" class="season-settings"
                   @click="emit('settings')" />
       <FoldButton :label="t('output.retryFailed')" :hint="t('output.season.retryFailedHint')" icon="pi pi-undo" severity="secondary"
@@ -169,6 +172,7 @@ function step(by: number): void {
       <PowerSwitch
         :on="!off" :busy="busy" :label="t(off ? 'output.season.enable' : 'output.season.disable')" @toggle="emit('switch-season', !$event)"
       />
+      </div>
     </header>
     <div class="season-body">
       <VoiceOrder

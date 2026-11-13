@@ -2,18 +2,19 @@
    meters, the grid of their cards and tiles. One file for both, so the two blocks are one look. */
 .season-block { margin: 0; }
 .season-head {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; padding: 0.75rem 1.25rem;
+  padding: 0.75rem 1.25rem;
   background: linear-gradient(135deg, var(--bg-light) 0%, var(--border-color) 100%); border-bottom: 1px solid var(--border-color);
   border-radius: var(--card-border-radius) var(--card-border-radius) 0 0;
 }
 .season-title { font-size: 1rem; font-weight: 600; color: #2c3e50; }
 .season-range { color: var(--text-muted); font-size: 0.8rem; }
-.season-meters { display: flex; flex-wrap: wrap; gap: 0.25rem 1.1rem; flex: 1 1 14rem; }
-.meter { display: flex; align-items: center; gap: 0.5rem; flex: 1 1 14rem; min-inline-size: 0; }
+.season-meters { display: flex; flex-wrap: wrap; gap: 0.25rem 1.1rem; flex: 1 1 14rem; min-inline-size: 0; }
+/* Where a meter has no room for its words beside the bar they go under it, and by words if the line is still short. */
+.meter { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; flex: 1 1 16rem; min-inline-size: 0; }
 .meter-name { flex: none; inline-size: 3.6rem; color: var(--text-muted); font-size: 0.75rem; }
-.meter-bar { display: flex; flex: 1 1 auto; block-size: 0.5rem; border-radius: 4px; overflow: hidden; background: #dee2e6; }
+.meter-bar { display: flex; flex: 1 1 3rem; min-inline-size: 2rem; block-size: 0.5rem; border-radius: 4px; overflow: hidden; background: #dee2e6; }
 .meter-bar [data-state] { background: var(--tone-end); }
-.meter-text { font-size: 0.75rem; color: var(--color-gray-600); white-space: nowrap; }
+.meter-text { font-size: 0.75rem; color: var(--color-gray-600); flex: 0 1 auto; min-inline-size: 0; }
 .season-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem 1.25rem; }
 .season-grid { position: relative; isolation: isolate; display: grid; grid-auto-flow: row dense; gap: 0.6rem; user-select: none; }
 .season-grid.is-tiles { grid-template-columns: repeat(auto-fill, minmax(2.25rem, 1fr)); gap: 0.25rem; }

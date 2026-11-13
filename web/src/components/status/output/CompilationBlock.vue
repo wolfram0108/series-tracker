@@ -118,7 +118,8 @@ const rows = computed<CompilationRow[]>(() => {
 
 <template>
   <section class="season-block modern-fieldset compilation-block fold-room" :data-compilation="head.key">
-    <header class="season-head">
+    <header class="season-head fold-head">
+      <div class="fold-said">
       <span class="compilation-letter" :style="{ '--tone': `var(--compilation-${badge.color})` }">{{ badge.letter }}</span>
       <span class="season-title">{{ t("output.compilation.title", { letter: badge.letter, range: range(view) }) }}</span>
       <span class="season-range compilation-source">
@@ -140,10 +141,13 @@ const rows = computed<CompilationRow[]>(() => {
           <span class="meter-text">{{ cutText }}</span>
         </div>
       </div>
+      </div>
+      <div class="fold-does">
       <FoldButton :label="t('output.compilation.settings')" icon="pi pi-sliders-h" severity="info" fold="xl" class="season-settings"
                   @click="emit('settings')" />
       <PowerSwitch :on="view.take" :busy="busy" :label="t(view.take ? 'output.compilation.disable' : 'output.compilation.enable')"
                    @toggle="emit('switch', !$event)" />
+      </div>
     </header>
     <div class="season-body">
       <div ref="grid" class="season-grid" :class="`is-${mode}`" :style="columns">

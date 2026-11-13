@@ -50,11 +50,13 @@ const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) =
 
 <template>
   <section class="episode-detail fold-room" :data-episode="view.episode">
-    <header class="detail-head">
+    <header class="detail-head fold-head">
+      <div class="fold-said">
       <h3 class="detail-title">{{ t("output.episode", { n: view.episode }) }}</h3>
       <span class="pill" :data-state="EPISODE_STATES[status]">{{ stateLabel(EPISODE_STATES[status]) }}</span>
       <span v-if="file" class="detail-file">{{ file }}</span>
-      <span class="detail-grow" />
+      </div>
+      <div class="fold-does">
       <FoldButton :label="t('output.retryFailed')" :hint="t('output.episode.retryFailedHint')" icon="pi pi-undo" severity="secondary"
                   fold="lg" class="do-retry-failed" data-lever :disabled="busy" @click="emit('retry-failed')" />
       <SyncButton name="episode" :scope="{ season: view.season, episode: view.episode }" fold="lg" />
@@ -65,6 +67,7 @@ const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) =
         @toggle="emit('switch', !$event)"
       />
       <button type="button" class="icon-btn" :aria-label="t('output.episode.close')" @click="emit('close')"><i class="pi pi-times" /></button>
+      </div>
     </header>
     <div class="detail-body">
       <div v-if="compilations" class="st-tabs st-tabs-wrap" role="tablist">
@@ -124,12 +127,11 @@ const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) =
   border-radius: var(--card-border-radius); box-shadow: var(--card-hover-shadow); overflow: hidden;
 }
 .detail-head {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; padding: 0.6rem 1rem;
+  padding: 0.6rem 1rem;
   background: linear-gradient(135deg, var(--bg-light) 0%, var(--border-color) 100%); border-bottom: 1px solid var(--border-color);
 }
 .detail-title { margin: 0; font-size: 1rem; font-weight: 600; color: #2c3e50; }
 .detail-file { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); overflow-wrap: anywhere; }
-.detail-grow { flex: 1 1 auto; }
 .icon-btn {
   border: 1px solid var(--border-color); background: var(--bg-white); border-radius: 8px; cursor: pointer;
   color: var(--color-gray-600); font: inherit; padding: 0.3rem 0.6rem;
