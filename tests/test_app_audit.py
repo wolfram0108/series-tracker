@@ -449,7 +449,8 @@ async def test_the_survey_measures_only_the_lines_in_the_list_of_the_application
     (out / 'discovery' / 'mtq-1.json').write_text(json.dumps({'state': 'found', 'selected': ['7']}))
     items = [{'place': place, 'label': str(place), 'token': f't{place}'} for place in range(1, 4)]
     (out / 'catalog' / 'mtq-7.json').write_text(json.dumps({'state': 'ok', 'card_data': {'names': ['x'], 'year': '', 'lines': [
-        {'code': code, 'name': code, 'listed': False, 'parsers': '', 'items': items} for code in ('JD4K', 'NBY', 'BBA')]}}))
+        {'code': code, 'name': code, 'listed': False, 'parsers': '', 'items': items}
+        for code in ('JD4K', 'MODEL_A', 'MODEL_B')]}}))  # the two others are lines no registry of the owner holds
 
     class Client:
         profile = AppProfile('mtq', 'mtq', 'appv7', {})
@@ -458,7 +459,7 @@ async def test_the_survey_measures_only_the_lines_in_the_list_of_the_application
             raise AppError(reason('app_no_parser', app='mtq', line=line, tried='—'))
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(404))) as http:
-        for all_lines, expected in ((False, {'JD4K'}), (True, {'JD4K', 'NBY', 'BBA'})):
+        for all_lines, expected in ((False, {'JD4K'}), (True, {'JD4K', 'MODEL_A', 'MODEL_B'})):
             (out / 'episodes-mtq.jsonl').unlink(missing_ok=True)
             await audit.sample('mtq', Client(), http, [{'id': 1}], out, 1, all_lines=all_lines)
             measured = {json.loads(row)['line'] for row in (out / 'episodes-mtq.jsonl').read_text().splitlines()}
