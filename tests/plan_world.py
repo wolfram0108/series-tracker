@@ -431,6 +431,9 @@ class World(SeriesSync):
                 assert ranks == sorted(ranks), f"{container.name}: the sounds {sounds} are out of the order of the season"
                 # Every sound of a visible file bears the name the user gave its group, and only that one.
                 labels = {track.group or "—" for track in container.tracks} | {container.video.snapshot.group or "—"}
+                # A deleted video that stays for want of another one takes no new work: what the file holds stays as it is.
+                if container.name in deleted_names(step.choices_after or step.choices):
+                    continue
                 titles = (step.choices_after or step.choices).titles
                 assert dict(container.titles) == {label: title for label, title in titles.items() if label in labels}, \
                     f"{container.name}: the titles {container.titles} are not the user's {titles}"

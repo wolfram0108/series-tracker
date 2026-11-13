@@ -623,6 +623,9 @@ def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, take
     for container in containers:
         here = f"file:{container.name}"
         join(here, at(video_slot(container.video)))
+        # The number it stands under is the number the media server sees it by: another file may take that number in this
+        # very sync (its row moved to another number), so the two are one group, applied together or not at all.
+        join(here, at(container.video.episode))
         for track in container.tracks:
             join(here, at(track_slot(track)))
 

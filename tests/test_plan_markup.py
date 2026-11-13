@@ -255,6 +255,19 @@ def test_the_sound_of_the_single_video_a_compilation_is_cut_by_is_not_downloaded
     assert op_kinds(step) == ["build", "cut", "download_picture", "download_video"]
 
 
+# The seeds of every action of the simulator, with a queue of the markup reference on every episode, that broke the invariants
+# once (two files under one number after a renumbering of a source, a row downloaded twice when a plan in between did not ask
+# it, a deleted video that waits and a title the user gave later): each stays as a history of its own.
+EVERY_ACTION_BROKEN_ONCE = (520, 983, 1435, 1438, 1470, 2882, 3842, 7158, 7725, 9413, 9651)
+
+
+@pytest.mark.parametrize("seed", (*range(60), *EVERY_ACTION_BROKEN_ONCE))
+def test_random_histories_of_every_action_with_a_markup_queue_keep_the_invariants_and_come_to_rest(seed):
+    world = World()
+    world.choose(markup={(season, episode): (("AniStar", 3, "cvh"),) for season in (1, 2) for episode in (1, 2, 3, 4)})
+    Chaos(world, random.Random(seed)).history(14)
+
+
 # --- the timeline a cut file lies on is known by the file ------------------------------------------------------------
 
 def marked_world() -> World:

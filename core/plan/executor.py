@@ -326,6 +326,7 @@ class SeriesSync:
         build_failed: set[str] = set()
         work: dict[str, Work] = {}  # the steps of the plan in force, by their ids
         every: list[Work] = []  # every step this sync began, the ones a later plan no longer asks among them
+        began: dict[str, Work] = {}  # the latest step of this sync of each id, in force or not: a plan that asks it again keeps it
         batches: dict[str, Batch] = {}  # the batch of each key not sent yet, or the last one sent
         sends: list[asyncio.Task] = []  # the pieces of work of batches a new plan completed (no member was arriving)
         news: list[tuple[str, tuple]] = []  # what the steps learned since the plan in force was made
@@ -343,8 +344,8 @@ class SeriesSync:
                     and entry.task.exception() is None and entry.task.result() is not None}
 
         def begin(plan_: Plan) -> dict[str, Work]:
-            """The steps of a plan: one that asks the work a step of this sync does or did keeps that step, with what
-            the steps before it are; any other begins anew."""
+            """The steps of a plan: one that asks the work a step of this sync does or did (a plan in between may not have
+            asked it) keeps that step, with what the steps before it are; any other begins anew."""
             by_id = {op.id: op for op in plan_.ops}
             missing = {need for op in plan_.ops for need in op.needs} - set(by_id)
             if missing:
@@ -353,15 +354,15 @@ class SeriesSync:
 
             def keeps(op: Op) -> bool:
                 if op.id not in kept:
-                    entry = work.get(op.id)
+                    entry = began.get(op.id)
                     kept[op.id] = entry is not None and same_work(entry.op, op) and all(keeps(by_id[need]) for need in op.needs) \
                         and not (entry.task.done() and (entry.task.cancelled() or entry.task.exception() is not None))
                 return kept[op.id]
 
             fresh = [op for op in plan_.ops if not keeps(op)]
-            steps = {op.id: work[op.id] for op in plan_.ops if kept[op.id]}
+            steps = {op.id: began[op.id] for op in plan_.ops if kept[op.id]}
             for op in fresh:
-                steps[op.id] = Work(op, None)
+                steps[op.id] = began[op.id] = Work(op, None)
                 every.append(steps[op.id])
             regroup(plan_, steps)
             for op in fresh:

@@ -838,3 +838,18 @@ def test_a_group_whose_step_failed_for_the_moment_is_left_and_the_others_are_app
     world.check(step)
     assert step.applied == (((1, 1),),) and [each.video.id.row_key for each in world.containers.values()] == ["ref1"]
     assert [(slot, kind) for slot, kind, _voice, _reason in step.problems] == [((1, 2), "download_video")]
+
+
+def test_a_file_that_stands_under_a_number_another_file_takes_is_of_the_same_group_so_no_number_has_two_files():
+    """The row of a file moves to the next number and a better row takes its old one: the sync of that episode alone does
+    not leave two files under the number — the group of the episode holds the file that stands there, and so the move of it."""
+    world = World()
+    world.put(1, "old", 4, group=REF, height=480)
+    world.check(world.sync("исходно"))
+    world.renumber(1, "old", 5)
+    world.put(2, "new", 4, group=REF, player="kodik", height=1080)
+    step = world.sync("серия 4", scope=(1, 4))
+    world.check(step)
+    assert [each.slots for each in step.plan.groups if (1, 4) in each.slots] == [((1, 4), (1, 5))]
+    assert sorted(each.name for each in world.containers.values() if not each.off) == [
+        "s01e04 [AniStar] 1080p.mkv", "s01e05 [AniStar] 480p.mkv"]
