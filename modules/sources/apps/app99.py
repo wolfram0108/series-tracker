@@ -29,7 +29,8 @@ from core.reasons import reason
 
 from ..players.http import retry_after
 
-from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream
+from . import (AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream, LEARNED_FOR_MIN_S, Lease, learned_for,
+               session_ended, whoever_asks)
 
 logger = logging.getLogger("sources")
 
@@ -85,7 +86,8 @@ def signature(nonce: str, stamp: str, body: str, token: str) -> str:
 
 
 class App99Client:
-    """One application of the family: its session, opened once and again when the application refuses a request of it."""
+    """One application of the family: its session, opened once and again when the application refuses a request of it; the
+    system of the application (its parsers) is asked again once its term is over, under the same guest."""
 
     def __init__(self, profile: AppProfile, http: Callable[[], httpx.AsyncClient],
                  clock: Callable[[], float] = time.time) -> None:
@@ -97,6 +99,7 @@ class App99Client:
         self._system: dict | None = None
         self._opening = asyncio.Lock()
         self._generation = 0
+        self._system_lease = Lease(learned_for(self._settings), clock)
 
     # --- the wire ---------------------------------------------------------------------------------------------
 
@@ -133,16 +136,35 @@ class App99Client:
                     parser_message(answer.get("msg")), time.monotonic() - began)
         return answer
 
+    def _system_request(self) -> dict:
+        settings = self._settings
+        return {"v": settings["versionName"], "n": settings["name"], "s": settings["buildSignature"], "pl": "1",
+                "apiVersion": "v2"}
+
+    async def _system_renewed(self) -> bool:
+        """The system of the application asked again under the guest of the session. False when the application refused it
+        (the session is then opened anew); an application that did not answer leaves the system as it was for a short term."""
+        try:
+            system = await self._post("/app/systemInit", self._system_request())
+            self._refused(system, "/app/systemInit")
+        except AppError as exc:
+            if not exc.transient:
+                return False
+            logger.info("приложение %s: система не обновлена, остаётся прежняя — %s", self.profile.name, exc.reason)
+            self._system_lease.renew(LEARNED_FOR_MIN_S)
+            return True
+        self._system = system
+        self._system_lease.renew()
+        return True
+
     async def _open(self) -> dict:
         """The session: the system of the application, then the guest login whose token goes with the requests."""
         async with self._opening:
-            if self._system is not None:
+            if self._system is not None and (self._system_lease.live or await self._system_renewed()):
                 return self._system
             settings = self._settings
             self._token = ""
-            system = await self._post("/app/systemInit", {
-                "v": settings["versionName"], "n": settings["name"], "s": settings["buildSignature"], "pl": "1",
-                "apiVersion": "v2"})
+            system = await self._post("/app/systemInit", self._system_request())
             self._refused(system, "/app/systemInit")
             stamp = int(self._clock() * 1000)
             login = settings.get("loginPath") or "/app/userInfo"
@@ -158,6 +180,7 @@ class App99Client:
                 raise AppError(reason("app_answer_broken", app=self.profile.label, step=login))
             self._token = str(info["user_token"] or "")
             self._system = system
+            self._system_lease.renew()
             self._generation += 1
             return system
 
@@ -167,17 +190,27 @@ class App99Client:
 
     async def call(self, path: str, fields: dict, *, renew: bool = True) -> dict:
         """One request in the session. A refusal of a request of the catalog opens the session again once (a guest
-        session ends at the application's will); the second refusal is the answer. A parser that refuses a link says so
-        of the link (`renew` false): its refusal is the answer at once."""
+        session ends at the application's will), and so does the end of the session said in so many words (HTTP 401, its
+        code or its words) to a request of any kind: the same guest, the same UUID. A quota or a VIP check is no end of the
+        session and opens nothing; a parser that refuses a link says so of the link (`renew` false): its refusal is the
+        answer at once. The second refusal is the answer."""
         await self._open()
         generation = self._generation
-        answer = await self._post(path, fields)
-        if answer.get("code") == 0:
-            return answer
-        if not renew:
+        status = None
+        try:
+            answer = await self._post(path, fields)
+        except AppError as exc:
+            if exc.status != 401:
+                raise
+            answer, status = {}, 401  # HTTP 401: the token of the guest ended
+        else:
+            if answer.get("code") == 0:
+                return answer
+        words = str(answer.get("msg") or "")
+        if not session_ended(answer.get("code"), words, status) and (not renew or whoever_asks(words)):
             self._refused(answer, path)
         logger.info("приложение %s: отказ на %s (%s) — запрос повторяется после проверки сессии", self.profile.name, path,
-                    answer.get("msg"))
+                    answer.get("msg") or status)
         # Several catalogue requests can be refused under the same expired session. A late refusal must not
         # discard the replacement another request has already opened, or each card starts another guest login.
         if self._generation == generation:

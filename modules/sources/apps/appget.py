@@ -1,7 +1,8 @@
 """The API of the applications of the AppGet family (茉莉): JSON over HTTP, the answers AES-CBC under the keys of the profile.
 
 The hosts of the API are what the published list of the application says (`site`, one address a line) or the one host
-of the profile (`url`); a host that does not answer gives way to the next. A request is `POST
+of the profile (`url`); a host that does not answer gives way to the next, and when none answers the list is read again
+once, since the application may have moved its API. A request is `POST
 <host>/api.php/getappapi.index/<method>` with the fields as JSON and headers that describe the device and the time; an
 answer is `{code, msg, data}` with `data` AES-CBC (PKCS#7, base64) under `dataKey` and `dataIv`. Code 1001 asks a person
 to pass a check: the application is then not read.
@@ -14,8 +15,8 @@ Two lines of a card may have one code (a line through a parser and the same reso
 of the parser — the playlist itself, or JSON that names it (`url`, or `data.url`). An episode whose address is no address
 is parsed by the application (`vodParse`, signed by the time under the keys).
 
-The token of an episode is its `url`; the address of its parser is kept with the card it was read with and asked of the
-card again when the client no longer holds it. The codec follows the client of the application as the owner's prototype
+The token of an episode is its `url`; the address of its parser is kept with the card it was read with, for a term, and asked
+of the card again when the client no longer holds it. The codec follows the client of the application as the owner's prototype
 reads it (source-prototypes/chinese_sources, sourcekit/client.py, QijiSource); its vectors are in the tests.
 """
 from __future__ import annotations
@@ -36,7 +37,8 @@ from cryptography.hazmat.primitives.padding import PKCS7
 
 from core.reasons import reason
 
-from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream, advertised_headers, parsed_address
+from . import (AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream, LEARNED_FOR_MIN_S, Lease, advertised_headers,
+               learned_for, parsed_address)
 
 logger = logging.getLogger("sources")
 
@@ -46,6 +48,8 @@ PREFIX = "/api.php/getappapi.index/"
 CAPTCHA = 1001
 # The cards whose parsers the client holds: the ones being read or downloaded now, not every card ever read.
 CARDS_HELD = 16
+# The published list of hosts is read again this often (the application moves its API without telling the clients).
+HOSTS_FOR_S = 300.0
 _MEDIA = re.compile(r"\.(m3u8|mp4|mkv)$", re.I)
 
 
@@ -98,9 +102,12 @@ class AppGetClient:
         self._http = http
         self._clock = clock
         self._hosts: list[str] = []
+        self._hosts_lease = Lease(HOSTS_FOR_S, clock)
         self._finding = asyncio.Lock()
-        # card -> line -> what the stream of its episodes is asked with (`lines_of`), as the card gave it.
-        self._parsers: OrderedDict[str, dict[str, dict]] = OrderedDict()
+        # card -> (until when it is believed, line -> what the stream of its episodes is asked with (`lines_of`), as the
+        # card gave it).
+        self._parsers: OrderedDict[str, tuple[float, dict[str, dict]]] = OrderedDict()
+        self._parsers_for = learned_for(self._settings)
 
     # --- the request ------------------------------------------------------------------------------------------------
 
@@ -117,10 +124,11 @@ class AppGetClient:
             headers["app-api-verify-sign"] = encrypt(stamp, self._settings["dataKey"], self._settings["dataIv"])
         return headers
 
-    async def _found(self) -> list[str]:
-        """The hosts of the API: the one of the profile, or the list the application publishes."""
+    async def _found(self, *, again: bool = False) -> list[str]:
+        """The hosts of the API: the one of the profile, or the list the application publishes, read again after its term
+        (and at once when `again`). A list that cannot be read now leaves the hosts held for a short term."""
         async with self._finding:
-            if self._hosts:
+            if self._hosts and not again and self._hosts_lease.live:
                 return self._hosts
             if self._settings.get("url"):
                 listed = [self._settings["url"]]
@@ -128,20 +136,44 @@ class AppGetClient:
                 try:
                     response = await self._http().get(self._settings["site"], timeout=REQUEST_TIMEOUT_S)
                 except httpx.HTTPError as exc:
+                    if self._hosts:
+                        logger.info("приложение %s: список хостов не прочитан, остаётся прежний — %s", self.profile.name,
+                                    type(exc).__name__)
+                        self._hosts_lease.renew(LEARNED_FOR_MIN_S)
+                        return self._hosts
                     raise AppError(reason("app_unreachable", app=self.profile.label, error=type(exc).__name__), True) from exc
                 listed = response.content.decode("utf-8-sig", "replace").splitlines() if response.status_code == 200 else []
             hosts = [each.strip().rstrip("/") for each in listed if each.strip().startswith(("http://", "https://"))]
             if not hosts:
+                if self._hosts:
+                    self._hosts_lease.renew(LEARNED_FOR_MIN_S)
+                    return self._hosts
                 raise AppError(reason("app_unreachable", app=self.profile.label, error="no host listed"), True)
             self._hosts = hosts
+            self._hosts_lease.renew()
             return hosts
 
     async def call(self, method: str, payload: dict | str, *, signed: bool = False) -> dict:
-        """One request; the answer decrypted. A host that does not answer gives way to the next one listed; a refusal
-        of the application is an error with its message."""
+        """One request; the answer decrypted. A host that does not answer gives way to the next one listed; when none
+        does, the published list is read again, and a request goes once to the hosts it names that it has not tried. A
+        refusal of the application is an error with its message."""
         body = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        hosts = await self._found()
+        try:
+            return await self._across(hosts, method, body, signed)
+        except AppError as exc:
+            if not exc.transient or self._settings.get("url"):
+                raise
+            failure = exc
+        fresh = [host for host in await self._found(again=True) if host not in hosts]
+        if not fresh:
+            raise failure
+        logger.info("приложение %s: ни один из хостов не ответил, список прочитан заново — %d новых", self.profile.name, len(fresh))
+        return await self._across(fresh, method, body, signed)
+
+    async def _across(self, hosts: list[str], method: str, body: str, signed: bool) -> dict:
         failure: AppError | None = None
-        for host in await self._found():
+        for host in hosts:
             began = time.monotonic()
             try:
                 response = await self._http().post(host + PREFIX + method, content=body.encode(),
@@ -179,7 +211,7 @@ class AppGetClient:
         if not isinstance(detail.get("vod"), dict) or not isinstance(detail.get("vod_play_list"), list):
             raise AppError(reason("app_title_absent", app=self.profile.label, card=str(card_id)))
         found = lines_of(detail)
-        self._parsers[str(card_id)] = {line.code: asked for line, asked in found}
+        self._parsers[str(card_id)] = (self._clock() + self._parsers_for, {line.code: asked for line, asked in found})
         self._parsers.move_to_end(str(card_id))
         while len(self._parsers) > CARDS_HELD:
             self._parsers.popitem(last=False)
@@ -192,14 +224,20 @@ class AppGetClient:
         return AppCardData(list(dict.fromkeys(name for name in names if name)), "" if year == "0" else year,
                            [line for line, _parsers in found])
 
+    def _held(self, card: str) -> dict[str, dict]:
+        """What the card gave, while its term lasts: the address of a parser is the application's, and the application
+        changes it."""
+        until, found = self._parsers.get(str(card), (0.0, {}))
+        return found if self._clock() < until else {}
+
     async def _asked_with(self, line: str, token: str, card: str) -> tuple[str, str, str, dict[str, str]]:
         """(the parser of the line, the address of the parser of the episode, the token of the episode, the headers the
         player of the line names for its stream), as the card of the episode says them: held from the read of the card,
         else the card is asked again."""
-        held = self._parsers.get(str(card), {}).get(line)
+        held = self._held(card).get(line)
         if (held is None or token not in held["episodes"]) and card:
             await self._detail(card)
-            held = self._parsers.get(str(card), {}).get(line)
+            held = self._held(card).get(line)
         if held is None:
             return "", "", "", {}
         address, own = held["episodes"].get(token, ("", ""))

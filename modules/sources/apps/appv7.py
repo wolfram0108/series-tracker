@@ -11,7 +11,9 @@ parse_api, parse_secret, headers}` with the episodes as `<label>$<token>#...`.
 The stream of an episode is its token when the line has no parser and the token is an address; else the parser of the
 line is asked with the token (a line that is `parse_secret` first has `secret_parse_api_url` seal the token) and answers
 `{code, msg, url}`: an address in a refusal is no stream. The parser belongs to the line of the card, so the card read
-last is kept for the resolve of its rows and asked again when a row's line is not in it.
+last is kept for the resolve of its rows, for a term, and asked again when its term is over or a row's line is not in it. A
+token of another application's episode (apps/routes.json) comes with no card: the parser of its line is the one the profile's
+`resolver_card` (a card of this application that lists the line) gave last, asked again when its term is over.
 
 The protocol follows the client of the application as the owner's prototype reads it (source-prototypes/chinese_sources,
 sourcekit/mtq.py and sourcekit/appv7.py).
@@ -35,7 +37,8 @@ from core.reasons import reason
 
 from ..players.http import retry_after
 
-from . import AppCardData, AppError, AppLine, AppPage, AppProfile, AppStream, advertised_headers, listed_lines, parsed_address
+from . import (AppCardData, AppError, AppLine, AppPage, AppProfile, AppStream, LEARNED_FOR_MIN_S, Lease, advertised_headers,
+               learned_for, listed_lines, parsed_address)
 from .gulu import cbc
 
 logger = logging.getLogger("sources")
@@ -84,8 +87,10 @@ class AppV7Client:
         self._settings = profile.settings
         self._http = http
         self._clock, self._iv = clock, iv
-        # card -> (the name of a line on it -> its player as the card gave it), the latest cards.
-        self._players: OrderedDict[str, dict[str, dict]] = OrderedDict()
+        # card -> (until when it is believed, the name of a line on it -> its player as the card gave it), the latest cards.
+        self._players: OrderedDict[str, tuple[float, dict[str, dict]]] = OrderedDict()
+        self._players_for = learned_for(self._settings)
+        self._resolver_lease = Lease(self._players_for, clock)
         # line -> its player as the application published it last, on any card (the profile gives the first one): the
         # parser of a line is the application's own, so the token of another application's episode of the line is asked
         # of it without a card (apps/routes.json).
@@ -139,7 +144,7 @@ class AppV7Client:
         # those it kept, in its order.
         kept = [each for each in groups if listed_lines(str(each["code"]), str(each.get("url") or ""))]
         players = {name: {k: v for k, v in group.items() if k != "url"} for (name, _code, _items), group in zip(listed, kept)}
-        self._players[str(card_id)] = players
+        self._players[str(card_id)] = (self._clock() + self._players_for, players)
         self._lines.update(players)
         self._players.move_to_end(str(card_id))
         while len(self._players) > CARDS_KEPT:
@@ -155,12 +160,29 @@ class AppV7Client:
         address = player.get("parse_api")
         return address if isinstance(address, str) and address.startswith(("http://", "https://")) else ""
 
+    def _held(self, card: str) -> dict[str, dict]:
+        until, found = self._players.get(str(card), (0.0, {}))
+        return found if self._clock() < until else {}
+
+    async def _resolver_renewed(self) -> None:
+        """The parsers the lines go by without a card of their own, as the card the profile names for it gives them now; a
+        card that cannot be read leaves the parsers held, to be asked again soon."""
+        try:
+            await self.card(str(self._settings["resolver_card"]))
+        except AppError as exc:
+            logger.info("приложение %s: карточка разборщиков не прочитана, остаются прежние — %s", self.profile.name, exc.reason)
+            self._resolver_lease.renew(LEARNED_FOR_MIN_S)
+            return
+        self._resolver_lease.renew()
+
     async def _player(self, line: str, card: str) -> dict:
-        player = (self._players.get(str(card)) or {}).get(line) if card else None
+        player = self._held(card).get(line) if card else None
         if player is None and card:
             await self.card(card)
-            player = (self._players.get(str(card)) or {}).get(line)
+            player = self._held(card).get(line)
         if player is None:
+            if self._settings.get("resolver_card") and not self._resolver_lease.live:
+                await self._resolver_renewed()
             player = self._lines.get(line)
         if player is None:
             raise AppError(reason("app_no_parser", app=self.profile.label, line=line, tried="—"))

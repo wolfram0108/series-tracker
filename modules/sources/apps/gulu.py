@@ -41,7 +41,8 @@ from cryptography.hazmat.primitives.padding import PKCS7
 
 from core.reasons import reason
 
-from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream, advertised_headers, parsed_address
+from . import (AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream, LEARNED_FOR_MIN_S, Lease, advertised_headers,
+               learned_for, parsed_address)
 from .appdrama import field, fields
 
 logger = logging.getLogger("sources")
@@ -164,7 +165,8 @@ def cards_of(found: bytes) -> list[dict]:
 
 
 class GuluClient:
-    """The session with the application and its requests."""
+    """The session with the application and its requests. The boot of the application (its players and its parsers) is
+    asked again in the same session once its term is over: the application changes its parsers without asking the clients."""
 
     def __init__(self, profile: AppProfile, http: Callable[[], httpx.AsyncClient], *,
                  clock: Callable[[], float] = time.time) -> None:
@@ -176,6 +178,7 @@ class GuluClient:
         self._session = ""
         self._device = self._settings.get("device") or secrets.token_hex(8)
         self._boot = b""
+        self._boot_lease = Lease(learned_for(self._settings), clock)
         self._opening = asyncio.Lock()
 
     # --- the session ------------------------------------------------------------------------------------------------
@@ -191,9 +194,30 @@ class GuluClient:
                            response.status_code >= 500 or response.status_code == 429)
         return response.content
 
+    def _boot_request(self) -> bytes:
+        app = message((1, "咕噜咕噜"), (2, "2.1.2"), (3, "com.jymqfh.xee"), (4, self._device), (5, "212"))
+        device = message((1, self._device), (2, 0), (3, "11"), (4, "Pixel 4"),
+                         (5, "google/redfin/redfin:11/RQ3A.211001.001"), (6, "google"), (7, "redfin"), (8, 0),
+                         (9, "unknown"), (10, "unknown"), (11, 0), (12, 30))
+        return message((1, "v1"), (2, "Android 11"), (3, "gulu"), (4, app), (5, device))
+
+    async def _boot_renewed(self) -> bool:
+        """The boot asked again in the session held. False when the session is gone (a new one is opened); an application
+        that did not answer, or refused in words, leaves the boot as it was for a short term."""
+        try:
+            self._boot = await self._asked(BOOT, self._boot_request())
+        except AppError as exc:
+            if not self._key:
+                return False
+            logger.info("приложение %s: boot не обновлён, остаётся прежний — %s", self.profile.name, exc.reason)
+            self._boot_lease.renew(LEARNED_FOR_MIN_S)
+            return True
+        self._boot_lease.renew()
+        return True
+
     async def _open(self) -> None:
         async with self._opening:
-            if self._key:
+            if self._key and (self._boot_lease.live or await self._boot_renewed()):
                 return
             private = ec.generate_private_key(ec.SECP256R1())
             public = private.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
@@ -210,15 +234,12 @@ class GuluClient:
             except (ValueError, TypeError, zlib.error) as exc:
                 raise AppError(reason("app_answer_broken", app=self.profile.label, step="handshake")) from exc
             self._session, self._key = session, session_key(shared, session)
-            app = message((1, "咕噜咕噜"), (2, "2.1.2"), (3, "com.jymqfh.xee"), (4, self._device), (5, "212"))
-            device = message((1, self._device), (2, 0), (3, "11"), (4, "Pixel 4"),
-                             (5, "google/redfin/redfin:11/RQ3A.211001.001"), (6, "google"), (7, "redfin"), (8, 0),
-                             (9, "unknown"), (10, "unknown"), (11, 0), (12, 30))
             try:
-                self._boot = await self._asked(BOOT, message((1, "v1"), (2, "Android 11"), (3, "gulu"), (4, app), (5, device)))
+                self._boot = await self._asked(BOOT, self._boot_request())
             except AppError:
                 self._key = b""
                 raise
+            self._boot_lease.renew()
 
     async def _asked(self, method: tuple[int, int], payload: bytes) -> bytes:
         stamp = int(self._clock() * 1000)

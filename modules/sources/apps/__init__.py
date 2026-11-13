@@ -9,10 +9,60 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass, field
-from typing import Mapping, Protocol
+from typing import Callable, Mapping, Protocol
 
 SCHEME = "app"
+
+# How long a client believes what it learned of the application itself (the parsers of its lines, its hosts, the
+# configuration of its resolvers). The application publishes them anew when it changes them; a client that never asks again
+# names a parser or a host that is gone until the process restarts. The profile may say `metadata_ttl` (seconds).
+LEARNED_FOR_S = 600.0
+LEARNED_FOR_MIN_S = 30.0
+
+
+def learned_for(settings: Mapping[str, str], default: float = LEARNED_FOR_S) -> float:
+    """The term of what a client learned of its application: `metadata_ttl` of the profile, not under half a minute."""
+    try:
+        return max(LEARNED_FOR_MIN_S, float(settings.get("metadata_ttl") or default))
+    except ValueError:
+        return default
+
+
+class Lease:
+    """What a client learned of the application is believed while its lease lasts. `renew` takes the term again (a shorter
+    one after a failed asking, so that a host that is down is not asked at every request), `lapse` ends it at once."""
+
+    def __init__(self, seconds: float, clock: Callable[[], float] = time.monotonic) -> None:
+        self.seconds, self._clock, self._until = seconds, clock, float("-inf")
+
+    @property
+    def live(self) -> bool:
+        return self._clock() < self._until
+
+    def renew(self, seconds: float | None = None) -> None:
+        self._until = self._clock() + (self.seconds if seconds is None else seconds)
+
+    def lapse(self) -> None:
+        self._until = float("-inf")
+
+
+# A refusal that comes of the session of the guest, and one that no guest escapes: a quota, a VIP check or a list of allowed
+# addresses refuses the request whoever asks, so opening another session is no cure for it.
+_SESSION_ENDED = re.compile(r"(?:token|session|登录|会话|令牌).{0,40}(?:expired|invalid|过期|失效|无效)|请先登录|未登录", re.I)
+_WHOEVER_ASKS = re.compile(r"quota|配额|次数|上限|vip|会员|白名单|whitelist", re.I)
+
+
+def whoever_asks(message: str) -> bool:
+    return bool(_WHOEVER_ASKS.search(message))
+
+
+def session_ended(code: object, message: str, status: int | None = None) -> bool:
+    """The application says the session of the guest is over: HTTP 401, the code 401 or words of an ended session."""
+    if whoever_asks(message):
+        return False
+    return status == 401 or str(code) == "401" or bool(_SESSION_ENDED.search(message))
 
 
 def daily_quota(message: str) -> bool:

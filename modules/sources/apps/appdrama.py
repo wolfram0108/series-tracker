@@ -201,6 +201,7 @@ class AppDramaClient:
         self._clock, self._rng, self._uid = clock, rng or random.SystemRandom(), uid
         self._host = ""
         self._zone = ""
+        self._opened = 0
         self._opening = asyncio.Lock()
 
     # --- the request ------------------------------------------------------------------------------------------------
@@ -255,30 +256,34 @@ class AppDramaClient:
                     time.monotonic() - began)
         return code, message, data
 
-    async def _open(self) -> None:
-        """The host the navigator names (the fallback when it names none) and the key of the zone."""
+    async def _open(self, *, opened: int | None = None) -> None:
+        """The host the navigator names (the fallback when it names none) and the key of the zone. `opened` is the count of
+        the opening the caller saw fail: when another request has opened the session since, there is nothing to redo."""
         async with self._opening:
-            if self._zone:
+            if self._zone and (opened is None or opened != self._opened):
                 return
-            self._host = await self._discover()
+            self._host = await self._discover(again=opened is not None)
             stamp, nonce = self._stamp(), random_text(self._rng, 16)
             request = (field(1, stamp) + field(2, rsa_encrypt(f"{stamp}{nonce}", self._settings["publicKey"]))
                        + field(3, random_text(self._rng, 16)) + field(4, nonce) + field(5, random_text(self._rng, 16)))
+            self._zone = ""
             code, message, data = await self._post("/api/v5/find/app/zone", request)
             if code != SUCCESS:
                 raise AppError(reason("app_refused", app=self.profile.label, step="zone", message=message[:300]))
             found = fields(data)
             self._zone = "".join(str(_first(found, number, "") or "") for number in (2, 3, 4, 5))
+            self._opened += 1
 
-    async def _discover(self) -> str:
+    async def _discover(self, *, again: bool = False) -> str:
         """Read the prototype's `site` navigator, or the legacy profile's `host` navigator.
 
-        With `site`, a nonempty `host` is a fixed API address, as in the standalone client. Only HTTP(S) domains
-        announced by the navigator are usable; a broken navigator falls back to the configured API address.
+        With `site`, a nonempty `host` is a fixed API address, as in the standalone client, until it stops answering:
+        `again` asks the navigator for the address the application publishes now. Only HTTP(S) domains announced by the
+        navigator are usable; a broken navigator falls back to the configured API address.
         """
         site = self._settings.get("site", "")
         host = self._settings.get("host", "")
-        if site and host:
+        if site and host and not again:
             return host.rstrip("/")
         if isinstance(site, str) and site.startswith("["):
             try:
@@ -299,9 +304,21 @@ class AppDramaClient:
         return str(self._settings["fallback"]).rstrip("/")
 
     async def call(self, path: str, params: dict) -> bytes:
-        """One request in the session; a refusal is an error with the application's message."""
-        await self._open()
-        code, message, data = await self._post(path, self.body(params))
+        """One request in the session; a refusal is an error with the application's message. A host that did not answer
+        may be one the application has left: with a published navigator (`site`) the session is opened again at the host it
+        names now, and the request is asked once more."""
+        seen = self._opened
+        try:
+            await self._open()
+            seen = self._opened
+            code, message, data = await self._post(path, self.body(params))
+        except AppError as exc:
+            if not exc.transient or not self._settings.get("site"):
+                raise
+            logger.info("приложение %s: хост не ответил, навигатор и ключ зоны запрашиваются заново — %s", self.profile.name,
+                        exc.reason)
+            await self._open(opened=seen)
+            code, message, data = await self._post(path, self.body(params))
         if code != SUCCESS:
             raise AppError(reason("app_refused", app=self.profile.label, step=path, message=message[:300]))
         return data

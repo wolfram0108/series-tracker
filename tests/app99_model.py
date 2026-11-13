@@ -57,7 +57,10 @@ class App99Model:
     pages: int = 1
     calls: list[tuple[str, dict]] = field(default_factory=list)
     refuse: set[str] = field(default_factory=set)  # paths refused once each, as an ended session is
-    sessions: int = 0
+    unauthorized: set[str] = field(default_factory=set)  # paths answered once each by HTTP 401, the token being over
+    said: dict[str, str] = field(default_factory=dict)  # path -> the words of its refusal, once (a quota, a VIP check)
+    sessions: int = 0  # systemInit asked
+    logins: int = 0  # guests opened
 
     def __post_init__(self) -> None:
         self._key = UUID.replace("-", "").encode()
@@ -87,12 +90,17 @@ class App99Model:
         self.calls.append((path, fields))
         if path == "/app/systemInit":
             self.sessions += 1
-            self._token = ""
             return self._answer({"code": 0, "msg": "init", "player": dict(self.players),
                                  "parser_api": [{"id": each, "name": f"parser {each}"} for each in self.parsers]})
         if path == "/app/userInfo":
-            self._token = f"guest-{self.sessions}"
+            self.logins += 1
+            self._token = f"guest-{self.logins}"
             return self._answer({"code": 0, "msg": "ok", "userInfo": {"user_token": self._token}})
+        if path in self.unauthorized:
+            self.unauthorized.discard(path)
+            return httpx.Response(401, text="")
+        if path in self.said:
+            return self._answer({"code": 1, "msg": self.said.pop(path)})
         if token != self._token or path in self.refuse:
             self.refuse.discard(path)
             return self._answer({"code": 1, "msg": "session ended"})
