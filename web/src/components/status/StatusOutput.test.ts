@@ -438,8 +438,9 @@ describe("StatusOutput", () => {
   it("puts the buttons first, then the sources, then the filters and the view", async () => {
     const w = mountOutput()
     await flushPromises()
+    const head = w.find(".output-actions")
+    expect(head.find(".output-sync").exists() && head.find(".output-series-settings").exists()).toBe(true)
     const bars = w.findAll(".output-bar")
-    expect(bars[0].find(".output-sync").exists() && bars[0].find(".output-series-settings").exists()).toBe(true)
     expect(bars[bars.length - 1].find(".output-filters").exists() && bars[bars.length - 1].find(".output-view").exists()).toBe(true)
   })
 
@@ -489,11 +490,14 @@ describe("StatusOutput", () => {
     reads.apply({ series_id: 1, source_id: 7, url: "https://1.ruchime.org/release/x", phase: "episodes", current: 34,
       total: 391, rate: 0.6 })
     await flushPromises()
-    expect(w.findAll(".output-reading").map((line) => line.text())).toEqual([
-      t("output.reading", { site: "1.ruchime.org", text: "Страницы серий: 34 из 391 | 0.6 с/с" })])
+    // A row of a source: its place (the host while the source has no mark), the phase, how far it is; the speed is the hint.
+    const rows = w.findAll(".read")
+    expect(rows.map((row) => [row.find(".read-place").text(), row.find(".read-phase").text(), row.find(".read-count").text()])).toEqual([
+      ["1.ruchime.org", "Страницы серий", t("output.reading.count", { current: 34, total: 391 })]])
+    expect(rows[0].attributes("title")).toBe(t("output.reading.rate", { rate: "0.6" }))
     reads.apply({ series_id: 1, source_id: 7, url: "https://1.ruchime.org/release/x", active: false })
     await flushPromises()
-    expect(w.findAll(".output-reading")).toHaveLength(0)
+    expect(w.findAll(".read")).toHaveLength(0)
   })
 
   it("names the sources of the series by their place and colour", async () => {

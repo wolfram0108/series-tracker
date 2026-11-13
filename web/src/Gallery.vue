@@ -16,6 +16,7 @@ import StInput from "./components/StInput.vue"
 import StSelect from "./components/StSelect.vue"
 import StBtn from "./components/StBtn.vue"
 import FoldButton from "./components/FoldButton.vue"
+import ReadProgress, { type ReadRow } from "./components/status/output/ReadProgress.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import Toast from "primevue/toast"
 import { t, tAround } from "./i18n"
@@ -154,6 +155,12 @@ const settingsBody = tAround("gallery.settings.body", "tab")
 // The widths (rem) of the rooms the folding button is shown in: it folds at the tier it names (30, 42, 56, 66 rem).
 const FOLD_ROOMS = [24, 36, 48, 60, 72]
 const HEAD_ROOMS = [24, 40, 72]
+const READ_ROOMS = [24, 48]
+const READS: ReadRow[] = [
+  { key: 1, mark: { n: 2, color: 1, place: "old.yummyani.me" }, place: "old.yummyani.me", phase: "Опрос плееров", current: 150, total: 200, rate: 3.5 },
+  { key: 2, mark: { n: 4, color: 2, place: "old.yummyani.me" }, place: "old.yummyani.me", phase: "Опрос плееров", current: 208, total: 1036, rate: 6.9 },
+  { key: 3, mark: { n: 5, color: 3, place: "1.ruchime.org" }, place: "1.ruchime.org", phase: "Страница релиза", current: 0, total: 0, rate: null },
+]
 function settingsLabel(): string {
   return settingsTabs.find((tab) => tab.value === settingsTab.value)?.label ?? ""
 }
@@ -473,6 +480,22 @@ const rtPass = ref("password123")
             <FoldButton :label="t('gallery.fold.last')" :hint="t('gallery.fold.lastHint')" icon="pi pi-star" severity="info" fold="xl" />
           </div>
         </div>
+      </div>
+    </section>
+
+    <section class="wide-section">
+      <h2>{{ t("gallery.reads.h2") }}</h2>
+      <p class="muted small">{{ t("gallery.reads.hint") }}</p>
+      <div v-for="width in READ_ROOMS" :key="width" class="head-demo-wrap">
+        <span class="muted small">{{ t("gallery.fold.room", { width }) }}</span>
+        <div class="fold-room fold-demo-room reads-demo" :style="{ width: `${width}rem` }"><ReadProgress :reads="READS" /></div>
+      </div>
+      <h3 class="small">{{ t("gallery.chips.h3") }}</h3>
+      <div class="row">
+        <span class="pill pill-danger"><i class="pi pi-exclamation-circle" aria-hidden="true" />{{ t("output.plan.failuresOpen", { count: 18, open: 1 }) }}</span>
+        <span class="pill pill-secondary"><i class="pi pi-exclamation-circle" aria-hidden="true" />{{ t("output.plan.failures", { count: 17 }) }}</span>
+        <span class="pill pill-warning"><i class="pi pi-times-circle" aria-hidden="true" />{{ t("output.plan.problems", { count: 3 }) }}</span>
+        <span class="pill pill-warning"><i class="pi pi-trash" aria-hidden="true" />{{ t("output.plan.deleteVideo", { name: "s01e12 [Китайский] 1080p.mkv" }) }}</span>
       </div>
     </section>
 

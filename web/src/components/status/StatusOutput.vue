@@ -9,7 +9,7 @@ import {
 import { CHANGE_ANSWER } from "../../lib/changeAnswer"
 import { HELD, holdLever } from "../../lib/lever"
 import { NO_SELECTION, keyOf, picked, selectedOf, switchesOff, type Pick, type Selection } from "../../lib/selection"
-import { pageHost, progressText } from "../../lib/sources"
+import { pageHost, phaseText } from "../../lib/sources"
 import { useSeriesStore } from "../../stores/series"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
 import { badgeOf, cardStatus, cutOf, cutOverride, cutsBySlot, heldCut, takes, type CompilationView, type CutState } from "../../lib/compilations"
@@ -19,6 +19,7 @@ import SyncButton from "../SyncButton.vue"
 import { SYNC_RUN } from "../../composables/syncRun"
 import LevelSettings from "./output/LevelSettings.vue"
 import PlanPending from "./output/PlanPending.vue"
+import ReadProgress, { type ReadRow } from "./output/ReadProgress.vue"
 import SeasonBlock from "./output/SeasonBlock.vue"
 import SourceMark from "./output/SourceMark.vue"
 
@@ -47,8 +48,9 @@ const canSync = computed(() => {
 provide(SYNC_RUN, { running: computed(() => busy.value || passing.value), allowed: canSync, stopping: output.stopping,
   sync: (scope) => output.sync(scope), stop: () => output.stop() })
 const reads = useSeriesReadsStore()
-const reading = computed(() => reads.forSeries(props.seriesId)
-  .map((read) => ({ key: read.sourceId, text: t("output.reading", { site: pageHost(read.url), text: progressText(read) }) })))
+const reading = computed<ReadRow[]>(() => reads.forSeries(props.seriesId).map((read) => ({
+  key: read.sourceId, mark: output.marks.value[read.sourceId] ?? null, place: output.marks.value[read.sourceId]?.place || pageHost(read.url),
+  phase: phaseText(read.phase), current: read.current, total: read.total, rate: read.rate ?? null })))
 
 type Filter = "all" | "deviations" | "errors" | "partial" | "working" | "off"
 const FILTERS: Filter[] = ["all", "deviations", "errors", "partial", "working", "off"]
@@ -177,12 +179,15 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
 
 <template>
   <div ref="root" class="status-output fold-room" :class="{ 'is-waiting': waiting }" @keydown="onKey" @keyup="onKey">
-    <div class="output-bar output-actions">
-      <FoldButton :label="t('output.settings.series')" icon="pi pi-sliders-h" severity="info" class="output-series-settings"
-                  @click="openSettings(null)" />
-      <FoldButton :label="t('output.retryFailed')" :hint="t('output.retryFailedHint')" icon="pi pi-undo" severity="secondary"
-                  class="output-retry-failed" :disabled="!canSync" @click="output.retryFailed()" />
-      <SyncButton name="output" />
+    <div class="output-actions fold-head">
+      <div class="fold-said"><PlanPending :series-id="props.seriesId" /></div>
+      <div class="fold-does">
+        <FoldButton :label="t('output.settings.series')" icon="pi pi-sliders-h" severity="info" class="output-series-settings"
+                    @click="openSettings(null)" />
+        <FoldButton :label="t('output.retryFailed')" :hint="t('output.retryFailedHint')" icon="pi pi-undo" severity="secondary"
+                    class="output-retry-failed" :disabled="!canSync" @click="output.retryFailed()" />
+        <SyncButton name="output" />
+      </div>
     </div>
     <div v-if="legend.length" class="output-bar output-legend">
       <span class="output-legend-name">{{ t("output.sources") }}</span>
@@ -204,8 +209,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       </div>
     </div>
 
-    <PlanPending :series-id="props.seriesId" />
-    <p v-for="read in reading" :key="read.key" class="output-reading"><i class="pi pi-spin pi-spinner" /><span>{{ read.text }}</span></p>
+    <ReadProgress :reads="reading" />
     <p v-if="output.failure.value" class="output-failure" role="alert">{{ output.failure.value }}</p>
     <p v-if="output.layoutFailure.value" class="output-failure output-layout-failure" role="alert">{{ output.layoutFailure.value }}</p>
 
@@ -293,6 +297,5 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
   display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0.75rem 0.15rem 0.25rem; border-radius: 20px;
   background: var(--bg-light); border: 1px solid var(--border-color); font-size: 0.85rem; color: var(--color-gray-600);
 }
-.output-reading { margin: 0; display: flex; gap: 0.5rem; align-items: center; color: var(--text-muted); overflow-wrap: anywhere; }
 .output-failure { margin: 0; color: var(--color-red-1); overflow-wrap: anywhere; }
 </style>

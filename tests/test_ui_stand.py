@@ -14,6 +14,12 @@ from ui_stand import SERIES, state, text, ui  # noqa: F401 - the fixture
 pytestmark = pytest.mark.ui
 
 
+def failures_text(count: int, open: int | None = None) -> str:
+    """The chip of the failed attempts: their number, and of them the ones no other source replaced (all, unless said)."""
+    lacking = count if open is None else open
+    return text("output.plan.failuresOpen", count=count, open=lacking) if lacking else text("output.plan.failures", count=count)
+
+
 async def series_in_browser(ui, episodes=(1, 2)) -> int:
     """The site has a release of each voice-over; the user sets the service and the groups up, makes a profile for each
     source in the constructor and adds the series in its window."""
@@ -100,7 +106,8 @@ async def test_a_download_that_failed_is_shown_and_tried_again_after_the_failure
     await ui.open_output(SERIES)
     await ui.press_sync(series_id)
     await expect(page.locator(".episode-card[data-state='failed']")).to_have_count(1)
-    await expect(page.locator(".plan-failures")).to_have_text(text("output.plan.failures", count=1))
+    await expect(page.locator(".plan-failures")).to_have_text(failures_text(1))
+    await ui.shot_of(page.locator(".output-actions"), "33-failures-chip")
     await page.locator(".episode-card").first.dblclick()
     row = page.locator(".episode-detail tr[data-group='AnimeVost']")
     await expect(row.locator(".pill")).to_have_text(state("failed"))
@@ -128,7 +135,7 @@ async def test_the_reset_of_an_episode_forgets_every_failed_attempt_of_it_and_on
     await ui.open_output(SERIES)
     await ui.press_sync(series_id)
     await expect(page.locator(".episode-card[data-state='failed']")).to_have_count(2)
-    await expect(page.locator(".plan-failures")).to_have_text(text("output.plan.failures", count=2))
+    await expect(page.locator(".plan-failures")).to_have_text(failures_text(2))
     await page.locator(".episode-card[data-episode='1']").dblclick()
     button = page.locator(".episode-detail .do-retry-failed")
     await expect(button).to_have_text(text("output.retryFailed"))
@@ -150,7 +157,7 @@ async def test_the_reset_of_an_episode_forgets_every_failed_attempt_of_it_and_on
             await expect(button).to_be_visible()
     await page.set_viewport_size({"width": 1440, "height": 1000})
     await button.click()
-    await expect(page.locator(".plan-failures")).to_have_text(text("output.plan.failures", count=1))
+    await expect(page.locator(".plan-failures")).to_have_text(failures_text(1))
     await expect(page.locator(".episode-card[data-episode='2']")).to_have_attribute("data-state", "failed")
     ui.site.gone("dub", 1, False)
     await ui.press_sync(series_id)
@@ -229,6 +236,14 @@ async def test_the_buttons_of_the_head_keep_their_words_while_the_tab_has_room_a
         said, does = await heads.nth(index).locator(".fold-said").bounding_box(), await heads.nth(index).locator(".fold-does").bounding_box()
         assert said["x"] + said["width"] <= does["x"] + 1 or does["y"] >= said["y"] + said["height"] - 1, index
     await ui.shot_of(page.locator("section", has=page.locator(".head-demo")), "29-gallery-head")
+    # The reads of the sources, a row each, in rooms of two widths: nothing leaves its row, the speed is the hint.
+    rooms = page.locator(".reads-demo")
+    await expect(rooms).to_have_count(2)
+    for index in range(2):
+        await expect(rooms.nth(index).locator(".read")).to_have_count(3)
+        assert await rooms.nth(index).locator(".reads").evaluate("e => e.scrollWidth <= e.clientWidth + 1"), index
+        assert await rooms.nth(index).locator(".read").first.get_attribute("title") == text("output.reading.rate", rate="3.5")
+    await ui.shot_of(page.locator("section", has=page.locator(".reads-demo")), "29-gallery-reads")
 
 
 async def test_the_queues_of_an_episode_say_which_variant_its_file_holds_beside_the_one_the_order_takes_first(ui):
