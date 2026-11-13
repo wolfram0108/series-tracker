@@ -57,14 +57,19 @@ watch(() => props.item.url, (url) => {
   query.value = parts.query
 }, { immediate: true })
 
-// The rows of each line of an application card a read takes: `all`, `10` (the first ten), `-10` (the last ten). It is
-// edited as text and sent when the field is left, and a value that is none of them is not sent.
+// The rows of each line of an application card a read takes: `all`, `10` (the first ten), `-10` (the last ten), `50-60`
+// (from the 50th to the 60th). It is edited as text and sent when the field is left, and a value that is none of them is
+// not sent.
 const rows = ref("")
 watch(() => props.item.rowsPerLine, (value) => { rows.value = value }, { immediate: true })
-const rowsValid = computed(() => /^(all|-?[1-9][0-9]*)?$/i.test(rows.value.trim()))
+const rowsText = computed(() => rows.value.replace(/\s+/g, "").replace(/[–—]/g, "-").toLowerCase())
+const rowsValid = computed(() => {
+  const span = /^([1-9][0-9]*)-([1-9][0-9]*)$/.exec(rowsText.value)
+  return span ? Number(span[1]) <= Number(span[2]) : /^(all|-?[1-9][0-9]*)?$/.test(rowsText.value)
+})
 
 function commitRows(): void {
-  const value = rows.value.trim().toLowerCase() || "all"
+  const value = rowsText.value || "all"
   if (rowsValid.value && value !== props.item.rowsPerLine) emit("change", { rowsPerLine: value })
 }
 

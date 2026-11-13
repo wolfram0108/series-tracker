@@ -246,12 +246,13 @@ async def test_a_card_is_read_by_the_first_or_the_last_rows_of_each_of_its_lines
         player = AppPlayer(App99Client(profile(), lambda: http), measure, registry=admitting("ffm3u8", "CO4K"))
         site = AppSite(player, AppLines([player]))
         keys = {}
-        for rows in ("1", "-1", "all", ""):
+        for rows in ("1", "-1", "2-3", "all", ""):
             draft = await site.read("app://banri/219017", ReadContext(http, lambda *_: None, rows=rows))
             keys[rows] = [row.key for row in draft.rows]
     # The rows of each line apart, in the order the application lists its episodes: the first, the last, all of them.
     assert keys["1"] == ["banri:ffm3u8:1", "banri:CO4K:1"]
     assert keys["-1"] == ["banri:ffm3u8:2", "banri:CO4K:3"]
+    assert keys["2-3"] == ["banri:ffm3u8:2", "banri:CO4K:2", "banri:CO4K:3"]
     assert keys["all"] == keys[""] == ["banri:ffm3u8:1", "banri:ffm3u8:2", "banri:CO4K:1", "banri:CO4K:2", "banri:CO4K:3"]
 
 

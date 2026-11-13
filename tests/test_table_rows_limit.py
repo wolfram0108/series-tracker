@@ -12,6 +12,7 @@ from test_sources_table import PAGE, FakeSite, build, entry, row, assert_no_seco
 @pytest.mark.parametrize("value,expected", [
     ("all", "all"), ("ALL", "all"), ("", "all"), (None, "all"), (" 10 ", "10"), ("-10", "-10"), ("0", None), ("-0", None),
     ("1.5", None), ("десять", None), ("--3", None), ("+3", None),
+    ("50-60", "50-60"), (" 50 – 60 ", "50-60"), ("7-7", "7-7"), ("60-50", None), ("0-5", None), ("50-", None), ("a-b", None),
 ])
 def test_the_setting_of_the_rows_of_a_line_is_all_n_or_minus_n(value, expected):
     assert normalized(value) == expected
@@ -23,6 +24,9 @@ def test_a_limit_takes_the_first_or_the_last_rows_of_a_line_in_the_order_they_ca
     assert limited(line, limit_of("-10")) == list(range(21, 31))
     assert limited(line, limit_of("all")) == line and limited(line, limit_of("")) == line
     assert limited([1, 2], limit_of("10")) == [1, 2] and limited([1, 2], limit_of("-10")) == [1, 2]
+    # From the place 5 to the place 7, both included; a line shorter than the span gives what it has, a shorter still none.
+    assert limited(line, limit_of("5-7")) == [5, 6, 7] and limited(line[:6], limit_of("5-7")) == [5, 6]
+    assert limited(line[:4], limit_of("5-7")) == [] and limited(line, limit_of("7-7")) == [7]
 
 
 class Card(FakeSite):
@@ -95,6 +99,20 @@ async def test_a_read_of_the_first_or_the_last_rows_keeps_the_rows_of_the_earlie
     assert heights["Серия 1"] == "[101]" and heights["Серия 6"] == "[102]"
     site.line = [1, 2, 3]
     assert await read("all") == ["Серия 1", "Серия 2", "Серия 3"]
+
+
+async def test_a_read_of_a_span_of_rows_takes_those_rows_and_keeps_the_others_where_they_were(card):
+    system, site = card
+
+    async def read(rows: str) -> list[str]:
+        system.probe.send_command("sources.table.read", {"url": PAGE, "rows": rows})
+        await entry(site)
+        await system.next(system.ready)
+        return await system.stored_texts()
+
+    assert await read("2") == ["Серия 1", "Серия 2"]
+    assert await read("5-6") == ["Серия 1", "Серия 2", "Серия 5", "Серия 6"]
+    assert await read("3-4") == ["Серия 1", "Серия 2", "Серия 5", "Серия 6", "Серия 3", "Серия 4"]
 
 
 async def test_a_stop_in_the_middle_of_the_read_of_a_card_is_no_read_to_begin_again_at_the_start(db_path, tmp_path):

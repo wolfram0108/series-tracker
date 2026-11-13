@@ -364,7 +364,7 @@ async def test_a_source_keeps_the_rows_per_line_it_was_given_as_all_n_or_minus_n
     _, probe = system
     made = await create_series(probe, sources=[source(url="app://banri/1", source_type="web_video")])
     assert (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[0]["rows_per_line"] == "all"
-    for given, stored in (("10", "10"), ("-10", "-10"), (" ALL ", "all"), ("", "all"), (None, "all")):
+    for given, stored in (("10", "10"), ("-10", "-10"), ("50 - 60", "50-60"), (" ALL ", "all"), ("", "all"), (None, "all")):
         reply = await probe.request("catalog.sources.update", {"source_id": made.source_id,
                                                                "fields": {"rows_per_line": given}}, timeout=5)
         assert reply["applied"] in ({"rows_per_line": stored}, {})
@@ -372,6 +372,9 @@ async def test_a_source_keeps_the_rows_per_line_it_was_given_as_all_n_or_minus_n
     with pytest.raises(BusRequestError, match="rows_per_line_invalid"):
         await probe.request("catalog.sources.update", {"source_id": made.source_id,
                                                        "fields": {"rows_per_line": "1.5"}}, timeout=5)
+    with pytest.raises(BusRequestError, match="rows_per_line_invalid"):
+        await probe.request("catalog.sources.update", {"source_id": made.source_id,
+                                                       "fields": {"rows_per_line": "60-50"}}, timeout=5)
 
 
 @pytest.mark.asyncio

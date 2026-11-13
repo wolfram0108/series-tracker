@@ -230,9 +230,14 @@ describe("SourcesEditor", () => {
     await input.setValue("ALL")
     await input.trigger("focusout")
     expect(w.emitted("change")?.[1]).toEqual([7, { rowsPerLine: "all" }])
-    await input.setValue("десять")
+    await input.setValue(" 50 – 60 ")
     await input.trigger("focusout")
-    expect(w.emitted("change")).toHaveLength(2)
+    expect(w.emitted("change")?.[2]).toEqual([7, { rowsPerLine: "50-60" }])
+    for (const wrong of ["десять", "60-50", "0-5"]) {
+      await input.setValue(wrong)
+      await input.trigger("focusout")
+    }
+    expect(w.emitted("change")).toHaveLength(3)
     expect(w.find(".source-rows .source-reason").text()).toBe(t("sources.rows.invalid"))
     expect(mountEditor().find(".source-rows").exists()).toBe(false)
   })
