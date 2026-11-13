@@ -15,7 +15,8 @@ import { liveEntries, liveFrom } from "../lib/live"
 import { useSeriesStore } from "../stores/series"
 import { usePlanStore } from "../stores/plan"
 import { useLayoutStore } from "../stores/layout"
-import { fileOf, heldFile, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, trackOf, type CompilationKey, type HeldFile } from "../lib/plan"
+import { fileOf, heldFile, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, takenReference, trackOf, type CompilationKey, type Held, type HeldFile } from "../lib/plan"
+import type { SameGroups } from "../lib/same"
 import {
   deleteFromPlan, fetchPlan, fetchQueues, resetFailures,
   cancelSync, resetLever, setLever, setVoiceOrder, setVoiceTitle, switchOutput, syncSeries, type Composition, type MediaFile,
@@ -182,6 +183,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
   /** What the file of an episode holds now (lib/plan.ts `heldFile`), for the window of the episode. */
   const heldOf = (season: number, episode: number, part: number | null = null): HeldFile | null => heldFile(plan.forSeries(seriesId), season, episode, part)
+  const takenOf = (season: number, episode: number, part: number | null = null): Held | null => takenReference(plan.forSeries(seriesId), season, episode, part)
   const queuesOf = (season: number | null, episode: number | null = null, compilation: string | null = null): Queues | undefined =>
     levelQueues.value[queueKey(season, episode, compilation)]
   const reloadQueues = (): void => {
@@ -215,6 +217,12 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     const lever = leversOf(queue).allow
     if (!lever) return Promise.resolve(null)
     return set(scope, lever, variantTarget(row.group, row.source_id, row.player), allowed)
+  }
+  // The variants of a queue of single videos the user declared equal: the whole value of the lever, none to go back to the level above.
+  const setSame = (scope: Scope, queue: QueueName, groups: SameGroups | null): Promise<string | null> => {
+    const lever = leversOf(queue).same
+    if (!lever) return Promise.resolve(null)
+    return groups === null ? reset(scope, lever, null) : set(scope, lever, null, groups)
   }
   const setTaken = (scope: Scope, group: string, taken: boolean): Promise<string | null> => {
     const lever = leversOf("voice").take
@@ -280,6 +288,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
 
   return { composition, references, loading, failure, busy, answer, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
-    sync, retryFailed, retrySeason, retryEpisode, voiceOrders, order, rename, marks, loadQueues, queuesOf, heldOf, setOrder, setAllowed, setTaken, resetOrder,
+    sync, retryFailed, retrySeason, retryEpisode, voiceOrders, order, rename, marks, loadQueues, queuesOf, heldOf, takenOf, setOrder, setAllowed, setSame, setTaken, resetOrder,
     retry, redo, refetch, compilations, cuts, member, takeCompilation, retryCut, labels }
 }

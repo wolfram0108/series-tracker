@@ -2,7 +2,8 @@
 import { computed, ref } from "vue"
 import { t } from "../../../i18n"
 import type { Queues } from "../../../composables/outputCalls"
-import type { HeldFile } from "../../../lib/plan"
+import type { Held, HeldFile } from "../../../lib/plan"
+import type { SameGroups } from "../../../lib/same"
 import type { EpisodeStatus, EpisodeView, QueueName, QueueRow, SourceMark as Mark, TrackCell } from "../../../lib/output"
 import FoldButton from "../../FoldButton.vue"
 import SyncButton from "../../SyncButton.vue"
@@ -24,10 +25,12 @@ const props = withDefaults(defineProps<{
   queues?: Queues
   /** What the file of the episode holds now: its queues show which of their variants it is. */
   held?: HeldFile | null
+  /** The variant the plan takes for the reference of the episode: the queue of the reference marks it. */
+  taken?: Held | null
   busy?: boolean
   /** The view «Компиляции» (stage 12): the compilations that cover the episode, and its REF 2 instead of its tracks. */
   compilations?: CompilationRow[]
-}>(), { busy: false, compilations: undefined })
+}>(), { busy: false, compilations: undefined, taken: null })
 
 const emit = defineEmits<{
   (e: "close"): void
@@ -40,6 +43,7 @@ const emit = defineEmits<{
   (e: "allow", queue: QueueName, row: QueueRow, allowed: boolean): void
   (e: "take", group: string, taken: boolean): void
   (e: "reset", queue: QueueName, group: string | null): void
+  (e: "same", queue: QueueName, groups: SameGroups | null): void
   (e: "member", key: string): void
   (e: "retry-cut"): void
   (e: "retry-failed"): void
@@ -104,16 +108,16 @@ const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) =
         @refetch="emit('refetch', $event)" @retry="emit('retry', $event)" @redo="emit('redo', $event)"
       />
       <QueuePanel
-        v-else-if="tab === 'reference'" queue="reference" level="episode" :view="queues?.reference" :marks="marks" :held="held?.video" :busy="busy"
+        v-else-if="tab === 'reference'" queue="reference" level="episode" :view="queues?.reference" :marks="marks" :held="held?.video" :taken="taken" :busy="busy"
         :hint="compilations ? t('output.queue.hintRef2') : undefined"
         @order="emit('order', 'reference', null, $event)" @allow="(row, allowed) => emit('allow', 'reference', row, allowed)"
-        @reset="emit('reset', 'reference', null)"
+        @reset="emit('reset', 'reference', null)" @same="emit('same', 'reference', $event)"
       />
       <QueuePanel
         v-else-if="tab === 'markup'" queue="markup" level="episode" :view="queues?.markup" :follows="queues?.markup_follows"
         :marks="marks" :busy="busy"
         @order="emit('order', 'markup', null, $event)" @allow="(row, allowed) => emit('allow', 'markup', row, allowed)"
-        @reset="emit('reset', 'markup', null)"
+        @reset="emit('reset', 'markup', null)" @same="emit('same', 'markup', $event)"
       />
       <QueuePanel
         v-else queue="voice" level="episode" :view="groupQueue(tab)" :marks="marks" :held="held?.tracks[tab]" :busy="busy" :from-reference="tab === referenceGroup"

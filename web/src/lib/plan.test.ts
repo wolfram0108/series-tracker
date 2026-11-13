@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fileOf, heldFile, planCuts, planDubs, planFiles, seasonVoiceOrders, trackOf } from "./plan"
+import { fileOf, heldFile, planCuts, planDubs, planFiles, seasonVoiceOrders, takenReference, trackOf } from "./plan"
 import { liveFrom } from "./live"
 import { asset, assetTrack, goal, goalTrack, goalVideo, planView, rowRef } from "./plan.fixtures"
 
@@ -286,5 +286,24 @@ describe("heldFile", () => {
       { ...asset("S01E03.mp4", rowRef(7, "r3"), [], null, [1, 3]), off: true }] })
     expect(heldFile(view, 1, 2)?.video).toEqual({ source_id: 4, player: "vk" })
     expect(heldFile(view, 1, 3)).toBeNull()
+  })
+})
+
+describe("takenReference", () => {
+  const reference = (over: object) => ({ season: 1, episode: 1, part: null, mark: "by_level" as const, source_id: null, row_key: null,
+    player: null, voice_group: null, height: null, reason: null, compilation: null, picture: null, markup: false, ...over })
+
+  it("is the variant the plan takes for the episode — what the order of the queue only wishes, as against the fact", () => {
+    const view = planView({ references: [reference({ source_id: 7, player: "line:duanju" }), reference({ episode: 2, source_id: 5, player: "vk" })] })
+    expect(takenReference(view, 1, 1)).toEqual({ source_id: 7, player: "line:duanju" })
+    expect(takenReference(view, 1, 2)).toEqual({ source_id: 5, player: "vk" })
+  })
+
+  it("is none for an episode the plan takes no video for, a part nobody asked for, or no plan", () => {
+    const view = planView({ references: [reference({ mark: "none" }), reference({ episode: 3, part: 2, source_id: 7, player: "vk" })] })
+    expect(takenReference(view, 1, 1)).toBeNull()
+    expect(takenReference(view, 1, 3)).toBeNull()
+    expect(takenReference(view, 1, 3, 2)).toEqual({ source_id: 7, player: "vk" })
+    expect(takenReference(undefined, 1, 1)).toBeNull()
   })
 })

@@ -207,6 +207,13 @@ export function heldFile(view: PlannerView | undefined, season: number, episode:
   return { video, tracks }
 }
 
+/** The variant the plan takes for the reference of an episode now: its source and its player (the single video whose
+ *  timeline a cut is laid on, for a cut). None while the plan takes none: the queue is then read as the order says. */
+export function takenReference(view: PlannerView | undefined, season: number, episode: number, part: number | null = null): Held | null {
+  const found = (view?.references ?? []).find((each) => each.season === season && each.episode === episode && (each.part ?? null) === part)
+  return found?.source_id != null && found.player ? { source_id: found.source_id, player: found.player } : null
+}
+
 /** The cuts of the episodes out of their compilations: done when the file holds a cut video, planned or under way while
  *  the plan cuts it, failed when the cut failed. */
 export function planCuts(view: PlannerView | undefined, keyOf: CompilationKey = ownKey): PlanCut[] {

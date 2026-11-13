@@ -1,6 +1,7 @@
 """The whole application in a browser (tests/ui_stand.py): the user's way through the screens on a stand whose site,
 player and alignment service are models."""
 import asyncio
+import re
 import os
 
 import pytest
@@ -244,6 +245,27 @@ async def test_the_buttons_of_the_head_keep_their_words_while_the_tab_has_room_a
         assert await rooms.nth(index).locator(".reads").evaluate("e => e.scrollWidth <= e.clientWidth + 1"), index
         assert await rooms.nth(index).locator(".read").first.get_attribute("title") == text("output.reading.rate", rate="3.5")
     await ui.shot_of(page.locator("section", has=page.locator(".reads-demo")), "29-gallery-reads")
+    # The queue of the reference with variants declared equal, in two rooms: the rows of a group carry the number and the stripe
+    # of one colour, the mark of the reference and the one of the file stand on one row, the table scrolls in a narrow room and
+    # the page does not go sideways.
+    rooms = page.locator(".same-demo")
+    await expect(rooms).to_have_count(2)
+    for index in range(2):
+        room = rooms.nth(index)
+        await expect(room.locator(".variant-row.in-same")).to_have_count(7)
+        await expect(room.locator(".same-chip")).to_have_count(7)
+        assert await room.locator(".variant-row.same-tone-0").count() == 5 and await room.locator(".variant-row.same-tone-1").count() == 2
+        head = room.locator(".variant-row.is-first")
+        await expect(head).to_have_count(1)
+        await expect(head.locator(".pill-primary")).to_have_text(text("output.queue.reference"))
+        await expect(head.locator(".queue-held")).to_have_text(text("output.queue.held"))
+        await expect(room.locator(".queue-same-level")).to_have_text(text("output.level.series"))
+        wide = await room.locator(".queue-scroll").evaluate("e => [e.scrollWidth, e.clientWidth]")
+        assert wide[0] <= wide[1] + 1 or index == 1, wide  # the wide room holds the table whole; the narrow one scrolls it
+    narrow = await rooms.nth(1).locator(".queue-scroll").evaluate("e => [e.scrollWidth, e.clientWidth]")
+    assert narrow[0] > narrow[1], narrow
+    assert await page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth + 1")
+    await ui.shot_of(page.locator("section", has=page.locator(".same-demo")), "29-gallery-same")
 
 
 async def test_the_queues_of_an_episode_say_which_variant_its_file_holds_beside_the_one_the_order_takes_first(ui):
@@ -264,6 +286,53 @@ async def test_the_queues_of_an_episode_say_which_variant_its_file_holds_beside_
         await tabs.nth(index).click()
         await expect(page.locator(".episode-detail .queue-held")).to_have_count(1)
         await ui.shot_of(page.locator(".episode-detail"), f"32-held-{index}")
+
+
+async def test_variants_declared_equal_are_picked_joined_marked_and_taken_apart_in_the_queue_of_the_reference(ui):
+    """The user's path (Р-99): in the queue of the reference of an episode he picks two variants by their marks, makes them one
+    group with «Объединить» (the whole value goes to the core as the lever `reference.same`), the queue shows the number and the
+    stripe of the group and the level the groups come from; the mark of the group opens its menu, and «Разъединить» takes the
+    group apart again."""
+    await synced_in_browser(ui, (1,))
+    page = ui.page
+    await page.locator(".episode-card").first.dblclick()
+    detail = page.locator(".episode-detail")
+    await detail.locator(".st-tab", has_text=text("output.tab.reference")).click()
+    rows = detail.locator(".queue-table .variant-row")
+    await expect(rows).to_have_count(2)
+    await expect(detail.locator(".same-chip")).to_have_count(0)
+    sent = []
+    page.on("request", lambda request: sent.append(request.post_data_json) if request.method == "PUT" and request.url.endswith("/output/settings") else None)
+
+    picks = detail.locator(".same-pick")
+    await picks.nth(0).click()
+    await expect(detail.locator(".same-pickbar")).to_have_text(re.compile(text("output.queue.samePicked", count=1)))
+    join = detail.locator(".same-join")
+    await expect(join).to_be_disabled()  # one row is no group
+    await picks.nth(1).click()
+    await expect(join).to_be_enabled()
+    await ui.shot_of(detail, "42-same-picked")
+    await join.click()
+
+    chips = detail.locator(".same-chip")
+    await expect(chips).to_have_count(2)
+    await expect(chips.first).to_have_text("1")
+    await expect(detail.locator(".variant-row.in-same.same-tone-0")).to_have_count(2)
+    await expect(detail.locator(".same-pickbar")).to_have_count(0)
+    await expect(detail.locator(".queue-same-level")).to_have_text(text("output.level.episode"))
+    levers = [(body["lever"], body["value"]) for body in sent if body]
+    assert [lever for lever, _ in levers] == ["reference.same"] and len(levers[0][1]) == 1 and len(levers[0][1][0]) == 2, levers
+    await ui.shot_of(detail, "43-same-joined")
+
+    await chips.first.click()
+    menu = page.locator(".same-menu .same-option")
+    await expect(menu).to_have_count(3)
+    await expect(menu.nth(2)).to_have_text(text("output.queue.sameSplit", count=2))
+    await menu.nth(2).click()
+    await expect(page.locator(".same-menu")).to_have_count(0)
+    await expect(chips).to_have_count(0)
+    await expect(detail.locator(".same-pick")).to_have_count(2)
+    await expect(page.locator(".output-failure")).to_have_count(0)
 
 
 async def test_the_head_of_a_block_says_on_the_left_and_does_on_the_right_nothing_goes_under_a_button_and_no_button_wraps(ui):

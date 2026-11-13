@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import type { HeldFile, ShownVoice } from "../../../lib/plan"
+import type { Held, HeldFile, ShownVoice } from "../../../lib/plan"
+import type { SameGroups } from "../../../lib/same"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
 import {
@@ -39,6 +40,8 @@ const props = withDefaults(defineProps<{
   queues?: Queues
   /** What the file of the opened episode holds now: the fact its queues are read against. */
   held?: HeldFile | null
+  /** The variant the plan takes for the reference of the opened episode. */
+  taken?: Held | null
   busy?: boolean
   /** The compilations of the season (stage 12): their outline behind the cards and their letters on them. */
   compilations?: CompilationView[]
@@ -66,6 +69,7 @@ const emit = defineEmits<{
   (e: "queue-allow", episode: number, queue: QueueName, row: QueueRow, allowed: boolean): void
   (e: "queue-take", episode: number, group: string, taken: boolean): void
   (e: "queue-reset", episode: number, queue: QueueName, group: string | null): void
+  (e: "queue-same", episode: number, queue: QueueName, groups: SameGroups | null): void
 }>()
 
 const order = computed(() => props.voices.map((voice) => voice.label))
@@ -206,7 +210,7 @@ function step(by: number): void {
           >{{ item.view.episode }}</button>
           <EpisodeDetail
             v-if="opened?.view.episode === item.view.episode" :view="item.view" :cells="item.cells" :status="item.status"
-            :marks="marks" :file="item.file" :queues="queues" :held="held" :busy="busy"
+            :marks="marks" :file="item.file" :queues="queues" :held="held" :taken="taken" :busy="busy"
             @close="emit('open', null)" @step="step" @switch="emit('switch-episode', item.view.episode, $event)"
             @refetch="emit('refetch', item.view.episode, $event)" @retry="emit('retry', item.view.episode, $event)"
             @retry-failed="emit('retry-failed', item.view.episode)" @redo="emit('redo', item.view.episode, $event)"
@@ -214,6 +218,7 @@ function step(by: number): void {
             @allow="(queue, row, allowed) => emit('queue-allow', item.view.episode, queue, row, allowed)"
             @take="(group, taken) => emit('queue-take', item.view.episode, group, taken)"
             @reset="(queue, group) => emit('queue-reset', item.view.episode, queue, group)"
+            @same="(queue, groups) => emit('queue-same', item.view.episode, queue, groups)"
           />
         </template>
       </div>

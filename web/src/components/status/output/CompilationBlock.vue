@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import type { Queues } from "../../../composables/outputCalls"
-import type { HeldFile } from "../../../lib/plan"
+import type { Held, HeldFile } from "../../../lib/plan"
+import type { SameGroups } from "../../../lib/same"
 import { useCardGrid } from "../../../composables/useCardGrid"
 import { sharing } from "../../../lib/sharing"
 import { t } from "../../../i18n"
@@ -37,8 +38,10 @@ const props = withDefaults(defineProps<{
   queues?: Queues
   /** What the file of the opened episode holds now: the fact its queues are read against. */
   held?: HeldFile | null
+  /** The variant the plan takes for the reference of the opened episode. */
+  taken?: Held | null
   busy?: boolean
-}>(), { mode: "cards", opened: null, busy: false })
+}>(), { mode: "cards", opened: null, busy: false, taken: null })
 
 const emit = defineEmits<{
   (e: "open", episode: number | null): void
@@ -50,6 +53,7 @@ const emit = defineEmits<{
   (e: "queue-order", episode: number, queue: QueueName, group: string | null, rows: QueueRow[]): void
   (e: "queue-allow", episode: number, queue: QueueName, row: QueueRow, allowed: boolean): void
   (e: "queue-reset", episode: number, queue: QueueName, group: string | null): void
+  (e: "queue-same", episode: number, queue: QueueName, groups: SameGroups | null): void
 }>()
 
 const badge = computed(() => badgeOf(props.view))
@@ -171,13 +175,14 @@ const rows = computed<CompilationRow[]>(() => {
           >{{ item.view.episode }}</button>
           <EpisodeDetail
             v-if="opened?.view.episode === item.view.episode" :view="item.view" :cells="item.cells" :status="item.status"
-            :marks="marks" :queues="queues" :held="held" :busy="busy" :compilations="rows"
+            :marks="marks" :queues="queues" :held="held" :taken="taken" :busy="busy" :compilations="rows"
             @close="emit('open', null)" @step="step" @switch="emit('member', item.view.episode, $event ? '' : head.key)"
             @member="emit('member', item.view.episode, $event)" @retry-cut="emit('retry', item.view.episode)"
             @retry-failed="emit('retry-failed', item.view.episode)"
             @order="(queue, group, list) => emit('queue-order', item.view.episode, queue, group, list)"
             @allow="(queue, row, allowed) => emit('queue-allow', item.view.episode, queue, row, allowed)"
             @reset="(queue, group) => emit('queue-reset', item.view.episode, queue, group)"
+            @same="(queue, groups) => emit('queue-same', item.view.episode, queue, groups)"
           />
         </template>
       </div>

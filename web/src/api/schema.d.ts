@@ -2719,6 +2719,8 @@ export interface components {
             rows?: components["schemas"]["QueueRow"][];
             /** @default default */
             order_level: components["schemas"]["Level"];
+            /** @default default */
+            same_level: components["schemas"]["Level"];
             /** Group */
             group: string;
             /**
@@ -3482,6 +3484,8 @@ export interface components {
             allowed: boolean;
             /** @default default */
             allowed_level: components["schemas"]["Level"];
+            /** Same */
+            same?: number | null;
         };
         /**
          * QueueTask
@@ -3500,6 +3504,8 @@ export interface components {
             rows?: components["schemas"]["QueueRow"][];
             /** @default default */
             order_level: components["schemas"]["Level"];
+            /** @default default */
+            same_level: components["schemas"]["Level"];
         };
         /**
          * QueuesReply
@@ -4149,7 +4155,7 @@ export interface components {
          *     empty for the order of the rule). A window draws a lever by its target and its shape.
          * @enum {string}
          */
-        ValueShape: "flag" | "variant_order" | "compilation";
+        ValueShape: "flag" | "variant_order" | "compilation" | "variant_sets";
         /**
          * VoiceOrderBody
          * @description The body of the command `composition.voice_order.set` without the series: a season and its voice-overs in order.

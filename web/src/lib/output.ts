@@ -21,6 +21,8 @@ export const RENDERED_FORMS = [
   "none/variant_order", "group/variant_order", "group/flag", "variant/flag",
   // Stage 12: the switch of a compilation (its block) and the compilation an episode stands in (its card and its tab).
   "none/flag", "none/compilation",
+  // Р-99: the variants of a queue the user declared equal (groups, by the number of the row).
+  "none/variant_sets",
 ] as const
 
 const RENDERED = new Set<string>(RENDERED_FORMS)
@@ -584,6 +586,8 @@ export interface QueueLevers {
   order?: string
   allow?: string
   take?: string
+  /** The groups of variants the user declared equal (the queues of single videos only). */
+  same?: string
 }
 
 export function queueLevers(specs: readonly LeverSpec[], queue: QueueName): QueueLevers {
@@ -593,6 +597,7 @@ export function queueLevers(specs: readonly LeverSpec[], queue: QueueName): Queu
     order: of(singleQueue(queue) ? "none" : "group", "variant_order"),
     allow: of("variant", "flag"),
     take: queue === "voice" ? of("group", "flag") : undefined,
+    same: singleQueue(queue) ? of("none", "variant_sets") : undefined,
   }
 }
 

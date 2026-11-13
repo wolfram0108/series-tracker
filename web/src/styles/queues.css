@@ -27,3 +27,39 @@
 .queue-mark-cell { white-space: nowrap; }
 .queue-mark { display: inline-flex; gap: 0.4rem; align-items: center; }
 .queue-table .queue-level { color: var(--text-muted); font-size: 0.75rem; }
+
+/* The groups of variants the user declared equal (Р-99): a column of marks, a stripe of the colour of the group at the edge
+   of each of its rows, the bar over the table that makes the picked rows one group. The table is wider than the window on
+   a narrow one: it scrolls, the window does not. */
+.queue-scroll { overflow-x: auto; max-inline-size: 100%; }
+.queue-same { text-align: center; white-space: nowrap; inline-size: 1%; }
+.queue-table th.queue-same i { font-size: 0.8rem; color: var(--text-muted); }
+.queue-table { --same-0: #0d6efd; --same-1: #6f42c1; --same-2: #d63384; --same-3: #fd7e14; }
+.queue-table .variant-row.in-same > td:first-child { box-shadow: inset 4px 0 0 var(--same-ink); }
+.queue-table .variant-row.same-tone-0 { --same-ink: var(--same-0); }
+.queue-table .variant-row.same-tone-1 { --same-ink: var(--same-1); }
+.queue-table .variant-row.same-tone-2 { --same-ink: var(--same-2); }
+.queue-table .variant-row.same-tone-3 { --same-ink: var(--same-3); }
+.same-pick {
+  display: inline-grid; place-items: center; inline-size: 1.5rem; block-size: 1.5rem; padding: 0; border-radius: 50%;
+  border: 1.5px solid #ced4da; background: var(--bg-white); color: #adb5bd; cursor: pointer; font: inherit;
+}
+.same-pick i { font-size: 0.7rem; }
+.same-pick:hover:not(:disabled) { border-color: #6c757d; color: #6c757d; }
+.same-pick.on { background: #343a40; border-color: #343a40; color: #fff; }
+.same-pick:disabled, .same-chip:disabled { opacity: 0.5; cursor: default; }
+.same-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem; border: 0; border-radius: 20px; padding: 0.05rem 0.55rem; cursor: pointer;
+  font: inherit; font-size: 0.75rem; font-weight: 700; color: #fff; background: var(--same-ink); font-variant-numeric: tabular-nums;
+}
+.same-chip i { font-size: 0.7rem; }
+.same-chip.on { outline: 2px solid #343a40; outline-offset: 1px; }
+.same-pickbar {
+  display: flex; align-items: center; gap: 0.75rem; padding: 0.45rem 0.8rem; border-radius: 10px; font-size: 0.85rem;
+  background: rgba(13, 110, 253, 0.08); border: 1px solid rgba(13, 110, 253, 0.25);
+}
+.same-join { display: inline-flex; align-items: center; gap: 0.4rem; }
+.queue-tools .queue-levels { display: inline-flex; align-items: center; gap: 0.5rem; margin-inline-start: auto; }
+.queue-tools .queue-level i { font-size: 0.7rem; }
+.same-option { display: block; inline-size: 100%; border: 0; background: none; text-align: start; font: inherit; }
+.same-option.is-danger { color: #b02a37; }

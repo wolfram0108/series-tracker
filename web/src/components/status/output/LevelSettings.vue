@@ -8,6 +8,7 @@ import { trackCells, type EpisodeView, type QueueName, type QueueRow, type Sourc
 import QueuePanel from "./QueuePanel.vue"
 import VoiceMark from "./VoiceMark.vue"
 import { CUT_STATES, stateWord, TRACK_STATES } from "../../../lib/states"
+import type { SameGroups } from "../../../lib/same"
 
 // The settings of a level — a season, or the whole series — as one table per queue, the order set for all of its
 // episodes at once; a season also has its tracks, with the actions that mend all the episodes of a group.
@@ -31,6 +32,7 @@ const emit = defineEmits<{
   (e: "allow", queue: QueueName, row: QueueRow, allowed: boolean): void
   (e: "take", group: string, taken: boolean): void
   (e: "reset", queue: QueueName, group: string | null): void
+  (e: "same", queue: QueueName, groups: SameGroups | null): void
   (e: "reset-level"): void
   (e: "retry", group: string): void
   (e: "redo", group: string): void
@@ -128,13 +130,13 @@ const countText = (state: TrackState | "reference", count: number): string => st
         v-else-if="tab === 'reference'" queue="reference" :level="level" :view="queues?.reference" :marks="marks" :busy="busy"
         :hint="compilation ? t('output.queue.hintRef2Level') : undefined"
         @order="emit('order', 'reference', null, $event)" @allow="(row, allowed) => emit('allow', 'reference', row, allowed)"
-        @reset="emit('reset', 'reference', null)"
+        @reset="emit('reset', 'reference', null)" @same="emit('same', 'reference', $event)"
       />
       <QueuePanel
         v-else-if="tab === 'markup'" queue="markup" :level="level" :view="queues?.markup" :follows="queues?.markup_follows"
         :marks="marks" :busy="busy"
         @order="emit('order', 'markup', null, $event)" @allow="(row, allowed) => emit('allow', 'markup', row, allowed)"
-        @reset="emit('reset', 'markup', null)"
+        @reset="emit('reset', 'markup', null)" @same="emit('same', 'markup', $event)"
       />
       <QueuePanel
         v-else queue="voice" :level="level" :view="groupQueue(tab)" :marks="marks" :busy="busy"

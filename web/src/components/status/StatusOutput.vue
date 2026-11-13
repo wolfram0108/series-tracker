@@ -8,6 +8,7 @@ import {
 } from "../../lib/output"
 import { CHANGE_ANSWER } from "../../lib/changeAnswer"
 import { HELD, holdLever } from "../../lib/lever"
+import type { SameGroups } from "../../lib/same"
 import { NO_SELECTION, keyOf, picked, selectedOf, switchesOff, type Pick, type Selection } from "../../lib/selection"
 import { pageHost, phaseText } from "../../lib/sources"
 import { useSeriesStore } from "../../stores/series"
@@ -171,6 +172,7 @@ const queueOrder = (scope: Scope, queue: QueueName, group: string | null, rows: 
 const queueAllow = (scope: Scope, queue: QueueName, row: QueueRow, allowed: boolean) => output.setAllowed(scope, queue, row, allowed)
 const queueTake = (scope: Scope, group: string, taken: boolean) => output.setTaken(scope, group, taken)
 const queueReset = (scope: Scope, queue: QueueName, group: string | null) => output.resetOrder(scope, queue, group)
+const queueSame = (scope: Scope, queue: QueueName, groups: SameGroups | null) => output.setSame(scope, queue, groups)
 const settingsSeason = computed(() => settingsOf.value?.season ?? null)
 const settingsKey = computed(() => settingsOf.value?.compilation ?? null)
 const settingsEpisodes = computed(() => settingsSeason.value === null ? []
@@ -223,7 +225,8 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
           :cuts="cuts" :marks="output.marks.value" :labels="output.labels.value" :order="orderOf(season.season)" mode="cards"
           :opened="opened?.compilation === view.ref.key ? opened.episode : null"
           :queues="opened?.compilation === view.ref.key ? output.queuesOf(season.season, opened.episode) : undefined"
-          :held="opened?.compilation === view.ref.key ? output.heldOf(season.season, opened.episode) : null" :busy="busy"
+          :held="opened?.compilation === view.ref.key ? output.heldOf(season.season, opened.episode) : null"
+          :taken="opened?.compilation === view.ref.key ? output.takenOf(season.season, opened.episode) : null" :busy="busy"
           @open="openInCompilation(season.season, view.ref.key, $event)" @settings="openSettings(season.season, view.ref.key)"
           @switch="output.takeCompilation(season.season, view.ref.key, !$event)"
           @member="(episode, key) => output.member(season.season, episode, key)"
@@ -232,6 +235,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
           @queue-order="(episode, queue, group, rows) => queueOrder(scopeOf(season.season, episode), queue, group, rows)"
           @queue-allow="(episode, queue, row, allowed) => queueAllow(scopeOf(season.season, episode), queue, row, allowed)"
           @queue-reset="(episode, queue, group) => queueReset(scopeOf(season.season, episode), queue, group)"
+          @queue-same="(episode, queue, groups) => queueSame(scopeOf(season.season, episode), queue, groups)"
         />
       </template>
     </template>
@@ -241,7 +245,8 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       :mode="mode === 'tiles' ? 'tiles' : 'cards'" :opened="opened?.season === season.season && !opened.compilation ? opened.episode : null"
       :compilations="compilationsOf(season.season)" :cuts="cuts"
       :queues="opened?.season === season.season ? output.queuesOf(season.season, opened.episode) : undefined"
-      :held="opened?.season === season.season ? output.heldOf(season.season, opened.episode) : null" :busy="busy"
+      :held="opened?.season === season.season ? output.heldOf(season.season, opened.episode) : null"
+      :taken="opened?.season === season.season ? output.takenOf(season.season, opened.episode) : null" :busy="busy"
       :selected="selectedBySeason.get(season.season) ?? NONE"
       @open="open(season.season, $event)" @select="(episode, pick) => select(season.season, episode, pick)"
       @settings="openSettings(season.season)"
@@ -258,6 +263,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       @queue-allow="(episode, queue, row, allowed) => queueAllow(scopeOf(season.season, episode), queue, row, allowed)"
       @queue-take="(episode, group, taken) => queueTake(scopeOf(season.season, episode), group, taken)"
       @queue-reset="(episode, queue, group) => queueReset(scopeOf(season.season, episode), queue, group)"
+      @queue-same="(episode, queue, groups) => queueSame(scopeOf(season.season, episode), queue, groups)"
     />
 
     <LevelSettings
@@ -270,6 +276,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       @allow="(queue, row, allowed) => queueAllow(scopeOf(settingsSeason, null, settingsKey), queue, row, allowed)"
       @take="(group, taken) => queueTake(scopeOf(settingsSeason, null, settingsKey), group, taken)"
       @reset="(queue, group) => queueReset(scopeOf(settingsSeason, null, settingsKey), queue, group)"
+      @same="(queue, groups) => queueSame(scopeOf(settingsSeason, null, settingsKey), queue, groups)"
       @reset-level="output.reset(scopeOf(settingsSeason, null, settingsKey))"
       @retry-cuts="settingsSeason !== null && output.retryCut(settingsSeason, null)"
       @retry="(group) => settingsSeason !== null && output.retry(settingsSeason, null, group)"

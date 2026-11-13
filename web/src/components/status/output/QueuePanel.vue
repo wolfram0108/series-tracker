@@ -4,6 +4,7 @@ import type { components } from "../../../api/schema"
 import { t } from "../../../i18n"
 import type { QueueName, QueueRow, SourceMark as Mark } from "../../../lib/output"
 import type { Held } from "../../../lib/plan"
+import type { SameGroups } from "../../../lib/same"
 import QueueTable from "./QueueTable.vue"
 
 type QueueView = components["schemas"]["QueueView"] & Partial<Pick<components["schemas"]["GroupQueue"], "group" | "take" | "take_level">>
@@ -25,16 +26,23 @@ const props = withDefaults(defineProps<{
   follows?: boolean
   /** The variant the file of the episode holds now (its source and player): the fact the order of the queue is read against. */
   held?: Held | null
-}>(), { fromReference: false, busy: false, hint: undefined, follows: false, held: null })
+  /** The variant the plan takes for the reference of the episode: the queue's mark of the reference stands on it. */
+  taken?: Held | null
+}>(), { fromReference: false, busy: false, hint: undefined, follows: false, held: null, taken: null })
 
 const emit = defineEmits<{
   (e: "order", rows: QueueRow[]): void
   (e: "allow", row: QueueRow, allowed: boolean): void
   (e: "take", taken: boolean): void
   (e: "reset"): void
+  /** The groups of equal variants the queue is to have on this level; none: they go back to the level above. */
+  (e: "same", groups: SameGroups | null): void
 }>()
 
 const own = computed(() => props.view?.order_level === props.level)
+// The groups of equal variants have a level of their own, as the order has: told where they come from, taken back there.
+const hasSame = computed(() => props.queue !== "voice" && props.view !== undefined && (props.view.same_level ?? "default") !== "default")
+const ownSame = computed(() => props.view?.same_level === props.level)
 const hint = computed(() => props.hint ?? (props.queue === "reference" ? t("output.queue.hintReference")
   : props.queue === "markup" ? t(props.follows ? "output.queue.hintMarkupFollows" : "output.queue.hintMarkup")
     : t("output.queue.hintVoice", { group: props.view?.group ?? "" })))
@@ -51,15 +59,24 @@ const hint = computed(() => props.hint ?? (props.queue === "reference" ? t("outp
         {{ t("output.queue.takeVoice") }}
         <span v-if="view.take_level && view.take_level !== 'default'" class="queue-level">{{ t(`output.level.${view.take_level}`) }}</span>
       </label>
-      <span v-if="view && follows" class="queue-level queue-follows">{{ t("output.queue.followsReference") }}</span>
-      <span v-else-if="view" class="queue-level" :class="{ 'is-own': own }">{{ t(`output.level.${view.order_level}`) }}</span>
-      <button v-if="own" type="button" class="queue-back" data-lever :disabled="busy" @click="emit('reset')">{{ t("output.lever.reset") }}</button>
+      <span class="queue-levels">
+        <span v-if="view && follows" class="queue-level queue-follows">{{ t("output.queue.followsReference") }}</span>
+        <span v-else-if="view" class="queue-level" :class="{ 'is-own': own }">{{ t(`output.level.${view.order_level}`) }}</span>
+        <button v-if="own" type="button" class="queue-back" data-lever :disabled="busy" @click="emit('reset')">{{ t("output.lever.reset") }}</button>
+        <template v-if="view && hasSame && !follows">
+          <span class="queue-level queue-same-level" :class="{ 'is-own': ownSame }" :title="t('output.queue.same')">
+            <i class="pi pi-link" aria-hidden="true" />{{ t(`output.level.${view.same_level}`) }}
+          </span>
+          <button v-if="ownSame && queue === 'reference'" type="button" class="queue-back queue-same-back" data-lever :disabled="busy"
+                  @click="emit('same', null)">{{ t("output.lever.reset") }}</button>
+        </template>
+      </span>
     </div>
     <p v-if="fromReference" class="queue-note">{{ t("output.queue.fromReference") }}</p>
     <p v-if="view && (view.rows ?? []).length === 0" class="queue-note">{{ t("output.queue.empty") }}</p>
     <QueueTable
-      v-else-if="view" :rows="view.rows ?? []" :queue="queue" :marks="marks" :level="level !== 'episode'" :held="held" :busy="busy"
-      @order="emit('order', $event)" @allow="(row, allowed) => emit('allow', row, allowed)"
+      v-else-if="view" :rows="view.rows ?? []" :queue="queue" :marks="marks" :level="level !== 'episode'" :held="held" :taken="taken" :busy="busy"
+      @order="emit('order', $event)" @allow="(row, allowed) => emit('allow', row, allowed)" @same="emit('same', $event)"
     />
     <p v-else class="queue-note">{{ t("common.fetching") }}</p>
   </div>

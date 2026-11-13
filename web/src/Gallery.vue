@@ -16,7 +16,8 @@ import StInput from "./components/StInput.vue"
 import StSelect from "./components/StSelect.vue"
 import StBtn from "./components/StBtn.vue"
 import FoldButton from "./components/FoldButton.vue"
-import ReadProgress, { type ReadRow } from "./components/status/output/ReadProgress.vue"
+import QueuePanel from "./components/status/output/QueuePanel.vue"
+import ReadProgress from "./components/status/output/ReadProgress.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import Toast from "primevue/toast"
 import { t, tAround } from "./i18n"
@@ -27,6 +28,7 @@ import {
   QUEUE_SLICING, RICK_EPISODE_FILE, RICK_EPISODE_TITLE, RICK_RECEIVED_FILE,
   RICK_SLICED_FILE, RICK_SLICED_TITLE, RICK_TEST_APPLIED, RICK_TEST_EXCLUDED, ROOT_PATH, ROWS,
   SERIES_FRONT, SERIES_FROM, SERIES_STRANGE, SLICING_SAMPLE,
+  CHIP_FILE, READS, SAME_HELD, SAME_MARKS, SAME_QUEUE,
 } from "./gallery.fixtures"
 
 // Карточки сериала — по состояниям, по порядку.
@@ -156,11 +158,7 @@ const settingsBody = tAround("gallery.settings.body", "tab")
 const FOLD_ROOMS = [24, 36, 48, 60, 72]
 const HEAD_ROOMS = [24, 40, 72]
 const READ_ROOMS = [24, 48]
-const READS: ReadRow[] = [
-  { key: 1, mark: { n: 2, color: 1, place: "old.yummyani.me" }, place: "old.yummyani.me", phase: "Опрос плееров", current: 150, total: 200, rate: 3.5 },
-  { key: 2, mark: { n: 4, color: 2, place: "old.yummyani.me" }, place: "old.yummyani.me", phase: "Опрос плееров", current: 208, total: 1036, rate: 6.9 },
-  { key: 3, mark: { n: 5, color: 3, place: "1.ruchime.org" }, place: "1.ruchime.org", phase: "Страница релиза", current: 0, total: 0, rate: null },
-]
+const SAME_ROOMS = [72, 36]
 function settingsLabel(): string {
   return settingsTabs.find((tab) => tab.value === settingsTab.value)?.label ?? ""
 }
@@ -484,6 +482,17 @@ const rtPass = ref("password123")
     </section>
 
     <section class="wide-section">
+      <h2>{{ t("gallery.same.h2") }}</h2>
+      <p class="muted small">{{ t("gallery.same.hint") }}</p>
+      <div v-for="width in SAME_ROOMS" :key="width" class="head-demo-wrap">
+        <span class="muted small">{{ t("gallery.fold.room", { width }) }}</span>
+        <div class="fold-room fold-demo-room same-demo" :style="{ width: `${width}rem` }">
+          <QueuePanel queue="reference" level="episode" :view="SAME_QUEUE" :marks="SAME_MARKS" :held="SAME_HELD" :taken="SAME_HELD" />
+        </div>
+      </div>
+    </section>
+
+    <section class="wide-section">
       <h2>{{ t("gallery.reads.h2") }}</h2>
       <p class="muted small">{{ t("gallery.reads.hint") }}</p>
       <div v-for="width in READ_ROOMS" :key="width" class="head-demo-wrap">
@@ -495,7 +504,7 @@ const rtPass = ref("password123")
         <span class="pill pill-danger"><i class="pi pi-exclamation-circle" aria-hidden="true" />{{ t("output.plan.failuresOpen", { count: 18, open: 1 }) }}</span>
         <span class="pill pill-secondary"><i class="pi pi-exclamation-circle" aria-hidden="true" />{{ t("output.plan.failures", { count: 17 }) }}</span>
         <span class="pill pill-warning"><i class="pi pi-times-circle" aria-hidden="true" />{{ t("output.plan.problems", { count: 3 }) }}</span>
-        <span class="pill pill-warning"><i class="pi pi-trash" aria-hidden="true" />{{ t("output.plan.deleteVideo", { name: "s01e12 [Китайский] 1080p.mkv" }) }}</span>
+        <span class="pill pill-warning"><i class="pi pi-trash" aria-hidden="true" />{{ t("output.plan.deleteVideo", { name: CHIP_FILE }) }}</span>
       </div>
     </section>
 
