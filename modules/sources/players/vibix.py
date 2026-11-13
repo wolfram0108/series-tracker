@@ -30,6 +30,7 @@ logger = logging.getLogger("sources")
 
 REFRESH_MARGIN_S = 600
 MANIFEST_TIMEOUT_S = 15.0
+_BUTTON = re.compile(r"""switchSource\(\s*["']vibix-embed["']""", re.IGNORECASE)
 _LINK = re.compile(r"^vibix=(\d+)/(\d+)$")
 _ABSOLUTE_URL = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 
@@ -115,7 +116,10 @@ class VibixPlayer:
             self._manifest_dir = Path(manifest_dir)
 
     def find(self, text: str, page_url: str) -> PlayerRef | None:
-        if "vibix-embed" not in text:
+        """The button that switches the page to Vibix, as the other players of the site are found by theirs: the word is
+        also in the script every page of the site carries, so a page without the player would show it too, and the catalog
+        would be captured through a page that has no button to press."""
+        if _BUTTON.search(text) is None:
             return None
         return PlayerRef(name=self.name, url=page_url)
 

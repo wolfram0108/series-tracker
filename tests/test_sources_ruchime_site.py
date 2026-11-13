@@ -370,6 +370,40 @@ async def test_a_release_whose_pages_do_not_show_vibix_has_no_catalog_to_capture
     assert asked == [] and {row.player for row in draft.rows} == {"vk", "allvideo", "kodik"}
 
 
+BUTTON = re.compile(r"<button[^>]*data-player=.vibix.[^>]*>[^<]*</button>")
+
+
+def without_the_vibix_button(page: str) -> str:
+    """The page of an episode that has no Vibix: its button is not on it, the script every page carries still names the player."""
+    page = BUTTON.sub("", page)
+    assert "vibix-embed" not in page
+    return page.replace("</body>", "<script>if (url === 'vibix-embed') { openVibix(); }</script></body>")
+
+
+async def test_a_page_that_only_names_vibix_in_its_script_shows_no_vibix_and_the_catalog_is_captured_through_a_page_that_has_the_button():
+    site = RuchimeSite(PlayerRegistry.standard())
+    asked = catalog_of(site, SLUG)
+
+    def episodes(number: int) -> str:
+        page = episode_page(number)
+        return without_the_vibix_button(page) if number < 3 else page
+
+    draft = await Run().read(site, web_of(release_with([entry(1), entry(2), entry(3), entry(4)]), episodes=episodes))
+
+    assert asked[0] == f"{RELEASE}/episode-3" and set(asked) == {f"{RELEASE}/episode-3"}  # never through a page with no button
+    assert not draft.unread and "vibix" in {row.player for row in draft.rows}
+
+
+async def test_a_release_whose_pages_all_only_name_vibix_in_their_script_has_no_catalog_and_no_unread_part():
+    site = RuchimeSite(PlayerRegistry.standard())
+    asked = catalog_of(site, SLUG, failure=VibixUnavailable(reason("vibix_no_button")))
+
+    draft = await Run().read(site, web_of(release_with([entry(1), entry(2)]),
+                                          episodes=lambda number: without_the_vibix_button(episode_page(number))))
+
+    assert asked == [] and not draft.unread and {row.player for row in draft.rows} == {"vk", "allvideo", "kodik"}
+
+
 # --- the choices of a source do not change the page ------------------------------------------------------------------------
 
 def test_the_address_of_the_page_is_the_release_alone_whatever_the_source_chose():
