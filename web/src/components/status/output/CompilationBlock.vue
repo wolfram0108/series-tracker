@@ -11,6 +11,7 @@ import { isOff, trackCells, type EpisodeView, type QueueName, type QueueRow, typ
 import type { CompilationRow } from "./CompilationTable.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
+import FoldButton from "../../FoldButton.vue"
 import PowerSwitch from "./PowerSwitch.vue"
 import SourceMark from "./SourceMark.vue"
 import { CUT_STATES, stateWord } from "../../../lib/states"
@@ -116,7 +117,7 @@ const rows = computed<CompilationRow[]>(() => {
 </script>
 
 <template>
-  <section class="season-block modern-fieldset compilation-block" :data-compilation="head.key">
+  <section class="season-block modern-fieldset compilation-block fold-room" :data-compilation="head.key">
     <header class="season-head">
       <span class="compilation-letter" :style="{ '--tone': `var(--compilation-${badge.color})` }">{{ badge.letter }}</span>
       <span class="season-title">{{ t("output.compilation.title", { letter: badge.letter, range: range(view) }) }}</span>
@@ -139,9 +140,8 @@ const rows = computed<CompilationRow[]>(() => {
           <span class="meter-text">{{ cutText }}</span>
         </div>
       </div>
-      <button type="button" class="action-btn btn-status season-settings" @click="emit('settings')">
-        <i class="pi pi-sliders-h" />{{ t("output.compilation.settings") }}
-      </button>
+      <FoldButton :label="t('output.compilation.settings')" icon="pi pi-sliders-h" severity="info" fold="lg" class="season-settings"
+                  @click="emit('settings')" />
       <PowerSwitch :on="view.take" :busy="busy" :label="t(view.take ? 'output.compilation.disable' : 'output.compilation.enable')"
                    @toggle="emit('switch', !$event)" />
     </header>

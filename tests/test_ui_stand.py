@@ -188,6 +188,23 @@ async def test_the_buttons_of_the_head_keep_their_words_while_the_tab_has_room_a
         for button in await row.locator("button").all():
             await expect(button).to_be_visible()
             assert await button.get_attribute("aria-label") or (await button.inner_text()).strip(), width
+    # The head of a season is a place of its own: its two buttons keep their words from 56rem of the season and fold under it.
+    season = page.locator(".season-block").first
+    reset_season = season.locator(".do-retry-season")
+    await expect(reset_season).to_have_attribute("aria-label", text("output.season.retryFailedHint"))
+    for width in (1440, 900, 520):
+        await page.set_viewport_size({"width": width, "height": 900})
+        await ui.shot_of(season.locator(".season-head"), f"28-season-head-{width}")
+        room = (await season.bounding_box())["width"]
+        for label in await season.locator(".season-head .p-button-label").all():
+            if room >= 56 * 16:
+                await expect(label).to_be_visible()
+            else:
+                await expect(label).to_be_hidden()
+        head = await season.locator(".season-head").bounding_box()
+        for button in await season.locator(".season-head button").all():
+            where = await button.bounding_box()
+            assert where["x"] + where["width"] <= head["x"] + head["width"] + 1, width
     # The page of the samples shows the same button in rooms of four widths: each folds at the tier it names.
     await page.set_viewport_size({"width": 1440, "height": 1000})
     await page.goto("/#gallery")

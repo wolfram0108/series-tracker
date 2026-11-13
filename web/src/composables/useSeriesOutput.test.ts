@@ -278,6 +278,8 @@ describe("useSeriesOutput", () => {
     // The whole of an episode: what failed for its reference, its voice-overs and its cuts together.
     expect(await output.retryEpisode(1, 2)).toBeNull()
     expect(calls.resetFailures).toHaveBeenLastCalledWith(1, { season: 1, episode: 2 })
+    expect(await output.retrySeason(1)).toBeNull()
+    expect(calls.resetFailures).toHaveBeenLastCalledWith(1, { season: 1 })
     expect(await output.redo(1, 2, "AniStar")).toBeNull()
     expect(calls.deleteFromPlan).toHaveBeenLastCalledWith(1, { kind: "track", name: "S01E02.mp4", dub: rowRef(8, "other") })
     expect(await output.refetch(1, 2, null)).toBeNull()

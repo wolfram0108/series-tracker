@@ -14,7 +14,6 @@
 .meter-bar { display: flex; flex: 1 1 auto; block-size: 0.5rem; border-radius: 4px; overflow: hidden; background: #dee2e6; }
 .meter-bar [data-state] { background: var(--tone-end); }
 .meter-text { font-size: 0.75rem; color: var(--color-gray-600); white-space: nowrap; }
-.season-settings { min-block-size: 2rem; padding-block: 0.25rem; font-size: 0.85rem; }
 .season-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem 1.25rem; }
 .season-grid { position: relative; isolation: isolate; display: grid; grid-auto-flow: row dense; gap: 0.6rem; user-select: none; }
 .season-grid.is-tiles { grid-template-columns: repeat(auto-fill, minmax(2.25rem, 1fr)); gap: 0.25rem; }

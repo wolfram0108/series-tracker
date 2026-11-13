@@ -244,6 +244,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       @refetch="(episode, part) => output.refetch(season.season, episode, part)"
       @retry="(episode, group) => output.retry(season.season, episode, group)"
       @retry-failed="(episode) => output.retryEpisode(season.season, episode)"
+      @retry-season="output.retrySeason(season.season)"
       @redo="(episode, group) => output.redo(season.season, episode, group)"
       @queue-order="(episode, queue, group, rows) => queueOrder(scopeOf(season.season, episode), queue, group, rows)"
       @queue-allow="(episode, queue, row, allowed) => queueAllow(scopeOf(season.season, episode), queue, row, allowed)"

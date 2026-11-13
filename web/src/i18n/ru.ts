@@ -347,6 +347,7 @@ export const ru = {
   "sync.notRunning": "Синхронизация уже не идёт",
   "output.retryFailed": "Сбросить",
   "output.retryFailedHint": "Сбросить неудачные попытки сериала",
+  "output.season.retryFailedHint": "Сбросить неудачные попытки сезона",
   "output.plan.pending": "Ждут синхронизации:",
   "output.plan.deleteVideo": "удалить файл {name}",
   "output.plan.deleteTrack": "удалить дорожку {voice} из {name}",

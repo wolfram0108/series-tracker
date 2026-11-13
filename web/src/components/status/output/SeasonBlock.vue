@@ -17,6 +17,7 @@ import { EPISODE_STATES, stateWord, TRACK_STATES, type StateName } from "../../.
 import GroupOutline from "./GroupOutline.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
+import FoldButton from "../../FoldButton.vue"
 import PowerSwitch from "./PowerSwitch.vue"
 
 // A season: its header (the state of its videos and voice-overs, the order of the tracks of its containers, its settings)
@@ -56,6 +57,7 @@ const emit = defineEmits<{
   (e: "refetch", episode: number, part: number | null): void
   (e: "retry", episode: number, group: string): void
   (e: "retry-failed", episode: number): void
+  (e: "retry-season"): void
   (e: "redo", episode: number, group: string): void
   (e: "queue-order", episode: number, queue: QueueName, group: string | null, rows: QueueRow[]): void
   (e: "queue-allow", episode: number, queue: QueueName, row: QueueRow, allowed: boolean): void
@@ -137,7 +139,7 @@ function step(by: number): void {
 </script>
 
 <template>
-  <section class="season-block modern-fieldset" :data-season="season">
+  <section class="season-block modern-fieldset fold-room" :data-season="season">
     <header class="season-head">
       <span class="season-title">{{ t("output.season", { n: season }) }}</span>
       <span class="season-range">{{ t("output.season.range", { range, count: episodes.length }) }}</span>
@@ -158,9 +160,10 @@ function step(by: number): void {
           <span class="meter-text">{{ voicesText }}</span>
         </div>
       </div>
-      <button type="button" class="action-btn btn-status season-settings" @click="emit('settings')">
-        <i class="pi pi-sliders-h" />{{ t("output.settings.season") }}
-      </button>
+      <FoldButton :label="t('output.settings.season')" icon="pi pi-sliders-h" severity="info" fold="lg" class="season-settings"
+                  @click="emit('settings')" />
+      <FoldButton :label="t('output.retryFailed')" :hint="t('output.season.retryFailedHint')" icon="pi pi-undo" severity="secondary"
+                  fold="lg" class="do-retry-season" data-lever :disabled="busy" @click="emit('retry-season')" />
       <PowerSwitch
         :on="!off" :busy="busy" :label="t(off ? 'output.season.enable' : 'output.season.disable')" @toggle="emit('switch-season', !$event)"
       />
