@@ -40,6 +40,14 @@ class PlanAssetTrack(PlanSnapshot):
     online: bool | None = None
 
 
+class PlanVariant(BaseModel):
+    """A variant of a queue of single videos: a voice-over at a player of a source, as the window lists it."""
+
+    group: str
+    source_id: int
+    player: str
+
+
 class PlanAsset(BaseModel):
     """A file of the library: one video and the tracks aligned to it; `off` is hidden from the media server (`.off`)."""
 
@@ -48,6 +56,8 @@ class PlanAsset(BaseModel):
     episode: list[int]
     video: PlanAssetVideo
     tracks: list[PlanAssetTrack] = Field(default_factory=list)
+    # The variant of the queue of the markup reference whose timeline the video lies on (its own for a video that is no cut).
+    timeline: PlanVariant | None = None
 
 
 class PlanGoalVideo(PlanSnapshot):
@@ -82,6 +92,8 @@ class PlanEpisode(BaseModel):
     # The voice-over of the markup reference of the episode (stage 14): its sound is the last of the file, out of the
     # order of the season; none without one.
     markup: str | None = None
+    # The variant of the queue of the markup reference the plan takes for the episode: none while the episode follows its reference.
+    markup_variant: PlanVariant | None = None
 
 
 class PlanFailure(BaseModel):

@@ -6,12 +6,16 @@ from dataclasses import asdict
 from typing import Iterable
 
 from core.plan.executor import SeriesSync
-from core.plan.planner import Plan, voice_of
+from core.plan.planner import Plan, timeline_variant, voice_of
 from core.plan.tables import OnlineRow, RowId
 
 
 def _row(row: RowId | None) -> dict | None:
     return None if row is None else asdict(row)
+
+
+def _variant(variant: tuple[str, int, str] | None) -> dict | None:
+    return None if variant is None else {"group": variant[0], "source_id": variant[1], "player": variant[2]}
 
 
 def _slots(row: OnlineRow) -> list[list[int]]:
@@ -60,7 +64,8 @@ def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: boo
             "video": {"row": _row(video.id), "cut_of": _row(video.cut_of), **asdict(video.snapshot),
                       "online": None if online is None else video.id in online},
             "tracks": [{"row": _row(track.dub), **asdict(track.snapshot),
-                        "online": None if online is None else track.dub in online} for track in container.tracks]})
+                        "online": None if online is None else track.dub in online} for track in container.tracks],
+            "timeline": _variant(timeline_variant(container))})
     episodes = []
     if made is not None:
         for goal in made.goals:
@@ -72,7 +77,8 @@ def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: boo
                                          goal.video.container.video.cut_of if goal.video.container is not None else None)},
                 "tracks": [{"voice": way.voice, "kind": way.kind, "row": _row(way.dub), **asdict(way.snapshot),
                             "own": way.own} for way in goal.tracks],
-                "markup": voice_of(goal.markup.group, goal.markup.id) if goal.markup is not None else None})
+                "markup": voice_of(goal.markup.group, goal.markup.id) if goal.markup is not None else None,
+                "markup_variant": _variant(goal.markup.variant) if goal.markup is not None else None})
     failures = [{key: value for key, value in each.items() if key != "key"} for each in placed(sync.failed, rows)]
     for failure in failures:
         failure["covered"] = covered(failure, assets)

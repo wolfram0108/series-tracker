@@ -6,6 +6,7 @@ import random
 import pytest
 
 from core.plan.tables import RowId
+from modules.planner.view import view_of
 from plan_world import Chaos, World
 
 PVA, ORIGINAL = "ПВА", "Оригинал"
@@ -57,6 +58,31 @@ def op_kinds(step) -> list[str]:
 
 def row(source: int, key: str) -> RowId:
     return RowId(source, key, key)
+
+
+# --- the window is told the variant of the markup reference the plan takes and the one the file lies on ---------------
+
+def told(world: World, step) -> dict:
+    return view_of(0, world, step.plan, running=False, rows=step.online)
+
+
+def test_the_window_is_told_the_variant_of_the_markup_reference_the_plan_takes_and_the_one_the_cut_file_lies_on():
+    world = world_of()
+    step = synced(world, "пометка")
+    view = told(world, step)
+    original = {"group": ORIGINAL, "source_id": MARKUP, "player": "cvh"}
+    assert [each["markup_variant"] for each in view["episodes"]] == [original]
+    assert [each["timeline"] for each in view["assets"]] == [original]
+
+
+def test_a_file_that_is_no_cut_lies_on_its_own_timeline_and_an_episode_that_follows_its_reference_names_no_markup():
+    world = world_of(markup=None)
+    step = synced(world, "без пометки")
+    view = told(world, step)
+    held = view["assets"][0]["video"]
+    assert view["episodes"][0]["markup_variant"] is None
+    assert view["assets"][0]["timeline"] == {"group": held["label"] or held["group"], "source_id": held["row"]["source_id"],
+                                             "player": held["player"]}
 
 
 # --- С-1, С-2: the mark ------------------------------------------------------------------------------------------

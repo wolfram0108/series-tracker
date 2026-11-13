@@ -91,6 +91,8 @@ class Markup:
     group: str | None
     height: int
     row: OnlineRow | None = None
+    # (voice-over, source id, player): the variant of the queue the timeline is of, as the window lists it.
+    variant: tuple[str, int, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -421,6 +423,23 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
                 languages)
 
 
+def timeline_shot(container: Container) -> Snapshot | None:
+    """What the timeline a file lies on is: the video itself, or for a cut what the file kept of its timeline, else the sound
+    of its timeline the file holds (a file made before the timeline was kept)."""
+    video = container.video
+    if video.cut_of is None:
+        return video.snapshot
+    return video.timeline_snapshot or next((track.snapshot for track in container.tracks if track.dub == video.timeline), None)
+
+
+def timeline_variant(container: Container) -> tuple[str, int, str] | None:
+    """The variant of the queue of the markup reference whose timeline a file lies on; none for a file whose timeline nothing tells."""
+    shot = timeline_shot(container)
+    if shot is None or shot.group is None:
+        return None
+    return (shot.variant_label, container.video.timeline.source_id, shot.player)
+
+
 def _markup_of(inputs: Inputs, episode, singles: list[OnlineRow], files: list[Container], criteria,
                position) -> Markup | None:
     """The markup reference of the episode (stage 14) by its queue: the user's order, then the service's rule, then what
@@ -444,21 +463,18 @@ def _markup_of(inputs: Inputs, episode, singles: list[OnlineRow], files: list[Co
     found: list[tuple[tuple, Markup]] = []
     for row in singles:
         if row.playable and row.variant not in denied and ("download", row.id) not in inputs.failed:
-            found.append((rank(row.variant, row.height, row.player, row.id, False), Markup(row.id, row.group, row.height, row)))
+            found.append((rank(row.variant, row.height, row.player, row.id, False),
+                          Markup(row.id, row.group, row.height, row, row.variant)))
     online = {row.id: row for row in singles}
     for container in files:
         timeline = container.video.timeline
-        # What the timeline is: the video itself, or for a cut what the file kept of its timeline, else the sound of its
-        # timeline the file holds (a file made before the timeline was kept).
-        shot = container.video.snapshot if container.video.cut_of is None else (
-            container.video.timeline_snapshot or next(
-                (track.snapshot for track in container.tracks if track.dub == timeline), None))
+        shot = timeline_shot(container)
         if shot is None or shot.group is None:
             continue
         variant = (shot.variant_label, timeline.source_id, shot.player)
         if variant not in denied:
             found.append((rank(variant, shot.height, shot.player, timeline, True),
-                          Markup(timeline, shot.group, shot.height, online.get(timeline))))
+                          Markup(timeline, shot.group, shot.height, online.get(timeline), variant)))
     return min(found, key=lambda each: each[0])[1] if found else None
 
 
