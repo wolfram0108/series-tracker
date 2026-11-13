@@ -343,6 +343,7 @@ export const ru = {
   "output.tab": "Выход",
   "output.sync": "Синхронизировать",
   "sync.stop": "Остановить синхронизацию",
+  "output.stop": "Остановить",
   "sync.stopped": "Синхронизация остановлена",
   "sync.notRunning": "Синхронизация уже не идёт",
   "output.retryFailed": "Сбросить",

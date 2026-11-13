@@ -505,9 +505,11 @@ async def test_the_sync_stopped_by_its_button_cancels_its_work_applies_nothing_a
     await ui.page.locator(".output-sync").click()
     await asyncio.wait_for(asyncio.to_thread(ui.daemon.made.wait), STAND_LIMIT_S)
     stop = ui.page.locator(".output-stop")
+    await expect(ui.page.locator(".output-sync")).to_have_count(0)  # the button of the sync is the one that stops it
     await ui.shot("80-sync-under-way")
     await stop.click()
     await expect(stop).to_have_count(0)
+    await expect(ui.page.locator(".output-sync")).to_have_count(1)
     assert ui.daemon.jobs == {} and ui.files() == []
     await ui.shot("81-sync-stopped")
     await ui.page.locator(".modal-close, .p-dialog-close-button, button:has-text('Закрыть')").first.click()

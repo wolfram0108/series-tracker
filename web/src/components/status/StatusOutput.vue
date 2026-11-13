@@ -177,10 +177,11 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
                   @click="openSettings(null)" />
       <FoldButton :label="t('output.retryFailed')" :hint="t('output.retryFailedHint')" icon="pi pi-undo" severity="secondary"
                   class="output-retry-failed" :disabled="!canSync" @click="output.retryFailed()" />
-      <FoldButton :label="t('output.sync')" :icon="passing ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'" severity="warn" class="output-sync"
-                  :disabled="!canSync" @click="output.sync()" />
-      <FoldButton v-if="busy || passing" :label="t('sync.stop')" icon="pi pi-stop-circle" severity="danger" class="output-stop"
-                  :disabled="output.stopping.value" @click="output.stop()" />
+      <!-- One place for both: while the series is synced the button of the sync is the button that stops it. -->
+      <FoldButton v-if="busy || passing" :label="t('output.stop')" :hint="t('sync.stop')" icon="pi pi-stop-circle" severity="danger"
+                  class="output-stop" :disabled="output.stopping.value" @click="output.stop()" />
+      <FoldButton v-else :label="t('output.sync')" icon="pi pi-refresh" severity="warn" class="output-sync" :disabled="!canSync"
+                  @click="output.sync()" />
     </div>
     <div v-if="legend.length" class="output-bar output-legend">
       <span class="output-legend-name">{{ t("output.sources") }}</span>
