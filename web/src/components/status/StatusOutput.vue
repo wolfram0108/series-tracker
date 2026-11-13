@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue"
-import Button from "primevue/button"
 import { useSeriesOutput } from "../../composables/useSeriesOutput"
 import { t } from "../../i18n"
 import {
@@ -15,6 +14,7 @@ import { useSeriesStore } from "../../stores/series"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
 import { badgeOf, cardStatus, cutOf, cutOverride, cutsBySlot, heldCut, takes, type CompilationView, type CutState } from "../../lib/compilations"
 import CompilationBlock from "./output/CompilationBlock.vue"
+import FoldButton from "../FoldButton.vue"
 import LevelSettings from "./output/LevelSettings.vue"
 import PlanPending from "./output/PlanPending.vue"
 import SeasonBlock from "./output/SeasonBlock.vue"
@@ -171,16 +171,16 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
 </script>
 
 <template>
-  <div ref="root" class="status-output" :class="{ 'is-waiting': waiting }" @keydown="onKey" @keyup="onKey">
+  <div ref="root" class="status-output fold-room" :class="{ 'is-waiting': waiting }" @keydown="onKey" @keyup="onKey">
     <div class="output-bar output-actions">
-      <Button :label="t('output.settings.series')" icon="pi pi-sliders-h" size="small" severity="info" class="output-series-settings"
-              @click="openSettings(null)" />
-      <Button class="output-retry-failed" :label="t('output.retryFailed')" icon="pi pi-replay" size="small" severity="secondary"
-              :disabled="!canSync" @click="output.retryFailed()" />
-      <Button :label="t('output.sync')" :icon="passing ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'" size="small" severity="warn"
-              class="output-sync" :disabled="!canSync" @click="output.sync()" />
-      <Button v-if="busy || passing" :label="t('sync.stop')" icon="pi pi-stop-circle" size="small" severity="danger"
-              class="output-stop" :disabled="output.stopping.value" @click="output.stop()" />
+      <FoldButton :label="t('output.settings.series')" icon="pi pi-sliders-h" severity="info" class="output-series-settings"
+                  @click="openSettings(null)" />
+      <FoldButton :label="t('output.retryFailed')" :hint="t('output.retryFailedHint')" icon="pi pi-undo" severity="secondary"
+                  class="output-retry-failed" :disabled="!canSync" @click="output.retryFailed()" />
+      <FoldButton :label="t('output.sync')" :icon="passing ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'" severity="warn" class="output-sync"
+                  :disabled="!canSync" @click="output.sync()" />
+      <FoldButton v-if="busy || passing" :label="t('sync.stop')" icon="pi pi-stop-circle" severity="danger" class="output-stop"
+                  :disabled="output.stopping.value" @click="output.stop()" />
     </div>
     <div v-if="legend.length" class="output-bar output-legend">
       <span class="output-legend-name">{{ t("output.sources") }}</span>

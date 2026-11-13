@@ -15,6 +15,7 @@ import StIcon from "./components/StIcon.vue"
 import StInput from "./components/StInput.vue"
 import StSelect from "./components/StSelect.vue"
 import StBtn from "./components/StBtn.vue"
+import FoldButton from "./components/FoldButton.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import Toast from "primevue/toast"
 import { t, tAround } from "./i18n"
@@ -150,6 +151,8 @@ const settingsTabs = [
 ]
 // The words around the name of the open tab, which the body shows in bold.
 const settingsBody = tAround("gallery.settings.body", "tab")
+// The widths (rem) of the rooms the folding button is shown in: it folds at the tier it names (30, 42, 56 rem).
+const FOLD_ROOMS = [24, 36, 48, 60]
 function settingsLabel(): string {
   return settingsTabs.find((tab) => tab.value === settingsTab.value)?.label ?? ""
 }
@@ -455,6 +458,22 @@ const rtPass = ref("password123")
       </div>
     </section>
 
+    <section>
+      <h2>{{ t("gallery.fold.h2") }}</h2>
+      <p class="muted small">{{ t("gallery.fold.hint") }}</p>
+      <div v-for="width in FOLD_ROOMS" :key="width" class="fold-demo">
+        <span class="muted small">{{ t("gallery.fold.room", { width }) }}</span>
+        <div class="fold-room fold-demo-room" :style="{ width: `${width}rem` }">
+          <div class="row">
+            <FoldButton :label="t('output.settings.series')" icon="pi pi-sliders-h" severity="info" />
+            <FoldButton :label="t('output.retryFailed')" :hint="t('output.retryFailedHint')" icon="pi pi-undo" severity="secondary" />
+            <FoldButton :label="t('output.sync')" icon="pi pi-refresh" severity="warn" />
+            <FoldButton :label="t('gallery.fold.late')" :hint="t('gallery.fold.lateHint')" icon="pi pi-check" severity="success" fold="lg" />
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="wide-section">
       <h2>{{ t("gallery.settings.h2") }}</h2>
       <p class="muted small">{{ t("gallery.settings.hint") }}</p>
@@ -577,6 +596,8 @@ h1 { margin-bottom: 4px; }
 small { color: #888; font-weight: 400; font-size: 0.6em; }
 .muted { color: var(--text-muted); }
 .small { font-size: 0.85rem; }
+.fold-demo { margin-top: 0.75rem; }
+.fold-demo-room { max-width: 100%; border: 1px dashed var(--color-gray-200); border-radius: 8px; padding: 0.5rem; margin-top: 0.25rem; }
 section { margin-top: 28px; border-top: 1px solid var(--color-gray-200); padding-top: 16px; }
 /* секция во всю ширину viewport (демо-окно как modal-xl, вне max-width галереи) */
 .wide-section {

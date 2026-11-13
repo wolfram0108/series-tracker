@@ -131,8 +131,24 @@ async def test_the_reset_of_an_episode_forgets_every_failed_attempt_of_it_and_on
     await expect(page.locator(".plan-failures")).to_have_text(text("output.plan.failures", count=2))
     await page.locator(".episode-card[data-episode='1']").dblclick()
     button = page.locator(".episode-detail .do-retry-failed")
-    await expect(button).to_have_text(text("output.episode.retryFailed"))
-    await ui.shot("27-reset-of-an-episode")
+    await expect(button).to_have_text(text("output.retryFailed"))
+    assert len(text("output.retryFailed").split()) == 1, "the button is one word"
+    await expect(button).to_have_attribute("aria-label", text("output.episode.retryFailedHint"))
+    # By the width: the word stays while the episode has room for it and is the icon alone when it has not — never wrapped
+    # or cut — and the head does not overflow the panel at any width.
+    label = button.locator(".p-button-label")
+    for width in (1440, 1100, 900, 700, 520, 380):
+        await page.set_viewport_size({"width": width, "height": 900})
+        await ui.shot_of(page.locator(".episode-detail"), f"27-reset-of-an-episode-{width}")
+        panel = await page.locator(".episode-detail").bounding_box()
+        head = await page.locator(".episode-detail .detail-head").bounding_box()
+        assert head["x"] >= panel["x"] - 1 and head["x"] + head["width"] <= panel["x"] + panel["width"] + 1, width
+        if panel["width"] >= 56 * 16:
+            await expect(label).to_be_visible()
+        else:
+            await expect(label).to_be_hidden()
+            await expect(button).to_be_visible()
+    await page.set_viewport_size({"width": 1440, "height": 1000})
     await button.click()
     await expect(page.locator(".plan-failures")).to_have_text(text("output.plan.failures", count=1))
     await expect(page.locator(".episode-card[data-episode='2']")).to_have_attribute("data-state", "failed")
@@ -141,6 +157,50 @@ async def test_the_reset_of_an_episode_forgets_every_failed_attempt_of_it_and_on
     await expect(page.locator(".episode-card[data-episode='1']")).to_have_attribute("data-state", "done")
     await expect(page.locator(".episode-card[data-episode='2']")).to_have_attribute("data-state", "failed")
     await ui.check(series_id)
+
+
+async def test_the_buttons_of_the_head_keep_their_words_while_the_tab_has_room_and_are_icons_when_it_has_not(ui):
+    """The head of the output tab: its buttons are as wide as their words while the tab has room, and their icons alone when
+    it has not — none wraps its word, cuts it or leaves the tab; the hints are their names. The reset of the series is one
+    word, like the one of an episode."""
+    await series_in_browser(ui, (1,))
+    page = ui.page
+    await ui.open_output(SERIES)
+    row = page.locator(".output-actions")
+    reset = row.locator(".output-retry-failed")
+    await expect(reset).to_have_text(text("output.retryFailed"))
+    assert len(text("output.retryFailed").split()) == 1, "the reset is one word"
+    await expect(reset).to_have_attribute("aria-label", text("output.retryFailedHint"))
+    for width in (1440, 1100, 900, 700, 520, 380):
+        await page.set_viewport_size({"width": width, "height": 900})
+        await ui.shot_of(row, f"28-head-buttons-{width}")
+        room = (await page.locator(".status-output").bounding_box())["width"]
+        box = await row.bounding_box()
+        for button in await row.locator("button").all():
+            where = await button.bounding_box()
+            assert where["x"] >= box["x"] - 1 and where["x"] + where["width"] <= box["x"] + box["width"] + 1, width
+        labels = row.locator(".p-button-label")
+        for index in range(await labels.count()):
+            if room >= 42 * 16:
+                await expect(labels.nth(index)).to_be_visible()
+            else:
+                await expect(labels.nth(index)).to_be_hidden()
+        for button in await row.locator("button").all():
+            await expect(button).to_be_visible()
+            assert await button.get_attribute("aria-label") or (await button.inner_text()).strip(), width
+    # The page of the samples shows the same button in rooms of four widths: each folds at the tier it names.
+    await page.set_viewport_size({"width": 1440, "height": 1000})
+    await page.goto("/#gallery")
+    await page.reload()  # the page of the samples is chosen by the anchor when the application starts
+    demo = page.locator(".fold-demo")
+    await expect(demo).to_have_count(4)
+    await ui.shot_of(page.locator(".fold-demo").first, "29-gallery-fold-24")
+    for index, rem in enumerate((24, 36, 48, 60)):
+        # Under 42rem every button folds; from 42rem the ones of the middle tier keep their words, the one of the high tier folds
+        # until 56rem; from 56rem all four keep them.
+        shown = await demo.nth(index).locator(".p-button-label:visible").count()
+        assert shown == {24: 0, 36: 0, 48: 3, 60: 4}[rem], (rem, shown)
+    await ui.shot_of(page.locator("section", has=page.locator(".fold-demo")), "29-gallery-fold")
 
 
 async def test_a_download_rebuilt_on_the_next_source_is_one_card_in_the_agents_and_stays_after_the_sync(ui):

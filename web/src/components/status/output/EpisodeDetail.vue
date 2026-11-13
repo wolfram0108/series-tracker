@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
-import Button from "primevue/button"
 import { t } from "../../../i18n"
 import type { Queues } from "../../../composables/outputCalls"
 import type { EpisodeStatus, EpisodeView, QueueName, QueueRow, SourceMark as Mark, TrackCell } from "../../../lib/output"
+import FoldButton from "../../FoldButton.vue"
 import CompilationTable, { type CompilationRow } from "./CompilationTable.vue"
 import PowerSwitch from "./PowerSwitch.vue"
 import QueuePanel from "./QueuePanel.vue"
@@ -48,14 +48,14 @@ const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) =
 </script>
 
 <template>
-  <section class="episode-detail" :data-episode="view.episode">
+  <section class="episode-detail fold-room" :data-episode="view.episode">
     <header class="detail-head">
       <h3 class="detail-title">{{ t("output.episode", { n: view.episode }) }}</h3>
       <span class="pill" :data-state="EPISODE_STATES[status]">{{ stateLabel(EPISODE_STATES[status]) }}</span>
       <span v-if="file" class="detail-file">{{ file }}</span>
       <span class="detail-grow" />
-      <Button class="do-retry-failed" data-lever :label="t('output.episode.retryFailed')" icon="pi pi-replay" size="small"
-              severity="secondary" :disabled="busy" @click="emit('retry-failed')" />
+      <FoldButton :label="t('output.retryFailed')" :hint="t('output.episode.retryFailedHint')" icon="pi pi-undo" severity="secondary"
+                  fold="lg" class="do-retry-failed" data-lever :disabled="busy" @click="emit('retry-failed')" />
       <button type="button" class="icon-btn" :aria-label="t('output.episode.prev')" @click="emit('step', -1)"><i class="pi pi-chevron-left" /></button>
       <button type="button" class="icon-btn" :aria-label="t('output.episode.next')" @click="emit('step', 1)"><i class="pi pi-chevron-right" /></button>
       <PowerSwitch

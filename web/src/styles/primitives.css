@@ -18,3 +18,22 @@
 .drag-ghost { opacity: 0.5; background: #c8ebfb; }
 .order-handle { border: none; background: none; color: #adb5bd; cursor: grab; padding: 0.2rem; }
 .order-handle:focus-visible { outline: 0.125rem solid var(--color-blue); border-radius: 4px; }
+
+/* The folding button (components/FoldButton.vue): a word with its icon. The room it asks — the nearest ancestor with `.fold-room` —
+   says how much width there is; where there is less than the tier the button names (`.fold-sm` 30rem, `.fold-md` 42rem,
+   `.fold-lg` 56rem), the word goes and the icon stays, its hint being the name left to it. A button never wraps its word and never
+   leaves its room: a place that can hold the words of all its buttons names the least tier, a crowded one a higher. */
+.fold-room { container: fold-room / inline-size; }
+.fold-btn { flex: 0 0 auto; white-space: nowrap; }
+@container fold-room (inline-size < 30rem) {
+  .fold-sm .p-button-label { display: none; }
+  .fold-sm.p-button { padding-inline: 0.7rem; gap: 0; }
+}
+@container fold-room (inline-size < 42rem) {
+  .fold-md .p-button-label { display: none; }
+  .fold-md.p-button { padding-inline: 0.7rem; gap: 0; }
+}
+@container fold-room (inline-size < 56rem) {
+  .fold-lg .p-button-label { display: none; }
+  .fold-lg.p-button { padding-inline: 0.7rem; gap: 0; }
+}

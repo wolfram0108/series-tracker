@@ -121,6 +121,13 @@ class UiStand(AppStand):
             os.makedirs(SHOTS, exist_ok=True)
             await self.page.screenshot(path=os.path.join(SHOTS, f"{name}.png"), full_page=True)
 
+    async def shot_of(self, target, name: str) -> None:
+        """A picture of one element (scrolled into view), when pictures are asked for."""
+        if SHOTS:
+            os.makedirs(SHOTS, exist_ok=True)
+            await target.scroll_into_view_if_needed()
+            await target.screenshot(path=os.path.join(SHOTS, f"{name}.png"))
+
     async def shut(self) -> None:
         await self.browser.close()
         await self.playwright.stop()
