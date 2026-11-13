@@ -62,7 +62,8 @@ class AppSite:
     """The cards of one application, read through its API."""
 
     source_type = "web_video"
-    # The first read of a card waits for the user (the button to read it); the core of the reads asks no more of it.
+    # A card is read by the user (the button to read it) or by a synchronization: a window, a preview or the recount of a
+    # layout does not begin its read, whatever the age of its table (modules/sources/table.py, `by_sync`).
     first_read_by_user = True
 
     def __init__(self, player: AppPlayer, lines: AppLines) -> None:

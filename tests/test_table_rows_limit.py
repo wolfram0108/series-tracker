@@ -68,18 +68,44 @@ async def test_a_card_nobody_has_read_is_not_read_by_a_request_and_is_read_by_th
     assert site.asked == ["2"] and await system.stored_texts() == ["Серия 1", "Серия 2"]
 
 
-async def test_a_card_that_was_read_is_read_again_by_its_term_with_the_limit_of_the_request(card):
+async def test_a_card_that_was_read_is_read_again_by_its_term_with_the_limit_of_the_request_of_a_sync(card):
     system, site = card
     system.probe.send_command("sources.table.read", {"url": PAGE, "rows": "all"})
     await entry(site)
     await system.next(system.ready)
     system.clock.advance(hours=2)
 
-    reply = await system.get(rows="-2")
+    reply = await system.get(rows="-2", by_sync=True)
     assert reply["state"] == "reading"
     await entry(site)
     await system.next(system.ready)
     assert site.asked == ["all", "-2"]
+
+
+async def test_a_card_that_was_read_is_not_begun_again_by_a_window_a_preview_or_a_recount_whatever_the_age_of_its_table(card):
+    system, site = card
+    system.probe.send_command("sources.table.read", {"url": PAGE, "rows": "all"})
+    await entry(site)
+    await system.next(system.ready)
+    system.clock.advance(hours=2)
+
+    # The asks of a window (a new source, the add window, the test of rules) do not begin the read of an old table, with
+    # the rows of the source or with none: the table in hand is what they show.
+    for request in ({}, {"rows": "-2"}, {"rows": "all"}, {"refresh": True}):
+        reply = await system.get(**request)
+        assert reply["state"] == "ready" and reply["table"] is not None
+    await assert_no_second_read(site)
+    assert site.asked == ["all"]
+
+    # The user's command and a sync's request begin it, each with its own rows.
+    system.probe.send_command("sources.table.read", {"url": PAGE, "rows": "2"})
+    await entry(site)
+    await system.next(system.ready)
+    system.clock.advance(hours=2)
+    assert (await system.get(rows="-2", by_sync=True))["state"] == "reading"
+    await entry(site)
+    await system.next(system.ready)
+    assert site.asked == ["all", "2", "-2"]
 
 
 async def test_a_read_of_the_first_or_the_last_rows_keeps_the_rows_of_the_earlier_reads_and_a_read_of_all_replaces_them(card):

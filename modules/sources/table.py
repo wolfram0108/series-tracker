@@ -146,8 +146,9 @@ class TableReader:
                 return self._as_it_is(key, stored)
             if table is not None and self._fresh(table):
                 return TableGetReply(url=key, state=TableState.READY, table=table)
-            if table is None and getattr(site, "first_read_by_user", False):
-                # A page nobody has read waits for the user's read: nothing but the user's command begins it.
+            if getattr(site, "first_read_by_user", False) and (table is None or not request.by_sync):
+                # The page of such a site is begun by the user's command; a page nobody has read waits for it, and a page
+                # that was read is read again by a synchronization only (its rows are the setting of its source).
                 return self._as_it_is(key, stored)
             if key not in self._reading:
                 self._launch(site, key, rows=request.rows)

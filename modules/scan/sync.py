@@ -97,7 +97,7 @@ async def sync_tables(sources: Sequence[SeriesSource], ask: Ask, signals: TableS
 
 async def _sync_source(source: SeriesSource, ask: Ask, signals: TableSignals, safeguard_s: float) -> SourceSync:
     since = signals.mark()
-    request = TableGetRequest(url=source.url, refresh=True, rows=source.rows_per_line)
+    request = TableGetRequest(url=source.url, refresh=True, rows=source.rows_per_line, by_sync=True)
     try:
         reply = TableGetReply.model_validate(
             await ask("sources.table.get", request.model_dump(mode="json")))

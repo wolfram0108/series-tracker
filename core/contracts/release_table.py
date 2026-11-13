@@ -158,6 +158,9 @@ class TableGetRequest(BaseModel):
     # How many rows of each line of a card an application source reads (core/row_limit.py): the setting of the source
     # the read is for; a site that reads no lines ignores it. None is all.
     rows: str = "all"
+    # The request is a synchronization's own. The page of a site that waits for the user (an application card) is begun
+    # by the user's command or by a synchronization, never by a window, a preview or the recount of a layout.
+    by_sync: bool = False
 
     @field_validator("rows", mode="before")
     @classmethod

@@ -10,7 +10,7 @@ Queries:
   sources.tracker.resolve {url}  → {tracker|null} (tracker_info деталей)
 
 Tables of site pages (the one way to read a site page; sites are registered in `sites`, the core is `table.py`):
-  sources.table.get {url, refresh?} → TableGetReply {url, state: ready | reading | failed | absent,
+  sources.table.get {url, refresh?, rows?, by_sync?} → TableGetReply {url, state: ready | reading | failed | absent,
                                    table?, reason?}. A complete table within the term (term.py) is `ready`. Otherwise the page is read — by one
                                    task however many ask — and the reply is `reading` at once, with the last
                                    complete table when there is one; the end comes as the events below.
@@ -20,7 +20,13 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    says how the page stands: `reading` while a read goes, `failed` (with the
                                    reason) when the last read failed, `ready` for a complete table however old,
                                    `absent` when nothing was read; with the last complete table when there is one.
-  sources.table.read {url} command: read the page now, term or not, unless a read of it is going; the read takes
+                                   `rows` is how many rows of each line of an application card a read takes (the
+                                   setting of the source). The page of an application card waits for the user: it
+                                   is begun by `sources.table.read` or by a request with `by_sync` (a
+                                   synchronization's own) that finds a table already read; any other request
+                                   (a window, a preview, the recount of a layout) says how the page stands and
+                                   begins nothing, however old its table is.
+  sources.table.read {url, rows?} command: read the page now, term or not, unless a read of it is going; the read takes
                                    no raw data that an earlier read left for sharing (the listing of a VK channel)
   sources.table.cancel {url} → {cancelled}: the read of the page going now stops (the user stopped the sync that waits
                                    for it): it ends failed (`read_cancelled`) and is not begun again at the start; the
