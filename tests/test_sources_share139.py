@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from modules.sources.apps import AppError, profiles_of
-from modules.sources.apps.share139 import LISTED_AT_MOST, Share139Client, natural, quality_of
+from modules.sources.apps.share139 import CATALOG_REQUESTS, LISTED_AT_MOST, Share139Client, natural, quality_of
 
 PROFILE = {"label": "139云盘", "latin": "139 Cloud", "protocol": "share139", "shares": {
     "1": {"title": "东大高武学院", "year": "2024", "link_id": "public-link", "folder_id": "root"},
@@ -51,7 +51,7 @@ async def world():
     cloud = Cloud()
     profile = profiles_of({"ST_APP_SHARE139": json.dumps(PROFILE)})[0]
     async with httpx.AsyncClient(transport=httpx.MockTransport(cloud.handle)) as http:
-        yield cloud, Share139Client(profile, lambda: http)
+        yield cloud, Share139Client(profile, lambda: http, interval=0)
 
 
 def test_a_name_is_read_the_way_a_person_orders_files_and_a_width_is_a_quality():
@@ -91,15 +91,57 @@ async def test_a_share_whose_root_holds_one_folder_is_that_folder_and_the_passwo
     assert cloud.bodies[0][1]["getOutLinkInfoReq"]["passwd"] == "pw"
 
 
-async def test_a_folder_of_more_files_than_one_window_is_no_card_and_a_card_the_profile_lacks_is_none(world):
+async def test_a_folder_of_more_files_than_one_window_is_read_window_by_window():
+    windows = {1: files(*((f"E{number}.mp4", f"c{number}", {"width": "3840"}) for number in range(1, LISTED_AT_MOST + 1))),
+               LISTED_AT_MOST + 1: files(("E201.mp4", "c201", {"width": "3840"}))}
+    asked = []
+
+    def listing(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)["getOutLinkInfoReq"]
+        asked.append((body["bNum"], body["eNum"]))
+        return httpx.Response(200, json={"code": "0", "data": {"coLst": windows[body["bNum"]], "caLst": []}})
+
+    profile = profiles_of({"ST_APP_SHARE139": json.dumps(PROFILE)})[0]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(listing)) as http:
+        card = await Share139Client(profile, lambda: http, interval=0).card("1")
+    assert asked == [(1, 200), (201, 400)]
+    assert len(card.lines[0].items) == 201 and card.lines[0].items[-1].label == "E201.mp4"
+
+
+async def test_a_folder_that_does_not_end_or_comes_again_is_no_card_a_part_is_never_given_as_the_whole(world):
     cloud, client = world
-    cloud.listing["root"] = {"coLst": files(("E1.mp4", "e1", {})), "caLst": [], "nextPageCursor": "more"}
-    with pytest.raises(AppError) as large:
+    count = []
+
+    def endless(request: httpx.Request) -> httpx.Response:
+        count.append(1)
+        start = json.loads(request.content)["getOutLinkInfoReq"]["bNum"]
+        return httpx.Response(200, json={"code": "0", "data": {"coLst": files(*((f"E{start + n}.mp4", f"c{start + n}", {})
+                                                                               for n in range(LISTED_AT_MOST))), "caLst": []}})
+
+    profile = profiles_of({"ST_APP_SHARE139": json.dumps(PROFILE)})[0]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(endless)) as http:
+        with pytest.raises(AppError) as large:
+            await Share139Client(profile, lambda: http, interval=0).card("1")
+    assert "app_folder_too_large" in large.value.reason and str(CATALOG_REQUESTS * LISTED_AT_MOST) in large.value.reason
+    assert len(count) == CATALOG_REQUESTS
+    cloud.listing["root"] = {"coLst": files(*((f"E{n}.mp4", f"c{n}", {}) for n in range(LISTED_AT_MOST))), "caLst": []}
+    with pytest.raises(AppError) as repeated:
         await client.card("1")
-    assert "app_folder_too_large" in large.value.reason and str(LISTED_AT_MOST) in large.value.reason
+    assert "app_pagination_repeated" in repeated.value.reason
     with pytest.raises(AppError) as absent:
         await client.card("9")
     assert "app_title_absent" in absent.value.reason
+
+
+async def test_a_folder_of_folders_is_no_card_of_episodes_and_names_its_folders(world):
+    cloud, client = world
+    cloud.listing["root"] = {"coLst": [], "caLst": [{"caID": "a", "caName": "第一季"}, {"caID": "b", "caName": "第二季"}]}
+    with pytest.raises(AppError) as chosen:
+        await client.card("1")
+    assert "app_folder_selection_required" in chosen.value.reason and "第一季, 第二季" in chosen.value.reason
+    # A folder that holds videos and folders is read for its own videos.
+    cloud.listing["root"] = {"coLst": files(("E1.mp4", "e1", {"width": "3840"})), "caLst": [{"caID": "a", "caName": "花絮"}]}
+    assert [each.label for each in (await client.card("1")).lines[0].items] == ["E1.mp4"]
 
 
 async def test_every_resolve_asks_the_cloud_for_the_preview_and_no_address_is_kept(world):
@@ -129,7 +171,7 @@ async def test_an_answer_that_is_no_answer_of_the_cloud_and_a_host_that_is_down_
                                      (lambda request: httpx.Response(200, text="<html>"), False, "app_answer_broken")):
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
             with pytest.raises(AppError) as failed:
-                await Share139Client(profile, lambda: http).resolve("preview4k", "c2", "1")
+                await Share139Client(profile, lambda: http, interval=0).resolve("preview4k", "c2", "1")
             assert code in failed.value.reason and failed.value.transient is transient
 
     def down(request: httpx.Request):
@@ -137,7 +179,7 @@ async def test_an_answer_that_is_no_answer_of_the_cloud_and_a_host_that_is_down_
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(down)) as http:
         with pytest.raises(AppError) as unreachable:
-            await Share139Client(profile, lambda: http).card("1")
+            await Share139Client(profile, lambda: http, interval=0).card("1")
         assert unreachable.value.transient and "app_unreachable" in unreachable.value.reason
 
 

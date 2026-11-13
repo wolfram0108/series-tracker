@@ -1,4 +1,5 @@
-"""Модуль sources — источники раздач: парсеры трекеров (Р-9).
+"""Модуль sources — источники раздач: парсеры трекеров (Р-9). Таблицы модуля: `trackers`, `release_tables` и
+`release_rows` (страницы сайтов), `share139_folders` (папки публичных ресурсов 139 Cloud, найденные поиском, Р-95).
 
 Queries:
   sources.parse {url}            → {service, title, releases[]} — the releases of a tracker; a page of a site
@@ -208,7 +209,9 @@ class SourcesModule(BaseModule):
             client = APP_PROTOCOLS.get(profile.protocol)
             if client is None:
                 raise ValueError(f"application {profile.name}: unknown protocol {profile.protocol!r}")
-            self.apps.append(AppPlayer(client(profile, lambda: self._http),
+            # What a protocol keeps of its own beyond its profile: the folders the search of 139 Cloud found.
+            own = {"folders": self.repo} if profile.protocol == "share139" else {}
+            self.apps.append(AppPlayer(client(profile, lambda: self._http, **own),
                                        registry=LineRegistry.load(profile.name, app_lines_dir), term=self.term))
         # A line of an application that another one parses when its own parser says no (apps/routes.json), where that
         # other application is configured.
