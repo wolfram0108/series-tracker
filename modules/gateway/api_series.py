@@ -15,7 +15,7 @@ from core import BusRequestError
 from core.reasons import code_of, reason, relayed
 from .routing import admitted
 
-from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, FailuresReset, OkResponse, SyncCancelled,
+from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, FailuresReset, FailuresResetBody, OkResponse, SyncCancelled,
                       QueueTask, SeriesCreate, SeriesObject, SeriesUpdate)
 
 # Общая документация веток ошибок (отдаются через JSONResponse, на них
@@ -290,13 +290,15 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return {"success": True, "cancelled": bool(done.get("cancelled"))}
 
     @r.post("/api/series/{series_id}/failures/reset", response_model=FailuresReset, responses=_ERRORS)
-    async def reset_failures(series_id: int):
+    async def reset_failures(series_id: int, body: FailuresResetBody | None = None):
         """Неудачные попытки сериала забываются: отклонённые и сбойные озвучки начинаются с первого источника своей
         цепочки, видео, которое не скачалось, снова участвует в выборе референса. Это правка сериала, а не
-        синхронизация: работа по ним идёт со следующей синхронизацией."""
+        синхронизация: работа по ним идёт со следующей синхронизацией. С телом — только попытки одного уровня (сезона,
+        серии, озвучки, нарезок): попытки остальных остаются, и выбор референса по ним не меняется."""
         try:
             async with admitted(gw, series_id):
-                done = await gw.request("planner.failures.forget", {"series_id": series_id})
+                done = await gw.request("planner.failures.forget", {
+                    "series_id": series_id, **(body.model_dump(exclude_none=True) if body is not None else {})})
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True, "reset": int((done or {}).get("reset") or 0)}

@@ -48,7 +48,9 @@ Queries:
   planner.delete {series_id, kind: video | track, name, dub?} -> {recorded}: the command «Удалить» of a file or of a track
       in it, carried out by the next sync (a video goes only for another video of its episode).
   planner.delete.cancel {series_id, kind, name, dub?} -> {dropped}.
-  planner.failures.forget {series_id} -> {reset}: the user's reset of the failed attempts.
+  planner.failures.forget {series_id, season?, episode?, voice?, kind?} -> {reset}: the user's reset of the failed attempts —
+      of the whole series, or only of the level named (PlanForget: a season, an episode of it, a voice-over group, the cuts);
+      the attempts of the other levels stay, and what the plan chose because they failed stays chosen.
   planner.pack.get {} -> {tasks, journals}: the cards of the packing and the journals being carried out. planner.pack.remove {id} -> {removed}: the user removes a card
       that stayed after its sync.
   planner.files.get {series_id} -> {names}: the files of the asset, relative to the folder of the series.
@@ -94,7 +96,7 @@ from core import NO_HANDLER, BaseModule, BusRequestError, compute, storage
 from core import container as mkv
 from core.clock import beat_while
 from core.dump import plain
-from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlannerView, SeriesSource, SourceType, SubmitOutcome,
+from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
 from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
 from core.envelope import Envelope
@@ -112,7 +114,7 @@ from core.voice_names import Groups
 
 from .packing import PackBook, card_id
 from .repository import PlannerRepository
-from .view import view_of
+from .view import placed, view_of
 
 PLANNER = "planner"
 # A safeguard of the copy of a video into the work folder of the alignment service: a 4K episode over the network.
@@ -1254,9 +1256,28 @@ class PlannerModule(BaseModule):
         return {"names": names}
 
     async def on_failures_forget(self, env: Envelope) -> dict:
-        series_id = int(env.payload["series_id"])
-        reset = await self.repo.forget_failures(series_id)
-        if series_id in self._runs:
-            self._forgot.add(series_id)
+        """The reset of failed attempts, of the whole series or of one level of it (PlanForget): the attempts of the other
+        levels stay, so what the plan chose because they failed (the second reference of an episode whose first did not
+        download) is not undone by the reset of another episode."""
+        forget = PlanForget.model_validate(env.payload)
+        series_id = forget.series_id
+        if forget.whole:
+            reset = await self.repo.forget_failures(series_id)
+            if series_id in self._runs:
+                self._forgot.add(series_id)
+        else:
+            gone = await self._failures_of(series_id, forget)
+            reset = await self.repo.forget_failures(series_id, [_failure_encoded(each) for each in gone])
+            if series_id in self._runs:
+                # What a sync under way holds of them is not written back by it.
+                self._shed.setdefault(series_id, set()).update(gone)
         await self._publish_view(series_id)
         return {"reset": reset}
+
+    async def _failures_of(self, series_id: int, forget: PlanForget) -> list[tuple]:
+        """The failed attempts of the series that belong to the level, placed by the rows the sources give now."""
+        series = await self.request("catalog.series.get", {"series_id": series_id})
+        held = {_failure_decoded(each) for each in await self.repo.failures(series_id)}
+        rows, choices = await self._inputs(series)
+        inputs = BusSync(self, series, False).inputs(rows, choices)
+        return [each["key"] for each in placed(held, inputs.online) if forget.holds(each)]

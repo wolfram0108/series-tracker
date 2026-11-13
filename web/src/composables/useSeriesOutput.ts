@@ -187,9 +187,10 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     set({ season, episode }, "compilation.member", null, key)
   const takeCompilation = (season: number, key: string, taken: boolean): Promise<string | null> =>
     taken ? reset({ season, compilation: key }, "compilation.take", null) : set({ season, compilation: key }, "compilation.take", null, false)
-  // A cut that failed is tried again once the failures of the series are reset (the plan passes over a failure until then).
-  const retryCut = (_season: number, _episode: number | null): Promise<string | null> =>
-    act(() => resetFailures(seriesId), busy)
+  // A cut that failed is tried again once its failure is reset (the plan passes over a failure until then): the cuts of the
+  // episode, or of the season; the failures of the other levels stay.
+  const retryCut = (season: number, episode: number | null): Promise<string | null> =>
+    act(() => resetFailures(seriesId, { season, ...(episode === null ? {} : { episode }), kind: "cut" }), busy)
 
   // A queue of a level takes the order the user dragged its rows into, leaves a variant out, or takes a voice-over at all.
   const leversOf = (queue: QueueName) => queueLevers(composition.value?.levers ?? [], queue)
@@ -217,10 +218,12 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
 
   // The actions on tracks: each is the one command it names, and what it changes comes as events.
-  // A failed voice-over is tried again once the failures are reset; «Удалить» of a track or of the video takes it out of
-  // the file at the next sync, and a row a source still gives is downloaded again.
-  const retry = (_season: number, _episode: number | null, _voiceLabel: string | null): Promise<string | null> =>
-    act(() => resetFailures(seriesId), busy)
+  // A failed voice-over is tried again once its failure is reset: the voice-over of the episode (or of the season, with no
+  // episode) — the failures of the others stay, so the references the plan chose by them stay chosen. «Удалить» of a track or
+  // of the video takes it out of the file at the next sync, and a row a source still gives is downloaded again.
+  const retry = (season: number, episode: number | null, voiceLabel: string | null): Promise<string | null> =>
+    act(() => resetFailures(seriesId, { season, ...(episode === null ? {} : { episode }),
+      ...(voiceLabel === null ? {} : { voice: voiceLabel }) }), busy)
   // «Пересоздать» of one episode is the command of its track; of a season («Пересоздать готовые»), the command of the
   // track in every episode whose row a source still gives — a track no source gives has nothing to be made again from.
   const redo = async (season: number, episode: number | null, voiceLabel: string | null): Promise<string | null> => {

@@ -494,6 +494,42 @@ async def test_a_failure_is_told_with_the_episodes_and_the_voice_over_of_its_row
     assert (failure["kind"], failure["episodes"], failure["voice"]) == ("align", [[1, 1]], "G1")
 
 
+async def test_the_reset_of_one_episode_forgets_its_failures_and_leaves_the_failures_of_the_others(world):
+    """«Повторить» of an episode resets what failed for it: the attempts of the other episodes stay, so what the plan chose
+    because they failed is not undone."""
+    neighbours, planner, _ = world
+    for number in (1, 2):
+        episode(neighbours, number, 2)
+        neighbours.daemon.answers[f"Сериал s01e0{number} G1"] = "mismatch"
+        neighbours.daemon.answers[f"Сериал s01e0{number} G2"] = "mismatch"
+    await sync(world)
+
+    async def failed() -> set[tuple]:
+        return {(each["voice"], tuple(map(tuple, each["episodes"])))
+                for each in (await planner.request("planner.series.get", {"series_id": SERIES}))["failures"]}
+
+    every = {(voice, ((1, number),)) for voice in ("G1", "G2") for number in (1, 2)}
+    assert await failed() == every
+    # A voice-over of one episode.
+    assert (await planner.request("planner.failures.forget", {
+        "series_id": SERIES, "season": 1, "episode": 1, "voice": "G1"}))["reset"] == 1
+    assert await failed() == every - {("G1", ((1, 1),))}
+    # One episode, whatever its voice-over.
+    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "season": 1, "episode": 2}))["reset"] == 2
+    assert await failed() == {("G2", ((1, 1),))}
+    # A level that holds no failure resets none; the failures of the series are still there.
+    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "season": 2}))["reset"] == 0
+    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "kind": "cut"}))["reset"] == 0
+    assert await failed() == {("G2", ((1, 1),))}
+    # A voice-over of a whole season; with no level, all that is left.
+    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "season": 1, "voice": "G2"}))["reset"] == 1
+    assert await failed() == set()
+    await sync(world)
+    assert len(await failed()) == 4, "the failed attempts are made again by the next sync, and they fail again"
+    assert (await planner.request("planner.failures.forget", {"series_id": SERIES}))["reset"] == 4
+    assert await failed() == set()
+
+
 async def test_the_voice_overs_the_user_switched_off_are_named_by_the_goal_of_the_episode(world):
     neighbours, planner, _ = world
     episode(neighbours, 1, 2)

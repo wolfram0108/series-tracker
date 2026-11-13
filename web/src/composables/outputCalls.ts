@@ -44,10 +44,16 @@ export function cancelSync(seriesId: number): Promise<Answer<{ cancelled?: boole
     OUTPUT_WORDS)
 }
 
-/** The failed attempts of the series are forgotten: a change of the series, not a sync. The voice-overs set back are
- * fetched by the next sync; what changes comes as events. */
-export function resetFailures(seriesId: number): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/series/{series_id}/failures/reset", { params: { path: { series_id: seriesId } } }),
+/** The level whose failed attempts are forgotten: a season, an episode of it, a voice-over group, the cuts out of
+ *  compilations. */
+export type FailuresLevel = Schemas["FailuresResetBody"]
+
+/** The failed attempts of the series are forgotten, or only those of one level of it (the others stay, and what the plan
+ * chose because they failed stays chosen): a change of the series, not a sync. The voice-overs set back are fetched by the
+ * next sync; what changes comes as events. */
+export function resetFailures(seriesId: number, level?: FailuresLevel): Promise<Answer<unknown>> {
+  const path = { params: { path: { series_id: seriesId } } }
+  return call(() => api.POST("/api/series/{series_id}/failures/reset", level === undefined ? path : { ...path, body: level }),
     OUTPUT_WORDS)
 }
 

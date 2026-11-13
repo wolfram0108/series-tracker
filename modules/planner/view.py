@@ -35,6 +35,21 @@ def covered(failure: dict, assets: list[dict]) -> bool:
     return True
 
 
+def placed(failed: Iterable[tuple], rows: Iterable[OnlineRow] = ()) -> list[dict]:
+    """The failed attempts (`key`) with where each belongs, as the layout the rows are of has it: the episodes its row gives
+    and its voice-over group; empty when the row is offline."""
+    by_id: dict[RowId, list[OnlineRow]] = {}
+    for row in rows:
+        by_id.setdefault(row.id, []).append(row)
+    found = []
+    for key in sorted(failed, key=repr):
+        held = by_id.get(key[1], [])
+        found.append({"key": key, "kind": key[0], "row": _row(key[1]), "video": _row(key[2]) if len(key) > 2 else None,
+                      "episodes": sorted({tuple(slot) for row in held for slot in _slots(row)}),
+                      "voice": next((row.group for row in held if row.group), None)})
+    return found
+
+
 def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: bool,
             online: frozenset[RowId] | None = None, rows: Iterable[OnlineRow] = ()) -> dict:
     assets = []
@@ -58,15 +73,7 @@ def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: boo
                 "tracks": [{"voice": way.voice, "kind": way.kind, "row": _row(way.dub), **asdict(way.snapshot),
                             "own": way.own} for way in goal.tracks],
                 "markup": voice_of(goal.markup.group, goal.markup.id) if goal.markup is not None else None})
-    by_id: dict[RowId, list[OnlineRow]] = {}
-    for row in rows:
-        by_id.setdefault(row.id, []).append(row)
-    failures = []
-    for key in sorted(sync.failed, key=repr):
-        found = by_id.get(key[1], [])
-        failures.append({"kind": key[0], "row": _row(key[1]), "video": _row(key[2]) if len(key) > 2 else None,
-                         "episodes": sorted({tuple(slot) for row in found for slot in _slots(row)}),
-                         "voice": next((row.group for row in found if row.group), None)})
+    failures = [{key: value for key, value in each.items() if key != "key"} for each in placed(sync.failed, rows)]
     for failure in failures:
         failure["covered"] = covered(failure, assets)
     commands = [{"kind": each[0], "name": each[1], "dub": _row(each[2]) if len(each) > 2 else None}

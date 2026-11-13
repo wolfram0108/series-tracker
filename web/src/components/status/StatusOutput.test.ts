@@ -193,7 +193,7 @@ describe("StatusOutput", () => {
     await flushPromises()
     await w.find(".track-action.do-retry").trigger("click")
     await flushPromises()
-    expect(calls.resetFailures).toHaveBeenCalledWith(1)
+    expect(calls.resetFailures).toHaveBeenCalledWith(1, { season: 1, episode: 1, voice: "AniStar" })
     expect(calls.deleteFromPlan).not.toHaveBeenCalled()
   })
 

@@ -140,3 +140,31 @@ class PlanDelete(BaseModel):
     kind: Literal["video", "track"]
     name: str
     dub: PlanRowRef | None = None
+
+
+class PlanForget(BaseModel):
+    """The reset of the failed attempts of a series: of all of them, or of those that belong to a level of it — a season, an
+    episode of it, a voice-over group, the cuts out of compilations. The attempts of the other levels stay: the plan goes
+    on passing over them, so a reference that stands because another one failed does not go back to the one that failed."""
+
+    series_id: int
+    season: int | None = None
+    episode: int | None = None
+    voice: str | None = None
+    kind: Literal["download", "align", "cut"] | None = None
+
+    @property
+    def whole(self) -> bool:
+        return self.season is None and self.episode is None and self.voice is None and self.kind is None
+
+    def holds(self, failure: dict) -> bool:
+        """Whether a failure as the view places it (its `kind`, `episodes`, `voice`) belongs to the level. A failure the
+        view cannot place (its row is offline) belongs to no level but the whole series."""
+        if self.kind is not None and failure["kind"] != self.kind:
+            return False
+        if self.voice is not None and failure["voice"] != self.voice:
+            return False
+        if self.season is None and self.episode is None:
+            return True
+        return any((self.season is None or slot[0] == self.season) and (self.episode is None or slot[1] == self.episode)
+                   for slot in failure["episodes"])

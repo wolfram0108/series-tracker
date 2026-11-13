@@ -76,6 +76,18 @@ async def test_the_reset_of_failed_attempts_is_a_change_of_the_series_and_starts
     assert topics(spy) == ["scan.edit.begin", "planner.failures.forget", "scan.edit.end"]
 
 
+async def test_the_reset_of_failed_attempts_may_name_the_level_it_is_of_and_an_unknown_level_is_refused(tmp_path):
+    answers = {"planner.failures.forget": {"reset": 1}}
+    async with serving(tmp_path, answers) as (client, owners, _, _):
+        response = await client.post("/api/series/1/failures/reset", json={"season": 1, "episode": 2, "voice": "AniStar"})
+        cuts = await client.post("/api/series/1/failures/reset", json={"season": 1, "kind": "cut"})
+        refused = await client.post("/api/series/1/failures/reset", json={"episode": 2, "level": "all"})
+    assert response.status_code == 200 and response.json() == {"success": True, "reset": 1} and cuts.status_code == 200
+    assert refused.status_code == 422
+    assert owners.asked("planner.failures.forget") == [
+        {"series_id": 1, "season": 1, "episode": 2, "voice": "AniStar"}, {"series_id": 1, "season": 1, "kind": "cut"}]
+
+
 async def test_the_composition_of_a_torrent_series_is_the_torrent_plan_with_iso_dates(tmp_path):
     plan = [{"id": 1, "original_path": "Dir/T.S01E01.mkv", "source_data": {"publication_date": "2026-01-01 00:00:00"}}]
     answers = {"catalog.series.get": card_of, "torrents.composition": plan, "composition.get": LAYOUT}

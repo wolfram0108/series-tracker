@@ -10,7 +10,7 @@ by name, not lost.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -43,6 +43,15 @@ class SyncCancelled(ApiModel):
     """Синхронизация сериала остановлена: всё, что она делала, прервано, ничего не применено; false — она не шла."""
     success: bool
     cancelled: bool = False
+
+
+class FailuresResetBody(RequestModel):
+    """The level whose failed attempts are reset: a season, an episode of it, a voice-over group, the cuts out of compilations.
+    Without a body, the whole series."""
+    season: int | None = None
+    episode: int | None = None
+    voice: str | None = None
+    kind: Literal["download", "align", "cut"] | None = None
 
 
 class FailuresReset(ApiModel):

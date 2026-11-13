@@ -51,8 +51,14 @@ class PlannerRepository:
         return [json.loads(row["key"]) for row in await self._db.fetch_all(
             "SELECT key FROM plan_failures WHERE series_id=? ORDER BY key", (series_id,))]
 
-    async def forget_failures(self, series_id: int) -> int:
-        return await self._db.execute("DELETE FROM plan_failures WHERE series_id=?", (series_id,))
+    async def forget_failures(self, series_id: int, failures: list | None = None) -> int:
+        """The failed attempts of the series forgotten: all of them, or those given (as `failures` gives them)."""
+        if failures is None:
+            return await self._db.execute("DELETE FROM plan_failures WHERE series_id=?", (series_id,))
+        found = 0
+        for each in failures:
+            found += await self._db.execute("DELETE FROM plan_failures WHERE series_id=? AND key=?", (series_id, _key(each)))
+        return found
 
     async def commands(self, series_id: int) -> list:
         return [json.loads(row["command"]) for row in await self._db.fetch_all(

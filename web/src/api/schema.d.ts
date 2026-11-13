@@ -360,7 +360,8 @@ export interface paths {
          * Reset Failures
          * @description Неудачные попытки сериала забываются: отклонённые и сбойные озвучки начинаются с первого источника своей
          *     цепочки, видео, которое не скачалось, снова участвует в выборе референса. Это правка сериала, а не
-         *     синхронизация: работа по ним идёт со следующей синхронизацией.
+         *     синхронизация: работа по ним идёт со следующей синхронизацией. С телом — только попытки одного уровня (сезона,
+         *     серии, озвучки, нарезок): попытки остальных остаются, и выбор референса по ним не меняется.
          */
         post: operations["reset_failures_api_series__series_id__failures_reset_post"];
         delete?: never;
@@ -2664,6 +2665,21 @@ export interface components {
             reset: number;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * FailuresResetBody
+         * @description The level whose failed attempts are reset: a season, an episode of it, a voice-over group, the cuts out of compilations.
+         *     Without a body, the whole series.
+         */
+        FailuresResetBody: {
+            /** Season */
+            season?: number | null;
+            /** Episode */
+            episode?: number | null;
+            /** Voice */
+            voice?: string | null;
+            /** Kind */
+            kind?: ("download" | "align" | "cut") | null;
         };
         /**
          * Figures
@@ -5245,7 +5261,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["FailuresResetBody"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
