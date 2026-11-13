@@ -124,6 +124,7 @@ from .apps.appmn import AppMnClient
 from .apps.appv7 import AppV7Client
 from .apps.gulu import GuluClient
 from .apps.lines import LineRegistry, routes_of
+from .apps.share139 import Share139Client
 from .apps.yunduo import YunDuoClient
 from .delivery import Delivery
 from .parsers import SourceParseError
@@ -146,7 +147,7 @@ VK_API_BASE = "https://api.vk.com/method/"
 
 # The clients of the protocols of the video applications, by the `protocol` of a profile (modules/sources/apps).
 APP_PROTOCOLS = {"app99": App99Client, "appdrama": AppDramaClient, "appget": AppGetClient, "gulu": GuluClient,
-                 "yunduo": YunDuoClient, "appmn": AppMnClient, "appv7": AppV7Client}
+                 "yunduo": YunDuoClient, "appmn": AppMnClient, "appv7": AppV7Client, "share139": Share139Client}
 
 # The connections the client of the sources opens and keeps open between requests. A read of a card of an application
 # has up to APP_IN_FLIGHT rows going, each one request at a time, and the applications read side by side: kept for the

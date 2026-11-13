@@ -1,5 +1,5 @@
 """Models of the video applications of every protocol the service reads besides App99 and AppDrama, for the stand of the
-whole application (tests/app_stand.py): AppGet (茉莉), Gulu (咕噜), YunDuo (布布), AppMN (米诺) and AppV7 (小猪). Each answers by its
+whole application (tests/app_stand.py): AppGet (茉莉), Gulu (咕噜), YunDuo (布布), AppMN (米诺), AppV7 (小猪) and the public shares of 139 Cloud. Each answers by its
 protocol as its client asks it (modules/sources/apps/<protocol>.py) — the keys, the sealing, the session, the ticket —
 with the cards a scenario gives it: a card is a name and one line of episodes, each episode a token whose stream is an
 address on the host of the stand. Nothing here is a snapshot of a real answer."""
@@ -244,4 +244,40 @@ class AppV7Model(_Model):
                 {"vod_id": card.number, "vod_name": card.name, "vod_year": "2021"} for card in self.cards.values()]})
         if method == "secret_parse_api_url":
             return httpx.Response(200, json={"code": 1, "data": "sealed-" + data["url"]})
+        return httpx.Response(404)
+
+
+# --- 139 Cloud: the public shares of the profile, the files of a folder, the preview stream of a file ---------------------------
+
+class Share139Model(_Model):
+    """The cloud: a share per card (`link<number>`), its folder the files of the card — a label and a token each — and the
+    address of the preview of a file. `widths` gives the width the cloud stores for a token (3840 when it gives none)."""
+    NUMBERS = range(500, 520)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.widths: dict[str, int] = {}
+        self.listings = 0
+
+    def profile(self) -> AppProfile:
+        shares = {str(number): {"title": f"万界独尊{number}", "year": "2021", "link_id": f"link{number}", "folder_id": "root"}
+                  for number in self.NUMBERS}
+        return AppProfile("share139", "139云盘", "share139", {"label": "139云盘", "protocol": "share139", "shares": json.dumps(shares)})
+
+    def owns(self, url: str) -> bool:
+        return url.startswith("https://share-kd-njs.yun.139.com/")
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.asked.append(str(request.url))
+        method, body = request.url.path.rsplit("/", 1)[-1], json.loads(request.content)
+        if method == "getOutLinkInfoV6":
+            self.listings += 1
+            card = self.cards.get(int(body["getOutLinkInfoReq"]["linkID"].removeprefix("link")))
+            files = [{"coID": token, "coName": f"{label}.mp4", "coSize": 1,
+                      "extInfo": {"width": str(self.widths.get(token, 3840)), "height": "1640"}}
+                     for label, token in (card.items if card else [])]
+            return httpx.Response(200, json={"code": "0", "data": {"coLst": files, "caLst": []}})
+        if method == "getContentInfoFromOutLink":
+            token = body["getContentInfoFromOutLinkReq"]["contentId"]
+            return httpx.Response(200, json={"code": "0", "data": {"contentInfo": {"presentURL": self.streams[token]}}})
         return httpx.Response(404)

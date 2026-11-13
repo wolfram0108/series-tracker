@@ -55,7 +55,7 @@ async def test_every_row_of_every_kind_of_source_has_the_frame_of_its_own_episod
     truth = {stand.site.releases["ref"].url: {1: 720, 2: 480}, stand.site.titles[4794].url: {1: 1080, 2: 720},
              "app://banri/219017": {1: 1080, 2: 2160}, "app://banri/219018": {1: 720, 2: 1080}}
     # Every other protocol of the applications the service reads: each of its own model, its line admitted.
-    for number, protocol in enumerate(("appdrama", "appget", "gulu", "yunduo", "appmn", "appv7"), start=500):
+    for number, protocol in enumerate(("appdrama", "appget", "gulu", "yunduo", "appmn", "appv7", "share139"), start=500):
         frames = {1: 720, 2: 1080} if number % 2 else {1: 1080, 2: 720}
         truth[await asyncio.to_thread(stand.site.protocol_card, protocol, number, f"万界独尊{number}", frames)] = frames
 
@@ -77,7 +77,7 @@ async def test_every_row_of_every_kind_of_source_has_the_frame_of_its_own_episod
         # Condition 2: the frame of each row is the frame of its own episode, never one carried from another row.
         assert got == frames, (url, got)
     assert order["player_labels"]["line:BLU"] == "BLU"  # a line of an application is named by its code
-    for code in ("DRAMA", "MOLI", "GULU", "YUNDUO", "MINUO", "XIAOZHU"):
+    for code in ("DRAMA", "MOLI", "GULU", "YUNDUO", "MINUO", "XIAOZHU", "preview4k"):
         assert order["player_labels"][f"line:{code}"] == code
     # Obligation 3 for every player a row can be of, whether a table of the stand holds one or not.
     for player in sources.players:

@@ -166,6 +166,7 @@ async def test_app99_preserves_a_quota_after_a_long_signed_address_and_tries_all
     client = App99Client(banri_profile(), lambda: None)
     client._system = {'player': {'limited': {'type': 1, 'parseUrl': '5,9'}},
                       'parser_api': [{'id': 5}, {'id': 9}]}
+    client._system_lease.renew()  # the system is held: no session is opened for it
     calls = []
     working = True
 

@@ -267,6 +267,7 @@ export const ru = {
   "reason.app_answer_broken": "{app}: ответ на {step} не расшифрован",
   "reason.app_refused": "{app}: отказ на {step}: {message}",
   "reason.app_title_absent": "{app}: карточки № {card} нет",
+  "reason.app_folder_too_large": "{app}: в папке больше {limit} файлов — подключите подпапку",
   "reason.app_no_stream": "{app}: парсер {parser} не дал потока: {message}",
   "reason.app_no_parser": "{app}: линия {line} — ни один парсер не дал потока (испробованы: {tried})",
   "reason.site_status": "{site}: страница вернула {status}: {url}",
