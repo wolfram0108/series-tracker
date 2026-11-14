@@ -15,6 +15,7 @@ import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { api } from "../../api/client"
 import { t } from "../../i18n"
+import { useBusyBar } from "../../composables/useWindowBusy"
 import { isExtract } from "../../lib/ruleVocabulary"
 import type { SourceAddress } from "../../lib/sources"
 import LoadingMark from "../LoadingMark.vue"
@@ -62,6 +63,7 @@ const profiles = ref<Profile[]>([])
 const selectedProfileId = ref<number | null>(props.initialProfileId ?? null)
 const newProfileName = ref("")
 const isLoading = ref(false)
+useBusyBar(() => isLoading.value)
 const rules = ref<EditableRule[]>([])
 // The lines of the test (step 3) and the codes of the fields of a line: what the quick templates of a table are made of.
 const testLines = ref<string[]>([])

@@ -106,15 +106,33 @@ afterEach(() => {
 describe("StatusOutput", () => {
   it("shows the seasons and their episodes as cards, each with the source and the resolution of its reference", async () => {
     const w = mountOutput()
-    expect(w.text()).toContain(t("common.fetching"))
+    expect(w.find(".load-skeleton").exists()).toBe(true) // nothing of the episodes before their layout and plan have been read
     await flushPromises()
     await frame()
     await flushPromises()
+    expect(w.find(".load-skeleton").exists()).toBe(false)
     expect(w.findAll(".season-title").map((each) => each.text())).toEqual([t("output.season", { n: 1 }), t("output.season", { n: 2 })])
     expect(cards(w)).toEqual([["1", "1"], ["1", "2"], ["2", "1"]])
     expect(w.find(".episode-card .card-ref-shown").findAll(".ref-text").map((each) => each.text()))
       .toEqual(expect.arrayContaining(["Vibix", t("output.height", { height: 1080 })]))
     expect(w.findAll(".episode-card")[0].findAll(".track-cell").map((cell) => cell.text())).toEqual(["1", "2"])
+  })
+
+  it("puts no episode on show while its plan has not been read: the states are the plan's, and the layout alone would call every episode without a reference", async () => {
+    let planned!: (answer: Answer<PlannerView>) => void
+    vi.mocked(calls.fetchPlan).mockReturnValue(new Promise((resolve) => { planned = resolve }))
+    const w = mountOutput()
+    await flushPromises()
+    await frame()
+    expect(w.find(".load-skeleton").exists()).toBe(true)
+    expect(w.find(".episode-card").exists()).toBe(false)
+    expect(w.find(".output-filters").exists()).toBe(false)
+    planned(ok({ ...planView(), references: windowReferences() }))
+    await flushPromises()
+    await frame()
+    await flushPromises()
+    expect(w.find(".load-skeleton").exists()).toBe(false)
+    expect(cards(w)).toHaveLength(3)
   })
 
   it("puts as many cards in a row as the tracks and the number of episodes of the season allow", async () => {

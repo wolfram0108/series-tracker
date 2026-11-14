@@ -6,6 +6,7 @@ import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { t, tn } from "../../i18n"
+import { useBusyBar } from "../../composables/useWindowBusy"
 import { stateLabel } from "../../lib/states"
 import { reasonText } from "../../lib/reason"
 import LoadingMark from "../LoadingMark.vue"
@@ -38,6 +39,7 @@ interface Item {
 }
 
 const loading = ref(false)
+useBusyBar(() => loading.value)
 const items = ref<Item[]>([])
 
 function baseName(p?: string | null): string {

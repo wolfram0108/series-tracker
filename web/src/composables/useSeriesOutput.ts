@@ -98,6 +98,9 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     return failed ? t("output.layoutFailed", { reason: reasonText(failed.reason) }) : ""
   })
   const seasons = sharing(() => bySeason(views.value))
+  // A video series has something to show only when its layout and its plan have both been read: the state of every episode is the plan's, so
+  // the layout alone would show every episode as having no reference. A torrent series has nothing to wait for.
+  const ready = computed(() => kind === "torrent" || (composition.value !== null && plan.forSeries(seriesId) != null))
 
   // Of several reads in flight only the one asked last may write: a late reply to an older ask must not roll back.
   let asked = 0
@@ -287,7 +290,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     })
   }
 
-  return { composition, references, loading, failure, busy, answer, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
+  return { composition, references, loading, ready, failure, busy, answer, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
     sync, retryFailed, retrySeason, retryEpisode, voiceOrders, order, rename, marks, loadQueues, queuesOf, heldOf, takenOf, setOrder, setAllowed, setSame, setTaken, resetOrder,
     retry, redo, refetch, compilations, cuts, member, takeCompilation, retryCut, labels }
 }

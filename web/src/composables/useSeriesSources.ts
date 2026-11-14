@@ -33,6 +33,10 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
   const canonical = ref<Record<number, string>>({})
   const error = ref("")
   const busy = ref(false)
+  // The tables of the sources are the layout's: until it has been read a source shows what the series itself knows of it, not its table, and
+  // the card says that the table is coming (`waiting`). A read that follows, with a layout on show, is told by the bar of the window only.
+  const tablesLoading = ref(kind === "video")
+  const waiting = computed(() => tablesLoading.value && layouts.forSeries(seriesId) == null)
 
   // A recount of the layout that failed leaves the earlier layout in force; the window says so until the next one arrives.
   const layoutFailure = computed(() => {
@@ -66,14 +70,19 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
   let asked = 0
   async function load(fresh = true): Promise<void> {
     const ask = ++asked
+    if (kind === "video") tablesLoading.value = true
     // The layout is asked for together with the sources: an ask of the output made by the same news is the same read.
     const read = kind === "video" ? (fresh ? layouts.refresh(seriesId) : layouts.ensure(seriesId)) : null
     const listed = await fetchSources(seriesId)
     if (ask !== asked) return
     if (listed.ok) sources.value = listed.data
-    if (read === null) return
+    if (read === null) {
+      tablesLoading.value = false
+      return
+    }
     await read
     if (ask !== asked) return
+    tablesLoading.value = false
     await Promise.all(sources.value.filter((source) => !(source.id in canonical.value)).map(nameThePage))
   }
 
@@ -165,5 +174,5 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (up) void load()
   })
 
-  return { items, error, layoutFailure, busy, add, remove, change, reread, stop, reload: load }
+  return { items, error, layoutFailure, busy, tablesLoading, waiting, add, remove, change, reread, stop, reload: load }
 }

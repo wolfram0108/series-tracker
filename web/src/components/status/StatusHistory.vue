@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { t } from "../../i18n"
+import { useBusyBar } from "../../composables/useWindowBusy"
 import LoadingMark from "../LoadingMark.vue"
 
 // Вкладка «История» — порт StatusTabHistory. Торрент: таблица истории
@@ -37,6 +38,7 @@ interface MediaRow {
 }
 
 const loading = ref(false)
+useBusyBar(() => loading.value)
 const torrentHistory = ref<TorrentRow[]>([])
 const mediaHistory = ref<MediaRow[]>([])
 

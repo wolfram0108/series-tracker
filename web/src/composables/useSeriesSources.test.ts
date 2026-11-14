@@ -50,6 +50,25 @@ describe("useSeriesSources", () => {
     expect(sources.items.value[0].view).toMatchObject({ state: "reading", progress: { current: 2, total: 9 } })
   })
 
+  it("says that the tables are coming until the layout has been read, for a video series only, and tells a later read by the loading alone", async () => {
+    let layoutRead!: (value: ReturnType<typeof ok<never>>) => void
+    vi.mocked(output.fetchComposition).mockReset()
+      .mockImplementationOnce(() => new Promise((resolve) => { layoutRead = resolve }))
+      .mockResolvedValue(ok({ sources: [summary], rows: [] }) as never)
+    const sources = setup()
+    await flushPromises()
+    expect(sources.waiting.value).toBe(true)
+    layoutRead(ok({ sources: [summary], rows: [] }) as never)
+    await flushPromises()
+    expect(sources.waiting.value).toBe(false)
+    const again = sources.reload()
+    expect(sources.waiting.value).toBe(false) // the layout is on show: a read again is not a wait for the tables
+    expect(sources.tablesLoading.value).toBe(true)
+    await again
+    expect(sources.tablesLoading.value).toBe(false)
+    expect(setup("torrent").waiting.value).toBe(false)
+  })
+
   it("counts the players of a source from the layout once: the news of a page changes its state and recounts no row", async () => {
     const sources = setup()
     await flushPromises()

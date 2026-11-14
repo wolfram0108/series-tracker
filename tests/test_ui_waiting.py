@@ -20,8 +20,9 @@ API = re.compile(r"/api/(?!stream)")
 class Held:
     """The answers of the service held back from the moment of `hold` until `release`; what asked for them is listed in `asked`."""
 
-    def __init__(self, page) -> None:
+    def __init__(self, page, pattern: re.Pattern = API) -> None:
         self.page = page
+        self.pattern = pattern
         self.letgo = asyncio.Event()
         self.news = asyncio.Event()
         self.asked: list[str] = []
@@ -39,7 +40,7 @@ class Held:
     async def hold(self) -> None:
         self.letgo.clear()
         self.asked.clear()
-        await self.page.route(API, self._hold)
+        await self.page.route(self.pattern, self._hold)
 
     def of(self, ending: str) -> list[str]:
         return [each for each in self.asked if ending in each]
@@ -52,7 +53,7 @@ class Held:
 
     async def release(self) -> None:
         self.letgo.set()
-        await self.page.unroute(API, self._hold)
+        await self.page.unroute(self.pattern, self._hold)
 
 
 SCREENS = [  # the button that opens the window, its tab, what is on the tab once it has been read
@@ -115,3 +116,24 @@ async def test_an_action_pressed_twice_on_a_slow_line_goes_out_once(ui):  # noqa
     await held.release()
     await expect(everything).not_to_have_class(re.compile("p-button-loading"), timeout=60_000)
     assert len(held.of("scan_all")) == 1, held.asked
+
+
+async def test_the_window_of_a_series_says_that_its_tables_are_being_read(ui):  # noqa: F811
+    await series_in_browser(ui, (1, 2))
+    page = ui.page
+    await page.reload()  # nothing of the series is in the page
+    await page.locator(".series-card", has_text=SERIES).first.locator("[title='Статус']").click()
+    await page.locator(".st-tab[title='Свойства']").wait_for()
+    bar = page.locator(".modern-header .modal-progress")
+    await expect(bar).to_have_count(0, timeout=15_000)  # the first tab has been read: the window is quiet
+
+    # The layout and the plan of the output are read again, as they are for a series of hundreds of episodes that takes seconds:
+    # the tab does not stand silent meanwhile.
+    held = Held(page, re.compile(r"/api/series/\d+/(plan|composition|output/queues)"))
+    await held.hold()
+    await page.locator(".st-tab[title='Выход']").click()
+    await expect(bar).to_be_visible()
+    assert await page.locator(".status-output").get_by_text(text("output.empty")).count() == 0, "an empty tab is told while it is read"
+    await held.release()
+    await expect(page.locator(".episode-card")).to_have_count(2, timeout=15_000)
+    await expect(bar).to_have_count(0)

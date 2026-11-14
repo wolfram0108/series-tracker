@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { mount, type VueWrapper } from "@vue/test-utils"
-import { defineComponent, h } from "vue"
+import { defineComponent, h, nextTick, ref } from "vue"
 
 vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} })  // the tabs fit their room (ModalShell)
 Element.prototype.scrollIntoView = () => {}  // jsdom has no layout
@@ -9,6 +9,7 @@ Element.prototype.scrollIntoView = () => {}  // jsdom has no layout
 import ModalShell from "./ModalShell.vue"
 import StSelect from "./StSelect.vue"
 import { useConfirm } from "../composables/useConfirm"
+import { useBusyBar } from "../composables/useWindowBusy"
 
 const mounted: VueWrapper[] = []
 afterEach(() => {
@@ -141,5 +142,21 @@ describe("the select in a window", () => {
     expect(wrapper.emitted("close")).toBeUndefined()
     press("Escape", {}, trigger())
     expect(wrapper.emitted("close")).toHaveLength(1)
+  })
+})
+
+describe("the bar of a window that is reading", () => {
+  it("runs under the title while a tab inside it reads, and goes when the read ends or the tab is gone", async () => {
+    const reading = ref(false)
+    const Tab = defineComponent({ setup() { useBusyBar(() => reading.value); return () => h("p", "tab") } })
+    const wrapper = mount(ModalShell, { attachTo: document.body, slots: { default: () => h(Tab) } })
+    mounted.push(wrapper)
+    expect(wrapper.find(".modal-progress").exists()).toBe(false)
+    reading.value = true
+    await nextTick()
+    expect(wrapper.find(".modal-progress").attributes("role")).toBe("progressbar")
+    reading.value = false
+    await nextTick()
+    expect(wrapper.find(".modal-progress").exists()).toBe(false)
   })
 })

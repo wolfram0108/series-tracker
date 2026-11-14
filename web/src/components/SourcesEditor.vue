@@ -18,6 +18,8 @@ const props = withDefaults(defineProps<{
   /** The words of the last refusal of an action. */
   error?: string
   busy?: boolean
+  /** The tables of the sources have not been read: the cards say so and wait. */
+  waiting?: boolean
   /** A torrent series has one source: no source is added to it or removed from it. */
   editable?: boolean
   /** Takes the typed address and says whether a source was made of it; the field is cleared only then. */
@@ -121,7 +123,7 @@ function clear(): void {
 <template>
   <div class="sources stack">
     <SourceCard
-      v-for="(item, index) in items" :key="item.id" :item="item" :profiles="profiles" :busy="busy" :place="index + 1"
+      v-for="(item, index) in items" :key="item.id" :item="item" :profiles="profiles" :busy="busy" :waiting="waiting" :place="index + 1"
       @change="emit('change', item.id, $event)" @remove="editable && emit('remove', item.id)"
       @reread="emit('reread', item.id)" @stop="emit('stop', item.id)"
     />

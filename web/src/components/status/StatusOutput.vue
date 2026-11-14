@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue"
 import { useSeriesOutput } from "../../composables/useSeriesOutput"
+import { useBusyBar } from "../../composables/useWindowBusy"
+import type { LoadState } from "../../composables/useLoad"
+import LoadGate from "../LoadGate.vue"
 import { t } from "../../i18n"
 import {
   allowedIn, episodeStatus, isDeviation, isOff, trackCells, type EpisodeStatus, type EpisodeView, type QueueName, type QueueRow,
@@ -41,7 +44,12 @@ const root = ref<HTMLElement | null>(null)
 onMounted(() => { for (const name of HELD) root.value?.addEventListener(name, hold, { capture: true }) })
 onBeforeUnmount(() => { for (const name of HELD) root.value?.removeEventListener(name, hold, { capture: true }) })
 const passing = computed(() => output.syncing.value || (series.byId(props.seriesId)?.statuses ?? []).includes("scanning"))
+// The tab shows the episodes once their layout and plan have been read; while it reads again what it has on show stands and the bar of the window runs.
+const gateState = computed<LoadState>(() => (output.ready.value ? "loaded" : output.failure.value ? "failed" : "loading"))
+useBusyBar(() => output.loading.value)
+// A pass is not started while the tab is still reading; where the layout could not be read it is left to the core, which mends it.
 const canSync = computed(() => {
+  if (gateState.value === "loading") return false
   const table = output.composition.value?.availability
   return table ? allowedIn(table, "sync", passing.value ? "scanning" : "idle") : !passing.value
 })
@@ -185,86 +193,86 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       <div class="fold-said"><PlanPending :series-id="props.seriesId" /></div>
       <div class="fold-does">
         <FoldButton :label="t('output.settings.series')" icon="pi pi-sliders-h" severity="info" class="output-series-settings"
-                    @click="openSettings(null)" />
+                    :disabled="!output.ready.value" @click="openSettings(null)" />
         <FoldButton :label="t('output.retryFailed')" :hint="t('output.retryFailedHint')" icon="pi pi-undo" severity="secondary"
                     class="output-retry-failed" :disabled="!canSync" @click="output.retryFailed()" />
         <SyncButton name="output" />
       </div>
     </div>
-    <div v-if="legend.length" class="output-bar output-legend">
-      <span class="output-legend-name">{{ t("output.sources") }}</span>
-      <span v-for="each in legend" :key="each.id" class="output-source"><SourceMark :mark="each.mark" />{{ each.mark.place }}</span>
-    </div>
-    <div class="output-bar">
-      <div class="output-filters" role="group">
-        <button
-          v-for="each in FILTERS" :key="each" type="button" class="output-filter" :class="[`is-${each}`, { 'is-on': filter === each }]"
-          :disabled="each !== 'all' && counts[each] === 0" @click="filter = each"
-        >{{ t(`output.filter.${each}`) }} <strong>{{ counts[each] }}</strong></button>
-      </div>
-      <span class="output-grow" />
-      <div class="st-tabs output-view" role="group" :aria-label="t('output.view.label')">
-        <button type="button" class="st-tab" :class="{ active: mode === 'cards' }" @click="mode = 'cards'">{{ t("output.view.cards") }}</button>
-        <button type="button" class="st-tab" :class="{ active: mode === 'tiles' }" @click="mode = 'tiles'">{{ t("output.view.tiles") }}</button>
-        <button type="button" class="st-tab output-view-compilations" :class="{ active: mode === 'compilations' }"
-                @click="mode = 'compilations'">{{ t("output.view.compilations") }}</button>
-      </div>
-    </div>
-
     <ReadProgress :reads="reading" />
     <p v-if="output.failure.value" class="output-failure" role="alert">{{ output.failure.value }}</p>
     <p v-if="output.layoutFailure.value" class="output-failure output-layout-failure" role="alert">{{ output.layoutFailure.value }}</p>
+    <LoadGate :state="gateState" layout="cards" @retry="output.load()">
+      <div v-if="legend.length" class="output-bar output-legend">
+        <span class="output-legend-name">{{ t("output.sources") }}</span>
+        <span v-for="each in legend" :key="each.id" class="output-source"><SourceMark :mark="each.mark" />{{ each.mark.place }}</span>
+      </div>
+      <div class="output-bar">
+        <div class="output-filters" role="group">
+          <button
+            v-for="each in FILTERS" :key="each" type="button" class="output-filter" :class="[`is-${each}`, { 'is-on': filter === each }]"
+            :disabled="each !== 'all' && counts[each] === 0" @click="filter = each"
+          >{{ t(`output.filter.${each}`) }} <strong>{{ counts[each] }}</strong></button>
+        </div>
+        <span class="output-grow" />
+        <div class="st-tabs output-view" role="group" :aria-label="t('output.view.label')">
+          <button type="button" class="st-tab" :class="{ active: mode === 'cards' }" @click="mode = 'cards'">{{ t("output.view.cards") }}</button>
+          <button type="button" class="st-tab" :class="{ active: mode === 'tiles' }" @click="mode = 'tiles'">{{ t("output.view.tiles") }}</button>
+          <button type="button" class="st-tab output-view-compilations" :class="{ active: mode === 'compilations' }"
+                  @click="mode = 'compilations'">{{ t("output.view.compilations") }}</button>
+        </div>
+      </div>
 
-    <div v-if="output.loading.value && all.length === 0" class="empty-state">{{ t("common.fetching") }}</div>
-    <div v-else-if="all.length === 0" class="empty-state">{{ t("output.empty") }}</div>
-    <template v-if="mode === 'compilations'">
-      <div v-if="compilationSeasons.length === 0" class="empty-state">{{ t("output.compilations.empty") }}</div>
-      <template v-for="season in compilationSeasons" :key="season.season">
-        <CompilationBlock
-          v-for="view in season.views" :key="view.ref.key" :view="view" :season="season.views" :episodes="season.episodes"
-          :cuts="cuts" :marks="output.marks.value" :labels="output.labels.value" :order="orderOf(season.season)" mode="cards"
-          :opened="opened?.compilation === view.ref.key ? opened.episode : null"
-          :queues="opened?.compilation === view.ref.key ? output.queuesOf(season.season, opened.episode) : undefined"
-          :held="opened?.compilation === view.ref.key ? output.heldOf(season.season, opened.episode) : null"
-          :taken="opened?.compilation === view.ref.key ? output.takenOf(season.season, opened.episode) : null" :busy="busy"
-          @open="openInCompilation(season.season, view.ref.key, $event)" @settings="openSettings(season.season, view.ref.key)"
-          @switch="output.takeCompilation(season.season, view.ref.key, !$event)"
-          @member="(episode, key) => output.member(season.season, episode, key)"
-          @retry="(episode) => output.retryCut(season.season, episode)"
-          @retry-failed="(episode) => output.retryEpisode(season.season, episode)"
-          @queue-order="(episode, queue, group, rows) => queueOrder(scopeOf(season.season, episode), queue, group, rows)"
-          @queue-allow="(episode, queue, row, allowed) => queueAllow(scopeOf(season.season, episode), queue, row, allowed)"
-          @queue-reset="(episode, queue, group) => queueReset(scopeOf(season.season, episode), queue, group)"
-          @queue-same="(episode, queue, groups) => queueSame(scopeOf(season.season, episode), queue, groups)"
-        />
+      <div v-if="all.length === 0" class="empty-state">{{ t("output.empty") }}</div>
+      <template v-if="mode === 'compilations'">
+        <div v-if="compilationSeasons.length === 0" class="empty-state">{{ t("output.compilations.empty") }}</div>
+        <template v-for="season in compilationSeasons" :key="season.season">
+          <CompilationBlock
+            v-for="view in season.views" :key="view.ref.key" :view="view" :season="season.views" :episodes="season.episodes"
+            :cuts="cuts" :marks="output.marks.value" :labels="output.labels.value" :order="orderOf(season.season)" mode="cards"
+            :opened="opened?.compilation === view.ref.key ? opened.episode : null"
+            :queues="opened?.compilation === view.ref.key ? output.queuesOf(season.season, opened.episode) : undefined"
+            :held="opened?.compilation === view.ref.key ? output.heldOf(season.season, opened.episode) : null"
+            :taken="opened?.compilation === view.ref.key ? output.takenOf(season.season, opened.episode) : null" :busy="busy"
+            @open="openInCompilation(season.season, view.ref.key, $event)" @settings="openSettings(season.season, view.ref.key)"
+            @switch="output.takeCompilation(season.season, view.ref.key, !$event)"
+            @member="(episode, key) => output.member(season.season, episode, key)"
+            @retry="(episode) => output.retryCut(season.season, episode)"
+            @retry-failed="(episode) => output.retryEpisode(season.season, episode)"
+            @queue-order="(episode, queue, group, rows) => queueOrder(scopeOf(season.season, episode), queue, group, rows)"
+            @queue-allow="(episode, queue, row, allowed) => queueAllow(scopeOf(season.season, episode), queue, row, allowed)"
+            @queue-reset="(episode, queue, group) => queueReset(scopeOf(season.season, episode), queue, group)"
+            @queue-same="(episode, queue, groups) => queueSame(scopeOf(season.season, episode), queue, groups)"
+          />
+        </template>
       </template>
-    </template>
-    <SeasonBlock
-      v-for="season in mode === 'compilations' ? [] : seasons" :key="season.season" :season="season.season" :episodes="season.shown" :total="season.episodes.length"
-      :voices="season.voices" :marks="output.marks.value" :names="output.names.value"
-      :mode="mode === 'tiles' ? 'tiles' : 'cards'" :opened="opened?.season === season.season && !opened.compilation ? opened.episode : null"
-      :compilations="compilationsOf(season.season)" :cuts="cuts"
-      :queues="opened?.season === season.season ? output.queuesOf(season.season, opened.episode) : undefined"
-      :held="opened?.season === season.season ? output.heldOf(season.season, opened.episode) : null"
-      :taken="opened?.season === season.season ? output.takenOf(season.season, opened.episode) : null" :busy="busy"
-      :selected="selectedBySeason.get(season.season) ?? NONE"
-      @open="open(season.season, $event)" @select="(episode, pick) => select(season.season, episode, pick)"
-      @settings="openSettings(season.season)"
-      @switch-season="output.switchTo(season.season, null, $event)"
-      @switch-episode="(episode, off) => output.switchTo(season.season, [episode], off)"
-      @voice-order="output.order(season.season, $event)"
-      @voice-title="(label, title) => output.rename(label, title)"
-      @refetch="(episode, part) => output.refetch(season.season, episode, part)"
-      @retry="(episode, group) => output.retry(season.season, episode, group)"
-      @retry-failed="(episode) => output.retryEpisode(season.season, episode)"
-      @retry-season="output.retrySeason(season.season)"
-      @redo="(episode, group) => output.redo(season.season, episode, group)"
-      @queue-order="(episode, queue, group, rows) => queueOrder(scopeOf(season.season, episode), queue, group, rows)"
-      @queue-allow="(episode, queue, row, allowed) => queueAllow(scopeOf(season.season, episode), queue, row, allowed)"
-      @queue-take="(episode, group, taken) => queueTake(scopeOf(season.season, episode), group, taken)"
-      @queue-reset="(episode, queue, group) => queueReset(scopeOf(season.season, episode), queue, group)"
-      @queue-same="(episode, queue, groups) => queueSame(scopeOf(season.season, episode), queue, groups)"
-    />
+      <SeasonBlock
+        v-for="season in mode === 'compilations' ? [] : seasons" :key="season.season" :season="season.season" :episodes="season.shown" :total="season.episodes.length"
+        :voices="season.voices" :marks="output.marks.value" :names="output.names.value"
+        :mode="mode === 'tiles' ? 'tiles' : 'cards'" :opened="opened?.season === season.season && !opened.compilation ? opened.episode : null"
+        :compilations="compilationsOf(season.season)" :cuts="cuts"
+        :queues="opened?.season === season.season ? output.queuesOf(season.season, opened.episode) : undefined"
+        :held="opened?.season === season.season ? output.heldOf(season.season, opened.episode) : null"
+        :taken="opened?.season === season.season ? output.takenOf(season.season, opened.episode) : null" :busy="busy"
+        :selected="selectedBySeason.get(season.season) ?? NONE"
+        @open="open(season.season, $event)" @select="(episode, pick) => select(season.season, episode, pick)"
+        @settings="openSettings(season.season)"
+        @switch-season="output.switchTo(season.season, null, $event)"
+        @switch-episode="(episode, off) => output.switchTo(season.season, [episode], off)"
+        @voice-order="output.order(season.season, $event)"
+        @voice-title="(label, title) => output.rename(label, title)"
+        @refetch="(episode, part) => output.refetch(season.season, episode, part)"
+        @retry="(episode, group) => output.retry(season.season, episode, group)"
+        @retry-failed="(episode) => output.retryEpisode(season.season, episode)"
+        @retry-season="output.retrySeason(season.season)"
+        @redo="(episode, group) => output.redo(season.season, episode, group)"
+        @queue-order="(episode, queue, group, rows) => queueOrder(scopeOf(season.season, episode), queue, group, rows)"
+        @queue-allow="(episode, queue, row, allowed) => queueAllow(scopeOf(season.season, episode), queue, row, allowed)"
+        @queue-take="(episode, group, taken) => queueTake(scopeOf(season.season, episode), group, taken)"
+        @queue-reset="(episode, queue, group) => queueReset(scopeOf(season.season, episode), queue, group)"
+        @queue-same="(episode, queue, groups) => queueSame(scopeOf(season.season, episode), queue, groups)"
+      />
+    </LoadGate>
 
     <LevelSettings
       v-if="settingsOf" :key="`${settingsSeason}:${settingsKey}`" :season="settingsSeason" :episodes="settingsEpisodes"

@@ -10,6 +10,7 @@ import { useConfirm } from "../../composables/useConfirm"
 import { useSSE } from "../../composables/useSSE"
 import SheetRow from "../SheetRow.vue"
 import { t } from "../../i18n"
+import { useBusyBar } from "../../composables/useWindowBusy"
 import { stateLabel } from "../../lib/states"
 import LoadingMark from "../LoadingMark.vue"
 
@@ -39,6 +40,7 @@ interface TFile {
 
 const loading = ref(false)
 const fetching = ref(false)
+useBusyBar(() => loading.value || fetching.value)
 const reprocessing = ref(false)
 const files = ref<TFile[]>([])
 // Память выбора: сезоны и номера серий сериала. Живёт в карточке сериала,

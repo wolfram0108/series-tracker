@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import { useToast } from "primevue/usetoast"
+import Skeleton from "primevue/skeleton"
 import FoldButton from "./FoldButton.vue"
 import SheetField from "./SheetField.vue"
 import StInput from "./StInput.vue"
@@ -21,7 +22,8 @@ import { SOURCE_STATES, stateLabel } from "../lib/states"
 // profile; and its players as tabs, each with the table of the voice-overs the rules of the profile made of its rows.
 // The numbers of episodes exist only as the constructor's answer; a group is made in the settings, nowhere else.
 // `place` is the place of the source in the list of its series: with its colour, the mark the output tab shows it by.
-const props = defineProps<{ item: SourceItem; profiles: { id: number; name: string }[]; busy?: boolean; place?: number }>()
+// `waiting`: the tables of the sources are being read; the card shows that in place of the state and the table it has not got yet.
+const props = defineProps<{ item: SourceItem; profiles: { id: number; name: string }[]; busy?: boolean; waiting?: boolean; place?: number }>()
 const emit = defineEmits<{
   (e: "change", patch: DraftPatch): void; (e: "remove"): void; (e: "reread"): void; (e: "stop"): void
 }>()
@@ -99,17 +101,18 @@ async function copyAddress(): Promise<void> {
         <span class="source-place">{{ view.title || placeOf(item.url) }}</span>
       </span>
       <template v-if="!isTorrent">
-        <span class="source-state" :data-state="SOURCE_STATES[view.state]">
+        <span v-if="waiting" class="source-state" data-state="read"><i class="pi pi-spin pi-spinner" />{{ t("sources.tableLoading") }}</span>
+        <span v-else class="source-state" :data-state="SOURCE_STATES[view.state]">
           <i v-if="view.state === 'reading'" class="pi pi-spin pi-spinner" />{{ stateText }}
         </span>
-        <span v-if="view.players.length" class="muted">{{ sourceCaption(view.players) }}</span>
+        <span v-if="view.players.length && !waiting" class="muted">{{ sourceCaption(view.players) }}</span>
         <span class="source-actions">
           <!-- One place for both: while the page is read the button that reads it again is the one that stops the read. -->
           <FoldButton v-if="view.state === 'reading'" :label="t('sources.stopRead')" icon="pi pi-stop-circle" severity="danger"
                       class="source-stop" @click="emit('stop')" />
-          <FoldButton v-else :label="t('sources.reread')" icon="pi pi-refresh" severity="warn" class="source-reread" :disabled="busy"
+          <FoldButton v-else :label="t('sources.reread')" icon="pi pi-refresh" severity="warn" class="source-reread" :disabled="busy || waiting"
                       @click="emit('reread')" />
-          <FoldButton :label="t('sources.remove')" icon="pi pi-trash" severity="danger" class="source-remove" :disabled="busy"
+          <FoldButton :label="t('sources.remove')" icon="pi pi-trash" severity="danger" class="source-remove" :disabled="busy || waiting"
                       @click="emit('remove')" />
         </span>
       </template>
@@ -162,7 +165,11 @@ async function copyAddress(): Promise<void> {
         />
       </SheetField>
       <small v-if="item.profileId === null && !isTorrent" class="muted">{{ t("sources.profile.hint") }}</small>
-      <div v-if="view.reason" class="source-reason">{{ reasonText(view.reason) }}</div>
+      <div v-if="view.reason && !waiting" class="source-reason">{{ reasonText(view.reason) }}</div>
+      <div v-if="waiting && !isTorrent" class="source-table-wait stack" role="status" aria-busy="true" :aria-label="t('sources.tableLoading')">
+        <Skeleton width="14rem" height="2rem" border-radius="var(--border-radius)" />
+        <Skeleton v-for="line in 4" :key="line" height="1.6rem" border-radius="0.4rem" />
+      </div>
 
       <div v-if="!isTorrent && player" class="players stack">
         <div class="st-tabs st-tabs-wrap" role="tablist" :aria-label="t('sources.player.tabs')">

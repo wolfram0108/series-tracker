@@ -34,6 +34,7 @@
 
 /* Шапка: заголовок | вкладки (растягиваются) | крестик */
 .modern-header {
+  position: relative;
   --header-gap: clamp(0.5rem, 4vw, 1.25rem);
   --tabs-min: 5rem;
   --close-size: 36px;
@@ -153,3 +154,14 @@
   justify-content: flex-end;
   flex-wrap: wrap;
 }
+
+/* The bar under the title of a window that is reading (composables/useWindowBusy.ts): a run of light on a thin track, in sight after a moment
+   (a read that is quick shows none). */
+.modal-progress {
+  position: absolute; inset-inline: 0; inset-block-end: 0; block-size: 0.1875rem; overflow: hidden;
+  background: color-mix(in srgb, var(--color-blue) 18%, transparent); animation: loadAppear 0.2s 0.2s backwards;
+}
+.modal-progress::after {
+  content: ""; position: absolute; inset-block: 0; inline-size: 35%; background: var(--color-blue); animation: modalProgress 1.2s ease-in-out infinite;
+}
+@keyframes modalProgress { from { inset-inline-start: -35%; } to { inset-inline-start: 100%; } }

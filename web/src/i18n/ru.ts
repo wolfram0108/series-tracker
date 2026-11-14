@@ -709,6 +709,7 @@ export const ru = {
   "sources.rows.label": "Строк на линию",
   "sources.rows.hint": "10 — первые десять строк каждой линии, -10 — последние десять, 50-60 — строки с 50-й по 60-ю, all — все. Действует при следующем чтении.",
   "sources.rows.invalid": "Строки: 10, -10, 50-60 или all",
+  "sources.tableLoading": "Таблица загружается…",
   "sources.stopRead": "Остановить чтение",
   "sources.address.label": "Адрес",
   "sources.address.copy": "Скопировать",

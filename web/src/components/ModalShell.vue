@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, onUpdated, ref } from "vue"
 import { useBodyScrollLock } from "../composables/useBodyScrollLock"
 import { useConfirm } from "../composables/useConfirm"
+import { provideWindowBusy } from "../composables/useWindowBusy"
 import { hasFocusable, useDialog } from "../composables/useLayers"
 import { t } from "../i18n"
 
@@ -22,6 +23,8 @@ const props = withDefaults(defineProps<{ title?: string; size?: "" | "xl" | "ful
 const emit = defineEmits<{ (e: "close"): void }>()
 const confirm = useConfirm()
 const room = ref<HTMLElement | null>(null)
+// The tabs tell what they are reading (useWindowBusy); the bar under the title runs while any of them does.
+const reading = provideWindowBusy()
 
 async function requestClose(): Promise<void> {
   if (props.dirty) {
@@ -138,6 +141,7 @@ onUnmounted(() => {
         <button type="button" class="modern-close" :title="t('common.close')" :aria-label="t('common.close')" @click="requestClose">
           <i class="pi pi-times" aria-hidden="true"></i>
         </button>
+        <div v-if="reading" class="modal-progress" role="progressbar" aria-busy="true" :aria-label="t('common.fetching')"></div>
       </div>
       <div ref="body" class="modern-body"><slot /></div>
       <div v-if="$slots.footer" class="modern-footer"><slot name="footer" /></div>

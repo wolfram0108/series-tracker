@@ -13,6 +13,7 @@ import { useApi } from "../../composables/useApi"
 import { fetchProfiles } from "../../composables/sourceCalls"
 import { useSeriesSources } from "../../composables/useSeriesSources"
 import { t } from "../../i18n"
+import { useBusyBar } from "../../composables/useWindowBusy"
 import { useSeriesStore, type Series } from "../../stores/series"
 import { compareNames } from "../../lib/collate"
 import { isAbsolutePath } from "../../lib/fsnames"
@@ -146,6 +147,7 @@ async function refreshSiteTorrents() {
 const torrentUrl = s.sources?.[0]?.url ?? ""
 // The sources act at once (their own requests); the profiles are what their groups choose from.
 const sources = useSeriesSources(Number(s.id), isVideo ? "video" : "torrent", s.sources ?? [])
+useBusyBar(() => siteTorrentsLoading.value || sources.busy.value || sources.tablesLoading.value)
 const isSeasonless = ref(!form.season)
 const showValidation = ref(false)
 
@@ -281,7 +283,7 @@ onMounted(() => {
     <!-- Sources: a group per source; a torrent series shows the address and the profile of its one source -->
     <SheetRow :caption="t('sources.title')">
       <SourcesEditor
-        :items="sources.items.value" :profiles="profiles" :error="sources.error.value || sources.layoutFailure.value" :busy="sources.busy.value || seriesBusy"
+        :items="sources.items.value" :profiles="profiles" :error="sources.error.value || sources.layoutFailure.value" :busy="sources.busy.value || seriesBusy" :waiting="sources.waiting.value"
         :editable="isVideo" :adder="sources.add" :names="seriesNames" :load-names="tmdbOriginal"
         @remove="sources.remove" @change="sources.change" @reread="sources.reread" @stop="sources.stop"
       />
