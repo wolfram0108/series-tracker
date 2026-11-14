@@ -4,7 +4,7 @@ Tables of pages: `release_tables` holds, per page, the head of the last complete
 not get) and the state of the read in progress; `release_rows` holds the rows of that complete table. A new complete table
 replaces the rows in one transaction. `provider_manifest` holds the last manifest of the provider of the socket
 (modules/sources/provider), by its address. The table `share139_folders` (migration 0067) is no longer read or written here:
-its rows are taken over by the provider (`tools/import_from_tracker.py folders` of the provider).
+its rows are taken over by the provider (its own import tool).
 """
 from __future__ import annotations
 
