@@ -1,18 +1,18 @@
 """The tracker's end of the socket of a provider (contracts/provider_socket.md): the module `sources` with a provider that is a
 model of the specification on real HTTP (tests/provider_mock.py). What is checked is what crosses the socket and what the
 module does with it: the sites and the player the manifest names join the registries and leave them as it says, a card is read
-into a table from frames and a read is stopped by closing the connection, a stream is asked right before it is wanted, the
+into a table from frames and a read is stopped by closing the connection, the file of a link is taken by the provider, the
 search gives the provider's cards or its reason, and a provider that goes down is a state and a reason, never a lost page."""
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 import pytest
 
 from core import BaseModule, Bus
 from core.db import Database
-from core.contracts.provider import StreamReply
 from modules.sources.module import SourcesModule
 from modules.sources.provider import ProviderClient, RemoteFamily
 from provider_mock import MockProvider, link_of, serving
@@ -227,38 +227,60 @@ async def test_a_read_that_is_stopped_closes_the_connection_and_the_provider_sto
     assert [path for path, _body in system.mock.requests if path != "manifest"] == ["read"]
 
 
-# --- the stream of an episode ------------------------------------------------------------------------------------------------------
+# --- the download of an episode ----------------------------------------------------------------------------------------------------
 
-async def test_the_stream_of_a_link_of_the_family_is_asked_of_the_provider_and_any_other_address_is_not_handled(system):
-    system.mock.stream_of(LINK, StreamReply(handled=True, stream_url="https://cdn.model/a.m3u8", headers={"Referer": "r"},
-                                            playlist=True))
+async def fetch(system, link: str = LINK, target: str = "", **more) -> dict:
+    """The file of a link into a path, as the downloads ask for it (`sources.video.fetch`)."""
+    return await system.probe.request("sources.video.fetch", {"url": link, "target": target, **more})
+
+
+async def test_a_link_of_the_family_is_taken_by_the_provider_and_no_stream_is_asked_of_it_and_any_other_address_is_not_handled(system):
     got = await system.probe.request("sources.video.stream", {"url": LINK, "max_height": 1080})
-    assert got == {"handled": True, "stream_url": "https://cdn.model/a.m3u8", "headers": {"Referer": "r"}, "progressive": False,
-                   "playlist": True, "player_fetch": False}
-    (_path, sent), = [request for request in system.mock.requests if request[0] == "stream"]
-    assert sent == {"url": LINK, "max_height": 1080, "term_hours": 1}
+    # The provider takes the whole file itself: the module says so with no network (nothing was asked of the provider).
+    assert got == {"handled": True, "stream_url": LINK, "headers": {}, "progressive": False, "playlist": False,
+                   "player_fetch": True, "fetch_by": "provider"}
+    assert [path for path, _body in system.mock.requests if path != "manifest"] == []
     assert (await system.probe.request("sources.video.stream", {"url": "https://example.org/x"})) == {"handled": False}
 
 
-async def test_a_separate_audio_address_of_a_stream_is_not_dropped_on_its_way_to_the_downloads(system):
-    system.mock.stream_of(LINK, StreamReply(handled=True, stream_url="https://cdn.model/v.mp4", audio_url="https://cdn.model/a.mp4",
-                                            headers={"Referer": "https://player.model/"}))
-    got = await system.probe.request("sources.video.stream", {"url": LINK})
-    assert got["audio_url"] == "https://cdn.model/a.mp4" and got["stream_url"] == "https://cdn.model/v.mp4"
-    assert got["progressive"] is False and got["playlist"] is False
+async def test_the_file_of_a_link_is_asked_of_the_provider_by_link_path_and_cap_with_its_telemetry_told_as_progress(system, tmp_path):
+    told = system.bus.subscribe("sources.video.progress")
+    target = str(tmp_path / "library" / "e1.mp4")
+    got = await fetch(system, target=target, max_height=1080)
+    assert got == {"ok": True, "seconds": 0.0, "longest": 0.0, "height": 720} and os.path.isfile(target)
+    (_path, sent), = [request for request in system.mock.requests if request[0] == "download"]
+    assert sent == {"url": LINK, "path": target, "max_height": 1080, "term_hours": 1}
+    figures = [(await nxt(told)) for _ in range(2)]
+    assert figures[0] == {"target": target, "phase": "link", "source_seconds": 1420.0}
+    assert figures[1]["phase"] == "download" and figures[1]["progress"] == 40 and figures[1]["target"] == target
 
 
-async def test_a_stream_the_provider_cannot_give_is_an_error_with_its_reason_and_whether_it_may_pass(system):
-    other = link_of("mock", 7, "X", "tok 2")
-    system.mock.stream_of(LINK, StreamReply(handled=True, error=json.dumps({"code": "app_no_parser"}), transient=False))
-    system.mock.stream_of(other, StreamReply(handled=True, error=json.dumps({"code": "player_status"}), transient=True))
-    refused = await system.probe.request("sources.video.stream", {"url": LINK})
-    passing = await system.probe.request("sources.video.stream", {"url": other})
-    assert (refused["handled"], json.loads(refused["error"])["code"], refused["transient"]) == (True, "app_no_parser", False)
-    assert (passing["handled"], json.loads(passing["error"])["code"], passing["transient"]) == (True, "player_status", True)
-    # A link of the family that the provider calls not its own is against the specification: no page goes to a generic downloader.
-    lost = await system.probe.request("sources.video.stream", {"url": link_of("mock", 7, "X", "tok 3")})
-    assert lost["handled"] is True and json.loads(lost["error"])["code"] == "provider_bad_answer"
+async def test_a_refusal_of_the_provider_keeps_its_kind_and_its_reason(system, tmp_path):
+    for kind in ("final", "broken", "unasked"):
+        system.mock.download_of(LINK, {"type": "error", "reason": json.dumps({"code": "app_no_stream", "app": "mock"}), "kind": kind})
+        got = await fetch(system, target=str(tmp_path / f"{kind}.mp4"))
+        assert got["ok"] is False and got["kind"] == kind and got["final"] is (kind == "final")
+        assert json.loads(got["error"])["code"] == "app_no_stream"
+    assert not os.path.exists(tmp_path / "final.mp4")
+
+
+async def test_a_download_that_ends_with_no_outcome_is_a_failure_that_says_nothing_of_the_source(system, tmp_path):
+    system.mock.download_of(LINK, {"type": "alive"})
+    got = await fetch(system, target=str(tmp_path / "e.mp4"))
+    assert got["ok"] is False and got["kind"] == "unasked" and json.loads(got["error"])["code"] == "provider_stream_broken"
+
+
+async def test_a_download_that_is_stopped_closes_the_connection_and_the_provider_stops_it(system, tmp_path):
+    system.mock.download_release.clear()
+    target = str(tmp_path / "e.mp4")
+    work = asyncio.ensure_future(fetch(system, target=target))
+    await asyncio.wait_for(system.mock.download_begun.wait(), WAIT_S)
+    assert (await system.probe.request("sources.video.fetch.stop", {"target": target})) == {"stopped": True}
+    got = await asyncio.wait_for(work, WAIT_S)
+    # The provider learned it from the closed connection: nothing else was said to it.
+    await asyncio.wait_for(system.mock.download_cancelled.wait(), WAIT_S)
+    assert got["ok"] is False and json.loads(got["error"])["code"] == "download_stopped" and not os.path.exists(target)
+    assert [path for path, _body in system.mock.requests if path == "download"] == ["download"]
 
 
 # --- the search ----------------------------------------------------------------------------------------------------------------
@@ -275,7 +297,7 @@ async def test_the_search_gives_the_cards_of_the_provider_or_its_reason_for_each
 
 # --- a provider that is down ------------------------------------------------------------------------------------------------------------
 
-async def test_a_provider_that_goes_down_is_a_state_and_a_reason_and_keeps_its_sites_and_comes_back_by_itself(system):
+async def test_a_provider_that_goes_down_is_a_state_and_a_reason_and_keeps_its_sites_and_comes_back_by_itself(system, tmp_path):
     await system.read()
     await system.server.down()
     assert json.loads((await state_is(system.states, "down"))["reason"])["code"] == "provider_unavailable"
@@ -284,8 +306,8 @@ async def test_a_provider_that_goes_down_is_a_state_and_a_reason_and_keeps_its_s
     failed = await system.read()
     assert json.loads(failed["reason"])["code"] == "provider_unavailable"
     assert len((await system.table())["table"]["rows"]) == 3
-    streamed = await system.probe.request("sources.video.stream", {"url": LINK})
-    assert streamed["handled"] is True and streamed["transient"] is True and "provider_unavailable" in streamed["error"]
+    fetched = await fetch(system, target=str(tmp_path / "e.mp4"))
+    assert fetched["ok"] is False and fetched["kind"] == "unasked" and "provider_unavailable" in fetched["error"]
     found = (await system.probe.request("sources.apps.search", {"query": "名"}))["apps"]
     assert [json.loads(each["reason"])["code"] for each in found] == ["provider_unavailable"]
     await system.server.up()
@@ -382,7 +404,7 @@ def test_the_models_of_the_wire_are_the_same_text_at_both_ends_of_the_socket():
     from core.contracts import apps, provider as ours, release_table
 
     for name in ("ProviderInfo", "SiteAddress", "ManifestSite", "ManifestFamily", "ManifestPlace", "ManifestPlayer", "ManifestSearch",
-                 "Manifest", "FeedEvent", "ReadRequest", "ReadFrame", "StreamRequest", "StreamReply", "ProviderState"):
+                 "Manifest", "FeedEvent", "ReadRequest", "ReadFrame", "DownloadRequest", "DownloadFrame", "ProviderState"):
         assert getattr(theirs, name).model_json_schema() == getattr(ours, name).model_json_schema(), name
     assert [each.value for each in their_rows.RowState] == [each.value for each in release_table.RowState]
     for name, owner in (("RowVoice", release_table), ("TableRow", release_table),
@@ -390,5 +412,5 @@ def test_the_models_of_the_wire_are_the_same_text_at_both_ends_of_the_socket():
                         ("AppSearchReply", apps)):
         assert getattr(their_rows, name).model_json_schema() == getattr(owner, name).model_json_schema(), name
     for constant in ("PROTOCOL", "HEARTBEAT_S", "SILENCE_S", "FRAME_PROGRESS", "FRAME_ALIVE", "FRAME_DRAFT", "FRAME_ERROR",
-                     "EVENT_HELLO", "EVENT_CHANGED"):
+                     "FRAME_DONE", "EVENT_HELLO", "EVENT_CHANGED"):
         assert getattr(theirs, constant) == getattr(ours, constant), constant

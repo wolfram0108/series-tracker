@@ -3,7 +3,7 @@
 `RemoteSite` is a `Site`: it tells an address of the provider from any other and writes its canonical form by the rules the
 manifest gives, with no network, and reads the page by asking the provider, which answers with frames; the table it returns
 is the draft the provider made. `RemoteFamily` is the player of the rows of the provider: it owns the links the manifest
-describes, names the video of a link, and asks the provider for the stream of one.
+describes, names the video of a link, and has the provider download the file of one.
 
 Nothing here knows what the provider reads: every fact about an address or a link is a regular expression of the manifest."""
 from __future__ import annotations
@@ -15,12 +15,12 @@ from urllib.parse import unquote, urlsplit
 
 from pydantic import ValidationError
 
-from core.contracts.provider import (FRAME_ALIVE, FRAME_DRAFT, FRAME_ERROR, FRAME_PROGRESS, PROVIDER_BAD_ANSWER,
-                                     PROVIDER_STREAM_BROKEN, ManifestFamily, ManifestSite, ReadFrame, ReadRequest,
-                                     StreamReply, StreamRequest)
+from core.contracts.provider import (FRAME_ALIVE, FRAME_DONE, FRAME_DRAFT, FRAME_ERROR, FRAME_PROGRESS,
+                                     PROVIDER_BAD_ANSWER, PROVIDER_STREAM_BROKEN, DownloadFrame, DownloadRequest,
+                                     ManifestFamily, ManifestSite, ReadFrame, ReadRequest)
 from core.reasons import reason
 
-from ..players.contract import StreamUnavailable
+from ..players.contract import TransferRefused
 from ..sites import ReadContext, SiteError, TableDraft
 from .client import ProviderError
 
@@ -30,7 +30,7 @@ class Wire(Protocol):
 
     def read(self, request: ReadRequest) -> AsyncIterator[ReadFrame]: ...
 
-    async def stream(self, request: StreamRequest) -> StreamReply: ...
+    def download(self, request: DownloadRequest) -> AsyncIterator[DownloadFrame]: ...
 
     def known_player(self, name: str) -> bool: ...
 
@@ -132,16 +132,26 @@ class RemoteFamily:
         return unquote(found.group(self.entry.video) or "") if found is not None else ""
 
     async def stream(self, url: str, http, max_height: int | None, pacer) -> dict:
-        """The stream of the episode now, asked of the provider right before the download."""
+        """What the downloads need to know of a link of the family before they ask for it: that the provider takes the whole
+        file itself (`fetch_by`), so no address of a stream is asked, none is held and nothing is read from the network."""
+        return {"stream_url": url, "headers": {}, "player_fetch": True, "fetch_by": "provider"}
+
+    async def transfer(self, url: str, target: str, max_height: int | None, connections: int, told) -> dict:
+        """The file of the link into `target`, taken by the provider. The telemetry of its stages goes on as it comes; the file
+        is at `target` whole when this returns. The number of connections is the provider's own business: `connections` is
+        not sent. A refusal has its kind (final, broken, unasked) as the provider says it; a provider that cannot be reached, or
+        whose answer ends with no outcome, says nothing of the source."""
+        request = DownloadRequest(url=url, path=target, max_height=max_height, term_hours=self._wire.term_hours)
         try:
-            reply = await self._wire.stream(StreamRequest(url=url, max_height=max_height, term_hours=self._wire.term_hours))
+            # Closed on every way out: the closed connection is how the provider learns the file is given up.
+            async with aclosing(self._wire.download(request)) as frames:
+                async for frame in frames:
+                    if frame.type == FRAME_PROGRESS:
+                        await told(frame.figures)
+                    elif frame.type == FRAME_DONE:
+                        return {"seconds": 0.0, "longest": 0.0, "height": frame.height}
+                    elif frame.type == FRAME_ERROR:
+                        raise TransferRefused(frame.reason, kind=frame.kind)
         except ProviderError as exc:
-            raise StreamUnavailable(exc.reason, exc.transient) from exc
-        if not reply.handled:
-            # The family owns the link: "not mine" is no answer the specification allows.
-            raise StreamUnavailable(reason(PROVIDER_BAD_ANSWER, cause="a link of the family was not handled"))
-        if reply.error or not reply.stream_url:
-            raise StreamUnavailable(reply.error or reason(PROVIDER_BAD_ANSWER, cause="no stream and no reason"),
-                                    reply.transient)
-        return {"stream_url": reply.stream_url, "headers": reply.headers, "progressive": reply.progressive,
-                "playlist": reply.playlist, **({"audio_url": reply.audio_url} if reply.audio_url else {})}
+            raise TransferRefused(exc.reason, kind="unasked") from exc
+        raise TransferRefused(reason(PROVIDER_STREAM_BROKEN), kind="unasked")

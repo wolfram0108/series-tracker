@@ -23,6 +23,7 @@ FRAME_PROGRESS = "progress"
 FRAME_ALIVE = "alive"
 FRAME_DRAFT = "draft"
 FRAME_ERROR = "error"
+FRAME_DONE = "done"
 
 # The events of the feed (`GET /v1/events`).
 EVENT_HELLO = "hello"
@@ -136,21 +137,27 @@ class ReadFrame(BaseModel):
     reason: str = ""
 
 
-class StreamRequest(BaseModel):
+class DownloadRequest(BaseModel):
+    """`POST /v1/download`: the file of the link of a row into `path` (absolute; the tracker and the provider share the
+    paths). The number of connections and the way the file comes are the provider's own business."""
+
     url: str
+    path: str
     max_height: int | None = None
     term_hours: int | None = None
 
 
-class StreamReply(BaseModel):
-    handled: bool
-    stream_url: str = ""
-    headers: dict[str, str] = Field(default_factory=dict)
-    progressive: bool = False
-    playlist: bool = False
-    audio_url: str = ""
-    error: str = ""
-    transient: bool = False
+class DownloadFrame(BaseModel):
+    """One line of the stream of a download. `progress` carries the telemetry `figures` (contracts/provider_socket.md, section
+    7); `done` the height of the picture of the file that lies at the path; `error` the reason and its `kind`: `final` is the last
+    word of the source (asking again changes nothing), `broken` a way that broke (the tracker asks again, and the failure is the
+    source's when its attempts are spent), `unasked` a failure that says nothing of the source (the provider did not reach it)."""
+
+    type: Literal["progress", "alive", "done", "error"]
+    figures: dict = Field(default_factory=dict)
+    height: int | None = None
+    reason: str = ""
+    kind: Literal["final", "broken", "unasked"] = "broken"
 
 
 class ProviderState(BaseModel):

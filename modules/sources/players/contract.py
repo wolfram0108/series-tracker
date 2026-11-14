@@ -85,10 +85,11 @@ class StreamPlayer(Protocol):
     def owns(self, url: str) -> bool: ...
 
     async def stream(self, url: str, http: "httpx.AsyncClient", max_height: int | None, pacer: Any) -> dict:
-        """{stream_url, headers, progressive?, playlist?, audio_url?} of the best file within `max_height` (the best of all without
-        it). What the file is decides how it is downloaded (modules/downloads/limits.py): `progressive` a ready file, asked
-        in parts; `playlist` an HLS playlist, by its segments; a stream that is neither is read by ffmpeg over one
-        connection. `audio_url` pairs a complete video file with a separate audio file, using the same headers.
+        """{stream_url, headers, progressive?, playlist?, player_fetch?, fetch_by?} of the best file within `max_height` (the best
+        of all without it). What the file is decides how it is downloaded (modules/downloads/limits.py): `progressive` a ready
+        file, asked in parts; `playlist` an HLS playlist, by its segments; a stream that is neither is read by ffmpeg over one
+        connection; `player_fetch` that the player takes the file itself, and `fetch_by` `provider` that it is a provider of the
+        socket (its stream is no address: the provider takes the whole file by its own way).
         Raises StreamUnavailable when the player owns the link but has no stream for it now."""
         ...
 
@@ -101,3 +102,15 @@ class StreamUnavailable(RuntimeError):
         super().__init__(reason)
         self.reason = reason
         self.transient = transient
+
+
+class TransferRefused(RuntimeError):
+    """A player that downloads its file itself could not take it: `words` for the log and the card, and `kind` — `final` the
+    source's last word on the file (asking again changes nothing), `broken` a way that broke (asked again, and the failure is
+    the source's when the attempts are spent), `unasked` a failure that says nothing of the source (the download did not reach
+    it). `status` is the HTTP status a host answered, when one did."""
+
+    def __init__(self, words: str, *, kind: str = "broken", status: int | None = None) -> None:
+        super().__init__(words)
+        self.kind, self.status = kind, status
+        self.final = kind == "final"

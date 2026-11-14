@@ -316,13 +316,11 @@ async def _local_duration(path: str) -> float:
 
 async def _download_direct_ffmpeg(stream_url: str, headers: dict,
                                   full_output_path: str,
-                                  on_progress: ProgressCb, announced: float | None = None, *,
-                                  audio_url: str | None = None) -> tuple[bool, str]:
+                                  on_progress: ProgressCb, announced: float | None = None) -> tuple[bool, str]:
     executable = program("ffmpeg")
     if not executable:
         return False, Unasked(reason("program_missing", program="ffmpeg"))
     duration = announced if announced is not None else await _probe_duration_ffprobe(stream_url, headers)
-    audio_duration = await _probe_duration_ffprobe(audio_url, headers) if audio_url else 0.0
     tmp_out = full_output_path + ".download.mp4"
     await on_progress({"phase": "download", "progress": 0, "eta": 0, "speed": 0.0})
 
@@ -332,11 +330,6 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
     cmd.extend(_segment_args(stream_url))
     cmd.extend(_headers_args(stream_url, headers))
     cmd.extend(["-i", stream_url])
-    if audio_url:
-        cmd.extend(PROTOCOL_WHITELIST)
-        cmd.extend(_reconnect_args(audio_url))
-        cmd.extend(_headers_args(audio_url, headers))
-        cmd.extend(["-i", audio_url, "-map", "0:V:0", "-map", "1:a:0"])
     cmd.extend(["-c", "copy", "-progress", "pipe:1", "-nostats", tmp_out])
 
     proc = await spawn(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -387,14 +380,6 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
     # words say a signal stopped it, the file is what is judged, by its length.
     if code == 0 or (code == LOST and not _interrupted(code, tail)):
         got = await _local_duration(tmp_out)
-        if audio_url:
-            # The longer track must not conceal a cut in the other one after remuxing rewrites their headers.
-            lengths = await _paired_lengths(tmp_out)
-            for kind, expected in (("video", duration), ("audio", audio_duration)):
-                length = lengths.get(kind, 0.0)
-                if length <= 0 or short_of(length, expected):
-                    await storage.discard(tmp_out)
-                    return False, reason("cut_short", got=f"{length:.0f}", expected=f"{expected:.0f}")
         if got <= 0 or short_of(got, duration):
             await storage.discard(tmp_out)
             if refused:
@@ -408,21 +393,6 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
     if _interrupted(code, tail):
         return False, Unasked(reason(INTERRUPTED, program="ffmpeg direct download", cause=str(last or code)))
     return False, reason("program_failed", program="ffmpeg direct download", cause=str(last or code))
-
-
-async def _paired_lengths(path: str) -> dict[str, float]:
-    """Check both copied tracks before publishing a paired DASH download."""
-    executable = program("ffprobe")
-    if not executable:
-        return {}
-    try:
-        code, out, _ = await run_capture([executable, "-v", "error", "-show_entries",
-                                          "stream=codec_type,duration", "-of", "json", path],
-                                         timeout=PROBE_TIMEOUT_S)
-        return {track["codec_type"]: float(track.get("duration") or 0)
-                for track in json.loads(out).get("streams", [])} if code == 0 else {}
-    except (OSError, TimeoutError, ValueError, KeyError):
-        return {}
 
 
 def _unavailable_error(error: str) -> bool:
@@ -441,14 +411,12 @@ async def download(video_url: str, full_output_path: str,
                    max_height: int | None = None,
                    playlist: bool = False,
                    resumable: bool = False,
-                   fetcher=None,
-                   audio_url: str | None = None) -> tuple[bool, str]:
+                   fetcher=None) -> tuple[bool, str]:
     """Two-phase video download. Supports parts of a ready file, direct ffmpeg copy and yt-dlp.
 
     A download that says it is done is taken only at the length its source announced: a stream copy short of it fails (the
     service refused each voice-over short of segments and took each whole one).
 
-    `audio_url` supplies a separate complete audio file for a DASH video track; both are copied into one MP4.
     `progressive` marks one ready file address: it is asked for in parts at once, and by one stream when the server
     cannot serve parts. `max_height` caps a page the downloader reads itself (a resolved stream is one file already).
     The name is owned from the first step to the last: the programs, their leftovers and the publication.
@@ -468,11 +436,10 @@ async def download(video_url: str, full_output_path: str,
             if playlist:
                 return await _download_playlist(video_url, full_output_path, on_progress, headers or {}, threads,
                                                 resumable, fetcher)
-            announced = (await _probe_duration_ffprobe(video_url, headers or {}) if audio_url
-                         else await _announced_length(video_url, headers, progressive))
+            announced = await _announced_length(video_url, headers, progressive)
             await on_progress({"phase": "link", "source_seconds": announced or None})
             done = await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive,
-                                         announced=announced, max_height=max_height, audio_url=audio_url)
+                                         announced=announced, max_height=max_height)
             return await _as_long_as_announced(done, full_output_path, announced, on_progress)
     except storage.StorageBusy:  # an operation on this name has not ended: a file written now could be lost
         return False, Unasked(reason("path_busy"))
@@ -608,16 +575,10 @@ async def _download_ranged_file(video_url: str, headers: dict, full_output_path:
 
 async def _download_owned(video_url: str, full_output_path: str, on_progress: ProgressCb,
                           headers: dict | None, threads: int, progressive: bool = False, *,
-                          announced: float | None = None, max_height: int | None = None,
-                          audio_url: str | None = None) -> tuple[bool, str]:
+                          announced: float | None = None, max_height: int | None = None) -> tuple[bool, str]:
     await storage.call(os.makedirs, os.path.dirname(full_output_path), exist_ok=True)
     if await storage.call(os.path.exists, full_output_path):
         return True, reason("file_already_there")
-
-    if audio_url:
-        await on_progress({"method": "ffmpeg"})
-        return await _download_direct_ffmpeg(video_url, headers or {}, full_output_path, on_progress, announced,
-                                             audio_url=audio_url)
 
     if progressive:
         await on_progress({"method": "ranged"})

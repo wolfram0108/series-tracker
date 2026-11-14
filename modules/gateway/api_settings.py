@@ -164,7 +164,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                       responses=_ERR1)
     async def download_limits(request: Request):
         """How many downloads go at once, by the way a file comes (downloads, limits.py): {threads_total,
-        threads_per_file, single_at_once, multi_at_once} both ways; a value the module refuses is 400 with its reason."""
+        threads_per_file, single_at_once, provider_at_once, multi_at_once} both ways; a value the module refuses is 400 with its reason."""
         if request.method == "POST":
             reply = await gw.request("downloads.limits.set", await request.json())
             if not reply.get("ok"):

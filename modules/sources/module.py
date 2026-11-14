@@ -136,8 +136,8 @@ from .parsers import SourceParseError
 from .provider import Connector, ProviderClient
 from .repository import SourcesRepository
 from .term import DEFAULT_HOURS, TERM_KEY, Term, hours_of
-from .players.alloha_session import AllohaRefused, Profile as AllohaProfile
-from .players.contract import StreamUnavailable
+from .players.alloha_session import Profile as AllohaProfile
+from .players.contract import StreamUnavailable, TransferRefused
 from .players.registry import PlayerRegistry
 from .players.streams import resolve_stream
 from .sites import Site, SiteError, SiteRegistry
@@ -553,9 +553,10 @@ class SourcesModule(BaseModule):
 
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}
-        reply: {handled, stream_url, headers, progressive, playlist, audio_url?} | {handled, error, transient}.
+        reply: {handled, stream_url, headers, progressive, playlist, player_fetch, fetch_by?} | {handled, error, transient}.
         `progressive` marks one ready file that a server may be asked for in parts; `playlist` an HLS playlist that is
-        downloaded by its segments. `audio_url` pairs a complete video file with its separate audio file.
+        downloaded by its segments; `player_fetch` that the player downloads the file itself (`sources.video.fetch`), and
+        `fetch_by` `provider` that the player is a provider of the socket, which takes the whole file by its own way.
 
         `error` means the URL belongs to a player that has no stream for it:
         the caller must not hand the page to a generic downloader."""
@@ -573,18 +574,19 @@ class SourcesModule(BaseModule):
                 "progressive": bool(stream_info.get("progressive")),
                 "playlist": bool(stream_info.get("playlist")),
                 "player_fetch": bool(stream_info.get("player_fetch")),
-                **({"audio_url": stream_info["audio_url"]} if stream_info.get("audio_url") else {}),
+                **({"fetch_by": stream_info["fetch_by"]} if stream_info.get("fetch_by") else {}),
             }
         return {"handled": False}
 
     async def on_video_fetch(self, env: Envelope) -> dict:
         """payload: {url, target, max_height?, connections}; reply: {ok, seconds, longest, height} | {ok: false, error,
-        final}. The file of a link whose player downloads it itself (`player_fetch` of the stream): the player takes the
-        segments into `target`, telling how far it is by `sources.video.progress {target, ...figures}`."""
+        final, kind}. The file of a link whose player downloads it itself (`player_fetch` of the stream): the player takes the
+        file into `target`, telling how far it is by `sources.video.progress {target, ...figures}`. `kind` of a refusal is
+        `final` (the source's last word), `broken` (a way that broke) or `unasked` (the source was not reached)."""
         url, target = env.payload["url"], env.payload["target"]
         player = next((each for each in self.players if each.owns(url) and hasattr(each, "transfer")), None)
         if player is None:
-            return {"ok": False, "error": reason("no_player_downloads"), "final": True}
+            return {"ok": False, "error": reason("no_player_downloads"), "final": True, "kind": "final"}
 
         async def told(figures: dict) -> None:
             self.publish_event("sources.video.progress", {"target": target, **figures})
@@ -596,11 +598,11 @@ class SourcesModule(BaseModule):
             done = await work
         except asyncio.CancelledError:
             if work.cancelled():
-                return {"ok": False, "error": reason("download_stopped"), "final": False}
+                return {"ok": False, "error": reason("download_stopped"), "final": False, "kind": "unasked"}
             raise
-        except AllohaRefused as exc:
+        except TransferRefused as exc:
             self.log.warning("%s: загрузка плеером не удалась: %s", os.path.basename(target), describe(str(exc)))
-            return {"ok": False, "error": str(exc), "final": exc.final}
+            return {"ok": False, "error": str(exc), "final": exc.final, "kind": exc.kind}
         finally:
             self._transfers.pop(target, None)
         return {"ok": True, **done}

@@ -1,6 +1,6 @@
 """The client of the socket of a provider (contracts/provider_socket.md): the five paths over HTTP, and nothing of what the
 provider reads. A failure of the way or of the answer is a `ProviderError` with a coded reason; the provider's own refusals
-(a card it cannot read, a stream it has none of) come as the fields of its answers, not as errors."""
+(a card it cannot read, a file it cannot take) come as the fields of its answers, not as errors."""
 from __future__ import annotations
 
 import json
@@ -11,8 +11,8 @@ from pydantic import BaseModel, ValidationError
 
 from core.contracts import AppSearchReply, AppSearchRequest
 from core.deadlines import deadline_of
-from core.contracts.provider import (PROVIDER_BAD_ANSWER, PROVIDER_REFUSED, PROVIDER_UNAVAILABLE, SILENCE_S, Manifest,
-                                     ReadFrame, ReadRequest, StreamReply, StreamRequest)
+from core.contracts.provider import (PROVIDER_BAD_ANSWER, PROVIDER_REFUSED, PROVIDER_UNAVAILABLE, SILENCE_S, DownloadFrame,
+                                     DownloadRequest, Manifest, ReadFrame, ReadRequest)
 from core.reasons import reason
 
 # What a short request of the socket may take (a safeguard): the manifest, the connection of the feed. A silent stream is
@@ -52,13 +52,12 @@ def _checked(response: httpx.Response) -> None:
 
 
 class ProviderClient:
-    def __init__(self, url: str, token: str = "", *, search_s: float | None = None, stream_s: float | None = None,
+    def __init__(self, url: str, token: str = "", *, search_s: float | None = None,
                  http: httpx.AsyncClient | None = None) -> None:
         self.url = url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {token}"} if token else {}
-        # The fuses of the two requests that wait for an application: those of the topics they answer (core/deadlines.py).
+        # The fuse of the request that waits for an application: that of the topic it answers (core/deadlines.py).
         self._search_s = search_s or (deadline_of("sources.apps.search") or 0) - FUSE_MARGIN_S
-        self._stream_s = stream_s or (deadline_of("sources.video.stream") or 0) - FUSE_MARGIN_S
         self._http = http or httpx.AsyncClient(timeout=httpx.Timeout(REQUEST_TIMEOUT_S, read=SILENCE_S))
 
     async def close(self) -> None:
@@ -97,25 +96,28 @@ class ProviderClient:
     async def search(self, request: AppSearchRequest) -> AppSearchReply:
         return await self._post("/v1/search", request, self._search_s, AppSearchReply, "search")
 
-    async def stream(self, request: StreamRequest) -> StreamReply:
-        return await self._post("/v1/stream", request, self._stream_s, StreamReply, "stream")
-
-    async def read(self, request: ReadRequest) -> AsyncIterator[ReadFrame]:
-        """The frames of a read as the provider sends them. Closing the generator (the read is stopped) closes the
+    async def _frames(self, path: str, body: BaseModel, frame: type[BaseModel], what: str) -> AsyncIterator[Any]:
+        """The frames of a request the provider answers line by line. Closing the generator (the work is stopped) closes the
         connection, which is how the provider is told to stop."""
         try:
-            async with self._http.stream("POST", f"{self.url}/v1/read", json=request.model_dump(mode="json"),
+            async with self._http.stream("POST", f"{self.url}{path}", json=body.model_dump(mode="json"),
                                          headers=self._headers, timeout=httpx.Timeout(REQUEST_TIMEOUT_S, read=SILENCE_S)) as response:
                 _checked(response)
                 async for line in response.aiter_lines():
                     if not line.strip():
                         continue
                     try:
-                        yield ReadFrame.model_validate_json(line)
+                        yield frame.model_validate_json(line)
                     except ValidationError as exc:
-                        raise _broken("read frame", exc) from exc
+                        raise _broken(what, exc) from exc
         except httpx.HTTPError as exc:
             raise _unavailable(exc) from exc
+
+    def read(self, request: ReadRequest) -> AsyncIterator[ReadFrame]:
+        return self._frames("/v1/read", request, ReadFrame, "read frame")
+
+    def download(self, request: DownloadRequest) -> AsyncIterator[DownloadFrame]:
+        return self._frames("/v1/download", request, DownloadFrame, "download frame")
 
     async def events(self) -> AsyncIterator[tuple[str, dict]]:
         """`(event, data)` of the feed, one for each event the provider sends; the comments of the heartbeat only keep the

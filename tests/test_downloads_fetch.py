@@ -33,6 +33,7 @@ class FakeNeighbours(BaseModule):
         self.player_fetches: list[dict] = []
         self.player_gate: asyncio.Event | None = None
         self.player_stops: list[str] = []
+        self.player_reply: dict | None = None  # what the player answers instead of the file, when a test says so
         super().__init__(bus)
 
     def register(self):
@@ -49,6 +50,8 @@ class FakeNeighbours(BaseModule):
                                                       "dlspeed": 12 * 1024 ** 2, "eta": 3, "total_size_mb": 300.0})
         if self.player_gate is not None:
             await self.player_gate.wait()
+        if self.player_reply is not None:
+            return self.player_reply
         os.makedirs(os.path.dirname(target), exist_ok=True)
         with open(target, "wb") as file:
             file.write(b"segments")
@@ -464,7 +467,7 @@ async def test_how_many_go_at_once_is_by_the_way_the_file_comes(system, tmp_path
     for its place asks its stream anew."""
     bus, fake, dl, probe = system
     assert await probe.request("downloads.limits.get", {}) == {
-        "threads_total": 32, "threads_per_file": 16, "single_at_once": 4, "multi_at_once": 2}
+        "threads_total": 32, "threads_per_file": 16, "single_at_once": 4, "provider_at_once": 2, "multi_at_once": 2}
     said = await probe.request("downloads.limits.set", {"single_at_once": "1"})
     assert said["ok"] and said["limits"]["single_at_once"] == 1
     refused = await probe.request("downloads.limits.set", {"threads_total": "0"})
@@ -612,16 +615,66 @@ async def test_a_file_its_player_takes_that_is_cancelled_stops_the_player(system
     assert done["ok"] is False and await _wait(lambda: fake.player_stops == [player_target(path)])
 
 
+# --- a file a provider of the socket takes whole (contracts/provider_socket.md, section 7) -----------------------------------
+
+PROVIDER_LINK = "app://mock/7#line=X&item=t1"
+PROVIDES = {"handled": True, "stream_url": PROVIDER_LINK, "headers": {}, "player_fetch": True, "fetch_by": "provider"}
+
+
 @pytest.mark.asyncio
-async def test_dash_audio_reaches_the_downloader(system, tmp_path):
+async def test_a_file_a_provider_takes_whole_is_asked_for_by_link_path_and_cap_only_and_goes_the_standard_way(system, tmp_path):
     bus, fake, dl, probe = system
-    fake.stream_replies['app://banri/1'] = {
-        'handled': True, 'stream_url': 'https://cdn/video.mp4', 'audio_url': 'https://cdn/audio.mp4',
-        'headers': {'Referer': 'https://player/'}, 'progressive': False, 'playlist': False}
-    (done,) = await _fetch(probe, bus, 1, jobs=[
-        {'key': 'dub:1', 'url': 'app://banri/1', 'path': str(tmp_path / 'dash.mp4'), 'series_id': 3}])
-    assert done['ok']
-    kw = dl.kwargs['https://cdn/video.mp4']
-    assert kw['audio_url'] == 'https://cdn/audio.mp4'
-    assert kw['headers'] == {'Referer': 'https://player/'}
-    assert not kw.get('progressive') and not kw.get('playlist')
+    fake.stream_replies[PROVIDER_LINK] = PROVIDES
+    fake.player_gate = asyncio.Event()
+    path = str(tmp_path / "library" / "e1.mp4")
+    probe.send_command("downloads.fetch", {"key": "video:1", "url": PROVIDER_LINK, "path": path, "max_height": 720,
+                                           "series_id": 3, "whole": True})
+    assert await _wait(lambda: fake.player_fetches)
+    # Its telemetry is the card's, and the download takes a place of its own way.
+    queue = await probe.request("downloads.queue.get", {}, timeout=5)
+    assert [card["figures"]["progress"] for card in queue["tasks"]] == [40] and queue["count"] == 1
+    sub = bus.subscribe("downloads.fetch.finished")
+    fake.player_gate.set()
+    done = (await asyncio.wait_for(sub.queue.get(), 5)).payload
+    # The file lies at the path itself (no raw file of a player), the downloader of this module was not asked, and the number of
+    # connections is not sent: it is the provider's own business.
+    assert done["ok"] is True and os.path.isfile(path) and dl.started == []
+    assert fake.player_fetches == [{"url": PROVIDER_LINK, "target": path, "max_height": 720}]
+
+
+@pytest.mark.asyncio
+async def test_no_more_downloads_of_a_provider_go_at_once_than_its_limit_says(system, tmp_path):
+    bus, fake, dl, probe = system
+    fake.stream_replies[PROVIDER_LINK] = PROVIDES
+    fake.player_gate = asyncio.Event()
+    assert (await probe.request("downloads.limits.get", {}, timeout=5))["provider_at_once"] == 2
+    for number in (1, 2, 3):
+        probe.send_command("downloads.fetch", {"key": f"dub:{number}", "url": PROVIDER_LINK, "series_id": 3,
+                                               "path": str(tmp_path / f"e{number}.mp4")})
+    assert await _wait(lambda: len(fake.player_fetches) == 2)
+    # The third has asked its stream and waits for a place of its way: the module says so, and it has not begun.
+    assert await _wait(lambda: len(_running.downloads._placing) == 1)
+    assert len(fake.player_fetches) == 2
+    # The limit is a setting: raised, the third goes at once.
+    assert (await probe.request("downloads.limits.set", {"provider_at_once": "3"}, timeout=5))["limits"]["provider_at_once"] == 3
+    assert fake.settings["download_provider_at_once"] == "3"
+    assert await _wait(lambda: len(fake.player_fetches) == 3)
+    fake.player_gate.set()
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_of_a_provider_says_what_it_says_of_the_source(system, tmp_path, monkeypatch):
+    """`final` is the source's last word: one attempt. `broken` is asked again and, spent, is the source's failure. `unasked`
+    is asked again and is never the source's."""
+    monkeypatch.setattr("modules.downloads.module.RETRY_DELAY_S", 0.0)
+    bus, fake, dl, probe = system
+    fake.stream_replies[PROVIDER_LINK] = PROVIDES
+    outcomes = {}
+    for kind in ("final", "broken", "unasked"):
+        fake.player_fetches.clear()
+        fake.player_reply = {"ok": False, "error": reason("app_no_stream", app="mock"), "final": kind == "final", "kind": kind}
+        (done,) = await _fetch(probe, bus, 1, jobs=[{"key": f"dub:{kind}", "url": PROVIDER_LINK, "series_id": 3,
+                                                     "path": str(tmp_path / f"{kind}.mp4")}])
+        outcomes[kind] = (len(fake.player_fetches), done["ok"], done["transient"], code_of(done["error"]))
+    assert outcomes == {"final": (1, False, False, "player_fetch_failed"), "broken": (3, False, False, "player_fetch_failed"),
+                        "unasked": (3, False, True, "player_fetch_failed")}

@@ -31,6 +31,8 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 from core import clock
 from core.reasons import reason
 
+from .contract import TransferRefused
+
 LANGUAGE = "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
 # Safeguards of one request of the host or the CDN and of the first `edge_hash`, as the prototype held them.
 REQUEST_TIMEOUT_S = 15.0
@@ -47,13 +49,12 @@ _STARTUP = ("ad_block_start", "view_start", "startup", "play", "pause", "playbac
 _CLIENT_ENV = {"connectionType": "4g", "downlink": 10, "pixelRatio": 1, "screenW": 1920, "screenH": 1080}
 
 
-class AllohaRefused(RuntimeError):
+class AllohaRefused(TransferRefused):
     """A step of the open or of the transfer did not come through, in words for the log and the card. `status` is the
     HTTP status a host answered, `final` a refusal that is the source's last word on the file (it is not there)."""
 
     def __init__(self, words: str, *, status: int | None = None, final: bool = False) -> None:
-        super().__init__(words)
-        self.status, self.final = status, final
+        super().__init__(words, kind="final" if final else "broken", status=status)
 
 
 @dataclass(frozen=True)

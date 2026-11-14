@@ -1,13 +1,14 @@
 """A provider of the socket (contracts/provider_socket.md) made by the specification alone, on real HTTP, for the tests of the
 tracker's end of it. It holds applications with cards of rows a test gives it, tells its manifest and its changes on the feed,
-answers a search, reads a card into frames, and gives the stream of a link — and what the test needs to watch: every request it
-got, every read that began, every read that was cancelled by a closed connection. A test makes it slow, silent, broken, down.
+answers a search, reads a card into frames, and downloads the file of a link into the path it is given — and what the test needs to watch: every request it
+got, every read that began, every read or download that was cancelled by a closed connection. A test makes it slow, silent, broken, down.
 
 Nothing here is a snapshot of a real provider: it is the specification played by a model."""
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import socket
 from contextlib import asynccontextmanager
@@ -21,7 +22,7 @@ from fastapi.responses import StreamingResponse
 
 from core.contracts import RowState, TableRow
 from core.contracts.provider import (PROTOCOL, FeedEvent, Manifest, ManifestFamily, ManifestPlace, ManifestPlayer, ManifestSearch,
-                                     ManifestSite, ProviderInfo, SiteAddress, StreamReply)
+                                     ManifestSite, ProviderInfo, SiteAddress)
 
 FAMILY = "line"
 
@@ -42,7 +43,14 @@ class MockProvider:
     def __init__(self, token: str = "", heartbeat_s: float = 0.2, *, protocol: int = PROTOCOL) -> None:
         self.token, self.heartbeat_s, self.protocol = token, heartbeat_s, protocol
         self.apps: dict[str, MockApp] = {}
-        self.streams: dict[str, StreamReply] = {}
+        # What a download of a link comes to: the frames it sends before its end and its end (a `done` or an `error` frame);
+        # a link with no script is downloaded whole into the path, with a frame of telemetry before the end.
+        self.downloads: dict[str, dict] = {}
+        self.downloads_cancelled = 0
+        self.download_begun = asyncio.Event()
+        self.download_cancelled = asyncio.Event()
+        self.download_release = asyncio.Event()
+        self.download_release.set()
         self.requests: list[tuple[str, dict]] = []
         self.reads_begun = 0
         self.reads_cancelled = 0
@@ -75,8 +83,9 @@ class MockProvider:
                                  link=link_of(app, card, line, item), site_fields={"app": app, "line": line}).model_dump(mode="json"))
         self.apps[app].cards[card] = {"names": names, "title": title or f"{self.apps[app].label} · {names[0]}", "rows": made}
 
-    def stream_of(self, link: str, reply: StreamReply) -> None:
-        self.streams[link] = reply
+    def download_of(self, link: str, end: dict) -> None:
+        """How the download of a link ends: the frame (`done` with a height, or `error` with a reason and a kind)."""
+        self.downloads[link] = end
 
     def changed(self) -> None:
         """The manifest changed: a new revision, told on every open feed."""
@@ -173,13 +182,32 @@ class MockProvider:
                                   {"app": app.name, "id": str(each["id"]), "url": f"app://{app.name}/{each['id']}",
                                    "name": each.get("name", "")} for each in app.found]} for app in asked]}
 
-        @api.post("/v1/stream")
-        async def stream(request: Request, authorization: str = Header(default="")):
+        @api.post("/v1/download")
+        async def download(request: Request, authorization: str = Header(default="")):
             guard(authorization)
             body = await request.json()
-            self.requests.append(("stream", body))
-            reply = self.streams.get(body["url"])
-            return reply if reply is not None else StreamReply(handled=False)
+            self.requests.append(("download", body))
+
+            async def frames() -> AsyncIterator[str]:
+                self.download_begun.set()
+                try:
+                    yield json.dumps({"type": "progress", "figures": {"phase": "link", "source_seconds": 1420.0}}) + "\n"
+                    yield json.dumps({"type": "progress", "figures": {"phase": "download", "method": "hls", "progress": 40,
+                                                                      "dlspeed": 3 * 1024 ** 2, "total_size_mb": 300.0}}) + "\n"
+                    await self.download_release.wait()
+                    end = self.downloads.get(body["url"])
+                    if end is None:
+                        os.makedirs(os.path.dirname(body["path"]), exist_ok=True)
+                        with open(body["path"], "wb") as file:
+                            file.write(b"the whole file")
+                        end = {"type": "done", "height": 720}
+                    yield json.dumps(end) + "\n"
+                except asyncio.CancelledError:
+                    self.downloads_cancelled += 1
+                    self.download_cancelled.set()
+                    raise
+
+            return StreamingResponse(frames(), media_type="application/x-ndjson")
 
         @api.post("/v1/read")
         async def read(request: Request, authorization: str = Header(default="")):

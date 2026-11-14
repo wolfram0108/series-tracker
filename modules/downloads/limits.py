@@ -2,11 +2,15 @@
 
 A download that takes its file by many connections at once (the segments of a playlist, the parts of a file, a page that
 yt-dlp reads) takes `threads_per_file` of them; all such downloads together take no more than `threads_total` — with 32
-and 16, two at once. A download by one connection (a stream ffmpeg reads) takes one place of `single_at_once`. The way is
-known once the stream of a link is asked (`ytdlp.multithreaded`), so a download waits for its place after that.
+and 16, two at once. A download by one connection (a stream ffmpeg reads) takes one place of `single_at_once`. A download a
+provider of the socket makes (contracts/provider_socket.md) takes one place of `provider_at_once`: how it takes the file,
+by how many connections, is the provider's own business, and this module counts only how many it has at work. The way is
+known once the stream of a link is asked (`ytdlp.multithreaded`, or the answer that the provider takes the file), so a
+download waits for its place after that.
 
-The three numbers are settings (`download_threads_total`, `download_threads_per_file`, `download_single_at_once`); this
-module is their one owner: it gives their defaults and refuses a value that is no whole number from 1 up.
+The four numbers are settings (`download_threads_total`, `download_threads_per_file`, `download_single_at_once`,
+`download_provider_at_once`); this module is their one owner: it gives their defaults and refuses a value that is no whole
+number from 1 up.
 """
 from __future__ import annotations
 
@@ -14,12 +18,15 @@ import asyncio
 from dataclasses import asdict, dataclass
 from typing import Callable
 
+# The ways a file comes: by many connections, by one, by a provider of the socket.
+MULTI, SINGLE, PROVIDER = "multi", "single", "provider"
+
 # Parts of one file asked at once: measured on the streams of a video application (tools/collectors/download_speed.py),
 # 6 gave 62–108 Mbit/s, 16 gave 168–196 Mbit/s, 32 less than 16.
 THREADS_PER_FILE = 16
 
 KEYS = {"threads_total": "download_threads_total", "threads_per_file": "download_threads_per_file",
-        "single_at_once": "download_single_at_once"}
+        "single_at_once": "download_single_at_once", "provider_at_once": "download_provider_at_once"}
 
 
 @dataclass(frozen=True)
@@ -27,6 +34,7 @@ class Limits:
     threads_total: int = 2 * THREADS_PER_FILE
     threads_per_file: int = THREADS_PER_FILE
     single_at_once: int = 4
+    provider_at_once: int = 2
 
     @property
     def multi_at_once(self) -> int:
@@ -54,16 +62,17 @@ class Places:
 
     def __init__(self, limits: Limits) -> None:
         self.limits = limits
-        self._busy = {True: 0, False: 0}
+        self._busy = {MULTI: 0, SINGLE: 0, PROVIDER: 0}
         self._turns = 0
-        self._asking: dict[int, bool | None] = {}  # turn -> its way, None while its stream is asked
+        self._asking: dict[int, str | None] = {}  # turn -> its way, None while its stream is asked
         self._changed = asyncio.Condition()
 
-    def room(self, multi: bool) -> int:
-        return self.limits.multi_at_once if multi else self.limits.single_at_once
+    def room(self, way: str) -> int:
+        return {MULTI: self.limits.multi_at_once, SINGLE: self.limits.single_at_once,
+                PROVIDER: self.limits.provider_at_once}[way]
 
-    def busy(self, multi: bool) -> int:
-        return self._busy[multi]
+    def busy(self, way: str) -> int:
+        return self._busy[way]
 
     def turn(self) -> int:
         """The turn of a fetch that leaves the queue: from now on later fetches wait for it to learn its way."""
@@ -75,24 +84,24 @@ class Places:
         """An attempt of the fetch asks its stream: later fetches of any way wait for it to learn its own."""
         self._asking[turn] = None
 
-    def _ready(self, multi: bool, turn: int) -> bool:
-        return self._busy[multi] < self.room(multi) and not any(
-            earlier < turn and way in (None, multi) for earlier, way in self._asking.items())
+    def _ready(self, way: str, turn: int) -> bool:
+        return self._busy[way] < self.room(way) and not any(
+            earlier < turn and asked in (None, way) for earlier, asked in self._asking.items())
 
-    async def take(self, multi: bool, turn: int, on_wait: Callable[[], None] = lambda: None) -> bool:
+    async def take(self, way: str, turn: int, on_wait: Callable[[], None] = lambda: None) -> bool:
         """A place of the way for the turn; True when it had to wait for it (`on_wait` is told then)."""
         async with self._changed:
-            self._asking[turn] = multi
+            self._asking[turn] = way
             self._changed.notify_all()
-            waited = not self._ready(multi, turn)
+            waited = not self._ready(way, turn)
             if waited:
                 on_wait()
             try:
-                await self._changed.wait_for(lambda: self._ready(multi, turn))
+                await self._changed.wait_for(lambda: self._ready(way, turn))
             finally:
                 self._asking.pop(turn, None)
                 self._changed.notify_all()
-            self._busy[multi] += 1
+            self._busy[way] += 1
             return waited
 
     async def leave(self, turn: int) -> None:
@@ -101,9 +110,9 @@ class Places:
             if self._asking.pop(turn, "gone") != "gone":
                 self._changed.notify_all()
 
-    async def give(self, multi: bool) -> None:
+    async def give(self, way: str) -> None:
         async with self._changed:
-            self._busy[multi] -= 1
+            self._busy[way] -= 1
             self._changed.notify_all()
 
     async def set(self, limits: Limits) -> None:
@@ -114,4 +123,4 @@ class Places:
     @property
     def total(self) -> int:
         """Downloads that may go at once whatever their way: how many leave the queue to ask their stream."""
-        return self.limits.multi_at_once + self.limits.single_at_once
+        return self.limits.multi_at_once + self.limits.single_at_once + self.limits.provider_at_once

@@ -66,13 +66,13 @@ async function saveFlag(path: string, value: boolean, label: string) {
 
 // --- числовые параметры yt-dlp (GET/POST → {value}) -------------------
 // --- пределы загрузок по способу (downloads, limits.py; GET/POST /api/settings/download_limits) ----
-interface DownloadLimits { threads_total: number; threads_per_file: number; single_at_once: number; multi_at_once: number }
-const limits = ref({ threads_total: "32", threads_per_file: "16", single_at_once: "4" })
+interface DownloadLimits { threads_total: number; threads_per_file: number; single_at_once: number; provider_at_once: number; multi_at_once: number }
+const limits = ref({ threads_total: "32", threads_per_file: "16", single_at_once: "4", provider_at_once: "2" })
 const multiAtOnce = ref(2)
 
 function showLimits(got: DownloadLimits) {
   limits.value = { threads_total: String(got.threads_total), threads_per_file: String(got.threads_per_file),
-                   single_at_once: String(got.single_at_once) }
+                   single_at_once: String(got.single_at_once), provider_at_once: String(got.provider_at_once) }
   multiAtOnce.value = got.multi_at_once
 }
 async function loadLimits() {
@@ -81,7 +81,7 @@ async function loadLimits() {
 }
 async function saveLimits() {
   const body = { threads_total: limits.value.threads_total.trim(), threads_per_file: limits.value.threads_per_file.trim(),
-                 single_at_once: limits.value.single_at_once.trim() }
+                 single_at_once: limits.value.single_at_once.trim(), provider_at_once: limits.value.provider_at_once.trim() }
   const saved = (await request(api.POST("/api/settings/download_limits" as never, { body } as never))) as DownloadLimits | null
   if (saved !== null) {
     showLimits(saved)
@@ -259,6 +259,10 @@ onMounted(async () => {
           <div class="num-field" :title="t('debug.downloads.singleAtOnceHint')">
             <span>{{ t("debug.downloads.singleAtOnce") }}</span>
             <InputText v-model="limits.single_at_once" inputmode="numeric" class="num-input" @change="saveLimits" />
+          </div>
+          <div class="num-field" :title="t('debug.downloads.providerAtOnceHint')">
+            <span>{{ t("debug.downloads.providerAtOnce") }}</span>
+            <InputText v-model="limits.provider_at_once" inputmode="numeric" class="num-input" @change="saveLimits" />
           </div>
           <div class="num-field muted-hint">{{ t("debug.downloads.multiAtOnce", { count: multiAtOnce }) }}</div>
           <div class="num-field" :title="t('debug.sourcesTerm.hint')">

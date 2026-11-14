@@ -16,8 +16,8 @@ from contextlib import aclosing
 from typing import Callable, Iterable
 
 from core.contracts import AppResults, AppSearchReply, AppSearchRequest
-from core.contracts.provider import (EVENT_CHANGED, EVENT_HELLO, PROTOCOL, PROVIDER_INCOMPATIBLE, PROVIDER_UNAVAILABLE, Manifest,
-                                     ManifestPlayer, ProviderState, ReadRequest, StreamReply, StreamRequest)
+from core.contracts.provider import (EVENT_CHANGED, EVENT_HELLO, PROTOCOL, PROVIDER_INCOMPATIBLE, PROVIDER_UNAVAILABLE, DownloadRequest, Manifest,
+                                     ManifestPlayer, ProviderState, ReadRequest)
 from core.reasons import reason
 
 from ..players.registry import PlayerRegistry
@@ -57,8 +57,8 @@ class Connector:
     def read(self, request: ReadRequest):
         return self.client.read(request)
 
-    async def stream(self, request: StreamRequest) -> StreamReply:
-        return await self.client.stream(request)
+    def download(self, request: DownloadRequest):
+        return self.client.download(request)
 
     @property
     def term_hours(self) -> int:

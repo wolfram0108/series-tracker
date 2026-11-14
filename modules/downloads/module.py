@@ -14,9 +14,9 @@ Queries / commands:
       request failed (a VK video). A key already waiting or under way is not asked twice. The fetches wait in one queue in
       the order asked; how many go at once is by the way each file comes (limits.py): a download by many connections takes
       `threads_per_file` of the `threads_total` (2 at once with 16 and 32), one by a single connection a place of
-      `single_at_once` (4).
-  downloads.limits.get {} -> {threads_total, threads_per_file, single_at_once, multi_at_once} - the limits now.
-  downloads.limits.set {threads_total?, threads_per_file?, single_at_once?} -> {ok, limits} | {ok: false, reason} - the
+      `single_at_once` (4), one a provider of the socket makes a place of `provider_at_once` (2).
+  downloads.limits.get {} -> {threads_total, threads_per_file, single_at_once, provider_at_once, multi_at_once} - the limits now.
+  downloads.limits.set {threads_total?, threads_per_file?, single_at_once?, provider_at_once?} -> {ok, limits} | {ok: false, reason} - the
       limits are changed and kept as settings; a value that is no whole number from 1 up is refused with its reason.
   downloads.withdraw {series_id} -> {stopped} - the owner stops the fetches of a series and waits for them: the answer
       comes once each has ended, its program stopped and what it wrote removed (work.withdrawn is the same, told).
@@ -42,7 +42,11 @@ Events out:
       was rebuilt stay, in the table download_cards, until the user removes them or the next sync of the series begins.
 A link whose player downloads the file itself (`player_fetch` of its stream: Alloha) is taken by `sources.video.fetch`
 into the raw file of the download, the progress by `sources.video.progress`; the rest is as for any playlist.
-Events in: sources.video.progress {target, ...figures}, scan.run.changed, settings.changed (download_threads_total, download_threads_per_file, download_single_at_once),
+A link of a provider of the socket (`fetch_by: provider`) is no stream the downloader reads: the provider takes the whole file by
+its own way into the path of the download (`sources.video.fetch`, contracts/provider_socket.md, section 7), the progress is its
+telemetry (`sources.video.progress`), and the file that lies at the path goes the standard way: the checks of this module, the
+card, the end of the fetch. The way of a download is its own place in the limits (`provider_at_once`).
+Events in: sources.video.progress {target, ...figures}, scan.run.changed, settings.changed (download_threads_total, download_threads_per_file, download_single_at_once, download_provider_at_once),
   work.withdrawn {series_id, keys?},
   series.deleted (the fetches of the series stop).
 """
@@ -51,6 +55,7 @@ from __future__ import annotations
 import asyncio
 import os
 import traceback
+from dataclasses import dataclass
 
 from core import BaseModule, notices, storage
 from core.clock import beat_while
@@ -63,7 +68,7 @@ from core.retry import UNTIMED, Budget, retrying
 
 from . import ytdlp
 from .failure import Failed, Final, Unasked, kind_of
-from .limits import KEYS, Limits, Places, whole
+from .limits import KEYS, MULTI, PROVIDER, SINGLE, Limits, Places, whole
 from .cards import CardBook
 from .repository import DownloadsRepository
 
@@ -80,6 +85,19 @@ async def _always() -> bool:
 async def _never() -> bool:
     """A link whose stream request failed is not handed to yt-dlp: a page of a web player is no stream."""
     return False
+
+
+@dataclass(frozen=True)
+class Stream:
+    """What the stream request of a link says: the address and the headers, how the file comes, or why it cannot."""
+
+    url: str
+    headers: dict | None = None
+    error: tuple[str, Failed] | None = None  # the words of the refusal and what they say of the source
+    progressive: bool = False
+    playlist: bool = False
+    by_player: bool = False    # the player downloads the file itself (`sources.video.fetch`), the segments of a playlist
+    by_provider: bool = False  # a provider of the socket takes the whole file by its own way into the path
 
 
 def awaited(task: asyncio.Task) -> str:
@@ -127,7 +145,7 @@ class DownloadsModule(BaseModule):
         self.repo = DownloadsRepository(db)
         self._download = downloader  # replaced in tests
         self.places = Places(Limits())  # how many fetches go at once, by the way a file comes
-        self._placing: dict[str, bool] = {}  # fetches that asked their stream and wait for a place of its way (multi)
+        self._placing: dict[str, str] = {}  # fetches that asked their stream and wait for a place of its way
         self._fetch_queue: list[dict] = []
         self._fetch_active: dict[str, tuple[asyncio.Task, int | None]] = {}
         self._fetch_jobs: dict[str, dict] = {}  # the job of every fetch under way: the window names it by its path
@@ -268,8 +286,8 @@ class DownloadsModule(BaseModule):
         their way go of how many may; then the queue, with how many fetches go of how many may whatever their way."""
         need_of = {job["key"]: job["need_key"] for job in [*self._fetch_jobs.values(), *self._fetch_queue]}
         places: dict[str, tuple[int, int, int]] = {}
-        for number, (key, multi) in enumerate(self._placing.items(), start=1):
-            places[need_of[key]] = (number, self.places.busy(multi), self.places.room(multi))
+        for number, (key, way) in enumerate(self._placing.items(), start=1):
+            places[need_of[key]] = (number, self.places.busy(way), self.places.room(way))
         going = len(self._fetch_active) - len(self._placing)
         for number, job in enumerate(self._fetch_queue, start=len(places) + 1):
             places[job["need_key"]] = (number, going, self.places.total)
@@ -325,12 +343,10 @@ class DownloadsModule(BaseModule):
 
     # --- the fetches ------------------------------------------------------------------
 
-    async def _resolve_stream(self, url: str, *, max_height: int | None = None,
-                              ytdlp_fallback) -> tuple[str, dict | None, tuple[str, Failed] | None, bool, bool, bool, str | None]:
-        """(stream url, headers, (error, what it says of the source), progressive, playlist, by the player, audio URL) of a link, via
-        the provider that owns it. The provider says itself whether its refusal is its last word; a provider that did not
-        answer said nothing of the source. `by the player`: the player downloads the file itself (`sources.video.fetch`),
-        a playlist by its segments.
+    async def _resolve_stream(self, url: str, *, max_height: int | None = None, ytdlp_fallback) -> Stream:
+        """The stream of a link, via the provider that owns it. The provider says itself whether its refusal is its last
+        word; a provider that did not answer said nothing of the source. `by_player`: the player downloads the file itself
+        (`sources.video.fetch`), a playlist by its segments; `by_provider`: a provider of the socket takes the whole file.
 
         `ytdlp_fallback` is an async callable asked only when the request fails: True hands the link to
         the downloader as it is, False makes the failure the error of the job, since a page of a web
@@ -339,17 +355,17 @@ class DownloadsModule(BaseModule):
         try:
             reply = await self.request("sources.video.stream", payload)
             if reply.get("error"):
-                return (url, None, (reply["error"], Failed.BROKEN if reply.get("transient") else Failed.FINAL),
-                        False, False, False, None)
+                return Stream(url, error=(reply["error"], Failed.BROKEN if reply.get("transient") else Failed.FINAL))
             if reply.get("handled"):
                 by_player = bool(reply.get("player_fetch"))
-                return (reply["stream_url"], reply.get("headers"), None, bool(reply.get("progressive")),
-                        bool(reply.get("playlist")) or by_player, by_player, reply.get("audio_url"))
+                return Stream(reply["stream_url"], reply.get("headers"), progressive=bool(reply.get("progressive")),
+                              playlist=bool(reply.get("playlist")) or by_player, by_player=by_player,
+                              by_provider=reply.get("fetch_by") == "provider")
         except Exception as exc:
             if not await ytdlp_fallback():
-                return url, None, (reason("stream_not_got", cause=str(exc)), Failed.UNASKED), False, False, False, None
+                return Stream(url, error=(reason("stream_not_got", cause=str(exc)), Failed.UNASKED))
             self.log.debug("sources.video.stream не обработан для %s: %s", url, exc)
-        return url, None, None, False, False, False, None
+        return Stream(url)
 
     async def on_fetch(self, env: Envelope) -> None:
         job = {k: env.payload.get(k) for k in ("key", "url", "path", "max_height", "series_id", "whole", "ytdlp")}
@@ -418,20 +434,21 @@ class DownloadsModule(BaseModule):
             self.cards.attempt(need_key, tries, budget.attempts)
             self.places.asking(turn)
             try:
-                stream_url, headers, stream_error, progressive, playlist, by_player, audio_url = await resolve()
-                if stream_error is not None:
-                    return (False, *stream_error)
-                multi = False if audio_url else ytdlp.multithreaded(stream_url, headers, progressive, playlist)
+                stream = await resolve()
+                if stream.error is not None:
+                    return (False, *stream.error)
+                way = (PROVIDER if stream.by_provider else
+                       MULTI if ytdlp.multithreaded(stream.url, stream.headers, stream.progressive, stream.playlist) else SINGLE)
 
                 def wait() -> None:
                     # The way of the file is full: the fetch waits in the queue.
                     self.cards.waiting(need_key)
-                    self._placing[key] = multi
+                    self._placing[key] = way
                     self._fetch_pump()
                     self._announce_queue()
 
                 try:
-                    waited = await self.places.take(multi, turn, wait)
+                    waited = await self.places.take(way, turn, wait)
                 finally:
                     self._placing.pop(key, None)
             finally:
@@ -440,29 +457,31 @@ class DownloadsModule(BaseModule):
                 if waited:
                     # An address a host signed may not outlive the wait: the stream is asked anew.
                     self.cards.attempt(need_key, tries, budget.attempts)
-                    stream_url, headers, stream_error, progressive, playlist, by_player, audio_url = await resolve()
-                    if stream_error is not None:
-                        return (False, *stream_error)
-                return await fetched(stream_url, headers, progressive, playlist, by_player, audio_url)
+                    stream = await resolve()
+                    if stream.error is not None:
+                        return (False, *stream.error)
+                return await fetched(stream)
             finally:
-                await self.places.give(multi)
+                await self.places.give(way)
 
-        async def fetched(stream_url: str, headers, progressive: bool, playlist: bool,
-                          by_player: bool = False, audio_url: str | None = None) -> tuple[bool, str, Failed | None]:
-            kw: dict = {"threads": self.places.limits.threads_per_file}
-            if audio_url:
-                kw["audio_url"] = audio_url
-            if by_player:
-                kw["fetcher"] = self._by_player(stream_url, job.get("max_height"), self.places.limits.threads_per_file)
-            if job.get("max_height"):
-                kw["max_height"] = job["max_height"]  # a page the downloader reads itself keeps the cap of the job
-            if headers:
-                kw["headers"] = headers
-            if progressive:
-                kw["progressive"] = True
-            if playlist:
-                kw["playlist"] = kw["resumable"] = True  # what an attempt got is dropped at the end of the fetch
-            done, failure = await self._watched(key, stream_url, path, on_progress, **kw)
+        async def fetched(stream: Stream) -> tuple[bool, str, Failed | None]:
+            if stream.by_provider:
+                # The provider takes the whole file by its own way: no address, no headers, no threads of ours.
+                done, failure = await self._watched(key, stream.url, path, on_progress,
+                                                    downloader=self._by_provider(job.get("max_height")))
+            else:
+                kw: dict = {"threads": self.places.limits.threads_per_file}
+                if stream.by_player:
+                    kw["fetcher"] = self._by_player(stream.url, job.get("max_height"), self.places.limits.threads_per_file)
+                if job.get("max_height"):
+                    kw["max_height"] = job["max_height"]  # a page the downloader reads itself keeps the cap of the job
+                if stream.headers:
+                    kw["headers"] = stream.headers
+                if stream.progressive:
+                    kw["progressive"] = True
+                if stream.playlist:
+                    kw["playlist"] = kw["resumable"] = True  # what an attempt got is dropped at the end of the fetch
+                done, failure = await self._watched(key, stream.url, path, on_progress, **kw)
             if done:
                 notice = notices.notice_of(await storage.call(_head_of, path, notices.head_bytes()))
                 if notice is not None:
@@ -516,6 +535,40 @@ class DownloadsModule(BaseModule):
             self._fetch_pump()
             self._announce_queue()
 
+    def _by_provider(self, max_height: int | None):
+        """The download of a provider of the socket as a downloader of this module: `(link, path, told) -> (ok, words)`. The
+        provider takes the whole file into the path itself; this module holds the name of the path meanwhile, as for any
+        download, and counts what the provider tells as the signs of life of the fetch."""
+        async def download(link: str, path: str, told) -> tuple[bool, str]:
+            try:
+                with storage.hold(path):
+                    return await self._transfer(link, path, max_height, told)
+            except storage.StorageBusy:  # an operation on this name has not ended: a file written now could be lost
+                return False, Unasked(reason("path_busy"))
+        return download
+
+    async def _transfer(self, link: str, path: str, max_height: int | None, told) -> tuple[bool, str]:
+        """(ok, words of a failure) of the file the player of the link downloads into `path` (`sources.video.fetch`), the
+        progress told by the player's events. The words carry what they say of the source: its last word (`Final`), or nothing
+        of it (`Unasked`); any other is a way that broke."""
+        self._player_progress[path] = told
+        payload = {"url": link, "target": path, **({"max_height": max_height} if max_height else {})}
+        try:
+            reply = await self.request("sources.video.fetch", payload)
+        except asyncio.CancelledError:
+            # The file is given up: the provider is told by the closed connection, and the transfer stops.
+            self.spawn(self.request("sources.video.fetch.stop", {"target": path}))
+            raise
+        except Exception as exc:  # noqa: BLE001 - a provider that did not answer said nothing of the source
+            return False, Unasked(reason("player_fetch_silent", cause=str(exc)))
+        finally:
+            self._player_progress.pop(path, None)
+        if reply.get("ok"):
+            return True, ""
+        words = reason("player_fetch_failed", cause=reply["error"]) if reply.get("error") else reason("player_fetch_refused")
+        kind = reply.get("kind") or ("final" if reply.get("final") else "broken")
+        return False, Final(words) if kind == "final" else Unasked(words) if kind == "unasked" else words
+
     def _by_player(self, url: str, max_height: int | None, connections: int):
         """The transfer of a file its player downloads itself (`sources.video.fetch`): the segments into the raw file of
         the download, the progress told by the player's events. (ok, words of a failure, seconds, longest segment)."""
@@ -552,16 +605,17 @@ class DownloadsModule(BaseModule):
         except OSError as exc:
             self.log.warning("файлы незавершённой загрузки %s не удалены: %s", path, exc)
 
-    async def _watched(self, key: str, url: str, path: str, on_progress, **kw) -> tuple[bool, str]:
+    async def _watched(self, key: str, url: str, path: str, on_progress, *, downloader=None, **kw) -> tuple[bool, str]:
         """A download under the fuse of silence: each report of progress is a sign of life, and a download that gives none
-        for SILENCE_FUSE_S is taken off with what it waited for in the log; its failure is one the queue tries again."""
+        for SILENCE_FUSE_S is taken off with what it waited for in the log; its failure is one the queue tries again.
+        `downloader` takes the place of the downloader of this module for a file a provider takes itself."""
         alive = asyncio.Event()
 
         async def told(data: dict) -> None:
             alive.set()
             await on_progress(data)
 
-        run = asyncio.ensure_future(self._download(url, path, told, **kw))
+        run = asyncio.ensure_future((downloader or self._download)(url, path, told, **kw))
         beat: asyncio.Future | None = None
         try:
             while True:

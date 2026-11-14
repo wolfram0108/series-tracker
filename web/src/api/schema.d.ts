@@ -1387,14 +1387,14 @@ export interface paths {
         /**
          * Download Limits
          * @description How many downloads go at once, by the way a file comes (downloads, limits.py): {threads_total,
-         *     threads_per_file, single_at_once, multi_at_once} both ways; a value the module refuses is 400 with its reason.
+         *     threads_per_file, single_at_once, provider_at_once, multi_at_once} both ways; a value the module refuses is 400 with its reason.
          */
         get: operations["download_limits_api_settings_download_limits_get"];
         put?: never;
         /**
          * Download Limits
          * @description How many downloads go at once, by the way a file comes (downloads, limits.py): {threads_total,
-         *     threads_per_file, single_at_once, multi_at_once} both ways; a value the module refuses is 400 with its reason.
+         *     threads_per_file, single_at_once, provider_at_once, multi_at_once} both ways; a value the module refuses is 400 with its reason.
          */
         post: operations["download_limits_api_settings_download_limits_post"];
         delete?: never;
