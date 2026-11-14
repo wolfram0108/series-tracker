@@ -42,6 +42,21 @@ DETECT = """() => {
   return problems;
 }"""
 
+# What the head of a window (the shell, components/ModalShell.vue) may not do: break a word of its title, push its close button out
+# of it, or run wider than the window.
+DETECT_HEAD = """() => {
+  const problems = [];
+  for (const bar of document.querySelectorAll('.modern-header')) {
+    const title = bar.querySelector('.modal-title'), name = title.textContent.trim();
+    const line = parseFloat(getComputedStyle(title).lineHeight);
+    if (name.split(/\\s+/).length === 1 && title.getBoundingClientRect().height > line * 1.5) problems.push('the title is broken inside its word: ' + name);
+    const edge = bar.getBoundingClientRect(), close = bar.querySelector('.modern-close').getBoundingClientRect();
+    if (close.right > edge.right + 1 || close.left < edge.left - 1) problems.push('the close button is out of the head of ' + name);
+    if (bar.scrollWidth > bar.clientWidth + 1) problems.push('the head runs wider than its window: ' + name);
+  }
+  return problems;
+}"""
+
 
 async def _no_provider(ui) -> None:
     """The stand may carry a provider of its own (the real one over models, when it is on the machine): the scenarios name theirs."""
@@ -153,3 +168,26 @@ async def test_every_tab_of_the_extensions_holds_its_layout_at_every_width(ui): 
         await ui.shot_of(page.locator(".modern-modal"), "55-extensions-narrow-chines")
         assert wide and narrow, (wide, narrow)
         assert len(walked) == 2
+
+
+async def test_the_head_of_a_window_keeps_the_words_of_its_title_and_its_close_button_at_every_width(ui):  # noqa: F811
+    """The title is one word of the window's own name; the tabs give way to it — tighter, then icons, then a line of their own under
+    it — and the close button stays beside it, in the window of the extensions and in the window of the settings alike."""
+    page = ui.page
+    await ui.first_run()
+    await _no_provider(ui)
+    below = {}
+    for name, open_window in (("extensions", lambda: ui.extensions(text("extensions.tab.chines"))),
+                              ("settings", lambda: ui.settings(text("settings.tab.voices")))):
+        await open_window()
+        for width in WIDTHS:
+            await page.set_viewport_size({"width": width, "height": 900})
+            found = await page.evaluate(DETECT_HEAD)
+            assert found == [], (name, width, found)
+            below[(name, width)] = await page.locator(".modern-header.tabs-below").count()
+        await page.set_viewport_size({"width": 390, "height": 900})
+        await ui.shot_of(page.locator(".modern-header"), f"56-head-{name}-390")
+        await page.set_viewport_size({"width": 1280, "height": 900})
+        await ui.close_settings()
+    # Wide, the tabs stand beside the title; narrow, under it — the shell moves them, as it measures.
+    assert not below[("extensions", 1280)] and below[("extensions", 320)], below

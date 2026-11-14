@@ -39,24 +39,43 @@ onUnmounted(() => document.removeEventListener("keydown", onKey))
 useBodyScrollLock()
 
 // A screen-width breakpoint broke with the seventh tab, so the tabs fit the room they get:
-// tighter padding, then icons, then scrolling.
+// tighter padding, then icons, then — where even icons leave the title less than its one line — a line of their own under it.
+// A word of the title is never broken for the tabs.
 const header = ref<HTMLElement | null>(null)
 let observer: ResizeObserver | null = null
 let shownTab: Element | null = null
+
+// The title kept on one line, for the moment of asking, does not fit the room the head leaves it. Put back before anything is painted.
+function titleCramped(title: HTMLElement | null): boolean {
+  if (!title) return false
+  title.style.whiteSpace = "nowrap"
+  const cramped = title.scrollWidth > title.clientWidth + 1
+  title.style.whiteSpace = ""
+  return cramped
+}
 
 function fitTabs(follow = false) {
   const bar = header.value
   const strip = bar?.querySelector<HTMLElement>(".st-tabs")
   if (!bar || !strip) return
+  const title = bar.querySelector<HTMLElement>(".modal-title")
+  const active = strip.querySelector<HTMLElement>(".st-tab.active")
+  const overflows = () => strip.scrollWidth > strip.clientWidth + 1
+  const squeeze = () => {
+    if (overflows()) bar.classList.add("tabs-tight")
+    if (overflows()) bar.classList.add("tabs-compact")
+    // The chosen tab does not fit even alone: its label goes too.
+    if (active && active.offsetWidth > strip.clientWidth) bar.classList.add("tabs-icons")
+  }
   // Without the transition the labels have their final width at the moment of measuring.
   bar.classList.add("tabs-measuring")
-  bar.classList.remove("tabs-tight", "tabs-compact", "tabs-icons")
-  const overflows = () => strip.scrollWidth > strip.clientWidth + 1
-  if (overflows()) bar.classList.add("tabs-tight")
-  if (overflows()) bar.classList.add("tabs-compact")
-  const active = strip.querySelector<HTMLElement>(".st-tab.active")
-  // The chosen tab does not fit even alone: its label goes too.
-  if (active && active.offsetWidth > strip.clientWidth) bar.classList.add("tabs-icons")
+  bar.classList.remove("tabs-tight", "tabs-compact", "tabs-icons", "tabs-below")
+  squeeze()
+  if (titleCramped(title)) {
+    bar.classList.remove("tabs-tight", "tabs-compact", "tabs-icons")
+    bar.classList.add("tabs-below")
+    squeeze()
+  }
   // A resize brings the chosen tab back into sight; a re-render does it only when another tab was chosen.
   if (active && (follow || active !== shownTab)) active.scrollIntoView({ block: "nearest", inline: "nearest" })
   shownTab = active
