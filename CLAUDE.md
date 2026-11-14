@@ -187,6 +187,8 @@ qBittorrent — Docker, WebUI `:8080`; секреты — в `.env` (вне git,
 - [contracts/bus_topics.md](contracts/bus_topics.md) — карта топиков шины.
 - [contracts/source_contract.md](contracts/source_contract.md) — договор источника: что сайт, плеер или
   приложение обязаны дать системе; новый источник сверяется с ним до экранов.
+- [contracts/provider_parity.md](contracts/provider_parity.md) — паритет поставщика: что Чинес обязан отдать, чтобы настроенные
+  сериалы остались такими, какие есть (срез прод-БД, очередь работ, тождество строки, приёмка).
 - [contracts/series_situations.md](contracts/series_situations.md) —
   поведенческая матрица (журнал верификации).
 - `logs/runs/<сериал>/*.jsonl.gz` — дамп каждой синхронизации: вся шина,
