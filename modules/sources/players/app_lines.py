@@ -40,7 +40,7 @@ from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
 from .dash import AudioRenewal, Tracks, UnsupportedDash, is_dash, tracks
 from .hls import (MEASURE_TIMEOUT_S, Measure, container_of, file_head_size, is_playlist, measure_head, measured,
                   probe_args, waiting)
-from .http import USER_AGENT, retry_after
+from .http import USER_AGENT, failure_words, retry_after
 from .vk_files import pick_file
 
 logger = logging.getLogger("sources")
@@ -94,7 +94,7 @@ async def served_as(http: httpx.AsyncClient, address: str, headers: dict[str, st
     except AnswerTooLarge as exc:
         return Served("", Answer(None, error=f"{type(exc).__name__}: the host ignores the range of a head"))
     except httpx.HTTPError as exc:
-        return Served("", Answer(None, error=f"{type(exc).__name__}: {urlsplit(address).hostname}"))
+        return Served("", Answer(None, error=failure_words(exc, address)))
     if is_dash(head):
         if cut:
             return Served("", Answer(200, reading=Reading(Kind.NO_FILE, 200, message="DASH manifest is incomplete")))
@@ -296,7 +296,7 @@ class AppPlayer:
         try:
             return await self._stream_answer(http, address, headers, measure)
         except httpx.HTTPError as exc:
-            return Answer(None, error=f"{type(exc).__name__}: {urlsplit(address).hostname}")
+            return Answer(None, error=failure_words(exc, address))
 
     async def _stream_answer(self, http: httpx.AsyncClient, address: str, headers: dict[str, str],
                              measure: bool) -> Answer:

@@ -718,3 +718,19 @@ async def test_a_clip_the_host_serves_instead_of_the_episode_is_known_by_its_hea
     assert refused.kind == "" and refused.answer.reading.kind is Kind.NOT_FOUND
     assert "test-quota" in refused.answer.reading.message and "instead of the episode" in refused.answer.reading.message
     assert served.kind == "file"
+
+
+def test_a_transport_failure_names_the_cause_beneath_it_and_keeps_the_class_and_the_host_first():
+    """`ConnectError: host` told a refused connection, a failed handshake and an unresolved name apart by nothing."""
+    from modules.sources.players.http import failure_words
+
+    try:
+        try:
+            raise ConnectionRefusedError(111, "Connection refused")
+        except OSError as inner:
+            raise httpx.ConnectError("") from inner
+    except httpx.ConnectError as exc:
+        said = failure_words(exc, "https://host.test:8443/a.m3u8?token=1")
+    assert said.startswith("ConnectError: host.test (ConnectionRefusedError:")
+    assert "token" not in said
+    assert failure_words(httpx.ReadTimeout("slow"), "https://host.test/x") == "ReadTimeout: host.test"

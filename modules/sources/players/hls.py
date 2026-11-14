@@ -22,7 +22,7 @@ from core.ffprobe import film_stream, probe
 from core.hls_playlist import without_insertions
 
 from .contract import Answer, Kind, Reading
-from .http import USER_AGENT, get_answer, retry_after
+from .http import USER_AGENT, failure_words, get_answer, retry_after
 
 REQUEST_TIMEOUT_S = 20.0
 # A host that takes no connection within this long takes none, however long the answer of one that did may be waited for:
@@ -184,7 +184,7 @@ async def _served(http: httpx.AsyncClient, url: str, referer: str, limit: int | 
                     break
             return bytes(body), response.headers.get("content-type", "")
     except httpx.HTTPError as exc:
-        raise MeasureError(Answer(None, error=f"{type(exc).__name__}: {urlsplit(url).hostname}")) from exc
+        raise MeasureError(Answer(None, error=failure_words(exc, url))) from exc
 
 
 async def _bytes(http: httpx.AsyncClient, url: str, referer: str, limit: int | None = None,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Callable
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -9,6 +10,16 @@ from .contract import Answer, Kind, Reading
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 REQUEST_TIMEOUT_S = 8.0
+
+
+def failure_words(exc: BaseException, address: str) -> str:
+    """What a transport failure says, with the cause beneath it: `ConnectError` alone does not tell a host that refuses the
+    connection from a handshake that fails or a name that does not resolve, and the cure of each is different."""
+    root = exc
+    while (root.__cause__ or root.__context__) is not None:
+        root = root.__cause__ or root.__context__
+    cause = f" ({type(root).__name__}: {str(root)[:80]})" if root is not exc else ""
+    return f"{type(exc).__name__}: {urlsplit(address).hostname}{cause}"
 
 
 def retry_after(response: httpx.Response) -> float | None:
