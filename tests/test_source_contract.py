@@ -10,10 +10,7 @@ import pytest
 
 from app_stand import STAND_LIMIT_S, AppStand
 from core.voice_names import fold_name
-from provider_world import needs_provider
-
-# Every protocol of the applications is read through the provider of the socket: without it on the machine there is nothing to keep.
-pytestmark = needs_provider
+from provider_mock import MockProvider, serving
 
 
 @pytest.fixture
@@ -47,23 +44,23 @@ async def tables_of(stand: AppStand, urls: list[str]) -> list[dict]:
 
 async def test_every_row_of_every_kind_of_source_has_the_frame_of_its_own_episode_and_a_player_the_order_places(stand):
     # Every kind of source the stand models, each with episodes in different frames: a frame carried from one row to
-    # another shows as a row whose frame is not the one of its own episode.
+    # another shows as a row whose frame is not the one of its own episode. The applications are the provider's: the stand
+    # reads them through a provider of the socket by the specification (tests/provider_mock.py), at its address.
     stand.site.release("ref", "AniStar")
     stand.site.episode("ref", 1, height=720)
     stand.site.episode("ref", 2, height=480)
     stand.site.title(4794)
     await asyncio.to_thread(stand.site.hls_episode, 4794, 1, height=1080)
     await asyncio.to_thread(stand.site.hls_episode, 4794, 2, height=720)
-    await asyncio.to_thread(stand.site.app_card, 219017, "万界独尊", {1: 1080, 2: 2160})
-    await asyncio.to_thread(stand.site.app_card, 219018, "师兄啊师兄", {1: 720, 2: 1080}, files=True)
+    mock = MockProvider()
+    mock.add_app("banri", "半日 Banri")
+    mock.card("banri", 219017, ["万界独尊"], [("第1集", "BLU", "1", [1080]), ("第2集", "BLU", "2", [2160])])
+    mock.card("banri", 219018, ["师兄啊师兄"], [("第1集", "BLU", "1", [720]), ("第2集", "BLU", "2", [1080])])
     truth = {stand.site.releases["ref"].url: {1: 720, 2: 480}, stand.site.titles[4794].url: {1: 1080, 2: 720},
              "app://banri/219017": {1: 1080, 2: 2160}, "app://banri/219018": {1: 720, 2: 1080}}
-    # Every other protocol of the applications the service reads: each of its own model, its line admitted.
-    for number, protocol in enumerate(("appdrama", "appget", "gulu", "yunduo", "appmn", "appv7", "share139", "bubu"), start=500):
-        frames = {1: 720, 2: 1080} if number % 2 else {1: 1080, 2: 720}
-        truth[await asyncio.to_thread(stand.site.protocol_card, protocol, number, f"万界独尊{number}", frames)] = frames
-
-    tables = await tables_of(stand, list(truth))
+    async with serving(mock) as server:
+        await stand.use_provider(server.url)
+        tables = await tables_of(stand, list(truth))
     order = await stand.call("GET", "/api/voices/settings")
     placed = {fold_name(name) for name in order["priority"]}
     sources = stand.module("sources")
@@ -80,9 +77,7 @@ async def test_every_row_of_every_kind_of_source_has_the_frame_of_its_own_episod
             assert order["player_labels"].get(row["player"]), (url, row["player"])
         # Condition 2: the frame of each row is the frame of its own episode, never one carried from another row.
         assert got == frames, (url, got)
-    assert order["player_labels"]["line:BLU"] == "BLU"  # a line of an application is named by its code
-    for code in ("DRAMA", "MOLI", "GULU", "YUNDUO", "MINUO", "XIAOZHU", "preview4k", "BUBU"):
-        assert order["player_labels"][f"line:{code}"] == code
+    assert order["player_labels"]["line:BLU"] == "BLU"  # a line of an application is named by the provider's manifest
     # Obligation 3 for every player a row can be of, whether a table of the stand holds one or not.
     for player in sources.players:
         if not getattr(player, "lines", False):

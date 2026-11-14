@@ -29,20 +29,10 @@ import httpx
 import uvicorn
 from fastapi.responses import StreamingResponse
 
-import provider_world  # noqa: F401 - makes the provider of the socket and its models importable (a stand needs it)
 from assembly import Options, assemble
 from core import Bus, Envelope, Runner
 from core import container as mkv
 from core.db import Database
-try:
-    from app99_model import HOST as APP_HOST, App99Model, Card, Line, profile as app_profile
-    from app_protocol_models import AppGetModel, AppMnModel, AppV7Model, BubuModel, GuluModel, Share139Model, YunDuoModel
-    from appdrama_model import DramaModel, Video as DramaVideo
-    MODELS = True
-except ModuleNotFoundError:
-    # The models of the applications are the provider's (its folder `tests`): with no provider on this machine the stand has
-    # none, and what it models of the sites and the players goes on.
-    MODELS = False
 from alloha_model import PROFILE as ALLOHA_PROFILE, AllohaModel
 from plan_disk import Codec, Daemon, Host, _run
 from plan_world import truth_of
@@ -197,14 +187,6 @@ class Title:
 HLS_KEY = bytes(range(16))
 
 
-# The application of each protocol on the stand, and the code of its one admitted line: a line is one player whichever
-# application lists it, so each has a code of its own here.
-APP_OF = {"appdrama": "huayi", "appget": "moli", "gulu": "gulu", "yunduo": "yunduo", "appmn": "appmn", "appv7": "xiaozhu",
-          "share139": "share139", "bubu": "bubu"}
-LINE_OF = {"huayi": "DRAMA", "moli": "MOLI", "gulu": "GULU", "yunduo": "YUNDUO", "appmn": "MINUO", "xiaozhu": "XIAOZHU",
-           "share139": "preview4k", "bubu": "BUBU"}
-
-
 class Site:
     """The site and the player as the real parser and the real player read them; the files on the host."""
 
@@ -216,46 +198,9 @@ class Site:
         self.ids: dict[tuple[str, int], int] = {}
         self.titles: dict[int, Title] = {}
         self.heads: list[str] = []  # the heads of segments the player asked for: what measuring a frame cost
-        # A video application (tests/app99_model.py): its cards list a line of a parser whose streams are on the host.
-        self.app = App99Model(parsers=[9]) if MODELS else None
-        self.app_lines = os.path.join(root, "app-lines")
-        # The applications of every other protocol the service reads, each with one admitted line of its own code.
-        self.drama = DramaModel() if MODELS else None
-        self.others = {"appget": AppGetModel(), "gulu": GuluModel(), "yunduo": YunDuoModel(), "appmn": AppMnModel(),
-                       "appv7": AppV7Model(), "share139": Share139Model(), "bubu": BubuModel()} if MODELS else {}
         # A title of yummyani.me and its player Alloha (tests/alloha_model.py), the CDN of which serves an HLS of the host.
         self.alloha = AllohaModel(voices={})
         self.yummy: dict[str, tuple[int, str, list[dict]]] = {}
-        if MODELS:
-            self.app.line("BLU", "蓝光", parsers="9")
-            # The registry of the admitted lines of the applications of the stand: the one line of each is a player.
-            os.makedirs(self.app_lines, exist_ok=True)
-            for name, lines in (("banri", "BLU"), *((each, LINE_OF[each]) for each in LINE_OF)):
-                with open(os.path.join(self.app_lines, f"{name}.json"), "w", encoding="utf-8") as registry:
-                    json.dump({"app": name, "admitted": {lines: {}}, "refused": {}}, registry)
-
-    def profiles(self) -> list:
-        """The profiles of every application the stand models (none when the machine has no provider)."""
-        if not MODELS:
-            return []
-        return [app_profile(), self.drama.profile(), *(model.profile() for model in self.others.values())]
-
-    def protocol_card(self, protocol: str, number: int, name: str, episodes: dict[int, int]) -> str:
-        """A card of an application of this protocol with its one admitted line: an episode (number → height) is a playlist
-        on the host its stream names. The address of the card as its source is added."""
-        app = APP_OF[protocol]
-        made = []
-        for episode, height in sorted(episodes.items()):
-            folder, token = f"{app}-{number}-ep{episode}", f"{app}-tok-{number}-{episode}"
-            self._hls(folder, truth_of(1, episode), height)
-            made.append((f"第{episode}集", token, self.host.url(folder + "/index.m3u8")))
-        if protocol == "appdrama":
-            self.drama.cards[number] = (name, 2021, [DramaVideo(LINE_OF[app], LINE_OF[app], label, token)
-                                                     for label, token, _ in made])
-            self.drama.plays.update({(LINE_OF[app], token): (address, {}) for _label, token, address in made})
-        else:
-            self.others[protocol].card(number, name, LINE_OF[app], made)
-        return f"app://{app}/{number}"
 
     def alloha_title(self, slug: str, number: int, name: str, voice: str, episodes: dict[int, int]) -> str:
         """A title of yummyani.me whose voice-over plays in Alloha: an episode (number → height) an unencrypted HLS on the
@@ -282,34 +227,6 @@ class Site:
         truth = truth_of(1, episode)
         self.titles[number].episodes[episode] = truth
         self._hls(self._hls_folder(number, episode), truth, height)
-
-    def app_card(self, number: int, name: str, episodes: dict[int, int], *, files: bool = False) -> None:
-        """A card of the application with its line of a parser: an episode (number → height) is a playlist on the host the
-        parser gives for its token — or, with `files`, an MP4 at an address without an extension, as a parser gives one;
-        the search of the application gives the card."""
-        items = []
-        for episode, height in sorted(episodes.items()):
-            folder, token = f"app-{number}-ep{episode}", f"tok-{number}-{episode}"
-            if files:
-                self.app.parses[(9, token)] = self.host.url(self._mp4(folder, truth_of(1, episode), height))
-            else:
-                self._hls(folder, truth_of(1, episode), height)
-                self.app.parses[(9, token)] = self.host.url(folder + "/index.m3u8")
-            items.append((f"第{episode}集", token))
-        self.app.cards[number] = Card(number, name, [Line("BLU", items)], sub="Model Title")
-        self.app.found = [{"id": number, "name": name, "sub": "Model Title", "year": "2021", "area": "大陆",
-                           "class": "动画", "remarks": f"更新至第{len(items)}集", "blurb": "", "pic": ""}]
-
-    def _mp4(self, name: str, truth: int, height: int) -> str:
-        """A video in a picture of this height as one MP4 on the host, its name with no extension; the name."""
-        path = os.path.join(self.root, name + "-video")
-        if not os.path.exists(path):
-            source = path + ".source.mp4"
-            self.codec.make(source, [truth])
-            _run("-i", source, "-vf", f"scale={height * 16 // 9 // 2 * 2}:{height}", "-c:v", "libx264", "-preset",
-                 "ultrafast", "-c:a", "copy", "-movflags", "+faststart", "-f", "mp4", path)
-            os.remove(source)
-        return name + "-video"
 
     def _hls(self, name: str, truth: int, height: int, *, encrypted: bool = True) -> None:
         folder = os.path.join(self.root, name)
@@ -464,13 +381,6 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
     def web(self) -> Web:
         def answer(request: httpx.Request):
             path = request.url.path.strip("/")
-            if MODELS and str(request.url).startswith(APP_HOST):
-                return self.app.handle(request)
-            if MODELS and request.url.host in ("navigator.model", "drama.model"):
-                return self.drama.handle(request)
-            model = next((each for each in self.others.values() if each.owns(str(request.url))), None)
-            if model is not None:
-                return model.handle(request)
             if request.url.host == "127.0.0.1":
                 return self._host_file(request)
             if request.url.host == "old.yummyani.me" and path.startswith("api/anime/"):
@@ -513,30 +423,15 @@ class AppStand:
         self.library = os.path.join(root, "library")
         self.db_path = migrated(os.path.join(root, "app.db"))
         self.profiles: dict[str, int] = {}  # the profile of each voice-over: two sources of one voice-over share it
-        # The provider of the socket reads the applications the stand models: its own process on the stand is a server in a
-        # thread of its own, over the web of the models (the applications are models, the provider and the tracker are real).
-        self.provider = self.provider_http = None
         # The time of day as the sources tell the age of a table by it: a scenario moves it to let a page be read again.
         self.now = datetime.now(timezone.utc)
-
-    def _serve_provider(self) -> str:
-        """The provider of the socket on the stand, once: it outlives the restarts of the tracker, as a provider does."""
-        if not provider_world.present():
-            return ""  # no provider on this machine: the stand has no applications, and the tests that need them are skipped
-        if self.provider_http is None:
-            from chinese_sources.server import create_app
-            from chinese_sources.service import Provider
-            self.provider = Provider(self.site.profiles(), app_lines_dir=self.site.app_lines, http=self.site.web().client())
-            self.provider_http = Served(create_app(self.provider))
-        return self.provider_http.url
 
     async def start(self, before_started=None) -> None:
         self.bus = Bus()
         self.db = Database(self.db_path)
         self.gateway, self.modules = assemble(self.bus, self.db, Options(
             db_path=self.db_path, auth_required=False, cookie_secure=False,
-            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now,
-            provider_url=self._serve_provider()))
+            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now))
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()
         self.module("sources")._http = self.site.web().client()
@@ -559,6 +454,15 @@ class AppStand:
         while sources.connector.state != "up":
             await asyncio.wait_for(up.queue.get(), STAND_LIMIT_S)
 
+    async def use_provider(self, url: str, token: str = "") -> None:
+        """The user names the provider of the socket (the window of the extensions, `PUT /api/provider`) and the stand waits for
+        its manifest to be applied — an event of the module, not a pause. The only way a test points the tracker at a provider:
+        by its address."""
+        up = self.bus.subscribe("sources.provider.state")
+        await self.call("PUT", "/api/provider", {"url": url, "token": token})
+        while (connector := self.module("sources").connector) is None or connector.state != "up":
+            await asyncio.wait_for(up.queue.get(), STAND_LIMIT_S)
+
     def module(self, name: str):
         return next(each for each in self.modules if each.name == name)
 
@@ -568,8 +472,6 @@ class AppStand:
 
     def close(self) -> None:
         self.daemon_http.close()
-        if self.provider_http is not None:
-            self.provider_http.close()
         self.host.close()
 
     # --- the user, through the API ------------------------------------------------------------------------------

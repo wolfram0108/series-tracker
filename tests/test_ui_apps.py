@@ -1,23 +1,14 @@
-"""A card of a video application (tests/app99_model.py) as the source of the reference, in a browser (tests/ui_stand.py):
-the user finds the title by the search of the application in the window of a new series, adds the card it gave, makes the
-rule of its labels («第N集») beside a source of a voice-over, and syncs. The read of the card measures the frame of its line
-on its newest episode — so its rows rank by their frame like the rows of any source: the application's 1080 is the
-reference before the voice-over's 480. The user puts the voice-over first in the queue of the reference of the episode:
-the next sync takes its picture. The address a parser gave serves the downloads of the episode within the hour."""
-import json
-import os
-import subprocess
-
+"""A card of a video application as the source of a series, in a browser (tests/ui_stand.py). The provider of the socket is a
+model of it by the specification (tests/provider_mock.py) at an address the user names in the window of the extensions: the user
+finds the title by the search of the application in the window of a new series, adds the card it gave, reads it by its button,
+puts the rule of its labels («第N集») to it and sees its line as a player. The card of the search keeps its parts at every width."""
 import pytest
 from playwright.async_api import expect
 
-from core import container as mkv
+from provider_mock import MockProvider, serving
+from ui_stand import _pick, state, text, ui  # noqa: F401 - the fixture
 
-from ui_stand import SERIES, SERIES_EN, _pick, lines_of, state, text, ui  # noqa: F401 - the fixture
-
-from provider_world import needs_provider
-
-pytestmark = [pytest.mark.ui, needs_provider]
+pytestmark = pytest.mark.ui
 
 LABEL = [{"type": "text", "value": "第"}, {"type": "number"}, {"type": "text", "value": "集"}]
 ORIGINAL = "Оригинал"
@@ -40,106 +31,51 @@ CARD_LAYOUT = """() => {
 }"""
 
 
-def frame_height(path: str) -> int:
-    probed = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=height", "-of",
-                             "json", path], capture_output=True, text=True, check=True, timeout=30)
-    return json.loads(probed.stdout)["streams"][0]["height"]
-
-
-async def test_a_card_found_by_the_search_of_an_application_is_the_reference_its_streams_parsed_only_to_download(ui):
-    ui.site.app_card(219017, "万界独尊", {1: 1080})
-    ui.site.release("dub", "AnimeVost")
-    ui.site.episode("dub", 1, height=480)
+async def test_a_card_found_by_the_search_of_an_application_is_added_read_by_its_button_and_its_line_is_a_player(ui):  # noqa: F811
+    mock = MockProvider()
+    mock.add_app("banri", "半日 Banri")
+    mock.card("banri", 219017, ["万界独尊"], [("第1集", "BLU", "1", [1080])], title="半日 · 万界独尊 (2021)")
+    mock.apps["banri"].found = [{"id": 219017, "name": "万界独尊"}]
     await ui.first_run()
-    await ui.set_up([ORIGINAL, "AnimeVost"], languages={ORIGINAL: "chi", "AnimeVost": "rus"})
+    await ui.set_up([ORIGINAL], languages={ORIGINAL: "chi"})
     await ui.profile("серии 半日", [{"name": "серия", "if": LABEL,
                                     "then": [("extract_single", LABEL), ("assign_voiceover", ORIGINAL)]}])
-    await ui.profile("серии AnimeVost", lines_of("AnimeVost"))
+    async with serving(mock) as server:
+        await ui.use_provider(server.url)
+        page = ui.page
+        await page.get_by_role("button", name="Добавить сериал").click()
+        await page.locator(".add-url-row .source-mode .st-tab", has_text=text("sources.mode.apps")).click()
+        await page.get_by_label(text("sources.apps.query")).fill("万界独尊")
+        await page.locator(".app-find").click()
+        found = page.locator(".app-card[data-card='219017']")
+        await expect(found).to_contain_text("万界独尊")
+        await ui.shot("a1-search")
+        size = page.viewport_size
+        faults = {}
+        for width in range(360, 1450, 10):
+            await page.set_viewport_size({"width": width, "height": size["height"]})
+            if found_here := await page.evaluate(CARD_LAYOUT):
+                faults[width] = found_here
+        await page.set_viewport_size(size)
+        assert not faults, faults
+        await found.locator(".app-add").click()
 
-    page = ui.page
-    await page.get_by_role("button", name="Добавить сериал").click()
-    await page.locator(".add-url-row .source-mode .st-tab", has_text=text("sources.mode.apps")).click()
-    await page.get_by_label(text("sources.apps.query")).fill("万界独尊")
-    await page.locator(".app-find").click()
-    found = page.locator(".app-card[data-card='219017']")
-    await expect(found).to_contain_text("更新至第1集")
-    await ui.shot("a1-search")
-    size = page.viewport_size
-    faults = {}
-    for width in range(360, 1450, 10):
-        await page.set_viewport_size({"width": width, "height": size["height"]})
-        if found_here := await page.evaluate(CARD_LAYOUT):
-            faults[width] = found_here
-    await page.set_viewport_size(size)
-    assert not faults, faults
-    await found.locator(".app-add").click()
-
-    source = page.locator(".source-card").first
-    # A card of an application is read when the user asks (its button), not when it is added.
-    await expect(source.locator(".source-state")).to_have_text(state("notRead"))
-    await source.locator(".source-reread").click()
-    # The head names the source as its site does (the application and the title); its field is its address, the one writing
-    # a field of an address takes.
-    await expect(source.locator(".source-place")).to_have_text("半日 · 万界独尊 (2021)")
-    await expect(source.locator(".source-app-card input")).to_have_value("app://banri/219017")
-    await _pick(page, source.locator(".item-select").first, "серии 半日")
-    await expect(source.locator(".source-state")).to_have_text(state("readDone"), timeout=60_000)
-    await expect(source.locator(".player-tab")).to_have_text(["BLU1"])  # a line is named by its code
-    # The search stays at hand in the sources: the card already added is marked by its place.
-    sources = page.locator(".sources")
-    await sources.locator(".source-mode .st-tab", has_text=text("sources.mode.apps")).click()
-    await sources.locator(".app-find").click()
-    await expect(sources.locator(".app-card[data-card='219017'] .app-added")).to_have_text(text("sources.apps.added", n=1))
-    await ui.shot("a2-added")
-    await sources.locator(".source-mode .st-tab", has_text=text("sources.mode.address")).click()
-    await page.get_by_label(text("sources.add.label")).fill(ui.site.releases["dub"].url)
-    await page.locator(".source-add button.btn-add", has_text=text("sources.add.button")).click()
-    dub = page.locator(".source-card").nth(1)
-    await _pick(page, dub.locator(".item-select").first, "серии AnimeVost")
-    await expect(dub.locator(".source-state")).to_have_text(state("readDone"), timeout=60_000)
-    await page.get_by_label("Название (RU)").fill(SERIES)
-    await page.get_by_label("Название (EN)").fill(SERIES_EN)
-    await page.get_by_label("Путь сохранения").fill(ui.library)
-    await page.locator(".modern-footer").get_by_role("button", name="Добавить", exact=True).click()
-    await page.locator(".series-card", has_text=SERIES).first.wait_for()
-    listed = await ui.call("GET", "/api/series")
-    series_id = next(each["id"] for each in listed if each["name"] == SERIES)
-    # The read of the card parsed its one line once, on its newest episode, and its rows carry that frame.
-    assert [fields["url"] for path, fields in ui.site.app.calls if path == "/app/vodParser"] == ["tok-219017-1"]
-
-    await ui.open_output()
-    await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
-    await ui.shot("a3-first-sync")
-    view = await ui.check(series_id)
-    (asset,) = view["assets"]
-    assert frame_height(os.path.join(ui.library, asset["name"])) == 1080, "the frame of the line ranks the reference"
-    held = await mkv.contents(os.path.join(ui.library, asset["name"]))
-    assert {track.label: track.language for track in held.audio} == {ORIGINAL: "chi", "AnimeVost": "rus"}
-    # The download takes the address the read parsed within the hour: no parse of its own.
-    assert [fields["url"] for path, fields in ui.site.app.calls if path == "/app/vodParser"] == ["tok-219017-1"]
-
-    await page.locator(".episode-card").first.dblclick()
-    detail = page.locator(".episode-detail")
-    await detail.locator(".st-tab", has_text=text("output.tab.reference")).click()
-    rows = detail.locator(".queue-table .variant-row")
-    await expect(rows).to_have_count(2)
-    groups = rows.locator("td:nth-child(6)")
-    await expect(groups).to_have_text([ORIGINAL, "AnimeVost"])
-    # The order is the core's once it answered: the queue it gives again is the end of the wait.
-    async with page.expect_response(lambda response: "/output/queues" in response.url) as reread:
-        await ui.drag(rows.nth(1).locator(".order-handle"), rows.nth(0))
-    await reread.value
-    await expect(groups).to_have_text(["AnimeVost", ORIGINAL])
-    await ui.shot("a4-reference-order")
-    ui.later()
-    await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(1)
-    view = await ui.check(series_id)
-    (asset,) = view["assets"]
-    # The user's queue goes before the frame: the picture is the voice-over's (the model's own, not the 1080 of the line).
-    assert "[AnimeVost]" in asset["name"] and frame_height(os.path.join(ui.library, asset["name"])) != 1080
-    held = await mkv.contents(os.path.join(ui.library, asset["name"]))
-    assert {track.label: track.language for track in held.audio} == {ORIGINAL: "chi", "AnimeVost": "rus"}
-    # The original sound goes to the new reference from a download of its own, by the address parsed within the hour.
-    assert [fields["url"] for path, fields in ui.site.app.calls if path == "/app/vodParser"] == ["tok-219017-1"]
+        source = page.locator(".source-card").first
+        # A card of an application is read when the user asks (its button), not when it is added.
+        await expect(source.locator(".source-state")).to_have_text(state("notRead"))
+        assert not [each for each in mock.requests if each[0] == "read"]
+        await source.locator(".source-reread").click()
+        # The head names the source as its site does (the application and the title); its field is its address, the one
+        # writing a field of an address takes.
+        await expect(source.locator(".source-place")).to_have_text("半日 · 万界独尊 (2021)")
+        await expect(source.locator(".source-app-card input")).to_have_value("app://banri/219017")
+        await _pick(page, source.locator(".item-select").first, "серии 半日")
+        await expect(source.locator(".source-state")).to_have_text(state("readDone"), timeout=60_000)
+        await expect(source.locator(".player-tab")).to_have_text(["BLU1"])  # a line is named by its code
+        assert len([each for each in mock.requests if each[0] == "read"]) == 1
+        # The search stays at hand in the sources: the card already added is marked by its place.
+        sources = page.locator(".sources")
+        await sources.locator(".source-mode .st-tab", has_text=text("sources.mode.apps")).click()
+        await sources.locator(".app-find").click()
+        await expect(sources.locator(".app-card[data-card='219017'] .app-added")).to_have_text(text("sources.apps.added", n=1))
+        await ui.shot("a2-added")

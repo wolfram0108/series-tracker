@@ -17,7 +17,6 @@ from core.db import Database
 from modules.sources.module import SourcesModule
 from modules.sources.provider import ProviderClient, RemoteFamily
 from provider_mock import MockProvider, link_of, serving
-from provider_world import needs_provider
 from schema_db import migrated
 
 CARD = "app://mock/7"
@@ -450,27 +449,6 @@ async def test_the_name_a_site_gives_its_source_is_kept_with_its_table(tmp_path)
                          rows=[TableRow(key="mock:X:1", player="line:X", state=RowState.PLAYABLE, text="1")])
     await sources.repo.save_table(table)
     assert (await sources.repo.stored(CARD)).table.title == "半日 · 万界独尊 (2021)"
-
-
-@needs_provider
-def test_the_models_of_the_wire_are_the_same_text_at_both_ends_of_the_socket():
-    """The tracker and the provider each hold the models of what crosses the socket: they are one text, and a difference is
-    a protocol that two processes read two ways."""
-    from chinese_sources import wire as theirs
-    from chinese_sources.core import contracts as their_rows
-    from core.contracts import apps, provider as ours, release_table
-
-    for name in ("ProviderInfo", "SiteAddress", "ManifestSite", "ManifestFamily", "ManifestPlace", "ManifestPlayer", "ManifestSearch",
-                 "Manifest", "FeedEvent", "ReadRequest", "ReadFrame", "DownloadRequest", "DownloadFrame", "ProviderState"):
-        assert getattr(theirs, name).model_json_schema() == getattr(ours, name).model_json_schema(), name
-    assert [each.value for each in their_rows.RowState] == [each.value for each in release_table.RowState]
-    for name, owner in (("RowVoice", release_table), ("TableRow", release_table),
-                        ("UnreadPart", release_table), ("AppSearchRequest", apps), ("AppCard", apps), ("AppResults", apps),
-                        ("AppSearchReply", apps)):
-        assert getattr(their_rows, name).model_json_schema() == getattr(owner, name).model_json_schema(), name
-    for constant in ("PROTOCOL", "HEARTBEAT_S", "SILENCE_S", "FRAME_PROGRESS", "FRAME_ALIVE", "FRAME_DRAFT", "FRAME_ERROR",
-                     "FRAME_DONE", "EVENT_HELLO", "EVENT_CHANGED"):
-        assert getattr(theirs, constant) == getattr(ours, constant), constant
 
 
 async def test_a_page_no_site_reads_now_still_serves_the_table_it_had_so_a_source_never_loses_its_rows_for_a_missing_reader(tmp_path):
