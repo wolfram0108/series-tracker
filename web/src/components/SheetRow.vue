@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// A row of a sheet (styles/primitives.css `.sheet`): the caption of what the row holds, its number when it holds a list, and the
-// body. The sheet is the window of the extensions and any window of settings that holds fields in rows.
+// A row of a sheet (styles/primitives.css `.sheet`): the caption of what the row holds, its number when it holds a list, and under it
+// the body, the whole width. The sheet is every window that holds fields, tables or cards in rows (the settings, the extensions, a series).
 defineProps<{ caption: string; count?: number }>()
 </script>
 

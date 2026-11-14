@@ -674,19 +674,16 @@ const rtPass = ref("password123")
       <div class="block sheet">
         <SheetRow :caption="t('rules.step.profiles')">
           <p class="muted small">{{ t("gallery.profile.hint") }}</p>
-          <SheetField :label="t('rules.profile.field')" icon="pi pi-user-edit">
+          <StGroup>
+            <StLabel icon="pi pi-user-edit" :text="t('rules.profile.field')" />
             <StSelect v-model="profileSel" :options="profileOptions" :placeholder="t('gallery.profile.placeholder')" />
+            <StInput v-model="newProfile" :placeholder="t('rules.profile.new')" :aria-label="t('rules.profile.new')" />
             <div class="constructor-item item-button-group">
+              <StBtn icon="pi pi-plus" variant="add" :title="t('rules.profile.create')" :disabled="!newProfile" />
               <StBtn icon="pi pi-pencil" variant="edit" :title="t('rules.profile.rename')" :disabled="!profileSel" />
               <StBtn icon="pi pi-trash" variant="delete" :title="t('common.delete')" :disabled="!profileSel" />
             </div>
-          </SheetField>
-          <SheetField :label="t('rules.profile.new')" icon="pi pi-tag">
-            <StInput v-model="newProfile" />
-            <div class="constructor-item item-button-group">
-              <StBtn icon="pi pi-plus" variant="add" :title="t('rules.profile.create')" :disabled="!newProfile" />
-            </div>
-          </SheetField>
+          </StGroup>
         </SheetRow>
       </div>
 

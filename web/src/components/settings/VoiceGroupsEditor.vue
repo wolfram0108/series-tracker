@@ -2,7 +2,9 @@
 import { computed, nextTick, ref, watch } from "vue"
 import Button from "primevue/button"
 import SheetField from "../SheetField.vue"
+import StGroup from "../StGroup.vue"
 import StInput from "../StInput.vue"
+import StLabel from "../StLabel.vue"
 import StSelect from "../StSelect.vue"
 import type { components } from "../../api/schema"
 import { useConfirm } from "../../composables/useConfirm"
@@ -37,6 +39,8 @@ const editing = ref<number | null>(null)
 const editText = ref("")
 const newText = ref("")
 const nameInput = ref<InstanceType<typeof StInput> | null>(null)
+// What the name field says it is for: a new group, or the new name of the chosen one.
+const nameLabel = computed(() => (renaming.value ? t("voices.settings.group.renameLabel") : t("voices.settings.group.new")))
 const newInput = ref<HTMLInputElement | null>(null)
 
 const names = computed(() => Object.keys(props.groups))
@@ -140,36 +144,32 @@ async function addRow() {
   <div class="groups-editor">
     <p v-if="rejected" class="sheet-problem">{{ t("voices.settings.rejected") }}</p>
 
-    <!-- [group: choose, rename, delete] [name: new or being edited: create or apply] -->
-    <SheetField :label="t('voices.settings.group.field')" icon="pi pi-users">
+    <!-- [group list][name: new or being edited][+][edit][delete] -->
+    <StGroup>
+      <StLabel icon="pi pi-users" :text="t('voices.settings.group.field')" />
       <StSelect :model-value="selected" :options="options" :placeholder="t('voices.settings.group.select')" @update:model-value="choose($event as string | null)" />
+      <StInput
+        ref="nameInput" v-model="nameField" :placeholder="nameLabel" :aria-label="nameLabel"
+        @keyup.enter="renaming ? applyRename() : create()" @keyup.esc="cancelRename"
+      />
       <div class="constructor-item item-button-group">
-        <button class="btn-icon btn-edit" :disabled="busy || !selected || renaming" :title="t('voices.settings.group.rename')" :aria-label="t('voices.settings.group.rename')" @click="startRename">
+        <button v-if="!renaming" class="btn-icon btn-add" :disabled="busy || !nameField.trim()" :title="t('voices.settings.group.create')" :aria-label="t('voices.settings.group.create')" @click="create">
+          <i class="pi pi-plus" />
+        </button>
+        <button v-else class="btn-icon btn-cancel" :title="t('voices.settings.group.cancel')" :aria-label="t('voices.settings.group.cancel')" @click="cancelRename">
+          <i class="pi pi-times" />
+        </button>
+        <button v-if="!renaming" class="btn-icon btn-edit" :disabled="busy || !selected" :title="t('voices.settings.group.rename')" :aria-label="t('voices.settings.group.rename')" @click="startRename">
           <i class="pi pi-pencil" />
+        </button>
+        <button v-else class="btn-icon btn-confirm" :disabled="busy || !nameField.trim()" :title="t('voices.settings.group.apply')" :aria-label="t('voices.settings.group.apply')" @click="applyRename">
+          <i class="pi pi-check" />
         </button>
         <button class="btn-icon btn-delete" :disabled="busy || !selected || renaming" :title="t('voices.settings.group.delete')" :aria-label="t('voices.settings.group.delete')" @click="removeGroup">
           <i class="pi pi-trash" />
         </button>
       </div>
-    </SheetField>
-    <SheetField :label="renaming ? t('voices.settings.group.renameLabel') : t('voices.settings.group.new')" icon="pi pi-tag">
-      <StInput ref="nameInput" v-model="nameField" @keyup.enter="renaming ? applyRename() : create()" @keyup.esc="cancelRename" />
-      <div class="constructor-item item-button-group">
-        <template v-if="!renaming">
-          <button class="btn-icon btn-add" :disabled="busy || !nameField.trim()" :title="t('voices.settings.group.create')" :aria-label="t('voices.settings.group.create')" @click="create">
-            <i class="pi pi-plus" />
-          </button>
-        </template>
-        <template v-else>
-          <button class="btn-icon btn-cancel" :title="t('voices.settings.group.cancel')" :aria-label="t('voices.settings.group.cancel')" @click="cancelRename">
-            <i class="pi pi-times" />
-          </button>
-          <button class="btn-icon btn-confirm" :disabled="busy || !nameField.trim()" :title="t('voices.settings.group.apply')" :aria-label="t('voices.settings.group.apply')" @click="applyRename">
-            <i class="pi pi-check" />
-          </button>
-        </template>
-      </div>
-    </SheetField>
+    </StGroup>
 
     <!-- The language and the names of the chosen group; the last row is the one a new name is written in -->
     <div v-if="selected" class="names-area">

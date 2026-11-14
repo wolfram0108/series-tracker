@@ -1,7 +1,7 @@
 """The window of the extensions in the browser, the whole application on the stand (tests/ui_stand.py): the tab of the provider of
 external sources is the line of its address until an address is named, takes a provider at once and tells what it says (the state of
-the socket, its applications), keeps its token a secret, and every tab of the window holds its layout at every width: its rows go
-beside their captions or under them and nothing runs out of the window or over another field. The provider is a model of the
+the socket, its applications), keeps its token a secret, and every tab of the window holds its layout at every width: the caption of a
+row is above its body and nothing runs out of the window or over another field. The provider is a model of the
 socket on real HTTP (tests/provider_mock.py)."""
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ DETECT = """() => {
       if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) problems.push('two fields overlap');
     }));
     const caption = row.querySelector('.sheet-caption').getBoundingClientRect(), place = row.querySelector('.sheet-body').getBoundingClientRect();
-    if (caption.right > place.left + 1 && caption.bottom > place.top + 1 && caption.left < place.right) problems.push('the caption is over its body');
+    if (caption.bottom > place.top + 1) problems.push('the caption is not above its body');
   }
   for (const each of document.querySelectorAll('.tile-title, .pill')) {
     if (each.scrollWidth > each.clientWidth + 1 && getComputedStyle(each).overflow !== 'visible') problems.push('text is cut: ' + each.textContent);
@@ -156,17 +156,10 @@ async def test_every_tab_of_the_extensions_holds_its_layout_at_every_width(ui): 
                 assert found == [], (tab, width, found)
             walked[tab] = len(WIDTHS)
             await ui.shot_of(page.locator(".modern-modal"), f"53-extensions-{tab}")
-        # Wide, the caption stands beside its body; narrow, above it.
-        await page.set_viewport_size({"width": 1280, "height": 900})
-        wide = await page.evaluate("""() => { const c = document.querySelector('.sheet-caption').getBoundingClientRect(),
-          b = document.querySelector('.sheet-body').getBoundingClientRect(); return b.left > c.right - 1 }""")
         await page.set_viewport_size({"width": 390, "height": 900})
-        narrow = await page.evaluate("""() => { const c = document.querySelector('.sheet-caption').getBoundingClientRect(),
-          b = document.querySelector('.sheet-body').getBoundingClientRect(); return b.top >= c.bottom - 1 }""")
         await ui.shot_of(page.locator(".modern-modal"), "54-extensions-narrow-conform")
         await page.locator(f".st-tab[title='{text('extensions.tab.chines')}']").click()
         await ui.shot_of(page.locator(".modern-modal"), "55-extensions-narrow-chines")
-        assert wide and narrow, (wide, narrow)
         assert len(walked) == 2
 
 

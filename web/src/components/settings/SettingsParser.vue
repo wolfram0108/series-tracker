@@ -2,8 +2,9 @@
 import { ref, computed, watch, nextTick, onMounted } from "vue"
 import { useToast } from "primevue/usetoast"
 import Button from "primevue/button"
-import SheetField from "../SheetField.vue"
+import StGroup from "../StGroup.vue"
 import StInput from "../StInput.vue"
+import StLabel from "../StLabel.vue"
 import StSelect from "../StSelect.vue"
 import ParserRuleCard, { type EditableRule } from "./ParserRuleCard.vue"
 import ParserTableCard from "./ParserTableCard.vue"
@@ -385,30 +386,26 @@ onMounted(() => {
       </button>
       <div v-if="openStep === 'profiles'" class="accordion-body">
         <p class="parser-hint">{{ t("rules.step.profiles.hint") }}</p>
-        <div class="stack">
+        <StGroup>
           <template v-if="!editingProfileId">
-            <SheetField :label="t('rules.profile.field')" icon="pi pi-user">
-              <StSelect v-model="selectedProfileId" :options="profileOptions" :placeholder="t('rules.profile.select')" />
-              <div class="constructor-item item-button-group">
-                <button class="btn-icon btn-edit" :disabled="!selectedProfileId || isLoading" :title="t('rules.profile.rename')" :aria-label="t('rules.profile.rename')" @click="startEditingProfile">
-                  <i class="pi pi-pencil" />
-                </button>
-                <button class="btn-icon btn-delete" :disabled="!selectedProfileId || isLoading" :title="t('rules.profile.delete')" :aria-label="t('rules.profile.delete')" @click="deleteProfile">
-                  <i class="pi pi-trash" />
-                </button>
-              </div>
-            </SheetField>
-            <SheetField :label="t('rules.profile.new')" icon="pi pi-tag">
-              <StInput v-model="newProfileName" @keyup.enter="createProfile" />
-              <div class="constructor-item item-button-group">
-                <button class="btn-icon btn-add" :disabled="!newProfileName.trim() || isLoading" :title="t('rules.profile.create')" :aria-label="t('rules.profile.create')" @click="createProfile">
-                  <i class="pi pi-plus" />
-                </button>
-              </div>
-            </SheetField>
+            <StLabel icon="pi pi-user" :text="t('rules.profile.field')" />
+            <StSelect v-model="selectedProfileId" :options="profileOptions" :placeholder="t('rules.profile.select')" />
+            <StInput v-model="newProfileName" :placeholder="t('rules.profile.new')" :aria-label="t('rules.profile.new')" @keyup.enter="createProfile" />
+            <div class="constructor-item item-button-group">
+              <button class="btn-icon btn-add" :disabled="!newProfileName.trim() || isLoading" :title="t('rules.profile.create')" :aria-label="t('rules.profile.create')" @click="createProfile">
+                <i class="pi pi-plus" />
+              </button>
+              <button class="btn-icon btn-edit" :disabled="!selectedProfileId || isLoading" :title="t('rules.profile.rename')" :aria-label="t('rules.profile.rename')" @click="startEditingProfile">
+                <i class="pi pi-pencil" />
+              </button>
+              <button class="btn-icon btn-delete" :disabled="!selectedProfileId || isLoading" :title="t('rules.profile.delete')" :aria-label="t('rules.profile.delete')" @click="deleteProfile">
+                <i class="pi pi-trash" />
+              </button>
+            </div>
           </template>
-          <SheetField v-else :label="t('rules.profile.renameLabel')" icon="pi pi-pencil">
-            <StInput ref="editInput" v-model="editingProfileName" @keyup.enter="saveProfileName" @keyup.esc="cancelEditing" />
+          <template v-else>
+            <StLabel icon="pi pi-pencil" :text="t('rules.profile.renameLabel')" />
+            <StInput ref="editInput" v-model="editingProfileName" :aria-label="t('rules.profile.renameLabel')" @keyup.enter="saveProfileName" @keyup.esc="cancelEditing" />
             <div class="constructor-item item-button-group">
               <button class="btn-icon btn-confirm" :disabled="!editingProfileName.trim()" :title="t('rules.profile.apply')" :aria-label="t('rules.profile.apply')" @click="saveProfileName">
                 <i class="pi pi-check" />
@@ -417,8 +414,8 @@ onMounted(() => {
                 <i class="pi pi-times" />
               </button>
             </div>
-          </SheetField>
-        </div>
+          </template>
+        </StGroup>
       </div>
     </div>
 

@@ -55,19 +55,18 @@
   .fold-does { margin-inline-start: auto; flex-wrap: wrap; justify-content: flex-end; max-inline-size: 100%; }
 }
 
-/* The sheet (components/SheetRow.vue): a window of settings as rows, each a caption and what it holds. A caption stands to the left of
-   its body while there is room for both (the body asks 22rem), and above it where there is not: nothing is measured by the screen.
-   Fields in a row go in as many columns as fit (`.sheet-pair`); a field is a group of the constructor (StGroup) with its label as a
-   segment (StLabel) and its value as a plain input (StInput without a label) or a control (StControl: a switch, a pair of buttons). */
+/* The sheet (components/SheetRow.vue): a window of settings as rows, each a caption above and what it holds under it, the whole width
+   of the window: no column of captions that stands empty beside a tall body. Fields in a row go in as many columns as fit
+   (`.sheet-pair`); a field is a group of the constructor (StGroup) with its label as a segment (StLabel) and its value as a plain
+   input (StInput without a label) or a control (StControl: a switch, a pair of buttons). */
 .sheet { display: flex; flex-direction: column; }
-.sheet-row { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; padding-block: 0.9rem; border-bottom: 1px solid var(--border-color); }
+.sheet-row { display: flex; flex-direction: column; gap: 0.5rem; padding-block: 0.9rem; border-bottom: 1px solid var(--border-color); }
 .sheet-row:last-child { border-bottom: 0; }
 .sheet-caption {
-  flex: 0 0 9.5rem; margin: 0; padding-top: 0.6rem; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--text-muted);
+  margin: 0; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted);
 }
 .sheet-count { margin-inline-start: 0.3rem; font-weight: 500; color: #adb5bd; }
-.sheet-body { flex: 1 1 22rem; min-inline-size: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.sheet-body { min-inline-size: 0; display: flex; flex-direction: column; gap: 0.6rem; }
 .sheet-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 0.6rem; }
 .sheet-pair > .input-constructor-group.is-wide { grid-column: 1 / -1; }
 .sheet-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
@@ -107,8 +106,8 @@
 .note-sheet { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.75rem; font-size: 0.85rem; line-height: 1.45; }
 .note-sheet dt { color: var(--text-muted); }
 .note-sheet dd { margin: 0; overflow-wrap: anywhere; }
-/* A short number in a field of a sheet (components/StNumber.vue). */
-.st-number { inline-size: 5rem; }
+/* A short number in a field of a sheet (components/StNumber.vue): the bare input of the group, its value at the end of the segment. */
+.st-number { flex: 0 0 auto; inline-size: 4.5rem; min-width: 0; padding: 0.25rem 0; text-align: end; }
 /* A hint under what a row holds. */
 .sheet-hint { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
 .sheet-hint.is-danger { color: var(--color-red-1); }
@@ -122,4 +121,8 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 .panel:last-child { margin-bottom: 0; }
+/* A row of a select, a typed name and buttons (the profile of the rules, a group of voice-overs): its parts wrap into lines on a narrow
+   screen instead of running out of the window. */
+.input-constructor-group:has(> .item-select):has(> .item-plain) { height: auto; flex-wrap: wrap; }
+.input-constructor-group:has(> .item-select):has(> .item-plain) > .item-select { min-width: 0; flex: 1 1 9rem; }
 
