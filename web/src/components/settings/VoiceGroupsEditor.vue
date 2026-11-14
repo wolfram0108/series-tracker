@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue"
 import Button from "primevue/button"
-import StGroup from "../StGroup.vue"
-import StIcon from "../StIcon.vue"
+import SheetField from "../SheetField.vue"
+import StInput from "../StInput.vue"
 import StSelect from "../StSelect.vue"
 import type { components } from "../../api/schema"
 import { useConfirm } from "../../composables/useConfirm"
@@ -30,14 +30,13 @@ const props = defineProps<{
 }>()
 const confirm = useConfirm()
 
-const uid = Math.random().toString(36).slice(2, 8)
 const selected = ref<string | null>(null)
 const nameField = ref("")
 const renaming = ref(false)
 const editing = ref<number | null>(null)
 const editText = ref("")
 const newText = ref("")
-const nameInput = ref<HTMLInputElement | null>(null)
+const nameInput = ref<InstanceType<typeof StInput> | null>(null)
 const newInput = ref<HTMLInputElement | null>(null)
 
 const names = computed(() => Object.keys(props.groups))
@@ -139,56 +138,48 @@ async function addRow() {
 
 <template>
   <div class="groups-editor">
-    <p v-if="rejected" class="problem">{{ t("voices.settings.rejected") }}</p>
+    <p v-if="rejected" class="sheet-problem">{{ t("voices.settings.rejected") }}</p>
 
-    <!-- [group list][name: new or being edited][+][edit][delete] -->
-    <div class="field-group">
-      <StGroup>
-        <StIcon icon="pi pi-users" />
-        <StSelect :model-value="selected" :options="options" :placeholder="t('voices.settings.group.select')" @update:model-value="choose($event as string | null)" />
-        <div class="constructor-item item-floating-label">
-          <input
-            :id="`${uid}-name`"
-            ref="nameInput"
-            v-model="nameField"
-            type="text"
-            class="item-input"
-            placeholder=" "
-            @keyup.enter="renaming ? applyRename() : create()"
-            @keyup.esc="cancelRename"
-          />
-          <label :for="`${uid}-name`">{{ renaming ? t("voices.settings.group.renameLabel") : t("voices.settings.group.new") }}</label>
-        </div>
-        <div class="constructor-item item-button-group">
-          <button v-if="!renaming" class="btn-icon btn-add" :disabled="busy || !nameField.trim()" :title="t('voices.settings.group.create')" :aria-label="t('voices.settings.group.create')" @click="create">
+    <!-- [group: choose, rename, delete] [name: new or being edited: create or apply] -->
+    <SheetField :label="t('voices.settings.group.field')" icon="pi pi-users">
+      <StSelect :model-value="selected" :options="options" :placeholder="t('voices.settings.group.select')" @update:model-value="choose($event as string | null)" />
+      <div class="constructor-item item-button-group">
+        <button class="btn-icon btn-edit" :disabled="busy || !selected || renaming" :title="t('voices.settings.group.rename')" :aria-label="t('voices.settings.group.rename')" @click="startRename">
+          <i class="pi pi-pencil" />
+        </button>
+        <button class="btn-icon btn-delete" :disabled="busy || !selected || renaming" :title="t('voices.settings.group.delete')" :aria-label="t('voices.settings.group.delete')" @click="removeGroup">
+          <i class="pi pi-trash" />
+        </button>
+      </div>
+    </SheetField>
+    <SheetField :label="renaming ? t('voices.settings.group.renameLabel') : t('voices.settings.group.new')" icon="pi pi-tag">
+      <StInput ref="nameInput" v-model="nameField" @keyup.enter="renaming ? applyRename() : create()" @keyup.esc="cancelRename" />
+      <div class="constructor-item item-button-group">
+        <template v-if="!renaming">
+          <button class="btn-icon btn-add" :disabled="busy || !nameField.trim()" :title="t('voices.settings.group.create')" :aria-label="t('voices.settings.group.create')" @click="create">
             <i class="pi pi-plus" />
           </button>
-          <button v-else class="btn-icon btn-cancel" :title="t('voices.settings.group.cancel')" :aria-label="t('voices.settings.group.cancel')" @click="cancelRename">
+        </template>
+        <template v-else>
+          <button class="btn-icon btn-cancel" :title="t('voices.settings.group.cancel')" :aria-label="t('voices.settings.group.cancel')" @click="cancelRename">
             <i class="pi pi-times" />
           </button>
-          <button v-if="!renaming" class="btn-icon btn-edit" :disabled="busy || !selected" :title="t('voices.settings.group.rename')" :aria-label="t('voices.settings.group.rename')" @click="startRename">
-            <i class="pi pi-pencil" />
-          </button>
-          <button v-else class="btn-icon btn-confirm" :disabled="busy || !nameField.trim()" :title="t('voices.settings.group.apply')" :aria-label="t('voices.settings.group.apply')" @click="applyRename">
+          <button class="btn-icon btn-confirm" :disabled="busy || !nameField.trim()" :title="t('voices.settings.group.apply')" :aria-label="t('voices.settings.group.apply')" @click="applyRename">
             <i class="pi pi-check" />
           </button>
-          <button class="btn-icon btn-delete" :disabled="busy || !selected || renaming" :title="t('voices.settings.group.delete')" :aria-label="t('voices.settings.group.delete')" @click="removeGroup">
-            <i class="pi pi-trash" />
-          </button>
-        </div>
-      </StGroup>
-    </div>
+        </template>
+      </div>
+    </SheetField>
 
     <!-- The language and the names of the chosen group; the last row is the one a new name is written in -->
     <div v-if="selected" class="names-area">
-      <StGroup class="group-language" :state="languages[selected] ? null : 'invalid'">
-        <StIcon icon="pi pi-globe" />
+      <SheetField class="group-language" :label="t('voices.settings.group.language')" icon="pi pi-globe" :state="languages[selected] ? null : 'invalid'">
         <StSelect
           :model-value="languages[selected] ?? null" :options="languageOptions"
           :placeholder="t('voices.settings.group.languageNone')" :aria-label="t('voices.settings.group.language')"
           @update:model-value="setLanguage($event as string | null)"
         />
-      </StGroup>
+      </SheetField>
       <div v-for="(name, index) in rows" :key="`${index}:${name}`" class="name-row">
         <template v-if="editing !== index">
           <span class="name-text">{{ name }}</span>
@@ -206,21 +197,14 @@ async function addRow() {
         <Button icon="pi pi-check" text rounded :disabled="busy || !newText.trim()" :title="t('voices.settings.name.save')" :aria-label="t('voices.settings.name.save')" @click="addRow" />
       </div>
     </div>
-    <p v-else class="muted-hint">{{ names.length ? t("voices.settings.group.choose") : t("voices.settings.group.none") }}</p>
+    <p v-else class="sheet-hint">{{ names.length ? t("voices.settings.group.choose") : t("voices.settings.group.none") }}</p>
 
-    <p v-for="(problem, index) in problems" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
+    <p v-for="(problem, index) in problems" :key="index" class="sheet-problem">{{ reasonText(problem.detail) }}</p>
   </div>
 </template>
 
 <style scoped>
-.groups-editor { display: flex; flex-direction: column; gap: 0.9rem; }
-.muted-hint { color: var(--text-muted); margin: 0; }
-.problem { color: var(--color-red-1); margin: 0; }
-/* The row of step 1 on a narrow screen: its parts wrap into lines instead of running out of the window. */
-.groups-editor :deep(.input-constructor-group) { height: auto; flex-wrap: wrap; }
-.groups-editor :deep(.input-constructor-group > .constructor-item) { min-height: 62px; }
-.groups-editor :deep(.item-select) { min-width: 0; flex: 1 1 9rem; }
-.groups-editor :deep(.item-floating-label) { min-width: 0; flex: 1 1 5rem; }
+.groups-editor { display: flex; flex-direction: column; gap: 0.6rem; }
 .names-area { display: flex; flex-direction: column; gap: 0.35rem; }
 .name-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0.4rem 0.15rem 0.8rem; background: var(--bg-light); border-radius: var(--border-radius); }
 .name-text { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }

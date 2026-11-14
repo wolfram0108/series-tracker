@@ -2,8 +2,8 @@
 import { ref, computed } from "vue"
 import Button from "primevue/button"
 import { useToast } from "primevue/usetoast"
-import StGroup from "../StGroup.vue"
-import StIcon from "../StIcon.vue"
+import SheetField from "../SheetField.vue"
+import SheetRow from "../SheetRow.vue"
 import StInput from "../StInput.vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
@@ -13,7 +13,7 @@ import { t, tAround } from "../../i18n"
 // Вкладка «Аккаунт»: смена пароля администратора. POST /api/auth/password
 // (за «замком»): обновляет хэш. Текущий пароль не запрашивается — активная
 // сессия уже подтверждает владельца (решение для однопользовательского
-// приложения). Поля — StGroup с валидацией рамкой; результат — Toast.
+// приложения). Поля — SheetField с валидацией рамкой; результат — Toast.
 const auth = useAuthStore()
 const toast = useToast()
 const { request, loading } = useApi()
@@ -63,41 +63,20 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <div class="settings-account">
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-lock"></i> {{ t("account.section") }}</div>
-      <div class="fieldset-content">
-        <StGroup :state="nextState">
-          <StIcon icon="pi pi-key" />
-          <StInput v-model="next" :label="t('account.new')" type="password" />
-        </StGroup>
-        <StGroup :state="next2State">
-          <StIcon icon="pi pi-key" />
-          <StInput v-model="next2" :label="t('account.repeat')" type="password" />
-        </StGroup>
-        <small class="fieldset-hint">{{ hint[0] }}<b>{{ auth.adminName }}</b>{{ hint[1] }}</small>
-        <div class="account-actions">
-          <Button :label="t('account.change')" icon="pi pi-check"
-                  :loading="loading" @click="submit" />
-        </div>
+  <div class="sheet settings-account">
+    <SheetRow :caption="t('account.section')">
+      <div class="sheet-pair">
+        <SheetField :label="t('account.new')" icon="pi pi-key" :state="nextState">
+          <StInput v-model="next" type="password" />
+        </SheetField>
+        <SheetField :label="t('account.repeat')" icon="pi pi-key" :state="next2State">
+          <StInput v-model="next2" type="password" />
+        </SheetField>
       </div>
-    </div>
+      <p class="sheet-hint">{{ hint[0] }}<b>{{ auth.adminName }}</b>{{ hint[1] }}</p>
+      <div class="sheet-line is-end">
+        <Button :label="t('account.change')" icon="pi pi-check" :loading="loading" @click="submit" />
+      </div>
+    </SheetRow>
   </div>
 </template>
-
-<style scoped>
-/* Вертикальные зазоры между группами полей (по умолчанию fieldset-content
-   их не задаёт — в других вкладках поля лежат одной группой). */
-.settings-account :deep(.fieldset-content) {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.settings-account :deep(.fieldset-hint) {
-  margin-top: 0;
-}
-.account-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-</style>

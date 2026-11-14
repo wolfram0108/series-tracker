@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue"
-import InputText from "primevue/inputtext"
 import InfoTile from "../InfoTile.vue"
+import SheetField from "../SheetField.vue"
 import SheetRow from "../SheetRow.vue"
-import StControl from "../StControl.vue"
-import StGroup from "../StGroup.vue"
 import StInput from "../StInput.vue"
-import StLabel from "../StLabel.vue"
+import StNumber from "../StNumber.vue"
 import StValue from "../StValue.vue"
 import { api } from "../../api/client"
 import type { components } from "../../api/schema"
@@ -106,21 +104,18 @@ onMounted(() => {
         <span v-else class="pill pill-danger">{{ t("extensions.chines.unavailable", { error: reasonText(view.reason) }) }}</span>
       </div>
       <div class="sheet-pair">
-        <StGroup :state="problems.some((each) => each.field === 'url') ? 'invalid' : null">
-          <StLabel icon="pi pi-link" :text="t('extensions.chines.address')" />
-          <StInput v-model="url" :placeholder="t('extensions.chines.addressExample')" :aria-label="t('extensions.chines.address')" />
-        </StGroup>
-        <StGroup v-if="named">
-          <StLabel icon="pi pi-key" :text="t('extensions.chines.token')" />
-          <StInput v-model="token" type="password" :placeholder="view?.has_token ? t('extensions.chines.tokenKept') : undefined"
-                   :aria-label="t('extensions.chines.token')" />
+        <SheetField :label="t('extensions.chines.address')" icon="pi pi-link" :state="problems.some((each) => each.field === 'url') ? 'invalid' : null">
+          <StInput v-model="url" :placeholder="t('extensions.chines.addressExample')" />
+        </SheetField>
+        <SheetField v-if="named" :label="t('extensions.chines.token')" icon="pi pi-key">
+          <StInput v-model="token" type="password" :placeholder="view?.has_token ? t('extensions.chines.tokenKept') : undefined" />
           <div v-if="view?.has_token && !token" class="constructor-item item-button-group">
             <button type="button" class="btn-icon btn-delete" :title="t('extensions.chines.tokenClear')"
                     :aria-label="t('extensions.chines.tokenClear')" @click="save(true)">
               <i class="pi pi-times" />
             </button>
           </div>
-        </StGroup>
+        </SheetField>
       </div>
       <p v-for="(problem, index) in problems" :key="index" class="sheet-problem">{{ reasonText(problem.detail) }}</p>
     </SheetRow>
@@ -128,21 +123,18 @@ onMounted(() => {
     <template v-if="named">
       <SheetRow :caption="t('extensions.sheet.params')">
         <div class="sheet-pair">
-          <StGroup :title="t('debug.downloads.providerAtOnceHint')">
-            <StLabel :text="t('extensions.chines.atOnce')" />
-            <StControl>
-              <InputText v-model="atOnce" inputmode="numeric" class="chines-num" :aria-label="t('extensions.chines.atOnce')" @change="saveAtOnce" />
-            </StControl>
-          </StGroup>
+          <SheetField :label="t('extensions.chines.atOnce')" :title="t('debug.downloads.providerAtOnceHint')" control>
+            <StNumber v-model="atOnce" @change="saveAtOnce" />
+          </SheetField>
         </div>
       </SheetRow>
 
       <SheetRow :caption="t('extensions.sheet.paths')">
         <div class="sheet-pair">
-          <StGroup class="is-readonly">
-            <StLabel icon="pi pi-folder" :text="t('extensions.chines.downloadsDir')"><span class="mark">{{ t("extensions.chines.fromConform") }}</span></StLabel>
+          <SheetField class="is-readonly" :label="t('extensions.chines.downloadsDir')" icon="pi pi-folder">
+            <template #mark><span class="mark">{{ t("extensions.chines.fromConform") }}</span></template>
             <StValue :value="view?.downloads_dir ?? ''" mono />
-          </StGroup>
+          </SheetField>
         </div>
       </SheetRow>
 
@@ -154,7 +146,3 @@ onMounted(() => {
     </template>
   </div>
 </template>
-
-<style scoped>
-.chines-num { inline-size: 5rem; }
-</style>

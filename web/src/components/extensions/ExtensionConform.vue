@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue"
-import InputText from "primevue/inputtext"
 import SelectButton from "primevue/selectbutton"
-import ToggleSwitch from "primevue/toggleswitch"
+import SheetField from "../SheetField.vue"
 import SheetRow from "../SheetRow.vue"
-import StControl from "../StControl.vue"
-import StGroup from "../StGroup.vue"
 import StInput from "../StInput.vue"
-import StLabel from "../StLabel.vue"
+import StNumber from "../StNumber.vue"
+import StSwitch from "../StSwitch.vue"
 import { api } from "../../api/client"
 import type { components } from "../../api/schema"
 import { useApi } from "../../composables/useApi"
@@ -169,70 +167,49 @@ onMounted(load)
         <span v-else class="pill pill-info">{{ t("conform.settings.connecting") }}</span>
       </div>
       <div class="sheet-pair">
-        <StGroup>
-          <StLabel icon="pi pi-link" :text="t('conform.settings.url')" />
-          <StInput v-model="url" :aria-label="t('conform.settings.url')" />
-        </StGroup>
+        <SheetField :label="t('conform.settings.url')" icon="pi pi-link">
+          <StInput v-model="url" />
+        </SheetField>
       </div>
     </SheetRow>
 
     <template v-if="named">
       <SheetRow :caption="t('extensions.sheet.paths')">
         <div class="sheet-pair">
-          <StGroup>
-            <StLabel icon="pi pi-folder" :text="t('conform.settings.local')" />
-            <StInput v-model="here" :aria-label="t('conform.settings.local')" />
-          </StGroup>
-          <StGroup>
-            <StLabel icon="pi pi-arrow-right" :text="t('conform.settings.daemon')" />
-            <StInput v-model="there" :aria-label="t('conform.settings.daemon')" />
-          </StGroup>
+          <SheetField :label="t('conform.settings.local')" icon="pi pi-folder">
+            <StInput v-model="here" />
+          </SheetField>
+          <SheetField :label="t('conform.settings.daemon')" icon="pi pi-arrow-right">
+            <StInput v-model="there" />
+          </SheetField>
         </div>
       </SheetRow>
 
       <SheetRow v-if="params" :caption="t('extensions.sheet.params')">
         <div class="sheet-pair">
-          <StGroup :title="t('conform.params.methodHint')">
-            <StLabel :text="t('conform.params.method')" />
-            <StControl>
-              <SelectButton :model-value="params.audio_method" :options="methods" option-label="label" option-value="value"
-                            :allow-empty="false" :aria-label="t('conform.params.method')"
-                            @update:model-value="setParams({ audio_method: $event })" />
-            </StControl>
-          </StGroup>
-          <StGroup :title="t('conform.params.driftHint', { value: domain?.drift_default ?? '' })">
-            <StLabel :text="t('conform.params.drift')" />
-            <StControl>
-              <span v-if="domain" class="item-hint">{{ t("conform.params.driftRange", { low: domain.drift_min, high: domain.drift_max }) }}</span>
-              <InputText v-model="drift" inputmode="decimal" class="conform-num" :aria-label="t('conform.params.drift')" @change="setDrift" />
-            </StControl>
-          </StGroup>
-          <StGroup :title="t('conform.params.keepTmpHint')">
-            <StLabel :text="t('conform.params.keepTmp')" />
-            <StControl>
-              <ToggleSwitch :model-value="params.keep_tmp" :aria-label="t('conform.params.keepTmp')" @update:model-value="setParams({ keep_tmp: $event })" />
-            </StControl>
-          </StGroup>
-          <StGroup :title="t('conform.params.fillHint')">
-            <StLabel :text="t('conform.params.fill')" />
-            <StControl>
-              <ToggleSwitch :model-value="params.fill_silence" :aria-label="t('conform.params.fill')" @update:model-value="setParams({ fill_silence: $event })" />
-            </StControl>
-          </StGroup>
-          <StGroup class="is-wide" :title="t('conform.params.edgesHint')">
-            <StLabel :text="t('extensions.conform.edges')" />
-            <StControl>
-              <SelectButton :model-value="params.extend_edges" :options="edges" option-label="label" option-value="value"
-                            :allow-empty="false" :aria-label="t('extensions.conform.edges')"
-                            @update:model-value="setParams({ extend_edges: $event })" />
-            </StControl>
-          </StGroup>
-          <StGroup class="is-wide" :title="t('conform.settings.clearFinishedHint')">
-            <StLabel :text="t('conform.settings.clearFinished')" />
-            <StControl>
-              <ToggleSwitch :model-value="core?.clear_finished ?? false" :aria-label="t('conform.settings.clearFinished')" @update:model-value="setClear($event)" />
-            </StControl>
-          </StGroup>
+          <SheetField :label="t('conform.params.method')" :title="t('conform.params.methodHint')" control>
+            <SelectButton :model-value="params.audio_method" :options="methods" option-label="label" option-value="value"
+                          :allow-empty="false" :aria-label="t('conform.params.method')"
+                          @update:model-value="setParams({ audio_method: $event })" />
+          </SheetField>
+          <SheetField :label="t('conform.params.drift')" :title="t('conform.params.driftHint', { value: domain?.drift_default ?? '' })" control>
+            <span v-if="domain" class="item-hint">{{ t("conform.params.driftRange", { low: domain.drift_min, high: domain.drift_max }) }}</span>
+            <StNumber v-model="drift" decimal @change="setDrift" />
+          </SheetField>
+          <SheetField :label="t('conform.params.keepTmp')" :title="t('conform.params.keepTmpHint')" control>
+            <StSwitch :model-value="params.keep_tmp" @update:model-value="setParams({ keep_tmp: $event })" />
+          </SheetField>
+          <SheetField :label="t('conform.params.fill')" :title="t('conform.params.fillHint')" control>
+            <StSwitch :model-value="params.fill_silence" @update:model-value="setParams({ fill_silence: $event })" />
+          </SheetField>
+          <SheetField :label="t('extensions.conform.edges')" :title="t('conform.params.edgesHint')" wide control>
+            <SelectButton :model-value="params.extend_edges" :options="edges" option-label="label" option-value="value"
+                          :allow-empty="false" :aria-label="t('extensions.conform.edges')"
+                          @update:model-value="setParams({ extend_edges: $event })" />
+          </SheetField>
+          <SheetField :label="t('conform.settings.clearFinished')" :title="t('conform.settings.clearFinishedHint')" wide control>
+            <StSwitch :model-value="core?.clear_finished ?? false" @update:model-value="setClear($event)" />
+          </SheetField>
         </div>
       </SheetRow>
     </template>
@@ -240,7 +217,3 @@ onMounted(load)
     <p v-for="(problem, index) in problems" :key="index" class="sheet-problem">{{ reasonText(problem.detail) }}</p>
   </div>
 </template>
-
-<style scoped>
-.conform-num { inline-size: 5rem; }
-</style>

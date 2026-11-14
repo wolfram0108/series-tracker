@@ -11,6 +11,7 @@ import { CHANGE_ANSWER, nextAnswer } from "../../lib/changeAnswer"
 import { reasonText } from "../../lib/reason"
 import { useVoicesStore } from "../../stores/voices"
 import OrderList from "../OrderList.vue"
+import SheetRow from "../SheetRow.vue"
 import VoiceGroupsEditor from "./VoiceGroupsEditor.vue"
 
 // Settings of the voices: groups of voice-overs and the order of the sources. Every action goes to the core at once and
@@ -93,86 +94,77 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="settings-voices">
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-users"></i> {{ t("voices.settings.voices.title") }}</div>
-      <div class="fieldset-content">
-        <p class="muted-hint">{{ t("voices.settings.voices.hint") }}</p>
-        <VoiceGroupsEditor
-          v-if="view"
-          :groups="view.voice_groups"
-          :busy="busy"
-          :languages="view.voice_languages ?? {}"
-          :commit="(next: Groups, languages: Record<string, string>) => commit({ voice_groups: next, voice_languages: languages })"
-          :problems="[...problemsOf('voice_groups'), ...problemsOf('voice_languages')]"
-          :rejected="rejected('voice_groups')"
-        />
-      </div>
-    </div>
+  <div class="sheet settings-voices">
+    <SheetRow :caption="t('voices.settings.voices.title')">
+      <p class="sheet-hint">{{ t("voices.settings.voices.hint") }}</p>
+      <VoiceGroupsEditor
+        v-if="view"
+        :groups="view.voice_groups"
+        :busy="busy"
+        :languages="view.voice_languages ?? {}"
+        :commit="(next: Groups, languages: Record<string, string>) => commit({ voice_groups: next, voice_languages: languages })"
+        :problems="[...problemsOf('voice_groups'), ...problemsOf('voice_languages')]"
+        :rejected="rejected('voice_groups')"
+      />
+    </SheetRow>
 
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-sort-amount-down"></i> {{ t("voices.settings.priority.title") }}</div>
-      <div class="fieldset-content">
-        <p class="muted-hint">{{ t("voices.settings.priority.hint") }}</p>
-        <p v-if="rejected('priority')" class="problem">{{ t("voices.settings.rejected") }}</p>
-        <div class="priority">
-          <div class="priority-head" aria-hidden="true">
-            <span></span>
-            <span>{{ t("voices.settings.priority.col.place") }}</span>
-            <span>{{ t("voices.settings.priority.col.name") }}</span>
-            <span>{{ t("voices.settings.priority.col.kind") }}</span>
-            <span>{{ t("voices.settings.priority.col.height") }}</span>
-            <span>{{ t("voices.settings.priority.col.where") }}</span>
-            <span class="priority-on">{{ t("voices.settings.priority.col.on") }}</span>
-          </div>
-          <OrderList class="priority-list" :items="order" :item-key="keyOf" :busy="busy" handle=".order-handle"
-                     @order="commit({ priority: $event })">
-            <template #item="{ item, index, step }">
-              <li class="priority-row" :class="{ 'is-off': off.has(item) }" :data-player="item">
-                <button type="button" class="order-handle" :disabled="busy" :aria-label="t('voices.settings.priority.drag')" @keydown="step">
-                  <i class="pi pi-bars" aria-hidden="true" />
-                </button>
-                <span class="priority-place">{{ index + 1 }}</span>
-                <span class="priority-name">{{ nameOf(item) }}</span>
-                <span class="priority-meta">
-                <span class="priority-kind">
-                  <span v-if="facts[item]" class="kind" :class="`kind-${facts[item].kind}`">{{ t(`voices.settings.priority.kind.${facts[item].kind}`) }}</span>
-                </span>
-                <span class="priority-height">
-                  <template v-if="facts[item]?.height">
-                    <span class="height-cell">{{ t("voices.settings.priority.height", { height: facts[item].height ?? "" }) }}</span>
-                    <span class="height-card">{{ t("voices.settings.priority.upTo", { height: facts[item].height ?? "" }) }}</span>
-                  </template>
-                </span>
-                </span>
-                <span class="priority-where">
-                  <span v-for="place in facts[item]?.places ?? []" :key="place.name" class="place" :class="{ zero: !place.sources }">
-                    {{ place.label }} <b>{{ place.sources }}</b>
-                  </span>
-                  <span v-if="facts[item] && !facts[item].places?.length" class="none">{{ t("voices.settings.priority.noSources") }}</span>
-                </span>
-                <span class="priority-on">
-                  <ToggleSwitch :model-value="!off.has(item)" :disabled="busy"
-                                :aria-label="t(off.has(item) ? 'voices.settings.priority.off' : 'voices.settings.priority.on', { player: nameOf(item) })"
-                                @update:model-value="switchPlayer(item, $event)" />
-                </span>
-              </li>
-            </template>
-          </OrderList>
+    <SheetRow :caption="t('voices.settings.priority.title')">
+      <p class="sheet-hint">{{ t("voices.settings.priority.hint") }}</p>
+      <p v-if="rejected('priority')" class="sheet-problem">{{ t("voices.settings.rejected") }}</p>
+      <div class="priority">
+        <div class="priority-head" aria-hidden="true">
+          <span></span>
+          <span>{{ t("voices.settings.priority.col.place") }}</span>
+          <span>{{ t("voices.settings.priority.col.name") }}</span>
+          <span>{{ t("voices.settings.priority.col.kind") }}</span>
+          <span>{{ t("voices.settings.priority.col.height") }}</span>
+          <span>{{ t("voices.settings.priority.col.where") }}</span>
+          <span class="priority-on">{{ t("voices.settings.priority.col.on") }}</span>
         </div>
-        <p v-for="(problem, index) in [...problemsOf('priority'), ...problemsOf('players_off')]" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
-        <div class="actions-row">
-          <Button :label="t('voices.settings.priority.reset')" icon="pi pi-undo" severity="secondary" size="small" text :disabled="busy" @click="resetOrder" />
-        </div>
+        <OrderList class="priority-list" :items="order" :item-key="keyOf" :busy="busy" handle=".order-handle"
+                   @order="commit({ priority: $event })">
+          <template #item="{ item, index, step }">
+            <li class="priority-row" :class="{ 'is-off': off.has(item) }" :data-player="item">
+              <button type="button" class="order-handle" :disabled="busy" :aria-label="t('voices.settings.priority.drag')" @keydown="step">
+                <i class="pi pi-bars" aria-hidden="true" />
+              </button>
+              <span class="priority-place">{{ index + 1 }}</span>
+              <span class="priority-name">{{ nameOf(item) }}</span>
+              <span class="priority-meta">
+              <span class="priority-kind">
+                <span v-if="facts[item]" class="kind" :class="`kind-${facts[item].kind}`">{{ t(`voices.settings.priority.kind.${facts[item].kind}`) }}</span>
+              </span>
+              <span class="priority-height">
+                <template v-if="facts[item]?.height">
+                  <span class="height-cell">{{ t("voices.settings.priority.height", { height: facts[item].height ?? "" }) }}</span>
+                  <span class="height-card">{{ t("voices.settings.priority.upTo", { height: facts[item].height ?? "" }) }}</span>
+                </template>
+              </span>
+              </span>
+              <span class="priority-where">
+                <span v-for="place in facts[item]?.places ?? []" :key="place.name" class="place" :class="{ zero: !place.sources }">
+                  {{ place.label }} <b>{{ place.sources }}</b>
+                </span>
+                <span v-if="facts[item] && !facts[item].places?.length" class="none">{{ t("voices.settings.priority.noSources") }}</span>
+              </span>
+              <span class="priority-on">
+                <ToggleSwitch :model-value="!off.has(item)" :disabled="busy"
+                              :aria-label="t(off.has(item) ? 'voices.settings.priority.off' : 'voices.settings.priority.on', { player: nameOf(item) })"
+                              @update:model-value="switchPlayer(item, $event)" />
+              </span>
+            </li>
+          </template>
+        </OrderList>
       </div>
-    </div>
+      <p v-for="(problem, index) in [...problemsOf('priority'), ...problemsOf('players_off')]" :key="index" class="sheet-problem">{{ reasonText(problem.detail) }}</p>
+      <div class="actions-row">
+        <Button :label="t('voices.settings.priority.reset')" icon="pi pi-undo" severity="secondary" size="small" text :disabled="busy" @click="resetOrder" />
+      </div>
+    </SheetRow>
   </div>
 </template>
 
 <style scoped>
-.settings-voices { display: flex; flex-direction: column; gap: 1.2rem; }
-.muted-hint { color: var(--text-muted); margin: 0 0 0.75rem; }
-.problem { color: var(--color-red-1); margin: 0.4rem 0; }
 .actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: 0.75rem 0 0; }
 /* One grid for the head and every row, so the columns line up; a narrow section turns each row into a card. */
 .priority {

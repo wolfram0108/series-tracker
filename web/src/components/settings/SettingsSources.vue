@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue"
-import StGroup from "../StGroup.vue"
-import StIcon from "../StIcon.vue"
+import SheetField from "../SheetField.vue"
+import SheetRow from "../SheetRow.vue"
 import StInput from "../StInput.vue"
 import StBtn from "../StBtn.vue"
 import StSelect from "../StSelect.vue"
@@ -91,48 +91,39 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="settings-sources">
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-wifi"></i> {{ t("settings.sources.trackers") }}</div>
-      <div class="fieldset-content sources-editor">
-        <StGroup>
-          <StIcon icon="pi pi-wifi" />
-          <StSelect :model-value="selected" :options="options" :placeholder="t('settings.sources.select')" @update:model-value="choose($event as number | null)" />
-        </StGroup>
-        <template v-if="chosen">
-          <div v-if="mirrorsOf(chosen).length" class="mirrors-row">
-            <span v-for="(mirror, index) in mirrorsOf(chosen)" :key="mirror" class="mirror-pill">
-              {{ mirror }}
-              <button class="mirror-pill-remove" :disabled="busy" :title="t('settings.sources.mirror.remove')" :aria-label="t('settings.sources.mirror.remove')" @click="removeMirror(index)" />
-            </span>
-          </div>
-          <StGroup>
-            <StInput v-model="newMirror" :label="t('settings.sources.mirror.new')" @keyup.enter="addMirror" />
-            <div class="constructor-item item-button-group">
-              <StBtn icon="pi pi-plus" variant="add" :disabled="busy || !newMirror.trim()" :title="t('settings.sources.mirror.add')" :aria-label="t('settings.sources.mirror.add')" @click="addMirror" />
-            </div>
-          </StGroup>
-        </template>
-      </div>
-    </div>
-    <div v-if="readers.length" class="modern-fieldset parsed-domains">
-      <div class="fieldset-header"><i class="pi pi-globe"></i> {{ t("settings.sources.domains.title") }}</div>
-      <div class="fieldset-content">
-        <div v-for="reader in readers" :key="`${reader.kind}:${reader.name}`" class="domains-row">
-          <span class="domains-name">{{ reader.name }}</span>
-          <span class="domains-kind">{{ t(`settings.sources.domains.kind.${reader.kind === "tracker" ? "tracker" : "site"}`) }}</span>
-          <span v-for="domain in reader.domains ?? []" :key="domain" class="mirror-pill">{{ domain }}</span>
+  <div class="sheet settings-sources">
+    <SheetRow class="sources-editor" :caption="t('settings.sources.trackers')">
+      <SheetField :label="t('settings.sources.tracker')" icon="pi pi-wifi">
+        <StSelect :model-value="selected" :options="options" :placeholder="t('settings.sources.select')" @update:model-value="choose($event as number | null)" />
+      </SheetField>
+      <template v-if="chosen">
+        <div v-if="mirrorsOf(chosen).length" class="sheet-line">
+          <span v-for="(mirror, index) in mirrorsOf(chosen)" :key="mirror" class="mirror-pill">
+            {{ mirror }}
+            <button class="mirror-pill-remove" :disabled="busy" :title="t('settings.sources.mirror.remove')" :aria-label="t('settings.sources.mirror.remove')" @click="removeMirror(index)" />
+          </span>
         </div>
+        <SheetField :label="t('settings.sources.mirror.new')" icon="pi pi-globe">
+          <StInput v-model="newMirror" @keyup.enter="addMirror" />
+          <div class="constructor-item item-button-group">
+            <StBtn icon="pi pi-plus" variant="add" :disabled="busy || !newMirror.trim()" :title="t('settings.sources.mirror.add')" :aria-label="t('settings.sources.mirror.add')" @click="addMirror" />
+          </div>
+        </SheetField>
+      </template>
+    </SheetRow>
+    <SheetRow v-if="readers.length" :caption="t('settings.sources.domains.title')" class="parsed-domains">
+      <div v-for="reader in readers" :key="`${reader.kind}:${reader.name}`" class="sheet-line domains-row">
+        <span class="domains-name">{{ reader.name }}</span>
+        <span class="domains-kind">{{ t(`settings.sources.domains.kind.${reader.kind === "tracker" ? "tracker" : "site"}`) }}</span>
+        <span v-for="domain in reader.domains ?? []" :key="domain" class="mirror-pill">{{ domain }}</span>
       </div>
-    </div>
+    </SheetRow>
   </div>
 </template>
 
 <style scoped>
-.sources-editor { display: flex; flex-direction: column; gap: 0.9rem; }
-.mirrors-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.domains-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; }
+.domains-row { padding-block: 0.4rem; }
 .domains-row + .domains-row { border-top: 1px solid var(--border-color); }
 .domains-name { font-weight: 600; }
-.domains-kind { color: var(--text-muted); margin-right: 4px; }
+.domains-kind { color: var(--text-muted); margin-inline-end: 0.25rem; }
 </style>

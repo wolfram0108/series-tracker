@@ -96,7 +96,7 @@ describe("the tab «Источники»", () => {
   it("ends with every domain the service reads pages of, as the core lists them", async () => {
     const w = await opened()
     const section = w.find(".parsed-domains")
-    expect(section.find(".fieldset-header").text()).toBe(t("settings.sources.domains.title"))
+    expect(section.find(".sheet-caption").text()).toBe(t("settings.sources.domains.title"))
     expect(section.findAll(".domains-row").map((row) => row.findAll(".mirror-pill").map((pill) => pill.text()))).toEqual([
       ["kinozal.me", "kinozal.guru"], ["jszyapi.com", "lziapi.com"]])
     expect(section.findAll(".domains-kind").map((each) => each.text())).toEqual([

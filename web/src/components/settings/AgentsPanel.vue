@@ -13,9 +13,10 @@ import { useQueuesStore } from "../../stores/queues"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
 import { useSeriesStore } from "../../stores/series"
 import { useVoicesStore } from "../../stores/voices"
-import StGroup from "../StGroup.vue"
-import StIcon from "../StIcon.vue"
+import SheetField from "../SheetField.vue"
+import SheetRow from "../SheetRow.vue"
 import StSelect from "../StSelect.vue"
+import StValue from "../StValue.vue"
 import ConformPlotViewer from "./ConformPlotViewer.vue"
 import WorkCard from "./WorkCard.vue"
 
@@ -93,12 +94,12 @@ const str = (value: unknown) => String(value ?? "")
 <template>
   <div class="agents-panel">
     <div class="agents-filter">
-      <span class="agents-filter-label">{{ t("agents.filter.series") }}</span>
-      <div v-if="seriesId != null" class="agents-fixed">{{ lockedLabel }}</div>
-      <StGroup v-else class="agents-select">
-        <StIcon icon="pi pi-filter" />
+      <SheetField v-if="seriesId != null" class="agents-select is-readonly" :label="t('agents.filter.series')" icon="pi pi-filter">
+        <StValue class="agents-fixed" :value="lockedLabel" />
+      </SheetField>
+      <SheetField v-else class="agents-select" :label="t('agents.filter.series')" icon="pi pi-filter">
         <StSelect v-model="picked" :options="seriesOptions" />
-      </StGroup>
+      </SheetField>
       <span class="agents-chips">
         <span v-for="section in shown" :key="section.key" class="pill agents-chip" :data-state="section.tone" :class="{ 'is-empty': !section.shown.length }">
           {{ section.chip }} <b>{{ section.shown.length }}</b>
@@ -106,28 +107,29 @@ const str = (value: unknown) => String(value ?? "")
       </span>
     </div>
 
-    <section v-for="section in shown" :key="section.key" class="agents-section" :data-section="section.key">
-      <h6 class="agents-title"><i class="pi" :class="section.icon"></i> {{ section.title }} <span class="agents-count">{{ section.shown.length }}</span></h6>
-      <template v-if="section.key === 'conform'">
-        <div v-if="!q.conform || !q.conform.daemon.up" class="queue-empty">
-          {{ q.conform && q.conform.daemon.error
-            ? t("agents.conform.daemon.down", { error: reasonText(q.conform.daemon.error) })
-            : t("agents.conform.daemon.idle") }}
+    <div class="sheet">
+      <SheetRow v-for="section in shown" :key="section.key" class="agents-section" :data-section="section.key" :caption="section.title" :count="section.shown.length">
+        <template v-if="section.key === 'conform'">
+          <div v-if="!q.conform || !q.conform.daemon.up" class="queue-empty">
+            {{ q.conform && q.conform.daemon.error
+              ? t("agents.conform.daemon.down", { error: reasonText(q.conform.daemon.error) })
+              : t("agents.conform.daemon.idle") }}
+          </div>
+          <div v-else class="agents-daemon">
+            <span class="pill" data-state="done">{{ t("agents.conform.daemon.up") }}</span>
+            <span v-if="q.conform.daemon.version" class="pill">{{ t("agents.conform.daemon.version", { version: str(q.conform.daemon.version) }) }}</span>
+            <span v-if="q.conform.daemon.gpu_name || q.conform.daemon.device" class="pill">{{ str(q.conform.daemon.gpu_name || q.conform.daemon.device) }}</span>
+          </div>
+        </template>
+        <div v-if="!section.shown.length" class="queue-empty">{{ t("agents.empty") }}</div>
+        <div v-else class="agents-cards">
+          <WorkCard
+            v-for="view in section.shown" :key="view.id" :view="view" :series-name="nameOf(view)" :busy="pending.has(view.id)"
+            @action="act(view, $event)" @plot="plot = $event"
+          />
         </div>
-        <div v-else class="agents-daemon">
-          <span class="pill" data-state="done">{{ t("agents.conform.daemon.up") }}</span>
-          <span v-if="q.conform.daemon.version" class="pill">{{ t("agents.conform.daemon.version", { version: str(q.conform.daemon.version) }) }}</span>
-          <span v-if="q.conform.daemon.gpu_name || q.conform.daemon.device" class="pill">{{ str(q.conform.daemon.gpu_name || q.conform.daemon.device) }}</span>
-        </div>
-      </template>
-      <div v-if="!section.shown.length" class="queue-empty">{{ t("agents.empty") }}</div>
-      <div v-else class="agents-cards">
-        <WorkCard
-          v-for="view in section.shown" :key="view.id" :view="view" :series-name="nameOf(view)" :busy="pending.has(view.id)"
-          @action="act(view, $event)" @plot="plot = $event"
-        />
-      </div>
-    </section>
+      </SheetRow>
+    </div>
 
     <ConformPlotViewer v-if="plot" :src="plot.src" :title="plot.title" @close="plot = null" />
   </div>
@@ -136,20 +138,9 @@ const str = (value: unknown) => String(value ?? "")
 <style scoped>
 .agents-panel { display: flex; flex-direction: column; gap: 20px; }
 .agents-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
-.agents-filter-label { font-size: 14px; font-weight: 600; color: var(--color-gray-600); }
 .agents-select { inline-size: min(22rem, 100%); }
-.agents-fixed {
-  box-sizing: border-box; min-block-size: 44px; display: inline-flex; align-items: center; padding: 0 14px; font-size: 15px;
-  border: 1px solid #ced4da; border-radius: var(--border-radius); background: var(--bg-white);
-}
 .agents-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
 .agents-chip.is-empty { opacity: 0.55; }
-.agents-section { display: flex; flex-direction: column; gap: 10px; }
-.agents-title {
-  display: flex; align-items: center; gap: 8px; margin: 0; padding-bottom: 8px; font-size: 14px; font-weight: 600;
-  color: var(--color-gray-700, #495057); border-bottom: 1px solid var(--border-color);
-}
-.agents-count { font-weight: 400; color: var(--text-muted); }
 .agents-cards { display: flex; flex-direction: column; gap: 8px; }
 .agents-daemon { display: flex; flex-wrap: wrap; gap: 8px; }
 .queue-empty { padding: 16px; text-align: center; color: var(--text-muted); background: var(--bg-light); border-radius: var(--border-radius); }

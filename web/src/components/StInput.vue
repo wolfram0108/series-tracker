@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch, useId } from "vue"
+import { ref, computed, inject, watch, useId } from "vue"
+import { FIELD_LABEL } from "../lib/fieldLabel"
 import { FS_RULES, type FsKind } from "../lib/fsnames"
 import { t } from "../i18n"
 
@@ -17,6 +18,9 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ "update:modelValue": [string] }>()
 const id = useId()
+const fieldLabel = inject(FIELD_LABEL, null)
+const input = ref<HTMLInputElement | null>(null)
+defineExpose({ focus: () => input.value?.focus() })
 const show = ref(false)
 const eType = computed(() =>
   props.type === "password" && !show.value ? "password" : "text")
@@ -52,11 +56,12 @@ watch(() => props.modelValue, (v) => {
   <div v-if="label === undefined" class="constructor-item item-plain">
     <input
       :id="id"
+      ref="input"
       class="item-input"
       :type="eType"
       :value="modelValue"
       :placeholder="placeholder"
-      :aria-label="ariaLabel"
+      :aria-label="ariaLabel ?? fieldLabel?.()"
       @input="onInput"
     />
     <button

@@ -26,7 +26,7 @@ async function pickIn(w: VueWrapper, selector: string, label: string) {
 describe("a group of voice-overs", () => {
   it("is made by its name alone; its language is chosen under it, marked red until then, and goes to the core", async () => {
     const { w, commit } = opened({ AniStar: [] }, { AniStar: "rus" })
-    expect(w.findAll(".input-constructor-group").length).toBe(1) // the top row holds no choice of a language
+    expect(w.findAll(".input-constructor-group").length).toBe(2) // the group and its name: no choice of a language yet
     await w.find("input.item-input").setValue("Оригинал")
     await createButton(w).trigger("click")
     await flushPromises()

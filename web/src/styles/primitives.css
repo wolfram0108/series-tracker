@@ -71,12 +71,16 @@
 .sheet-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 0.6rem; }
 .sheet-pair > .input-constructor-group.is-wide { grid-column: 1 / -1; }
 .sheet-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.sheet-line.is-end { justify-content: flex-end; }
 .sheet-problem { margin: 0; color: var(--color-red-1); }
 /* The segment of a group that holds a control and not a text; the control stands at the end of the group. */
-.constructor-item.item-control { flex: 1 1 auto; justify-content: flex-end; gap: 0.6rem; padding: 0.25rem 0.75rem; flex-wrap: wrap; }
+.constructor-item.item-control { flex: 0 1 auto; margin-inline-start: auto; justify-content: flex-end; gap: 0.6rem; padding: 0.25rem 0.75rem; flex-wrap: wrap; }
+.constructor-item.item-control:has(.p-selectbutton) { flex-grow: 1; }
 .item-control .item-hint { color: var(--text-muted); font-size: 0.8rem; }
-/* A field whose value is a control keeps its label whole: where the control does not fit beside it, it goes to a line under it. */
+/* A field whose value is a control: its label takes what the control leaves and wraps in it; where the control is too wide to stand
+   beside even a label of 8rem, it goes to a line under it. */
 .input-constructor-group:has(> .item-control) { flex-wrap: wrap; }
+.input-constructor-group:has(> .item-control) > .item-label-text-icon { flex: 1 1 8rem; min-inline-size: 0; white-space: normal; }
 /* A pair of buttons (a choice of two) goes to a line of its own where the group is too narrow for both, instead of widening it. */
 .constructor-item.item-control { min-inline-size: 0; }
 .item-control .p-selectbutton { display: flex; flex-wrap: wrap; justify-content: flex-end; min-inline-size: 0; }
@@ -103,3 +107,9 @@
 .note-sheet { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.75rem; font-size: 0.85rem; line-height: 1.45; }
 .note-sheet dt { color: var(--text-muted); }
 .note-sheet dd { margin: 0; overflow-wrap: anywhere; }
+/* A short number in a field of a sheet (components/StNumber.vue). */
+.st-number { inline-size: 5rem; }
+/* A hint under what a row holds. */
+.sheet-hint { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
+.sheet-hint.is-danger { color: var(--color-red-1); }
+

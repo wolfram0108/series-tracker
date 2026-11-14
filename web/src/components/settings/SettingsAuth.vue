@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue"
-import StGroup from "../StGroup.vue"
-import StIcon from "../StIcon.vue"
+import SheetField from "../SheetField.vue"
+import SheetRow from "../SheetRow.vue"
 import StInput from "../StInput.vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
@@ -9,7 +9,7 @@ import { t } from "../../i18n"
 
 // Вкладка «Авторизация»: учётки сервисов (qBittorrent/Kinozal/VK/RuTracker/
 // TMDB). GET /api/auth — загрузка, POST /api/auth — сохранение. Поля — через
-// constructor-group (StGroup), пароли с глазиком (StInput type=password).
+// листа (SheetRow/SheetField), пароли с глазиком (StInput type=password).
 interface Creds {
   qbittorrent: { url: string; username: string; password: string }
   kinozal: { username: string; password: string }
@@ -72,65 +72,58 @@ defineExpose({ save })
 </script>
 
 <template>
-  <div class="settings-auth">
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-server"></i> qBittorrent</div>
-      <div class="fieldset-content">
-        <StGroup>
-          <StIcon icon="pi pi-link" />
-          <StInput v-model="creds.qbittorrent.url" label="URL" />
-          <StIcon icon="pi pi-user" />
-          <StInput v-model="creds.qbittorrent.username" :label="t('auth.login')" />
-          <StIcon icon="pi pi-lock" />
-          <StInput v-model="creds.qbittorrent.password" :label="secretLabel(t('auth.password'), configured.qbittorrent)" type="password" />
-        </StGroup>
+  <div class="sheet settings-auth">
+    <SheetRow caption="qBittorrent">
+      <div class="sheet-pair">
+        <SheetField label="URL" icon="pi pi-link">
+          <StInput v-model="creds.qbittorrent.url" />
+        </SheetField>
+        <SheetField :label="t('auth.login')" icon="pi pi-user">
+          <StInput v-model="creds.qbittorrent.username" />
+        </SheetField>
+        <SheetField :label="secretLabel(t('auth.password'), configured.qbittorrent)" icon="pi pi-lock">
+          <StInput v-model="creds.qbittorrent.password" type="password" />
+        </SheetField>
       </div>
-    </div>
+    </SheetRow>
 
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-download"></i> Kinozal.me</div>
-      <div class="fieldset-content">
-        <StGroup>
-          <StIcon icon="pi pi-user" />
-          <StInput v-model="creds.kinozal.username" :label="t('auth.login')" />
-          <StIcon icon="pi pi-lock" />
-          <StInput v-model="creds.kinozal.password" :label="secretLabel(t('auth.password'), configured.kinozal)" type="password" />
-        </StGroup>
+    <SheetRow caption="Kinozal.me">
+      <div class="sheet-pair">
+        <SheetField :label="t('auth.login')" icon="pi pi-user">
+          <StInput v-model="creds.kinozal.username" />
+        </SheetField>
+        <SheetField :label="secretLabel(t('auth.password'), configured.kinozal)" icon="pi pi-lock">
+          <StInput v-model="creds.kinozal.password" type="password" />
+        </SheetField>
       </div>
-    </div>
+    </SheetRow>
 
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-youtube"></i> VK Video</div>
-      <div class="fieldset-content">
-        <StGroup>
-          <StIcon icon="pi pi-key" />
-          <StInput v-model="creds.vk.token" :label="secretLabel('Access Token', configured.vk)" type="password" />
-        </StGroup>
+    <SheetRow caption="VK Video">
+      <div class="sheet-pair">
+        <SheetField :label="secretLabel('Access Token', configured.vk)" icon="pi pi-key">
+          <StInput v-model="creds.vk.token" type="password" />
+        </SheetField>
       </div>
-    </div>
+    </SheetRow>
 
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-download"></i> RuTracker.org</div>
-      <div class="fieldset-content">
-        <StGroup>
-          <StIcon icon="pi pi-user" />
-          <StInput v-model="creds.rutracker.username" :label="t('auth.login')" />
-          <StIcon icon="pi pi-lock" />
-          <StInput v-model="creds.rutracker.password" :label="secretLabel(t('auth.password'), configured.rutracker)" type="password" />
-        </StGroup>
+    <SheetRow caption="RuTracker.org">
+      <div class="sheet-pair">
+        <SheetField :label="t('auth.login')" icon="pi pi-user">
+          <StInput v-model="creds.rutracker.username" />
+        </SheetField>
+        <SheetField :label="secretLabel(t('auth.password'), configured.rutracker)" icon="pi pi-lock">
+          <StInput v-model="creds.rutracker.password" type="password" />
+        </SheetField>
       </div>
-    </div>
+    </SheetRow>
 
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-video"></i> The Movie Database (TMDB)</div>
-      <div class="fieldset-content">
-        <StGroup>
-          <StIcon icon="pi pi-key" />
-          <StInput v-model="creds.tmdb.token" :label="secretLabel('Read Access Token (v4)', configured.tmdb)" type="password" />
-        </StGroup>
-        <small class="fieldset-hint">{{ t("auth.tmdbHint") }}</small>
+    <SheetRow caption="The Movie Database (TMDB)">
+      <div class="sheet-pair">
+        <SheetField :label="secretLabel('Read Access Token (v4)', configured.tmdb)" icon="pi pi-key">
+          <StInput v-model="creds.tmdb.token" type="password" />
+        </SheetField>
       </div>
-    </div>
-
+      <p class="sheet-hint">{{ t("auth.tmdbHint") }}</p>
+    </SheetRow>
   </div>
 </template>

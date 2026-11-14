@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue"
+import { ref, reactive, computed, onMounted, watch } from "vue"
 import Button from "primevue/button"
-import ToggleSwitch from "primevue/toggleswitch"
-import InputText from "primevue/inputtext"
 import { useToast } from "primevue/usetoast"
-import StGroup from "../StGroup.vue"
+import SheetField from "../SheetField.vue"
+import SheetRow from "../SheetRow.vue"
+import StBtn from "../StBtn.vue"
+import StInput from "../StInput.vue"
+import StNumber from "../StNumber.vue"
 import StSelect from "../StSelect.vue"
+import StSwitch from "../StSwitch.vue"
 import DatabaseViewerModal from "./DatabaseViewerModal.vue"
 import { api } from "../../api/client"
 import { sanitizePath } from "../../lib/fsnames"
@@ -43,14 +46,25 @@ async function saveScanner() {
     { errorMessage: t("debug.autoSync.saveFailed") },
   )
 }
+async function setEnabled(value: boolean) {
+  enabled.value = value
+  await saveScanner()
+}
 async function scanAll() {
   await request(api.POST("/api/scanner/scan_all", {} as never), { errorMessage: t("debug.syncAll.failed") })
 }
 
 // --- флаги конвейера (GET/POST → {enabled}) ---------------------------
-const forceReplace = ref(false)
-const lessStrict = ref(false)
-const slicingDelete = ref(false)
+const FLAGS = [
+  { key: "forceReplace", path: "/api/settings/force_replace", label: "debug.flag.forceReplace", hint: "debug.flag.forceReplace.hint" },
+  { key: "lessStrict", path: "/api/settings/less_strict_scan", label: "debug.flag.lessStrict", hint: "debug.flag.lessStrict.hint" },
+  { key: "slicingDelete", path: "/api/settings/slicing_delete_source", label: "debug.flag.slicingDelete", hint: "debug.flag.slicingDelete.hint" },
+] as const satisfies readonly { key: string; path: string; label: MessageKey; hint: MessageKey }[]
+const flags = reactive({ forceReplace: false, lessStrict: false, slicingDelete: false })
+async function setFlag(flag: (typeof FLAGS)[number], value: boolean) {
+  flags[flag.key] = value
+  await saveFlag(flag.path, value, t(flag.label))
+}
 
 async function loadFlag(path: string): Promise<boolean> {
   const d = (await request(api.GET(path as never))) as { enabled?: boolean } | null
@@ -67,6 +81,11 @@ async function saveFlag(path: string, value: boolean, label: string) {
 // --- пределы загрузок по способу (общее состояние с окном расширений: composables/useDownloadLimits.ts) ----
 const { limits: shared, load: loadLimits, save: saveShared } = useDownloadLimits()
 const limits = ref({ threads_total: "32", threads_per_file: "16", single_at_once: "4" })
+const LIMITS = [
+  { field: "threads_total", label: "debug.downloads.threadsTotal", hint: "debug.downloads.threadsTotalHint" },
+  { field: "threads_per_file", label: "debug.downloads.threadsPerFile", hint: null },
+  { field: "single_at_once", label: "debug.downloads.singleAtOnce", hint: "debug.downloads.singleAtOnceHint" },
+] as const satisfies readonly { field: keyof typeof limits.value; label: MessageKey; hint: MessageKey | null }[]
 const multiAtOnce = computed(() => shared.value?.multi_at_once ?? 2)
 watch(shared, (got) => {
   if (got) limits.value = { threads_total: String(got.threads_total), threads_per_file: String(got.threads_per_file), single_at_once: String(got.single_at_once) }
@@ -178,28 +197,25 @@ onMounted(async () => {
   syncFromStore()
   void loadPaths()
   void loadTables()
-  forceReplace.value = await loadFlag("/api/settings/force_replace")
-  lessStrict.value = await loadFlag("/api/settings/less_strict_scan")
-  slicingDelete.value = await loadFlag("/api/settings/slicing_delete_source")
+  for (const flag of FLAGS) flags[flag.key] = await loadFlag(flag.path)
   void loadLimits()
   sourcesTerm.value = await loadNum("/api/settings/sources_term", 1)
 })
 </script>
 
 <template>
-  <div class="settings-debug">
+  <div class="sheet settings-debug">
     <!-- Сканер -->
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-th-large"></i> {{ t("debug.sync.title") }}</div>
-      <div class="fieldset-content debug-scanner">
-        <label class="debug-switch">
-          <ToggleSwitch v-model="enabled" @change="saveScanner" />
-          <span>{{ t("series.autoSync") }}</span>
-        </label>
-        <div class="debug-interval">
-          <span>{{ t("debug.autoSync.interval") }}</span>
-          <InputText v-model="interval" inputmode="numeric" class="interval-input" @change="saveScanner" />
-        </div>
+    <SheetRow :caption="t('debug.sync.title')">
+      <div class="sheet-pair">
+        <SheetField :label="t('series.autoSync')" control>
+          <StSwitch :model-value="enabled" @update:model-value="setEnabled" />
+        </SheetField>
+        <SheetField :label="t('debug.autoSync.interval')" control>
+          <StNumber v-model="interval" @change="saveScanner" />
+        </SheetField>
+      </div>
+      <div class="sheet-line">
         <Button
           :label="t('debug.syncAll.button')"
           icon="pi pi-refresh"
@@ -207,116 +223,71 @@ onMounted(async () => {
           @click="scanAll"
         />
       </div>
-    </div>
+    </SheetRow>
 
     <!-- Параметры конвейера и отладка -->
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-sliders-h"></i> {{ t("debug.pipeline.title") }}</div>
-      <div class="fieldset-content">
-        <div class="flags-grid">
-          <label class="debug-switch" :title="t('debug.flag.forceReplace.hint')">
-            <ToggleSwitch v-model="forceReplace" @change="saveFlag('/api/settings/force_replace', forceReplace, t('debug.flag.forceReplace'))" />
-            <span>{{ t("debug.flag.forceReplace") }}</span>
-          </label>
-          <label class="debug-switch" :title="t('debug.flag.lessStrict.hint')">
-            <ToggleSwitch v-model="lessStrict" @change="saveFlag('/api/settings/less_strict_scan', lessStrict, t('debug.flag.lessStrict'))" />
-            <span>{{ t("debug.flag.lessStrict") }}</span>
-          </label>
-          <label class="debug-switch" :title="t('debug.flag.slicingDelete.hint')">
-            <ToggleSwitch v-model="slicingDelete" @change="saveFlag('/api/settings/slicing_delete_source', slicingDelete, t('debug.flag.slicingDelete'))" />
-            <span>{{ t("debug.flag.slicingDelete") }}</span>
-          </label>
-        </div>
-        <div class="nums-row">
-          <div class="num-field" :title="t('debug.downloads.threadsTotalHint')">
-            <span>{{ t("debug.downloads.threadsTotal") }}</span>
-            <InputText v-model="limits.threads_total" inputmode="numeric" class="num-input" @change="saveLimits('threads_total')" />
-          </div>
-          <div class="num-field">
-            <span>{{ t("debug.downloads.threadsPerFile") }}</span>
-            <InputText v-model="limits.threads_per_file" inputmode="numeric" class="num-input" @change="saveLimits('threads_per_file')" />
-          </div>
-          <div class="num-field" :title="t('debug.downloads.singleAtOnceHint')">
-            <span>{{ t("debug.downloads.singleAtOnce") }}</span>
-            <InputText v-model="limits.single_at_once" inputmode="numeric" class="num-input" @change="saveLimits('single_at_once')" />
-          </div>
-          <div class="num-field muted-hint">{{ t("debug.downloads.multiAtOnce", { count: multiAtOnce }) }}</div>
-          <div class="num-field" :title="t('debug.sourcesTerm.hint')">
-            <span>{{ t("debug.sourcesTerm.label") }}</span>
-            <InputText v-model="sourcesTerm" inputmode="numeric" class="num-input" @change="saveSourcesTerm" />
-          </div>
-        </div>
+    <SheetRow :caption="t('debug.pipeline.title')">
+      <div class="sheet-pair">
+        <SheetField v-for="flag in FLAGS" :key="flag.key" :label="t(flag.label)" :title="t(flag.hint)" control>
+          <StSwitch :model-value="flags[flag.key]" @update:model-value="setFlag(flag, $event)" />
+        </SheetField>
       </div>
-    </div>
+      <div class="sheet-pair">
+        <SheetField v-for="each in LIMITS" :key="each.field" :label="t(each.label)" :title="each.hint ? t(each.hint) : undefined" control>
+          <StNumber v-model="limits[each.field]" @change="saveLimits(each.field)" />
+        </SheetField>
+        <SheetField :label="t('debug.sourcesTerm.label')" :title="t('debug.sourcesTerm.hint')" control>
+          <StNumber v-model="sourcesTerm" @change="saveSourcesTerm" />
+        </SheetField>
+      </div>
+      <p class="sheet-hint">{{ t("debug.downloads.multiAtOnce", { count: multiAtOnce }) }}</p>
+    </SheetRow>
 
     <!-- База данных -->
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-database"></i> {{ t("debug.db.title") }}</div>
-      <div class="fieldset-content">
-        <div class="db-actions-row">
-          <Button :label="t('debug.db.view')" icon="pi pi-table" severity="info" @click="showDb = true" />
-          <span class="muted-hint">{{ t("debug.db.viewHint") }}</span>
-        </div>
-        <hr class="debug-sep" />
-        <p class="muted-hint danger-hint">{{ t("debug.db.clearWarning") }}</p>
-        <div class="field-group">
-          <StGroup>
-            <StSelect v-model="selectedTable" :options="tableOptions" :placeholder="t('debug.db.chooseTable')" />
-            <div class="constructor-item item-label clear-desc">{{ tableDescription }}</div>
-            <div class="constructor-item item-button-group">
-              <button class="btn-icon btn-delete" :title="t('debug.db.clear')" :disabled="!selectedTable" @click="clearTable">
-                <i class="pi pi-trash" />
-              </button>
-            </div>
-          </StGroup>
-        </div>
+    <SheetRow :caption="t('debug.db.title')">
+      <div class="sheet-line">
+        <Button :label="t('debug.db.view')" icon="pi pi-table" severity="info" @click="showDb = true" />
+        <span class="sheet-hint">{{ t("debug.db.viewHint") }}</span>
       </div>
-    </div>
+      <p class="sheet-hint is-danger">{{ t("debug.db.clearWarning") }}</p>
+      <SheetField :label="t('debug.db.clear')" icon="pi pi-trash">
+        <StSelect v-model="selectedTable" :options="tableOptions" :placeholder="t('debug.db.chooseTable')" />
+        <div class="constructor-item item-label clear-desc">{{ tableDescription }}</div>
+        <div class="constructor-item item-button-group">
+          <button class="btn-icon btn-delete" :title="t('debug.db.clear')" :disabled="!selectedTable" @click="clearTable">
+            <i class="pi pi-trash" />
+          </button>
+        </div>
+      </SheetField>
+    </SheetRow>
 
     <!-- Сохранённые пути -->
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-folder"></i> {{ t("savedPaths.title") }}</div>
-      <div class="fieldset-content">
-        <div v-if="paths.length" class="saved-paths-list">
-          <div v-for="p in paths" :key="p.id" class="saved-path-row">
-            <span class="saved-path-value">{{ p.path }}</span>
-            <Button icon="pi pi-times" severity="danger" text rounded :title="t('common.delete')" @click="removePath(p.id)" />
-          </div>
-        </div>
-        <div v-else class="muted-hint">{{ t("debug.paths.empty") }}</div>
-        <div class="add-path-row">
-          <InputText v-model="newPath" placeholder="/nas/media/..." class="add-path-input" @keyup.enter="addPath" />
-          <Button :label="t('common.add')" icon="pi pi-plus" severity="secondary" @click="addPath" />
+    <SheetRow :caption="t('savedPaths.title')" :count="paths.length">
+      <div v-if="paths.length" class="saved-paths-list">
+        <div v-for="p in paths" :key="p.id" class="saved-path-row">
+          <span class="saved-path-value">{{ p.path }}</span>
+          <Button icon="pi pi-times" severity="danger" text rounded :title="t('common.delete')" @click="removePath(p.id)" />
         </div>
       </div>
-    </div>
+      <p v-else class="sheet-hint">{{ t("debug.paths.empty") }}</p>
+      <SheetField :label="t('debug.paths.new')" icon="pi pi-folder">
+        <StInput v-model="newPath" placeholder="/nas/media/..." @keyup.enter="addPath" />
+        <div class="constructor-item item-button-group">
+          <StBtn icon="pi pi-plus" variant="add" :disabled="!newPath.trim()" :title="t('common.add')" :aria-label="t('common.add')" @click="addPath" />
+        </div>
+      </SheetField>
+    </SheetRow>
 
     <DatabaseViewerModal v-if="showDb" @close="showDb = false" />
   </div>
 </template>
 
 <style scoped>
-.debug-scanner { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; }
-.debug-switch { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-.debug-interval { display: flex; align-items: center; gap: 10px; }
-.interval-input { width: 90px; }
-.flags-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; margin-bottom: 16px; }
-.nums-row { display: flex; flex-wrap: wrap; gap: 24px; }
-.num-field { display: flex; flex-direction: column; gap: 6px; }
-.num-field span { color: var(--text-muted); font-size: 0.85rem; }
-.num-input { width: 120px; }
-.db-actions-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
-.debug-sep { border: none; border-top: 1px solid var(--border-color); margin: 14px 0; }
 .clear-desc { flex-grow: 1; justify-content: flex-start; white-space: normal; color: var(--text-muted); font-weight: 400; }
-.saved-paths-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.saved-paths-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .saved-path-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 6px 6px 6px 14px; background: var(--bg-light); border-radius: var(--border-radius);
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  padding: 0.25rem 0.4rem 0.25rem 0.9rem; background: var(--bg-light); border-radius: var(--border-radius);
 }
 .saved-path-value { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.muted-hint { color: var(--text-muted); margin-bottom: 12px; }
-.danger-hint { color: var(--color-red-1); }
-.add-path-row { display: flex; gap: 10px; }
-.add-path-input { flex: 1; }
-.settings-debug { display: flex; flex-direction: column; gap: 18px; }
 </style>

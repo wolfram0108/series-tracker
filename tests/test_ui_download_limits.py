@@ -15,9 +15,9 @@ async def test_the_limits_of_the_downloads_are_shown_changed_and_kept(ui):  # no
     page = ui.page
     await ui.first_run()
     await ui.settings("Отладка")
-    total = page.locator(".num-field", has_text="Потоков на все многопоточные загрузки").locator("input")
-    per_file = page.locator(".num-field", has_text="Потоков на одну многопоточную загрузку").locator("input")
-    single = page.locator(".num-field", has_text="Однопоточных загрузок одновременно").locator("input")
+    total = page.get_by_label("Потоков на все многопоточные загрузки")
+    per_file = page.get_by_label("Потоков на одну многопоточную загрузку")
+    single = page.get_by_label("Однопоточных загрузок одновременно")
     await expect(total).to_have_value("32")
     await expect(per_file).to_have_value("16")
     await expect(single).to_have_value("4")
