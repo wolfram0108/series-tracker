@@ -103,6 +103,7 @@ class AppSite:
             raise SiteError(exc.reason) from exc
         ctx.progress(PHASE_RELEASE, 1, 1)
         lines, passed, off = [], [], []
+        unadmitted = [each.code for each in card.lines if not self.player.registry.admits(each.code)]
         for each in card.lines:
             if not self.player.registry.admits(each.code):
                 passed.append(f"{each.code} ({self.player.registry.why_not(each.code)})")
@@ -148,6 +149,9 @@ class AppSite:
                                      for code, labels in absent.items()))
         # A card whose every line was switched off has no row to read: that is no failure of the card.
         if not rows and not off:
+            if card.lines and len(unadmitted) == len(card.lines):
+                # Said apart from a card that lists nothing: the owner reads which lines the card has and that none plays.
+                raise SiteError(reason("app_lines_not_admitted", site=self.player.label, lines=", ".join(unadmitted)))
             raise SiteError(reason("no_players_empty", site=self.player.label))
         title = " · ".join(part for part in (self.label, card.names[0] + (f" ({card.year})" if card.year else "")
                                              if card.names else "") if part)

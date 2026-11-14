@@ -734,3 +734,19 @@ def test_a_transport_failure_names_the_cause_beneath_it_and_keeps_the_class_and_
     assert said.startswith("ConnectError: host.test (ConnectionRefusedError:")
     assert "token" not in said
     assert failure_words(httpx.ReadTimeout("slow"), "https://host.test/x") == "ReadTimeout: host.test"
+
+
+async def test_a_card_whose_every_line_is_not_admitted_says_which_lines_it_has():
+    """The owner adds a card the search found and reads «no players» of it: it must say that the lines are known and none plays."""
+    from core.reasons import parse
+    from modules.sources.sites import SiteError
+
+    model = card_world()
+    http, _asked = world(model, {})
+    async with http:
+        player = AppPlayer(App99Client(profile(), lambda: http), registry=admitting("NBY"))
+        site = AppSite(player, AppLines([player]))
+        with pytest.raises(SiteError) as refused:
+            await site.read("app://banri/219017", ReadContext(http, lambda *_: None))
+        said = parse(refused.value.reason)
+        assert said["code"] == "app_lines_not_admitted" and said["params"]["lines"] == "ffm3u8, CO4K, co_egg"

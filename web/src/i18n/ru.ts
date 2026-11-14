@@ -267,6 +267,7 @@ export const ru = {
   "reason.app_answer_broken": "{app}: ответ на {step} не расшифрован",
   "reason.app_refused": "{app}: отказ на {step}: {message}",
   "reason.app_title_absent": "{app}: карточки № {card} нет",
+  "reason.app_lines_not_admitted": "{site}: линии карточки ({lines}) не признаны, ни одна не читается",
   "reason.scope_video_only": "Синхронизация серии или сезона есть только у видео-сериала",
   "reason.app_folder_too_large": "{app}: в папке больше {limit} файлов — подключите подпапку",
   "reason.app_pagination_repeated": "{app}: страница папки пришла повторно — список не дочитан",
