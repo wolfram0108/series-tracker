@@ -27,6 +27,7 @@
     "@types/node": "^22.10.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/test-utils": "^2.4.11",
+    "axe-core": "4.10.2",
     "jsdom": "^25.0.1",
     "openapi-typescript": "^7.4.4",
     "typescript": "^5.7.2",

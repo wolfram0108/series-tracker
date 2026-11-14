@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from "vue"
-import { computeDropStyle, type DropStyle } from "../composables/useDropAnchor"
+import { computed } from "vue"
+import { useDropList } from "../composables/useDropList"
 
 // A chevron button inside the group of a field: it opens a list of ready values to put into the field. It keeps no
 // choice itself: a click on a value emits it. `load` runs before every opening, so the list is as the core has it now.
-// The list is teleported into <body> (useDropAnchor): no frame of an ancestor cuts it. One list for every field of this
-// kind (the saved paths of a series, the sources and the queries of a series in the test of a profile).
+// The list is teleported into <body> (useDropList): no frame of an ancestor cuts it; it is worked from the keyboard as every list
+// that drops from a trigger. One list for every field of this kind (the saved paths of a series, the sources and the queries of a
+// series in the test of a profile).
 export interface PickItem { value: string; label: string }
 
 const props = withDefaults(defineProps<{
@@ -17,56 +18,38 @@ const props = withDefaults(defineProps<{
 }>(), { load: undefined, minWidth: 320 })
 const emit = defineEmits<{ (e: "select", value: string): void }>()
 
-const open = ref(false)
-const root = ref<HTMLElement | null>(null)
-const list = ref<HTMLElement | null>(null)
-const dropStyle = ref<DropStyle | null>(null)
-
-function reposition(): void {
-  if (root.value) dropStyle.value = computeDropStyle(root.value, { align: "right", minWidth: props.minWidth })
-}
-function onMove(): void {
-  if (open.value) reposition()
-}
-
-async function toggle(): Promise<void> {
-  if (open.value) {
-    open.value = false
-    return
-  }
-  await props.load?.()
-  reposition()
-  open.value = true
-}
-
-function choose(value: string): void {
-  emit("select", value)
-  open.value = false
-}
-
-function onOutside(event: MouseEvent): void {
-  const target = event.target as Node
-  if (open.value && !root.value?.contains(target) && !list.value?.contains(target)) open.value = false
-}
-onMounted(() => {
-  document.addEventListener("click", onOutside, true)
-  window.addEventListener("scroll", onMove, true)
-  window.addEventListener("resize", onMove)
+const drop = useDropList({
+  count: () => props.items.length,
+  selected: () => -1,
+  choose: (index) => emit("select", props.items[index].value),
+  place: () => ({ align: "right", minWidth: props.minWidth }),
+  before: async () => props.load?.(),
 })
-onBeforeUnmount(() => {
-  document.removeEventListener("click", onOutside, true)
-  window.removeEventListener("scroll", onMove, true)
-  window.removeEventListener("resize", onMove)
-})
+const { open, root, list, dropStyle, active, listId, optionId } = drop
+const hasItems = computed(() => props.items.length > 0)
 </script>
 
 <template>
-  <div ref="root" class="constructor-item pick-trigger" :class="{ open }" :title="title" @click.stop="toggle">
-    <i class="pi pi-chevron-down chevron" />
+  <div
+    ref="root" class="constructor-item pick-trigger" :class="{ open }" role="combobox" :title="title" :aria-label="title"
+    v-bind="drop.triggerAttrs()" @click.stop="drop.toggle" @keydown="drop.onKey"
+  >
+    <i class="pi pi-chevron-down chevron" aria-hidden="true" />
     <Teleport to="body">
-      <div v-if="open" ref="list" class="options-list pick-list" :style="dropStyle ?? undefined">
-        <div v-if="!items.length" class="pick-empty">{{ empty }}</div>
-        <div v-for="item in items" :key="item.value" class="option" @click.stop="choose(item.value)">{{ item.label }}</div>
+      <div v-if="open" :id="listId" ref="list" class="options-list pick-list" role="listbox" :aria-label="title" :style="dropStyle ?? undefined" @mousedown.prevent>
+        <div v-if="!hasItems" class="pick-empty">{{ empty }}</div>
+        <div
+          v-for="(item, index) in items"
+          :id="optionId(index)"
+          :key="item.value"
+          role="option"
+          class="option"
+          :class="{ active: index === active }"
+          :aria-selected="false"
+          @click.stop="drop.take(index)"
+        >
+          {{ item.label }}
+        </div>
       </div>
     </Teleport>
   </div>

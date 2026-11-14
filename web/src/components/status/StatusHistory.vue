@@ -92,8 +92,8 @@ onMounted(load)
     <div v-if="loading" class="status-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
 
     <template v-else-if="isVk">
-      <h6 class="status-history-title">{{ t("history.vk.title") }}</h6>
-      <div class="status-history-scroll">
+      <h3 class="status-history-title">{{ t("history.vk.title") }}</h3>
+      <div class="status-history-scroll" tabindex="0" role="region" :aria-label="t('history.vk.title')">
         <div class="div-table table-media-item-history">
           <div class="div-table-header">
             <div class="div-table-cell">Unique ID</div>
@@ -121,7 +121,7 @@ onMounted(load)
     </template>
 
     <template v-else>
-      <h6 class="status-history-title">{{ t("history.torrents.title") }}</h6>
+      <h3 class="status-history-title">{{ t("history.torrents.title") }}</h3>
       <div class="div-table table-torrents-history">
         <div class="div-table-header">
           <div class="div-table-cell">ID</div>

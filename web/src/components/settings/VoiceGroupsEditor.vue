@@ -150,7 +150,7 @@ async function addRow() {
       <StSelect :model-value="selected" :options="options" :placeholder="t('voices.settings.group.select')" @update:model-value="choose($event as string | null)" />
       <StInput
         ref="nameInput" v-model="nameField" :placeholder="nameLabel" :aria-label="nameLabel"
-        @keyup.enter="renaming ? applyRename() : create()" @keyup.esc="cancelRename"
+        @keyup.enter="renaming ? applyRename() : create()" @keydown.esc.prevent="cancelRename"
       />
       <div class="constructor-item item-button-group">
         <button v-if="!renaming" class="btn-icon btn-add" :disabled="busy || !nameField.trim()" :title="t('voices.settings.group.create')" :aria-label="t('voices.settings.group.create')" @click="create">
@@ -187,7 +187,7 @@ async function addRow() {
           <Button icon="pi pi-trash" severity="danger" text rounded :disabled="busy" :title="t('voices.settings.name.remove')" :aria-label="t('voices.settings.name.remove')" @click="removeRow(index)" />
         </template>
         <template v-else>
-          <input v-model="editText" class="name-input" type="text" @keyup.enter="saveEdit" @keyup.esc="editing = null" />
+          <input v-model="editText" class="name-input" type="text" @keyup.enter="saveEdit" @keydown.esc.prevent="editing = null" />
           <Button icon="pi pi-check" text rounded :disabled="busy || !editText.trim()" :title="t('voices.settings.name.save')" :aria-label="t('voices.settings.name.save')" @click="saveEdit" />
           <Button icon="pi pi-times" severity="secondary" text rounded :title="t('voices.settings.name.cancel')" :aria-label="t('voices.settings.name.cancel')" @click="editing = null" />
         </template>

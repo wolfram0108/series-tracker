@@ -95,6 +95,9 @@
   cursor: pointer;
 }
 .rule-toggle-icon { transition: transform 0.2s ease-in-out; color: var(--text-muted); }
+/* The icon is a real button for the keyboard; it looks as the icon alone did. */
+.rule-toggle { display: inline-flex; padding: 0; margin: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.rule-toggle:focus-visible { outline: 0.125rem solid var(--color-blue); border-radius: 4px; }
 .rule-invalid-badge {
   flex-shrink: 0;
   padding: 0.1rem 0.4rem;

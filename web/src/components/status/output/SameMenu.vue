@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { computeDropStyle, type DropStyle } from "../../../composables/useDropAnchor"
+import { useLayer } from "../../../composables/useLayers"
 
 // The menu of a mark of a group of equal variants: what the mark may be told to do. It stands under the mark, in <body>
 // (useDropAnchor), so that no frame of the table cuts it; a click outside, Escape or a scroll closes it.
@@ -19,20 +20,17 @@ const onOutside = (event: MouseEvent): void => {
   const target = event.target as Node
   if (!list.value?.contains(target) && !props.anchor?.contains(target)) emit("close")
 }
-const onKey = (event: KeyboardEvent): void => {
-  if (event.key === "Escape") emit("close")
-}
+// Escape closes the menu alone (a layer): the window under it stays.
+useLayer(() => emit("close")).enter()
 
 watch(() => props.anchor, place, { immediate: true })
 onMounted(() => {
   document.addEventListener("click", onOutside, true)
-  document.addEventListener("keydown", onKey)
   window.addEventListener("scroll", place, true)
   window.addEventListener("resize", place)
 })
 onBeforeUnmount(() => {
   document.removeEventListener("click", onOutside, true)
-  document.removeEventListener("keydown", onKey)
   window.removeEventListener("scroll", place, true)
   window.removeEventListener("resize", place)
 })

@@ -20,6 +20,8 @@
 .modal-overlay .modern-modal.modal-fixed { height: 86vh; }
 .modal-overlay .modern-body { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 
+/* The window takes the focus itself when it opens (useDialog): the ring belongs to the elements in it, not to the window. */
+.modern-modal:focus { outline: none; }
 .modern-modal {
   border: none;
   border-radius: var(--card-border-radius); /* 12px */
@@ -139,6 +141,7 @@
   padding: clamp(0.75rem, 5vw, 1.5rem);
   background: var(--bg-white);
 }
+.modern-body:focus-visible { outline: 0.125rem solid var(--color-blue); outline-offset: -0.125rem; }
 
 /* Футер */
 .modern-footer {

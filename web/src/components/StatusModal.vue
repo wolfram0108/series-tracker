@@ -93,7 +93,7 @@ onMounted(load)
 </script>
 
 <template>
-  <ModalShell size="xl" fixed-height @close="emit('close')">
+  <ModalShell size="xl" fixed-height :dirty="!!propsRef?.dirty" @close="emit('close')">
     <template #title><i class="pi pi-info-circle"></i> {{ t("status.title") }}</template>
     <template #header-extra>
       <div class="header-tabs st-tabs">

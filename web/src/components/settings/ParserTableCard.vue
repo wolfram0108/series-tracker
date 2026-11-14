@@ -162,7 +162,9 @@ function setAction(value: string): void {
   <div class="rule-card rule-table-card">
     <div class="rule-header">
       <div class="rule-title" @click="emit('toggle')">
-        <i class="pi rule-toggle-icon" :class="toggleIcon" />
+        <button type="button" class="rule-toggle" :aria-expanded="isOpen" :aria-label="t('rules.rule.toggle')" @click.stop="emit('toggle')">
+          <i class="pi rule-toggle-icon" :class="toggleIcon" aria-hidden="true" />
+        </button>
         <i class="pi pi-table rule-kind" :title="t('rules.table.kind')" />
         <input v-model="rule.name" type="text" class="rule-name-input" :placeholder="t('rules.rule.namePlaceholder')" @click.stop />
         <span v-if="rule.valid === false" class="rule-invalid-badge" :title="reasonText(rule.error) || t('rules.rule.disabled.title')">

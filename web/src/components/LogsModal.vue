@@ -101,7 +101,7 @@ onMounted(() => {
       <div class="logs-filters">
         <Select v-model="group" :options="groupOptions" option-label="label" option-value="value" @change="loadLogs" />
         <Select v-model="level" :options="levelOptions" option-label="label" option-value="value" @change="loadLogs" />
-        <InputText v-model="limit" inputmode="numeric" class="limit-input" :title="t('logs.limit')" @change="loadLogs" />
+        <InputText v-model="limit" inputmode="numeric" class="limit-input" :title="t('logs.limit')" :aria-label="t('logs.limit')" @change="loadLogs" />
       </div>
 
       <div class="div-table logs-table">

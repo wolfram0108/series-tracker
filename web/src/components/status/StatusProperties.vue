@@ -16,6 +16,7 @@ import { t, tn } from "../../i18n"
 import { useSeriesStore, type Series } from "../../stores/series"
 import { compareNames } from "../../lib/collate"
 import { isAbsolutePath } from "../../lib/fsnames"
+import { vPress } from "../../directives/press"
 
 // "Properties" tab of the status window. Saving is POST /api/series/{id}; the fields of the sources are not in it:
 // a source changes at once by its own request (the "Sources" block). save() is called from the footer of
@@ -47,6 +48,11 @@ const form = reactive({
   quality_override: String((s as Record<string, unknown>).quality_override ?? ""),
   resolution_override: String((s as Record<string, unknown>).resolution_override ?? ""),
 })
+// What the user has typed and not saved: the window asks before it is closed over it (the quality a read of the site picks
+// for itself is no typing).
+const typed = (): string => JSON.stringify([form.name, form.name_en, form.save_path, form.season, form.quality_override, form.resolution_override])
+const saved = ref(typed())
+const dirty = computed(() => typed() !== saved.value)
 const site = String((s as Record<string, unknown>).site ?? "")
 const trackerInfo = (s as Record<string, unknown>).tracker_info as { ui_features?: { quality_selector?: string } } | null
 const qualitySelector = computed(() => trackerInfo?.ui_features?.quality_selector || "")
@@ -317,6 +323,7 @@ async function save(): Promise<boolean> {
     )
     if (ok !== null) {
       toast.add({ severity: "success", summary: t("properties.saved"), detail: t("properties.savedDetail"), life: 3000 })
+      saved.value = typed()
       return true
     }
     return false
@@ -325,7 +332,7 @@ async function save(): Promise<boolean> {
   }
 }
 
-defineExpose({ save })
+defineExpose({ save, dirty })
 onMounted(() => {
   void fetchProfiles().then((list) => { profiles.value = list })
   if (!isVideo) void refreshSiteTorrents() // автопарсинг доступных раздач + качество
@@ -437,8 +444,8 @@ onMounted(() => {
           <div class="pills-column">
             <div class="quality-badge">ID: {{ res.id }}</div>
             <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill"><i class="pi pi-check-circle" /><span>{{ t("seriesForm.chosen") }}</span></div>
-            <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill pill-link" :title="t('common.reset')" @click.stop="clearTMDBSelection">
-              <i class="pi pi-times" /><span>{{ t("seriesForm.clearChoice") }}</span>
+            <div v-if="tmdbSelected && tmdbSelected.id === res.id" v-press class="pill pill-link" :title="t('common.reset')" @click.stop="clearTMDBSelection">
+              <i class="pi pi-times" aria-hidden="true" /><span>{{ t("seriesForm.clearChoice") }}</span>
             </div>
           </div>
         </div>
@@ -458,7 +465,7 @@ onMounted(() => {
         <div class="pills-column">
           <div class="quality-badge">ID: {{ tmdbSelected.id }}</div>
           <div class="pill"><i class="pi pi-check-circle" /><span>{{ t("seriesForm.chosen") }}</span></div>
-          <div class="pill pill-link" :title="t('common.reset')" @click.stop="clearTMDBSelection"><i class="pi pi-times" /><span>{{ t("seriesForm.clearChoice") }}</span></div>
+          <div v-press class="pill pill-link" :title="t('common.reset')" @click.stop="clearTMDBSelection"><i class="pi pi-times" aria-hidden="true" /><span>{{ t("seriesForm.clearChoice") }}</span></div>
         </div>
       </div>
 

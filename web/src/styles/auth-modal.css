@@ -1,6 +1,7 @@
 /* Модалки входа и установки администратора (Этап 1). Общий оверлей и
    карточка; поля/кнопки — штатные компоненты проекта (StGroup/StInput,
    PrimeVue Button). */
+.login-overlay:focus { outline: none; }
 .login-overlay {
   position: fixed;
   inset: 0;

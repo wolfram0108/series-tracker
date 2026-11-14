@@ -31,6 +31,8 @@ const state = reactive<ConfirmState>({
  *  «удалить из qBittorrent». */
 export function useConfirm() {
   function open(opts: { title?: string; message: string; checkbox?: ConfirmCheckbox }): Promise<ConfirmResult> {
+    // A question asked over an unanswered one cancels it: its asker is told "no", not left waiting for ever.
+    state.resolve?.({ confirmed: false, checkboxChecked: false })
     state.title = opts.title ?? t("common.confirmTitle")
     state.message = opts.message
     state.checkbox = opts.checkbox ? { ...opts.checkbox } : null

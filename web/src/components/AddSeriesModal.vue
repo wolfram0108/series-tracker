@@ -80,6 +80,9 @@ const candidate = ref("")
 const candidateChannel = ref(false)
 const candidateQuery = ref("")
 const kind = computed<"video" | "torrent">(() => (sourceItems.value.length ? "video" : "torrent"))
+// What the user has typed or chosen and the series is not yet made of: the window asks before it is closed over it.
+const dirty = computed(() => !!(newSeries.url || newSeries.name || newSeries.name_en || newSeries.save_path || newSeries.quality_override
+  || newSeries.resolution_override || candidate.value || sourceItems.value.length || tmdbSelected.value))
 // The test of the rules offers the addresses and the queries of the sources the series is made of, as they stand now.
 const draftAddresses = async (): Promise<SourceAddress[]> =>
   sourceItems.value.map((item) => ({ url: item.url, vk: item.sourceType === "vk_video" }))
@@ -509,7 +512,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <ModalShell size="xl" @close="emit('close')">
+  <ModalShell size="xl" :dirty="dirty" @close="emit('close')">
     <template #title><i class="pi pi-plus"></i> {{ t("add.title") }}</template>
     <template #header-extra>
       <ModalTabs v-model="activeTab" :tabs="addTabs" />

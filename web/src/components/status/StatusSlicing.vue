@@ -285,14 +285,14 @@ onMounted(loadMediaItems)
         <div v-if="it.chapters && it.chapters.length" class="slicing-card-body">
           <!-- активные главы -->
           <div v-if="it.filteredChapters && it.filteredChapters.length" class="chapter-section">
-            <h6>{{ t("slicing.chapters.active", { count: it.filteredChapters.length }) }}</h6>
+            <h3>{{ t("slicing.chapters.active", { count: it.filteredChapters.length }) }}</h3>
             <div class="chapter-list">
               <span v-for="(ch, i) in it.filteredChapters" :key="'f' + i" class="chapter-pill chapter-active">{{ ch.time }} ({{ ch.title ?? t("slicing.chapter.untitled") }})</span>
             </div>
           </div>
           <!-- мусорные главы -->
           <div v-if="it.garbageChapters && it.garbageChapters.length" class="chapter-section">
-            <h6>{{ t("slicing.chapters.garbage", { count: it.garbageChapters.length }) }}</h6>
+            <h3>{{ t("slicing.chapters.garbage", { count: it.garbageChapters.length }) }}</h3>
             <div class="chapter-list">
               <span v-for="(ch, i) in it.garbageChapters" :key="'g' + i" class="chapter-pill chapter-garbage" :title="reasonText(ch.garbage_reason)">
                 {{ ch.time }} ({{ ch.title ?? t("slicing.chapter.untitled") }}) <i class="pi pi-times-circle" />
@@ -312,7 +312,7 @@ onMounted(loadMediaItems)
 
           <!-- ручной выбор глав -->
           <div v-if="it.showChapterSelection" class="chapter-selection">
-            <h6>{{ t("slicing.chapters.manualTitle") }}</h6>
+            <h3>{{ t("slicing.chapters.manualTitle") }}</h3>
             <div class="chapter-checkbox-list">
               <div v-for="(ch, i) in it.chapters" :key="'s' + i" class="chk-row">
                 <input :id="`ch-${it.unique_id}-${i}`" v-model="it.selectedChapters" type="checkbox" :value="i" />

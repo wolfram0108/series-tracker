@@ -7,6 +7,7 @@ import { api } from "../api/client"
 import { t } from "../i18n"
 import { useAuthStore } from "../stores/auth"
 import { useBodyScrollLock } from "../composables/useBodyScrollLock"
+import { useDialog } from "../composables/useLayers"
 import { reasonText } from "../lib/reason"
 
 // Модалка первого запуска: создание администратора (имя, пароль, повтор).
@@ -23,6 +24,9 @@ const attempted = ref(false)
 const notice = ref("")
 
 useBodyScrollLock()  // фон не прокручивается, пока окно открыто
+// A window that cannot be closed: the focus goes to its first field and Tab keeps to it.
+const room = ref<HTMLElement | null>(null)
+const { titleId } = useDialog(room, () => undefined, { first: true })
 
 type VState = "valid" | "invalid" | null
 const touched = (v: string) => attempted.value || v.length > 0
@@ -77,9 +81,9 @@ async function submit(): Promise<void> {
 
 <template>
   <Teleport to="body">
-    <div class="login-overlay">
+    <div ref="room" class="login-overlay" role="dialog" aria-modal="true" :aria-labelledby="titleId" tabindex="-1">
       <form class="login-card" @submit.prevent="submit">
-        <h2 class="login-title">{{ t("setup.title") }}</h2>
+        <h2 :id="titleId" class="login-title">{{ t("setup.title") }}</h2>
         <p class="login-sub">{{ t("setup.sub") }}</p>
 
         <SheetField :label="t('setup.username')" icon="pi pi-user" :state="userState">

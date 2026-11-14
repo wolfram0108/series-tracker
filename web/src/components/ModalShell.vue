@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, onUpdated, ref } from "vue"
 import { useBodyScrollLock } from "../composables/useBodyScrollLock"
+import { useConfirm } from "../composables/useConfirm"
+import { hasFocusable, useDialog } from "../composables/useLayers"
 import { t } from "../i18n"
 
 // Переиспользуемая оболочка модального окна (порт modern-modal): оверлей +
@@ -9,12 +11,25 @@ import { t } from "../i18n"
 // fixedHeight: окно занимает фикс. высоту (настройки/логи — чтобы габарит
 // не прыгал). Без него окно растёт под контент (как окно добавления в
 // легаси: max-height 90vh, тело скроллится).
-withDefaults(defineProps<{ title?: string; size?: "" | "xl" | "full"; fixedHeight?: boolean }>(), {
+// dirty: the window holds what the user typed and has not saved; a way out the window takes itself (Escape, the cross, a click
+// on the ground) asks first. A button of the window that says "Cancel" is the user's word and asks nothing.
+const props = withDefaults(defineProps<{ title?: string; size?: "" | "xl" | "full"; fixedHeight?: boolean; dirty?: boolean }>(), {
   title: "",
   size: "",
   fixedHeight: false,
+  dirty: false,
 })
 const emit = defineEmits<{ (e: "close"): void }>()
+const confirm = useConfirm()
+const room = ref<HTMLElement | null>(null)
+
+async function requestClose(): Promise<void> {
+  if (props.dirty) {
+    const answer = await confirm.open({ title: t("window.discard.title"), message: t("window.discard.message") })
+    if (!answer.confirmed) return
+  }
+  emit("close")
+}
 
 // Закрытие по клику вне окна — только если ЖЕСТ начался на самом оверлее.
 // Иначе выделение текста в поле с отпусканием за пределами окна порождает
@@ -25,15 +40,12 @@ function onOverlayMousedown(e: MouseEvent) {
   pressedOnOverlay = e.target === e.currentTarget
 }
 function onOverlayClick(e: MouseEvent) {
-  if (e.target === e.currentTarget && pressedOnOverlay) emit("close")
+  if (e.target === e.currentTarget && pressedOnOverlay) void requestClose()
   pressedOnOverlay = false
 }
 
-function onKey(e: KeyboardEvent) {
-  if (e.key === "Escape") emit("close")
-}
-onMounted(() => document.addEventListener("keydown", onKey))
-onUnmounted(() => document.removeEventListener("keydown", onKey))
+// The window is a layer (useLayers): Escape and Tab belong to the top one, the focus goes in and comes back to what opened it.
+const { titleId } = useDialog(room, requestClose)
 
 // фон не прокручивается, пока окно открыто (scroll chaining)
 useBodyScrollLock()
@@ -43,6 +55,17 @@ useBodyScrollLock()
 // A word of the title is never broken for the tabs.
 const header = ref<HTMLElement | null>(null)
 let observer: ResizeObserver | null = null
+
+// A body that scrolls and holds nothing the focus can reach is reached itself: a keyboard user scrolls it with the arrows.
+const body = ref<HTMLElement | null>(null)
+function reachBody(): void {
+  const el = body.value
+  if (!el) return
+  if (el.scrollHeight > el.clientHeight + 1 && !hasFocusable(el)) el.tabIndex = 0
+  else el.removeAttribute("tabindex")
+}
+let bodyResize: ResizeObserver | null = null
+let bodyChange: MutationObserver | null = null
 let shownTab: Element | null = null
 
 // The title kept on one line, for the moment of asking, does not fit the room the head leaves it. Put back before anything is painted.
@@ -84,25 +107,39 @@ function fitTabs(follow = false) {
 onMounted(() => {
   observer = new ResizeObserver(() => fitTabs(true))
   if (header.value) observer.observe(header.value)
+  bodyResize = new ResizeObserver(reachBody)
+  bodyChange = new MutationObserver(reachBody)
+  if (body.value) {
+    bodyResize.observe(body.value)
+    bodyChange.observe(body.value, { childList: true, subtree: true })
+  }
+  reachBody()
   void document.fonts?.ready.then(() => fitTabs(true))
   fitTabs(true)
 })
 onUpdated(() => fitTabs())
-onUnmounted(() => observer?.disconnect())
+onUnmounted(() => {
+  observer?.disconnect()
+  bodyResize?.disconnect()
+  bodyChange?.disconnect()
+})
 </script>
 
 <template>
   <div class="modal-overlay" @mousedown="onOverlayMousedown" @click="onOverlayClick">
     <div
-      class="modern-modal"
+      ref="room"
+      class="modern-modal" role="dialog" aria-modal="true" :aria-labelledby="titleId" tabindex="-1"
       :class="[size === 'xl' ? 'modal-xl' : size === 'full' ? 'modal-full' : '', { 'modal-fixed': fixedHeight }]"
     >
       <div ref="header" class="modern-header">
-        <h5 class="modal-title"><slot name="title">{{ title }}</slot></h5>
+        <h2 :id="titleId" class="modal-title"><slot name="title">{{ title }}</slot></h2>
         <slot name="header-extra" />
-        <button class="modern-close" :title="t('common.close')" @click="emit('close')"><i class="pi pi-times"></i></button>
+        <button type="button" class="modern-close" :title="t('common.close')" :aria-label="t('common.close')" @click="requestClose">
+          <i class="pi pi-times" aria-hidden="true"></i>
+        </button>
       </div>
-      <div class="modern-body"><slot /></div>
+      <div ref="body" class="modern-body"><slot /></div>
       <div v-if="$slots.footer" class="modern-footer"><slot name="footer" /></div>
     </div>
   </div>

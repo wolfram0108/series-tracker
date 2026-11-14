@@ -69,6 +69,7 @@
 }
 
 .card-final .pill.pill-link { cursor: pointer; }
+.pill.pill-link:focus-visible { outline: 0.125rem solid var(--color-blue); outline-offset: 0.0625rem; }
 
 /* ── Единая статусная палитра (пастель 135° + бордер в тон) ───────────── */
 /* A card of a queue takes the same grounds by the state of its work: under way, done, failed (the silver one waits). */
@@ -207,9 +208,9 @@
 /* секции и список глав */
 .chapter-section { margin-bottom: 15px; }
 .chapter-section:last-child { margin-bottom: 0; } /* без хвоста перед footer */
-/* margin: 0 — гасим браузерный margin-top h6 (reboot'а в проекте нет),
+/* margin: 0 — гасим браузерный margin-top заголовка (reboot'а в проекте нет),
    иначе над «Активные главы» висит лишний отступ ~1.7em */
-.chapter-section h6 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--text-muted); }
+.chapter-section h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--text-muted); }
 .chapter-list { display: flex; flex-wrap: wrap; gap: 6px; } /* отступ снизу даёт сама секция */
 
 /* пилюля главы (таблетка): обычная / активная (голубая) / мусорная (зачёркнутая) */

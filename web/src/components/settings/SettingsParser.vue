@@ -405,7 +405,7 @@ onMounted(() => {
           </template>
           <template v-else>
             <StLabel icon="pi pi-pencil" :text="t('rules.profile.renameLabel')" />
-            <StInput ref="editInput" v-model="editingProfileName" :aria-label="t('rules.profile.renameLabel')" @keyup.enter="saveProfileName" @keyup.esc="cancelEditing" />
+            <StInput ref="editInput" v-model="editingProfileName" :aria-label="t('rules.profile.renameLabel')" @keyup.enter="saveProfileName" @keydown.esc.prevent="cancelEditing" />
             <div class="constructor-item item-button-group">
               <button class="btn-icon btn-confirm" :disabled="!editingProfileName.trim()" :title="t('rules.profile.apply')" :aria-label="t('rules.profile.apply')" @click="saveProfileName">
                 <i class="pi pi-check" />

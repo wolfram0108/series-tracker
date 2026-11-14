@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue"
+import { ref } from "vue"
 import Button from "primevue/button"
 import ModalShell from "../ModalShell.vue"
 import { t } from "../../i18n"
@@ -12,14 +12,6 @@ const emit = defineEmits<{ (e: "close"): void }>()
 const full = ref(false)
 const missing = ref(false)
 
-// Escape closes the picture only: the settings window under it stays open.
-function onKey(e: KeyboardEvent) {
-  if (e.key !== "Escape") return
-  e.stopImmediatePropagation()
-  emit("close")
-}
-onMounted(() => window.addEventListener("keydown", onKey, true))
-onUnmounted(() => window.removeEventListener("keydown", onKey, true))
 </script>
 
 <template>

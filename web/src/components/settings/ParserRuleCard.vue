@@ -94,7 +94,9 @@ function getAssignActionLabel(actionType: string): string {
   <div class="rule-card">
     <div class="rule-header">
       <div class="rule-title" @click="emit('toggle')">
-        <i class="pi rule-toggle-icon" :class="toggleIcon" />
+        <button type="button" class="rule-toggle" :aria-expanded="isOpen" :aria-label="t('rules.rule.toggle')" @click.stop="emit('toggle')">
+          <i class="pi rule-toggle-icon" :class="toggleIcon" aria-hidden="true" />
+        </button>
         <input v-model="rule.name" type="text" class="rule-name-input" :placeholder="t('rules.rule.namePlaceholder')" @click.stop />
         <span
           v-if="rule.valid === false"

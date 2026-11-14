@@ -158,7 +158,7 @@ const scanTime = computed(() => {
     <div class="card-header">
       <div class="series-title-container">
         <span class="series-id unified-text-bg">#{{ series.id }}</span>
-        <h3 class="series-title unified-text-bg">{{ series.name }}</h3>
+        <h2 class="series-title unified-text-bg">{{ series.name }}</h2>
       </div>
       <div class="card-meta">
         <span class="series-site unified-text-bg">{{ series.site }}</span>
