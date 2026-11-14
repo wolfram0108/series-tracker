@@ -21,6 +21,7 @@ import SheetRow from "./components/SheetRow.vue"
 import StControl from "./components/StControl.vue"
 import StLabel from "./components/StLabel.vue"
 import StValue from "./components/StValue.vue"
+import VoiceOrder from "./components/status/VoiceOrder.vue"
 import QueuePanel from "./components/status/output/QueuePanel.vue"
 import ReadProgress from "./components/status/output/ReadProgress.vue"
 import SeriesCard from "./components/SeriesCard.vue"
@@ -161,6 +162,16 @@ const settingsTabs = [
 const settingsBody = tAround("gallery.settings.body", "tab")
 // The widths (rem) of the rooms the sheet is shown in: its caption stands beside its body where both fit and above it where not.
 const SHEET_ROOMS = [26, 40, 64]
+// The rooms (rem) of the chips of the tracks, and the tracks: whole, with one gap, with many gaps, one episode, a long name.
+const VOICE_ROOMS = [24, 40, 72]
+const VOICE_SAMPLE = [
+  { label: "ruchime", episodes: "1–154, 158–162, 165–168, 170–174, 176–656", online: true },
+  { label: "PVA", episodes: "1–525, 527–656", online: true },
+  { label: "AnimeVost", episodes: "509", online: true },
+  { label: "Original", episodes: "0–656", online: true },
+  { label: "Dub", title: "Dub with a very long name the user gave to the track in the containers", online: false,
+    episodes: "1–12, 14–19, 21–23, 25, 27–31, 33–39, 41–44, 46, 48–52, 54–57, 59–63, 65–70, 72, 74–81, 83–90, 92–97, 99–104, 106–111" },
+]
 const sheetUrl = ref("http://127.0.0.1:5100")
 const sheetOn = ref(true)
 const sheetNote = (sources: number, lines: number) =>
@@ -579,6 +590,17 @@ const rtPass = ref("password123")
       </div>
     </section>
 
+    <section class="wide-section voice-samples">
+      <h2>{{ t("gallery.voices.h2") }}</h2>
+      <p class="muted small">{{ t("gallery.voices.hint") }}</p>
+      <div v-for="width in VOICE_ROOMS" :key="width" class="sheet-demo">
+        <span class="muted small">{{ t("gallery.fold.room", { width }) }}</span>
+        <div class="fold-demo-room" :style="{ width: `${width}rem` }">
+          <VoiceOrder :voices="VOICE_SAMPLE" />
+        </div>
+      </div>
+    </section>
+
     <section class="wide-section">
       <h2>{{ t("gallery.settings.h2") }}</h2>
       <p class="muted small">{{ t("gallery.settings.hint") }}</p>
@@ -706,6 +728,8 @@ small { color: #888; font-weight: 400; font-size: 0.6em; }
 .head-demo-wrap { margin-top: 0.75rem; }
 .head-demo { padding: 0.4rem 0.6rem; background: var(--bg-light); border-radius: 8px; }
 .fold-demo-room { max-width: 100%; border: 1px dashed var(--color-gray-200); border-radius: 8px; padding: 0.5rem; margin-top: 0.25rem; }
+/* A component whose root is a <section> keeps its own look in a room, not the one of a section of this page. */
+.fold-demo-room section { margin-top: 0; border-top: 0; padding-top: 0; }
 section { margin-top: 28px; border-top: 1px solid var(--color-gray-200); padding-top: 16px; }
 /* секция во всю ширину viewport (демо-окно как modal-xl, вне max-width галереи) */
 .wide-section {

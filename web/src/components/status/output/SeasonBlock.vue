@@ -5,9 +5,10 @@ import type { SameGroups } from "../../../lib/same"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
 import {
-  allOff, episodeStatus, fileNamesOf, isOff, spansOf, trackCells, type EpisodeView, type QueueName, type QueueRow,
+  allOff, episodeStatus, fileNamesOf, isOff, trackCells, type EpisodeView, type QueueName, type QueueRow,
   type SourceMark as Mark,
 } from "../../../lib/output"
+import { spansOf } from "../../../lib/ranges"
 import { useCardGrid } from "../../../composables/useCardGrid"
 import { useShownCells } from "../../../composables/useShownCells"
 import { sharing } from "../../../lib/sharing"

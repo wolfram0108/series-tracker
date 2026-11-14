@@ -608,14 +608,3 @@ export function orderValue(queue: QueueName, rows: readonly QueueRow[]): Record<
     ? { group: row.group, source_id: row.source_id, player: row.player }
     : { source_id: row.source_id, player: row.player })
 }
-
-/** `1–50, 52` of a set of episode numbers, as the core words the episodes of a voice-over. */
-export function spansOf(numbers: Iterable<number>): string {
-  const runs: [number, number][] = []
-  for (const number of [...new Set(numbers)].sort((a, b) => a - b)) {
-    const last = runs[runs.length - 1]
-    if (last && number === last[1] + 1) last[1] = number
-    else runs.push([number, number])
-  }
-  return runs.map(([first, end]) => (first === end ? String(first) : `${first}–${end}`)).join(", ")
-}

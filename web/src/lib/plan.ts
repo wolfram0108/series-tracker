@@ -1,7 +1,7 @@
 import type { components } from "../api/schema"
 import type { MediaFile } from "../composables/outputCalls"
 import { NO_LIVE, dubKey, slotKey, type Live } from "./live"
-import { spansOf } from "./output"
+import { spansOf } from "./ranges"
 
 type Schemas = components["schemas"]
 export type PlannerView = Schemas["PlannerView"]

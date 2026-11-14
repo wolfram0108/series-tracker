@@ -4,6 +4,7 @@ import { useAwaited } from "../../composables/useAwaited"
 import { t } from "../../i18n"
 import type { ShownVoice } from "../../lib/plan"
 import OrderList from "../OrderList.vue"
+import EpisodeReach from "./output/EpisodeReach.vue"
 import VoiceMark from "./output/VoiceMark.vue"
 
 // The tracks of the containers of a season: the voice-overs in their order, the first being the default one, each under
@@ -21,6 +22,8 @@ const { shown: titles, hold } = useAwaited<Titles>(
   () => Object.fromEntries(props.voices.map((voice) => [voice.label, voice.title ?? ""])),
   (each) => JSON.stringify(Object.entries(each).sort()))
 const nameOf = (voice: ShownVoice): string => titles.value[voice.label] || voice.label
+// The whole name leads the hint of its chip: a long name is clipped there.
+const nameTitle = (voice: ShownVoice, hint: string): string => `${nameOf(voice)}\n${hint}`
 // The voice-over of the markup reference stands last in the files whatever the order: it is shown after the list, fixed,
 // and the order the user drags keeps it in its place at the end.
 const movable = computed(() => props.voices.filter((voice) => !voice.last))
@@ -73,9 +76,9 @@ function keep(voice: ShownVoice): void {
           />
           <span
             v-else class="voice-order-name" @click="start(item)"
-            :title="nameOf(item) !== item.label ? t('output.voices.group', { label: item.label }) : t('output.voices.rename')"
+            :title="nameTitle(item, nameOf(item) !== item.label ? t('output.voices.group', { label: item.label }) : t('output.voices.rename'))"
           >{{ nameOf(item) }}</span>
-          <span class="voice-order-episodes">{{ item.episodes }}</span>
+          <EpisodeReach :episodes="item.episodes" />
         </li>
       </template>
     </OrderList>
@@ -92,9 +95,9 @@ function keep(voice: ShownVoice): void {
           :size="Math.max(draft.length, item.label.length)" :placeholder="item.label" :aria-label="t('output.voices.titleInput', { label: item.label })"
           @keydown.enter.prevent="keep(item)" @keydown.esc.prevent="editing = null" @blur="keep(item)"
         />
-        <span v-else class="voice-order-name" @click="start(item)">{{ nameOf(item) }}</span>
+        <span v-else class="voice-order-name" :title="nameTitle(item, t('output.voices.markup'))" @click="start(item)">{{ nameOf(item) }}</span>
         <i class="pi pi-bookmark-fill voice-order-markup" aria-hidden="true" />
-        <span class="voice-order-episodes">{{ item.episodes }}</span>
+        <EpisodeReach :episodes="item.episodes" />
       </li>
     </ol>
   </section>
@@ -103,18 +106,20 @@ function keep(voice: ShownVoice): void {
 <style scoped>
 .voice-order { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem; }
 .voice-order-title { color: var(--text-muted); font-size: 0.85rem; }
-.voice-order-list { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0; padding: 0; list-style: none; }
+.voice-order-list { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0; padding: 0; list-style: none; min-inline-size: 0; max-inline-size: 100%; }
 .voice-order-item {
   display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.2rem 0.75rem 0.2rem 0.25rem; cursor: grab;
+  max-inline-size: 100%; min-inline-size: 0;
   background: var(--bg-light); border: 1px solid var(--border-color); border-radius: 20px; font-size: 0.85rem; font-weight: 500;
   color: var(--color-gray-600);
 }
 .voice-order-item:focus-visible { outline: 0.125rem solid var(--color-blue); }
 .voice-order-item.is-busy { cursor: not-allowed; opacity: 0.6; }
-.voice-order-episodes { color: var(--text-muted); }
 .voice-order-item.is-fixed { cursor: default; }
 .voice-order-markup { color: var(--text-muted); font-size: 0.8em; }
-.voice-order-name { cursor: text; }
+/* A chip is one line within its room: a long name gives way first, its end cut by dots (the whole name is in its hint), the
+   numbers never. */
+.voice-order-name { cursor: text; min-inline-size: 0; max-inline-size: var(--voice-name-max, 20ch); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .voice-order-item.is-busy .voice-order-name { cursor: not-allowed; }
 .voice-title-input {
   font: inherit; padding: 0 0.4rem; border: 1px solid var(--color-blue); border-radius: 10px; background: var(--bg-white);

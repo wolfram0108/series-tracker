@@ -3,7 +3,7 @@ import type { components } from "../api/schema"
 import type { VoiceDub } from "./plan"
 import {
   allOff, bySeason, episodeStatus, fileNamesOf, groupTarget, isDeviation, isOff, joinEpisodes, orderValue, outputLines,
-  parseGroupTarget, parseVariantTarget, perRowOf, queueLevers, referenceOf, resetBody, setBody, sourceMarks, spansOf,
+  parseGroupTarget, parseVariantTarget, perRowOf, queueLevers, referenceOf, resetBody, setBody, sourceMarks,
   trackCells, variantTarget, voiceColumns, type EpisodeView, type Lever, type QueueRow, type Reference, type Row,
 } from "./output"
 import { SPECS } from "./output.fixtures"
@@ -421,10 +421,3 @@ describe("the levers of a queue", () => {
   })
 })
 
-describe("spansOf", () => {
-  it("words a set of episodes as runs", () => {
-    expect(spansOf([3, 1, 2, 5, 7, 6, 2])).toBe("1–3, 5–7")
-    expect(spansOf([4])).toBe("4")
-    expect(spansOf([])).toBe("")
-  })
-})

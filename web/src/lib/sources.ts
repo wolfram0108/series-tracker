@@ -5,6 +5,7 @@
 import type { components } from "../api/schema"
 import { ru } from "../i18n/ru"
 import { t, tn, type MessageKey } from "../i18n"
+import { gapsBetween, rangeText, type Run } from "./ranges"
 import type { PageProgress, PageStatus } from "../stores/sourceTables"
 
 type Schemas = components["schemas"]
@@ -116,8 +117,6 @@ function spansOf(rows: LayoutRow[]): Span[] {
   return spans
 }
 
-const rangeText = (from: number, to: number): string => (from === to ? `${from}` : `${from}–${to}`)
-
 function stepsText(low: number | null, high: number | null): string | null {
   if (low === null || high === null) return null
   const lowText = t("sources.height.step", { height: low })
@@ -137,7 +136,7 @@ export interface Coverage {
 
 function seasonCoverage(rows: LayoutRow[], season: number | null): Coverage {
   const spans = spansOf(rows)
-  const gaps = spans.slice(1).map((span, index) => rangeText(spans[index].to + 1, span.from - 1)).join(", ")
+  const gaps = gapsBetween(spans.map((span): Run => [span.from, span.to])).map(([from, to]) => rangeText(from, to)).join(", ")
   const bySteps = new Map<string, string[]>()
   for (const span of spans) {
     const steps = stepsText(span.low, span.high)

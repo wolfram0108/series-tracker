@@ -121,6 +121,15 @@ class UiStand(AppStand):
             os.makedirs(SHOTS, exist_ok=True)
             await self.page.screenshot(path=os.path.join(SHOTS, f"{name}.png"), full_page=True)
 
+    async def shot_around(self, target, name: str, below: int) -> None:
+        """A picture of one element and the `below` pixels under it: what opens under it into the body of the page (a card)."""
+        if SHOTS:
+            os.makedirs(SHOTS, exist_ok=True)
+            await target.scroll_into_view_if_needed()
+            box = await target.bounding_box()
+            await self.page.screenshot(path=os.path.join(SHOTS, f"{name}.png"), clip={
+                "x": box["x"], "y": box["y"], "width": box["width"], "height": box["height"] + below})
+
     async def shot_of(self, target, name: str) -> None:
         """A picture of one element (scrolled into view), when pictures are asked for."""
         if SHOTS:
