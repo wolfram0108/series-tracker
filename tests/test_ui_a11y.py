@@ -19,6 +19,9 @@ AXE = os.path.join(os.path.dirname(__file__), "..", "web", "node_modules", "axe-
 
 FOUND = """() => axe.run(document, {resultTypes: ['violations']})
   .then((r) => r.violations.map((v) => v.id + ': ' + v.nodes.slice(0, 3).map((n) => n.target.join(' ').slice(0, 80)).join(' | ')))"""
+# What the form and the table of a source do on their way in: axe would count their words half-written.
+SETTLED = """() => !document.getAnimations().some((each) => each.effect && each.effect.target && each.effect.target.closest
+  && (each.effect.target.closest('.load-gate') || each.effect.target.closest('.source-card .players')))"""
 TABS = "() => [...document.querySelectorAll('.modern-header .st-tab')].map((each) => each.getAttribute('title'))"
 OUTSIDE = "() => !document.activeElement.closest('.modern-modal')"
 
@@ -37,6 +40,7 @@ async def test_no_screen_has_a_violation_axe_finds(ui):  # noqa: F811
     async def scan(where: str) -> None:
         # A notice that is fading out is painted thin: axe would count its words half-written. Its end is the signal.
         await expect(page.locator(".p-toast-message")).to_have_count(0, timeout=15_000)
+        await page.wait_for_function(SETTLED)
         violations = await page.evaluate(FOUND)
         if violations:
             found[where] = violations

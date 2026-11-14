@@ -65,3 +65,16 @@
 .load-cards { display: flex; flex-direction: column; gap: 0.75rem; }
 .load-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.6rem; }
 .load-failed { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 3rem 1rem; color: var(--text-muted); text-align: center; }
+
+/* The place of a screen that waits (components/LoadGate.vue): its form and its skeleton stand in one box that passes on the gap of the box it is in,
+   so that what is in the slot is spaced as it was without the gate. The skeleton dissolves while the form comes into sight: the leaving one is
+   taken out of the flow at the top of the box, the form is in the flow at once, so nothing moves while they cross. */
+.load-gate, .load-content { display: flex; flex-direction: column; gap: inherit; min-inline-size: 0; }
+.load-gate { position: relative; }
+.load-swap-enter-active { transition: opacity 0.25s ease-out, transform 0.25s ease-out; }
+.load-swap-enter-from { opacity: 0; transform: translateY(0.25rem); }
+.load-swap-leave-active { position: absolute; inset-block-start: 0; inset-inline: 0; transition: opacity 0.2s ease-in; animation: none; }
+.load-swap-leave-to { opacity: 0; }
+/* The table of a source that has come after its skeleton comes into sight the same way. */
+@keyframes loadIn { from { opacity: 0; transform: translateY(0.25rem); } }
+.source-card .players { animation: loadIn 0.25s ease-out backwards; }

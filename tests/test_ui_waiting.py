@@ -137,3 +137,21 @@ async def test_the_window_of_a_series_says_that_its_tables_are_being_read(ui):  
     await held.release()
     await expect(page.locator(".episode-card")).to_have_count(2, timeout=15_000)
     await expect(bar).to_have_count(0)
+
+
+async def test_the_skeleton_dissolves_while_the_form_comes_into_sight(ui):  # noqa: F811
+    await series_in_browser(ui, (1,))
+    page = ui.page
+    held = Held(page)
+    await held.hold()
+    await page.get_by_role("button", name="Настройки").click()
+    await page.locator(".st-tab[title='Авторизация']").click()
+    # The skeleton comes into sight after a moment: it is let go once the user has seen it.
+    await page.wait_for_function("() => { const e = document.querySelector('.modern-body .load-skeleton'); return e && getComputedStyle(e).opacity === '1' }")
+    crossing = asyncio.ensure_future(page.wait_for_function(
+        """() => { const gone = document.querySelector('.modern-body .load-skeleton.load-swap-leave-active');
+                  return !!gone && !!document.querySelector('.modern-body .load-content') && getComputedStyle(gone).position === 'absolute' }"""))
+    await held.release()
+    await crossing  # for a moment both stand there, the leaving one out of the flow
+    await expect(page.locator(".modern-body .load-skeleton")).to_have_count(0)
+    await expect(page.locator(".modern-body .load-content")).to_be_visible()

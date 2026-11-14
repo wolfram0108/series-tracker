@@ -66,6 +66,7 @@ describe("the gate of a screen", () => {
     expect(loading.find(".load-skeleton").attributes("aria-busy")).toBe("true")
     expect(loading.findAll(".load-field").length).toBeGreaterThan(0)
     expect(gate("loaded").find(".form").exists()).toBe(true)
+    expect(gate("loaded").find(".load-gate .load-content > .form").exists()).toBe(true) // one box round the slot, which passes on the gap
   })
 
   it("says it could not be read and gives a button for another try", async () => {
