@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from "pinia"
 
 const connected = ref(false)
 vi.mock("./useSSE", () => ({
-  useSSE: () => ({ connected, on: () => () => undefined, connect: () => undefined, disconnect: () => undefined }),
+  useSSE: () => ({ connected, on: () => () => undefined, connect: () => undefined, disconnect: () => undefined, retryOnlyIf: () => undefined }),
 }))
 
 import { setupRealtime } from "./useRealtime"
@@ -20,6 +20,7 @@ describe("a connection that comes back", () => {
   it("reads the list of series and the scanner again; the first connection leaves them to the start", async () => {
     const series = vi.spyOn(useSeriesStore(), "load").mockResolvedValue()
     const scanner = vi.spyOn(useScannerStore(), "load").mockResolvedValue()
+    useSeriesStore().loaded = true // the start has read the list
     setupRealtime()
 
     connected.value = true
@@ -29,6 +30,16 @@ describe("a connection that comes back", () => {
 
     connected.value = false // the service restarted: what it said meanwhile never came
     await nextTick()
+    connected.value = true
+    await nextTick()
+    expect(series).toHaveBeenCalledTimes(1)
+    expect(scanner).toHaveBeenCalledTimes(1)
+  })
+
+  it("reads them at the first connection where the start could not (the service was away)", async () => {
+    const series = vi.spyOn(useSeriesStore(), "load").mockResolvedValue()
+    const scanner = vi.spyOn(useScannerStore(), "load").mockResolvedValue()
+    setupRealtime()
     connected.value = true
     await nextTick()
     expect(series).toHaveBeenCalledTimes(1)

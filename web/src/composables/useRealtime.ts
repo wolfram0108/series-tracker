@@ -12,6 +12,8 @@ import { useProviderStore, type ProviderView } from "../stores/provider"
 import { useVoicesStore, type VoiceSettingsView } from "../stores/voices"
 import { useSourcesStore, type SourcesSettingsView } from "../stores/sources"
 import { usePlanStore } from "../stores/plan"
+import { useAuthStore } from "../stores/auth"
+import { api } from "../api/client"
 
 type Schemas = components["schemas"]
 
@@ -80,11 +82,23 @@ export function setupRealtime(): void {
     if (!up) return
     tables.reset()
     reads.reset()
-    if (upBefore) {
+    // The first connection reads nothing again, unless the start could not read the list (the server was away).
+    if (upBefore || !series.loaded) {
       void series.load()
       void scanner.load()
     }
     upBefore = true
+  })
+
+  // A stream the server refused is closed for good: if the session has ended the user is asked to log in (the login opens the
+  // stream again), otherwise it is tried again.
+  sse.retryOnlyIf(async () => {
+    const { data } = await api.GET("/api/auth/status")
+    const status = data as { configured?: boolean; authenticated?: boolean } | undefined
+    // An administrator not made yet may be the auth module not answering for a moment: that is no ground to show the setup.
+    if (!status || status.authenticated || !status.configured) return true
+    useAuthStore().showLogin = true
+    return false
   })
 
   sse.connect()

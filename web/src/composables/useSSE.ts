@@ -13,6 +13,19 @@ type Handler = (data: unknown) => void
 const handlers = new Map<SSEEvent, Set<Handler>>()
 let source: EventSource | null = null
 const connected = ref(false)
+// The stream broke after it had been up, or never came up: the window tells it (components/ConnectionBanner.vue). It ends with the
+// next open, and an end the user asked for (disconnect) is no loss.
+const lost = ref(false)
+
+// The browser reconnects a stream that was cut by itself, but not one the server refused (a session that ended answers 401): that
+// one is closed for good. Then the owner of the login says whether to try again (retryOnlyIf), and the tries are spaced so that a
+// server that keeps refusing is not asked in a tight loop — the one place where time is the matter, not the signal.
+const EVENT_SOURCE_CLOSED = 2
+const RETRY_FIRST_MS = 3000
+const RETRY_LAST_MS = 30000
+let retryWait = RETRY_FIRST_MS
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+let mayRetry: (() => Promise<boolean>) | null = null
 
 // A handler that throws loses its own event only, not the rest of the turn.
 function deliver(event: SSEEvent, data: unknown) {
@@ -44,17 +57,43 @@ function connect() {
   source = new EventSource("/api/stream?frames=batch")
   source.onopen = () => {
     connected.value = true
+    lost.value = false
+    retryWait = RETRY_FIRST_MS
   }
   source.onerror = () => {
     connected.value = false // браузер переподключится сам
+    lost.value = true
+    if (source?.readyState === EVENT_SOURCE_CLOSED) giveUp()
   }
   source.addEventListener("batch", (e) => dispatchTurn((e as MessageEvent).data))
 }
 
+function giveUp() {
+  source?.close()
+  source = null
+  void (async () => {
+    try {
+      if (mayRetry && !(await mayRetry())) return
+    } catch {
+      // the question itself got no answer: the server is away, so try again like any other
+    }
+    retryTimer = setTimeout(connect, retryWait)
+    retryWait = Math.min(retryWait * 2, RETRY_LAST_MS)
+  })()
+}
+
 function disconnect() {
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
   source?.close()
   source = null
   connected.value = false
+  lost.value = false
+}
+
+/** Whether a stream that was closed for good is opened again: false where the user has to log in first (the login connects again). */
+function retryOnlyIf(check: () => Promise<boolean>): void {
+  mayRetry = check
 }
 
 /** Подписка на SSE-событие. Возвращает функцию отписки. */
@@ -73,5 +112,5 @@ function on(event: SSEEvent, handler: Handler): () => void {
 /** Singleton-доступ к SSE-шине: connect() один раз при старте приложения,
  *  on(event, fn) — подписка сторов на события. */
 export function useSSE() {
-  return { connect, disconnect, on, connected }
+  return { connect, disconnect, on, connected, lost, retryOnlyIf }
 }

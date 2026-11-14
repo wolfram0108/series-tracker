@@ -6,6 +6,7 @@ class FakeSource {
   static last: FakeSource | null = null
   url: string
   listeners = new Map<string, (event: MessageEvent) => void>()
+  readyState = 0
   onopen: (() => void) | null = null
   onerror: (() => void) | null = null
   constructor(url: string) {
@@ -86,5 +87,52 @@ describe("useSSE", () => {
       { event: "plan_update", data: { episode } }))))
     await nextTick()
     expect(counted).toEqual([215])
+  })
+
+  it("tells that the stream is lost until it is open again, and an end the user asked for is no loss", async () => {
+    const { sse, source } = await freshSSE()
+    source.onopen!()
+    expect(sse.lost.value).toBe(false)
+    source.onerror!() // the browser mends it by itself
+    expect(sse.lost.value).toBe(true)
+    source.onopen!()
+    expect(sse.lost.value).toBe(false)
+    source.onerror!()
+    sse.disconnect()
+    expect(sse.lost.value).toBe(false)
+  })
+
+  it("opens a stream the server closed for good again, once the owner of the login allows it, at growing spaces", async () => {
+    vi.useFakeTimers()
+    const { sse, source } = await freshSSE()
+    const allowed = vi.fn(async () => true)
+    sse.retryOnlyIf(allowed)
+    source.readyState = 2
+    source.onerror!()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(allowed).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(2999)
+    expect(FakeSource.last).toBe(source)
+    await vi.advanceTimersByTimeAsync(1)
+    const again = FakeSource.last!
+    expect(again).not.toBe(source)
+    again.readyState = 2
+    again.onerror!()
+    await vi.advanceTimersByTimeAsync(5999)
+    expect(FakeSource.last).toBe(again)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(FakeSource.last).not.toBe(again)
+    vi.useRealTimers()
+  })
+
+  it("does not open it again where the login must come first", async () => {
+    vi.useFakeTimers()
+    const { sse, source } = await freshSSE()
+    sse.retryOnlyIf(async () => false)
+    source.readyState = 2
+    source.onerror!()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(FakeSource.last).toBe(source)
+    vi.useRealTimers()
   })
 })

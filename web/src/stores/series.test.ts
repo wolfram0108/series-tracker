@@ -1,5 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import { setActivePinia, createPinia } from "pinia"
+const client = vi.hoisted(() => ({ GET: vi.fn() }))
+vi.mock("../api/client", () => ({ api: client }))
+
 import { useSeriesStore, type Series } from "./series"
 
 function mk(id: number, over: Partial<Series> = {}): Series {
@@ -91,3 +94,30 @@ describe("the sources of a series in the store", () => {
   })
 })
 
+describe("the read of the list", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    client.GET.mockReset()
+  })
+
+  it("is told apart from an empty list: not loaded until the core has answered, loaded with nothing in it when it has", async () => {
+    const store = useSeriesStore()
+    expect([store.loaded, store.failed]).toEqual([false, false])
+    client.GET.mockResolvedValue({ data: [] })
+    await store.load()
+    expect([store.loaded, store.failed, store.list]).toEqual([true, false, []])
+  })
+
+  it("says it failed where the server is away or refused, and is loaded by the read that follows", async () => {
+    const store = useSeriesStore()
+    client.GET.mockRejectedValueOnce(new TypeError("NetworkError"))
+    await store.load()
+    expect([store.loaded, store.failed]).toEqual([false, true])
+    client.GET.mockResolvedValueOnce({ error: { error: "x" } })
+    await store.load()
+    expect([store.loaded, store.failed]).toEqual([false, true])
+    client.GET.mockResolvedValueOnce({ data: [mk(1)] })
+    await store.load()
+    expect([store.loaded, store.failed, store.list.length]).toEqual([true, false, 1])
+  })
+})

@@ -425,12 +425,14 @@ class AppStand:
         self.profiles: dict[str, int] = {}  # the profile of each voice-over: two sources of one voice-over share it
         # The time of day as the sources tell the age of a table by it: a scenario moves it to let a page be read again.
         self.now = datetime.now(timezone.utc)
+        # The lock of the gateway (a session for every request): off for the stand, a scenario of the login sets it before `start()`.
+        self.locked = False
 
     async def start(self, before_started=None) -> None:
         self.bus = Bus()
         self.db = Database(self.db_path)
         self.gateway, self.modules = assemble(self.bus, self.db, Options(
-            db_path=self.db_path, auth_required=False, cookie_secure=False,
+            db_path=self.db_path, auth_required=self.locked, cookie_secure=False,
             torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now))
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()

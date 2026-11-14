@@ -3,6 +3,9 @@ import { useToast } from "primevue/usetoast"
 import { reasonText } from "../lib/reason"
 import { t } from "../i18n"
 
+// An error stays long enough to be read through: it is what the user must act on.
+const ERROR_LIFE_MS = 10_000
+
 /** Тело ошибки бэка по контракту (schemas.py: ErrorResponse/ErrorOnly). */
 function extractError(error: unknown): string | null {
   if (error && typeof error === "object" && "error" in error) {
@@ -27,16 +30,18 @@ export function useApi() {
       const { data, error } = await call
       if (error) {
         const detail = extractError(error) || opts.errorMessage || t("common.requestFailed")
-        toast.add({ severity: "error", summary: t("common.error"), detail, life: 5000 })
+        toast.add({ severity: "error", summary: t("common.error"), detail, life: ERROR_LIFE_MS })
         return null
       }
       return (data ?? null) as T | null
     } catch (e) {
+      // The exception is for the log of the browser; the window says what it means for the user's action.
+      console.error(e)
       toast.add({
         severity: "error",
         summary: t("common.networkFailed"),
-        detail: opts.errorMessage || String(e),
-        life: 5000,
+        detail: opts.errorMessage || t("common.notDone"),
+        life: ERROR_LIFE_MS,
       })
       return null
     } finally {

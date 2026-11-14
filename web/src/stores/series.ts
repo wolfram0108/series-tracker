@@ -28,6 +28,9 @@ export type SeriesDelta = { id: number } & Partial<Series>
 
 export const useSeriesStore = defineStore("series", () => {
   const list = ref<Series[]>([])
+  // The list is read from the core: until it has been, the screen says it is being read, and where the read failed it says that, not that there are no series.
+  const loaded = ref(false)
+  const failed = ref(false)
   // id серий с оптимистичным «сохранением» — спиннер до falsy is_busy от SSE
   const savingIds = ref<Set<number>>(new Set())
 
@@ -37,8 +40,16 @@ export const useSeriesStore = defineStore("series", () => {
 
   /** Полная загрузка списка (GET /api/series). */
   async function load(): Promise<void> {
-    const { data } = await api.GET("/api/series")
-    if (data) list.value = data as unknown as Series[]
+    try {
+      const { data } = await api.GET("/api/series")
+      if (data) {
+        list.value = data as unknown as Series[]
+        loaded.value = true
+      }
+      failed.value = !data
+    } catch {
+      failed.value = true // the server is away: the window says so (ConnectionBanner), the list is read again when the stream is back
+    }
   }
 
   /** Частичный merge дельты (series_updated): Object.assign только присланных
@@ -83,5 +94,5 @@ export const useSeriesStore = defineStore("series", () => {
     return savingIds.value.has(id)
   }
 
-  return { list, savingIds, byId, load, applyDelta, applySource, upsert, remove, markSaving, isSaving }
+  return { list, loaded, failed, savingIds, byId, load, applyDelta, applySource, upsert, remove, markSaving, isSaving }
 })

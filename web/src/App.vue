@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import Button from "primevue/button"
 import Toast from "primevue/toast"
 import { useToast } from "primevue/usetoast"
 import { ref } from "vue"
 import { t } from "./i18n"
 import AppHeader from "./components/AppHeader.vue"
+import ConnectionBanner from "./components/ConnectionBanner.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import ConfirmDialog from "./components/ConfirmDialog.vue"
 import SettingsModal from "./components/SettingsModal.vue"
@@ -113,6 +115,7 @@ async function onDelete(id: number) {
 <template>
   <main class="app">
     <Toast />
+    <ConnectionBanner />
     <AppHeader
       @add="openModal = 'add'"
       @logs="openModal = 'logs'"
@@ -132,7 +135,15 @@ async function onDelete(id: number) {
         @delete="onDelete"
         @toggle-auto-scan="onToggle"
       />
-      <div v-if="!seriesStore.list.length" class="empty-state">{{ t("app.empty") }}</div>
+      <!-- Nothing is said of "no series" before the list has been read, and nothing of it where it could not be read. -->
+      <div v-if="!seriesStore.list.length" class="empty-state" :role="seriesStore.loaded ? undefined : 'status'">
+        <template v-if="seriesStore.failed">
+          {{ t("app.loadFailed") }}
+          <div><Button class="empty-retry" :label="t('common.retry')" icon="pi pi-refresh" severity="secondary" @click="seriesStore.load()" /></div>
+        </template>
+        <template v-else-if="!seriesStore.loaded"><i class="pi pi-spin pi-spinner" aria-hidden="true" /> {{ t("app.loading") }}</template>
+        <template v-else>{{ t("app.empty") }}</template>
+      </div>
     </div>
 
     <SettingsModal v-if="openModal === 'settings'" @close="openModal = null" />
