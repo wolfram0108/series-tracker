@@ -137,7 +137,14 @@ class TableReader:
     async def get(self, request: TableGetRequest) -> TableGetReply:
         found = self._resolve(request.url)
         if found is None:
-            return TableGetReply(url=request.url, state=TableState.FAILED, reason=reason("site_not_found"))
+            # No site reads the address now (the provider of the socket is not up and was never heard of): the page is not read,
+            # but the table it had still serves, as after any failed read — a source never loses its rows for a missing reader.
+            try:
+                held = (await self._repo.stored(request.url)).table
+            except Exception:  # noqa: BLE001 - a store that cannot be read has no table to give; the refusal is the answer
+                self._log.exception("the table of %s could not be read for a page no site reads", request.url)
+                held = None
+            return TableGetReply(url=request.url, state=TableState.FAILED, table=held, reason=reason("site_not_found"))
         site, key = found
         async with self._gate:
             stored = await self._repo.stored(key)

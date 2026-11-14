@@ -414,3 +414,39 @@ def test_the_models_of_the_wire_are_the_same_text_at_both_ends_of_the_socket():
     for constant in ("PROTOCOL", "HEARTBEAT_S", "SILENCE_S", "FRAME_PROGRESS", "FRAME_ALIVE", "FRAME_DRAFT", "FRAME_ERROR",
                      "FRAME_DONE", "EVENT_HELLO", "EVENT_CHANGED"):
         assert getattr(theirs, constant) == getattr(ours, constant), constant
+
+
+async def test_a_page_no_site_reads_now_still_serves_the_table_it_had_so_a_source_never_loses_its_rows_for_a_missing_reader(tmp_path):
+    """The first start after the applications left the tracker, with the provider not yet up and no manifest ever saved: the
+    sites of the applications are not in the registry. A sync, a window and the recount of a layout ask for the tables of the
+    pages all the same, and they get the last ones, with the reason the page is not read."""
+    mock = MockProvider()
+    async with serving(mock) as gone:
+        await gone.down()
+        sources = SourcesModule(Bus(), Database(str(migrated(tmp_path / "s.db"))), torrent_cache_dir=str(tmp_path / "c"),
+                                provider=ProviderClient(gone.url), provider_reconnect=(0.05, 0.2))
+        await sources.start()
+        try:
+            assert sources.tables.resolve(CARD).site is None
+            await sources.repo.save_table(_stored(CARD, "line:X", [1080]))
+            for refresh in (True, False):
+                got = await sources.on_table_get(type("Env", (), {"payload": {"url": CARD, "refresh": refresh}})())
+                assert got["state"] == "failed" and json.loads(got["reason"])["code"] == "site_not_found"
+                assert [row["player"] for row in got["table"]["rows"]] == ["line:X"]
+            never = await sources.on_table_get(type("Env", (), {"payload": {"url": "app://mock/99"}})())
+            assert never["state"] == "failed" and never["table"] is None
+        finally:
+            await sources.stop()
+
+
+def test_the_schema_file_of_the_socket_is_the_one_the_models_make():
+    """The schema is what a writer of a provider reads (contracts/provider_socket.md, appendix A): a document the models
+    have left behind would teach him a protocol that is no longer the tracker's."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("provider_schema", os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "checks", "provider_schema.py"))
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    with open(tool.PATH, encoding="utf-8") as stored:
+        assert stored.read() == tool.text(), "contracts/provider_socket.schema.json is stale: run tools/checks/provider_schema.py"
+    assert json.loads(tool.text())["protocol"] == 1

@@ -1,0 +1,1024 @@
+{
+ "messages": {
+  "AppSearchReply": {
+   "$defs": {
+    "AppCard": {
+     "description": "A card of a title as the search of its application gives it; `url` is the address it is a source by (empty when\nthe application gave the card no number to be asked by again).",
+     "properties": {
+      "app": {
+       "title": "App",
+       "type": "string"
+      },
+      "area": {
+       "default": "",
+       "title": "Area",
+       "type": "string"
+      },
+      "blurb": {
+       "default": "",
+       "title": "Blurb",
+       "type": "string"
+      },
+      "genres": {
+       "default": "",
+       "title": "Genres",
+       "type": "string"
+      },
+      "id": {
+       "title": "Id",
+       "type": "string"
+      },
+      "name": {
+       "default": "",
+       "title": "Name",
+       "type": "string"
+      },
+      "pic": {
+       "default": "",
+       "title": "Pic",
+       "type": "string"
+      },
+      "remarks": {
+       "default": "",
+       "title": "Remarks",
+       "type": "string"
+      },
+      "sub": {
+       "default": "",
+       "title": "Sub",
+       "type": "string"
+      },
+      "url": {
+       "title": "Url",
+       "type": "string"
+      },
+      "year": {
+       "default": "",
+       "title": "Year",
+       "type": "string"
+      }
+     },
+     "required": [
+      "app",
+      "id",
+      "url"
+     ],
+     "title": "AppCard",
+     "type": "object"
+    },
+    "AppResults": {
+     "description": "One application's answer to the search: a page of its cards, or the reason it gave none.",
+     "properties": {
+      "app": {
+       "title": "App",
+       "type": "string"
+      },
+      "cards": {
+       "items": {
+        "$ref": "#/$defs/AppCard"
+       },
+       "title": "Cards",
+       "type": "array"
+      },
+      "label": {
+       "title": "Label",
+       "type": "string"
+      },
+      "page": {
+       "default": 1,
+       "title": "Page",
+       "type": "integer"
+      },
+      "pages": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Pages"
+      },
+      "reason": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Reason"
+      },
+      "total": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Total"
+      }
+     },
+     "required": [
+      "app",
+      "label"
+     ],
+     "title": "AppResults",
+     "type": "object"
+    }
+   },
+   "properties": {
+    "apps": {
+     "items": {
+      "$ref": "#/$defs/AppResults"
+     },
+     "title": "Apps",
+     "type": "array"
+    }
+   },
+   "title": "AppSearchReply",
+   "type": "object"
+  },
+  "AppSearchRequest": {
+   "properties": {
+    "app": {
+     "default": "",
+     "title": "App",
+     "type": "string"
+    },
+    "page": {
+     "default": 1,
+     "minimum": 1,
+     "title": "Page",
+     "type": "integer"
+    },
+    "query": {
+     "title": "Query",
+     "type": "string"
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "title": "AppSearchRequest",
+   "type": "object"
+  },
+  "DownloadFrame": {
+   "description": "One line of the stream of a download. `progress` carries the telemetry `figures` (contracts/provider_socket.md, section\n7); `done` the height of the picture of the file that lies at the path; `error` the reason and its `kind`: `final` is the last\nword of the source (asking again changes nothing), `broken` a way that broke (the tracker asks again, and the failure is the\nsource's when its attempts are spent), `unasked` a failure that says nothing of the source (the provider did not reach it).",
+   "properties": {
+    "figures": {
+     "additionalProperties": true,
+     "title": "Figures",
+     "type": "object"
+    },
+    "height": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Height"
+    },
+    "kind": {
+     "default": "broken",
+     "enum": [
+      "final",
+      "broken",
+      "unasked"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "reason": {
+     "default": "",
+     "title": "Reason",
+     "type": "string"
+    },
+    "type": {
+     "enum": [
+      "progress",
+      "alive",
+      "done",
+      "error"
+     ],
+     "title": "Type",
+     "type": "string"
+    }
+   },
+   "required": [
+    "type"
+   ],
+   "title": "DownloadFrame",
+   "type": "object"
+  },
+  "DownloadRequest": {
+   "description": "`POST /v1/download`: the file of the link of a row into `path` (absolute; the tracker and the provider share the\npaths). The number of connections and the way the file comes are the provider's own business.",
+   "properties": {
+    "max_height": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Max Height"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "term_hours": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Term Hours"
+    },
+    "url": {
+     "title": "Url",
+     "type": "string"
+    }
+   },
+   "required": [
+    "url",
+    "path"
+   ],
+   "title": "DownloadRequest",
+   "type": "object"
+  },
+  "FeedEvent": {
+   "description": "`hello` and `changed` of the feed: the revision of the manifest the provider has now.",
+   "properties": {
+    "revision": {
+     "title": "Revision",
+     "type": "string"
+    }
+   },
+   "required": [
+    "revision"
+   ],
+   "title": "FeedEvent",
+   "type": "object"
+  },
+  "Manifest": {
+   "$defs": {
+    "ManifestFamily": {
+     "properties": {
+      "label": {
+       "default": "",
+       "title": "Label",
+       "type": "string"
+      },
+      "name": {
+       "minLength": 1,
+       "title": "Name",
+       "type": "string"
+      },
+      "owns": {
+       "title": "Owns",
+       "type": "string"
+      },
+      "video": {
+       "title": "Video",
+       "type": "string"
+      }
+     },
+     "required": [
+      "name",
+      "owns",
+      "video"
+     ],
+     "title": "ManifestFamily",
+     "type": "object"
+    },
+    "ManifestPlace": {
+     "properties": {
+      "label": {
+       "default": "",
+       "title": "Label",
+       "type": "string"
+      },
+      "name": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     "required": [
+      "name"
+     ],
+     "title": "ManifestPlace",
+     "type": "object"
+    },
+    "ManifestPlayer": {
+     "properties": {
+      "kind": {
+       "default": "line",
+       "enum": [
+        "site",
+        "line"
+       ],
+       "title": "Kind",
+       "type": "string"
+      },
+      "label": {
+       "default": "",
+       "title": "Label",
+       "type": "string"
+      },
+      "name": {
+       "minLength": 1,
+       "title": "Name",
+       "type": "string"
+      },
+      "places": {
+       "items": {
+        "$ref": "#/$defs/ManifestPlace"
+       },
+       "title": "Places",
+       "type": "array"
+      }
+     },
+     "required": [
+      "name"
+     ],
+     "title": "ManifestPlayer",
+     "type": "object"
+    },
+    "ManifestSearch": {
+     "properties": {
+      "label": {
+       "default": "",
+       "title": "Label",
+       "type": "string"
+      },
+      "name": {
+       "minLength": 1,
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     "required": [
+      "name"
+     ],
+     "title": "ManifestSearch",
+     "type": "object"
+    },
+    "ManifestSite": {
+     "properties": {
+      "address": {
+       "$ref": "#/$defs/SiteAddress"
+      },
+      "domains": {
+       "items": {
+        "type": "string"
+       },
+       "minItems": 1,
+       "title": "Domains",
+       "type": "array"
+      },
+      "first_read_by_user": {
+       "default": false,
+       "title": "First Read By User",
+       "type": "boolean"
+      },
+      "label": {
+       "default": "",
+       "title": "Label",
+       "type": "string"
+      },
+      "name": {
+       "minLength": 1,
+       "title": "Name",
+       "type": "string"
+      },
+      "source_type": {
+       "default": "web_video",
+       "enum": [
+        "vk_video",
+        "web_video"
+       ],
+       "title": "Source Type",
+       "type": "string"
+      }
+     },
+     "required": [
+      "name",
+      "domains",
+      "address"
+     ],
+     "title": "ManifestSite",
+     "type": "object"
+    },
+    "ProviderInfo": {
+     "properties": {
+      "id": {
+       "minLength": 1,
+       "title": "Id",
+       "type": "string"
+      },
+      "version": {
+       "default": "",
+       "title": "Version",
+       "type": "string"
+      }
+     },
+     "required": [
+      "id"
+     ],
+     "title": "ProviderInfo",
+     "type": "object"
+    },
+    "SiteAddress": {
+     "description": "How an address of a site is told and written: its schemes, a path matching `path` whole, and the one canonical\nspelling (`{group}` of `path`).",
+     "properties": {
+      "canonical": {
+       "title": "Canonical",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "schemes": {
+       "items": {
+        "type": "string"
+       },
+       "minItems": 1,
+       "title": "Schemes",
+       "type": "array"
+      }
+     },
+     "required": [
+      "schemes",
+      "path",
+      "canonical"
+     ],
+     "title": "SiteAddress",
+     "type": "object"
+    }
+   },
+   "description": "What a provider reads and plays, told without the network (`GET /v1/manifest`).",
+   "properties": {
+    "families": {
+     "items": {
+      "$ref": "#/$defs/ManifestFamily"
+     },
+     "title": "Families",
+     "type": "array"
+    },
+    "players": {
+     "items": {
+      "$ref": "#/$defs/ManifestPlayer"
+     },
+     "title": "Players",
+     "type": "array"
+    },
+    "protocol": {
+     "title": "Protocol",
+     "type": "integer"
+    },
+    "provider": {
+     "$ref": "#/$defs/ProviderInfo"
+    },
+    "revision": {
+     "minLength": 1,
+     "title": "Revision",
+     "type": "string"
+    },
+    "search": {
+     "items": {
+      "$ref": "#/$defs/ManifestSearch"
+     },
+     "title": "Search",
+     "type": "array"
+    },
+    "sites": {
+     "items": {
+      "$ref": "#/$defs/ManifestSite"
+     },
+     "title": "Sites",
+     "type": "array"
+    }
+   },
+   "required": [
+    "protocol",
+    "provider",
+    "revision"
+   ],
+   "title": "Manifest",
+   "type": "object"
+  },
+  "ReadFrame": {
+   "description": "One line of the stream of a read. `draft` is a `TableDraft` as the dict it serialises to.",
+   "properties": {
+    "current": {
+     "default": 0,
+     "title": "Current",
+     "type": "integer"
+    },
+    "draft": {
+     "anyOf": [
+      {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Draft"
+    },
+    "phase": {
+     "default": "",
+     "title": "Phase",
+     "type": "string"
+    },
+    "reason": {
+     "default": "",
+     "title": "Reason",
+     "type": "string"
+    },
+    "total": {
+     "default": 0,
+     "title": "Total",
+     "type": "integer"
+    },
+    "type": {
+     "enum": [
+      "progress",
+      "alive",
+      "draft",
+      "error"
+     ],
+     "title": "Type",
+     "type": "string"
+    }
+   },
+   "required": [
+    "type"
+   ],
+   "title": "ReadFrame",
+   "type": "object"
+  },
+  "ReadRequest": {
+   "description": "`POST /v1/read`: the whole page into one table. `last_rows` are `TableRow` dicts of the last complete table.",
+   "properties": {
+    "fresh": {
+     "default": false,
+     "title": "Fresh",
+     "type": "boolean"
+    },
+    "last_rows": {
+     "items": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "title": "Last Rows",
+     "type": "array"
+    },
+    "off": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Off",
+     "type": "array"
+    },
+    "recent": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Recent"
+    },
+    "rows": {
+     "default": "all",
+     "title": "Rows",
+     "type": "string"
+    },
+    "term_hours": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Term Hours"
+    },
+    "url": {
+     "title": "Url",
+     "type": "string"
+    }
+   },
+   "required": [
+    "url"
+   ],
+   "title": "ReadRequest",
+   "type": "object"
+  },
+  "TableDraft": {
+   "$defs": {
+    "RowState": {
+     "description": "`not_obtained` is not `absent`: the answer stayed unsure to the end, the player may still have the video.",
+     "enum": [
+      "playable",
+      "absent",
+      "not_obtained"
+     ],
+     "title": "RowState",
+     "type": "string"
+    },
+    "RowVoice": {
+     "description": "The voice-over as the player or the site words it; `kind` is the type the player names (voice, subtitles, ...).",
+     "properties": {
+      "kind": {
+       "default": "",
+       "title": "Kind",
+       "type": "string"
+      },
+      "name": {
+       "default": "",
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     "title": "RowVoice",
+     "type": "object"
+    },
+    "TableRow": {
+     "additionalProperties": false,
+     "description": "One element of one player's list, as the site gave it.",
+     "properties": {
+      "duration_s": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Duration S"
+      },
+      "group": {
+       "default": "",
+       "title": "Group",
+       "type": "string"
+      },
+      "heights": {
+       "items": {
+        "type": "integer"
+       },
+       "title": "Heights",
+       "type": "array"
+      },
+      "key": {
+       "title": "Key",
+       "type": "string"
+      },
+      "link": {
+       "default": "",
+       "title": "Link",
+       "type": "string"
+      },
+      "part": {
+       "default": "",
+       "title": "Part",
+       "type": "string"
+      },
+      "player": {
+       "title": "Player",
+       "type": "string"
+      },
+      "player_label": {
+       "default": "",
+       "title": "Player Label",
+       "type": "string"
+      },
+      "published": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Published"
+      },
+      "reason": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Reason"
+      },
+      "site_fields": {
+       "additionalProperties": true,
+       "title": "Site Fields",
+       "type": "object"
+      },
+      "state": {
+       "$ref": "#/$defs/RowState"
+      },
+      "text": {
+       "default": "",
+       "title": "Text",
+       "type": "string"
+      },
+      "video": {
+       "default": "",
+       "title": "Video",
+       "type": "string"
+      },
+      "voice": {
+       "$ref": "#/$defs/RowVoice"
+      }
+     },
+     "required": [
+      "key",
+      "player",
+      "state"
+     ],
+     "title": "TableRow",
+     "type": "object"
+    },
+    "UnreadPart": {
+     "additionalProperties": false,
+     "description": "A part of a page the read could not get: its rows are the ones it gave the last read that got it, if any.\n`names` are what the site calls its content (the voice-overs of a catalog, the title of an episode).",
+     "properties": {
+      "names": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Names",
+       "type": "array"
+      },
+      "part": {
+       "title": "Part",
+       "type": "string"
+      },
+      "player_label": {
+       "default": "",
+       "title": "Player Label",
+       "type": "string"
+      },
+      "reason": {
+       "title": "Reason",
+       "type": "string"
+      }
+     },
+     "required": [
+      "part",
+      "reason"
+     ],
+     "title": "UnreadPart",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "description": "What a site returns: the head, the rows and the parts of the page it could not read (`UnreadPart`; the core keeps\ntheir rows of the read before). Row keys are unique within the page (the core rejects a repeat).",
+   "properties": {
+    "channel": {
+     "default": "",
+     "title": "Channel",
+     "type": "string"
+    },
+    "names": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Names",
+     "type": "array"
+    },
+    "rows": {
+     "items": {
+      "$ref": "#/$defs/TableRow"
+     },
+     "title": "Rows",
+     "type": "array"
+    },
+    "site_voice": {
+     "default": "",
+     "title": "Site Voice",
+     "type": "string"
+    },
+    "title": {
+     "default": "",
+     "title": "Title",
+     "type": "string"
+    },
+    "unread": {
+     "items": {
+      "$ref": "#/$defs/UnreadPart"
+     },
+     "title": "Unread",
+     "type": "array"
+    }
+   },
+   "title": "TableDraft",
+   "type": "object"
+  },
+  "TableRow": {
+   "$defs": {
+    "RowState": {
+     "description": "`not_obtained` is not `absent`: the answer stayed unsure to the end, the player may still have the video.",
+     "enum": [
+      "playable",
+      "absent",
+      "not_obtained"
+     ],
+     "title": "RowState",
+     "type": "string"
+    },
+    "RowVoice": {
+     "description": "The voice-over as the player or the site words it; `kind` is the type the player names (voice, subtitles, ...).",
+     "properties": {
+      "kind": {
+       "default": "",
+       "title": "Kind",
+       "type": "string"
+      },
+      "name": {
+       "default": "",
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     "title": "RowVoice",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "description": "One element of one player's list, as the site gave it.",
+   "properties": {
+    "duration_s": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Duration S"
+    },
+    "group": {
+     "default": "",
+     "title": "Group",
+     "type": "string"
+    },
+    "heights": {
+     "items": {
+      "type": "integer"
+     },
+     "title": "Heights",
+     "type": "array"
+    },
+    "key": {
+     "title": "Key",
+     "type": "string"
+    },
+    "link": {
+     "default": "",
+     "title": "Link",
+     "type": "string"
+    },
+    "part": {
+     "default": "",
+     "title": "Part",
+     "type": "string"
+    },
+    "player": {
+     "title": "Player",
+     "type": "string"
+    },
+    "player_label": {
+     "default": "",
+     "title": "Player Label",
+     "type": "string"
+    },
+    "published": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Published"
+    },
+    "reason": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Reason"
+    },
+    "site_fields": {
+     "additionalProperties": true,
+     "title": "Site Fields",
+     "type": "object"
+    },
+    "state": {
+     "$ref": "#/$defs/RowState"
+    },
+    "text": {
+     "default": "",
+     "title": "Text",
+     "type": "string"
+    },
+    "video": {
+     "default": "",
+     "title": "Video",
+     "type": "string"
+    },
+    "voice": {
+     "$ref": "#/$defs/RowVoice"
+    }
+   },
+   "required": [
+    "key",
+    "player",
+    "state"
+   ],
+   "title": "TableRow",
+   "type": "object"
+  },
+  "UnreadPart": {
+   "additionalProperties": false,
+   "description": "A part of a page the read could not get: its rows are the ones it gave the last read that got it, if any.\n`names` are what the site calls its content (the voice-overs of a catalog, the title of an episode).",
+   "properties": {
+    "names": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Names",
+     "type": "array"
+    },
+    "part": {
+     "title": "Part",
+     "type": "string"
+    },
+    "player_label": {
+     "default": "",
+     "title": "Player Label",
+     "type": "string"
+    },
+    "reason": {
+     "title": "Reason",
+     "type": "string"
+    }
+   },
+   "required": [
+    "part",
+    "reason"
+   ],
+   "title": "UnreadPart",
+   "type": "object"
+  }
+ },
+ "protocol": 1
+}
