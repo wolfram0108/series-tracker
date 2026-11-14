@@ -133,7 +133,7 @@ describe("SourcesEditor", () => {
     const w = mountEditor([torrent], { editable: false })
     expect(w.find("button.source-remove").exists()).toBe(false)
     expect(w.find(".source-add").exists()).toBe(false)
-    expect((w.find("input[readonly]").element as HTMLInputElement).value).toBe("https://kinozal.tv/details.php?id=1")
+    expect(w.find(".item-value").text()).toBe("https://kinozal.tv/details.php?id=1")
     expect(w.find(".players").exists()).toBe(false)
   })
 

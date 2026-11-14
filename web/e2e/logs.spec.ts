@@ -15,7 +15,7 @@ test.describe("Логи", () => {
     await openApp(page)
     await page.getByRole("button", { name: "Просмотр логов" }).click()
     await page.locator(".st-tab[title='Настройка']").click()
-    await expect(page.locator(".logging-groups .modern-fieldset").first()).toBeVisible()
+    await expect(page.locator(".logging-groups .sheet-row").first()).toBeVisible()
     expect(await page.locator(".dump-grid .debug-switch").count()).toBeGreaterThan(0)
 
     const scanFlag = async (): Promise<boolean> => {

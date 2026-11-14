@@ -29,31 +29,6 @@
   50% { box-shadow: 0 0 4px 1px rgba(13, 110, 253, 0.2); }
 }
 
-/* Блок-рамка раздела (порт lists.css .modern-fieldset). overflow НЕ
-   hidden — иначе он обрезает выпадающие списки select/saved-path внутри
-   (в легаси они уходили за край через position:fixed). Верхние углы
-   плашки заголовка скруглены явно, чтобы вид совпал с оригиналом. */
-.modern-fieldset {
-  background: var(--bg-white);
-  border: 1px solid var(--border-color);
-  border-radius: var(--card-border-radius);
-  margin-bottom: 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-.modern-fieldset:last-child { margin-bottom: 0; }
-.fieldset-header {
-  display: flex; align-items: center; gap: 8px;
-  justify-content: space-between;
-  background: linear-gradient(135deg, var(--bg-light) 0%, var(--border-color) 100%);
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-color);
-  border-radius: var(--card-border-radius) var(--card-border-radius) 0 0;
-}
-.fieldset-title { font-size: 16px; font-weight: 600; color: #2c3e50; }
-.fieldset-header { font-size: 16px; font-weight: 600; color: #2c3e50; }
-.fieldset-content { padding: 20px; }
-.fieldset-hint { display: block; margin-top: 8px; font-size: 0.85rem; color: var(--text-muted); }
-
 .series-list { display: flex; flex-direction: column; }
 .empty-state {
   text-align: center; padding: 48px 16px; color: var(--text-muted);

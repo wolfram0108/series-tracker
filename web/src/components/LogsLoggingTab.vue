@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue"
-import ToggleSwitch from "primevue/toggleswitch"
+import SheetField from "./SheetField.vue"
+import SheetRow from "./SheetRow.vue"
+import StSwitch from "./StSwitch.vue"
 import { useToast } from "primevue/usetoast"
 import { api } from "../api/client"
 import { hasMessage, t, type MessageKey } from "../i18n"
@@ -56,41 +58,30 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="logging-settings">
+  <div class="sheet logging-settings">
     <div v-if="loading" class="logging-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
     <template v-else>
-      <p class="muted-hint">
-        {{ t("logs.logging.hint") }}
-      </p>
+      <p class="sheet-hint">{{ t("logs.logging.hint") }}</p>
       <div class="logging-groups">
-        <div v-for="(mods, g) in groups" :key="g" class="modern-fieldset">
-          <div class="fieldset-header logging-group-header">
-            <span class="fieldset-title">{{ sectionText(String(g)) }}</span>
-            <ToggleSwitch :model-value="groupOn(mods)" @update:model-value="toggleGroup(g, mods, $event)" />
-          </div>
-          <div class="fieldset-content">
-            <ul class="module-list">
-              <li v-for="m in mods" :key="m.name">
-                <strong>{{ m.name }}</strong><span v-if="moduleText(m.name)" class="muted"> — {{ moduleText(m.name) }}</span>
-              </li>
-            </ul>
-          </div>
-        </div>
+        <SheetRow v-for="(mods, g) in groups" :key="g" :caption="sectionText(String(g))">
+          <SheetField :label="t('logs.logging.on')" control>
+            <StSwitch :model-value="groupOn(mods)" @update:model-value="toggleGroup(g, mods, $event)" />
+          </SheetField>
+          <ul class="module-list">
+            <li v-for="m in mods" :key="m.name">
+              <strong>{{ m.name }}</strong><span v-if="moduleText(m.name)" class="muted"> — {{ moduleText(m.name) }}</span>
+            </li>
+          </ul>
+        </SheetRow>
       </div>
     </template>
   </div>
 </template>
 
 <style scoped>
-.logging-settings { display: flex; flex-direction: column; gap: 16px; }
 .logging-loading { display: flex; justify-content: center; padding: 2rem; color: var(--text-muted); }
-.muted-hint { color: var(--text-muted); font-size: 0.88rem; margin: 0 0 8px; }
-.logging-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.logging-group-header { display: flex; align-items: center; justify-content: space-between; }
+.logging-groups { display: flex; flex-direction: column; }
 .module-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .module-list li { font-size: 0.85rem; }
 .module-list .muted { color: var(--text-muted); }
-@media (max-width: 900px) {
-  .logging-groups { grid-template-columns: 1fr; }
-}
 </style>

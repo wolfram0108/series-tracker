@@ -4,17 +4,16 @@ import { FIELD_LABEL } from "../lib/fieldLabel"
 import { FS_RULES, type FsKind } from "../lib/fsnames"
 import { t } from "../i18n"
 
-// Floating-label поле (constructor-item item-floating-label). Иконка —
-// отдельным StIcon перед ним (как в оригинале). Опц. пароль-глазик.
-// Без `label` — простое поле: подпись ему даёт сегмент группы (StLabel), значение — `placeholder` пока пусто.
+// The field of a sheet (constructor-item item-plain): its label is the first segment of its group (SheetField / StLabel), its hint
+// the `placeholder` while it is empty; with `type="password"` an eye shows what was typed. It names itself by the label of its
+// field (lib/fieldLabel.ts) unless `ariaLabel` names it.
 const props = withDefaults(defineProps<{
   modelValue?: string
-  label?: string
   placeholder?: string
   ariaLabel?: string
   type?: "text" | "password"
   kind?: FsKind
-}>(), { modelValue: "", type: "text", label: undefined, placeholder: undefined, ariaLabel: undefined })
+}>(), { modelValue: "", type: "text", placeholder: undefined, ariaLabel: undefined })
 
 const emit = defineEmits<{ "update:modelValue": [string] }>()
 const id = useId()
@@ -53,7 +52,7 @@ watch(() => props.modelValue, (v) => {
 </script>
 
 <template>
-  <div v-if="label === undefined" class="constructor-item item-plain">
+  <div class="constructor-item item-plain">
     <input
       :id="id"
       ref="input"
@@ -64,26 +63,6 @@ watch(() => props.modelValue, (v) => {
       :aria-label="ariaLabel ?? fieldLabel?.()"
       @input="onInput"
     />
-    <button
-      v-if="type === 'password'"
-      type="button"
-      class="password-toggle-btn"
-      :title="show ? t('common.hide') : t('common.show')"
-      @click="show = !show"
-    >
-      <i class="pi" :class="show ? 'pi-eye-slash' : 'pi-eye'" />
-    </button>
-  </div>
-  <div v-else class="constructor-item item-floating-label">
-    <input
-      :id="id"
-      class="item-input"
-      :type="eType"
-      :value="modelValue"
-      placeholder=" "
-      @input="onInput"
-    />
-    <label :for="id">{{ label }}</label>
     <button
       v-if="type === 'password'"
       type="button"

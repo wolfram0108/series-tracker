@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Рамка constructor-group: монолитный блок, в который через слот
-// собираются айтемы (StIcon / StInput / StSelect / item-button-group).
+// собираются айтемы (StLabel / StInput / StSelect / item-button-group). Поле листа собирает её само — SheetField.
 defineProps<{ state?: "valid" | "invalid" | null }>()
 </script>
 

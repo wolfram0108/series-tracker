@@ -3,8 +3,8 @@ import { computed, ref, watch } from "vue"
 import AppSearch from "./AppSearch.vue"
 import SourceCard from "./SourceCard.vue"
 import StGroup from "./StGroup.vue"
-import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
+import StLabel from "./StLabel.vue"
 import { t } from "../i18n"
 import { joinVkAddress, splitVkAddress, vkQuery, type SourceItem } from "../lib/sources"
 import { kindOf } from "../composables/sourceAddress"
@@ -143,11 +143,11 @@ function clear(): void {
       <AppSearch v-if="mode === 'apps'" :names="searchNames" :added="added" :busy="busy || adding" @add="addCard" />
       <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->
       <StGroup v-if="mode === 'address'" class="source-add">
-        <StIcon icon="pi pi-link" />
-        <StInput v-model="address" :label="t('sources.add.label')" @keyup.enter="add" />
+        <StLabel icon="pi pi-link" :text="t('sources.add.label')" />
+        <StInput v-model="address" :aria-label="t('sources.add.label')" @keyup.enter="add" />
         <template v-if="channel">
-          <StIcon icon="pi pi-search" />
-          <StInput v-model="query" class="source-query" :label="t('sources.vk.query')" @keyup.enter="add" />
+          <StLabel icon="pi pi-search" :text="t('sources.vk.query')" />
+          <StInput v-model="query" class="source-query" :aria-label="t('sources.vk.query')" @keyup.enter="add" />
         </template>
         <div class="item-button-group">
           <button type="button" class="btn-icon btn-add btn-text-icon" :disabled="busy || adding || !ready" @click="add">

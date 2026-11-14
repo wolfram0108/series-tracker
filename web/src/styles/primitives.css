@@ -112,4 +112,14 @@
 /* A hint under what a row holds. */
 .sheet-hint { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
 .sheet-hint.is-danger { color: var(--color-red-1); }
+/* A framed block of a page (a season of the output, a compilation): a white card with a soft shadow. Its overflow is not hidden: it
+   would cut the lists of the selects that open inside it. */
+.panel {
+  background: var(--bg-white);
+  border: 1px solid var(--border-color);
+  border-radius: var(--card-border-radius);
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.panel:last-child { margin-bottom: 0; }
 

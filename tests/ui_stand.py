@@ -200,9 +200,9 @@ class UiStand(AppStand):
         block by block from the palette. A rule: {"name", "if": [blocks], "then": [(kind, blocks or value)]}."""
         page = self.page
         await self.settings("Правила")
-        if not await page.locator("#new-profile-name").is_visible():
+        if not await page.get_by_label(text("rules.profile.new")).is_visible():
             await page.locator("button.accordion-button").first.click()
-        await page.locator("#new-profile-name").fill(name)
+        await page.get_by_label(text("rules.profile.new")).fill(name)
         await page.locator("button.btn-add[title='Создать']").click()
         await page.get_by_text(f"Шаг 2: Правила для профиля «{name}»").wait_for()
         for rule in rules:
@@ -295,7 +295,7 @@ class UiStand(AppStand):
         await self.tab("Свойства")
         cards = page.locator(".source-card")
         before = await cards.count()
-        card = cards.filter(has=page.locator(f"input[value='{self.site.releases[slug].url}']"))
+        card = cards.filter(has=page.locator(".item-value", has_text=re.compile(f"^{re.escape(self.site.releases[slug].url)}$")))
         await card.locator(".source-remove").click()
         await expect(cards).to_have_count(before - 1)
 

@@ -9,9 +9,7 @@ import SelectButton from "primevue/selectbutton"
 import Button from "primevue/button"
 import DataTable from "primevue/datatable"
 import Column from "primevue/column"
-import StField from "./components/StField.vue"
 import StGroup from "./components/StGroup.vue"
-import StIcon from "./components/StIcon.vue"
 import StInput from "./components/StInput.vue"
 import StSelect from "./components/StSelect.vue"
 import StBtn from "./components/StBtn.vue"
@@ -29,10 +27,10 @@ import Toast from "primevue/toast"
 import { t, tAround, tn } from "./i18n"
 import { SERIES_STATES, stateLabel, stateWord } from "./lib/states"
 import {
-  DISABLED_SAMPLE, EXCLUDED_BY_RULE, FRONT_EPISODE_TITLE, LOGS, MISSING_EPISODE, PASSWORD_SAMPLE,
+  DISABLED_SAMPLE, EXCLUDED_BY_RULE, FRONT_EPISODE_TITLE, LOGS, MISSING_EPISODE,
   PROFILE_ANIME, PROFILE_DEFAULT, PROFILE_MOVIES, QUEUE_DOWNLOAD, QUEUE_MONITOR, QUEUE_PROCESSING,
   QUEUE_SLICING, RICK_EPISODE_FILE, RICK_EPISODE_TITLE, RICK_RECEIVED_FILE,
-  RICK_SLICED_FILE, RICK_SLICED_TITLE, RICK_TEST_APPLIED, RICK_TEST_EXCLUDED, ROOT_PATH, ROWS,
+  RICK_SLICED_FILE, RICK_SLICED_TITLE, RICK_TEST_APPLIED, RICK_TEST_EXCLUDED, ROWS,
   SERIES_FRONT, SERIES_FROM, SERIES_STRANGE, SLICING_SAMPLE,
   CHIP_FILE, READS, SAME_HELD, SAME_MARKS, SAME_QUEUE,
 } from "./gallery.fixtures"
@@ -187,11 +185,6 @@ const SAME_ROOMS = [72, 36]
 function settingsLabel(): string {
   return settingsTabs.find((tab) => tab.value === settingsTab.value)?.label ?? ""
 }
-
-// StField (floating-label, порт constructor-group)
-const fText = ref("")
-const fPath = ref(ROOT_PATH)
-const fPwd = ref(PASSWORD_SAMPLE)
 
 // Нагруженные примеры из прода
 const profileSel = ref<number | null>(null)
@@ -450,16 +443,6 @@ const rtPass = ref("password123")
     </section>
 
     <section>
-      <h2>{{ t("gallery.float.h2") }}</h2>
-      <div class="grid">
-        <div class="cell"><StField v-model="fText" :label="t('seriesForm.nameRu')" /></div>
-        <div class="cell"><StField v-model="fPath" :label="t('seriesForm.savePath')" icon="pi pi-folder-open" /></div>
-        <div class="cell"><StField v-model="fPwd" :label="t('auth.password')" type="password" icon="pi pi-lock" /></div>
-        <div class="cell"><StField model-value="" :label="t('gallery.float.invalid')" icon="pi pi-tag" state="invalid" /></div>
-      </div>
-    </section>
-
-    <section>
       <h2>{{ t("gallery.toggles.h2") }}</h2>
       <div class="grid">
         <div class="cell"><label>ToggleSwitch</label><ToggleSwitch v-model="sw" /></div>
@@ -688,30 +671,36 @@ const rtPass = ref("password123")
       <h2>{{ t("gallery.loaded.h2") }}</h2>
       <p class="muted small">{{ t("gallery.loaded.hint") }}</p>
 
-      <div class="block">
-        <p class="muted small">{{ t("gallery.profile.hint") }}</p>
-        <StGroup>
-          <StIcon icon="pi pi-user-edit" />
-          <StSelect v-model="profileSel" :options="profileOptions" :placeholder="t('gallery.profile.placeholder')" />
-          <StInput v-model="newProfile" :label="t('rules.profile.new')" />
-          <div class="constructor-item item-button-group">
-            <StBtn icon="pi pi-plus" variant="add" :title="t('rules.profile.create')" :disabled="!newProfile" />
-            <StBtn icon="pi pi-pencil" variant="edit" :title="t('rules.profile.rename')" :disabled="!profileSel" />
-            <StBtn icon="pi pi-trash" variant="delete" :title="t('common.delete')" :disabled="!profileSel" />
-          </div>
-        </StGroup>
+      <div class="block sheet">
+        <SheetRow :caption="t('rules.step.profiles')">
+          <p class="muted small">{{ t("gallery.profile.hint") }}</p>
+          <SheetField :label="t('rules.profile.field')" icon="pi pi-user-edit">
+            <StSelect v-model="profileSel" :options="profileOptions" :placeholder="t('gallery.profile.placeholder')" />
+            <div class="constructor-item item-button-group">
+              <StBtn icon="pi pi-pencil" variant="edit" :title="t('rules.profile.rename')" :disabled="!profileSel" />
+              <StBtn icon="pi pi-trash" variant="delete" :title="t('common.delete')" :disabled="!profileSel" />
+            </div>
+          </SheetField>
+          <SheetField :label="t('rules.profile.new')" icon="pi pi-tag">
+            <StInput v-model="newProfile" />
+            <div class="constructor-item item-button-group">
+              <StBtn icon="pi pi-plus" variant="add" :title="t('rules.profile.create')" :disabled="!newProfile" />
+            </div>
+          </SheetField>
+        </SheetRow>
       </div>
 
-      <div class="fieldset">
-        <div class="fieldset-head"><span>RuTracker.org</span></div>
-        <div class="fieldset-body">
-          <StGroup>
-            <StIcon icon="pi pi-user" />
-            <StInput v-model="rtLogin" :label="t('auth.login')" />
-            <StIcon icon="pi pi-lock" />
-            <StInput v-model="rtPass" :label="t('auth.password')" type="password" />
-          </StGroup>
-        </div>
+      <div class="block sheet">
+        <SheetRow caption="RuTracker.org">
+          <div class="sheet-pair">
+            <SheetField :label="t('auth.login')" icon="pi pi-user">
+              <StInput v-model="rtLogin" />
+            </SheetField>
+            <SheetField :label="t('auth.password')" icon="pi pi-lock">
+              <StInput v-model="rtPass" type="password" />
+            </SheetField>
+          </div>
+        </SheetRow>
       </div>
     </section>
   </main>

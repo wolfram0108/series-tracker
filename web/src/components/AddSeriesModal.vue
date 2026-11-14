@@ -3,11 +3,16 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from "vue"
 import Button from "primevue/button"
 import { useToast } from "primevue/usetoast"
 import ModalShell from "./ModalShell.vue"
+import ModalTabs from "./ModalTabs.vue"
+import SeriesInfoRows from "./SeriesInfoRows.vue"
+import SheetField from "./SheetField.vue"
+import SheetRow from "./SheetRow.vue"
+import CatalogNameField from "./CatalogNameField.vue"
+import TmdbSearchField from "./TmdbSearchField.vue"
 import StGroup from "./StGroup.vue"
-import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
+import StLabel from "./StLabel.vue"
 import StSelect from "./StSelect.vue"
-import SavedPathDropdown from "./SavedPathDropdown.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
 import AppSearch from "./AppSearch.vue"
 import SourcesEditor from "./SourcesEditor.vue"
@@ -20,6 +25,7 @@ import { useSSE } from "../composables/useSSE"
 import { useSourceDrafts } from "../composables/useSourceDrafts"
 import { fetchProfiles, resolveAddress } from "../composables/sourceCalls"
 import { compareNames } from "../lib/collate"
+import { isAbsolutePath } from "../lib/fsnames"
 
 // Add-series window. An address is told by POST /api/sources/resolve: a site reads it, so it is a video source
 // and goes into the list; otherwise it is a tracker page (POST /api/parse_url). The series is created by
@@ -170,14 +176,16 @@ type VState = "valid" | "invalid" | null
 function vstate(ok: boolean): VState {
   return ok ? "valid" : "invalid"
 }
-function isAbsolutePath(value: string): boolean {
-  return value.trim().startsWith("/")
-}
 const urlState = computed<VState>(() => {
   if (!shouldShowValidation.value) return null
   if (urlError.value) return "invalid"
   return vstate(parsed.value)
 })
+const infoStates = computed(() => ({ name: nameState.value, name_en: nameEnState.value, save_path: savePathState.value, season: seasonState.value }))
+const addTabs = [
+  { label: t("add.tabAdd"), value: "add", icon: "pi-plus-circle" },
+  { label: t("add.tabNaming"), value: "naming", icon: "pi-filter" },
+] as const
 const profileState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.parser_profile_id) : null))
 const nameState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.name) : null))
 const nameEnState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.name_en) : null))
@@ -504,16 +512,7 @@ onBeforeUnmount(() => {
   <ModalShell size="xl" @close="emit('close')">
     <template #title><i class="pi pi-plus"></i> {{ t("add.title") }}</template>
     <template #header-extra>
-      <div class="header-tabs st-tabs">
-        <button class="st-tab" :class="{ active: activeTab === 'add' }" :title="t('add.tabAdd')" @click="activeTab = 'add'">
-          <i class="pi tab-icon pi-plus-circle"></i>
-          <span class="tab-label" :data-text="t('add.tabAdd')"><span class="tl-text">{{ t("add.tabAdd") }}</span></span>
-        </button>
-        <button class="st-tab" :class="{ active: activeTab === 'naming' }" :title="t('add.tabNaming')" @click="activeTab = 'naming'">
-          <i class="pi tab-icon pi-filter"></i>
-          <span class="tab-label" :data-text="t('add.tabNaming')"><span class="tl-text">{{ t("add.tabNaming") }}</span></span>
-        </button>
-      </div>
+      <ModalTabs v-model="activeTab" :tabs="addTabs" />
     </template>
 
     <div v-show="activeTab === 'add'">
@@ -536,12 +535,12 @@ onBeforeUnmount(() => {
       <AppSearch v-if="firstMode === 'apps'" :names="seriesNames" :added="{}" :busy="sourcesBusy" @add="addSource" />
       <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->
       <StGroup v-if="firstMode === 'address'" :state="urlState">
-        <StIcon icon="pi pi-link" />
-        <StInput v-model="newSeries.url" :label="t('add.urlLabel')" />
+        <StLabel icon="pi pi-link" :text="t('add.urlLabel')" />
+        <StInput v-model="newSeries.url" :aria-label="t('add.urlLabel')" />
         <template v-if="candidate && candidateChannel">
-          <StIcon icon="pi pi-search" />
+          <StLabel icon="pi pi-search" :text="t('sources.vk.query')" />
           <StInput
-            v-model="candidateQuery" class="source-query" :label="t('sources.vk.query')"
+            v-model="candidateQuery" class="source-query" :aria-label="t('sources.vk.query')"
             @keyup.enter="vkQuery(candidateQuery) && addCandidate()"
           />
         </template>
@@ -559,210 +558,123 @@ onBeforeUnmount(() => {
       <div v-if="candidate && candidateChannel" class="add-hint">{{ t("sources.vk.hint") }}</div>
     </div>
 
-    <div v-if="parsed || kind === 'video'">
+    <div v-if="parsed || kind === 'video'" class="sheet">
       <!-- Информация о сериале -->
-      <div class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">{{ t("seriesForm.infoTitle") }}</span></div>
-        <div class="fieldset-content">
-          <div class="add-grid-2">
-            <StGroup :state="nameState">
-              <StIcon icon="pi pi-pencil" />
-              <StInput v-model="newSeries.name" :label="t('seriesForm.nameRu')" />
-            </StGroup>
-            <StGroup :state="nameEnState">
-              <StIcon icon="pi pi-language" />
-              <StInput v-model="newSeries.name_en" :label="t('seriesForm.nameEn')" kind="filename" />
-            </StGroup>
-          </div>
-          <div class="add-grid-2 mt-3">
-            <StGroup :state="savePathState">
-              <StIcon icon="pi pi-folder-open" />
-              <StInput v-model="newSeries.save_path" :label="t('seriesForm.savePath')" kind="path" />
-              <SavedPathDropdown :catalog-name="tmdbCatalogName" @select="newSeries.save_path = $event" />
-            </StGroup>
-            <StGroup :state="seasonState" :class="{ 'is-disabled': isSeasonless }">
-              <StIcon icon="pi pi-hashtag" />
-              <StInput v-model="newSeries.season" :label="t('seriesForm.season')" />
-            </StGroup>
-          </div>
-          <div v-if="newSeries.save_path && !isAbsolutePath(newSeries.save_path)" class="add-error">
-            {{ t("seriesForm.savePathAbsolute") }}
-          </div>
-          <!-- оверрайды качества/разрешения (ручной ввод; как в инфо-модалке) -->
-          <div class="add-grid-2 mt-3">
-            <StGroup>
-              <StIcon icon="pi pi-video" />
-              <StInput v-model="newSeries.quality_override" :label="t('seriesForm.qualityOverride')" kind="filename" />
-            </StGroup>
-            <StGroup>
-              <StIcon icon="pi pi-desktop" />
-              <StInput v-model="newSeries.resolution_override" :label="t('seriesForm.resolutionOverride')" kind="filename" />
-            </StGroup>
-          </div>
-          <div v-if="kind === 'torrent'" class="field-group mt-3">
-            <StGroup :state="profileState">
-              <div class="constructor-item item-label-icon item-label-text-icon" :title="t('sources.profile.label')">
-                <i class="pi pi-filter" /><span>{{ t("sources.profile.label") }}</span>
-              </div>
-              <StSelect v-model="newSeries.parser_profile_id" :options="profileOptions" :placeholder="t('add.profilePick')" />
-            </StGroup>
-          </div>
-        </div>
-      </div>
+      <SeriesInfoRows
+        v-model:seasonless="isSeasonless" :form="newSeries" :states="infoStates" :catalog-name="tmdbCatalogName"
+        :can-switch-seasons="showSeasonlessSwitch"
+      >
+        <SheetField v-if="kind === 'torrent'" :label="t('sources.profile.label')" icon="pi pi-filter" :state="profileState">
+          <StSelect v-model="newSeries.parser_profile_id" :options="profileOptions" :placeholder="t('add.profilePick')" />
+        </SheetField>
+      </SeriesInfoRows>
 
       <!-- Sources of a video series: a group per source, its players and voice-overs -->
-      <div v-if="kind === 'video'" class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">{{ t("sources.title") }}</span></div>
-        <div class="fieldset-content">
-          <SourcesEditor
-            :items="sourceItems" :profiles="profiles" :error="sourcesError" :busy="sourcesBusy" :adder="addSource"
-            :names="seriesNames"
-            @remove="removeDraft" @change="changeDraft" @reread="rereadDraft" @stop="stopDraft"
-          />
-        </div>
-      </div>
-
-      <!-- Несколько сезонов -->
-      <div v-if="showSeasonlessSwitch" class="modern-fieldset">
-        <div class="fieldset-content">
-          <label class="modern-form-check">
-            <input v-model="isSeasonless" type="checkbox" class="form-switch-input" />
-            <span class="modern-form-check-label">{{ t("seriesForm.seasonless") }}</span>
-          </label>
-        </div>
-      </div>
+      <SheetRow v-if="kind === 'video'" :caption="t('sources.title')">
+        <SourcesEditor
+          :items="sourceItems" :profiles="profiles" :error="sourcesError" :busy="sourcesBusy" :adder="addSource"
+          :names="seriesNames"
+          @remove="removeDraft" @change="changeDraft" @reread="rereadDraft" @stop="stopDraft"
+        />
+      </SheetRow>
 
       <!-- Качество -->
-      <div v-if="showQualityBlock" class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">{{ t("seriesForm.qualityChoice") }}</span></div>
-        <div class="fieldset-content">
-          <template v-if="qualitySelector === 'anilibria'">
-            <div v-if="isQualityOptionsReady && qualityOptionsAnilibria.length" class="field-group">
-              <StGroup>
-                <div class="constructor-item item-label">{{ t("common.quality") }}</div>
-                <StSelect
-                  :model-value="newSeries.qualityByEpisodes.all"
-                  :options="qualityOptionsAnilibria"
-                  @update:model-value="newSeries.qualityByEpisodes.all = $event as string"
-                />
-              </StGroup>
-            </div>
-            <div v-else-if="isQualityOptionsReady" class="add-error">{{ t("seriesForm.qualityNotFound") }}</div>
-          </template>
+      <SheetRow v-if="showQualityBlock" :caption="t('seriesForm.qualityChoice')">
+        <template v-if="qualitySelector === 'anilibria'">
+          <SheetField v-if="isQualityOptionsReady && qualityOptionsAnilibria.length" :label="t('common.quality')" icon="pi pi-video">
+            <StSelect
+              :model-value="newSeries.qualityByEpisodes.all"
+              :options="qualityOptionsAnilibria"
+              @update:model-value="newSeries.qualityByEpisodes.all = $event as string"
+            />
+          </SheetField>
+          <p v-else-if="isQualityOptionsReady" class="sheet-problem">{{ t("seriesForm.qualityNotFound") }}</p>
+        </template>
 
-          <template v-if="qualitySelector === 'astar' && isQualityOptionsReady">
-            <p class="fieldset-hint mb-2">{{ t("add.astarHint") }}</p>
-            <template v-for="ep in sortedQualityOptionsKeys" :key="ep">
-              <div v-if="episodeQualityOptions[ep].length > 1" class="field-group mt-2">
-                <StGroup>
-                  <div class="constructor-item item-label">{{ t("seriesForm.episodeGroup", { ep }) }}</div>
-                  <StSelect
-                    :model-value="newSeries.qualityByEpisodes[ep]"
-                    :options="episodeQualityOptions[ep].map((q) => ({ label: q, value: q }))"
-                    @update:model-value="newSeries.qualityByEpisodes[ep] = $event as string"
-                  />
-                </StGroup>
-              </div>
-            </template>
-            <div v-if="!astarHasAlternatives" class="fieldset-hint">{{ t("seriesForm.noAlternatives") }}</div>
+        <template v-if="qualitySelector === 'astar' && isQualityOptionsReady">
+          <p class="sheet-hint">{{ t("add.astarHint") }}</p>
+          <template v-for="ep in sortedQualityOptionsKeys" :key="ep">
+            <SheetField v-if="episodeQualityOptions[ep].length > 1" :label="t('seriesForm.episodeGroup', { ep })" icon="pi pi-video">
+              <StSelect
+                :model-value="newSeries.qualityByEpisodes[ep]"
+                :options="episodeQualityOptions[ep].map((q) => ({ label: q, value: q }))"
+                @update:model-value="newSeries.qualityByEpisodes[ep] = $event as string"
+              />
+            </SheetField>
           </template>
-        </div>
-      </div>
+          <p v-if="!astarHasAlternatives" class="sheet-hint">{{ t("seriesForm.noAlternatives") }}</p>
+        </template>
+      </SheetRow>
 
       <!-- TMDB -->
-      <div class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">{{ t("seriesForm.tmdbSync") }}</span></div>
-        <div class="fieldset-content">
-          <div class="input-group mb-3">
-            <input
-              v-model="tmdbSearchQuery"
-              type="text"
-              class="form-control"
-              :placeholder="t('seriesForm.tmdbPlaceholder')"
-              @keyup.enter="searchTMDB"
-            />
-            <button type="button" class="input-group-btn" :disabled="tmdbLoading" @click="searchTMDB">
-              <i class="pi" :class="tmdbLoading ? 'pi-spin pi-spinner' : 'pi-search'" /> {{ t("common.find") }}
-            </button>
-          </div>
+      <SheetRow :caption="t('seriesForm.tmdbSync')">
+        <TmdbSearchField v-model="tmdbSearchQuery" :loading="tmdbLoading" @search="searchTMDB" />
 
-          <div v-if="tmdbResults.length" class="tmdb-results">
-            <div
-              v-for="res in tmdbResults"
-              :key="res.id"
-              class="card-final card-tmdb tmdb-result-card"
-              :class="tmdbSelected && tmdbSelected.id === res.id ? 'status-success' : 'status-no-match'"
-              @click="selectTMDBSeries(res)"
-            >
-              <div class="info-column">
-                <span class="card-title">{{ tmdbName(res) }} <small style="opacity: 0.6">({{ res.year }})</small></span>
-                <div class="path-line tmdb-pills">
-                  <span v-if="res.original_name" class="path-pill">
-                    <span class="path-pill-label">{{ t("seriesForm.originalLabel") }}</span>
-                    <span class="path-pill-value">{{ res.original_name }}</span>
-                  </span>
-                  <span v-if="tmdbSelected && tmdbSelected.id === res.id && !isSeasonless" class="path-pill">
-                    <span class="path-pill-label">{{ t("seriesForm.seasonPill", { n: tmdbSeasonNumber }) }}</span>
-                    <span class="path-pill-value">{{ tn("seriesForm.episodes", tmdbEpisodeCount) }}</span>
-                  </span>
-                  <span v-else-if="tmdbSelected && tmdbSelected.id === res.id" class="path-pill">
-                    <span class="path-pill-value">{{ t("add.severalSeasons") }}</span>
-                  </span>
-                </div>
-              </div>
-              <div class="pills-column">
-                <div class="quality-badge">ID: {{ res.id }}</div>
-                <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill">
-                  <i class="pi pi-check-circle" /><span>{{ t("seriesForm.chosen") }}</span>
-                </div>
-                <div
-                  v-if="tmdbSelected && tmdbSelected.id === res.id"
-                  class="pill pill-link"
-                  :title="t('add.tmdbClear')"
-                  @click.stop="clearTMDBSelection"
-                >
-                  <i class="pi pi-times" /><span>{{ t("seriesForm.clearChoice") }}</span>
-                </div>
+        <div v-if="tmdbResults.length" class="tmdb-results">
+          <div
+            v-for="res in tmdbResults"
+            :key="res.id"
+            class="card-final card-tmdb tmdb-result-card"
+            :class="tmdbSelected && tmdbSelected.id === res.id ? 'status-success' : 'status-no-match'"
+            @click="selectTMDBSeries(res)"
+          >
+            <div class="info-column">
+              <span class="card-title">{{ tmdbName(res) }} <small style="opacity: 0.6">({{ res.year }})</small></span>
+              <div class="path-line tmdb-pills">
+                <span v-if="res.original_name" class="path-pill">
+                  <span class="path-pill-label">{{ t("seriesForm.originalLabel") }}</span>
+                  <span class="path-pill-value">{{ res.original_name }}</span>
+                </span>
+                <span v-if="tmdbSelected && tmdbSelected.id === res.id && !isSeasonless" class="path-pill">
+                  <span class="path-pill-label">{{ t("seriesForm.seasonPill", { n: tmdbSeasonNumber }) }}</span>
+                  <span class="path-pill-value">{{ tn("seriesForm.episodes", tmdbEpisodeCount) }}</span>
+                </span>
+                <span v-else-if="tmdbSelected && tmdbSelected.id === res.id" class="path-pill">
+                  <span class="path-pill-value">{{ t("add.severalSeasons") }}</span>
+                </span>
               </div>
             </div>
-          </div>
-
-          <div v-if="tmdbSelected && tmdbCatalogName" class="tmdb-catalog">
-            <label class="tmdb-catalog-label">{{ t("seriesForm.catalogName") }}</label>
-            <div class="input-group">
-              <input class="form-control" :value="tmdbCatalogName" readonly @focus="($event.target as HTMLInputElement).select()" />
-              <button type="button" class="input-group-btn" :title="t('common.copy')" @click="copyCatalogName">
-                <i class="pi pi-clipboard" />
-              </button>
+            <div class="pills-column">
+              <div class="quality-badge">ID: {{ res.id }}</div>
+              <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill">
+                <i class="pi pi-check-circle" /><span>{{ t("seriesForm.chosen") }}</span>
+              </div>
+              <div
+                v-if="tmdbSelected && tmdbSelected.id === res.id"
+                class="pill pill-link"
+                :title="t('add.tmdbClear')"
+                @click.stop="clearTMDBSelection"
+              >
+                <i class="pi pi-times" /><span>{{ t("seriesForm.clearChoice") }}</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+
+        <CatalogNameField v-if="tmdbSelected && tmdbCatalogName" :name="tmdbCatalogName" @copy="copyCatalogName" />
+      </SheetRow>
 
       <!-- Доступные торренты -->
-      <div v-if="kind === 'torrent' && parserData && parserData.torrents.length" class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">{{ t("add.torrentsTitle", { count: parserData.torrents.length }) }}</span></div>
-        <div class="fieldset-content">
-          <div class="div-table table-site-torrents">
-            <div class="div-table-header">
-              <div class="div-table-cell">ID</div>
-              <div class="div-table-cell">{{ t("common.link") }}</div>
-              <div class="div-table-cell">{{ t("common.date") }}</div>
-              <div class="div-table-cell">{{ t("common.episodes") }}</div>
-              <div class="div-table-cell">{{ t("common.quality") }}</div>
-            </div>
-            <div class="div-table-body">
-              <div v-for="(tor, i) in parserData.torrents" :key="tor.torrent_id ?? i" class="div-table-row">
-                <div class="div-table-cell">{{ tor.torrent_id }}</div>
-                <div class="div-table-cell">{{ tor.link }}</div>
-                <div class="div-table-cell">{{ tor.date_time }}</div>
-                <div class="div-table-cell">{{ tor.episodes }}</div>
-                <div class="div-table-cell">{{ tor.quality }}</div>
-              </div>
+      <SheetRow v-if="kind === 'torrent' && parserData && parserData.torrents.length" :caption="t('add.torrentsTitle', { count: parserData.torrents.length })">
+        <div class="div-table table-site-torrents">
+          <div class="div-table-header">
+            <div class="div-table-cell">ID</div>
+            <div class="div-table-cell">{{ t("common.link") }}</div>
+            <div class="div-table-cell">{{ t("common.date") }}</div>
+            <div class="div-table-cell">{{ t("common.episodes") }}</div>
+            <div class="div-table-cell">{{ t("common.quality") }}</div>
+          </div>
+          <div class="div-table-body">
+            <div v-for="(tor, i) in parserData.torrents" :key="tor.torrent_id ?? i" class="div-table-row">
+              <div class="div-table-cell">{{ tor.torrent_id }}</div>
+              <div class="div-table-cell">{{ tor.link }}</div>
+              <div class="div-table-cell">{{ tor.date_time }}</div>
+              <div class="div-table-cell">{{ tor.episodes }}</div>
+              <div class="div-table-cell">{{ tor.quality }}</div>
             </div>
           </div>
         </div>
-      </div>
+      </SheetRow>
     </div>
     </div>
 

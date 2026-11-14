@@ -102,7 +102,7 @@ describe("the search of the video applications in the sources", () => {
     const w = mountEditor({ items: [itemOfSource(stored(), summary, null)] })
     await flushPromises()
     expect(w.find(".source-place").text()).toBe("半日 · 万界独尊 (2021)")
-    expect((w.find(".source-app-card input").element as HTMLInputElement).value).toBe("app://banri/219017")
+    expect(w.find(".source-app-card .item-value").text()).toBe("app://banri/219017")
     expect(w.find(".source-app-card a").exists()).toBe(false)
   })
 })

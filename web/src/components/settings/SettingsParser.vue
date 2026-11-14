@@ -2,8 +2,8 @@
 import { ref, computed, watch, nextTick, onMounted } from "vue"
 import { useToast } from "primevue/usetoast"
 import Button from "primevue/button"
-import StGroup from "../StGroup.vue"
-import StIcon from "../StIcon.vue"
+import SheetField from "../SheetField.vue"
+import StInput from "../StInput.vue"
 import StSelect from "../StSelect.vue"
 import ParserRuleCard, { type EditableRule } from "./ParserRuleCard.vue"
 import ParserTableCard from "./ParserTableCard.vue"
@@ -69,7 +69,7 @@ const openStep = ref<"profiles" | "rules" | "test" | null>("profiles")
 
 const editingProfileId = ref<number | null>(null)
 const editingProfileName = ref("")
-const editInput = ref<HTMLInputElement | null>(null)
+const editInput = ref<InstanceType<typeof StInput> | null>(null)
 
 const profileOptions = computed(() => [
   { label: t("rules.profile.select"), value: null as number | null },
@@ -95,10 +95,11 @@ async function loadProfiles(): Promise<void> {
 }
 
 async function createProfile(): Promise<void> {
-  if (!newProfileName.value) return
+  const name = newProfileName.value.trim()
+  if (!name) return
   isLoading.value = true
   const data = (await request(
-    api.POST("/api/parser-profiles", { body: { name: newProfileName.value } } as never),
+    api.POST("/api/parser-profiles", { body: { name } } as never),
     { errorMessage: t("rules.profile.createFailed") },
   )) as { success: boolean; id: number } | null
   isLoading.value = false
@@ -384,61 +385,39 @@ onMounted(() => {
       </button>
       <div v-if="openStep === 'profiles'" class="accordion-body">
         <p class="parser-hint">{{ t("rules.step.profiles.hint") }}</p>
-        <div class="field-group">
-          <StGroup>
-            <template v-if="!editingProfileId">
-              <StIcon icon="pi pi-user" />
-              <StSelect
-                v-model="selectedProfileId"
-                :options="profileOptions"
-                :placeholder="t('rules.profile.select')"
-              />
-              <div class="constructor-item item-floating-label">
-                <input
-                  id="new-profile-name"
-                  v-model.trim="newProfileName"
-                  type="text"
-                  class="item-input"
-                  placeholder=" "
-                  @keyup.enter="createProfile"
-                />
-                <label for="new-profile-name">{{ t("rules.profile.new") }}</label>
-              </div>
+        <div class="stack">
+          <template v-if="!editingProfileId">
+            <SheetField :label="t('rules.profile.field')" icon="pi pi-user">
+              <StSelect v-model="selectedProfileId" :options="profileOptions" :placeholder="t('rules.profile.select')" />
               <div class="constructor-item item-button-group">
-                <button class="btn-icon btn-add" :disabled="!newProfileName || isLoading" :title="t('rules.profile.create')" @click="createProfile">
-                  <i class="pi pi-plus" />
-                </button>
-                <button class="btn-icon btn-edit" :disabled="!selectedProfileId || isLoading" :title="t('rules.profile.rename')" @click="startEditingProfile">
+                <button class="btn-icon btn-edit" :disabled="!selectedProfileId || isLoading" :title="t('rules.profile.rename')" :aria-label="t('rules.profile.rename')" @click="startEditingProfile">
                   <i class="pi pi-pencil" />
                 </button>
-                <button class="btn-icon btn-delete" :disabled="!selectedProfileId || isLoading" :title="t('rules.profile.delete')" @click="deleteProfile">
+                <button class="btn-icon btn-delete" :disabled="!selectedProfileId || isLoading" :title="t('rules.profile.delete')" :aria-label="t('rules.profile.delete')" @click="deleteProfile">
                   <i class="pi pi-trash" />
                 </button>
               </div>
-            </template>
-            <template v-else>
-              <div class="constructor-item item-floating-label">
-                <input
-                  ref="editInput"
-                  v-model.trim="editingProfileName"
-                  type="text"
-                  class="item-input"
-                  placeholder=" "
-                  @keyup.enter="saveProfileName"
-                  @keyup.esc="cancelEditing"
-                />
-                <label>{{ t("rules.profile.renameLabel") }}</label>
-              </div>
+            </SheetField>
+            <SheetField :label="t('rules.profile.new')" icon="pi pi-tag">
+              <StInput v-model="newProfileName" @keyup.enter="createProfile" />
               <div class="constructor-item item-button-group">
-                <button class="btn-icon btn-confirm" :disabled="!editingProfileName" :title="t('rules.profile.apply')" @click="saveProfileName">
-                  <i class="pi pi-check" />
-                </button>
-                <button class="btn-icon btn-cancel" :title="t('rules.profile.cancel')" @click="cancelEditing">
-                  <i class="pi pi-times" />
+                <button class="btn-icon btn-add" :disabled="!newProfileName.trim() || isLoading" :title="t('rules.profile.create')" :aria-label="t('rules.profile.create')" @click="createProfile">
+                  <i class="pi pi-plus" />
                 </button>
               </div>
-            </template>
-          </StGroup>
+            </SheetField>
+          </template>
+          <SheetField v-else :label="t('rules.profile.renameLabel')" icon="pi pi-pencil">
+            <StInput ref="editInput" v-model="editingProfileName" @keyup.enter="saveProfileName" @keyup.esc="cancelEditing" />
+            <div class="constructor-item item-button-group">
+              <button class="btn-icon btn-confirm" :disabled="!editingProfileName.trim()" :title="t('rules.profile.apply')" :aria-label="t('rules.profile.apply')" @click="saveProfileName">
+                <i class="pi pi-check" />
+              </button>
+              <button class="btn-icon btn-cancel" :title="t('rules.profile.cancel')" :aria-label="t('rules.profile.cancel')" @click="cancelEditing">
+                <i class="pi pi-times" />
+              </button>
+            </div>
+          </SheetField>
         </div>
       </div>
     </div>

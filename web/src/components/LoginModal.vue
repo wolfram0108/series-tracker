@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue"
 import Button from "primevue/button"
-import StGroup from "./StGroup.vue"
-import StIcon from "./StIcon.vue"
+import SheetField from "./SheetField.vue"
 import StInput from "./StInput.vue"
 import { api } from "../api/client"
 import { t } from "../i18n"
@@ -65,10 +64,9 @@ async function submit(): Promise<void> {
         <h2 class="login-title">{{ t("login.title") }}</h2>
         <p class="login-user">{{ auth.adminName }}</p>
 
-        <StGroup :state="passState">
-          <StIcon icon="pi pi-lock" />
-          <StInput v-model="password" :label="t('auth.password')" type="password" />
-        </StGroup>
+        <SheetField :label="t('auth.password')" icon="pi pi-lock" :state="passState">
+          <StInput v-model="password" type="password" />
+        </SheetField>
 
         <Button class="login-submit" type="submit" :label="t('login.submit')"
                 icon="pi pi-sign-in" :loading="busy" />

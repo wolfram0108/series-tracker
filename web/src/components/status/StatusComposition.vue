@@ -8,6 +8,7 @@ import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { useSSE } from "../../composables/useSSE"
+import SheetRow from "../SheetRow.vue"
 import { t } from "../../i18n"
 import { stateLabel } from "../../lib/states"
 
@@ -285,10 +286,9 @@ defineExpose({ reload: () => load() })
 
 <template>
   <div class="status-composition">
-    <div class="modern-fieldset">
-      <div class="fieldset-header">
-        <span class="fieldset-title">{{ t("composition.manage") }}</span>
-        <div class="vk-comp-actions">
+    <div class="sheet">
+      <SheetRow :caption="t('composition.manage')">
+        <div class="sheet-line vk-comp-actions">
           <Button
             :label="t('composition.reprocess')"
             icon="pi pi-pencil"
@@ -307,7 +307,7 @@ defineExpose({ reload: () => load() })
             @click="fetchData"
           />
         </div>
-      </div>
+      </SheetRow>
     </div>
 
     <div v-if="loading || fetching" class="status-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>

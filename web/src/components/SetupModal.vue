@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue"
 import Button from "primevue/button"
-import StGroup from "./StGroup.vue"
-import StIcon from "./StIcon.vue"
+import SheetField from "./SheetField.vue"
 import StInput from "./StInput.vue"
 import { api } from "../api/client"
 import { t } from "../i18n"
@@ -83,20 +82,17 @@ async function submit(): Promise<void> {
         <h2 class="login-title">{{ t("setup.title") }}</h2>
         <p class="login-sub">{{ t("setup.sub") }}</p>
 
-        <StGroup :state="userState">
-          <StIcon icon="pi pi-user" />
-          <StInput v-model="username" :label="t('setup.username')" />
-        </StGroup>
+        <SheetField :label="t('setup.username')" icon="pi pi-user" :state="userState">
+          <StInput v-model="username" />
+        </SheetField>
 
-        <StGroup :state="passState">
-          <StIcon icon="pi pi-lock" />
-          <StInput v-model="password" :label="t('setup.password')" type="password" />
-        </StGroup>
+        <SheetField :label="t('setup.password')" icon="pi pi-lock" :state="passState">
+          <StInput v-model="password" type="password" />
+        </SheetField>
 
-        <StGroup :state="pass2State">
-          <StIcon icon="pi pi-lock" />
-          <StInput v-model="password2" :label="t('setup.passwordRepeat')" type="password" />
-        </StGroup>
+        <SheetField :label="t('setup.passwordRepeat')" icon="pi pi-lock" :state="pass2State">
+          <StInput v-model="password2" type="password" />
+        </SheetField>
 
         <Button class="login-submit" type="submit" :label="t('setup.submit')"
                 icon="pi pi-check" :loading="busy" />

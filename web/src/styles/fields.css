@@ -1,7 +1,5 @@
-/* Точный порт поля constructor-group (static/css/components/constructor.css).
-   Это ключевой повторяемый паттерн поля series-tracker: иконка-сегмент +
-   floating-label (+ опц. пароль-глазик). Используется компонентом StField.
-   Простые контролы (кнопки, switch, select, таблица) — PrimeVue. */
+/* Поле constructor-group: сегменты в одной рамке — подпись (иконка + слова), значение (поле, выбор, управление), кнопки; собирается
+   компонентом SheetField. Простые контролы (кнопки, switch, select, таблица) — PrimeVue. */
 
 .input-constructor-group {
   /* a group is not lower than its row, and grows when its text wraps instead of cutting it */
@@ -16,7 +14,6 @@
   box-sizing: border-box;
   gap: 2px;
 }
-.input-constructor-group:has(.item-floating-label) { min-height: 4rem; }
 .input-constructor-group:focus-within {
   border-color: var(--color-blue);
   box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.25);
@@ -94,34 +91,6 @@
   border: none;
 }
 .item-input:focus, .item-input:active { outline: 0; }
-
-/* The input and its label share one cell while the field is at rest (the label stands where the value will be). Raised,
-   the label takes the row above the input, so a long one wraps and makes the field higher, and is never cut. */
-.item-floating-label {
-  flex-grow: 1; flex-shrink: 1; min-width: 0; overflow: hidden;
-  display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); align-items: stretch;
-}
-.item-floating-label .item-input {
-  grid-area: 2 / 1; min-width: 0; width: 100%; padding: 0.25rem 1rem 0.5rem; align-self: stretch;
-}
-.item-floating-label .item-input:has(~ .password-toggle-btn) { padding-right: 45px; }
-.item-floating-label label {
-  grid-area: 2 / 1; align-self: center; margin: 0 1rem;
-  color: var(--color-gray-600);
-  pointer-events: none; transition: color 0.2s ease-in-out;
-  /* at rest a long label wraps too */
-  overflow-wrap: anywhere; line-height: 1.15;
-}
-.item-floating-label .item-input:focus + label,
-.item-floating-label .item-input:not(:placeholder-shown) + label {
-  grid-area: 1 / 1; align-self: start; margin: 0.4rem 1rem 0;
-  font-size: 0.85em;
-  color: var(--color-blue);
-}
-.is-valid .item-floating-label .item-input:focus + label,
-.is-valid .item-floating-label .item-input:not(:placeholder-shown) + label { color: var(--color-green-1); }
-.is-invalid .item-floating-label .item-input:focus + label,
-.is-invalid .item-floating-label .item-input:not(:placeholder-shown) + label { color: var(--color-red-1); }
 
 .password-toggle-btn {
   position: absolute; right: 0; top: 0.25rem; bottom: 0;

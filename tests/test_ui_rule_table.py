@@ -27,9 +27,9 @@ async def test_a_table_filled_from_the_pages_by_a_template_names_the_voice_overs
 
     page = ui.page
     await ui.settings("Правила")
-    if not await page.locator("#new-profile-name").is_visible():
+    if not await page.get_by_label(text("rules.profile.new")).is_visible():
         await page.locator("button.accordion-button").first.click()
-    await page.locator("#new-profile-name").fill(PROFILE)
+    await page.get_by_label(text("rules.profile.new")).fill(PROFILE)
     await page.locator("button.btn-add[title='Создать']").click()
     rules_step = page.get_by_text(text("rules.step.rules", profile=PROFILE))
     await rules_step.wait_for()
@@ -100,9 +100,9 @@ async def test_a_season_assigned_by_a_table_and_by_a_rule_is_saved_as_typed_and_
     await ui.set_up(["AnimeVost"])
     page = ui.page
     await ui.settings("Правила")
-    if not await page.locator("#new-profile-name").is_visible():
+    if not await page.get_by_label(text("rules.profile.new")).is_visible():
         await page.locator("button.accordion-button").first.click()
-    await page.locator("#new-profile-name").fill(PROFILE)
+    await page.get_by_label(text("rules.profile.new")).fill(PROFILE)
     await page.locator("button.btn-add[title='Создать']").click()
     rules_step = page.get_by_text(text("rules.step.rules", profile=PROFILE))
     test_step = page.get_by_text(text("rules.step.test"))
@@ -157,9 +157,9 @@ async def test_cells_joined_in_the_table_are_saved_joined_and_give_their_one_val
     await ui.set_up([voice for voice, _height in VOICES.values()])
     page = ui.page
     await ui.settings("Правила")
-    if not await page.locator("#new-profile-name").is_visible():
+    if not await page.get_by_label(text("rules.profile.new")).is_visible():
         await page.locator("button.accordion-button").first.click()
-    await page.locator("#new-profile-name").fill(PROFILE)
+    await page.get_by_label(text("rules.profile.new")).fill(PROFILE)
     await page.locator("button.btn-add[title='Создать']").click()
     rules_step = page.get_by_text(text("rules.step.rules", profile=PROFILE))
     test_step = page.get_by_text(text("rules.step.test"))

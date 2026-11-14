@@ -68,7 +68,7 @@ async def test_a_card_found_by_the_search_of_an_application_is_added_read_by_its
         # The head names the source as its site does (the application and the title); its field is its address, the one
         # writing a field of an address takes.
         await expect(source.locator(".source-place")).to_have_text("半日 · 万界独尊 (2021)")
-        await expect(source.locator(".source-app-card input")).to_have_value("app://banri/219017")
+        await expect(source.locator(".source-app-card .item-value")).to_have_text("app://banri/219017")
         await _pick(page, source.locator(".item-select").first, "серии 半日")
         await expect(source.locator(".source-state")).to_have_text(state("readDone"), timeout=60_000)
         await expect(source.locator(".player-tab")).to_have_text(["BLU1"])  # a line is named by its code

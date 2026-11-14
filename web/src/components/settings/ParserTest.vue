@@ -2,8 +2,9 @@
 import { ref, computed, watch } from "vue"
 import PickDropdown from "../PickDropdown.vue"
 import Button from "primevue/button"
+import SheetRow from "../SheetRow.vue"
 import StGroup from "../StGroup.vue"
-import StIcon from "../StIcon.vue"
+import StLabel from "../StLabel.vue"
 import StInput from "../StInput.vue"
 import { useRulesTest } from "../../composables/useRulesTest"
 import { t } from "../../i18n"
@@ -93,45 +94,43 @@ function runTest(): Promise<void> {
   <div class="parser-test">
     <p class="parser-hint">{{ t("rulesTest.hint") }}</p>
 
-    <div class="modern-fieldset">
-      <div class="fieldset-content">
-        <small class="fieldset-hint">
+    <div class="sheet">
+      <SheetRow :caption="t('rulesTest.source')">
+        <p class="sheet-hint">
           <b>{{ t("rulesTest.channel") }}:</b> {{ t("rulesTest.channelHint") }}<br />
           <b>{{ t("rulesTest.sites") }}:</b> {{ t("rulesTest.sitesHint") }}
-        </small>
-        <div class="field-group mt-3">
-          <StGroup>
-            <StIcon :icon="dbId ? 'pi pi-database' : 'pi pi-globe'" />
-            <StInput v-model="address" :label="t('rulesTest.field.address')" />
-            <PickDropdown
-              v-if="loadSources" :items="addressItems" :title="t('rulesTest.pick.address')" :empty="t('rulesTest.pick.addressEmpty')"
-              :load="loadOffers" :min-width="420" @select="pickAddress"
-            />
-            <StIcon icon="pi pi-search" />
-            <StInput v-model="query" :label="t('rulesTest.field.query')" />
-            <PickDropdown
-              v-if="loadSources" :items="queryItems" :title="t('rulesTest.pick.query')" :empty="t('rulesTest.pick.queryEmpty')"
-              :load="loadOffers" :min-width="420" @select="query = $event"
-            />
-            <div class="constructor-item item-button-group">
-              <button
-                class="btn-icon btn-search btn-text-icon"
-                :disabled="!address.trim() || working"
-                @click="fetchRows"
-              >
-                <i class="pi" :class="fetchIcon" />
-                <span>{{ fetchLabel }}</span>
-              </button>
-            </div>
-          </StGroup>
-        </div>
-        <small v-if="test.state.value === 'asking'" class="fieldset-hint">{{ t("common.fetching") }}</small>
-        <small v-else-if="test.state.value === 'reading'" class="fieldset-hint">
+        </p>
+        <StGroup>
+          <StLabel :icon="dbId ? 'pi pi-database' : 'pi pi-globe'" :text="t('rulesTest.field.address')" />
+          <StInput v-model="address" :aria-label="t('rulesTest.field.address')" />
+          <PickDropdown
+            v-if="loadSources" :items="addressItems" :title="t('rulesTest.pick.address')" :empty="t('rulesTest.pick.addressEmpty')"
+            :load="loadOffers" :min-width="420" @select="pickAddress"
+          />
+          <StLabel icon="pi pi-search" :text="t('rulesTest.field.query')" />
+          <StInput v-model="query" :aria-label="t('rulesTest.field.query')" />
+          <PickDropdown
+            v-if="loadSources" :items="queryItems" :title="t('rulesTest.pick.query')" :empty="t('rulesTest.pick.queryEmpty')"
+            :load="loadOffers" :min-width="420" @select="query = $event"
+          />
+          <div class="constructor-item item-button-group">
+            <button
+              class="btn-icon btn-search btn-text-icon"
+              :disabled="!address.trim() || working"
+              @click="fetchRows"
+            >
+              <i class="pi" :class="fetchIcon" />
+              <span>{{ fetchLabel }}</span>
+            </button>
+          </div>
+        </StGroup>
+        <p v-if="test.state.value === 'asking'" class="sheet-hint">{{ t("common.fetching") }}</p>
+        <p v-else-if="test.state.value === 'reading'" class="sheet-hint">
           {{ test.progress.value ? progressText(test.progress.value) : stateLabel("read") }}
-        </small>
-        <small v-else-if="failed" class="fieldset-hint">{{ failure }}</small>
-        <small v-else-if="loadedNames !== null" class="fieldset-hint">{{ t("rulesTest.names.loaded", { n: loadedNames }) }}</small>
-      </div>
+        </p>
+        <p v-else-if="failed" class="sheet-hint">{{ failure }}</p>
+        <p v-else-if="loadedNames !== null" class="sheet-hint">{{ t("rulesTest.names.loaded", { n: loadedNames }) }}</p>
+      </SheetRow>
     </div>
 
     <StGroup class="group-auto-height">

@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import FoldButton from "./FoldButton.vue"
-import StGroup from "./StGroup.vue"
-import StIcon from "./StIcon.vue"
+import SheetField from "./SheetField.vue"
 import StInput from "./StInput.vue"
 import { t } from "../i18n"
 import { searchApps } from "../composables/sourceCalls"
@@ -84,15 +83,14 @@ function meta(card: AppCard): string {
 
 <template>
   <div class="app-search stack fold-room">
-    <StGroup>
-      <StIcon icon="pi pi-search" />
-      <StInput v-model="query" class="app-query" :label="t('sources.apps.query')" @keyup.enter="find()" />
+    <SheetField :label="t('sources.apps.query')" icon="pi pi-search">
+      <StInput v-model="query" class="app-query" @keyup.enter="find()" />
       <div class="item-button-group">
         <button type="button" class="btn-icon btn-add btn-text-icon app-find" :disabled="searching || !query.trim()" @click="find()">
           <i class="pi" :class="searching ? 'pi-spin pi-spinner' : 'pi-search'" /><span>{{ t("sources.apps.find") }}</span>
         </button>
       </div>
-    </StGroup>
+    </SheetField>
     <div v-if="names.length" class="app-names">
       <span class="muted">{{ t("sources.apps.names") }}</span>
       <button

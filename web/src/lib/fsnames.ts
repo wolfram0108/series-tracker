@@ -33,3 +33,9 @@ export const FS_RULES: Record<FsKind, { live: (raw: string) => string; commit: (
   filename: { live: stripName, commit: sanitizeName },
   path: { live: stripPath, commit: sanitizePath },
 }
+
+/** A folder named from the root: what the service writes into. */
+export function isAbsolutePath(value: string): boolean {
+  return value.trim().startsWith("/")
+}
+

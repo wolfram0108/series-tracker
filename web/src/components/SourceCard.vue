@@ -2,10 +2,10 @@
 import { computed, ref, watch } from "vue"
 import { useToast } from "primevue/usetoast"
 import FoldButton from "./FoldButton.vue"
-import StGroup from "./StGroup.vue"
-import StIcon from "./StIcon.vue"
+import SheetField from "./SheetField.vue"
 import StInput from "./StInput.vue"
 import StSelect from "./StSelect.vue"
+import StValue from "./StValue.vue"
 import PowerSwitch from "./status/output/PowerSwitch.vue"
 import SourceMark from "./status/output/SourceMark.vue"
 import { t } from "../i18n"
@@ -119,40 +119,32 @@ async function copyAddress(): Promise<void> {
       <div v-if="isChannel" class="stack">
         <small class="muted">{{ t("sources.vk.hint") }}</small>
         <div class="grid-fit" @focusout="commitChannel" @keyup.enter="commitChannel">
-          <StGroup>
-            <StIcon icon="pi pi-youtube" />
-            <StInput v-model="channel" :label="t('sources.vk.channel')" />
-          </StGroup>
-          <StGroup>
-            <StIcon icon="pi pi-search" />
-            <StInput v-model="query" :label="t('sources.vk.query')" />
-          </StGroup>
+          <SheetField :label="t('sources.vk.channel')" icon="pi pi-youtube">
+            <StInput v-model="channel" />
+          </SheetField>
+          <SheetField :label="t('sources.vk.query')" icon="pi pi-search">
+            <StInput v-model="query" />
+          </SheetField>
         </div>
         <small v-if="!vkQuery(query)" class="source-reason">{{ t("sources.vk.queryMissing") }}</small>
       </div>
-      <StGroup v-else-if="appCard" class="source-app-card">
-        <StIcon icon="pi pi-video" />
-        <div class="constructor-item item-floating-label">
-          <input :id="`app-card-${item.id}`" class="item-input" :value="item.url" readonly placeholder=" " />
-          <label :for="`app-card-${item.id}`">{{ t("sources.apps.card") }}</label>
-        </div>
+      <SheetField v-else-if="appCard" class="source-app-card is-readonly" :label="t('sources.apps.card')" icon="pi pi-video">
+        <StValue :value="item.url" mono />
         <div class="constructor-item url-actions">
           <button type="button" class="url-action-btn" :title="t('sources.address.copy')" @click="copyAddress">
             <i class="pi pi-clipboard" />
           </button>
         </div>
-      </StGroup>
+      </SheetField>
       <div v-if="appCard" class="stack source-rows" @focusout="commitRows" @keyup.enter="commitRows">
-        <StGroup>
-          <StIcon icon="pi pi-list" />
-          <StInput v-model="rows" :label="t('sources.rows.label')" />
-        </StGroup>
+        <SheetField :label="t('sources.rows.label')" icon="pi pi-list">
+          <StInput v-model="rows" />
+        </SheetField>
         <small v-if="rowsValid" class="muted">{{ t("sources.rows.hint") }}</small>
         <small v-else class="source-reason">{{ t("sources.rows.invalid") }}</small>
       </div>
-      <StGroup v-if="!isChannel && !appCard">
-        <StIcon icon="pi pi-link" />
-        <div class="constructor-item item-floating-label"><input class="item-input" :value="item.url" readonly /></div>
+      <SheetField v-if="!isChannel && !appCard" class="is-readonly" :label="t('sources.address.label')" icon="pi pi-link">
+        <StValue :value="item.url" mono />
         <div class="constructor-item url-actions">
           <button type="button" class="url-action-btn" :title="t('sources.address.copy')" @click="copyAddress">
             <i class="pi pi-clipboard" />
@@ -161,17 +153,14 @@ async function copyAddress(): Promise<void> {
             <i class="pi pi-external-link" />
           </a>
         </div>
-      </StGroup>
+      </SheetField>
 
-      <StGroup>
-        <div class="constructor-item item-label-icon item-label-text-icon" :title="t('sources.profile.label')">
-          <i class="pi pi-filter" /><span>{{ t("sources.profile.label") }}</span>
-        </div>
+      <SheetField :label="t('sources.profile.label')" icon="pi pi-filter">
         <StSelect
           :model-value="item.profileId" :options="options" :placeholder="t('sources.profile.none')"
           @update:model-value="emit('change', { profileId: $event as number | null })"
         />
-      </StGroup>
+      </SheetField>
       <small v-if="item.profileId === null && !isTorrent" class="muted">{{ t("sources.profile.hint") }}</small>
       <div v-if="view.reason" class="source-reason">{{ reasonText(view.reason) }}</div>
 
@@ -199,15 +188,12 @@ async function copyAddress(): Promise<void> {
               @toggle="emit('change', { playersOff: togglePlayer(item.playersOff, player.player) })"
             />
           </div>
-          <StGroup v-if="player.chooseSeason" class="player-season">
-            <div class="constructor-item item-label-icon item-label-text-icon" :title="t('sources.vibix.season')">
-              <i class="pi pi-th-large" /><span>{{ t("sources.vibix.season") }}</span>
-            </div>
+          <SheetField v-if="player.chooseSeason" class="player-season" :label="t('sources.vibix.season')" icon="pi pi-th-large">
             <StSelect
               :model-value="item.vibixSeason" :options="seasonOptions(player.groups)" :placeholder="t('sources.vibix.none')"
               @update:model-value="emit('change', { vibixSeason: $event as number | null })"
             />
-          </StGroup>
+          </SheetField>
           <small v-if="player.chooseSeason && item.vibixSeason === null" class="muted">{{ t("sources.vibix.hint") }}</small>
           <div v-if="player.voices.length" class="voice-scroll">
             <table class="voice-table">

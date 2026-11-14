@@ -124,7 +124,7 @@ const rows = computed<CompilationRow[]>(() => {
 </script>
 
 <template>
-  <section class="season-block modern-fieldset compilation-block fold-room" :data-compilation="head.key">
+  <section class="season-block panel compilation-block fold-room" :data-compilation="head.key">
     <header class="season-head fold-head">
       <div class="fold-said">
       <span class="compilation-letter" :style="{ '--tone': `var(--compilation-${badge.color})` }">{{ badge.letter }}</span>

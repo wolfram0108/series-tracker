@@ -147,7 +147,7 @@ function step(by: number): void {
 </script>
 
 <template>
-  <section class="season-block modern-fieldset fold-room" :data-season="season">
+  <section class="season-block panel fold-room" :data-season="season">
     <header class="season-head fold-head">
       <div class="fold-said">
       <span class="season-title">{{ t("output.season", { n: season }) }}</span>

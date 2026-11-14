@@ -34,7 +34,7 @@ test.describe("Конфигуратор «Фильтры VK»", () => {
     await openApp(page)
     await openSettings(page, "Фильтры VK")
     const name = "e2e-tmp-" + Date.now()
-    await page.locator("#new-profile-name").fill(name)
+    await page.getByLabel("Имя нового профиля").fill(name)
     await page.locator(".btn-add[title='Создать']").click()
     await page.waitForTimeout(900)
     // создан в БД
