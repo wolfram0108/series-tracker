@@ -8,6 +8,7 @@ import subprocess
 import pytest
 
 from app_stand import STAND_LIMIT_S, AppStand
+from provider_world import needs_provider
 from core import container as mkv
 from core.contracts import job_dir
 from core.envelope import Envelope
@@ -411,6 +412,7 @@ async def test_a_sync_stopped_while_the_service_aligns_cancels_its_job_and_appli
     await nothing_taken_up_after_a_start(stand, series_id)
 
 
+@needs_provider
 async def test_a_card_whose_parser_gives_a_video_at_an_address_without_an_extension_is_measured_downloaded_and_built(stand):
     """A parser of an application gives the address of an MP4 with no extension: the start of what its host serves tells
     a file from a playlist, its frame is the one ffprobe reads of it, and the download takes it as the file it is."""

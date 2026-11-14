@@ -25,6 +25,7 @@ from modules.scan import ScanModule
 from modules.settings import SettingsModule
 from modules.slicing import SlicingModule
 from modules.sources import SourcesModule
+from modules.sources.provider import ProviderClient
 from modules.sources.table import utc_now
 from modules.torrents import TorrentsModule
 from modules.trackerauth import TrackerauthModule
@@ -49,13 +50,13 @@ class Options:
     torrent_cache_dir: str = "torrent_cache"
     # The clock the age of a table of a page is told by (a stand moves it; the service runs on the time of day).
     table_clock: Callable[[], datetime] = utc_now
-    # The video applications read through their APIs (modules/sources/apps), from the private environment.
-    apps: list = field(default_factory=list)
     # The client profile Alloha is asked as (modules/sources/players/alloha_session.py), from the private environment.
     alloha_profile: object = None
-    # Where the registries of the admitted lines of the applications are (modules/sources/apps/lines.py); the package's own
-    # folder when None.
-    app_lines_dir: str | None = None
+    # The provider of the socket of external sources (contracts/provider_socket.md): its address and token; no address, no socket.
+    provider_url: str = ""
+    provider_token: str = ""
+    # The pace the feed of the provider is opened again at after it dropped (the first pause, the ceiling); the default when None.
+    provider_reconnect: tuple[float, float] | None = None
 
 
 def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, list]:
@@ -72,8 +73,10 @@ def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, l
         RulesModule(bus, db),
         TrackerauthModule(bus, db),
         SourcesModule(bus, db, read_recent=options.read_recent, torrent_cache_dir=options.torrent_cache_dir,
-                      table_clock=options.table_clock, apps=options.apps,
-                      app_lines_dir=options.app_lines_dir, alloha_profile=options.alloha_profile),
+                      table_clock=options.table_clock,
+                      alloha_profile=options.alloha_profile,
+                      provider=ProviderClient(options.provider_url, options.provider_token) if options.provider_url else None,
+                      provider_reconnect=options.provider_reconnect),
         MetadataModule(bus, db),
         LibraryModule(bus, db),
         # scan/downloads/renaming — после catalog/settings/sources/rules: их reconcile при старте шлёт запросы соседям.

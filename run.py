@@ -15,9 +15,9 @@
   ST_QBIT_URL / ST_QBIT_USER / ST_QBIT_PASS
                qBittorrent; без ST_QBIT_URL модуль torrents не стартует
                (удобно для разработки без qBit)
-  ST_APP_<NAME>
-               a video application read through its API (modules/sources/apps): a JSON object with `label`,
-               `protocol` and the private settings of the protocol; without it the application is not read
+  ST_PROVIDER_URL / ST_PROVIDER_TOKEN
+               the provider of the socket of external sources (contracts/provider_socket.md): its address and the
+               token its requests carry; without an address there is no socket and the service reads what it has itself
 
 Все модули живут в одном asyncio-процессе (ТЗ, раздел 2.1); жизненным
 циклом управляет lifespan FastAPI.
@@ -31,7 +31,6 @@ from assembly import Options, assemble
 from core import Bus, Envelope, Runner
 from core.db import Database
 from core.logging import configure, get_logger
-from modules.sources.apps import profiles_of
 from modules.sources.players.alloha_session import profile_of as alloha_profile_of
 
 configure()
@@ -69,8 +68,9 @@ gateway, modules = assemble(bus, db, Options(
     docs_enabled=docs_enabled, allowed_hosts=allowed_hosts, read_recent=read_recent,
     conform_url=os.environ.get("ST_CONFORM_URL", ""),
     qbit_url=os.environ.get("ST_QBIT_URL", ""), qbit_username=os.environ.get("ST_QBIT_USER", "admin"),
-    qbit_password=os.environ.get("ST_QBIT_PASS", ""), apps=profiles_of(os.environ),
-    alloha_profile=alloha_profile_of(os.environ)))
+    qbit_password=os.environ.get("ST_QBIT_PASS", ""),
+    alloha_profile=alloha_profile_of(os.environ), provider_url=os.environ.get("ST_PROVIDER_URL", "").strip(),
+    provider_token=os.environ.get("ST_PROVIDER_TOKEN", "")))
 
 runner = Runner(bus, modules)
 

@@ -15,7 +15,9 @@ from core import container as mkv
 
 from ui_stand import SERIES, SERIES_EN, _pick, lines_of, state, text, ui  # noqa: F401 - the fixture
 
-pytestmark = pytest.mark.ui
+from provider_world import needs_provider
+
+pytestmark = [pytest.mark.ui, needs_provider]
 
 LABEL = [{"type": "text", "value": "第"}, {"type": "number"}, {"type": "text", "value": "集"}]
 ORIGINAL = "Оригинал"

@@ -123,6 +123,10 @@ class SiteRegistry:
             raise ValueError(f"site {site.name!r} repeats a registered name or domain: {sorted(clash)}")
         self._sites.append(site)
 
+    def unregister(self, name: str) -> None:
+        """Take a site out by its name (a provider whose manifest no longer names it); a name that is not there is no error."""
+        self._sites = [site for site in self._sites if site.name != name]
+
     def __iter__(self):
         return iter(self._sites)
 

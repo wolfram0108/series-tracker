@@ -1,5 +1,4 @@
-"""The analyzers of the tools (tools/analyzers) on sample records with answers known beforehand: the decisions of each
-(what a line is admitted by, what a dump says of a sync) and its whole path from the raw records to its output."""
+"""The analyzers of the tools (tools/analyzers) on sample records with answers known beforehand: what a dump says of a sync and its whole path from the raw records to its output."""
 from __future__ import annotations
 
 import gzip
@@ -22,53 +21,6 @@ def lines(path, records) -> None:
     with open(path, "w", encoding="utf-8") as out:
         for record in records:
             out.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-
-# --- the registry of the lines of an application --------------------------------------------------------------------
-
-def episode(line: str, which: str, ok: bool = True, **more) -> dict:
-    return {"app": "app", "card": "7", "line": line, "which": which, "label": which, "ok": ok, "at": f"2026-01-01T00:0{len(which)}",
-            "size": 100 * len(which), "mbit_s": 50.0,
-            "file": {"width": 1920, "height": 1080, "audio": 1, "duration": f"{60 + len(which)}.0"}, **more}
-
-
-def table(rows: list[tuple[str, str, list[int]]], recent: int | None) -> list[dict]:
-    return [*({"app": "app", "card": "7", "player": f"line:{line}", "text": text, "heights": heights,
-               "fields": {} if heights else {"frame_failed": "the host answered 404"}} for line, text, heights in rows),
-            {"app": "app", "card": "7", "recent": recent, "rows": len(rows), "rows_per_s": 1.0}]
-
-
-def test_a_line_is_admitted_by_three_whole_episodes_and_the_frames_of_its_last_ten_rows(tmp_path, monkeypatch):
-    made = tool("app_lines_registry")
-    monkeypatch.setattr(made, "ROOT", str(tmp_path))
-    raw = tmp_path / "data" / "raw"
-    lines(raw / "app_lines_admission__1__app-7.jsonl", [
-        *(episode("whole", which) for which in made.WHICH),
-        *(episode("blind", which) for which in made.WHICH),
-        *(episode("old", which) for which in made.WHICH),
-        episode("broken", "first"), episode("broken", "central", ok=False, step="download", reason="обрыв"),
-        episode("again", "first", ok=False, step="stream", reason="the host 10.20.30.40 answered 403"),
-        # One clip of sixteen seconds for every episode (a notice for those who did not pay): no episode at all.
-        *(episode("clip", which, size=1581830, file={"width": 1280, "height": 720, "audio": 1, "duration": "16.277007"})
-          for which in made.WHICH),
-        episode("closed", "first", ok=False, step="stream", reason="IP 未授权：10.20.30.40 不在授权列表"),
-    ])
-    # A later record of an episode is the one that counts: the line asked again came whole.
-    lines(raw / "app_lines_admission__2__app-7.jsonl", [episode("again", which) for which in made.WHICH])
-    lines(raw / "app_table_rate__1__app-7.jsonl", table(
-        [("whole", "9", [1080]), ("blind", "9", []), ("blind", "10", [720]), ("old", "9", [720]), ("again", "9", [720])], 10))
-    # A read of the whole card is no part of the admission: an old episode of an admitted line gone from its host.
-    lines(raw / "app_table_rate__2__app-7.jsonl", table([("old", "1", []), ("whole", "1", [])], None))
-
-    registry = made.registry("app")
-    assert sorted(registry["admitted"]) == ["again", "old", "whole"]
-    assert registry["admitted"]["whole"]["episodes"][0] == {"which": "first", "label": "first", "width": 1920, "height": 1080,
-                                                           "audio": 1, "duration": "65.0", "size": 500, "mbit_s": 50.0}
-    assert registry["refused"]["clip"]["step"] == "file" and "one and the same file" in registry["refused"]["clip"]["reason"]
-    # The registry is in git: an address of a machine a host names in its refusal is not kept.
-    assert registry["refused"]["closed"]["reason"] == "IP 未授权：<ip> 不在授权列表"
-    assert registry["refused"]["blind"]["step"] == "table" and "1 rows of the table" in registry["refused"]["blind"]["reason"]
-    assert registry["refused"]["broken"] == {"card": "7", "episode": "central", "step": "download", "reason": "обрыв"}
 
 
 # --- the dump of a sync -----------------------------------------------------------------------------------------------

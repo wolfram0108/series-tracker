@@ -1,4 +1,4 @@
-"""The search of the video applications (modules/sources/apps): a title has no page there, it is found by the search of
+"""The search of the video applications a provider of the socket reads (contracts/provider_socket.md): a title has no page there, it is found by the search of
 the application, and the card the user picks is a source by its address (`app://<application>/<card>`).
 
 The cards come as the application gives them, in its order: nothing is chosen, ranked or left out here.

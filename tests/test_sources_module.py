@@ -9,9 +9,10 @@ import pytest
 from core import BaseModule, Bus
 from core.contracts import ReleaseTable, RowState, TableRow
 from core.db import Database
-from app99_model import profile as app_profile
+from provider_mock import MockProvider, serving
 from modules.sources.module import SourcesModule
 from modules.sources.players.vibix import link_of
+from modules.sources.provider import ProviderClient
 from modules.sources.sites import PHASES
 from modules.sources.sites.builtin import builtin_sites
 from schema_db import migrated
@@ -87,17 +88,22 @@ def page(url: str, site: str, *rows: tuple[str, str, list[int]]) -> ReleaseTable
 
 @pytest.fixture
 async def with_lines(tmp_path):
-    """A module with one application: its lines are those its registry admits (modules/sources/apps/admitted)."""
-    path = migrated(tmp_path / "sources.db")
-    bus = Bus()
-    app = app_profile(label="半日 (Banri)")
-    sources = SourcesModule(bus, Database(str(path)), torrent_cache_dir=str(tmp_path / "cache"), apps=[app])
-    probe = Probe(bus)
-    await sources.start()
-    await probe.start()
-    yield sources, probe
-    await probe.stop()
-    await sources.stop()
+    """A module with a provider of the socket whose one application has two lines: they are the players its manifest names."""
+    mock = MockProvider()
+    mock.add_app("banri", "半日 (Banri)")
+    mock.card("banri", 7, ["万界独尊"], [("1", "NBY", "n1", [1080]), ("2", "CO4K", "c1", [720])])
+    async with serving(mock) as server:
+        bus = Bus()
+        sources = SourcesModule(bus, Database(str(migrated(tmp_path / "sources.db"))), torrent_cache_dir=str(tmp_path / "cache"),
+                                provider=ProviderClient(server.url), provider_reconnect=(0.05, 0.2))
+        probe, states = Probe(bus), bus.subscribe("sources.provider.state")
+        await sources.start()
+        await probe.start()
+        while (await asyncio.wait_for(states.queue.get(), STEP_LIMIT_S)).payload["state"] != "up":
+            pass
+        yield sources, probe
+        await probe.stop()
+        await sources.stop()
 
 
 async def test_every_player_says_where_it_is_among_the_pages_asked_about_and_the_best_height_of_its_rows(with_lines):

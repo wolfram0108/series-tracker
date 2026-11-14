@@ -1,5 +1,5 @@
 """Модуль sources — источники раздач: парсеры трекеров (Р-9). Таблицы модуля: `trackers`, `release_tables` и
-`release_rows` (страницы сайтов), `share139_folders` (папки публичных ресурсов 139 Cloud, найденные поиском, Р-95).
+`release_rows` (страницы сайтов), `provider_manifest` (последний манифест поставщика розетки, Р-102).
 
 Queries:
   sources.parse {url}            → {service, title, releases[]} — the releases of a tracker; a page of a site
@@ -53,15 +53,14 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    table can be of, as the order of sources names it, with where it is among the pages
                                    of `urls` (their stored tables, no network): its kind (`site`, `line`), the best
                                    height of its rows and its places — the sites whose pages hold its rows, or the
-                                   applications that admit the line, each with how many of the pages are its. The
-                                   players are those of the registry and the lines some application admits, one
-                                   player a code whichever application lists it (`line:<code>`, named by the code;
-                                   modules/sources/apps/lines.py)
-  sources.apps.search {query, page?, app?} → AppSearchReply {apps: [AppResults]}: a page of the search of every video
-                                   application (modules/sources/apps), or of the one named, as the application gives it,
-                                   or the reason it gave none. A card picked is a source by its address
-                                   `app://<application>/<card>`; its table is every episode of every line of the card,
-                                   a row of the player `<application>:<line>` (players/app_lines.py)
+                                   places a provider of the socket says it is in, each with how many of the pages are
+                                   its. The players are those of the registry and those the manifest of the provider
+                                   names
+  sources.apps.search {query, page?, app?} → AppSearchReply {apps: [AppResults]}: a page of the search of every source
+                                   of search the provider of the socket names (contracts/provider_socket.md), or of the
+                                   one named, as the provider gives it, or the reason it gave none (`provider_unavailable`
+                                   when it cannot be reached). A card picked is a source by the address the provider
+                                   gives (for video applications `app://<application>/<card>`)
   sources.term.get {} → {hours}: the term of what the sources answered (term.py), whole hours
   sources.term.set {hours} → {ok, hours, reason?}: a whole number of hours from one is stored (`sources_term_hours` of the
                                    settings) and is the term of every reader of the module at once; any other value is
@@ -76,6 +75,10 @@ Events (owner: sources):
   sources.table.trace {url, site, kind: begin | end, …}  what a read does, for its dump (modules/runlog): `end` carries
                                                         the seconds of the read and what every player of the page gave
                                                         (rows by state, frames, the causes of the rows without a video)
+  sources.provider.state {provider, state: connecting | up | down | incompatible, revision, reason}  how the socket of the
+                                                        provider stands (modules/sources/provider; absent when none is configured)
+  sources.provider.manifest {provider, revision}        the manifest of the provider was applied: its sites and players are those
+                                                        of this revision
 Events in: series.source.added | .updated {changed has url} | .removed, series.deleted, system.started — the tables of pages
 belong to the sources of the series: the module asks the catalog which pages its sources list (`catalog.series.list`) and
 forgets the table of a page that was listed and is not any more at once, and of a page that never was (a preview, one left
@@ -112,12 +115,11 @@ import time
 from datetime import datetime
 from typing import Callable, Iterable
 
-import httpx
 
 from core import BaseModule, compute, ids
 from core import storage
 from core.contracts.voices import PLAYERS_OFF_KEY
-from core.contracts import (AppCard, AppResults, AppSearchReply, AppSearchRequest, ParsedDomains, PlayerFacts, PlayerPlace,
+from core.contracts import (AppSearchReply, AppSearchRequest, ParsedDomains, PlayerFacts, PlayerPlace,
                             PlayersListReply, PlayersListRequest, SiteResolveRequest,
                             SourcesSettingsView, TableGetRequest, TrackerMirrors)
 from core.deadlines import TABLE_READ_S
@@ -129,29 +131,16 @@ from core.reasons import describe, reason
 
 from . import anilibria, delivery, parsers
 from .browser_pool import BrowserPool
-from .apps import AppError, AppProfile, card_address
-from .apps.app99 import App99Client
-from .apps.appdrama import AppDramaClient
-from .apps.appget import AppGetClient
-from .apps.appmn import AppMnClient
-from .apps.appv7 import AppV7Client
-from .apps.bubu import BubuClient
-from .apps.gulu import GuluClient
-from .apps.lines import LineRegistry, routes_of
-from .apps.share139 import Share139Client
-from .apps.yunduo import YunDuoClient
 from .delivery import Delivery
 from .parsers import SourceParseError
+from .provider import Connector, ProviderClient
 from .repository import SourcesRepository
 from .term import DEFAULT_HOURS, TERM_KEY, Term, hours_of
 from .players.alloha_session import AllohaRefused, Profile as AllohaProfile
-from .players.app_lines import AppLines, AppPlayer, line_player_name
 from .players.contract import StreamUnavailable
 from .players.registry import PlayerRegistry
 from .players.streams import resolve_stream
 from .sites import Site, SiteError, SiteRegistry
-from .sites.apps import AppSite
-from .sites.apps.site import APP_IN_FLIGHT
 from .sites.builtin import builtin_sites
 from .table import TableReader, utc_now
 
@@ -159,17 +148,6 @@ REQUEST_MIN_INTERVAL = 3.0  # секунд между запросами к од
 VK_API_BASE = "https://api.vk.com/method/"
 
 
-# The clients of the protocols of the video applications, by the `protocol` of a profile (modules/sources/apps).
-APP_PROTOCOLS = {"app99": App99Client, "appdrama": AppDramaClient, "appget": AppGetClient, "gulu": GuluClient,
-                 "yunduo": YunDuoClient, "appmn": AppMnClient, "appv7": AppV7Client, "share139": Share139Client,
-                 "bubu": BubuClient}
-
-# The connections the client of the sources opens and keeps open between requests. A read of a card of an application
-# has up to APP_IN_FLIGHT rows going, each one request at a time, and the applications read side by side: kept for the
-# rows of a dozen of them, a row asks over an open connection instead of a new TCP and TLS handshake (measured on 半日:
-# a row 5.2 s with 20 kept, 2.8 s with 100), and as many again are left to the reads of the other sources.
-CONNECTIONS = httpx.Limits(max_connections=2 * 12 * APP_IN_FLIGHT, max_keepalive_connections=2 * 12 * APP_IN_FLIGHT,
-                           keepalive_expiry=30.0)
 
 class SourcesModule(BaseModule):
     name = "sources"
@@ -185,8 +163,8 @@ class SourcesModule(BaseModule):
                  sites: Iterable[Site] | None = None,
                  table_clock: Callable[[], datetime] = utc_now,
                  table_safeguard_s: float = TABLE_READ_S, read_recent: int | None = None,
-                 apps: Iterable[AppProfile] = (), app_lines_dir: str | None = None,
-                 alloha_profile: AllohaProfile | None = None) -> None:
+                 alloha_profile: AllohaProfile | None = None, provider: ProviderClient | None = None,
+                 provider_reconnect: tuple[float, float] | None = None) -> None:
         self.repo = SourcesRepository(db)
         # The downloads players make themselves, by their files (`sources.video.fetch`).
         self._transfers: dict[str, asyncio.Future] = {}
@@ -205,8 +183,6 @@ class SourcesModule(BaseModule):
             alloha_profile=alloha_profile)
         # One object per player for the whole module: the sites read with them and the streams are resolved by them.
         self.players = PlayerRegistry.standard(**wiring)
-        # The video applications the environment describes: each a player of its lines and a site of its cards.
-        self.apps: list[AppPlayer] = []
         # One term of what the sources answered for every reader of the module; the setting changes it for all at once.
         self.term = Term()
         # The pages some source lists, as the catalog said at the last change of the sources (None until it was asked), and
@@ -215,28 +191,17 @@ class SourcesModule(BaseModule):
         self._listing = asyncio.Lock()
         # The players switched off for every source (the setting of the voices module, kept here as the event says it).
         self.players_off: frozenset[str] = frozenset()
-        for profile in apps:
-            client = APP_PROTOCOLS.get(profile.protocol)
-            if client is None:
-                raise ValueError(f"application {profile.name}: unknown protocol {profile.protocol!r}")
-            # What a protocol keeps of its own beyond its profile: the folders the search of 139 Cloud found.
-            own = {"folders": self.repo} if profile.protocol == "share139" else {}
-            self.apps.append(AppPlayer(client(profile, lambda: self._http, **own),
-                                       registry=LineRegistry.load(profile.name, app_lines_dir), term=self.term))
-        # A line of an application that another one parses when its own parser says no (apps/routes.json), where that
-        # other application is configured.
-        clients = {each.name: each.client for each in self.apps}
-        for each in self.apps:
-            each.through = {line: (clients[name], code) for line, (name, code) in routes_of(each.name).items()
-                            if name in clients}
-        # One player of the lines of every application: a line is one player whichever application lists it.
-        self.lines = AppLines(self.apps)
-        if self.apps:
-            self.players.register(self.lines)
         # The sites belong to this instance, not to the process: a site is added by registering it (builtin.py).
-        self.sites = SiteRegistry([*(builtin_sites() if sites is None else sites),
-                                   *(AppSite(app, self.lines) for app in self.apps)])
+        self.sites = SiteRegistry(builtin_sites() if sites is None else sites)
         self.sites.configure(players=self.players, vk_call=self._vk_call, term=self.term)
+        # The provider of the socket (modules/sources/provider), when the environment names one: its sites and players join
+        # the registries as its manifest says, and leave them as it says.
+        self.connector: Connector | None = None
+        self._feed: asyncio.Task | None = None
+        if provider is not None:
+            self.connector = Connector(provider, self.repo, sites=self.sites, players=self.players, term=self.term,
+                                       publish=lambda topic, payload: self.publish_event(topic, payload),
+                                       **({"reconnect": provider_reconnect} if provider_reconnect else {}))
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
             players=self.players, clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent, term=self.term,
@@ -296,7 +261,10 @@ class SourcesModule(BaseModule):
                 series = await self.request("catalog.series.list", {})
                 if not isinstance(series, list):
                     raise TypeError("the list of series is no list")
-                listed =self.tables.keys_of([source["url"] for one in series for source in one.get("sources") or []])
+                addresses = [source["url"] for one in series for source in one.get("sources") or []]
+                # A page some source lists is kept even when no site reads its address now (the provider of the socket is not
+                # up, or is not configured): its table is the one the next read of it begins from.
+                listed = self.tables.keys_of(addresses) | set(addresses)
                 gone = await self.tables.forget(listed, self._listed or set())
             except Exception:  # noqa: BLE001 - the tables stay as they are; a table kept is no loss
                 self.log.exception("the pages no source lists were not counted")
@@ -309,7 +277,12 @@ class SourcesModule(BaseModule):
             return True
 
     async def on_start(self) -> None:
-        self._http = bounded_client(timeout=20.0, follow_redirects=True, limits=CONNECTIONS)
+        self._http = bounded_client(timeout=20.0, follow_redirects=True)
+        if self.connector is not None:
+            # The sites of the saved manifest first: a provider that is down at the start must not take its pages' tables out of
+            # the hands of its sites (the next step forgets the pages no site reads).
+            await self.connector.load_saved()
+            self._feed = self.spawn(self.connector.run(), name="sources.provider", lasting=True)
         try:
             stored = (await self.request("settings.value.get", {"key": TERM_KEY})).get("value")
         except Exception:  # noqa: BLE001 - a setting that cannot be read leaves the term at its default
@@ -327,6 +300,11 @@ class SourcesModule(BaseModule):
             self.log.exception("reads of tables interrupted by a stop were not resumed")
 
     async def on_stop(self) -> None:
+        if self.connector is not None:
+            # The feed stops before its client closes: a loop that wakes to a closed client has nothing to read.
+            self._feed.cancel()
+            await asyncio.gather(self._feed, return_exceptions=True)
+            await self.connector.close()
         await self.tables.close()
         await self._http.aclose()
         await self.browsers.shutdown()
@@ -542,16 +520,16 @@ class SourcesModule(BaseModule):
 
     async def on_players_list(self, env: Envelope) -> dict:
         """Every player a row of a table can be of, with the words a window names it by and where it is among the pages
-        asked about: the players of the registry, and the admitted lines of the applications (`line:<code>`, named by
-        their codes), each line in every application that admits it."""
+        asked about: the players of the registry, and those the manifest of the provider names (`line:<code>` of the
+        video applications), each in every place the manifest says it is."""
         request = PlayersListRequest.model_validate(env.payload or {})
         urls = list(dict.fromkeys(self.tables.resolve(url).canonical_url or url for url in request.urls))
         pages, heights = await self.repo.players_of_pages(urls)
 
-        def places(player: str, admitting: Iterable[AppPlayer] = ()) -> list[PlayerPlace]:
-            found = {app.name: PlayerPlace(name=app.name, label=app.label, sources=pages.get((player, app.name), 0))
-                     for app in admitting}
-            labels = {app.name: app.label for app in self.lines.apps.values()}
+        def places(player: str, admitting: Iterable = ()) -> list[PlayerPlace]:
+            found = {place.name: PlayerPlace(name=place.name, label=place.label, sources=pages.get((player, place.name), 0))
+                     for place in admitting}
+            labels = self.connector.labels() if self.connector else {}
             for (name, site), count in pages.items():
                 if name == player and site not in found:
                     found[site] = PlayerPlace(name=site, label=labels.get(site, site), sources=count)
@@ -560,36 +538,18 @@ class SourcesModule(BaseModule):
         players = [PlayerFacts(name=each.name, label=getattr(each, "label", "") or each.name, kind="site",
                                height=heights.get(each.name), places=places(each.name))
                    for each in self.players if not getattr(each, "lines", False)]
-        for code in self.lines.codes():
-            name = line_player_name(code)
-            admitting = [app for app in self.lines.apps.values() if code in app.registry.admitted]
-            players.append(PlayerFacts(name=name, label=code, kind="line", height=heights.get(name),
-                                       places=places(name, admitting)))
+        for each in (self.connector.players() if self.connector else ()):
+            players.append(PlayerFacts(name=each.name, label=each.label or each.name, kind=each.kind,
+                                       height=heights.get(each.name), places=places(each.name, each.places)))
         return PlayersListReply(players=players).model_dump(mode="json")
 
     async def on_apps_search(self, env: Envelope) -> dict:
-        """payload: AppSearchRequest; reply: AppSearchReply — a page of the search of every application (or of the one
-        named), each as the application gives it, or the reason it gave none."""
+        """payload: AppSearchRequest; reply: AppSearchReply — a page of the search of every source of search the provider of the
+        socket names (or of the one named), each as the provider gives it, or the reason it gave none. No provider, no source of
+        search: the reply is empty."""
         request = AppSearchRequest.model_validate(env.payload)
-        asked = [app for app in self.apps if not request.app or app.name == request.app]
-        found = await asyncio.gather(*(self._search(app, request.query, request.page) for app in asked))
-        return AppSearchReply(apps=list(found)).model_dump(mode="json")
-
-    async def _search(self, app: AppPlayer, query: str, page: int) -> AppResults:
-        try:
-            answer = await app.client.search_page(query, page)
-        except AppError as exc:
-            return AppResults(app=app.name, label=app.label, page=page, reason=exc.reason)
-        # A card without a number the application could be asked by again is shown all the same, with no address.
-        cards = [AppCard(app=app.name, id=str(each.get("id", "")),
-                         url=card_address(app.name, str(each["id"])) if str(each.get("id", "")).isdigit() else "",
-                         name=str(each.get("name") or ""), sub=str(each.get("sub") or ""), year=str(each.get("year") or ""),
-                         area=str(each.get("area") or ""), genres=str(each.get("class") or ""),
-                         remarks=str(each.get("remarks") or ""), blurb=str(each.get("blurb") or "").strip(),
-                         pic=str(each.get("pic") or ""))
-                 for each in answer.cards]
-        return AppResults(app=app.name, label=app.label, page=page, cards=cards, pages=answer.pages, total=answer.total,
-                          reason=answer.note if not cards and answer.note else None)
+        found = await self.connector.search(request) if self.connector is not None else []
+        return AppSearchReply(apps=found).model_dump(mode="json")
 
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}

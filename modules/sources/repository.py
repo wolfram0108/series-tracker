@@ -2,8 +2,9 @@
 
 Tables of pages: `release_tables` holds, per page, the head of the last complete table (with the parts its read could
 not get) and the state of the read in progress; `release_rows` holds the rows of that complete table. A new complete table
-replaces the rows in one transaction. `share139_folders` holds the folders of the public shares of 139 Cloud the search of
-that application found, each with the number that is its card.
+replaces the rows in one transaction. `provider_manifest` holds the last manifest of the provider of the socket
+(modules/sources/provider), by its address. The table `share139_folders` (migration 0067) is no longer read or written here:
+its rows are taken over by the provider (`tools/import_from_tracker.py folders` of the provider).
 """
 from __future__ import annotations
 
@@ -13,13 +14,10 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from core.contracts import ReleaseTable, RowState, RowVoice, TableRow, UnreadPart
+from core.contracts.provider import Manifest
 from core.db import Database
 
 from . import hosts
-
-# The cards of the folders the search of 139 Cloud found begin here: the cards of the shares the owner connected by hand
-# (the profile) have small numbers of their own.
-SHARE_CARDS_FROM = 1_000_000
 
 # One statement is one snapshot: the head and the rows of a page cannot come from two different tables.
 _LAST_TABLE = (
@@ -180,35 +178,23 @@ class SourcesRepository:
         return await self._db.fetch_all(
             "SELECT url, site FROM release_tables WHERE state = 'reading' ORDER BY reading_since, url")
 
-    # --- the folders of the public shares of 139 Cloud (apps/share139.py) -------------------------------------------
+    # --- the manifest of the provider of the socket (modules/sources/provider) -----------------------------------------
 
-    async def share_folder_register(self, link_id: str, folder_id: str, *, password: str = "", title: str = "",
-                                    publisher_url: str = "", published_at: str = "", found_by: str = "") -> int:
-        """The card of a folder of a share: the number it has, or the next one when it is found for the first time. What is
-        known of it again (a title, the code the post gives) replaces what was; an empty value does not. How it was found is
-        how it was found first."""
-        now = datetime.now(timezone.utc).isoformat()
+    async def provider_manifest(self, url: str) -> Manifest | None:
+        """The last manifest saved for the provider at this address; None when none was, or when what is stored no longer
+        reads as a manifest (the provider tells it again)."""
+        row = await self._db.fetch_one("SELECT body FROM provider_manifest WHERE url = ?", (url,))
+        if row is None:
+            return None
+        try:
+            return Manifest.model_validate_json(row["body"])
+        except ValueError:
+            return None
 
-        def write(conn) -> int:
-            held = conn.execute("SELECT card, password, title, publisher_url, published_at, found_by FROM share139_folders"
-                                " WHERE link_id = ? AND folder_id = ?", (link_id, folder_id)).fetchone()
-            if held is not None:
-                conn.execute("UPDATE share139_folders SET password = ?, title = ?, publisher_url = ?, published_at = ?,"
-                             " found_by = ?, seen_at = ? WHERE card = ?",
-                             (password or held["password"], title or held["title"], publisher_url or held["publisher_url"],
-                              published_at or held["published_at"], held["found_by"] or found_by, now, held["card"]))
-                return held["card"]
-            card = conn.execute("SELECT COALESCE(MAX(card), ?) + 1 FROM share139_folders", (SHARE_CARDS_FROM - 1,)).fetchone()[0]
-            conn.execute("INSERT INTO share139_folders (card, link_id, folder_id, password, title, publisher_url, published_at,"
-                         " found_by, found_at, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                         (card, link_id, folder_id, password, title, publisher_url, published_at, found_by, now, now))
-            return card
-
-        return await self._db.transaction(write)
-
-    async def share_folder(self, card: int) -> dict | None:
-        return await self._db.fetch_one("SELECT * FROM share139_folders WHERE card = ?", (card,))
-
-    async def share_folders(self) -> list[dict]:
-        """Every folder found so far, the latest seen first."""
-        return await self._db.fetch_all("SELECT * FROM share139_folders ORDER BY seen_at DESC, card DESC")
+    async def provider_manifest_save(self, url: str, manifest: Manifest) -> None:
+        await self._db.execute(
+            "INSERT INTO provider_manifest (url, provider, revision, body, saved_at) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT (url) DO UPDATE SET provider = excluded.provider, revision = excluded.revision,"
+            " body = excluded.body, saved_at = excluded.saved_at",
+            (url, manifest.provider.id, manifest.revision, manifest.model_dump_json(),
+             datetime.now(timezone.utc).isoformat()))

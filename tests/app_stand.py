@@ -29,14 +29,21 @@ import httpx
 import uvicorn
 from fastapi.responses import StreamingResponse
 
+import provider_world  # noqa: F401 - makes the provider of the socket and its models importable (a stand needs it)
 from assembly import Options, assemble
 from core import Bus, Envelope, Runner
 from core import container as mkv
 from core.db import Database
-from app99_model import HOST as APP_HOST, App99Model, Card, Line, profile as app_profile
+try:
+    from app99_model import HOST as APP_HOST, App99Model, Card, Line, profile as app_profile
+    from app_protocol_models import AppGetModel, AppMnModel, AppV7Model, BubuModel, GuluModel, Share139Model, YunDuoModel
+    from appdrama_model import DramaModel, Video as DramaVideo
+    MODELS = True
+except ModuleNotFoundError:
+    # The models of the applications are the provider's (its folder `tests`): with no provider on this machine the stand has
+    # none, and what it models of the sites and the players goes on.
+    MODELS = False
 from alloha_model import PROFILE as ALLOHA_PROFILE, AllohaModel
-from app_protocol_models import AppGetModel, AppMnModel, AppV7Model, BubuModel, GuluModel, Share139Model, YunDuoModel
-from appdrama_model import DramaModel, Video as DramaVideo
 from plan_disk import Codec, Daemon, Host, _run
 from plan_world import truth_of
 from schema_db import migrated
@@ -192,26 +199,27 @@ class Site:
         self.titles: dict[int, Title] = {}
         self.heads: list[str] = []  # the heads of segments the player asked for: what measuring a frame cost
         # A video application (tests/app99_model.py): its cards list a line of a parser whose streams are on the host.
-        self.app = App99Model(parsers=[9])
-        self.app.line("BLU", "蓝光", parsers="9")
-        # The registry of the admitted lines of the application of the stand: its one line is a player.
+        self.app = App99Model(parsers=[9]) if MODELS else None
         self.app_lines = os.path.join(root, "app-lines")
-        os.makedirs(self.app_lines, exist_ok=True)
-        with open(os.path.join(self.app_lines, "banri.json"), "w", encoding="utf-8") as registry:
-            json.dump({"app": "banri", "admitted": {"BLU": {}}, "refused": {}}, registry)
         # The applications of every other protocol the service reads, each with one admitted line of its own code.
-        self.drama = DramaModel()
+        self.drama = DramaModel() if MODELS else None
         self.others = {"appget": AppGetModel(), "gulu": GuluModel(), "yunduo": YunDuoModel(), "appmn": AppMnModel(),
-                       "appv7": AppV7Model(), "share139": Share139Model(), "bubu": BubuModel()}
+                       "appv7": AppV7Model(), "share139": Share139Model(), "bubu": BubuModel()} if MODELS else {}
         # A title of yummyani.me and its player Alloha (tests/alloha_model.py), the CDN of which serves an HLS of the host.
         self.alloha = AllohaModel(voices={})
         self.yummy: dict[str, tuple[int, str, list[dict]]] = {}
-        for name in ("huayi", "moli", "gulu", "yunduo", "appmn", "xiaozhu", "share139", "bubu"):
-            with open(os.path.join(self.app_lines, f"{name}.json"), "w", encoding="utf-8") as registry:
-                json.dump({"app": name, "admitted": {LINE_OF[name]: {}}, "refused": {}}, registry)
+        if MODELS:
+            self.app.line("BLU", "蓝光", parsers="9")
+            # The registry of the admitted lines of the applications of the stand: the one line of each is a player.
+            os.makedirs(self.app_lines, exist_ok=True)
+            for name, lines in (("banri", "BLU"), *((each, LINE_OF[each]) for each in LINE_OF)):
+                with open(os.path.join(self.app_lines, f"{name}.json"), "w", encoding="utf-8") as registry:
+                    json.dump({"app": name, "admitted": {lines: {}}, "refused": {}}, registry)
 
     def profiles(self) -> list:
-        """The profiles of every application the stand models."""
+        """The profiles of every application the stand models (none when the machine has no provider)."""
+        if not MODELS:
+            return []
         return [app_profile(), self.drama.profile(), *(model.profile() for model in self.others.values())]
 
     def protocol_card(self, protocol: str, number: int, name: str, episodes: dict[int, int]) -> str:
@@ -438,9 +446,9 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
     def web(self) -> Web:
         def answer(request: httpx.Request):
             path = request.url.path.strip("/")
-            if str(request.url).startswith(APP_HOST):
+            if MODELS and str(request.url).startswith(APP_HOST):
                 return self.app.handle(request)
-            if request.url.host in ("navigator.model", "drama.model"):
+            if MODELS and request.url.host in ("navigator.model", "drama.model"):
                 return self.drama.handle(request)
             model = next((each for each in self.others.values() if each.owns(str(request.url))), None)
             if model is not None:
@@ -487,19 +495,35 @@ class AppStand:
         self.library = os.path.join(root, "library")
         self.db_path = migrated(os.path.join(root, "app.db"))
         self.profiles: dict[str, int] = {}  # the profile of each voice-over: two sources of one voice-over share it
+        # The provider of the socket reads the applications the stand models: its own process on the stand is a server in a
+        # thread of its own, over the web of the models (the applications are models, the provider and the tracker are real).
+        self.provider = self.provider_http = None
         # The time of day as the sources tell the age of a table by it: a scenario moves it to let a page be read again.
         self.now = datetime.now(timezone.utc)
+
+    def _serve_provider(self) -> str:
+        """The provider of the socket on the stand, once: it outlives the restarts of the tracker, as a provider does."""
+        if not provider_world.present():
+            return ""  # no provider on this machine: the stand has no applications, and the tests that need them are skipped
+        if self.provider_http is None:
+            from chinese_sources.server import create_app
+            from chinese_sources.service import Provider
+            self.provider = Provider(self.site.profiles(), app_lines_dir=self.site.app_lines, http=self.site.web().client())
+            self.provider_http = Served(create_app(self.provider))
+        return self.provider_http.url
 
     async def start(self, before_started=None) -> None:
         self.bus = Bus()
         self.db = Database(self.db_path)
         self.gateway, self.modules = assemble(self.bus, self.db, Options(
             db_path=self.db_path, auth_required=False, cookie_secure=False,
-            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now, apps=self.site.profiles(),
-            app_lines_dir=self.site.app_lines))
+            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now,
+            provider_url=self._serve_provider()))
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()
         self.module("sources")._http = self.site.web().client()
+        # The tracker is up when the manifest of the provider is in its registries: the sites of the applications are its sites.
+        await self._provider_in()
         # Alloha is asked as its player asks, by the client of its model, with the profile of the model.
         self.module("sources").players.get("alloha").configure(alloha_profile=ALLOHA_PROFILE,
                                                                 alloha_client=self.site.alloha.client)
@@ -507,6 +531,15 @@ class AppStand:
             before_started()
         self.bus.publish(Envelope(topic="system.started", kind="event"))
         self.api = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.gateway.app), base_url="http://stand")
+
+    async def _provider_in(self) -> None:
+        """Wait for the socket: the provider's manifest applied (an event of the module, not a pause)."""
+        sources = self.module("sources")
+        if sources.connector is None or (sources.connector.manifest is not None and sources.connector.state == "up"):
+            return
+        up = self.bus.subscribe("sources.provider.state")
+        while sources.connector.state != "up":
+            await asyncio.wait_for(up.queue.get(), STAND_LIMIT_S)
 
     def module(self, name: str):
         return next(each for each in self.modules if each.name == name)
@@ -517,6 +550,8 @@ class AppStand:
 
     def close(self) -> None:
         self.daemon_http.close()
+        if self.provider_http is not None:
+            self.provider_http.close()
         self.host.close()
 
     # --- the user, through the API ------------------------------------------------------------------------------

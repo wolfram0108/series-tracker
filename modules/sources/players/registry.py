@@ -47,8 +47,12 @@ class PlayerRegistry:
             raise ValueError(f"player {player.name!r} is registered twice")
         self._players[player.name] = player
 
+    def unregister(self, name: str) -> None:
+        """Take a player out by its name (a provider whose manifest no longer names its family); none by that name is no error."""
+        self._players.pop(name, None)
+
     def get(self, name: str) -> Player:
-        """The player of a name; a line of a player with lines (`<player>:<line>`, players/app_lines.py) is its player."""
+        """The player of a name; a line of a player with lines (`<player>:<line>`, the family of a provider of the socket) is its player."""
         found = self._players.get(name)
         if found is not None:
             return found

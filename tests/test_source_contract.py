@@ -10,6 +10,10 @@ import pytest
 
 from app_stand import STAND_LIMIT_S, AppStand
 from core.voice_names import fold_name
+from provider_world import needs_provider
+
+# Every protocol of the applications is read through the provider of the socket: without it on the machine there is nothing to keep.
+pytestmark = needs_provider
 
 
 @pytest.fixture

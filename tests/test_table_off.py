@@ -12,8 +12,9 @@ from core import Bus
 from core.contracts import ReleaseTable, RowState, TableRow
 from core.contracts.voices import PLAYERS_OFF_KEY
 from core.db import Database
-from app99_model import profile as app_profile
+from core.contracts.provider import ManifestFamily
 from modules.sources.module import SourcesModule
+from modules.sources.provider import RemoteFamily
 from modules.sources.sites import TableDraft
 from schema_db import migrated
 
@@ -50,8 +51,10 @@ class Banri:
 
 @pytest.fixture
 async def module(tmp_path):
-    sources = SourcesModule(Bus(), Database(str(migrated(tmp_path / "sources.db"))), torrent_cache_dir=str(tmp_path / "cache"),
-                            apps=[app_profile(label="半日 (Banri)")])
+    sources = SourcesModule(Bus(), Database(str(migrated(tmp_path / "sources.db"))), torrent_cache_dir=str(tmp_path / "cache"))
+    # The player of the rows of the card, as a provider of the socket names it in its manifest.
+    sources.players.register(RemoteFamily(ManifestFamily(
+        name="line", label="Линии", video="video", owns=r"^app://banri/[0-9]+#line=(?P<line>[^&]+)&item=(?P<video>[^&]+)$"), None))
     await sources.start()
     yield sources
     await sources.stop()

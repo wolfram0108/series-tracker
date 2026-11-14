@@ -75,6 +75,13 @@ reply). Request/reply реализован поверх pub/sub в обвязк�
 | Фронтенд | Vite, Vue 3, TypeScript, PrimeVue (`web/`) |
 | Внешнее | qBittorrent (WebUI API), yt-dlp, ffmpeg, Playwright (Firefox), TMDB |
 
+**Внешние источники.** Видеоприложения с собственными API читает не сам
+трекер, а отдельный необязательный процесс — поставщик, подключённый через
+«розетку» (HTTP: манифест, лента событий, поиск, чтение страницы потоком
+кадров, поток серии). Спецификация — `contracts/provider_socket.md`; адрес
+поставщика — `ST_PROVIDER_URL`, токен — `ST_PROVIDER_TOKEN`; без адреса
+розетки нет, и трекер работает со встроенными источниками.
+
 Карта топиков шины — `contracts/bus_topics.md`; решения по контракту —
 `contracts/revision.md`; находки/грабли — `contracts/findings.md`.
 
@@ -119,8 +126,9 @@ cd web && npm run test                 # фронтенд (vitest)
 
 Тесты не требуют внешних данных: сайты, плееры и трекеры проверяются на
 синтетических ответах (`tests/site_samples.py`, `tests/samples/`). Пропускаются
-только интеграция с живым qBittorrent (без `ST_QBIT_URL`) и сверка с локальными
-`.torrent` (без `tests/fixtures/torrents`).
+только интеграция с живым qBittorrent (без `ST_QBIT_URL`), сверка с локальными
+`.torrent` (без `tests/fixtures/torrents`) и сквозные тесты с внешним поставщиком
+источников (без его папки, `ST_PROVIDER_SRC`).
 
 ---
 

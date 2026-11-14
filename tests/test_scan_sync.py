@@ -50,4 +50,4 @@ async def test_a_page_nobody_has_read_waits_for_the_user_and_the_sync_goes_on_wi
     card = SeriesSource(id=1, series_id=7, url=PAGE, source_type="web_video", parser_profile_id=1, rows_per_line="-10")
     [synced] = await sync_tables([card], ask, TableSignals(), safeguard_s=1)
     assert synced.state == "skipped" and '"code":"table_not_read"' in synced.reason
-    assert asked == [{"url": PAGE, "refresh": True, "rows": "-10"}]
+    assert asked == [{"url": PAGE, "refresh": True, "rows": "-10", "by_sync": True}]
