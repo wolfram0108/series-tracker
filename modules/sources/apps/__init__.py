@@ -233,6 +233,9 @@ class AppPage:
     cards: list[dict]
     pages: int | None = None
     total: int | None = None
+    # What an application says of an answer that holds no card (a reason: a code and its facts), when it has more to say than
+    # «none» — where it looked, what to do. An answer with cards has none.
+    note: str = ""
 
 
 class AppClient(Protocol):

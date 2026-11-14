@@ -13,7 +13,8 @@ from core.db import Database
 from modules.sources.apps import AppError, profiles_of
 from modules.sources.apps.share139 import (ACCESSIBLE_FOR_S, FOUND_FOR_S, NOTHING_FOUND_FOR_S, VERIFIED_AT_MOST, Share139Client,
                                            search_sources_of)
-from modules.sources.apps.share139_search import IndexAnswerError, pansou_candidates, parse_share, telegram_candidates, title_matches
+from modules.sources.apps.share139_search import (IndexAnswerError, pansou_candidates, parse_share, pasted_shares, telegram_candidates,
+                                                  title_matches)
 from modules.sources.repository import SHARE_CARDS_FROM, SourcesRepository
 
 TITLE = "万界独尊"
@@ -37,7 +38,7 @@ class World:
     def __init__(self) -> None:
         self.channels: dict[str, str] = {}      # channel -> the page its search gives
         # host -> the JSON its search gives (a status when an int); «none found» unless a test says more
-        self.pansou: dict[str, object] = {host: {"code": 0, "data": {"results": []}} for host in ("so.252035.xyz", "pansou.app")}
+        self.pansou: dict[str, object] = {host: {"code": 0, "data": {"results": []}} for host in ("pansou.app", "backup.example")}
         self.cloud: dict[str, object] = {}      # link -> the listing of its root, or the words of a refusal
         self.folders: dict[tuple[str, str], dict] = {}   # (link, folder) -> the listing of a folder
         self.requests: list[str] = []
@@ -89,9 +90,10 @@ class Clock:
 async def world(db_path):
     world, clock = World(), Clock()
     repo = SourcesRepository(Database(str(db_path)))
-    profile = profiles_of({"ST_APP_SHARE139": json.dumps(PROFILE)})[0]
     async with httpx.AsyncClient(transport=httpx.MockTransport(world.handle)) as http:
-        def client() -> Share139Client:
+        def client(sources: list[dict] | None = None) -> Share139Client:
+            settings = PROFILE if sources is None else {**PROFILE, "search_sources": sources}
+            profile = profiles_of({"ST_APP_SHARE139": json.dumps(settings)})[0]
             return Share139Client(profile, lambda: http, folders=repo, clock=clock, interval=0)
 
         yield world, clock, client, repo
@@ -143,7 +145,11 @@ def test_the_answer_of_a_search_api_is_read_for_its_results_and_an_answer_of_ano
 
 
 def test_the_indexes_of_the_profile_are_a_list_of_at_most_six_of_a_known_kind_and_a_fault_of_it_stops_the_start():
-    assert [each["kind"] for each in search_sources_of({})] == ["telegram", "telegram", "pansou", "pansou"]
+    # The indexes the search reads by default are the ones measured to hold shares of 139 Cloud (share139_search.py): no channel
+    # that was taken over, no index that does not answer.
+    assert [each.get("channel") or each["url"] for each in search_sources_of({})] == [
+        "yunpan139", "leoziyuan", "https://pansou.app/api/search"]
+    assert [each.get("fallback", False) for each in search_sources_of({})] == [False, False, True]
     assert search_sources_of({"search_sources": "[]"}) == []
     assert search_sources_of({"search_sources": json.dumps([{"kind": "telegram", "channel": "somechannel"}])})[0]["channel"] == "somechannel"
     for bad in ("not json", "{}", json.dumps([{"kind": "telegram", "channel": "no spaces"}]), json.dumps([{"kind": "pansou", "url": "ftp://x"}]),
@@ -164,7 +170,7 @@ async def test_the_search_offers_the_folder_of_a_share_a_post_gives_each_with_a_
     card = page.cards[0]
     assert int(card["id"]) >= SHARE_CARDS_FROM and card["name"] == f"{TITLE} 4K" and card["remarks"] == "accessible"
     assert card["blurb"] == "https://t.me/yunpan139/1"
-    assert cloud.requests == ["t.me/s/yunpan139", "t.me/s/ydypzyfx", "share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink/getOutLinkInfoV6"]
+    assert cloud.requests == ["t.me/s/yunpan139", "t.me/s/leoziyuan", "share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink/getOutLinkInfoV6"]
     # Another client, with the same memory, reads the card by its number: the search is not repeated and the code goes with it.
     fresh = client()
     data = await fresh.card(card["id"])
@@ -193,7 +199,7 @@ async def test_what_the_indexes_answered_is_believed_for_half_an_hour_the_cloud_
     assert len(cloud.requests) == asked + 1 and cloud.requests[-1].endswith("getOutLinkInfoV6"), "the cloud is asked, the indexes not"
     clock.now += FOUND_FOR_S
     await app.search_page(TITLE, 1)
-    assert cloud.requests[asked + 1:asked + 3] == ["t.me/s/yunpan139", "t.me/s/ydypzyfx"]
+    assert cloud.requests[asked + 1:asked + 3] == ["t.me/s/yunpan139", "t.me/s/leoziyuan"]
     # A title nobody posted: every index is asked once, and the answer «none» holds for two minutes only.
     nothing = client()
     assert (await nothing.search_page("没有这部", 1)).cards == []
@@ -205,15 +211,18 @@ async def test_what_the_indexes_answered_is_believed_for_half_an_hour_the_cloud_
     assert len(cloud.requests) > sent
 
 
-async def test_the_fallback_indexes_are_asked_only_when_the_others_found_nothing_and_one_channel_after_another(world):
+async def test_the_fallback_indexes_are_asked_only_when_the_others_found_nothing_and_one_after_another(world):
     cloud, _clock, client, _repo = world
-    cloud.pansou = {"so.252035.xyz": {"code": 0, "data": {"results": [{"title": TITLE, "links": [{"url": share("viaapi01")}]}]}},
-                    "pansou.app": 500}
+    indexes = [{"kind": "telegram", "channel": "yunpan139"},
+               {"kind": "pansou", "url": "https://pansou.app/api/search", "channels": ["yunpan139"], "fallback": True},
+               {"kind": "pansou", "url": "https://backup.example/api/search", "channels": ["yunpan139"], "fallback": True}]
+    cloud.pansou = {"pansou.app": {"code": 0, "data": {"results": [{"title": TITLE, "links": [{"url": share("viaapi01")}]}]}},
+                    "backup.example": 500}
     cloud.cloud["viaapi01"] = videos("1.mp4")
-    page = await client().search_page(TITLE, 1)
+    page = await client(indexes).search_page(TITLE, 1)
     assert [each["remarks"] for each in page.cards] == ["accessible"]
-    assert cloud.requests[:3] == ["t.me/s/yunpan139", "t.me/s/ydypzyfx", "so.252035.xyz/api/search"]
-    assert not any(each.startswith("pansou.app") for each in cloud.requests)
+    assert cloud.requests[:2] == ["t.me/s/yunpan139", "pansou.app/api/search"]
+    assert not any(each.startswith("backup.example") for each in cloud.requests)
 
 
 async def test_a_folder_its_owner_deleted_is_not_offered_one_that_wants_a_password_and_one_the_cloud_did_not_answer_are_offered_so(world):
@@ -258,7 +267,7 @@ async def test_a_share_of_folders_is_offered_as_the_folders_the_words_name_and_e
     assert [each.label for each in first.lines[0].items] == ["S1E1.mp4"]
     assert sorted(each["folder_id"] for each in await repo.share_folders()) == ["f1", "f3"]
     # A share of one folder is that folder: the card of the share reads it.
-    cloud.channels["ydypzyfx"] = post(2, f"{TITLE} 单", share("single001"), channel="ydypzyfx")
+    cloud.channels["leoziyuan"] = post(2, f"{TITLE} 单", share("single001"), channel="leoziyuan")
     cloud.cloud["single001"] = {"coLst": [], "caLst": [{"caID": "only", "caName": "x"}]}
     cloud.folders[("single001", "only")] = videos("E1.mp4")
     single = [each for each in (await client().search_page(TITLE, 1)).cards if each["name"].endswith("单")]
@@ -268,7 +277,7 @@ async def test_a_share_of_folders_is_offered_as_the_folders_the_words_name_and_e
 async def test_every_index_down_is_an_error_not_the_answer_nothing_found_and_an_index_that_refused_is_not_asked_again_for_a_while(world):
     cloud, clock, client, _repo = world
     cloud.refuse_channels = 429
-    cloud.pansou = {"so.252035.xyz": 503, "pansou.app": {"code": 0, "data": "x"}}
+    cloud.pansou = {"pansou.app": {"code": 0, "data": "x"}}
     app = client()
     with pytest.raises(AppError) as down:
         await app.search_page(TITLE, 1)
@@ -321,3 +330,68 @@ async def test_a_card_nobody_registered_is_absent_and_the_memory_of_the_folders_
     held = await repo.share_folder(first)
     assert (held["password"], held["title"], held["publisher_url"]) == ("pw", "一一", "u")
     assert await repo.share_folder(SHARE_CARDS_FROM + 9) is None
+
+
+# --- what the search says when it finds nothing, and the link a person found elsewhere ---------------------------------------
+
+def test_a_text_that_holds_shares_gives_them_with_the_code_of_the_address_or_the_text_and_nothing_that_is_not_a_share():
+    assert pasted_shares(f"名称：{TITLE} 链接：{share('alone1234')} 提取码：ab12") == [("alone1234", "ab12")]
+    # Of several shares a code in the text is no one's: only the code an address carries is.
+    assert pasted_shares(f"{share('one1111')}?pwd=xy34 {share('two2222')} 提取码：zz99") == [("one1111", "xy34"), ("two2222", "")]
+    assert pasted_shares(f"{share('dup11111')} {share('dup11111')}?pwd=abcd") == [("dup11111", "abcd")]
+    assert pasted_shares("https://caiyun.139.com/w/i/emoji1234📁") == [("emoji1234", "")]
+    assert pasted_shares("https://pan.baidu.com/s/abc https://yun.139.com.evil.invalid/w/i/abc12345") == []
+    assert pasted_shares(TITLE) == [] and pasted_shares("") == []
+
+
+async def test_a_pasted_share_is_looked_into_and_offered_by_the_name_the_cloud_gives_it_and_no_index_is_asked(world):
+    cloud, _clock, client, repo = world
+    cloud.cloud["pasted0001"] = {**videos("1.mp4", "2.mp4"), "lkName": "无上神帝 4K"}
+    page = await client().search_page(f"{share('pasted0001')} 提取码：ab12", 1)
+    assert [(each["name"], each["remarks"]) for each in page.cards] == [("无上神帝 4K", "accessible")] and page.note == ""
+    assert cloud.requests == ["share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink/getOutLinkInfoV6"]
+    (held,) = await repo.share_folders()
+    assert (held["link_id"], held["password"], held["found_by"], held["title"]) == ("pasted0001", "ab12", "pasted", "无上神帝 4K")
+    # The card is read again by its number, with the code, by a client that never saw the link.
+    data = await client().card(page.cards[0]["id"])
+    assert data.names == ["无上神帝 4K"] and cloud.asked[-1]["passwd"] == "ab12"
+
+
+async def test_a_pasted_share_its_owner_deleted_says_so_and_one_that_wants_a_code_is_offered_again_when_the_code_comes(world):
+    cloud, _clock, client, _repo = world
+    app = client()
+    with pytest.raises(AppError) as gone:
+        await app.search_page(share("deleted222"), 1)
+    assert "app_share_gone" in gone.value.reason and "deleted222" in gone.value.reason
+    cloud.cloud["secret3333"] = "提取码错误"
+    assert [each["remarks"] for each in (await app.search_page(share("secret3333"), 1)).cards] == ["password_required"]
+    # Pasted again within the minutes the refusal is believed, but with the code: the cloud is asked with it.
+    cloud.cloud["secret3333"] = videos("1.mp4")
+    again = await app.search_page(f"{share('secret3333')} 提取码：ab12", 1)
+    assert [each["remarks"] for each in again.cards] == ["accessible"] and cloud.asked[-1]["passwd"] == "ab12"
+
+
+async def test_a_pasted_share_of_folders_is_offered_as_every_folder_of_it(world):
+    cloud, _clock, client, repo = world
+    cloud.cloud["library99"] = {"coLst": [], "caLst": [{"caID": "f1", "caName": "第一季"}, {"caID": "f2", "caName": "第二季"}],
+                                "lkName": "合集"}
+    page = await client().search_page(share("library99"), 1)
+    assert [each["name"] for each in page.cards] == ["合集 / 第一季", "合集 / 第二季"]
+    assert sorted(each["folder_id"] for each in await repo.share_folders()) == ["f1", "f2"]
+
+
+async def test_a_search_that_finds_nothing_says_where_it_looked_and_which_index_did_not_answer(world):
+    cloud, _clock, client, _repo = world
+    page = await client().search_page("没有这部", 1)
+    note = json.loads(page.note)
+    assert page.cards == [] and note["code"] == "app_share_unlisted" and note["indexes"] == "yunpan139, leoziyuan, pansou.app"
+    # An index that did not answer is named: «nothing» of the others is not «nothing anywhere».
+    cloud.refuse_channels = 503
+    other = json.loads((await client().search_page("还是没有", 1)).note)
+    assert other["code"] == "app_share_unlisted_partial" and other["indexes"] == "pansou.app" and other["failed"] == "yunpan139, leoziyuan"
+    # An answer with a card says nothing of the kind.
+    cloud.refuse_channels = None
+    cloud.channels["yunpan139"] = post(1, TITLE, share("good0001"))
+    cloud.cloud["good0001"] = videos("1.mp4")
+    found = await client().search_page(TITLE, 1)
+    assert len(found.cards) == 1 and found.note == ""

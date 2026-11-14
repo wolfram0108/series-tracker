@@ -659,6 +659,27 @@ async def test_the_search_gives_the_cards_of_each_application_as_it_gives_them_e
         await http.aclose()
 
 
+async def test_what_an_application_says_of_an_answer_with_no_card_is_its_reason_and_an_answer_with_cards_has_none(tmp_path):
+    from modules.sources.apps import AppPage
+
+    class Says:
+        def __init__(self, page: AppPage) -> None:
+            self.page = page
+
+        async def search_page(self, query: str, page: int) -> AppPage:
+            return self.page
+
+    sources = SourcesModule(Bus(), Database(str(migrated(tmp_path / "s.db"))), torrent_cache_dir=str(tmp_path / "cache"),
+                            apps=[profile()])
+    ask = Envelope(topic="sources.apps.search", kind="query", payload={"query": "x"})
+    sources.apps[0].client = Says(AppPage([], 1, 0, '{"code":"app_share_unlisted","indexes":"a, b"}'))
+    (said,) = (await sources.on_apps_search(ask))["apps"]
+    assert said["cards"] == [] and said["reason"] == '{"code":"app_share_unlisted","indexes":"a, b"}'
+    sources.apps[0].client = Says(AppPage([{"id": 7, "name": "名"}], 1, 1, "stale"))
+    (listed,) = (await sources.on_apps_search(ask))["apps"]
+    assert [card["id"] for card in listed["cards"]] == ["7"] and listed["reason"] is None
+
+
 def test_an_unknown_protocol_of_an_application_stops_the_start(tmp_path):
     odd = AppProfile(name="odd", label="Odd", protocol="other", settings={"uuid": UUID})
     with pytest.raises(ValueError):

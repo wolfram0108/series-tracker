@@ -541,7 +541,8 @@ class SourcesModule(BaseModule):
                          remarks=str(each.get("remarks") or ""), blurb=str(each.get("blurb") or "").strip(),
                          pic=str(each.get("pic") or ""))
                  for each in answer.cards]
-        return AppResults(app=app.name, label=app.label, page=page, cards=cards, pages=answer.pages, total=answer.total)
+        return AppResults(app=app.name, label=app.label, page=page, cards=cards, pages=answer.pages, total=answer.total,
+                          reason=answer.note if not cards and answer.note else None)
 
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}

@@ -13,7 +13,8 @@ published, so the search reads the public indexes that announce such shares (app
 few candidates through the cloud itself (a folder its owner deleted is no candidate; one that wants a password says so) and
 offers the folders of the shares it found. Each folder it offers gets a number (`share139_folders`), the card in the address of
 a source, so a chosen card is read again without the search. A candidate is the folder somebody published: what it holds is
-known only when its card is read.
+known only when its card is read. A title no index knows has no card: the search says where it looked, and the way in is the
+link a person found elsewhere — pasted where the title is asked, it is looked into the same way and offered the same way.
 
 A line of a card is a quality group of its files by the width the cloud stores for each (`preview4k`, `preview1080`,
 `preview_unknown`), an episode a video file: its label is its name as the folder gives it, its token its content id. Nothing
@@ -34,7 +35,7 @@ import math
 import re
 import time
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Awaitable, Callable, Protocol
 from urllib.parse import urlsplit
 
 import httpx
@@ -44,8 +45,8 @@ from core.reasons import describe, reason
 from ..players.http import retry_after
 
 from . import AppCardData, AppError, AppItem, AppLine, AppPage, AppProfile, AppStream
-from .share139_search import (DEFAULT_SOURCES, Candidate, IndexAnswerError, normalize, pansou_candidates, telegram_candidates,
-                              title_matches)
+from .share139_search import (DEFAULT_SOURCES, Candidate, IndexAnswerError, normalize, pansou_candidates, pasted_shares,
+                              telegram_candidates, title_matches)
 
 logger = logging.getLogger("sources")
 
@@ -60,6 +61,9 @@ CATALOG_REQUESTS = 8
 REQUEST_INTERVAL_S = 1.5
 # One search looks into this many candidates through the cloud itself; the rest are offered unchecked.
 VERIFIED_AT_MOST = 3
+# A pasted text is read for this many shares, and a pasted share of folders is offered as at most this many folders.
+PASTED_AT_MOST = 5
+PASTED_FOLDERS_AT_MOST = 30
 PAGE_SIZE = 20
 SEARCH_SOURCES_AT_MOST = 6
 # How long what a search learned is believed: the candidates of a query (none found: a short while), the state of a folder.
@@ -154,6 +158,7 @@ class Checked:
     until: float
     folders: tuple[dict, ...] = ()  # its folders, when it is accessible and holds no video file
     holds_videos: bool = False
+    name: str = ""                  # the name the cloud gives the share (`lkName`)
 
 
 @dataclass(frozen=True)
@@ -163,6 +168,8 @@ class Found:
     candidates: tuple[Candidate, ...]
     errors: tuple[str, ...]
     answered: int  # how many indexes answered at all (an index that found none is an answer)
+    asked: tuple[str, ...] = ()   # which ones answered, and which did not
+    failed: tuple[str, ...] = ()
 
 
 class Share139Client:
@@ -312,36 +319,39 @@ class Share139Client:
 
     async def search_page(self, query: str, page: int) -> AppPage:
         """The shares of the profile whose title holds the words, the folders the search found before, and what the public
-        indexes offer now. A page of the results is `PAGE_SIZE` cards; what the search looks into is bounded (see below)."""
-        cards = [self._card(key, each.get("title") or key, year=each.get("year"), state="")
-                 for key, each in self._shares.items() if not query.strip() or title_matches(query, str(each.get("title") or key))]
-        if query.strip() and self._folders is not None and normalize(query):
+        indexes offer now. A page of the results is `PAGE_SIZE` cards; what the search looks into is bounded (see below).
+        A text that holds the address of a public share is no title: it is the share a person found where no index knows
+        the title, and the answer is the folders of that share (the indexes are not asked)."""
+        pasted = pasted_shares(query)
+        cards = [] if pasted else [self._card(key, each.get("title") or key, year=each.get("year"), state="")
+                                   for key, each in self._shares.items()
+                                   if not query.strip() or title_matches(query, str(each.get("title") or key))]
+        note = ""
+        if query.strip() and self._folders is not None and (pasted or normalize(query)):
             async with self._searching:
-                cards += await self._found_cards(query.strip())
+                if pasted:
+                    cards += await self._pasted_cards(pasted)
+                else:
+                    found, note = await self._found_cards(query.strip())
+                    cards += found
         size = len(cards)
-        return AppPage(cards[(page - 1) * PAGE_SIZE: page * PAGE_SIZE], max(1, math.ceil(size / PAGE_SIZE)), size)
+        return AppPage(cards[(page - 1) * PAGE_SIZE: page * PAGE_SIZE], max(1, math.ceil(size / PAGE_SIZE)), size,
+                       "" if cards else note)
 
     @staticmethod
     def _card(card: object, name: object, *, year: object = "", state: str = "", where: str = "") -> dict:
         return {"id": str(card), "name": str(name), "sub": "", "year": str(year or ""), "area": "", "class": "",
                 "remarks": state, "blurb": where, "pic": ""}
 
-    async def _found_cards(self, query: str) -> list[dict]:
-        """The cards of the folders the search found for the words: the candidates the indexes offer now, then the folders
-        found before that they do not offer again. Each share is looked into (the first `VERIFIED_AT_MOST` that were not looked
-        into lately): one its owner deleted is dropped, one that wants a password is offered with that said, and a share of
-        folders is offered as each of the folders the words name."""
-        assert self._folders is not None
-        found = await self._candidates(query)
-        fresh = sorted(found.candidates, key=lambda each: each.published_at, reverse=True)
-        offered = {(each.link_id, "root") for each in fresh}
-        older = [each for each in await self._folders.share_folders()
-                 if title_matches(query, each["title"]) and (each["link_id"], each["folder_id"]) not in offered]
-        looked, dropped, cards = 0, [], []
+    def _checker(self) -> Callable[[str, str], Awaitable[Checked | None]]:
+        """What looking into a share says, for one search: of the shares it is asked about the first `VERIFIED_AT_MOST` that
+        were not looked into lately are looked into, the rest are not known (None). What is known holds for its term, by the
+        share and the code it was asked with."""
+        looked = 0
 
         async def seen(link_id: str, password: str) -> Checked | None:
             nonlocal looked
-            checked = self._checked.get((link_id, "root"))
+            checked = self._checked.get((link_id, password))
             if (checked is None or checked.until <= self._clock()) and looked < VERIFIED_AT_MOST:
                 looked += 1
                 checked = await self._look(link_id, password)
@@ -349,20 +359,48 @@ class Share139Client:
                 return checked
             return None
 
-        for candidate in fresh:
+        return seen
+
+    async def _offer(self, seen: Callable[[str, str], Awaitable[Checked | None]], candidates: list[Candidate],
+                     folders_of: Callable[[Checked], list[dict]], dropped: list[str]) -> list[dict]:
+        """The cards of the shares of the candidates, each looked into (`seen`): a share its owner deleted is dropped (its link
+        goes to `dropped`), one that wants a password is offered with that said, one not looked into is offered unchecked; a
+        share of folders and no video file is offered as each of the folders `folders_of` picks of it. The number of a card
+        is the one the memory of the folders gives."""
+        assert self._folders is not None
+        cards = []
+        for candidate in candidates:
             checked = await seen(candidate.link_id, candidate.password)
             if checked is not None and checked.state == "gone":
                 dropped.append(candidate.link_id)
                 continue
             state = checked.state if checked is not None else "unchecked"
-            named = [each for each in checked.folders if title_matches(query, str(each.get("caName") or ""))] \
-                if checked is not None and checked.state == "accessible" and not checked.holds_videos and len(checked.folders) > 1 else []
-            for folder, name in [(str(each["caID"]), f"{candidate.title} / {each['caName']}") for each in named] \
-                    or [("root", candidate.title)]:
+            title = candidate.title or (checked.name if checked is not None else "") or candidate.link_id
+            picked = folders_of(checked) if checked is not None and checked.state == "accessible" and not checked.holds_videos \
+                and len(checked.folders) > 1 else []
+            for folder, name in [(str(each["caID"]), f"{title} / {each.get('caName') or each['caID']}") for each in picked] \
+                    or [("root", title)]:
                 card = await self._folders.share_folder_register(
                     candidate.link_id, folder, password=candidate.password, title=name, publisher_url=candidate.publisher_url,
                     published_at=candidate.published_at, found_by=candidate.found_by)
                 cards.append(self._card(card, name, state=state, where=candidate.publisher_url))
+        return cards
+
+    async def _found_cards(self, query: str) -> tuple[list[dict], str]:
+        """The cards of the folders the search found for the words: the candidates the indexes offer now, then the folders
+        found before that they do not offer again; and, when there is none, what the search can say of that (a reason: where
+        it looked). Each share is looked into (the first `VERIFIED_AT_MOST` that were not looked into lately): one its owner
+        deleted is dropped, one that wants a password is offered with that said, and a share of folders is offered as each of
+        the folders the words name."""
+        assert self._folders is not None
+        found = await self._candidates(query)
+        fresh = sorted(found.candidates, key=lambda each: each.published_at, reverse=True)
+        offered = {(each.link_id, "root") for each in fresh}
+        older = [each for each in await self._folders.share_folders()
+                 if title_matches(query, each["title"]) and (each["link_id"], each["folder_id"]) not in offered]
+        seen, dropped = self._checker(), []
+        cards = await self._offer(seen, fresh, lambda checked: [each for each in checked.folders
+                                                                if title_matches(query, str(each.get("caName") or ""))], dropped)
         for each in older:
             checked = await seen(each["link_id"], each["password"])
             if checked is not None and checked.state == "gone":
@@ -375,6 +413,23 @@ class Share139Client:
                         ", ".join(dropped))
         if not cards and found.errors and not found.answered:
             raise AppError(reason("app_search_unavailable", app=self.profile.label, causes="; ".join(found.errors)), True)
+        if cards or not found.answered:
+            return cards, ""
+        # Nothing offered: the owner is told where the search looked, and that a link found elsewhere is a way in.
+        if found.failed:
+            return cards, reason("app_share_unlisted_partial", app=self.profile.label, indexes=", ".join(found.asked),
+                                 failed=", ".join(found.failed))
+        return cards, reason("app_share_unlisted", app=self.profile.label, indexes=", ".join(found.asked))
+
+    async def _pasted_cards(self, pasted: list[tuple[str, str]]) -> list[dict]:
+        """The cards of the shares a person pasted: each looked into through the cloud, a share of folders offered as every one
+        of its folders (which is wanted is the owner's word). Shares all of which their owners deleted are no answer but the
+        words saying so."""
+        candidates = [Candidate(link, code, "", "", "", "pasted") for link, code in pasted[:PASTED_AT_MOST]]
+        dropped: list[str] = []
+        cards = await self._offer(self._checker(), candidates, lambda checked: list(checked.folders[:PASTED_FOLDERS_AT_MOST]), dropped)
+        if not cards and dropped:
+            raise AppError(reason("app_share_gone", app=self.profile.label, links=", ".join(dropped)))
         return cards
 
     async def _look(self, link_id: str, password: str) -> Checked:
@@ -382,15 +437,15 @@ class Share139Client:
         deleted it, or the answer is not sure (the cloud was unreachable)."""
         share = {"link_id": link_id, "password": password}
         try:
-            files, folders, _ = await self._folder(share, "root")
+            files, folders, name = await self._folder(share, "root")
         except AppError as exc:
             words = _message_of(exc)
             state = "gone" if _GONE.search(words) else "password_required" if _PASSWORD.search(words) else "uncertain"
             checked = Checked(state, self._clock() + REFUSED_FOR_S)
         else:
             holds_videos = any(_VIDEO.search(str(each.get("coName") or "")) for each in files)
-            checked = Checked("accessible", self._clock() + ACCESSIBLE_FOR_S, tuple(folders), holds_videos)
-        self._checked[(link_id, "root")] = checked
+            checked = Checked("accessible", self._clock() + ACCESSIBLE_FOR_S, tuple(folders), holds_videos, name)
+        self._checked[(link_id, password)] = checked
         return checked
 
     async def _candidates(self, query: str) -> Found:
@@ -402,26 +457,30 @@ class Share139Client:
             return held
         found: dict[str, Candidate] = {}
         errors: list[str] = []
-        answered = 0
+        asked: list[str] = []
+        failed: list[str] = []
         for spec in self._sources:
             if spec.get("fallback") and found:
                 continue
             identity = json.dumps(spec, sort_keys=True)
+            name = spec.get("channel") or urlsplit(str(spec.get("url"))).hostname or str(spec.get("kind"))
             if self._cooldowns.get(identity, 0.0) > self._clock():
                 errors.append(describe(reason("app_search_source_cooling", app=self.profile.label, source=str(spec.get("kind")))))
+                failed.append(name)
                 continue
             try:
                 for each in await self._ask_index(spec, query):
                     found.setdefault(each.link_id, each)
-                answered += 1
+                asked.append(name)
             except AppError as exc:
                 errors.append(describe(exc.reason))
-                logger.warning("приложение %s, поиск «%s»: индекс %s не ответил — %s", self.profile.name, query,
-                               spec.get("channel") or urlsplit(str(spec.get("url"))).hostname, describe(exc.reason))
+                failed.append(name)
+                logger.warning("приложение %s, поиск «%s»: индекс %s не ответил — %s", self.profile.name, query, name,
+                               describe(exc.reason))
                 if exc.transient or exc.status in (401, 403, 429):
                     self._cooldowns[identity] = self._clock() + SOURCE_COOLDOWN_S
         result = Found(self._clock() + (FOUND_FOR_S if found else NOTHING_FOUND_FOR_S), tuple(found.values()), tuple(errors),
-                       answered)
+                       len(asked), tuple(asked), tuple(failed))
         if found or not errors:
             self._found[key] = result
         if len(self._found) > 200:

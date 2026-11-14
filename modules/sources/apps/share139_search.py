@@ -7,6 +7,9 @@ folder somebody published, not a verified release — what it holds is known onl
 
 An address is taken only when it is a share of 139 Cloud itself (`yun.139.com`, `caiyun.139.com`, no credentials in it): a
 look-alike domain, another cloud, or a title that does not hold the words asked for is no candidate.
+
+What no index knows a person may still have found (a link in a chat, a forum, the cloud's own app): such a link, pasted where
+a title is asked, is a candidate of its own (`pasted_shares`) — the one way to a title nobody posted in a channel the indexes read.
 """
 from __future__ import annotations
 
@@ -17,12 +20,16 @@ from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlsplit
 
 # The indexes read in this order, one after another. A `fallback` index is asked only when the earlier ones found nothing.
+# What is here was measured on 2026-11-14, not taken on trust: of the 75 channels the public PanSou indexes read, one posts
+# shares of 139 Cloud in volume (`yunpan139`: 1524 shares in its whole history, most of them 4K donghua) and one in passing
+# (`leoziyuan`, a large channel of everything: the web search of a channel finds its posts of the title); `ydypzyfx`, which
+# the indexes list as a channel of 139 Cloud, was created anew on 2026-09-18 and advertises another channel now — it is no
+# index; `so.252035.xyz` answered a timeout, a 400 and a 403 in three asks of three. The public PanSou indexes, asked of all
+# their sources, gave no link of 139 Cloud for titles `yunpan139` holds: PanSou stays a fallback for its channels only.
 DEFAULT_SOURCES: list[dict] = [
     {"kind": "telegram", "channel": "yunpan139"},
-    {"kind": "telegram", "channel": "ydypzyfx"},
-    {"kind": "pansou", "url": "https://so.252035.xyz/api/search", "channels": ["yunpan139", "ydypzyfx", "Q_dongman"],
-     "fallback": True},
-    {"kind": "pansou", "url": "https://pansou.app/api/search", "channels": ["yunpan139", "ydypzyfx"], "fallback": True},
+    {"kind": "telegram", "channel": "leoziyuan"},
+    {"kind": "pansou", "url": "https://pansou.app/api/search", "channels": ["yunpan139", "leoziyuan"], "fallback": True},
 ]
 
 SHARE_RE = re.compile(r"https?://(?:yun|caiyun)\.139\.com/(?:shareweb/)?(?:#/[wv]/i/|[wv]/i/|m/i\?)([A-Za-z0-9_-]{4,128})", re.I)
@@ -73,6 +80,26 @@ def parse_share(address: str, password: str = "") -> tuple[str, str] | None:
     params.update(parse_qs(parsed.fragment.partition("?")[2]))
     given = password or next(iter(params.get("pwd") or params.get("password") or params.get("passwd") or [""]))
     return found[1], given
+
+
+_ADDRESS_RE = re.compile(r"https?://[^\s<>\"'“”‘’]+")
+
+
+def pasted_shares(text: str) -> list[tuple[str, str]]:
+    """(the link, the access code) of every public share of 139 Cloud a text holds — what a person pastes when the indexes do
+    not know the title: an address, or a post copied whole. The code is the one an address carries, else the one the text
+    gives when it holds a single share (which share a code belongs to is not guessed among several). Each share once."""
+    found: dict[str, str] = {}
+    for address in _ADDRESS_RE.findall(html.unescape(text)):
+        parsed = parse_share(address)
+        if parsed is not None and (parsed[0] not in found or not found[parsed[0]]):
+            found[parsed[0]] = parsed[1]
+    if len(found) == 1:
+        (link, given), = found.items()
+        coded = _CODE_RE.search(text)
+        if not given and coded:
+            found[link] = coded[1]
+    return list(found.items())
 
 
 class _Messages(HTMLParser):
