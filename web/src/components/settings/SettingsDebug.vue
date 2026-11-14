@@ -42,7 +42,7 @@ async function saveScanner() {
   await request(
     api.POST("/api/scanner/settings", {
       body: { enabled: enabled.value, interval: Number(interval.value) },
-    } as never),
+    }),
     { errorMessage: t("debug.autoSync.saveFailed") },
   )
 }
@@ -51,7 +51,7 @@ async function setEnabled(value: boolean) {
   await saveScanner()
 }
 async function scanAll() {
-  await request(api.POST("/api/scanner/scan_all", {} as never), { errorMessage: t("debug.syncAll.failed") })
+  await request(api.POST("/api/scanner/scan_all", {}), { errorMessage: t("debug.syncAll.failed") })
 }
 
 // --- флаги конвейера (GET/POST → {enabled}) ---------------------------
@@ -66,12 +66,13 @@ async function setFlag(flag: (typeof FLAGS)[number], value: boolean) {
   await saveFlag(flag.path, value, t(flag.label))
 }
 
-async function loadFlag(path: string): Promise<boolean> {
-  const d = (await request(api.GET(path as never))) as { enabled?: boolean } | null
+type FlagPath = (typeof FLAGS)[number]["path"]
+async function loadFlag(path: FlagPath): Promise<boolean> {
+  const d = (await request(api.GET(path))) as { enabled?: boolean } | null
   return !!d?.enabled
 }
-async function saveFlag(path: string, value: boolean, label: string) {
-  const ok = await request(api.POST(path as never, { body: { enabled: value } } as never), {
+async function saveFlag(path: FlagPath, value: boolean, label: string) {
+  const ok = await request(api.POST(path, { body: { enabled: value } }), {
     errorMessage: t("debug.flag.saveFailed"),
   })
   if (ok !== null) toast.add({ severity: "info", summary: label, detail: value ? t("common.enabled") : t("common.disabled"), life: 2000 })
@@ -95,8 +96,8 @@ async function saveLimits(field: keyof typeof limits.value) {
   await saveShared({ [field]: limits.value[field].trim() })
 }
 
-async function loadNum(path: string, fallback: number): Promise<string> {
-  const d = (await request(api.GET(path as never))) as { value?: number } | null
+async function loadNum(path: "/api/settings/sources_term", fallback: number): Promise<string> {
+  const d = (await request(api.GET(path))) as { value?: number } | null
   return String(d?.value ?? fallback)
 }
 
@@ -105,7 +106,7 @@ const sourcesTerm = ref("1")
 
 async function saveSourcesTerm() {
   const saved = (await request(
-    api.POST("/api/settings/sources_term" as never, { body: { value: sourcesTerm.value.trim() } } as never),
+    api.POST("/api/settings/sources_term", { body: { value: sourcesTerm.value.trim() } }),
   )) as { value?: number } | null
   if (saved !== null) {
     toast.add({ severity: "info", summary: t("debug.sourcesTerm.label"), detail: String(saved.value), life: 2000 })
@@ -126,7 +127,7 @@ async function addPath() {
   const v = sanitizePath(newPath.value)
   if (!v) return
   const ok = await request(
-    api.POST("/api/settings/saved_paths", { body: { path: v } } as never),
+    api.POST("/api/settings/saved_paths", { body: { path: v } }),
     { errorMessage: t("debug.paths.addFailed") },
   )
   if (ok !== null) {
@@ -136,7 +137,7 @@ async function addPath() {
 }
 async function removePath(id: number) {
   const ok = await request(
-    api.DELETE("/api/settings/saved_paths", { body: { id } } as never),
+    api.DELETE("/api/settings/saved_paths", { body: { id } }),
     { errorMessage: t("debug.paths.removeFailed") },
   )
   if (ok !== null) await loadPaths()
@@ -185,7 +186,7 @@ async function clearTable() {
   })
   if (!r.confirmed) return
   const data = (await request(
-    api.POST("/api/database/clear_table", { body: { table_name: selectedTable.value } } as never),
+    api.POST("/api/database/clear_table", { body: { table_name: selectedTable.value } }),
     { errorMessage: t("debug.db.clear.failed") },
   )) as { success?: boolean; message?: string } | null
   if (data?.success) {

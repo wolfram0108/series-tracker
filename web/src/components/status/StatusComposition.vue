@@ -133,7 +133,7 @@ async function saveEpisodes(next: Record<string, number[]>): Promise<boolean> {
     api.PUT("/api/series/{series_id}/ignored-episodes", {
       params: { path: { series_id: props.seriesId } },
       body: { episodes: next },
-    } as never),
+    }),
     { errorMessage: t("composition.error.plan") },
   )
   if (ok === null) {
@@ -182,7 +182,7 @@ async function toggleSeasonIgnored(sn: string) {
     api.POST("/api/series/{series_id}/ignored-seasons", {
       params: { path: { series_id: props.seriesId } },
       body: { seasons: ignoredSeasons.value },
-    } as never),
+    }),
     { errorMessage: t("composition.error.season") },
   )
   if (ok === null) ignoredSeasons.value = previous
@@ -220,7 +220,7 @@ function parseMemory(raw: unknown): Record<string, number[]> {
 
 async function loadSeries() {
   const series = (await request(
-    api.GET("/api/series/{series_id}", { params: { path: { series_id: props.seriesId } } } as never),
+    api.GET("/api/series/{series_id}", { params: { path: { series_id: props.seriesId } } }),
   )) as Record<string, unknown> | null
   ignoredSeasons.value = parseList(series?.ignored_seasons)
   ignoredEpisodes.value = parseMemory(series?.ignored_episodes)
@@ -233,7 +233,7 @@ async function load(refresh = false) {
     const data = (await request(
       api.GET("/api/series/{series_id}/composition", {
         params: { path: { series_id: props.seriesId }, query: { refresh } },
-      } as never),
+      }),
       { errorMessage: refresh ? t("composition.error.fetch") : t("composition.error.load") },
     )) as TFile[] | null
     if (Array.isArray(data)) files.value = data
@@ -257,7 +257,7 @@ async function reprocess() {
   reprocessing.value = true
   try {
     const ok = await request(
-      api.POST("/api/series/{series_id}/reprocess", { params: { path: { series_id: props.seriesId } } } as never),
+      api.POST("/api/series/{series_id}/reprocess", { params: { path: { series_id: props.seriesId } } }),
       { errorMessage: t("composition.error.reprocess") },
     )
     if (ok !== null) {

@@ -84,7 +84,7 @@ async function loadMediaItems() {
   loading.value = true
   try {
     const raw = (await request(
-      api.GET("/api/series/{series_id}/media-items", { params: { path: { series_id: props.seriesId } } } as never),
+      api.GET("/api/series/{series_id}/media-items", { params: { path: { series_id: props.seriesId } } }),
       { errorMessage: t("slicing.load.error") },
     )) as Array<Record<string, unknown>> | null
     if (!Array.isArray(raw)) return
@@ -123,7 +123,7 @@ async function fetchChapters(it: Item) {
   it.isLoadingChapters = true
   try {
     const data = (await request(
-      api.POST("/api/media-items/{unique_id}/chapters", { params: { path: { unique_id: it.unique_id } } } as never),
+      api.POST("/api/media-items/{unique_id}/chapters", { params: { path: { unique_id: it.unique_id } } }),
       { errorMessage: t("slicing.chapters.error") },
     )) as Chapter[] | null
     if (Array.isArray(data)) {
@@ -140,7 +140,7 @@ async function fetchFilteredChapters(it: Item) {
   it.isLoadingChapters = true
   try {
     const data = (await request(
-      api.POST("/api/media-items/{unique_id}/chapters/filtered", { params: { path: { unique_id: it.unique_id } } } as never),
+      api.POST("/api/media-items/{unique_id}/chapters/filtered", { params: { path: { unique_id: it.unique_id } } }),
       { errorMessage: t("slicing.filter.error") },
     )) as { chapters?: Chapter[]; filtered_chapters?: Chapter[]; garbage_chapters?: Chapter[]; status_message?: string } | null
     if (data) {
@@ -173,7 +173,7 @@ async function applyManualFilter(it: Item) {
     api.POST("/api/media-items/{unique_id}/chapters/mark-garbage", {
       params: { path: { unique_id: it.unique_id } },
       body: { garbage_indices: garbage },
-    } as never),
+    }),
     { errorMessage: t("slicing.mark.error") },
   )) as { chapters?: Chapter[]; filtered_chapters?: Chapter[]; garbage_chapters?: Chapter[]; status_message?: string } | null
   if (data) {
@@ -194,7 +194,7 @@ async function createSlicingTask(it: Item) {
   const prev = it.slicing_status
   it.slicing_status = "pending"
   const data = (await request(
-    api.POST("/api/media-items/{unique_id}/slice", { params: { path: { unique_id: it.unique_id } } } as never),
+    api.POST("/api/media-items/{unique_id}/slice", { params: { path: { unique_id: it.unique_id } } }),
     { errorMessage: t("slicing.task.error") },
   )) as { source_missing?: boolean; message?: string } | null
   if (data === null) {
@@ -222,7 +222,7 @@ async function createSlicingTaskWithFilter(it: Item) {
     api.POST("/api/media-items/{unique_id}/slice-with-filter", {
       params: { path: { unique_id: it.unique_id } },
       body: { garbage_indices: garbage },
-    } as never),
+    }),
     { errorMessage: t("slicing.task.error") },
   )) as { source_missing?: boolean; message?: string } | null
   if (data === null) {
@@ -243,7 +243,7 @@ async function deleteSource(it: Item) {
   })
   if (!r.confirmed) return
   const data = (await request(
-    api.POST("/api/media-items/{unique_id}/delete-source", { params: { path: { unique_id: it.unique_id } } } as never),
+    api.POST("/api/media-items/{unique_id}/delete-source", { params: { path: { unique_id: it.unique_id } } }),
     { errorMessage: t("slicing.deleteSource.error") },
   )) as { message?: string } | null
   if (data !== null) {

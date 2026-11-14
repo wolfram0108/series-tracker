@@ -24,14 +24,14 @@ export function useDownloadLimits() {
   const toast = useToast()
 
   async function load(): Promise<void> {
-    const got = (await request(api.GET("/api/settings/download_limits" as never))) as DownloadLimits | null
+    const got = (await request(api.GET("/api/settings/download_limits"))) as DownloadLimits | null
     if (got) limits.value = got
   }
 
   /** Writes the limits named in `change` and nothing else: the core holds the rest and merges, so a window never sends a limit it
    *  has not been shown (not loaded yet, or changed by another window meanwhile). What the core refuses is read back. */
   async function save(change: Change): Promise<void> {
-    const saved = (await request(api.POST("/api/settings/download_limits" as never, { body: change } as never))) as DownloadLimits | null
+    const saved = (await request(api.POST("/api/settings/download_limits", { body: change }))) as DownloadLimits | null
     if (saved !== null) {
       limits.value = saved
       toast.add({ severity: "info", summary: t("debug.downloads.saved"), life: 2000 })

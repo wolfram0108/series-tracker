@@ -62,7 +62,7 @@ async function submit(): Promise<void> {
   try {
     const { data, error, response } = await api.POST("/api/setup", {
       body: { username: username.value.trim(), password: password.value },
-    } as never)
+    })
     const body = data as unknown as { success?: boolean; username?: string } | null
     if (response.ok && body?.success && body.username) {
       auth.setAuthenticated(body.username)

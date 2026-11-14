@@ -57,7 +57,7 @@ async function keep(tracker: Tracker, mirrors: string[]): Promise<boolean> {
   busy.value = true
   try {
     const ok = await request(
-      api.PUT("/api/trackers/{tracker_id}", { params: { path: { tracker_id: tracker.id } }, body: { mirrors } } as never),
+      api.PUT("/api/trackers/{tracker_id}", { params: { path: { tracker_id: tracker.id } }, body: { mirrors } }),
       { errorMessage: t("settings.sources.saveFailed") },
     )
     if (!ok) await load()

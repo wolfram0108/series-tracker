@@ -39,7 +39,7 @@ async function fetchTable(name: string) {
   const data = (await request(
     api.GET("/api/database/table/{table_name}", {
       params: { path: { table_name: name } },
-    } as never),
+    }),
     { errorMessage: t("dbViewer.tableFailed", { name }) },
   )) as Record<string, unknown>[] | null
   loading.value = false

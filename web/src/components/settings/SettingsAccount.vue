@@ -50,7 +50,7 @@ async function submit(): Promise<void> {
   const ok = await request(
     api.POST("/api/auth/password", {
       body: { new: next.value },
-    } as never),
+    }),
     { errorMessage: t("account.error.change") },
   )
   if (ok === null) return

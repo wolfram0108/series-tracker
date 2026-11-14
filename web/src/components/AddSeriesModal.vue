@@ -26,6 +26,9 @@ import { useSourceDrafts } from "../composables/useSourceDrafts"
 import { fetchProfiles, resolveAddress } from "../composables/sourceCalls"
 import { compareNames } from "../lib/collate"
 import { isAbsolutePath } from "../lib/fsnames"
+import type { components } from "../api/schema"
+
+type SeriesCreate = components["schemas"]["SeriesCreate"]
 
 // Add-series window. An address is told by POST /api/sources/resolve: a site reads it, so it is a video source
 // and goes into the list; otherwise it is a tracker page (POST /api/parse_url). The series is created by
@@ -311,7 +314,7 @@ async function parseTorrentUrl() {
     return
   }
   try {
-    const { data, error } = await api.POST("/api/parse_url", { body: { url: newSeries.url } } as never)
+    const { data, error } = await api.POST("/api/parse_url", { body: { url: newSeries.url } })
     const res = (data ?? null) as ParseResult | null
     if (error || !res) {
       const err = (error ?? null) as { error?: string } | null
@@ -371,7 +374,7 @@ async function prefetchNamingFiles(torrents: Torrent[]): Promise<void> {
     })
     .filter((it): it is NonNullable<typeof it> => it !== null)
   if (!items.length) return
-  await api.POST("/api/preview/naming/fetch", { body: { items } } as never)
+  await api.POST("/api/preview/naming/fetch", { body: { items } })
 }
 
 // --- TMDB ---
@@ -381,7 +384,7 @@ async function searchTMDB() {
   tmdbLoading.value = true
   tmdbResults.value = []
   try {
-    const { data } = await api.POST("/api/tmdb/search", { body: { query: tmdbSearchQuery.value } } as never)
+    const { data } = await api.POST("/api/tmdb/search", { body: { query: tmdbSearchQuery.value } })
     const res = (data ?? null) as { success?: boolean; results?: TmdbResult[]; error?: string } | null
     if (res?.success) {
       tmdbResults.value = res.results ?? []
@@ -434,9 +437,12 @@ async function addSeries() {
   }
   saving.value = true
   try {
-    const payload: Record<string, unknown> = {
+    // The body is the one the contract declares (SeriesCreate): the site and the sources are told by the kind of the series below.
+    const payload: SeriesCreate = {
       name: newSeries.name,
       name_en: newSeries.name_en,
+      site: "",
+      sources: [],
       save_path: newSeries.save_path,
       season: isSeasonless.value ? "" : newSeries.season,
       // пустой ручной ввод → null (как в edit-модалке), а не "" в БД
@@ -478,9 +484,9 @@ async function addSeries() {
         quality = newSeries.qualityByEpisodes.all || ""
       }
       payload.quality = quality
-      payload.torrents = parserData.value?.torrents ?? []
+      payload.torrents = (parserData.value?.torrents ?? []).map((each) => ({ ...each }))
     }
-    const ok = await request(api.POST("/api/series", { body: payload } as never), {
+    const ok = await request(api.POST("/api/series", { body: payload }), {
       errorMessage: t("add.createFailed"),
     })
     if (ok !== null) {

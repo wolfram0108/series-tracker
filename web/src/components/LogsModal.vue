@@ -36,7 +36,7 @@ const { request } = useApi()
 const groupOptions = ref<{ label: string; value: string }[]>([{ label: t("logs.allGroups"), value: ALL }])
 
 async function loadGroups() {
-  const data = (await request(api.GET("/api/logs/groups", {} as never))) as unknown
+  const data = (await request(api.GET("/api/logs/groups", {}))) as unknown
   const groups = Array.isArray(data) ? (data as string[]) : []
   groupOptions.value = [{ label: t("logs.allGroups"), value: ALL }, ...groups.map((g) => ({ label: g, value: g }))]
 }
@@ -58,7 +58,7 @@ async function loadLogs() {
           limit: Number(limit.value) || 200,
         },
       },
-    } as never),
+    }),
   )) as unknown
   if (Array.isArray(data)) logs.value = data as LogEntry[]
 }

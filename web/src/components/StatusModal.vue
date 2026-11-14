@@ -53,7 +53,7 @@ const tabs = computed(() => {
 
 async function load() {
   const data = (await request(
-    api.GET("/api/series/{series_id}", { params: { path: { series_id: props.seriesId } } } as never),
+    api.GET("/api/series/{series_id}", { params: { path: { series_id: props.seriesId } } }),
     { errorMessage: t("status.notFound") },
   )) as Series | null
   if (data) series.value = data

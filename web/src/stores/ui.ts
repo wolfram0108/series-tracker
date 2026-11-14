@@ -12,7 +12,7 @@ export const useUiStore = defineStore("ui", () => {
     await api.POST("/api/series/{series_id}/state", {
       params: { path: { series_id: id } },
       body: { state },
-    } as never)
+    })
   }
 
   /** Открыть статус-модалку серии: пометить серию как просматриваемую. */

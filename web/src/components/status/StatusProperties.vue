@@ -125,13 +125,13 @@ async function refreshSiteTorrents() {
   siteDataIsStale.value = false
   try {
     const hist = (await request(
-      api.GET("/api/series/{series_id}/torrents/history", { params: { path: { series_id: Number(s.id) } } } as never),
+      api.GET("/api/series/{series_id}/torrents/history", { params: { path: { series_id: Number(s.id) } } }),
     )) as Torrent[] | null
     if (Array.isArray(hist)) {
       allSiteTorrents.value = hist
       buildQualityOptions(hist)
     }
-    const { data } = await api.POST("/api/parse_url", { body: { url: torrentUrl } } as never)
+    const { data } = await api.POST("/api/parse_url", { body: { url: torrentUrl } })
     const res = (data ?? null) as { success?: boolean; torrents?: Torrent[]; error?: string } | null
     if (res?.success && Array.isArray(res.torrents)) {
       allSiteTorrents.value = res.torrents
@@ -229,7 +229,7 @@ async function searchTMDB() {
   tmdbLoading.value = true
   tmdbResults.value = []
   try {
-    const { data } = await api.POST("/api/tmdb/search", { body: { query: tmdbSearchQuery.value } } as never)
+    const { data } = await api.POST("/api/tmdb/search", { body: { query: tmdbSearchQuery.value } })
     const res = (data ?? null) as { success?: boolean; results?: TmdbResult[]; error?: string } | null
     if (res?.success) tmdbResults.value = res.results ?? []
     else toast.add({ severity: "warn", summary: "TMDB", detail: t("seriesForm.tmdbSearchFailed", { error: res?.error ?? "?" }), life: 4000 })
@@ -318,7 +318,7 @@ async function save(): Promise<boolean> {
       }
     }
     const ok = await request(
-      api.POST("/api/series/{series_id}", { params: { path: { series_id: Number(s.id) } }, body: payload } as never),
+      api.POST("/api/series/{series_id}", { params: { path: { series_id: Number(s.id) } }, body: payload }),
       { errorMessage: t("properties.saveFailed") },
     )
     if (ok !== null) {

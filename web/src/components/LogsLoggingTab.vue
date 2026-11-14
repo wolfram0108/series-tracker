@@ -38,7 +38,7 @@ function groupOn(mods: Mod[]): boolean {
 
 async function postFlag(name: string, enabled: boolean): Promise<boolean> {
   const ok = await request(
-    api.POST("/api/settings/debug_flags", { body: { module: name, enabled } } as never),
+    api.POST("/api/settings/debug_flags", { body: { module: name, enabled } }),
     { errorMessage: t("logs.logging.saveFailed", { name }) },
   )
   return ok !== null

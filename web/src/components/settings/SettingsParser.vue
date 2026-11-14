@@ -88,7 +88,7 @@ function toggleStep(s: "profiles" | "rules" | "test"): void {
 async function loadProfiles(): Promise<void> {
   isLoading.value = true
   const data = (await request(
-    api.GET("/api/parser-profiles") as never,
+    api.GET("/api/parser-profiles"),
     { errorMessage: t("rules.profile.loadFailed") },
   )) as Profile[] | null
   if (data) profiles.value = data
@@ -100,7 +100,7 @@ async function createProfile(): Promise<void> {
   if (!name) return
   isLoading.value = true
   const data = (await request(
-    api.POST("/api/parser-profiles", { body: { name } } as never),
+    api.POST("/api/parser-profiles", { body: { name } }),
     { errorMessage: t("rules.profile.createFailed") },
   )) as { success: boolean; id: number } | null
   isLoading.value = false
@@ -131,7 +131,7 @@ async function saveProfileName(): Promise<void> {
     api.PUT("/api/parser-profiles/{profile_id}", {
       params: { path: { profile_id: editingProfileId.value } },
       body: { name },
-    } as never),
+    }),
     { errorMessage: t("rules.profile.renameFailed") },
   )
   isLoading.value = false
@@ -154,7 +154,7 @@ async function deleteProfile(): Promise<void> {
   const ok = await request(
     api.DELETE("/api/parser-profiles/{profile_id}", {
       params: { path: { profile_id: selectedProfileId.value } },
-    } as never),
+    }),
     { errorMessage: t("rules.profile.deleteFailed") },
   )
   isLoading.value = false
@@ -185,7 +185,7 @@ async function loadRules(): Promise<void> {
   const raw = (await request(
     api.GET("/api/parser-profiles/{profile_id}/rules", {
       params: { path: { profile_id: selectedProfileId.value } },
-    } as never),
+    }),
     { errorMessage: t("rules.rule.loadFailed") },
   )) as RawRule[] | null
   isLoading.value = false
@@ -288,11 +288,13 @@ async function saveRule(rule: EditableRule): Promise<void> {
     throw error
   }
   if (isNew) {
+    const profileId = selectedProfileId.value
+    if (profileId === null) return // a rule is made in a profile: with none chosen there is nowhere to save it
     const data = (await request(
       api.POST("/api/parser-profiles/{profile_id}/rules", {
-        params: { path: { profile_id: selectedProfileId.value } },
+        params: { path: { profile_id: profileId } },
         body: payload,
-      } as never),
+      }),
       { errorMessage: t("rules.rule.saveFailed") },
     )) as { success: boolean; id: number } | null
     if (data?.id) {
@@ -301,11 +303,12 @@ async function saveRule(rule: EditableRule): Promise<void> {
       openRuleId.value = data.id
     }
   } else {
+    if (typeof rule.id !== "number") return // a saved rule has the number of its row
     const ok = await request(
       api.PUT("/api/parser-rules/{rule_id}", {
         params: { path: { rule_id: rule.id } },
         body: payload,
-      } as never),
+      }),
       { errorMessage: t("rules.rule.saveFailed") },
     )
     if (ok) toast.add({ severity: "success", summary: t("rules.rule.toast"), detail: t("rules.rule.saved"), life: 2000 })
@@ -317,12 +320,13 @@ async function deleteRule(rule: EditableRule): Promise<void> {
     rules.value = rules.value.filter((r) => r.id !== rule.id)
     return
   }
+  if (typeof rule.id !== "number") return
   const r = await confirm.open({ title: t("rules.rule.deleteTitle"), message: t("rules.rule.deleteMessage") })
   if (!r.confirmed) return
   const ok = await request(
     api.DELETE("/api/parser-rules/{rule_id}", {
       params: { path: { rule_id: rule.id } },
-    } as never),
+    }),
     { errorMessage: t("rules.rule.deleteFailed") },
   )
   if (ok) loadRules()
@@ -337,7 +341,7 @@ async function moveRule(index: number, dir: -1 | 1): Promise<void> {
   const orderedIds = arr.filter((r) => !r.is_new).map((r) => r.id)
   if (orderedIds.length < 2) return
   const ok = await request(
-    api.POST("/api/parser-rules/reorder", { body: orderedIds } as never),
+    api.POST("/api/parser-rules/reorder", { body: orderedIds }),
     { errorMessage: t("rules.rule.reorderFailed") },
   )
   if (!ok) loadRules()

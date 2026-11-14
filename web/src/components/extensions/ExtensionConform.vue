@@ -123,7 +123,7 @@ function setDrift() {
 
 // The pipeline flag that finished jobs leave the queue by themselves: the core reads it with the settings, writes it by its own call.
 async function setClear(enabled: boolean): Promise<void> {
-  const done = await request(api.POST("/api/settings/conform_clear_finished" as never, { body: { enabled } } as never),
+  const done = await request(api.POST("/api/settings/conform_clear_finished", { body: { enabled } }),
     { errorMessage: t("debug.flag.saveFailed") })
   if (done !== null) await load()
 }

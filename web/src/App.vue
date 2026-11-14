@@ -45,7 +45,7 @@ function onLoggedIn() {
 }
 
 async function onLogout() {
-  await request(api.POST("/api/logout", {} as never))
+  await request(api.POST("/api/logout", {}))
   auth.reset()
   useSSE().disconnect()
   auth.showLogin = true // снова показать вход
@@ -57,7 +57,7 @@ const openModal = ref<null | "settings" | "extensions" | "logs" | "add">(null)
 
 async function onCancelScan(id: number) {
   const r = (await request(
-    api.POST("/api/series/{series_id}/scan/cancel", { params: { path: { series_id: id } } } as never),
+    api.POST("/api/series/{series_id}/scan/cancel", { params: { path: { series_id: id } } }),
   )) as { cancelled?: boolean } | null
   if (r === null) return
   toast.add({ severity: "info", summary: t(r.cancelled ? "sync.stopped" : "sync.notRunning"), life: 3000 })
@@ -67,7 +67,7 @@ async function onScan(id: number) {
   // Ручной скан (по кнопке) уведомляет о результате; ошибку покажет useApi.
   // Автоскан — в фоне и молча (решение пользователя).
   const r = (await request(
-    api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: id } } } as never),
+    api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: id } } }),
   )) as { changed?: boolean; cancelled?: boolean } | null
   if (r === null || r.cancelled) return  // a stopped sync is told by its stop
   toast.add(
@@ -81,7 +81,7 @@ function onToggle(id: number, enabled: boolean) {
     api.POST("/api/series/{series_id}/toggle_auto_scan", {
       params: { path: { series_id: id } },
       body: { enabled },
-    } as never),
+    }),
   )
 }
 function onOpenStatus(id: number) {
@@ -106,7 +106,7 @@ async function onDelete(id: number) {
   const ok = await request(
     api.DELETE("/api/series/{series_id}", {
       params: { path: { series_id: id }, query: { delete_from_qb: r.checkboxChecked } },
-    } as never),
+    }),
   )
   if (ok !== null) seriesStore.remove(id) // оптимистично; SSE series_deleted подтвердит
 }

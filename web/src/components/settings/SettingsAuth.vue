@@ -34,7 +34,7 @@ const { request } = useApi()
 // The eye of a field of a secret asks the core for it (GET /api/auth/{service}/secret): the secrets are not sent with the rest.
 async function reveal(service: string, held: boolean): Promise<string | null> {
   if (!held) return null
-  const got = (await request(api.GET(`/api/auth/${service}/secret` as never))) as { secret?: string } | null
+  const got = (await request(api.GET("/api/auth/{service}/secret", { params: { path: { service } } }))) as { secret?: string } | null
   return got?.secret || null
 }
 
@@ -63,7 +63,7 @@ async function load() {
 }
 
 async function save(): Promise<boolean> {
-  const ok = await request(api.POST("/api/auth", { body: creds.value } as never), {
+  const ok = await request(api.POST("/api/auth", { body: creds.value }), {
     errorMessage: t("auth.saveFailed"),
   })
   return ok !== null

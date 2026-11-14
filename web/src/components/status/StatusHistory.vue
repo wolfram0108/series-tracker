@@ -68,13 +68,13 @@ async function load() {
   try {
     if (isVk) {
       const data = (await request(
-        api.GET("/api/series/{series_id}/media-items", { params: { path: { series_id: props.seriesId } } } as never),
+        api.GET("/api/series/{series_id}/media-items", { params: { path: { series_id: props.seriesId } } }),
         { errorMessage: t("history.error.media") },
       )) as MediaRow[] | null
       if (Array.isArray(data)) mediaHistory.value = data
     } else {
       const data = (await request(
-        api.GET("/api/series/{series_id}/torrents/history", { params: { path: { series_id: props.seriesId } } } as never),
+        api.GET("/api/series/{series_id}/torrents/history", { params: { path: { series_id: props.seriesId } } }),
         { errorMessage: t("history.error.torrents") },
       )) as TorrentRow[] | null
       if (Array.isArray(data)) torrentHistory.value = data
