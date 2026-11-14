@@ -64,6 +64,17 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    gives (for video applications `app://<application>/<card>`). With the provider not up
                                    (none configured, not heard yet, dropped, another protocol) the search is refused:
                                    NotAllowed `provider_not_connected`
+  sources.provider.get {} → ProviderView: the provider of external sources as the tab of the extensions shows it — its address,
+                                   whether a token is set (never the token), the state of the socket and why it is not up, what its
+                                   last manifest says (id, version, protocol, revision), its applications with the sources of the
+                                   series and the lines each has, and the folder it writes the downloads to (inside the work folder of
+                                   the alignment, asked of `conform.workspace`)
+  sources.provider.set ProviderSettingsDraft {url, token?} → ProviderSaved {saved, problems, provider}: the address (empty: none) and
+                                   the token (absent: the stored one stays, empty: cleared) checked as a whole, written to the settings
+                                   `provider.url` and `provider.token` (the token encrypted) and taken at once, without a restart: the
+                                   feed of the old provider ends, its sites and players leave the registries, the new one's join. The
+                                   environment (`ST_PROVIDER_URL`, `ST_PROVIDER_TOKEN`) stands while no address is stored; a stored empty
+                                   one is a deliberate «none»
   sources.pages.check {urls} → {blocked: [{url, reason}]}: the pages among `urls` that cannot be read now because the
                                    provider that reads them is not up (`provider_not_connected`, `provider_incompatible`).
                                    A page of the provider's world is one a site of its manifest reads, or an address that
@@ -83,6 +94,9 @@ Events (owner: sources):
   sources.table.trace {url, site, kind: begin | end, …}  what a read does, for its dump (modules/runlog): `end` carries
                                                         the seconds of the read and what every player of the page gave
                                                         (rows by state, frames, the causes of the rows without a video)
+  sources.provider.changed ProviderView            the whole picture of the provider, told again whenever the socket, the manifest, the
+                                                        address or the pages of the sources change (`seq` grows with every one); the
+                                                        screen takes it as it is
   sources.provider.state {provider, state: connecting | up | down | incompatible, revision, reason}  how the socket of the
                                                         provider stands (modules/sources/provider; absent when none is configured)
   sources.provider.manifest {provider, revision}        the manifest of the provider was applied: its sites and players are those
@@ -141,7 +155,7 @@ from . import anilibria, delivery, parsers
 from .browser_pool import BrowserPool
 from .delivery import Delivery
 from .parsers import SourceParseError
-from .provider import Connector, ProviderClient, is_web_address, not_connected
+from .provider import Connector, ProviderClient, ProviderHost, is_web_address, not_connected
 from .provider import block as provider_block
 from .repository import SourcesRepository
 from .term import DEFAULT_HOURS, TERM_KEY, Term, hours_of
@@ -205,12 +219,11 @@ class SourcesModule(BaseModule):
         self.sites.configure(players=self.players, vk_call=self._vk_call, term=self.term)
         # The provider of the socket (modules/sources/provider), when the environment names one: its sites and players join
         # the registries as its manifest says, and leave them as it says.
-        self.connector: Connector | None = None
-        self._feed: asyncio.Task | None = None
-        if provider is not None:
-            self.connector = Connector(provider, self.repo, sites=self.sites, players=self.players, term=self.term,
-                                       publish=lambda topic, payload: self.publish_event(topic, payload),
-                                       **({"reconnect": provider_reconnect} if provider_reconnect else {}))
+        self.provider = ProviderHost(
+            repo=self.repo, sites=self.sites, players=self.players, term=self.term,
+            publish=lambda topic, payload: self.publish_event(topic, payload),
+            spawn=lambda coro, **kw: self.spawn(coro, **kw), request=lambda topic, payload, **kw: self.request(topic, payload, **kw),
+            site_of=lambda url: self.tables.resolve(url).site, default=provider, reconnect=provider_reconnect)
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
             players=self.players, clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent, term=self.term,
@@ -241,6 +254,8 @@ class SourcesModule(BaseModule):
         self.handle("sources.settings.get", self.on_settings_get)
         self.handle("sources.apps.search", self.on_apps_search)
         self.handle("sources.pages.check", self.on_pages_check)
+        self.handle("sources.provider.get", self.on_provider_get)
+        self.handle("sources.provider.set", self.on_provider_set)
         self.handle("sources.players.list", self.on_players_list)
         self.handle("sources.term.get", self.on_term_get)
         self.handle("sources.term.set", self.on_term_set)
@@ -257,6 +272,7 @@ class SourcesModule(BaseModule):
         if env.topic == "series.source.updated" and "url" not in (env.payload.get("changed") or []):
             return
         await self._forget_unlisted_pages()
+        self.provider.announce()  # how many sources each application has changed
 
     async def on_series_deleted(self, env: Envelope) -> None:
         """Cascade of a deleted series (Р-19): the tables of the pages only it listed go, and the owner reports it."""
@@ -288,11 +304,6 @@ class SourcesModule(BaseModule):
 
     async def on_start(self) -> None:
         self._http = bounded_client(timeout=20.0, follow_redirects=True)
-        if self.connector is not None:
-            # The sites of the saved manifest first: a provider that is down at the start must not take its pages' tables out of
-            # the hands of its sites (the next step forgets the pages no site reads).
-            await self.connector.load_saved()
-            self._feed = self.spawn(self.connector.run(), name="sources.provider", lasting=True)
         try:
             stored = (await self.request("settings.value.get", {"key": TERM_KEY})).get("value")
         except Exception:  # noqa: BLE001 - a setting that cannot be read leaves the term at its default
@@ -303,6 +314,9 @@ class SourcesModule(BaseModule):
         except Exception:  # noqa: BLE001 - a setting that cannot be read leaves every player asked, as the term stays at its default
             players_off = None
         self._set_players_off(players_off)
+        # The sites of the saved manifest first: a provider that is down at the start must not take its pages' tables out of
+        # the hands of its sites (the next step forgets the pages no site reads).
+        await self.provider.start()
         try:
             await self.tables.resume()
         except Exception:  # noqa: BLE001 — the other duties of the module do not wait for the table reads
@@ -310,11 +324,7 @@ class SourcesModule(BaseModule):
             self.log.exception("reads of tables interrupted by a stop were not resumed")
 
     async def on_stop(self) -> None:
-        if self.connector is not None:
-            # The feed stops before its client closes: a loop that wakes to a closed client has nothing to read.
-            self._feed.cancel()
-            await asyncio.gather(self._feed, return_exceptions=True)
-            await self.connector.close()
+        await self.provider.stop()
         await self.tables.close()
         await self._http.aclose()
         await self.browsers.shutdown()
@@ -561,6 +571,16 @@ class SourcesModule(BaseModule):
         if (why := not_connected(self.connector)) is not None:
             raise NotAllowed(why)  # the search is the provider's: with none up there is nothing to search, and the user is told
         return AppSearchReply(apps=await self.connector.search(request)).model_dump(mode="json")
+
+    @property
+    def connector(self) -> Connector | None:
+        return self.provider.connector
+
+    async def on_provider_get(self, env: Envelope) -> dict:
+        return (await self.provider.view()).model_dump(mode="json")
+
+    async def on_provider_set(self, env: Envelope) -> dict:
+        return (await self.provider.save(env.payload)).model_dump(mode="json")
 
     def _provider_block(self, url: str) -> str | None:
         """The reason a page cannot be read now because the provider that reads it is not up; None for any other page."""

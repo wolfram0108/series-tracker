@@ -1548,6 +1548,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Provider View
+         * @description The provider of external sources as it stands: its address, the state of the socket, what its manifest says.
+         */
+        get: operations["provider_view_api_provider_get"];
+        /**
+         * Save Provider
+         * @description The address and the token: written whole and taken at once, or refused with coded reasons (`saved: false`).
+         */
+        put: operations["save_provider_api_provider_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/debug_flags": {
         parameters: {
             query?: never;
@@ -3461,6 +3485,89 @@ export interface components {
             heights?: number[];
         };
         /**
+         * ProviderApp
+         * @description An application of the provider's manifest: how many sources of the series are its cards, how many lines of the order
+         *     of sources are its.
+         */
+        ProviderApp: {
+            /** Name */
+            name: string;
+            /** Label */
+            label: string;
+            /**
+             * Sources
+             * @default 0
+             */
+            sources: number;
+            /**
+             * Lines
+             * @default 0
+             */
+            lines: number;
+        };
+        /**
+         * ProviderSaved
+         * @description The reply of `sources.provider.set`: saved, or the problems that kept it from being saved.
+         */
+        ProviderSaved: {
+            /** Saved */
+            saved: boolean;
+            /** Problems */
+            problems: components["schemas"]["SettingProblem"][];
+            provider: components["schemas"]["ProviderView"];
+        };
+        /**
+         * ProviderSettingsDraft
+         * @description The address of the provider (empty: none) and its token: `None` keeps the stored one, an empty text clears it.
+         */
+        ProviderSettingsDraft: {
+            /** Url */
+            url: string;
+            /** Token */
+            token?: string | null;
+        };
+        /**
+         * ProviderView
+         * @description The reply of `sources.provider.get` and the body of `sources.provider.changed`: everything the tab shows, every value
+         *     stated. `state` is that of the socket (`none`: no address); `reason` is why it is not up, as the event of the state gives
+         *     it. The manifest facts and the applications are those of the last manifest, kept while the provider is down.
+         *     `downloads_dir` is the folder the provider writes the files of the series to (the one inside the work folder of the
+         *     alignment). `seq` grows with every view: a screen never takes a view older than the one it shows.
+         */
+        ProviderView: {
+            /** Url */
+            url: string;
+            /** Has Token */
+            has_token: boolean;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "none" | "connecting" | "up" | "down" | "incompatible";
+            /** Reason */
+            reason?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Version */
+            version?: string | null;
+            /** Protocol */
+            protocol?: number | null;
+            /** Revision */
+            revision?: string | null;
+            /** Apps */
+            apps?: components["schemas"]["ProviderApp"][];
+            /**
+             * Downloads Dir
+             * @default
+             */
+            downloads_dir: string;
+            /**
+             * Seq
+             * @default 0
+             */
+            seq: number;
+        };
+        /**
          * Queue
          * @description The queue a lever acts on: the reference of an episode, or the voice-over of a group. A window draws the
          *     levers of a queue on its tab.
@@ -4453,7 +4560,7 @@ export interface components {
         /** StreamEvent */
         StreamEvent: {
             /** @enum {string} */
-            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_read_progress" | "conform_queue_update" | "pack_queue_update" | "pack_journal_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
+            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_read_progress" | "conform_queue_update" | "pack_queue_update" | "pack_journal_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "conform_settings_update" | "provider_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
             data: unknown;
         };
     };
@@ -8536,6 +8643,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConformSettingsSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    provider_view_api_provider_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderView"];
+                };
+            };
+        };
+    };
+    save_provider_api_provider_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderSettingsDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderSaved"];
                 };
             };
             /** @description Validation Error */

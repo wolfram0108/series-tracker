@@ -4,7 +4,7 @@
   "path": "/",
   "func": "index",
   "file": "modules/gateway/module.py",
-  "line": 351,
+  "line": 393,
   "access": "public",
   "conditional": null,
   "summary": "Боевой фронт панели (web/dist/index.html)",
@@ -15,7 +15,7 @@
   "path": "/api/_diag/echo",
   "func": "diag_echo",
   "file": "modules/gateway/module.py",
-  "line": 317,
+  "line": 359,
   "access": "session",
   "conditional": "diag",
   "summary": "Диагностический прокси к шине (только при diag=True)",
@@ -37,7 +37,7 @@
   "path": "/api/auth",
   "func": "get_auth",
   "file": "modules/gateway/api_settings.py",
-  "line": 69,
+  "line": 75,
   "access": "session",
   "conditional": null,
   "summary": "Креды внешних сервисов без секретов",
@@ -50,12 +50,12 @@
   "path": "/api/auth",
   "func": "save_auth",
   "file": "modules/gateway/api_settings.py",
-  "line": 83,
+  "line": 89,
   "access": "session",
   "conditional": null,
   "summary": "Сохранение кредов сервисов",
   "panel_sites": [
-   "components/settings/SettingsAuth.vue:66"
+   "components/settings/SettingsAuth.vue:64"
   ]
  },
  {
@@ -63,12 +63,12 @@
   "path": "/api/auth/password",
   "func": "change_password",
   "file": "modules/gateway/api_auth.py",
-  "line": 131,
+  "line": 130,
   "access": "session",
   "conditional": null,
   "summary": "Смена пароля администратором",
   "panel_sites": [
-   "components/settings/SettingsAccount.vue:48"
+   "components/settings/SettingsAccount.vue:51"
   ]
  },
  {
@@ -81,7 +81,7 @@
   "conditional": null,
   "summary": "Статус онбординга: настроен ли админ, вошёл ли клиент",
   "panel_sites": [
-   "main.ts:73"
+   "main.ts:79"
   ]
  },
  {
@@ -89,12 +89,12 @@
   "path": "/api/conform/jobs/{job_id}",
   "func": "conform_job_delete",
   "file": "modules/gateway/api_system.py",
-  "line": 104,
+  "line": 148,
   "access": "session",
   "conditional": null,
   "summary": "Остановить задачу выравнивания, которая ждёт или идёт, либо удалить запись завершённой",
   "panel_sites": [
-   "components/settings/ConformQueue.vue:45"
+   "components/settings/AgentsPanel.vue:76"
   ]
  },
  {
@@ -102,23 +102,36 @@
   "path": "/api/conform/jobs/{job_id}/plot/{name}",
   "func": "conform_plot",
   "file": "modules/gateway/api_system.py",
-  "line": 115,
+  "line": 159,
   "access": "session",
   "conditional": null,
   "summary": "Картинка графика выравнивания озвучки (PNG), как её сделал демон",
   "panel_sites": []
  },
  {
+  "method": "PUT",
+  "path": "/api/conform/params",
+  "func": "save_conform_params",
+  "file": "modules/gateway/api_settings.py",
+  "line": 229,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "components/extensions/ExtensionConform.vue:83"
+  ]
+ },
+ {
   "method": "GET",
   "path": "/api/conform/settings",
   "func": "conform_settings",
   "file": "modules/gateway/api_settings.py",
-  "line": 222,
+  "line": 224,
   "access": "session",
   "conditional": null,
   "summary": "Адрес демона выравнивания, рабочая папка здесь и на демоне, очистка очереди по завершении (только чтение): как действуют сейчас",
   "panel_sites": [
-   "components/settings/SettingsConformServer.vue:38"
+   "components/extensions/ExtensionConform.vue:58"
   ]
  },
  {
@@ -126,12 +139,12 @@
   "path": "/api/conform/settings",
   "func": "save_conform_settings",
   "file": "modules/gateway/api_settings.py",
-  "line": 227,
+  "line": 234,
   "access": "session",
   "conditional": null,
   "summary": "Записать адрес и рабочую папку целиком (адрес применяется сразу) или получить коды причин отказа",
   "panel_sites": [
-   "components/settings/SettingsConformServer.vue:49"
+   "components/extensions/ExtensionConform.vue:68"
   ]
  },
  {
@@ -139,12 +152,12 @@
   "path": "/api/database/clear_table",
   "func": "database_clear_table",
   "file": "modules/gateway/api_settings.py",
-  "line": 507,
+  "line": 527,
   "access": "session",
   "conditional": null,
   "summary": "Очистка таблицы БД",
   "panel_sites": [
-   "components/settings/SettingsDebug.vue:153"
+   "components/settings/SettingsDebug.vue:169"
   ]
  },
  {
@@ -152,12 +165,12 @@
   "path": "/api/database/table/{table_name}",
   "func": "database_table",
   "file": "modules/gateway/api_settings.py",
-  "line": 489,
+  "line": 509,
   "access": "session",
   "conditional": null,
   "summary": "Все строки таблицы БД",
   "panel_sites": [
-   "components/settings/DatabaseViewerModal.vue:39"
+   "components/settings/DatabaseViewerModal.vue:40"
   ]
  },
  {
@@ -165,13 +178,13 @@
   "path": "/api/database/tables",
   "func": "database_tables",
   "file": "modules/gateway/api_settings.py",
-  "line": 484,
+  "line": 504,
   "access": "session",
   "conditional": null,
   "summary": "Список таблиц БД",
   "panel_sites": [
-   "components/settings/DatabaseViewerModal.vue:23",
-   "components/settings/SettingsDebug.vue:139"
+   "components/settings/DatabaseViewerModal.vue:24",
+   "components/settings/SettingsDebug.vue:155"
   ]
  },
  {
@@ -179,11 +192,24 @@
   "path": "/api/directories",
   "func": "directories",
   "file": "modules/gateway/api_settings.py",
-  "line": 318,
+  "line": 334,
   "access": "session",
   "conditional": null,
   "summary": "Листинг каталогов",
   "panel_sites": []
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/downloads/cards/{card_id}",
+  "func": "downloads_card_remove",
+  "file": "modules/gateway/api_system.py",
+  "line": 118,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "components/settings/AgentsPanel.vue:72"
+  ]
  },
  {
   "method": "GET",
@@ -201,7 +227,7 @@
   "path": "/api/downloads/queue/clear",
   "func": "downloads_queue_clear",
   "file": "modules/gateway/api_system.py",
-  "line": 74,
+  "line": 75,
   "access": "session",
   "conditional": null,
   "summary": "Очистка очереди загрузок",
@@ -212,7 +238,7 @@
   "path": "/api/downloads/{task_id}/cancel",
   "func": "downloads_cancel",
   "file": "modules/gateway/api_system.py",
-  "line": 86,
+  "line": 131,
   "access": "session",
   "conditional": null,
   "summary": "Отмена загрузки: процесс, файл, задача",
@@ -223,12 +249,12 @@
   "path": "/api/login",
   "func": "login",
   "file": "modules/gateway/api_auth.py",
-  "line": 49,
+  "line": 50,
   "access": "public",
   "conditional": null,
   "summary": "Вход администратора",
   "panel_sites": [
-   "components/LoginModal.vue:40"
+   "components/LoginModal.vue:42"
   ]
  },
  {
@@ -236,12 +262,12 @@
   "path": "/api/logout",
   "func": "logout",
   "file": "modules/gateway/api_auth.py",
-  "line": 161,
+  "line": 159,
   "access": "session",
   "conditional": null,
   "summary": "Выход (очистка сессии)",
   "panel_sites": [
-   "App.vue:44"
+   "App.vue:46"
   ]
  },
  {
@@ -249,12 +275,12 @@
   "path": "/api/logs",
   "func": "logs",
   "file": "modules/gateway/api_settings.py",
-  "line": 424,
+  "line": 444,
   "access": "session",
   "conditional": null,
   "summary": "Чтение логов из logs/*.log",
   "panel_sites": [
-   "components/LogsModal.vue:52"
+   "components/LogsModal.vue:53"
   ]
  },
  {
@@ -262,12 +288,12 @@
   "path": "/api/logs/groups",
   "func": "log_groups",
   "file": "modules/gateway/api_settings.py",
-  "line": 450,
+  "line": 470,
   "access": "session",
   "conditional": null,
   "summary": "Список групп логов",
   "panel_sites": [
-   "components/LogsModal.vue:38"
+   "components/LogsModal.vue:39"
   ]
  },
  {
@@ -275,7 +301,7 @@
   "path": "/api/me",
   "func": "me",
   "file": "modules/gateway/api_auth.py",
-  "line": 166,
+  "line": 164,
   "access": "session",
   "conditional": null,
   "summary": "Кто сейчас вошёл",
@@ -286,12 +312,12 @@
   "path": "/api/media-items/{unique_id}/chapters",
   "func": "chapters",
   "file": "modules/gateway/api_media.py",
-  "line": 61,
+  "line": 64,
   "access": "session",
   "conditional": null,
   "summary": "Оглавление исходника",
   "panel_sites": [
-   "components/status/StatusSlicing.vue:123"
+   "components/status/StatusSlicing.vue:126"
   ]
  },
  {
@@ -299,12 +325,12 @@
   "path": "/api/media-items/{unique_id}/chapters/filtered",
   "func": "chapters_filtered",
   "file": "modules/gateway/api_media.py",
-  "line": 74,
+  "line": 77,
   "access": "session",
   "conditional": null,
   "summary": "Оглавление с автофильтром мусора",
   "panel_sites": [
-   "components/status/StatusSlicing.vue:140"
+   "components/status/StatusSlicing.vue:143"
   ]
  },
  {
@@ -312,12 +338,12 @@
   "path": "/api/media-items/{unique_id}/chapters/mark-garbage",
   "func": "chapters_mark",
   "file": "modules/gateway/api_media.py",
-  "line": 89,
+  "line": 92,
   "access": "session",
   "conditional": null,
   "summary": "Ручная разметка мусорных глав",
   "panel_sites": [
-   "components/status/StatusSlicing.vue:170"
+   "components/status/StatusSlicing.vue:173"
   ]
  },
  {
@@ -325,12 +351,12 @@
   "path": "/api/media-items/{unique_id}/delete-source",
   "func": "delete_source",
   "file": "modules/gateway/api_media.py",
-  "line": 159,
+  "line": 153,
   "access": "session",
   "conditional": null,
   "summary": "Удаление исходника нарезанной компиляции",
   "panel_sites": [
-   "components/status/StatusSlicing.vue:243"
+   "components/status/StatusSlicing.vue:246"
   ]
  },
  {
@@ -338,12 +364,12 @@
   "path": "/api/media-items/{unique_id}/slice",
   "func": "slice_task",
   "file": "modules/gateway/api_media.py",
-  "line": 125,
+  "line": 121,
   "access": "session",
   "conditional": null,
   "summary": "Задача нарезки компиляции",
   "panel_sites": [
-   "components/status/StatusSlicing.vue:194"
+   "components/status/StatusSlicing.vue:197"
   ]
  },
  {
@@ -351,12 +377,12 @@
   "path": "/api/media-items/{unique_id}/slice-with-filter",
   "func": "slice_with_filter",
   "file": "modules/gateway/api_media.py",
-  "line": 139,
+  "line": 135,
   "access": "session",
   "conditional": null,
   "summary": "Нарезка с заданным списком отброшенных глав",
   "panel_sites": [
-   "components/status/StatusSlicing.vue:219"
+   "components/status/StatusSlicing.vue:222"
   ]
  },
  {
@@ -364,10 +390,34 @@
   "path": "/api/media-items/{unique_id}/verify-sliced-files",
   "func": "verify_sliced",
   "file": "modules/gateway/api_media.py",
-  "line": 174,
+  "line": 168,
   "access": "session",
   "conditional": null,
   "summary": "Сверка нарезок с диском",
+  "panel_sites": []
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/pack/cards/{card_id}",
+  "func": "pack_card_remove",
+  "file": "modules/gateway/api_system.py",
+  "line": 105,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "components/settings/AgentsPanel.vue:74"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/pack/queue",
+  "func": "pack_queue",
+  "file": "modules/gateway/api_system.py",
+  "line": 96,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
   "panel_sites": []
  },
  {
@@ -375,13 +425,13 @@
   "path": "/api/parse_url",
   "func": "parse_url",
   "file": "modules/gateway/api_settings.py",
-  "line": 107,
+  "line": 113,
   "access": "session",
   "conditional": null,
   "summary": "Разбор страницы торрент-трекера: заголовок, раздачи, трекер; страница сайта — отказ not_a_torrent_page",
   "panel_sites": [
-   "components/AddSeriesModal.vue:272",
-   "components/status/StatusProperties.vue:122"
+   "components/AddSeriesModal.vue:303",
+   "components/status/StatusProperties.vue:126"
   ]
  },
  {
@@ -389,13 +439,13 @@
   "path": "/api/parser-profiles",
   "func": "profiles_list",
   "file": "modules/gateway/api_settings.py",
-  "line": 330,
+  "line": 346,
   "access": "session",
   "conditional": null,
   "summary": "Список профилей парсера",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:81",
-   "composables/sourceCalls.ts:58"
+   "components/settings/SettingsParser.vue:90",
+   "composables/sourceCalls.ts:69"
   ]
  },
  {
@@ -403,12 +453,12 @@
   "path": "/api/parser-profiles",
   "func": "profile_create",
   "file": "modules/gateway/api_settings.py",
-  "line": 334,
+  "line": 350,
   "access": "session",
   "conditional": null,
   "summary": "Создание профиля парсера",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:92"
+   "components/settings/SettingsParser.vue:101"
   ]
  },
  {
@@ -416,7 +466,7 @@
   "path": "/api/parser-profiles/test",
   "func": "rules_test",
   "file": "modules/gateway/api_sources.py",
-  "line": 94,
+  "line": 121,
   "access": "session",
   "conditional": null,
   "summary": "Тест профиля правил на странице: строки для конструктора и ответ на каждую (composition.preview)",
@@ -429,12 +479,12 @@
   "path": "/api/parser-profiles/{profile_id}",
   "func": "profile_delete",
   "file": "modules/gateway/api_settings.py",
-  "line": 368,
+  "line": 383,
   "access": "session",
   "conditional": null,
   "summary": "Удаление профиля парсера с правилами",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:144"
+   "components/settings/SettingsParser.vue:153"
   ]
  },
  {
@@ -442,12 +492,12 @@
   "path": "/api/parser-profiles/{profile_id}",
   "func": "profile_update",
   "file": "modules/gateway/api_settings.py",
-  "line": 352,
+  "line": 368,
   "access": "session",
   "conditional": null,
   "summary": "Переименование профиля парсера",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:120"
+   "components/settings/SettingsParser.vue:129"
   ]
  },
  {
@@ -455,12 +505,12 @@
   "path": "/api/parser-profiles/{profile_id}/rules",
   "func": "rules_list",
   "file": "modules/gateway/api_settings.py",
-  "line": 378,
+  "line": 399,
   "access": "session",
   "conditional": null,
   "summary": "Правила профиля",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:175"
+   "components/settings/SettingsParser.vue:184"
   ]
  },
  {
@@ -468,12 +518,12 @@
   "path": "/api/parser-profiles/{profile_id}/rules",
   "func": "rule_add",
   "file": "modules/gateway/api_settings.py",
-  "line": 384,
+  "line": 405,
   "access": "session",
   "conditional": null,
   "summary": "Добавление правила в профиль",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:256"
+   "components/settings/SettingsParser.vue:290"
   ]
  },
  {
@@ -481,12 +531,12 @@
   "path": "/api/parser-rules/reorder",
   "func": "rules_reorder",
   "file": "modules/gateway/api_settings.py",
-  "line": 414,
+  "line": 434,
   "access": "session",
   "conditional": null,
   "summary": "Перестановка правил",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:304"
+   "components/settings/SettingsParser.vue:338"
   ]
  },
  {
@@ -494,12 +544,12 @@
   "path": "/api/parser-rules/{rule_id}",
   "func": "rule_delete",
   "file": "modules/gateway/api_settings.py",
-  "line": 407,
+  "line": 428,
   "access": "session",
   "conditional": null,
   "summary": "Удаление правила",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:287"
+   "components/settings/SettingsParser.vue:321"
   ]
  },
  {
@@ -507,12 +557,12 @@
   "path": "/api/parser-rules/{rule_id}",
   "func": "rule_update",
   "file": "modules/gateway/api_settings.py",
-  "line": 396,
+  "line": 417,
   "access": "session",
   "conditional": null,
   "summary": "Изменение правила",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:269"
+   "components/settings/SettingsParser.vue:303"
   ]
  },
  {
@@ -520,12 +570,51 @@
   "path": "/api/preview/naming/fetch",
   "func": "preview_naming_fetch",
   "file": "modules/gateway/api_media.py",
-  "line": 243,
+  "line": 238,
   "access": "session",
   "conditional": null,
   "summary": "Предпросмотр нейминга: команда torrents.preview.fetch, ответ сразу",
   "panel_sites": [
-   "components/AddSeriesModal.vue:332"
+   "components/AddSeriesModal.vue:363"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/provider",
+  "func": "provider_view",
+  "file": "modules/gateway/api_settings.py",
+  "line": 239,
+  "access": "session",
+  "conditional": null,
+  "summary": "Поставщик внешних источников (Чинес): адрес, состояние розетки, манифест, приложения с числом источников и линий, папка загрузок (токен — только признак наличия)",
+  "panel_sites": [
+   "components/extensions/ExtensionChines.vue:49"
+  ]
+ },
+ {
+  "method": "PUT",
+  "path": "/api/provider",
+  "func": "save_provider",
+  "file": "modules/gateway/api_settings.py",
+  "line": 244,
+  "access": "session",
+  "conditional": null,
+  "summary": "Записать адрес и токен поставщика (адрес применяется сразу, токен не задан — прежний остаётся, пустой — удаляется) или получить коды причин отказа",
+  "panel_sites": [
+   "components/extensions/ExtensionChines.vue:57"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/rules/line-fields",
+  "func": "line_fields",
+  "file": "modules/gateway/api_settings.py",
+  "line": 393,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "components/settings/SettingsParser.vue:367"
   ]
  },
  {
@@ -533,12 +622,12 @@
   "path": "/api/scanner/scan_all",
   "func": "scan_all",
   "file": "modules/gateway/api_system.py",
-  "line": 43,
+  "line": 44,
   "access": "session",
   "conditional": null,
   "summary": "Полный проход по всем сериалам",
   "panel_sites": [
-   "components/settings/SettingsDebug.vue:45"
+   "components/settings/SettingsDebug.vue:47"
   ]
  },
  {
@@ -546,12 +635,12 @@
   "path": "/api/scanner/settings",
   "func": "scanner_settings",
   "file": "modules/gateway/api_system.py",
-  "line": 27,
+  "line": 28,
   "access": "session",
   "conditional": null,
   "summary": "Настройки планировщика (вкл/выкл, интервал)",
   "panel_sites": [
-   "components/settings/SettingsDebug.vue:38"
+   "components/settings/SettingsDebug.vue:40"
   ]
  },
  {
@@ -559,7 +648,7 @@
   "path": "/api/scanner/status",
   "func": "scanner_status",
   "file": "modules/gateway/api_system.py",
-  "line": 23,
+  "line": 24,
   "access": "session",
   "conditional": null,
   "summary": "Состояние планировщика сканирования",
@@ -572,12 +661,12 @@
   "path": "/api/series",
   "func": "list_series",
   "file": "modules/gateway/api_series.py",
-  "line": 67,
+  "line": 71,
   "access": "session",
   "conditional": null,
   "summary": "Список сериалов",
   "panel_sites": [
-   "stores/series.ts:38"
+   "stores/series.ts:40"
   ]
  },
  {
@@ -585,12 +674,12 @@
   "path": "/api/series",
   "func": "add_series",
   "file": "modules/gateway/api_series.py",
-  "line": 81,
+  "line": 85,
   "access": "session",
   "conditional": null,
   "summary": "Создание серии",
   "panel_sites": [
-   "components/AddSeriesModal.vue:441"
+   "components/AddSeriesModal.vue:472"
   ]
  },
  {
@@ -598,7 +687,7 @@
   "path": "/api/series/active_torrents",
   "func": "active_torrents",
   "file": "modules/gateway/api_series.py",
-  "line": 104,
+  "line": 106,
   "access": "session",
   "conditional": null,
   "summary": "Прогресс активных загрузок",
@@ -609,12 +698,12 @@
   "path": "/api/series/{series_id}",
   "func": "delete_series",
   "file": "modules/gateway/api_series.py",
-  "line": 182,
+  "line": 164,
   "access": "session",
   "conditional": null,
   "summary": "Удаление серии",
   "panel_sites": [
-   "App.vue:95"
+   "App.vue:105"
   ]
  },
  {
@@ -622,13 +711,13 @@
   "path": "/api/series/{series_id}",
   "func": "series_details",
   "file": "modules/gateway/api_series.py",
-  "line": 128,
+  "line": 117,
   "access": "session",
   "conditional": null,
   "summary": "Карточка серии",
   "panel_sites": [
-   "components/StatusModal.vue:45",
-   "components/status/StatusComposition.vue:220"
+   "components/StatusModal.vue:56",
+   "components/status/StatusComposition.vue:222"
   ]
  },
  {
@@ -636,12 +725,12 @@
   "path": "/api/series/{series_id}",
   "func": "update_series",
   "file": "modules/gateway/api_series.py",
-  "line": 149,
+  "line": 139,
   "access": "session",
   "conditional": null,
   "summary": "Сохранение свойств серии",
   "panel_sites": [
-   "components/status/StatusProperties.vue:301"
+   "components/status/StatusProperties.vue:315"
   ]
  },
  {
@@ -649,14 +738,13 @@
   "path": "/api/series/{series_id}/composition",
   "func": "composition",
   "file": "modules/gateway/api_output.py",
-  "line": 42,
+  "line": 52,
   "access": "session",
   "conditional": null,
   "summary": "Композиция: раскладка видео-сериала (composition) либо состав торрента (torrents)",
   "panel_sites": [
-   "components/status/StatusComposition.vue:231",
-   "composables/outputCalls.ts:14",
-   "composables/sourceCalls.ts:69"
+   "components/status/StatusComposition.vue:233",
+   "composables/outputCalls.ts:13"
   ]
  },
  {
@@ -664,12 +752,23 @@
   "path": "/api/series/{series_id}/deep-adoption",
   "func": "deep_adoption",
   "file": "modules/gateway/api_media.py",
-  "line": 191,
+  "line": 184,
   "access": "session",
   "conditional": null,
   "summary": "Глубокое усыновление (фон)",
+  "panel_sites": []
+ },
+ {
+  "method": "POST",
+  "path": "/api/series/{series_id}/failures/reset",
+  "func": "reset_failures",
+  "file": "modules/gateway/api_series.py",
+  "line": 296,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
   "panel_sites": [
-   "composables/outputCalls.ts:47"
+   "composables/outputCalls.ts:58"
   ]
  },
  {
@@ -677,12 +776,12 @@
   "path": "/api/series/{series_id}/ignored-episodes",
   "func": "ignored_episodes",
   "file": "modules/gateway/api_series.py",
-  "line": 250,
+  "line": 232,
   "access": "session",
   "conditional": null,
   "summary": "Память отключённых серий",
   "panel_sites": [
-   "components/status/StatusComposition.vue:130"
+   "components/status/StatusComposition.vue:132"
   ]
  },
  {
@@ -690,12 +789,12 @@
   "path": "/api/series/{series_id}/ignored-seasons",
   "func": "ignored_seasons",
   "file": "modules/gateway/api_series.py",
-  "line": 231,
+  "line": 213,
   "access": "session",
   "conditional": null,
   "summary": "Список игнорируемых сезонов",
   "panel_sites": [
-   "components/status/StatusComposition.vue:179"
+   "components/status/StatusComposition.vue:181"
   ]
  },
  {
@@ -703,13 +802,13 @@
   "path": "/api/series/{series_id}/media-items",
   "func": "media_items",
   "file": "modules/gateway/api_media.py",
-  "line": 50,
+  "line": 53,
   "access": "session",
   "conditional": null,
   "summary": "Медиа-элементы серии",
   "panel_sites": [
-   "components/status/StatusHistory.vue:70",
-   "components/status/StatusSlicing.vue:84"
+   "components/status/StatusHistory.vue:71",
+   "components/status/StatusSlicing.vue:87"
   ]
  },
  {
@@ -717,12 +816,23 @@
   "path": "/api/series/{series_id}/output",
   "func": "output",
   "file": "modules/gateway/api_output.py",
-  "line": 72,
+  "line": 81,
   "access": "session",
   "conditional": null,
   "summary": "Референс каждой серии и отметка (scan)",
+  "panel_sites": []
+ },
+ {
+  "method": "GET",
+  "path": "/api/series/{series_id}/output/queues",
+  "func": "output_queues",
+  "file": "modules/gateway/api_output.py",
+  "line": 90,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
   "panel_sites": [
-   "composables/outputCalls.ts:19"
+   "composables/outputCalls.ts:101"
   ]
  },
  {
@@ -730,12 +840,12 @@
   "path": "/api/series/{series_id}/output/settings",
   "func": "set_output_setting",
   "file": "modules/gateway/api_output.py",
-  "line": 92,
+  "line": 145,
   "access": "session",
   "conditional": null,
   "summary": "Значение рычага выхода на уровне сериала, сезона или серии",
   "panel_sites": [
-   "composables/outputCalls.ts:58"
+   "composables/outputCalls.ts:71"
   ]
  },
  {
@@ -743,12 +853,12 @@
   "path": "/api/series/{series_id}/output/settings/reset",
   "func": "reset_output_settings",
   "file": "modules/gateway/api_output.py",
-  "line": 104,
+  "line": 184,
   "access": "session",
   "conditional": null,
   "summary": "Возврат рычагов уровня в наследование",
   "panel_sites": [
-   "composables/outputCalls.ts:64"
+   "composables/outputCalls.ts:89"
   ]
  },
  {
@@ -756,12 +866,77 @@
   "path": "/api/series/{series_id}/output/switch",
   "func": "switch_output",
   "file": "modules/gateway/api_output.py",
-  "line": 80,
+  "line": 132,
   "access": "session",
   "conditional": null,
   "summary": "",
   "panel_sites": [
-   "composables/outputCalls.ts:52"
+   "composables/outputCalls.ts:65"
+  ]
+ },
+ {
+  "method": "PUT",
+  "path": "/api/series/{series_id}/output/voice-order",
+  "func": "set_voice_order",
+  "file": "modules/gateway/api_output.py",
+  "line": 158,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "composables/outputCalls.ts:77"
+  ]
+ },
+ {
+  "method": "PUT",
+  "path": "/api/series/{series_id}/output/voice-title",
+  "func": "set_voice_title",
+  "file": "modules/gateway/api_output.py",
+  "line": 171,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "composables/outputCalls.ts:83"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/series/{series_id}/plan",
+  "func": "plan",
+  "file": "modules/gateway/api_output.py",
+  "line": 102,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "composables/outputCalls.ts:108"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/series/{series_id}/plan/delete",
+  "func": "plan_delete",
+  "file": "modules/gateway/api_output.py",
+  "line": 111,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "composables/outputCalls.ts:113"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/series/{series_id}/plan/delete/cancel",
+  "func": "plan_delete_cancel",
+  "file": "modules/gateway/api_output.py",
+  "line": 122,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "composables/outputCalls.ts:120"
   ]
  },
  {
@@ -769,26 +944,23 @@
   "path": "/api/series/{series_id}/rename_preview",
   "func": "rename_preview",
   "file": "modules/gateway/api_media.py",
-  "line": 201,
+  "line": 199,
   "access": "session",
   "conditional": null,
   "summary": "Предпросмотр новых имён файлов",
-  "panel_sites": [
-   "composables/outputCalls.ts:37"
-  ]
+  "panel_sites": []
  },
  {
   "method": "POST",
   "path": "/api/series/{series_id}/reprocess",
   "func": "reprocess",
   "file": "modules/gateway/api_media.py",
-  "line": 212,
+  "line": 210,
   "access": "session",
   "conditional": null,
   "summary": "Переобработка имён файлов (вид сериала решает renaming)",
   "panel_sites": [
-   "components/status/StatusComposition.vue:257",
-   "composables/outputCalls.ts:42"
+   "components/status/StatusComposition.vue:259"
   ]
  },
  {
@@ -796,13 +968,27 @@
   "path": "/api/series/{series_id}/scan",
   "func": "scan_series",
   "file": "modules/gateway/api_series.py",
-  "line": 282,
+  "line": 264,
   "access": "session",
   "conditional": null,
   "summary": "Синхронный скан одной серии",
   "panel_sites": [
+   "App.vue:68",
+   "composables/outputCalls.ts:39"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/series/{series_id}/scan/cancel",
+  "func": "cancel_scan",
+  "file": "modules/gateway/api_series.py",
+  "line": 286,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
    "App.vue:58",
-   "composables/outputCalls.ts:24"
+   "composables/outputCalls.ts:45"
   ]
  },
  {
@@ -810,7 +996,7 @@
   "path": "/api/series/{series_id}/source-filenames",
   "func": "source_filenames",
   "file": "modules/gateway/api_media.py",
-  "line": 229,
+  "line": 224,
   "access": "session",
   "conditional": null,
   "summary": "Имена файлов раздач сериала для теста правил торрента",
@@ -823,12 +1009,12 @@
   "path": "/api/series/{series_id}/sources",
   "func": "sources_of",
   "file": "modules/gateway/api_sources.py",
-  "line": 31,
+  "line": 28,
   "access": "session",
   "conditional": null,
   "summary": "Источники сериала по порядку",
   "panel_sites": [
-   "composables/sourceCalls.ts:63"
+   "composables/sourceCalls.ts:74"
   ]
  },
  {
@@ -836,12 +1022,12 @@
   "path": "/api/series/{series_id}/sources",
   "func": "add_source",
   "file": "modules/gateway/api_sources.py",
-  "line": 38,
+  "line": 35,
   "access": "session",
   "conditional": null,
   "summary": "Добавление источника сериалу (ответ {id})",
   "panel_sites": [
-   "composables/sourceCalls.ts:74"
+   "composables/sourceCalls.ts:78"
   ]
  },
  {
@@ -849,12 +1035,12 @@
   "path": "/api/series/{series_id}/sources/{source_id}",
   "func": "remove_source",
   "file": "modules/gateway/api_sources.py",
-  "line": 57,
+  "line": 56,
   "access": "session",
   "conditional": null,
   "summary": "Удаление источника (единственный не удаляется: last_source)",
   "panel_sites": [
-   "composables/sourceCalls.ts:84"
+   "composables/sourceCalls.ts:88"
   ]
  },
  {
@@ -862,12 +1048,12 @@
   "path": "/api/series/{series_id}/sources/{source_id}",
   "func": "change_source",
   "file": "modules/gateway/api_sources.py",
-  "line": 46,
+  "line": 44,
   "access": "session",
   "conditional": null,
   "summary": "Изменение полей источника: адрес, профиль, режим поиска, сезон Vibix, отключённые плееры, место",
   "panel_sites": [
-   "composables/sourceCalls.ts:78"
+   "composables/sourceCalls.ts:82"
   ]
  },
  {
@@ -875,7 +1061,7 @@
   "path": "/api/series/{series_id}/state",
   "func": "set_state",
   "file": "modules/gateway/api_series.py",
-  "line": 195,
+  "line": 176,
   "access": "session",
   "conditional": null,
   "summary": "Открытие/закрытие статус-окна (viewing)",
@@ -888,12 +1074,12 @@
   "path": "/api/series/{series_id}/toggle_auto_scan",
   "func": "toggle_auto_scan",
   "file": "modules/gateway/api_series.py",
-  "line": 213,
+  "line": 194,
   "access": "session",
   "conditional": null,
   "summary": "Включение/выключение автоскана",
   "panel_sites": [
-   "App.vue:69"
+   "App.vue:79"
   ]
  },
  {
@@ -901,53 +1087,13 @@
   "path": "/api/series/{series_id}/torrents/history",
   "func": "torrents_history",
   "file": "modules/gateway/api_series.py",
-  "line": 273,
+  "line": 255,
   "access": "session",
   "conditional": null,
   "summary": "История раздач серии",
   "panel_sites": [
-   "components/status/StatusHistory.vue:76",
-   "components/status/StatusProperties.vue:116"
-  ]
- },
- {
-  "method": "GET",
-  "path": "/api/series/{series_id}/voices",
-  "func": "series_voices",
-  "file": "modules/gateway/api_series.py",
-  "line": 116,
-  "access": "session",
-  "conditional": null,
-  "summary": "Озвучки сериала по сериям с состоянием каждой",
-  "panel_sites": []
- },
- {
-  "method": "GET",
-  "path": "/api/settings/concurrent_fragments",
-  "func": "concurrent_fragments",
-  "file": "modules/gateway/api_settings.py",
-  "line": 175,
-  "access": "session",
-  "conditional": null,
-  "summary": "Чтение числа параллельных фрагментов yt-dlp",
-  "panel_sites": [
-   "components/settings/SettingsDebug.vue:170",
-   "components/settings/SettingsDebug.vue:235",
-   "components/settings/SettingsDebug.vue:70"
-  ]
- },
- {
-  "method": "POST",
-  "path": "/api/settings/concurrent_fragments",
-  "func": "concurrent_fragments",
-  "file": "modules/gateway/api_settings.py",
-  "line": 175,
-  "access": "session",
-  "conditional": null,
-  "summary": "Запись числа параллельных фрагментов yt-dlp",
-  "panel_sites": [
-   "components/settings/SettingsDebug.vue:235",
-   "components/settings/SettingsDebug.vue:75"
+   "components/status/StatusHistory.vue:77",
+   "components/status/StatusProperties.vue:120"
   ]
  },
  {
@@ -955,7 +1101,7 @@
   "path": "/api/settings/conform_clear_finished",
   "func": "conform_clear_finished",
   "file": "modules/gateway/api_settings.py",
-  "line": 155,
+  "line": 159,
   "access": "session",
   "conditional": null,
   "summary": "Флаг очистки очереди выравнивания по завершении",
@@ -970,7 +1116,7 @@
   "path": "/api/settings/conform_clear_finished",
   "func": "conform_clear_finished",
   "file": "modules/gateway/api_settings.py",
-  "line": 155,
+  "line": 159,
   "access": "session",
   "conditional": null,
   "summary": "Записать флаг очистки очереди выравнивания по завершении",
@@ -984,12 +1130,12 @@
   "path": "/api/settings/debug_flags",
   "func": "debug_flags",
   "file": "modules/gateway/api_settings.py",
-  "line": 241,
+  "line": 258,
   "access": "session",
   "conditional": null,
   "summary": "Структура логирования с флагами отладки",
   "panel_sites": [
-   "components/LogsLoggingTab.vue:20"
+   "components/LogsLoggingTab.vue:24"
   ]
  },
  {
@@ -997,20 +1143,42 @@
   "path": "/api/settings/debug_flags",
   "func": "debug_flags",
   "file": "modules/gateway/api_settings.py",
-  "line": 241,
+  "line": 258,
   "access": "session",
   "conditional": null,
   "summary": "Включение/выключение отладочного логирования",
   "panel_sites": [
-   "components/LogsLoggingTab.vue:35"
+   "components/LogsLoggingTab.vue:39"
   ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/download_limits",
+  "func": "download_limits",
+  "file": "modules/gateway/api_settings.py",
+  "line": 164,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": []
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/download_limits",
+  "func": "download_limits",
+  "file": "modules/gateway/api_settings.py",
+  "line": 164,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": []
  },
  {
   "method": "GET",
   "path": "/api/settings/force_replace",
   "func": "force_replace",
   "file": "modules/gateway/api_settings.py",
-  "line": 140,
+  "line": 144,
   "access": "session",
   "conditional": null,
   "summary": "Чтение флага «всегда заменять торренты»",
@@ -1025,7 +1193,7 @@
   "path": "/api/settings/force_replace",
   "func": "force_replace",
   "file": "modules/gateway/api_settings.py",
-  "line": 140,
+  "line": 144,
   "access": "session",
   "conditional": null,
   "summary": "Запись флага «всегда заменять торренты»",
@@ -1039,7 +1207,7 @@
   "path": "/api/settings/less_strict_scan",
   "func": "less_strict_scan",
   "file": "modules/gateway/api_settings.py",
-  "line": 145,
+  "line": 149,
   "access": "session",
   "conditional": null,
   "summary": "Чтение флага «менее строгий скан»",
@@ -1054,7 +1222,7 @@
   "path": "/api/settings/less_strict_scan",
   "func": "less_strict_scan",
   "file": "modules/gateway/api_settings.py",
-  "line": 145,
+  "line": 149,
   "access": "session",
   "conditional": null,
   "summary": "Запись флага «менее строгий скан»",
@@ -1064,45 +1232,16 @@
   ]
  },
  {
-  "method": "GET",
-  "path": "/api/settings/parallel_downloads",
-  "func": "parallel_downloads",
-  "file": "modules/gateway/api_settings.py",
-  "line": 160,
-  "access": "session",
-  "conditional": null,
-  "summary": "Чтение числа параллельных загрузок",
-  "panel_sites": [
-   "components/settings/SettingsDebug.vue:169",
-   "components/settings/SettingsDebug.vue:226",
-   "components/settings/SettingsDebug.vue:70"
-  ]
- },
- {
-  "method": "POST",
-  "path": "/api/settings/parallel_downloads",
-  "func": "parallel_downloads",
-  "file": "modules/gateway/api_settings.py",
-  "line": 160,
-  "access": "session",
-  "conditional": null,
-  "summary": "Запись числа параллельных загрузок",
-  "panel_sites": [
-   "components/settings/SettingsDebug.vue:226",
-   "components/settings/SettingsDebug.vue:75"
-  ]
- },
- {
   "method": "DELETE",
   "path": "/api/settings/saved_paths",
   "func": "saved_paths",
   "file": "modules/gateway/api_settings.py",
-  "line": 192,
+  "line": 189,
   "access": "session",
   "conditional": null,
   "summary": "Удаление сохранённого пути",
   "panel_sites": [
-   "components/settings/SettingsDebug.vue:104"
+   "components/settings/SettingsDebug.vue:120"
   ]
  },
  {
@@ -1110,13 +1249,13 @@
   "path": "/api/settings/saved_paths",
   "func": "saved_paths",
   "file": "modules/gateway/api_settings.py",
-  "line": 192,
+  "line": 189,
   "access": "session",
   "conditional": null,
   "summary": "Список сохранённых путей загрузки",
   "panel_sites": [
-   "components/SavedPathDropdown.vue:33",
-   "components/settings/SettingsDebug.vue:87"
+   "components/SavedPathDropdown.vue:18",
+   "components/settings/SettingsDebug.vue:103"
   ]
  },
  {
@@ -1124,12 +1263,12 @@
   "path": "/api/settings/saved_paths",
   "func": "saved_paths",
   "file": "modules/gateway/api_settings.py",
-  "line": 192,
+  "line": 189,
   "access": "session",
   "conditional": null,
   "summary": "Добавление сохранённого пути",
   "panel_sites": [
-   "components/settings/SettingsDebug.vue:94"
+   "components/settings/SettingsDebug.vue:110"
   ]
  },
  {
@@ -1137,7 +1276,7 @@
   "path": "/api/settings/slicing_delete_source",
   "func": "slicing_delete_source",
   "file": "modules/gateway/api_settings.py",
-  "line": 150,
+  "line": 154,
   "access": "session",
   "conditional": null,
   "summary": "Чтение флага «удалять исходник после нарезки»",
@@ -1152,7 +1291,7 @@
   "path": "/api/settings/slicing_delete_source",
   "func": "slicing_delete_source",
   "file": "modules/gateway/api_settings.py",
-  "line": 150,
+  "line": 154,
   "access": "session",
   "conditional": null,
   "summary": "Запись флага «удалять исходник после нарезки»",
@@ -1160,6 +1299,28 @@
    "components/settings/SettingsDebug.vue:211",
    "components/settings/SettingsDebug.vue:59"
   ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/sources_term",
+  "func": "sources_term",
+  "file": "modules/gateway/api_settings.py",
+  "line": 176,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": []
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/sources_term",
+  "func": "sources_term",
+  "file": "modules/gateway/api_settings.py",
+  "line": 176,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": []
  },
  {
   "method": "POST",
@@ -1171,7 +1332,31 @@
   "conditional": null,
   "summary": "Первичное создание администратора",
   "panel_sites": [
-   "components/SetupModal.vue:58"
+   "components/SetupModal.vue:60"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/slicing/queue",
+  "func": "slicing_queue",
+  "file": "modules/gateway/api_system.py",
+  "line": 87,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": []
+ },
+ {
+  "method": "POST",
+  "path": "/api/sources/cancel",
+  "func": "cancel_read",
+  "file": "modules/gateway/api_sources.py",
+  "line": 111,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "composables/sourceCalls.ts:65"
   ]
  },
  {
@@ -1179,12 +1364,12 @@
   "path": "/api/sources/preview",
   "func": "preview_source",
   "file": "modules/gateway/api_sources.py",
-  "line": 75,
+  "line": 74,
   "access": "session",
   "conditional": null,
   "summary": "Что показать окну об адресе, который ещё не источник: состояние таблицы, сводка, строки для конструктора",
   "panel_sites": [
-   "composables/sourceCalls.ts:49"
+   "composables/sourceCalls.ts:55"
   ]
  },
  {
@@ -1192,12 +1377,12 @@
   "path": "/api/sources/read",
   "func": "read_source",
   "file": "modules/gateway/api_sources.py",
-  "line": 88,
+  "line": 105,
   "access": "session",
   "conditional": null,
   "summary": "",
   "panel_sites": [
-   "composables/sourceCalls.ts:54"
+   "composables/sourceCalls.ts:60"
   ]
  },
  {
@@ -1205,7 +1390,7 @@
   "path": "/api/sources/resolve",
   "func": "resolve_source",
   "file": "modules/gateway/api_sources.py",
-  "line": 80,
+  "line": 88,
   "access": "session",
   "conditional": null,
   "summary": "Какой сайт читает адрес и его канонический вид (без сети)",
@@ -1214,30 +1399,55 @@
   ]
  },
  {
+  "method": "POST",
+  "path": "/api/sources/search",
+  "func": "search_apps",
+  "file": "modules/gateway/api_sources.py",
+  "line": 96,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "composables/sourceCalls.ts:44"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/sources/settings",
+  "func": "sources_settings",
+  "file": "modules/gateway/api_sources.py",
+  "line": 79,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "components/settings/SettingsSources.vue:38"
+  ]
+ },
+ {
   "method": "GET",
   "path": "/api/stream",
   "func": "stream",
   "file": "modules/gateway/module.py",
-  "line": 311,
+  "line": 353,
   "access": "session",
   "conditional": null,
   "summary": "SSE-поток событий шины",
-  "panel_sites": [
-   "composables/useSSE.ts:55"
-  ]
+  "panel_sites": []
  },
  {
   "method": "GET",
   "path": "/api/tmdb/details/{tmdb_id}",
   "func": "tmdb_details",
   "file": "modules/gateway/api_settings.py",
-  "line": 286,
+  "line": 302,
   "access": "session",
   "conditional": null,
   "summary": "Детали сериала TMDB",
   "panel_sites": [
-   "components/AddSeriesModal.vue:355",
-   "components/status/StatusProperties.vue:222"
+   "components/AddSeriesModal.vue:386",
+   "components/status/StatusProperties.vue:174",
+   "components/status/StatusProperties.vue:236"
   ]
  },
  {
@@ -1245,13 +1455,13 @@
   "path": "/api/tmdb/search",
   "func": "tmdb_search",
   "file": "modules/gateway/api_settings.py",
-  "line": 268,
+  "line": 285,
   "access": "session",
   "conditional": null,
   "summary": "Поиск сериала в TMDB",
   "panel_sites": [
-   "components/AddSeriesModal.vue:342",
-   "components/status/StatusProperties.vue:212"
+   "components/AddSeriesModal.vue:373",
+   "components/status/StatusProperties.vue:226"
   ]
  },
  {
@@ -1259,25 +1469,36 @@
   "path": "/api/trackers",
   "func": "trackers_list",
   "file": "modules/gateway/api_settings.py",
-  "line": 300,
+  "line": 316,
   "access": "session",
   "conditional": null,
   "summary": "Список трекеров с зеркалами",
-  "panel_sites": [
-   "components/settings/SettingsTrackers.vue:23"
-  ]
+  "panel_sites": []
  },
  {
   "method": "PUT",
   "path": "/api/trackers/{tracker_id}",
   "func": "tracker_update",
   "file": "modules/gateway/api_settings.py",
-  "line": 304,
+  "line": 320,
   "access": "session",
   "conditional": null,
   "summary": "Обновление зеркал трекера",
   "panel_sites": [
-   "components/settings/SettingsTrackers.vue:52"
+   "components/settings/SettingsSources.vue:60"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/voices/players",
+  "func": "voices_players",
+  "file": "modules/gateway/api_settings.py",
+  "line": 214,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "components/settings/SettingsVoices.vue:37"
   ]
  },
  {
@@ -1285,12 +1506,12 @@
   "path": "/api/voices/settings",
   "func": "voices_settings",
   "file": "modules/gateway/api_settings.py",
-  "line": 212,
+  "line": 209,
   "access": "session",
   "conditional": null,
   "summary": "Группы озвучек и порядок источников: как действуют, порядок по умолчанию",
   "panel_sites": [
-   "components/settings/SettingsVoices.vue:26"
+   "components/settings/SettingsVoices.vue:36"
   ]
  },
  {
@@ -1298,12 +1519,12 @@
   "path": "/api/voices/settings",
   "func": "save_voices_settings",
   "file": "modules/gateway/api_settings.py",
-  "line": 217,
+  "line": 219,
   "access": "session",
   "conditional": null,
   "summary": "Записать группы и порядок источников целиком или получить коды причин отказа",
   "panel_sites": [
-   "components/settings/SettingsVoices.vue:35"
+   "components/settings/SettingsVoices.vue:50"
   ]
  },
  {
@@ -1311,7 +1532,7 @@
   "path": "/favicon.svg",
   "func": "favicon",
   "file": "modules/gateway/module.py",
-  "line": 377,
+  "line": 419,
   "access": "public",
   "conditional": null,
   "summary": "Фавикон",
@@ -1322,7 +1543,7 @@
   "path": "/legacy",
   "func": "legacy",
   "file": "modules/gateway/module.py",
-  "line": 356,
+  "line": 398,
   "access": "public",
   "conditional": null,
   "summary": "Старый фронт (откат), ассеты по /static",
@@ -1333,7 +1554,7 @@
   "path": "/v2",
   "func": "v2_redirect",
   "file": "modules/gateway/module.py",
-  "line": 365,
+  "line": 407,
   "access": "public",
   "conditional": null,
   "summary": "Редирект 307 на корень",
@@ -1344,7 +1565,7 @@
   "path": "/v2/",
   "func": "v2_redirect",
   "file": "modules/gateway/module.py",
-  "line": 365,
+  "line": 407,
   "access": "public",
   "conditional": null,
   "summary": "Редирект 307 на корень",

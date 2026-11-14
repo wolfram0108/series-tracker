@@ -49,7 +49,8 @@ async def test_settings_set_get_and_event(system):
 
     env = sub.queue.get_nowait()
     assert env.topic == "settings.changed"
-    assert env.payload == {"key": "tmdb_token", "value": "т0кен"}
+    # The event goes round the bus and into the dumps of the runs: a secret is told as changed, never as its value.
+    assert env.payload == {"key": "tmdb_token", "value": ""}
 
 
 @pytest.mark.asyncio

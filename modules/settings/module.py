@@ -9,7 +9,7 @@ from core import BaseModule, sanitize_path
 from core.db import Database
 from core.envelope import Envelope
 
-from .repository import SettingsRepository
+from .repository import SECRET_KEYS, SettingsRepository
 
 
 class SettingsModule(BaseModule):
@@ -41,7 +41,7 @@ class SettingsModule(BaseModule):
     async def on_set(self, env: Envelope) -> dict:
         key, value = env.payload["key"], env.payload["value"]
         await self.repo.set(key, value)
-        self.publish_event("settings.changed", {"key": key, "value": value})
+        self.publish_event("settings.changed", {"key": key, "value": "" if key in SECRET_KEYS else value})
         return {"key": key, "value": value}
 
     async def on_set_many(self, env: Envelope) -> dict:
@@ -49,7 +49,8 @@ class SettingsModule(BaseModule):
         values = {str(key): str(value) for key, value in env.payload["values"].items()}
         await self.repo.set_many(values)
         for key, value in values.items():
-            self.publish_event("settings.changed", {"key": key, "value": value})
+            # The event goes round the bus and into the dumps of the runs: a secret is told as changed, never as its value.
+            self.publish_event("settings.changed", {"key": key, "value": "" if key in SECRET_KEYS else value})
         return {"values": values}
 
     async def on_by_prefix(self, env: Envelope) -> dict:

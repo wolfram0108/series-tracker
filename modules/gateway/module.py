@@ -188,6 +188,7 @@ SSE_MAP: dict[str, Outgoing] = {
     "voices.settings.changed": Outgoing("voice_settings_update"),
     "sources.settings.changed": Outgoing("sources_settings_update"),
     "conform.settings.changed": Outgoing("conform_settings_update"),
+    "sources.provider.changed": Outgoing("provider_update"),
     "renaming.finished": Outgoing("renaming_complete"),
     "library.relocation.started": Outgoing("relocation_started"),
     "library.relocation.finished": Outgoing("relocation_finished"),

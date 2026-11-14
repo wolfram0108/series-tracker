@@ -17,7 +17,8 @@ from fastapi.responses import JSONResponse
 from core import BusRequestError
 from core import logging as core_logging
 from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView,
-                            PlayersListReply, VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
+                            PlayersListReply, ProviderSaved, ProviderSettingsDraft, ProviderView, VoiceSettingsDraft,
+                            VoiceSettingsSaved, VoiceSettingsView)
 from core.reasons import code_of, reason, relayed
 
 from .routing import refusal, route_per_method
@@ -234,6 +235,16 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def save_conform_settings(draft: ConformSettingsDraft):
         """Written whole and taken at once, or refused with coded reasons (`saved: false`) and nothing written."""
         return await gw.request("conform.settings.set", draft.model_dump(mode="json"))
+
+    @r.get("/api/provider", response_model=ProviderView)
+    async def provider_view():
+        """The provider of external sources as it stands: its address, the state of the socket, what its manifest says."""
+        return await gw.request("sources.provider.get", {})
+
+    @r.put("/api/provider", response_model=ProviderSaved)
+    async def save_provider(draft: ProviderSettingsDraft):
+        """The address and the token: written whole and taken at once, or refused with coded reasons (`saved: false`)."""
+        return await gw.request("sources.provider.set", draft.model_dump(mode="json"))
 
     async def _refresh_debug_groups():
         reply = await gw.request("settings.values.by_prefix",

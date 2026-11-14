@@ -55,6 +55,7 @@ class ProviderClient:
     def __init__(self, url: str, token: str = "", *, search_s: float | None = None,
                  http: httpx.AsyncClient | None = None) -> None:
         self.url = url.rstrip("/")
+        self.token = token
         self._headers = {"Authorization": f"Bearer {token}"} if token else {}
         # The fuse of the request that waits for an application: that of the topic it answers (core/deadlines.py).
         self._search_s = search_s or (deadline_of("sources.apps.search") or 0) - FUSE_MARGIN_S

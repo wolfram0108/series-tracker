@@ -159,6 +159,15 @@ class Connector:
     async def close(self) -> None:
         await self.client.close()
 
+    def release(self) -> None:
+        """Take this provider's sites and players out of the registries: another provider (or none) takes the place."""
+        for name in self._sites_ours:
+            self._sites.unregister(name)
+        for name in self._players_ours:
+            self._players.unregister(name)
+        self._sites_ours, self._players_ours = [], []
+        self.manifest = None
+
     # --- what the provider adds to the answers of the module ---------------------------------------------------------
 
     async def search(self, request: AppSearchRequest) -> list[AppResults]:

@@ -1,0 +1,172 @@
+"""The holder of the provider of the socket for the module `sources`: which provider the module talks to (the address and the token
+the owner set, or the environment's until one is stored), the connector kept alive for it, and the whole picture of it the tab
+of the provider shows.
+
+An address saved is taken at once, without a restart: the feed of the old provider ends, its sites and players leave the
+registries, the new one (or none) takes their place. The picture is told by the event `sources.provider.changed` whenever the
+socket, the manifest, the address or the pages of the sources change, so that every open screen shows the same."""
+from __future__ import annotations
+
+import asyncio
+from collections import Counter
+from typing import Awaitable, Callable
+
+from core import BusRequestError
+from core.contracts import ProviderApp, ProviderSaved, ProviderSettingsDraft, ProviderView
+from core.logging import get_logger
+
+from ..players.registry import PlayerRegistry
+from ..repository import SourcesRepository
+from ..sites import SiteRegistry
+from ..term import Term
+from . import settings
+from .client import ProviderClient
+from .connector import Connector
+
+CHANGED_TOPIC = "sources.provider.changed"
+Publish = Callable[[str, dict], None]
+Request = Callable[..., Awaitable[dict]]
+
+
+class ProviderHost:
+    def __init__(self, *, repo: SourcesRepository, sites: SiteRegistry, players: PlayerRegistry, term: Term, publish: Publish,
+                 spawn: Callable[..., asyncio.Task], request: Request, site_of: Callable[[str], str | None],
+                 default: ProviderClient | None = None, reconnect: tuple[float, float] | None = None) -> None:
+        self._repo, self._sites, self._players, self._term = repo, sites, players, term
+        self._publish, self._spawn, self._request, self._site_of = publish, spawn, request, site_of
+        self._reconnect = reconnect
+        self._log = get_logger("sources")
+        self._lock = asyncio.Lock()
+        self._feed: asyncio.Task | None = None
+        self._seq = 0
+        self.connector: Connector | None = self._connector_of(default) if default is not None else None
+
+    # --- the connector ------------------------------------------------------------------------------------------------
+
+    def _connector_of(self, client: ProviderClient) -> Connector:
+        return Connector(client, self._repo, sites=self._sites, players=self._players, term=self._term, publish=self._told,
+                         **({"reconnect": self._reconnect} if self._reconnect else {}))
+
+    def _told(self, topic: str, payload: dict) -> None:
+        """What the connector says goes out as it is, and the screen is told the whole picture again."""
+        self._publish(topic, payload)
+        self.announce()
+
+    def announce(self) -> None:
+        self._spawn(self._announce(), name="sources.provider.announce")
+
+    async def _announce(self) -> None:
+        self._publish(CHANGED_TOPIC, (await self.view()).model_dump(mode="json"))
+
+    # --- the life of it -----------------------------------------------------------------------------------------------
+
+    async def _stored(self, key: str) -> str | None:
+        try:
+            return (await self._request("settings.value.get", {"key": key})).get("value")
+        except Exception:  # noqa: BLE001 - a setting that cannot be read leaves what the environment named
+            return None
+
+    async def start(self) -> None:
+        """The provider the owner saved, else the environment's. The sites of its saved manifest first: a provider that is down
+        at the start must not take the pages of its tables out of the hands of its sites."""
+        url = await self._stored(settings.URL_KEY)
+        if url is not None:
+            token = await self._stored(settings.TOKEN_KEY) or ""
+            if self.connector is not None and (self.connector.client.url, self.connector.client.token) != (url.rstrip("/"), token):
+                await self.connector.close()  # the environment's was never started
+                self.connector = None
+            if self.connector is None:
+                await self.use(url, token)
+                return
+        if self.connector is not None:
+            await self.connector.load_saved()
+            self._feed = self._spawn(self.connector.run(), name="sources.provider", lasting=True)
+
+    async def stop(self) -> None:
+        """The feed stops before its client closes: a loop that wakes to a closed client has nothing to read."""
+        await self._stop_feed()
+        if self.connector is not None:
+            await self.connector.close()
+
+    async def _stop_feed(self) -> None:
+        if self._feed is not None:
+            self._feed.cancel()
+            await asyncio.gather(self._feed, return_exceptions=True)
+            self._feed = None
+
+    async def use(self, url: str, token: str) -> None:
+        """Point the module at another provider, or at none (an empty address)."""
+        async with self._lock:
+            url = url.strip().rstrip("/")
+            current = self.connector
+            if current is None and not url:
+                return
+            if current is not None and (current.client.url, current.client.token) == (url, token) and self._feed is not None:
+                return
+            await self._stop_feed()
+            if current is not None:
+                current.release()
+                await current.close()
+            self.connector = None
+            if url:
+                self.connector = self._connector_of(ProviderClient(url, token))
+                await self.connector.load_saved()
+                self._feed = self._spawn(self.connector.run(), name="sources.provider", lasting=True)
+            self._log.info("поставщик внешних источников: %s%s", url or "не задан", ", токен задан" if token else "")
+            self.announce()
+
+    # --- what the screen asks and sends ---------------------------------------------------------------------------------
+
+    async def save(self, payload: dict) -> ProviderSaved:
+        """The address and the token, checked as a whole, written and taken at once, or refused with coded problems."""
+        draft = settings.clean(ProviderSettingsDraft.model_validate(payload))
+        self._log.info("поставщик внешних источников: запись %s, токен %s", draft.url or "без адреса",
+                       "не назван" if draft.token is None else "очищается" if draft.token == "" else "назван")
+        problems = settings.check(draft)
+        if not problems:
+            if draft.token is None:
+                draft = ProviderSettingsDraft(url=draft.url, token=(
+                    self.connector.client.token if self.connector is not None else await self._stored(settings.TOKEN_KEY) or ""))
+            await self._request("settings.values.set_many", {"values": settings.stored(draft)})
+            await self.use(draft.url, draft.token or "")
+        return ProviderSaved(saved=not problems, problems=problems, provider=await self.view())
+
+    async def _sources_by_app(self) -> Counter:
+        try:
+            series = await self._request("catalog.series.list", {})
+        except (BusRequestError, asyncio.TimeoutError):
+            return Counter()
+        found = Counter()
+        for one in series if isinstance(series, list) else ():
+            for source in one.get("sources") or []:
+                site = self._site_of(source.get("url") or "")
+                if site:
+                    found[site] += 1
+        return found
+
+    async def _downloads_dir(self) -> str:
+        try:
+            return str((await self._request("conform.workspace", {})).get("downloads") or "")
+        except (BusRequestError, asyncio.TimeoutError):
+            return ""
+
+    async def view(self) -> ProviderView:
+        """The picture as it stands now: its number and every part that can change under it are taken in one step, before anything is
+        awaited, so that of two pictures the one taken later has the greater number and shows the later state — whichever is
+        finished first."""
+        self._seq += 1
+        seq = self._seq
+        connector = self.connector
+        manifest = connector.manifest if connector is not None else None
+        fixed = dict(
+            url=connector.client.url if connector is not None else "", has_token=bool(connector and connector.client.token),
+            state=connector.state if connector is not None else "none", reason=(connector.why or None) if connector is not None else None,
+            provider=manifest.provider.id if manifest else None, version=manifest.provider.version if manifest else None,
+            protocol=manifest.protocol if manifest else None, revision=manifest.revision if manifest else None)
+        apps: list[ProviderApp] = []
+        if manifest is not None:
+            lines = Counter(place.name for each in manifest.players if each.kind == "line" for place in each.places)
+            sources = await self._sources_by_app()
+            apps = [ProviderApp(name=each.name, label=each.label or each.name, sources=sources.get(each.name, 0),
+                                lines=lines.get(each.name, 0)) for each in manifest.sites]
+        return ProviderView(**fixed, apps=apps, downloads_dir=await self._downloads_dir(), seq=seq)

@@ -5,7 +5,7 @@ from core import crypto
 from core.db import Database
 
 # Ключи-секреты: их значения хранятся в БД зашифрованными (Этап 3Б).
-_SECRET_KEYS = {"tmdb_token"}
+SECRET_KEYS = frozenset({"tmdb_token", "provider.token"})
 
 
 class SettingsRepository:
@@ -17,10 +17,10 @@ class SettingsRepository:
             "SELECT value FROM settings WHERE key=?", (key,))
         if not row:
             return None
-        return crypto.decrypt(row["value"]) if key in _SECRET_KEYS else row["value"]
+        return crypto.decrypt(row["value"]) if key in SECRET_KEYS else row["value"]
 
     async def set(self, key: str, value: str) -> None:
-        stored = crypto.encrypt(value) if key in _SECRET_KEYS else value
+        stored = crypto.encrypt(value) if key in SECRET_KEYS else value
         await self._db.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -31,14 +31,14 @@ class SettingsRepository:
         await self._db.execute_many([
             ("INSERT INTO settings (key, value) VALUES (?, ?) "
              "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-             (key, crypto.encrypt(value) if key in _SECRET_KEYS else value))
+             (key, crypto.encrypt(value) if key in SECRET_KEYS else value))
             for key, value in values.items()])
 
     async def encrypt_legacy_secrets(self) -> int:
         """Одноразовая миграция секретных ключей в шифр (Этап 3Б).
         Идемпотентна. Возвращает число перешифрованных значений."""
         migrated = 0
-        for key in _SECRET_KEYS:
+        for key in SECRET_KEYS:
             row = await self._db.fetch_one(
                 "SELECT value FROM settings WHERE key=?", (key,))
             if row and row["value"] and not crypto.is_encrypted(row["value"]):
@@ -52,7 +52,8 @@ class SettingsRepository:
         rows = await self._db.fetch_all(
             "SELECT key, value FROM settings WHERE key LIKE ?",
             (prefix + "%",))
-        return {r["key"]: r["value"] for r in rows}
+        # A secret is read by its key alone, never in bulk.
+        return {r["key"]: r["value"] for r in rows if r["key"] not in SECRET_KEYS}
 
     # --- saved_paths (отдельная таблица, тот же владелец) ------------------
 

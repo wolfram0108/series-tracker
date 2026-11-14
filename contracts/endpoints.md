@@ -151,6 +151,8 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | GET | `/api/conform/settings` | Адрес демона выравнивания, рабочая папка здесь и на демоне, очистка очереди по завершении (`ConformSettingsView`): как действуют сейчас (Р-57, Р-59) | `SettingsConformServer.vue` |
 | DELETE | `/api/conform/jobs/{job_id}` | Остановить задачу выравнивания, которая ждёт или идёт (запись остаётся со статусом «отменено»), либо удалить запись завершённой: демон снимает свои файлы записи, выходной звук остаётся; ответ `{done: true}`, демон недоступен — 502 с кодом `conform_job_unchanged` (Р-59) | `WorkCard.vue` |
 | GET | `/api/conform/jobs/{job_id}/plot/{name}` | Картинка графика выравнивания (PNG), как её сделал демон; допускается только простое имя `*.png`; нет графика — 404 `conform_plot_missing`, демон недоступен — 502 (Р-59) | `ConformPlotViewer.vue` (адрес картинки) |
+| GET | `/api/provider` | Поставщик внешних источников (Чинес) как он есть (`ProviderView`): адрес, признак токена, состояние розетки и причина, манифест (id, версия, протокол, ревизия), приложения с числом источников и линий, папка загрузок | `ExtensionChines.vue` |
+| PUT | `/api/provider` | Адрес и токен целиком (`ProviderSettingsDraft` {url, token?}); адрес применяется сразу; токен не задан — прежний остаётся, пустой — удаляется; ответ `ProviderSaved`: `saved: true` и картина либо `saved: false` и коды причин (`provider_url_invalid`) | `ExtensionChines.vue` |
 | PUT | `/api/conform/settings` | Адрес и рабочая папка здесь и на демоне целиком (`ConformSettingsDraft` {url, work_dir, work_dir_remote}); при заданном адресе обе папки обязательны; ответ `ConformSettingsSaved`: `saved: true`, новый адрес применён сразу, либо `saved: false` и коды причин, ничего не записано (Р-57, Р-58) | `SettingsConformServer.vue` |
 | PUT | `/api/voices/settings` | Группы и порядок целиком (`VoiceSettingsDraft` {priority, voice_groups}); ответ `VoiceSettingsSaved`: `saved: true` и действующие значения либо `saved: false` и коды причин, ничего не записано. Экран шлёт каждое действие сразу (Р-54) | `SettingsVoices.vue` |
 | POST | `/api/tmdb/search` | Поиск сериала в TMDB | `AddSeriesModal.vue`, `StatusProperties.vue` |
@@ -292,7 +294,8 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | Настройки → Правила: имена файлов серии | GET | `/api/series/{series_id}/source-filenames` |
 | Настройки → Отладка: настройки сканера | POST | `/api/scanner/settings` |
 | Настройки → Отладка: сканировать всё | POST | `/api/scanner/scan_all` |
-| Настройки → Отладка: флаги (4 шт.) | GET, POST | `/api/settings/force_replace`, `/api/settings/less_strict_scan`, `/api/settings/slicing_delete_source`, `/api/settings/conform_clear_finished` |
+| Настройки → Отладка: флаги (3 шт.) | GET, POST | `/api/settings/force_replace`, `/api/settings/less_strict_scan`, `/api/settings/slicing_delete_source` |
+| Расширения → Conform: очистка очереди по завершении | GET, POST | `/api/settings/conform_clear_finished` |
 | Настройки → Отладка: числа (2 шт.) | GET, POST | `/api/settings/parallel_downloads`, `/api/settings/concurrent_fragments` |
 | Настройки → Отладка: пути | GET, POST, DELETE | `/api/settings/saved_paths` |
 | Настройки → Отладка: список таблиц | GET | `/api/database/tables` |
