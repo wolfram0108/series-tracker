@@ -23,7 +23,7 @@
 .slicing-card-accent.status-danger { border-left-color: rgba(220, 53, 69, 0.7); background: linear-gradient(90deg, rgba(220, 53, 69, 0.05) 0%, #fff 15%); }
 
 .card-footer-status { font-size: 13px; font-weight: 500; color: var(--text-muted); }
-.card-footer-status .status-message { font-style: italic; color: #6c757d; }
+.card-footer-status .status-message { font-style: italic; color: var(--text-muted); }
 
 /* иконочные кнопки операций */
 .control-btn {

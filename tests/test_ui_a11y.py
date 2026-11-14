@@ -2,8 +2,7 @@
 no screen has a violation that axe-core finds, a window holds the focus and gives it back, Escape goes to the layer on top alone, a window
 with typed data asks before it is closed, a list that drops is worked with the keys.
 
-The contrast of the grounds of the tabs and of the gradients of the buttons is not asked yet: it waits for the owner's word on the shades
-(PENDING)."""
+The words on a gradient ground (the buttons) axe cannot count; web/src/styles/guards.test.ts does."""
 from __future__ import annotations
 
 import os
@@ -17,9 +16,8 @@ from ui_stand import SERIES, text, ui  # noqa: F401 - the fixture
 pytestmark = [pytest.mark.ui, pytest.mark.asyncio]
 
 AXE = os.path.join(os.path.dirname(__file__), "..", "web", "node_modules", "axe-core", "axe.min.js")
-PENDING = ["color-contrast"]
 
-FOUND = """(pending) => axe.run(document, {rules: Object.fromEntries(pending.map((id) => [id, {enabled: false}])), resultTypes: ['violations']})
+FOUND = """() => axe.run(document, {resultTypes: ['violations']})
   .then((r) => r.violations.map((v) => v.id + ': ' + v.nodes.slice(0, 3).map((n) => n.target.join(' ').slice(0, 80)).join(' | ')))"""
 TABS = "() => [...document.querySelectorAll('.modern-header .st-tab')].map((each) => each.getAttribute('title'))"
 OUTSIDE = "() => !document.activeElement.closest('.modern-modal')"
@@ -37,7 +35,9 @@ async def test_no_screen_has_a_violation_axe_finds(ui):  # noqa: F811
     found: dict[str, list[str]] = {}
 
     async def scan(where: str) -> None:
-        violations = await page.evaluate(FOUND, PENDING)
+        # A notice that is fading out is painted thin: axe would count its words half-written. Its end is the signal.
+        await expect(page.locator(".p-toast-message")).to_have_count(0, timeout=15_000)
+        violations = await page.evaluate(FOUND)
         if violations:
             found[where] = violations
 

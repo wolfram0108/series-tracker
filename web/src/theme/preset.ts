@@ -31,4 +31,19 @@ export const STPreset = definePreset(Aura, {
       xl: "16px",
     },
   },
+  components: {
+    // The words of a toggle that is not chosen: a shade darker than Aura's slate, to keep 4.5:1 on its ground (#f1f5f9).
+    togglebutton: { colorScheme: { light: { root: { color: "#617187" }, icon: { color: "#617187" } } } },
+    // The words of a notice, a shade darker than Aura's 600: on their tint they were 2.8–4.4:1, now 4.7 and more.
+    toast: {
+      colorScheme: {
+        light: {
+          info: { color: "{blue.700}" },
+          success: { color: "{green.700}" },
+          warn: { color: "{yellow.700}" },
+          error: { color: "{red.700}" },
+        },
+      },
+    },
+  },
 })

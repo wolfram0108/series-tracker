@@ -67,3 +67,36 @@ describe("the code", () => {
     expect(offenders(/target="_blank"(?![^>]*rel="[^"]*noopener)/)).toEqual([])
   })
 })
+
+// What axe cannot see — the words on a gradient ground — is counted here, with the shades axe does see.
+function luminance(hex: string): number {
+  const channel = (at: number): number => {
+    const value = parseInt(hex.slice(at, at + 2), 16) / 255
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
+}
+function contrast(a: string, b: string): number {
+  const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (high + 0.05) / (low + 0.05)
+}
+
+describe("the shades", () => {
+  const tokens = noComments(read(join(SRC, "styles/tokens.css")))
+  const token = (name: string): string => tokens.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`))![1]
+
+  it("keep muted words readable (4.5:1) on the grounds they stand on, and blue words on the blue tint", () => {
+    for (const ground of [token("--color-gray-200"), "#f8f9fa", "#ffffff"]) expect(contrast(token("--text-muted"), ground)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(token("--color-blue-ink"), "#cfe2ff")).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it("keep the words of every button readable (4.5:1) on both stops of its ground", () => {
+    const grounds = [...tokens.matchAll(/--button-(\w+):\s*linear-gradient\(135deg,\s*(#[0-9a-fA-F]{6}) 0%,\s*(#[0-9a-fA-F]{6}) 100%\)/g)]
+    expect(grounds.map((each) => each[1])).toEqual(["primary", "secondary", "help", "success", "danger", "warn", "info"])
+    for (const [, name, from, to] of grounds) {
+      const ink = name === "warn" ? "#212529" : "#ffffff" // the ink the sheet gives the button (styles/overrides.css)
+      expect([name, contrast(ink, from) >= 4.5, contrast(ink, to) >= 4.5]).toEqual([name, true, true])
+    }
+    expect(noComments(read(join(SRC, "styles/overrides.css")))).not.toMatch(/linear-gradient\(135deg,\s*#/) // no ground of a button outside the tokens
+  })
+})

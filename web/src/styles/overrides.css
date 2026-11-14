@@ -21,7 +21,7 @@
   font-size: 14px !important;
   transition: all 0.2s ease !important;
   /* primary по умолчанию (severity не задан) */
-  background: linear-gradient(135deg, #007bff 0%, #0056b3 100%) !important;
+  background: var(--button-primary) !important;
   color: #fff !important;
   box-shadow: 0 2px 8px rgba(0, 123, 255, 0.3) !important;
 }
@@ -29,30 +29,30 @@
 .p-button:disabled { opacity: 0.6 !important; filter: none !important; }
 
 .p-button-secondary {
-  background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%) !important;
+  background: var(--button-secondary) !important;
   box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3) !important;
   color: #fff !important;
 }
 .p-button-help {
-  background: linear-gradient(135deg, #7952b3 0%, #5a3d8a 100%) !important;
+  background: var(--button-help) !important;
   box-shadow: 0 2px 8px rgba(111, 66, 193, 0.3) !important;
   color: #fff !important;
 }
 .p-button-success {
-  background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%) !important;
+  background: var(--button-success) !important;
   box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3) !important;
 }
 .p-button-danger {
-  background: linear-gradient(135deg, #dc3545 0%, #c82333 100%) !important;
+  background: var(--button-danger) !important;
   box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3) !important;
 }
 .p-button-warn {
-  background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%) !important;
+  background: var(--button-warn) !important;
   color: #212529 !important;
   box-shadow: 0 2px 8px rgba(255, 193, 7, 0.3) !important;
 }
 .p-button-info {
-  background: linear-gradient(135deg, #17a2b8 0%, #117a8b 100%) !important;
+  background: var(--button-info) !important;
   box-shadow: 0 2px 8px rgba(23, 162, 184, 0.3) !important;
 }
 

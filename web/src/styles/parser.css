@@ -36,7 +36,7 @@
 .parser-accordion .accordion-button:hover { background: #f8f9fa; }
 .parser-accordion .accordion-button.active {
   background: #cfe2ff;
-  color: #0c63e4;
+  color: var(--color-blue-ink);
 }
 .parser-accordion .accordion-button .acc-chevron {
   transition: transform 0.2s ease-in-out;

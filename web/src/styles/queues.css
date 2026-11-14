@@ -45,7 +45,7 @@
   border: 1.5px solid #ced4da; background: var(--bg-white); color: #adb5bd; cursor: pointer; font: inherit;
 }
 .same-pick i { font-size: 0.7rem; }
-.same-pick:hover:not(:disabled) { border-color: #6c757d; color: #6c757d; }
+.same-pick:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text-muted); }
 .same-pick.on { background: #343a40; border-color: #343a40; color: #fff; }
 .same-pick:disabled, .same-chip:disabled { opacity: 0.5; cursor: default; }
 .same-chip {

@@ -140,7 +140,12 @@ const str = (value: unknown) => String(value ?? "")
 .agents-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 .agents-select { inline-size: min(22rem, 100%); }
 .agents-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
-.agents-chip.is-empty { opacity: 0.55; }
+/* An empty queue is a chip that is quiet: its tint and its edge are the faded ones, its words are not (4.5:1 on its tint). */
+.agents-chip.is-empty {
+  background-color: color-mix(in srgb, var(--tone) 12%, transparent);
+  border-color: color-mix(in srgb, var(--tone-end) 30%, transparent);
+  color: color-mix(in srgb, var(--tone-end) 72%, black);
+}
 .agents-cards { display: flex; flex-direction: column; gap: 8px; }
 .agents-daemon { display: flex; flex-wrap: wrap; gap: 8px; }
 .queue-empty { padding: 16px; text-align: center; color: var(--text-muted); background: var(--bg-light); border-radius: var(--border-radius); }

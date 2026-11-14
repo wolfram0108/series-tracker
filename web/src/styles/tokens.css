@@ -40,7 +40,10 @@
   --border-color-focus: var(--color-blue);
   --bg-light: var(--color-gray-100);
   --bg-white: #fff;
-  --text-muted: #6c757d;
+  /* Muted words keep 4.5:1 on the grey ground of the tabs (#e9ecef) and on the lightest grounds (styles/guards.test.ts). */
+  --text-muted: #636b73;
+  /* Blue words on the blue tint of a chosen row (#cfe2ff). */
+  --color-blue-ink: #0b5cd4;
   --stripe-intensity: 0.3;
 }
 
@@ -57,7 +60,7 @@
   --state-built: #8bc98e; --state-built-end: #6fb873; --state-built-ink: #fff;
   --state-partial: var(--partial-ground); --state-partial-end: var(--partial-ground-end); --state-partial-ink: #495057;
   --state-absent: #ffda6a; --state-absent-end: #f5c84c; --state-absent-ink: #5c4400;
-  --state-noRow: #f8f9fa; --state-noRow-end: #adb5bd; --state-noRow-ink: #6c757d;
+  --state-noRow: #f8f9fa; --state-noRow-end: #adb5bd; --state-noRow-ink: var(--text-muted);
   --state-noFile: var(--state-noRow); --state-noFile-end: var(--state-noRow-end); --state-noFile-ink: var(--state-noRow-ink);
   --state-noReference: var(--state-failed); --state-noReference-end: var(--state-failed-end); --state-noReference-ink: var(--state-failed-ink);
   --state-download: #009688; --state-download-end: #00796d; --state-download-ink: #fff;
@@ -142,4 +145,15 @@
   --outline-line: 0.16rem;
   --outline-ground-share: 0.28;
   --selection-tone: var(--color-blue);
+}
+
+/* The grounds of the buttons (styles/overrides.css): the words on every stop of each keep 4.5:1, which styles/guards.test.ts counts. */
+:root {
+  --button-primary: linear-gradient(135deg, #0072ec 0%, #0056b3 100%);
+  --button-secondary: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+  --button-help: linear-gradient(135deg, #7952b3 0%, #5a3d8a 100%);
+  --button-success: linear-gradient(135deg, #208738 0%, #1e7e34 100%);
+  --button-danger: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+  --button-warn: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);
+  --button-info: linear-gradient(135deg, #128193 0%, #117a8b 100%);
 }

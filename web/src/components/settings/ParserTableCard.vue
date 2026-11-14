@@ -324,7 +324,7 @@ function setAction(value: string): void {
 }
 .template-chip:hover:not(:disabled) { border-color: #0d6efd; color: #0d6efd; }
 .template-chip:disabled { color: #adb5bd; border-color: #e9ecef; cursor: default; }
-.template-count { margin-left: 0.25rem; color: #6c757d; }
+.template-count { margin-left: 0.25rem; color: var(--text-muted); }
 .template-chip:disabled .template-count { color: #ced4da; }
 .table-action { flex: 1 1 10rem; min-width: 0; border: 1px solid #ced4da; border-radius: 4px; background: #fff; }
 

@@ -110,7 +110,7 @@
 .card-final.card-missing {
   display: flex; align-items: center; justify-content: space-between;
   background: #f8f9fa; border: 1px dashed var(--border-color);
-  color: var(--text-muted, #6c757d);
+  color: var(--text-muted);
 }
 .card-final.card-missing .card-title { font-weight: 500; }
 .card-final.card-missing .missing-icon { font-size: 20px; opacity: 0.5; }

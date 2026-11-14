@@ -115,7 +115,7 @@ onMounted(fetchTables)
   font-family: var(--font-mono); transition: all 0.15s ease;
 }
 .db-tab:hover { background: var(--bg-light); }
-.db-tab.active { background: #cfe2ff; border-color: #9ec5fe; color: #0c63e4; font-weight: 600; }
+.db-tab.active { background: #cfe2ff; border-color: #9ec5fe; color: var(--color-blue-ink); font-weight: 600; }
 .db-content { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; }
 .db-loading, .db-empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
