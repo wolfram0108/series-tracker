@@ -7,8 +7,8 @@ import ModalTabs from "./ModalTabs.vue"
 import SeriesInfoRows from "./SeriesInfoRows.vue"
 import SheetField from "./SheetField.vue"
 import SheetRow from "./SheetRow.vue"
-import CatalogNameField from "./CatalogNameField.vue"
-import TmdbSearchField from "./TmdbSearchField.vue"
+import TmdbSync from "./TmdbSync.vue"
+import { useTmdbChoice } from "../composables/useTmdbChoice"
 import StGroup from "./StGroup.vue"
 import StInput from "./StInput.vue"
 import StLabel from "./StLabel.vue"
@@ -17,7 +17,7 @@ import SettingsParser from "./settings/SettingsParser.vue"
 import AppSearch from "./AppSearch.vue"
 import SourcesEditor from "./SourcesEditor.vue"
 import { api } from "../api/client"
-import { t, tn } from "../i18n"
+import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
 import { joinVkAddress, siteOf, sourceTypeOf, splitVkAddress, titlesOf, vkQuery, type SourceAddress } from "../lib/sources"
 import { useApi } from "../composables/useApi"
@@ -41,8 +41,6 @@ const toast = useToast()
 interface Torrent { torrent_id?: string | number; link?: string; magnet?: string; date_time?: string; episodes?: string; quality?: string }
 interface ParseResult { success?: boolean; title?: { ru?: string; en?: string }; torrents?: Torrent[]; tracker_info?: TrackerInfo; error?: string }
 interface TrackerInfo { ui_features?: { quality_selector?: string } }
-interface TmdbResult { id: number; name?: string; name_en?: string; original_name?: string; year?: string; poster_path?: string }
-interface TmdbSeason { season_number: number; episode_count: number }
 
 // --- состояние формы ---
 const newSeries = reactive({
@@ -85,7 +83,7 @@ const candidateQuery = ref("")
 const kind = computed<"video" | "torrent">(() => (sourceItems.value.length ? "video" : "torrent"))
 // What the user has typed or chosen and the series is not yet made of: the window asks before it is closed over it.
 const dirty = computed(() => !!(newSeries.url || newSeries.name || newSeries.name_en || newSeries.save_path || newSeries.quality_override
-  || newSeries.resolution_override || candidate.value || sourceItems.value.length || tmdbSelected.value))
+  || newSeries.resolution_override || candidate.value || sourceItems.value.length || tmdb.selected.value))
 // The test of the rules offers the addresses and the queries of the sources the series is made of, as they stand now.
 const draftAddresses = async (): Promise<SourceAddress[]> =>
   sourceItems.value.map((item) => ({ url: item.url, vk: item.sourceType === "vk_video" }))
@@ -105,12 +103,7 @@ let unsubReady: (() => void) | null = null
 let unsubFailed: (() => void) | null = null
 
 // --- TMDB ---
-const tmdbSearchQuery = ref("")
-const tmdbResults = ref<TmdbResult[]>([])
-const tmdbSelected = ref<TmdbResult | null>(null)
-const tmdbLoading = ref(false)
-const tmdbEpisodeCount = ref(0)
-const tmdbSeasonDetails = ref<TmdbSeason[]>([])
+const tmdb = useTmdbChoice({ query: () => newSeries.name || newSeries.name_en, season: () => newSeries.season, seasonless: () => isSeasonless.value })
 
 // сортировка ключей групп эпизодов astar (порт sortEpisodeKeys из index.html)
 function sortEpisodeKeys(keys: string[]): string[] {
@@ -143,39 +136,11 @@ const sortedQualityOptionsKeys = computed(() => {
   if (!site.value.includes("astar")) return []
   return sortEpisodeKeys(Object.keys(episodeQualityOptions))
 })
-const tmdbSeasonNumber = computed(() => {
-  if (isSeasonless.value) return 1
-  const m = newSeries.season.match(/^s(\d+)$/i)
-  return m ? parseInt(m[1], 10) : 1
-})
-// Отображаемое имя: русское, если перевод реально есть (name ≠ original);
-// иначе английское (для азиатских релизов без ru TMDB кладёт в name
-// оригинал-иероглифы); иначе — что есть. Применяется и в списке, и в
-// имени каталога.
-function tmdbName(r: TmdbResult): string {
-  const ru = (r.name || "").trim()
-  const orig = (r.original_name || "").trim()
-  if (ru && ru !== orig) return ru
-  const en = (r.name_en || "").trim()
-  if (en && en !== orig) return en
-  return ru || en || orig
-}
-
 // The names the search of the video applications offers: the original one of the TMDB card chosen, then those typed.
 const seriesNames = computed(() => [
-  ...(tmdbSelected.value?.original_name ? [{ text: tmdbSelected.value.original_name, mark: t("sources.apps.tmdb") }] : []),
+  ...(tmdb.selected.value?.original_name ? [{ text: tmdb.selected.value.original_name, mark: t("sources.apps.tmdb") }] : []),
   ...[...(newSeries.name || "").split("/"), newSeries.name_en || ""].map((text) => ({ text })),
 ].map((name) => ({ ...name, text: name.text.trim() })).filter((name) => name.text))
-
-// «Имя (год) [tmdbid-XXXX]» (шаблон Jellyfin/Plex); год опускается, если его нет
-const tmdbCatalogName = computed(() => {
-  if (!tmdbSelected.value) return ""
-  const name = tmdbName(tmdbSelected.value)
-  if (!name) return ""
-  const year = String(tmdbSelected.value.year || "").trim()
-  const idPart = `[tmdbid-${tmdbSelected.value.id}]`
-  return year ? `${name} (${year}) ${idPart}` : `${name} ${idPart}`
-})
 
 // --- состояния валидации для рамок групп (valid/invalid/null) ---
 type VState = "valid" | "invalid" | null
@@ -378,54 +343,8 @@ async function prefetchNamingFiles(torrents: Torrent[]): Promise<void> {
 }
 
 // --- TMDB ---
-async function searchTMDB() {
-  if (!tmdbSearchQuery.value) tmdbSearchQuery.value = newSeries.name || newSeries.name_en
-  if (!tmdbSearchQuery.value) return
-  tmdbLoading.value = true
-  tmdbResults.value = []
-  try {
-    const { data } = await api.POST("/api/tmdb/search", { body: { query: tmdbSearchQuery.value } })
-    const res = (data ?? null) as { success?: boolean; results?: TmdbResult[]; error?: string } | null
-    if (res?.success) {
-      tmdbResults.value = res.results ?? []
-    } else {
-      toast.add({ severity: "warn", summary: "TMDB", detail: t("seriesForm.tmdbSearchFailed", { error: reasonText(res?.error) || t("add.unknown") }), life: 4000 })
-    }
-  } finally {
-    tmdbLoading.value = false
-  }
-}
-async function selectTMDBSeries(s: TmdbResult) {
-  tmdbSelected.value = s
-  const { data } = await api.GET("/api/tmdb/details/{tmdb_id}", { params: { path: { tmdb_id: s.id } } })
-  const res = (data ?? null) as { success?: boolean; seasons?: TmdbSeason[] } | null
-  if (res?.success) {
-    tmdbSeasonDetails.value = res.seasons ?? []
-    updateTMDBEpisodeCount()
-  }
-}
-function clearTMDBSelection() {
-  tmdbSelected.value = null
-  tmdbSeasonDetails.value = []
-  tmdbEpisodeCount.value = 0
-}
-async function copyCatalogName() {
-  if (!tmdbCatalogName.value) return
-  try {
-    await navigator.clipboard.writeText(tmdbCatalogName.value)
-    toast.add({ severity: "success", summary: t("common.copied"), detail: t("seriesForm.catalogCopied"), life: 2500 })
-  } catch {
-    toast.add({ severity: "error", summary: t("common.error"), detail: t("common.copyFailed"), life: 2500 })
-  }
-}
-function updateTMDBEpisodeCount() {
-  if (!tmdbSelected.value || !tmdbSeasonDetails.value.length) return
-  const s = tmdbSeasonDetails.value.find((x) => x.season_number === tmdbSeasonNumber.value)
-  tmdbEpisodeCount.value = s ? s.episode_count : 0
-}
-watch(() => newSeries.season, updateTMDBEpisodeCount)
 watch(() => newSeries.name, (v) => {
-  if (!tmdbSearchQuery.value && !tmdbSelected.value) tmdbSearchQuery.value = v
+  if (!tmdb.query.value && !tmdb.selected.value) tmdb.query.value = v
 })
 
 // --- сохранение ---
@@ -449,16 +368,16 @@ async function addSeries() {
       quality_override: newSeries.quality_override || null,
       resolution_override: newSeries.resolution_override || null,
     }
-    if (tmdbSelected.value) {
+    if (tmdb.selected.value) {
       payload.tmdb_data = {
-        tmdb_id: tmdbSelected.value.id,
-        tmdb_season_number: tmdbSeasonNumber.value,
+        tmdb_id: tmdb.selected.value.id,
+        tmdb_season_number: tmdb.seasonNumber.value,
         // «несколько сезонов»: число серий неизвестно до нейминга/скана —
         // не задаём (0), карточка не покажет, агрегатор посчитает позже.
-        total_episodes: isSeasonless.value ? 0 : tmdbEpisodeCount.value,
-        poster_path: tmdbSelected.value.poster_path,
-        series_name: tmdbName(tmdbSelected.value),
-        year: tmdbSelected.value.year,
+        total_episodes: isSeasonless.value ? 0 : tmdb.episodeCount.value,
+        poster_path: tmdb.selected.value.poster_path,
+        series_name: tmdb.name(tmdb.selected.value),
+        year: tmdb.selected.value.year,
       }
     }
     if (kind.value === "video") {
@@ -570,7 +489,7 @@ onBeforeUnmount(() => {
     <div v-if="parsed || kind === 'video'" class="sheet">
       <!-- Информация о сериале -->
       <SeriesInfoRows
-        v-model:seasonless="isSeasonless" :form="newSeries" :states="infoStates" :catalog-name="tmdbCatalogName"
+        v-model:seasonless="isSeasonless" :form="newSeries" :states="infoStates" :catalog-name="tmdb.catalogName.value"
         :can-switch-seasons="showSeasonlessSwitch"
       >
         <SheetField v-if="kind === 'torrent'" :label="t('sources.profile.label')" icon="pi pi-filter" :state="profileState" wide>
@@ -615,53 +534,7 @@ onBeforeUnmount(() => {
         </template>
       </SheetRow>
 
-      <!-- TMDB -->
-      <SheetRow :caption="t('seriesForm.tmdbSync')">
-        <TmdbSearchField v-model="tmdbSearchQuery" :loading="tmdbLoading" @search="searchTMDB" />
-
-        <div v-if="tmdbResults.length" class="tmdb-results">
-          <div
-            v-for="res in tmdbResults"
-            :key="res.id"
-            class="card-final card-tmdb tmdb-result-card"
-            :class="tmdbSelected && tmdbSelected.id === res.id ? 'status-success' : 'status-no-match'"
-            @click="selectTMDBSeries(res)"
-          >
-            <div class="info-column">
-              <span class="card-title">{{ tmdbName(res) }} <small style="opacity: 0.6">({{ res.year }})</small></span>
-              <div class="path-line tmdb-pills">
-                <span v-if="res.original_name" class="path-pill">
-                  <span class="path-pill-label">{{ t("seriesForm.originalLabel") }}</span>
-                  <span class="path-pill-value">{{ res.original_name }}</span>
-                </span>
-                <span v-if="tmdbSelected && tmdbSelected.id === res.id && !isSeasonless" class="path-pill">
-                  <span class="path-pill-label">{{ t("seriesForm.seasonPill", { n: tmdbSeasonNumber }) }}</span>
-                  <span class="path-pill-value">{{ tn("seriesForm.episodes", tmdbEpisodeCount) }}</span>
-                </span>
-                <span v-else-if="tmdbSelected && tmdbSelected.id === res.id" class="path-pill">
-                  <span class="path-pill-value">{{ t("add.severalSeasons") }}</span>
-                </span>
-              </div>
-            </div>
-            <div class="pills-column">
-              <div class="quality-badge">ID: {{ res.id }}</div>
-              <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill">
-                <i class="pi pi-check-circle" /><span>{{ t("seriesForm.chosen") }}</span>
-              </div>
-              <div
-                v-if="tmdbSelected && tmdbSelected.id === res.id"
-                class="pill pill-link"
-                :title="t('add.tmdbClear')"
-                @click.stop="clearTMDBSelection"
-              >
-                <i class="pi pi-times" /><span>{{ t("seriesForm.clearChoice") }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <CatalogNameField v-if="tmdbSelected && tmdbCatalogName" :name="tmdbCatalogName" @copy="copyCatalogName" />
-      </SheetRow>
+      <TmdbSync :tmdb="tmdb" :seasonless="isSeasonless" />
 
       <!-- Доступные торренты -->
       <SheetRow v-if="kind === 'torrent' && parserData && parserData.torrents.length" :caption="t('add.torrentsTitle', { count: parserData.torrents.length })">

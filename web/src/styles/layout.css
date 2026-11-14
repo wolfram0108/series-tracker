@@ -46,3 +46,13 @@
 }
 @keyframes connectionAppear { from { opacity: 0; } }
 
+
+/* A user who asked for less motion gets none that is not the matter itself: the transitions and the animations stop. The ring of a read
+   that is under way keeps turning: it is the one sign that something is being done. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important; scroll-behavior: auto !important;
+  }
+  .pi-spin { animation-duration: 1s !important; animation-iteration-count: infinite !important; }
+}

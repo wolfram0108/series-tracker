@@ -15,6 +15,7 @@ import { fetchSources } from "../composables/sourceCalls"
 import type { SourceAddress } from "../lib/sources"
 import { useSeriesStore, type Series } from "../stores/series"
 import { t } from "../i18n"
+import LoadingMark from "./LoadingMark.vue"
 
 // Status window: the shell of the settings window (ModalShell xl, fixed height) with segment tabs (st-tabs); the
 // tabs depend on the kind of the series. The footer has "Save" on the Properties tab only. The tab of the VK filters is
@@ -111,7 +112,7 @@ onMounted(load)
       </div>
     </template>
 
-    <div v-if="!series" class="status-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem"></i></div>
+    <div v-if="!series" class="status-loading"><LoadingMark /></div>
     <template v-else>
       <StatusProperties v-show="tab === 'properties'" ref="propsRef" :series="series" @saving="saving = $event" />
       <StatusComposition

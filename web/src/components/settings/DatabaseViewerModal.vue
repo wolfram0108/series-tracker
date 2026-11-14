@@ -5,6 +5,7 @@ import ModalShell from "../ModalShell.vue"
 import { api } from "../../api/client"
 import { t } from "../../i18n"
 import { useApi } from "../../composables/useApi"
+import LoadingMark from "../LoadingMark.vue"
 
 // Полноэкранное окно просмотра БД (порт DatabaseViewerModal): список
 // таблиц вкладками + таблица строк выбранной таблицы. Только чтение.
@@ -75,7 +76,7 @@ onMounted(fetchTables)
       </div>
 
       <div class="db-content">
-        <div v-if="loading" class="db-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
+        <div v-if="loading" class="db-loading"><LoadingMark /></div>
         <div v-else-if="!rows.length" class="db-empty">
           <i class="pi pi-inbox" />
           <p>{{ t("dbViewer.empty", { table: activeTable ?? "" }) }}</p>

@@ -92,3 +92,5 @@ tr.is-stale > td { background: var(--stale-ground); }
   cursor: pointer; color: var(--color-gray-600); font: inherit;
 }
 .row-action:disabled { opacity: 0.5; cursor: default; }
+/* A row that says one thing across the whole table ("none"). */
+.div-table-cell.span-all { grid-column: 1 / -1; }

@@ -7,6 +7,7 @@ import { useToast } from "primevue/usetoast"
 import { api } from "../api/client"
 import { hasMessage, t, type MessageKey } from "../i18n"
 import { useApi } from "../composables/useApi"
+import LoadingMark from "./LoadingMark.vue"
 
 // "Setup" tab of the logs window: the detail of the logs per group of modules (the master switch of a group turns on
 // the debug log of all its modules). Contract: GET /api/settings/debug_flags, POST {module, enabled}.
@@ -59,7 +60,7 @@ onMounted(load)
 
 <template>
   <div class="sheet logging-settings">
-    <div v-if="loading" class="logging-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
+    <div v-if="loading" class="logging-loading"><LoadingMark /></div>
     <template v-else>
       <p class="sheet-hint">{{ t("logs.logging.hint") }}</p>
       <div class="logging-groups">

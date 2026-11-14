@@ -69,7 +69,7 @@ async function submit(): Promise<void> {
         <p class="login-user">{{ auth.adminName }}</p>
 
         <SheetField :label="t('auth.password')" icon="pi pi-lock" :state="passState">
-          <StInput v-model="password" type="password" />
+          <StInput v-model="password" type="password" autocomplete="current-password" />
         </SheetField>
 
         <Button class="login-submit" type="submit" :label="t('login.submit')"

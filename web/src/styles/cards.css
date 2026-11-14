@@ -68,6 +68,7 @@
   background-color: rgba(255, 255, 255, 0.3); color: inherit;
 }
 
+.tmdb-year { opacity: 0.6; }
 .card-final .pill.pill-link { cursor: pointer; }
 .pill.pill-link:focus-visible { outline: 0.125rem solid var(--color-blue); outline-offset: 0.0625rem; }
 

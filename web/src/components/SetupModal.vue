@@ -87,7 +87,7 @@ async function submit(): Promise<void> {
         <p class="login-sub">{{ t("setup.sub") }}</p>
 
         <SheetField :label="t('setup.username')" icon="pi pi-user" :state="userState">
-          <StInput v-model="username" />
+          <StInput v-model="username" autocomplete="username" />
         </SheetField>
 
         <SheetField :label="t('setup.password')" icon="pi pi-lock" :state="passState">

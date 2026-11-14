@@ -8,6 +8,7 @@ import { useConfirm } from "../../composables/useConfirm"
 import { t, tn } from "../../i18n"
 import { stateLabel } from "../../lib/states"
 import { reasonText } from "../../lib/reason"
+import LoadingMark from "../LoadingMark.vue"
 
 // Вкладка «Нарезка» — порт ChapterManager. Компиляции в плане/обработанные
 // слайсером, операции над главами: проверить оглавление (ffprobe), фильтр,
@@ -257,7 +258,7 @@ onMounted(loadMediaItems)
 
 <template>
   <div class="status-slicing">
-    <div v-if="loading" class="status-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
+    <div v-if="loading" class="status-loading"><LoadingMark /></div>
     <div v-else-if="!items.length" class="empty-state">{{ t("slicing.empty") }}</div>
 
     <div v-else class="compilation-cards-container">

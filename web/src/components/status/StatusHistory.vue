@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { t } from "../../i18n"
+import LoadingMark from "../LoadingMark.vue"
 
 // Вкладка «История» — порт StatusTabHistory. Торрент: таблица истории
 // торрентов (GET torrents/history). VK: таблица медиа-элементов в БД
@@ -89,7 +90,7 @@ onMounted(load)
 
 <template>
   <div class="status-history">
-    <div v-if="loading" class="status-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
+    <div v-if="loading" class="status-loading"><LoadingMark /></div>
 
     <template v-else-if="isVk">
       <h3 class="status-history-title">{{ t("history.vk.title") }}</h3>
@@ -107,14 +108,14 @@ onMounted(load)
           <div class="div-table-body">
             <div v-for="m in mediaHistory" :key="m.id" class="div-table-row">
               <div class="div-table-cell">{{ m.unique_id }}</div>
-              <div class="div-table-cell"><a :href="m.source_url" target="_blank">{{ m.source_url }}</a></div>
+              <div class="div-table-cell"><a :href="m.source_url" target="_blank" rel="noopener noreferrer">{{ m.source_url }}</a></div>
               <div class="div-table-cell">{{ episodeInfo(m) }}</div>
               <div class="div-table-cell">{{ m.status }}</div>
               <div class="div-table-cell">{{ m.final_filename }}</div>
               <div class="div-table-cell">{{ chapterStatus(m) }}</div>
               <div class="div-table-cell">{{ fmtDate(m.publication_date) }}</div>
             </div>
-            <div v-if="!mediaHistory.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">{{ t("common.none") }}</div></div>
+            <div v-if="!mediaHistory.length" class="div-table-row"><div class="div-table-cell span-all">{{ t("common.none") }}</div></div>
           </div>
         </div>
       </div>
@@ -142,7 +143,7 @@ onMounted(load)
             <div class="div-table-cell">{{ row.is_active ? t("common.yes") : t("common.no") }}</div>
             <div class="div-table-cell">{{ row.qb_hash || "N/A" }}</div>
           </div>
-          <div v-if="!torrentHistory.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">{{ t("common.none") }}</div></div>
+          <div v-if="!torrentHistory.length" class="div-table-row"><div class="div-table-cell span-all">{{ t("common.none") }}</div></div>
         </div>
       </div>
     </template>

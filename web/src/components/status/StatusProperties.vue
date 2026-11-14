@@ -1,22 +1,21 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted } from "vue"
+import { ref, reactive, computed, onMounted } from "vue"
 import { useToast } from "primevue/usetoast"
-import CatalogNameField from "../CatalogNameField.vue"
 import SeriesInfoRows from "../SeriesInfoRows.vue"
 import SheetField from "../SheetField.vue"
 import SheetRow from "../SheetRow.vue"
 import StSelect from "../StSelect.vue"
 import SourcesEditor from "../SourcesEditor.vue"
-import TmdbSearchField from "../TmdbSearchField.vue"
+import TmdbSync from "../TmdbSync.vue"
+import { useTmdbChoice } from "../../composables/useTmdbChoice"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { fetchProfiles } from "../../composables/sourceCalls"
 import { useSeriesSources } from "../../composables/useSeriesSources"
-import { t, tn } from "../../i18n"
+import { t } from "../../i18n"
 import { useSeriesStore, type Series } from "../../stores/series"
 import { compareNames } from "../../lib/collate"
 import { isAbsolutePath } from "../../lib/fsnames"
-import { vPress } from "../../directives/press"
 
 // "Properties" tab of the status window. Saving is POST /api/series/{id}; the fields of the sources are not in it:
 // a source changes at once by its own request (the "Sources" block). save() is called from the footer of
@@ -29,8 +28,6 @@ const emit = defineEmits<{ (e: "saving", v: boolean): void }>()
 const { request } = useApi()
 const toast = useToast()
 
-interface TmdbResult { id: number; name?: string; name_en?: string; original_name?: string; year?: string; poster_path?: string }
-interface TmdbSeason { season_number: number; episode_count: number }
 interface Torrent { torrent_id?: string | number; link?: string; date_time?: string; episodes?: string; quality?: string; is_active?: boolean }
 type VState = "valid" | "invalid" | null
 
@@ -155,56 +152,29 @@ const showValidation = ref(false)
 const profiles = ref<{ id: number; name: string }[]>([])
 
 // --- TMDB (как в Add) ---
-const tmdbSearchQuery = ref("")
-const tmdbResults = ref<TmdbResult[]>([])
-const tmdbSelected = ref<TmdbResult | null>(null)
-const tmdbLoading = ref(false)
-const tmdbEpisodeCount = ref(0)
-const tmdbSeasonDetails = ref<TmdbSeason[]>([])
+const tmdb = useTmdbChoice({ query: () => form.name || form.name_en, season: () => form.season, seasonless: () => isSeasonless.value })
 
 // предзаполнение из сохранённого tmdb_info
 const info = (s as Record<string, unknown>).tmdb_info as Record<string, unknown> | null
 if (info && info.tmdb_id) {
-  tmdbSelected.value = {
+  tmdb.selected.value = {
     id: Number(info.tmdb_id),
     name: String(info.series_name ?? ""),
     year: info.year ? String(info.year) : undefined,
     poster_path: info.poster_path ? String(info.poster_path) : undefined,
   }
-  tmdbEpisodeCount.value = Number(info.total_episodes ?? 0)
+  tmdb.episodeCount.value = Number(info.total_episodes ?? 0)
 }
 
 // The names the search of the video applications offers: those of the series, then the original one of TMDB, asked
 // only when the search is opened.
 const seriesNames = computed(() => [...form.name.split("/"), form.name_en].map((text) => ({ text: text.trim() })).filter((name) => name.text))
 async function tmdbOriginal(): Promise<{ text: string; mark?: string }[]> {
-  if (!tmdbSelected.value?.id) return []
-  const { data } = await api.GET("/api/tmdb/details/{tmdb_id}", { params: { path: { tmdb_id: tmdbSelected.value.id } } })
+  if (!tmdb.selected.value?.id) return []
+  const { data } = await api.GET("/api/tmdb/details/{tmdb_id}", { params: { path: { tmdb_id: tmdb.selected.value.id } } })
   const original = String((data as Record<string, unknown> | undefined)?.original_name ?? "").trim()
   return original ? [{ text: original, mark: t("sources.apps.tmdb") }] : []
 }
-
-const tmdbSeasonNumber = computed(() => {
-  if (isSeasonless.value) return 1
-  const m = form.season.match(/^s(\d+)$/i)
-  return m ? parseInt(m[1], 10) : 1
-})
-function tmdbName(r: TmdbResult): string {
-  const ru = (r.name || "").trim()
-  const orig = (r.original_name || "").trim()
-  if (ru && ru !== orig) return ru
-  const en = (r.name_en || "").trim()
-  if (en && en !== orig) return en
-  return ru || en || orig
-}
-const tmdbCatalogName = computed(() => {
-  if (!tmdbSelected.value) return ""
-  const name = tmdbName(tmdbSelected.value)
-  if (!name) return ""
-  const year = String(tmdbSelected.value.year || "").trim()
-  const idPart = `[tmdbid-${tmdbSelected.value.id}]`
-  return year ? `${name} (${year}) ${idPart}` : `${name} ${idPart}`
-})
 
 // --- валидация ---
 const isSeasonValid = computed(() => {
@@ -222,50 +192,6 @@ const seasonState = computed<VState>(() => {
   if (!showValidation.value || isSeasonless.value || isVideo) return null
   return vstate(isSeasonValid.value)
 })
-
-async function searchTMDB() {
-  if (!tmdbSearchQuery.value) tmdbSearchQuery.value = form.name || form.name_en
-  if (!tmdbSearchQuery.value) return
-  tmdbLoading.value = true
-  tmdbResults.value = []
-  try {
-    const { data } = await api.POST("/api/tmdb/search", { body: { query: tmdbSearchQuery.value } })
-    const res = (data ?? null) as { success?: boolean; results?: TmdbResult[]; error?: string } | null
-    if (res?.success) tmdbResults.value = res.results ?? []
-    else toast.add({ severity: "warn", summary: "TMDB", detail: t("seriesForm.tmdbSearchFailed", { error: res?.error ?? "?" }), life: 4000 })
-  } finally {
-    tmdbLoading.value = false
-  }
-}
-async function selectTMDBSeries(r: TmdbResult) {
-  tmdbSelected.value = r
-  const { data } = await api.GET("/api/tmdb/details/{tmdb_id}", { params: { path: { tmdb_id: r.id } } })
-  const res = (data ?? null) as { success?: boolean; seasons?: TmdbSeason[] } | null
-  if (res?.success) {
-    tmdbSeasonDetails.value = res.seasons ?? []
-    updateEpisodeCount()
-  }
-}
-function clearTMDBSelection() {
-  tmdbSelected.value = null
-  tmdbSeasonDetails.value = []
-  tmdbEpisodeCount.value = 0
-}
-function updateEpisodeCount() {
-  if (!tmdbSelected.value || !tmdbSeasonDetails.value.length) return
-  const sn = tmdbSeasonDetails.value.find((x) => x.season_number === tmdbSeasonNumber.value)
-  tmdbEpisodeCount.value = sn ? sn.episode_count : 0
-}
-watch(() => form.season, updateEpisodeCount)
-async function copyCatalogName() {
-  if (!tmdbCatalogName.value) return
-  try {
-    await navigator.clipboard.writeText(tmdbCatalogName.value)
-    toast.add({ severity: "success", summary: t("common.copied"), detail: t("seriesForm.catalogCopied"), life: 2500 })
-  } catch {
-    toast.add({ severity: "error", summary: t("common.error"), detail: t("common.copyFailed"), life: 2500 })
-  }
-}
 
 const canSave = computed(() => {
   const base = !!form.name && !!form.name_en && isAbsolutePath(form.save_path)
@@ -307,14 +233,14 @@ async function save(): Promise<boolean> {
       }
       payload.quality = quality
     }
-    if (tmdbSelected.value) {
+    if (tmdb.selected.value) {
       payload.tmdb_data = {
-        tmdb_id: tmdbSelected.value.id,
-        tmdb_season_number: tmdbSeasonNumber.value,
-        total_episodes: tmdbEpisodeCount.value,
-        poster_path: tmdbSelected.value.poster_path,
-        series_name: tmdbName(tmdbSelected.value),
-        year: tmdbSelected.value.year,
+        tmdb_id: tmdb.selected.value.id,
+        tmdb_season_number: tmdb.seasonNumber.value,
+        total_episodes: tmdb.episodeCount.value,
+        poster_path: tmdb.selected.value.poster_path,
+        series_name: tmdb.name(tmdb.selected.value),
+        year: tmdb.selected.value.year,
       }
     }
     const ok = await request(
@@ -343,7 +269,7 @@ onMounted(() => {
   <div class="sheet status-properties">
     <!-- Информация -->
     <SeriesInfoRows
-      v-model:seasonless="isSeasonless" :form="form" :states="infoStates" :catalog-name="tmdbCatalogName" :can-switch-seasons="true"
+      v-model:seasonless="isSeasonless" :form="form" :states="infoStates" :catalog-name="tmdb.catalogName.value" :can-switch-seasons="true"
     >
       <template #path-note>
         <p v-if="s.planned_save_path" class="relocation-planned">
@@ -409,7 +335,7 @@ onMounted(() => {
               <div class="div-table-cell">{{ tor.episodes }}</div>
               <div class="div-table-cell">{{ tor.quality }}</div>
             </div>
-            <div v-if="!filteredSiteTorrents.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">{{ t("properties.torrentsNone") }}</div></div>
+            <div v-if="!filteredSiteTorrents.length" class="div-table-row"><div class="div-table-cell span-all">{{ t("properties.torrentsNone") }}</div></div>
           </div>
         </div>
         <p v-if="siteDataIsStale" class="sheet-problem">{{ t("properties.siteStale") }}</p>
@@ -417,59 +343,6 @@ onMounted(() => {
     </SheetRow>
 
     <!-- TMDB -->
-    <SheetRow :caption="t('seriesForm.tmdbSync')">
-      <TmdbSearchField v-model="tmdbSearchQuery" :loading="tmdbLoading" @search="searchTMDB" />
-
-      <div v-if="tmdbResults.length" class="tmdb-results">
-        <div
-          v-for="res in tmdbResults"
-          :key="res.id"
-          class="card-final card-tmdb tmdb-result-card"
-          :class="tmdbSelected && tmdbSelected.id === res.id ? 'status-success' : 'status-no-match'"
-          @click="selectTMDBSeries(res)"
-        >
-          <div class="info-column">
-            <span class="card-title">{{ tmdbName(res) }} <small style="opacity: 0.6">({{ res.year }})</small></span>
-            <div class="path-line tmdb-pills">
-              <span v-if="res.original_name" class="path-pill">
-                <span class="path-pill-label">{{ t("seriesForm.originalLabel") }}</span>
-                <span class="path-pill-value">{{ res.original_name }}</span>
-              </span>
-              <span v-if="tmdbSelected && tmdbSelected.id === res.id" class="path-pill">
-                <span class="path-pill-label">{{ t("seriesForm.seasonPill", { n: tmdbSeasonNumber }) }}</span>
-                <span class="path-pill-value">{{ tn("seriesForm.episodes", tmdbEpisodeCount) }}</span>
-              </span>
-            </div>
-          </div>
-          <div class="pills-column">
-            <div class="quality-badge">ID: {{ res.id }}</div>
-            <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill"><i class="pi pi-check-circle" /><span>{{ t("seriesForm.chosen") }}</span></div>
-            <div v-if="tmdbSelected && tmdbSelected.id === res.id" v-press class="pill pill-link" :title="t('common.reset')" @click.stop="clearTMDBSelection">
-              <i class="pi pi-times" aria-hidden="true" /><span>{{ t("seriesForm.clearChoice") }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- выбранный без поиска (предзаполнен из tmdb_info) -->
-      <div
-        v-else-if="tmdbSelected"
-        class="card-final card-tmdb status-success"
-      >
-        <div class="info-column">
-          <span class="card-title">{{ tmdbName(tmdbSelected) }} <small style="opacity: 0.6">({{ tmdbSelected.year }})</small></span>
-          <div class="path-line">
-            <span class="path-pill"><span class="path-pill-label">{{ t("seriesForm.seasonPill", { n: tmdbSeasonNumber }) }}</span><span class="path-pill-value">{{ tn("seriesForm.episodes", tmdbEpisodeCount) }}</span></span>
-          </div>
-        </div>
-        <div class="pills-column">
-          <div class="quality-badge">ID: {{ tmdbSelected.id }}</div>
-          <div class="pill"><i class="pi pi-check-circle" /><span>{{ t("seriesForm.chosen") }}</span></div>
-          <div v-press class="pill pill-link" :title="t('common.reset')" @click.stop="clearTMDBSelection"><i class="pi pi-times" aria-hidden="true" /><span>{{ t("seriesForm.clearChoice") }}</span></div>
-        </div>
-      </div>
-
-      <CatalogNameField v-if="tmdbSelected && tmdbCatalogName" :name="tmdbCatalogName" @copy="copyCatalogName" />
-    </SheetRow>
+    <TmdbSync :tmdb="tmdb" :seasonless="isSeasonless" />
   </div>
 </template>

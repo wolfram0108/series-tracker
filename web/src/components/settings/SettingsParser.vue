@@ -17,6 +17,7 @@ import { api } from "../../api/client"
 import { t } from "../../i18n"
 import { isExtract } from "../../lib/ruleVocabulary"
 import type { SourceAddress } from "../../lib/sources"
+import LoadingMark from "../LoadingMark.vue"
 
 // Вкладка «Фильтры VK» окна Настроек — конфигуратор профилей парсера.
 // Аккордеон трёх шагов (профили / правила / тест), как в оригинале
@@ -435,7 +436,7 @@ onMounted(() => {
             <Button :label="t('rules.rule.add')" icon="pi pi-plus-circle" size="small" @click="addRule" />
             <Button :label="t('rules.table.add')" icon="pi pi-table" size="small" severity="secondary" @click="addTable" />
           </div>
-          <div v-if="isLoading" class="parser-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
+          <div v-if="isLoading" class="parser-loading"><LoadingMark /></div>
           <div v-else-if="rules.length === 0" class="parser-empty">{{ t("rules.rule.none") }}</div>
           <div v-else class="rules-list">
             <template v-for="(rule, index) in rules" :key="rule.id">

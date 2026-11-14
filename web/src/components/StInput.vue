@@ -12,10 +12,11 @@ const props = withDefaults(defineProps<{
   modelValue?: string
   placeholder?: string
   ariaLabel?: string
+  autocomplete?: string
   type?: "text" | "password"
   kind?: FsKind
   reveal?: () => Promise<string | null>
-}>(), { modelValue: "", type: "text", placeholder: undefined, ariaLabel: undefined, reveal: undefined })
+}>(), { modelValue: "", type: "text", placeholder: undefined, ariaLabel: undefined, autocomplete: undefined, reveal: undefined })
 
 const emit = defineEmits<{ "update:modelValue": [string] }>()
 const id = useId()
@@ -26,6 +27,8 @@ const show = ref(false)
 const eType = computed(() =>
   props.type === "password" && !show.value ? "password" : "text")
 const rules = computed(() => (props.kind ? FS_RULES[props.kind] : null))
+// A secret field is never given what the browser keeps for the login of the window: `new-password` unless the field says what it is.
+const autoFill = computed(() => props.autocomplete ?? (props.type === "password" ? "new-password" : undefined))
 
 // The eye: a press shows what is typed; on a field that holds nothing and can reveal, it first takes the secret from the core.
 async function toggle() {
@@ -71,6 +74,7 @@ watch(() => props.modelValue, (v) => {
       :type="eType"
       :value="modelValue"
       :placeholder="placeholder"
+      :autocomplete="autoFill"
       :aria-label="ariaLabel ?? fieldLabel?.()"
       @input="onInput"
     />

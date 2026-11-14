@@ -11,6 +11,7 @@ import { useSSE } from "../../composables/useSSE"
 import SheetRow from "../SheetRow.vue"
 import { t } from "../../i18n"
 import { stateLabel } from "../../lib/states"
+import LoadingMark from "../LoadingMark.vue"
 
 // Вкладка «Композиция» (торрент) — порт StatusTabTorrentComposition.
 // Файлы сериала, сгруппированные по сезонам, карточками card-torrent;
@@ -310,7 +311,7 @@ defineExpose({ reload: () => load() })
       </SheetRow>
     </div>
 
-    <div v-if="loading || fetching" class="status-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
+    <div v-if="loading || fetching" class="status-loading"><LoadingMark /></div>
     <div v-else-if="!files.length" class="empty-state">
       {{ t("composition.empty") }}
     </div>
