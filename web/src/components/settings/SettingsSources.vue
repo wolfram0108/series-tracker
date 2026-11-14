@@ -104,7 +104,7 @@ onMounted(load)
           </span>
         </div>
         <SheetField :label="t('settings.sources.mirror.new')" icon="pi pi-globe">
-          <StInput v-model="newMirror" @keyup.enter="addMirror" />
+          <StInput v-model="newMirror" :placeholder="t('settings.sources.mirror.newHint')" @keyup.enter="addMirror" />
           <div class="constructor-item item-button-group">
             <StBtn icon="pi pi-plus" variant="add" :disabled="busy || !newMirror.trim()" :title="t('settings.sources.mirror.add')" :aria-label="t('settings.sources.mirror.add')" @click="addMirror" />
           </div>

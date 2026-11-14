@@ -147,7 +147,7 @@ function clear(): void {
         <StInput v-model="address" :aria-label="t('sources.add.label')" @keyup.enter="add" />
         <template v-if="channel">
           <StLabel icon="pi pi-search" :text="t('sources.vk.query')" />
-          <StInput v-model="query" class="source-query" :aria-label="t('sources.vk.query')" @keyup.enter="add" />
+          <StInput v-model="query" class="source-query" :placeholder="t('sources.vk.queryHint')" :aria-label="t('sources.vk.query')" @keyup.enter="add" />
         </template>
         <div class="item-button-group">
           <button type="button" class="btn-icon btn-add btn-text-icon" :disabled="busy || adding || !ready" @click="add">

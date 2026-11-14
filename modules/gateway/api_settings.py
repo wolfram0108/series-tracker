@@ -11,7 +11,7 @@ import asyncio
 import json
 import os
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from core import BusRequestError
@@ -85,6 +85,19 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                 {"key": "tmdb_token"})
         out["tmdb"] = {"configured": bool(tmdb.get("value"))}
         return out
+
+    @r.get("/api/auth/{service}/secret", response_model=DynamicObject)
+    async def get_auth_secret(service: str):
+        """The secret of one service, as the eye of its field asks it (Этап 3, docs/security.md: a secret is never given with the
+        credentials, only on this request, to the administrator who is signed in): {secret}, empty when none is set. Not cached."""
+        if service == "tmdb":
+            reply = await gw.request("settings.value.get", {"key": "tmdb_token"})
+            secret = reply.get("value") or ""
+        elif service in AUTH_SERVICES:
+            secret = (await gw.request("trackerauth.secret.get", {"service": service}))["secret"]
+        else:
+            raise HTTPException(status_code=404)
+        return JSONResponse({"secret": secret}, headers={"Cache-Control": "no-store"})
 
     @r.post("/api/auth", response_model=OkResponse,
             response_model_exclude_none=True)

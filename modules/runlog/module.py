@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from core import BaseModule, compute, storage
+from core.secrets import redacted
 from core.contracts.release_table import TABLE_TRACE
 from core.contracts.work import RUN_CHANGED
 from core.envelope import Envelope
@@ -70,7 +71,7 @@ def _line(entry) -> str:
     kind, at, body = entry
     if kind == "bus":
         body = {"kind": body.kind, "topic": body.topic, "cid": body.correlation_id, "reply_to": body.reply_to,
-                "admission": body.admission, "payload": body.payload}
+                "admission": body.admission, "payload": redacted(body.payload)}
     return json.dumps({"t": at, "e": kind, **body}, ensure_ascii=False, default=repr)
 
 

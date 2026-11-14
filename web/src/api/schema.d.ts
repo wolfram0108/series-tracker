@@ -1284,6 +1284,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/{service}/secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Auth Secret
+         * @description The secret of one service, as the eye of its field asks it (Этап 3, docs/security.md: a secret is never given with the
+         *     credentials, only on this request, to the administrator who is signed in): {secret}, empty when none is set. Not cached.
+         */
+        get: operations["get_auth_secret_api_auth__service__secret_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/parse_url": {
         parameters: {
             query?: never;
@@ -7980,6 +8001,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+        };
+    };
+    get_auth_secret_api_auth__service__secret_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                service: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DynamicObject"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -231,8 +231,6 @@ onMounted(async () => {
         <SheetField v-for="flag in FLAGS" :key="flag.key" :label="t(flag.label)" :title="t(flag.hint)" control>
           <StSwitch :model-value="flags[flag.key]" @update:model-value="setFlag(flag, $event)" />
         </SheetField>
-      </div>
-      <div class="sheet-pair">
         <SheetField v-for="each in LIMITS" :key="each.field" :label="t(each.label)" :title="each.hint ? t(each.hint) : undefined" control>
           <StNumber v-model="limits[each.field]" @change="saveLimits(each.field)" />
         </SheetField>

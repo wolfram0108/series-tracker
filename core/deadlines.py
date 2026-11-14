@@ -57,7 +57,7 @@ _QUICK = (
     "sources.trackers.list",
     "torrents.db.add", "torrents.db.files.for_series", "torrents.db.history",
     "torrents.queue.get",
-    "trackerauth.credentials.get", "trackerauth.credentials.set",
+    "trackerauth.credentials.get", "trackerauth.credentials.set", "trackerauth.secret.get",
     "planner.work.get", "planner.delete", "planner.delete.cancel", "planner.failures.forget",
     "planner.downloaded_counts", "planner.seasons", "sources.video.fetch.stop",
 )

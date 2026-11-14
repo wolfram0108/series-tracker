@@ -31,9 +31,11 @@ const configured = ref({
 })
 const { request } = useApi()
 
-/** Подпись поля секрета: помечает, что секрет уже задан. */
-function secretLabel(base: string, on: boolean): string {
-  return on ? t("auth.secret.set", { label: base }) : base
+// The eye of a field of a secret asks the core for it (GET /api/auth/{service}/secret): the secrets are not sent with the rest.
+async function reveal(service: string, held: boolean): Promise<string | null> {
+  if (!held) return null
+  const got = (await request(api.GET(`/api/auth/${service}/secret` as never))) as { secret?: string } | null
+  return got?.secret || null
 }
 
 async function load() {
@@ -81,8 +83,8 @@ defineExpose({ save })
         <SheetField :label="t('auth.login')" icon="pi pi-user">
           <StInput v-model="creds.qbittorrent.username" />
         </SheetField>
-        <SheetField :label="secretLabel(t('auth.password'), configured.qbittorrent)" icon="pi pi-lock">
-          <StInput v-model="creds.qbittorrent.password" type="password" />
+        <SheetField :label="t('auth.password')" icon="pi pi-lock">
+          <StInput v-model="creds.qbittorrent.password" type="password" :placeholder="configured.qbittorrent ? t('auth.secret.mask') : undefined" :reveal="() => reveal('qbittorrent', configured.qbittorrent)" />
         </SheetField>
       </div>
     </SheetRow>
@@ -92,16 +94,16 @@ defineExpose({ save })
         <SheetField :label="t('auth.login')" icon="pi pi-user">
           <StInput v-model="creds.kinozal.username" />
         </SheetField>
-        <SheetField :label="secretLabel(t('auth.password'), configured.kinozal)" icon="pi pi-lock">
-          <StInput v-model="creds.kinozal.password" type="password" />
+        <SheetField :label="t('auth.password')" icon="pi pi-lock">
+          <StInput v-model="creds.kinozal.password" type="password" :placeholder="configured.kinozal ? t('auth.secret.mask') : undefined" :reveal="() => reveal('kinozal', configured.kinozal)" />
         </SheetField>
       </div>
     </SheetRow>
 
     <SheetRow caption="VK Video">
       <div class="sheet-pair">
-        <SheetField :label="secretLabel('Access Token', configured.vk)" icon="pi pi-key">
-          <StInput v-model="creds.vk.token" type="password" />
+        <SheetField :label="'Access Token'" icon="pi pi-key">
+          <StInput v-model="creds.vk.token" type="password" :placeholder="configured.vk ? t('auth.secret.mask') : undefined" :reveal="() => reveal('vk', configured.vk)" />
         </SheetField>
       </div>
     </SheetRow>
@@ -111,16 +113,16 @@ defineExpose({ save })
         <SheetField :label="t('auth.login')" icon="pi pi-user">
           <StInput v-model="creds.rutracker.username" />
         </SheetField>
-        <SheetField :label="secretLabel(t('auth.password'), configured.rutracker)" icon="pi pi-lock">
-          <StInput v-model="creds.rutracker.password" type="password" />
+        <SheetField :label="t('auth.password')" icon="pi pi-lock">
+          <StInput v-model="creds.rutracker.password" type="password" :placeholder="configured.rutracker ? t('auth.secret.mask') : undefined" :reveal="() => reveal('rutracker', configured.rutracker)" />
         </SheetField>
       </div>
     </SheetRow>
 
     <SheetRow caption="The Movie Database (TMDB)">
       <div class="sheet-pair">
-        <SheetField :label="secretLabel('Read Access Token (v4)', configured.tmdb)" icon="pi pi-key">
-          <StInput v-model="creds.tmdb.token" type="password" />
+        <SheetField :label="'Read Access Token (v4)'" icon="pi pi-key">
+          <StInput v-model="creds.tmdb.token" type="password" :placeholder="configured.tmdb ? t('auth.secret.mask') : undefined" :reveal="() => reveal('tmdb', configured.tmdb)" />
         </SheetField>
       </div>
       <p class="sheet-hint">{{ t("auth.tmdbHint") }}</p>

@@ -121,6 +121,23 @@ async def test_auth_roundtrip(system):
 
 
 @pytest.mark.asyncio
+async def test_a_secret_is_given_only_when_the_eye_of_its_field_asks_for_it_and_is_not_kept(system):
+    """The password of a service is shown on request: its own call, not cached, nothing of it in the credentials; a service with none
+    set gives an empty one, a name that is no service is no route."""
+    _, _, client = system
+    await client.post("/api/auth", json={
+        "qbittorrent": {"url": "http://qb:8080", "username": "admin", "password": "pass-qb"},
+        "vk": {"token": "vk-token-1"}, "tmdb": {"token": "tmdb-token-1"}})
+    for service, secret in (("qbittorrent", "pass-qb"), ("vk", "vk-token-1"), ("tmdb", "tmdb-token-1"), ("kinozal", "")):
+        answer = await client.get(f"/api/auth/{service}/secret")
+        assert answer.status_code == 200 and answer.json() == {"secret": secret}, service
+        assert answer.headers["cache-control"] == "no-store"
+    assert (await client.get("/api/auth/nothing/secret")).status_code == 404
+    # the credentials still carry no secret
+    assert "pass-qb" not in (await client.get("/api/auth")).text
+
+
+@pytest.mark.asyncio
 async def test_parse_url_form(system):
     _, _, client = system
     resp = await client.post("/api/parse_url", json={"url": "http://kinozal.tv/details.php?id=1"})

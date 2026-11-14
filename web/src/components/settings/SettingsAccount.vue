@@ -67,7 +67,7 @@ async function submit(): Promise<void> {
     <SheetRow :caption="t('account.section')">
       <div class="sheet-pair">
         <SheetField :label="t('account.new')" icon="pi pi-key" :state="nextState">
-          <StInput v-model="next" type="password" />
+          <StInput v-model="next" type="password" :placeholder="t('account.newHint')" />
         </SheetField>
         <SheetField :label="t('account.repeat')" icon="pi pi-key" :state="next2State">
           <StInput v-model="next2" type="password" />

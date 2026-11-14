@@ -123,7 +123,7 @@ async function copyAddress(): Promise<void> {
             <StInput v-model="channel" />
           </SheetField>
           <SheetField :label="t('sources.vk.query')" icon="pi pi-search">
-            <StInput v-model="query" />
+            <StInput v-model="query" :placeholder="t('sources.vk.queryHint')" />
           </SheetField>
         </div>
         <small v-if="!vkQuery(query)" class="source-reason">{{ t("sources.vk.queryMissing") }}</small>

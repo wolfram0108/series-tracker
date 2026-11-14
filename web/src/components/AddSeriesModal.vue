@@ -540,7 +540,7 @@ onBeforeUnmount(() => {
         <template v-if="candidate && candidateChannel">
           <StLabel icon="pi pi-search" :text="t('sources.vk.query')" />
           <StInput
-            v-model="candidateQuery" class="source-query" :aria-label="t('sources.vk.query')"
+            v-model="candidateQuery" class="source-query" :placeholder="t('sources.vk.queryHint')" :aria-label="t('sources.vk.query')"
             @keyup.enter="vkQuery(candidateQuery) && addCandidate()"
           />
         </template>
@@ -564,7 +564,7 @@ onBeforeUnmount(() => {
         v-model:seasonless="isSeasonless" :form="newSeries" :states="infoStates" :catalog-name="tmdbCatalogName"
         :can-switch-seasons="showSeasonlessSwitch"
       >
-        <SheetField v-if="kind === 'torrent'" :label="t('sources.profile.label')" icon="pi pi-filter" :state="profileState">
+        <SheetField v-if="kind === 'torrent'" :label="t('sources.profile.label')" icon="pi pi-filter" :state="profileState" wide>
           <StSelect v-model="newSeries.parser_profile_id" :options="profileOptions" :placeholder="t('add.profilePick')" />
         </SheetField>
       </SeriesInfoRows>

@@ -45,22 +45,20 @@ const seasonless = defineModel<boolean>("seasonless", { required: true })
         <SavedPathDropdown :catalog-name="catalogName" @select="form.save_path = $event" />
       </SheetField>
       <SheetField :label="t('seriesForm.season')" icon="pi pi-hashtag" :state="states.season" :class="{ 'is-disabled': seasonless }">
-        <StInput v-model="form.season" />
+        <StInput v-model="form.season" :placeholder="t('seriesForm.seasonHint')" />
       </SheetField>
-      <SheetField v-if="canSwitchSeasons" :label="t('seriesForm.seasonless')" control>
+      <slot name="path-note" />
+      <p v-if="form.save_path && !isAbsolutePath(form.save_path)" class="sheet-problem">{{ t("seriesForm.savePathAbsolute") }}</p>
+      <SheetField v-if="canSwitchSeasons" :label="t('seriesForm.seasonless')" :title="t('seriesForm.seasonlessHint')" wide control>
         <StSwitch v-model="seasonless" />
       </SheetField>
-    </div>
-    <slot name="path-note" />
-    <p v-if="form.save_path && !isAbsolutePath(form.save_path)" class="sheet-problem">{{ t("seriesForm.savePathAbsolute") }}</p>
-    <div class="sheet-pair">
       <SheetField :label="t('seriesForm.qualityOverride')" icon="pi pi-video">
-        <StInput v-model="form.quality_override" kind="filename" />
+        <StInput v-model="form.quality_override" kind="filename" :placeholder="t('seriesForm.manualHint')" />
       </SheetField>
       <SheetField :label="t('seriesForm.resolutionOverride')" icon="pi pi-desktop">
-        <StInput v-model="form.resolution_override" kind="filename" />
+        <StInput v-model="form.resolution_override" kind="filename" :placeholder="t('seriesForm.manualHint')" />
       </SheetField>
+      <slot />
     </div>
-    <slot />
   </SheetRow>
 </template>

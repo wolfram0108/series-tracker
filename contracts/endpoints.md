@@ -138,6 +138,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 |---|---|---|---|
 | GET | `/api/auth` | Креды внешних сервисов без секретов + статус TMDB | `SettingsAuth.vue` |
 | POST | `/api/auth` | Сохранение кредов сервисов | `SettingsAuth.vue` |
+| GET | `/api/auth/{service}/secret` | Секрет одного сервиса по просьбе глаза его поля (не кэшируется); пустой, если не задан | `SettingsAuth.vue` (через `StInput`) |
 | POST | `/api/parse_url` | Разбор страницы трекера: заголовок, раздачи, трекер; страница, которую читает сайт, — отказ 400 `not_a_torrent_page` | `AddSeriesModal.vue`, `StatusProperties.vue` |
 | GET, POST | `/api/settings/force_replace` | Флаг «всегда заменять торренты» | `SettingsDebug.vue` |
 | GET, POST | `/api/settings/conform_clear_finished` | Флаг «очищать очередь выравнивания по завершении» (Р-59): завершённая задача уходит из истории демона вместе с графиками | `SettingsDebug.vue` |

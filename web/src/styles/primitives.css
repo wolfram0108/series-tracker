@@ -57,7 +57,7 @@
 
 /* The sheet (components/SheetRow.vue): a window of settings as rows, each a caption above and what it holds under it, the whole width
    of the window: no column of captions that stands empty beside a tall body. Fields in a row go in as many columns as fit
-   (`.sheet-pair`); a field is a group of the constructor (StGroup) with its label as a segment (StLabel) and its value as a plain
+   (`.sheet-pair`, at most two, in one grid so that the columns of a row stand under those of the row above); a field is a group of the constructor (StGroup) with its label as a segment (StLabel) and its value as a plain
    input (StInput without a label) or a control (StControl: a switch, a pair of buttons). */
 .sheet { display: flex; flex-direction: column; }
 .sheet-row { display: flex; flex-direction: column; gap: 0.5rem; padding-block: 0.9rem; border-bottom: 1px solid var(--border-color); }
@@ -67,8 +67,11 @@
 }
 .sheet-count { margin-inline-start: 0.3rem; font-weight: 500; color: #adb5bd; }
 .sheet-body { min-inline-size: 0; display: flex; flex-direction: column; gap: 0.6rem; }
-.sheet-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 0.6rem; }
+/* A pair: two columns where the room holds two fields of 22rem, one where it does not — never more, so that a long value (a name, a folder)
+   keeps its room and the rows of a window stand in the same columns. What is no field (a note, a problem) takes the whole row. */
+.sheet-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, max(22rem, calc(50% - 0.3rem))), 1fr)); gap: 0.6rem; }
 .sheet-pair > .input-constructor-group.is-wide { grid-column: 1 / -1; }
+.sheet-pair > :not(.input-constructor-group) { grid-column: 1 / -1; }
 .sheet-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
 .sheet-line.is-end { justify-content: flex-end; }
 .sheet-problem { margin: 0; color: var(--color-red-1); }
@@ -125,4 +128,10 @@
    screen instead of running out of the window. */
 .input-constructor-group:has(> .item-select):has(> .item-plain) { height: auto; flex-wrap: wrap; }
 .input-constructor-group:has(> .item-select):has(> .item-plain) > .item-select { min-width: 0; flex: 1 1 9rem; }
+
+/* The buttons of a head — the band above a block: the page, a season, a compilation, an episode, a source — are lower than the buttons on
+   the ground of a window: a head is a line of text with its actions, not a place of their own. */
+.header-actions .p-button, .fold-does .p-button, .source-actions .p-button {
+  min-height: 32px !important; padding: 4px 14px !important; font-size: 13px !important; gap: 6px !important;
+}
 

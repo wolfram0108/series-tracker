@@ -149,7 +149,7 @@ class UiStand(AppStand):
         page = self.page
         await page.goto("/", wait_until="domcontentloaded")
         await page.get_by_label("Имя администратора").fill(ADMIN)
-        await page.get_by_label("Пароль (от 8 символов)").fill(PASSWORD)
+        await page.get_by_label(text("setup.password"), exact=True).fill(PASSWORD)
         await page.get_by_label("Повтор пароля").fill(PASSWORD)
         await page.get_by_role("button", name="Создать и войти").click()
         await page.get_by_label("Имя администратора").wait_for(state="detached")

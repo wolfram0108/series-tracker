@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from core import crypto
 from core.db import Database
+from core.secrets import SECRET_SETTING_KEYS
 
 # Ключи-секреты: их значения хранятся в БД зашифрованными (Этап 3Б).
-SECRET_KEYS = frozenset({"tmdb_token", "provider.token"})
+SECRET_KEYS = SECRET_SETTING_KEYS
 
 
 class SettingsRepository:

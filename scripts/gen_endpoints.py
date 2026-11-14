@@ -94,6 +94,7 @@ SUMMARIES = {
     "POST /api/preview/naming/fetch": "Предпросмотр нейминга: команда torrents.preview.fetch, ответ сразу",
     "GET /api/auth": "Креды внешних сервисов без секретов",
     "POST /api/auth": "Сохранение кредов сервисов",
+    "GET /api/auth/{service}/secret": "Секрет одного сервиса по просьбе глаза его поля (не кэшируется); пустой, если не задан",
     "POST /api/parse_url": "Разбор страницы торрент-трекера: заголовок, раздачи, трекер; страница сайта — отказ not_a_torrent_page",
     "GET /api/settings/force_replace": "Чтение флага «всегда заменять торренты»",
     "POST /api/settings/force_replace": "Запись флага «всегда заменять торренты»",

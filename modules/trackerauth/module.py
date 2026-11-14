@@ -77,6 +77,7 @@ class TrackerauthModule(BaseModule):
         self.handle("trackerauth.fetch", self.on_fetch)
         self.handle("trackerauth.credentials.get", self.on_credentials_get)
         self.handle("trackerauth.credentials.set", self.on_credentials_set)
+        self.handle("trackerauth.secret.get", self.on_secret_get)
 
     async def on_start(self) -> None:
         # Этап 3Б: одноразово зашифровать секреты, лежащие в открытом виде.
@@ -96,6 +97,13 @@ class TrackerauthModule(BaseModule):
         return {"credentials": {
             "username": row["username"], "url": row["url"],
             "has_password": bool(row["password"])}}
+
+    async def on_secret_get(self, env: Envelope) -> dict:
+        """The password of a service, for the one who asked to see it (the eye of its field in the settings): {secret}, empty when there is
+        none. It goes to the window only on that request, never with the credentials; on the bus it is masked in every dump
+        (core/secrets.py)."""
+        row = await self.repo.get_credentials(env.payload["service"])
+        return {"secret": (row or {}).get("password") or ""}
 
     async def on_credentials_set(self, env: Envelope) -> dict:
         p = env.payload

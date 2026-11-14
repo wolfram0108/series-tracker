@@ -6,14 +6,16 @@ import { t } from "../i18n"
 
 // The field of a sheet (constructor-item item-plain): its label is the first segment of its group (SheetField / StLabel), its hint
 // the `placeholder` while it is empty; with `type="password"` an eye shows what was typed. It names itself by the label of its
-// field (lib/fieldLabel.ts) unless `ariaLabel` names it.
+// field (lib/fieldLabel.ts) unless `ariaLabel` names it. A secret field that is empty may be given `reveal`: the eye then asks for
+// the secret the core keeps (it is never sent with the rest) and shows it.
 const props = withDefaults(defineProps<{
   modelValue?: string
   placeholder?: string
   ariaLabel?: string
   type?: "text" | "password"
   kind?: FsKind
-}>(), { modelValue: "", type: "text", placeholder: undefined, ariaLabel: undefined })
+  reveal?: () => Promise<string | null>
+}>(), { modelValue: "", type: "text", placeholder: undefined, ariaLabel: undefined, reveal: undefined })
 
 const emit = defineEmits<{ "update:modelValue": [string] }>()
 const id = useId()
@@ -24,6 +26,15 @@ const show = ref(false)
 const eType = computed(() =>
   props.type === "password" && !show.value ? "password" : "text")
 const rules = computed(() => (props.kind ? FS_RULES[props.kind] : null))
+
+// The eye: a press shows what is typed; on a field that holds nothing and can reveal, it first takes the secret from the core.
+async function toggle() {
+  if (!show.value && !props.modelValue && props.reveal) {
+    const secret = await props.reveal()
+    if (secret) emit("update:modelValue", secret)
+  }
+  show.value = !show.value
+}
 
 function onInput(e: Event) {
   const el = e.target as HTMLInputElement
@@ -68,7 +79,7 @@ watch(() => props.modelValue, (v) => {
       type="button"
       class="password-toggle-btn"
       :title="show ? t('common.hide') : t('common.show')"
-      @click="show = !show"
+      @click="toggle"
     >
       <i class="pi" :class="show ? 'pi-eye-slash' : 'pi-eye'" />
     </button>

@@ -87,7 +87,7 @@ async function submit(): Promise<void> {
         </SheetField>
 
         <SheetField :label="t('setup.password')" icon="pi pi-lock" :state="passState">
-          <StInput v-model="password" type="password" />
+          <StInput v-model="password" type="password" :placeholder="t('setup.passwordHint')" />
         </SheetField>
 
         <SheetField :label="t('setup.passwordRepeat')" icon="pi pi-lock" :state="pass2State">

@@ -56,6 +56,30 @@ async def test_a_run_is_dumped_whole_in_order_and_nothing_outside_it(tmp_path):
     assert got[-1]["stopped"] is False
 
 
+async def test_a_secret_that_goes_round_the_bus_in_a_run_is_in_its_dump_as_a_mask(tmp_path):
+    """The password of a service the administrator saves or asks to see, a secret setting read: all of it passes the bus while a run is
+    open, and none of it is written into the dump."""
+    bus = Bus()
+    module = RunlogModule(bus, str(tmp_path))
+    runner = Runner(bus, [module])
+    await runner.start()
+    try:
+        bus.publish(run_changed(5, True))
+        bus.publish(Envelope(topic="trackerauth.credentials.set", kind="query", payload={"service": "kinozal", "password": "p4ss"}))
+        bus.publish(Envelope(topic="trackerauth.secret.get", kind="reply", payload={"secret": "s3cret"}))
+        bus.publish(Envelope(topic="settings.value.get", kind="reply", payload={"key": "tmdb_token", "value": "t0ken"}))
+        bus.publish(run_changed(5, False))
+        await module.written()
+    finally:
+        await runner.stop()
+    (path,) = dumps(tmp_path, 5)
+    with gzip.open(path, "rt", encoding="utf-8") as dump:
+        raw = dump.read()
+    assert "p4ss" not in raw and "s3cret" not in raw and "t0ken" not in raw
+    got = {each["topic"]: each["payload"] for each in lines(path) if each["e"] == "bus"}
+    assert got["trackerauth.credentials.set"] == {"service": "kinozal", "password": "***"} and got["settings.value.get"]["value"] == "***"
+
+
 async def test_a_run_the_process_stops_in_is_closed_as_stopped_and_old_dumps_go(tmp_path):
     bus = Bus()
     module = RunlogModule(bus, str(tmp_path), keep=2)
