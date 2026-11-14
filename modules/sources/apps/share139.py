@@ -362,11 +362,13 @@ class Share139Client:
         return seen
 
     async def _offer(self, seen: Callable[[str, str], Awaitable[Checked | None]], candidates: list[Candidate],
-                     folders_of: Callable[[Checked], list[dict]], dropped: list[str]) -> list[dict]:
+                     folders_of: Callable[[Checked], list[dict]], dropped: list[str],
+                     titles: dict[tuple[str, str], str] | None = None) -> list[dict]:
         """The cards of the shares of the candidates, each looked into (`seen`): a share its owner deleted is dropped (its link
         goes to `dropped`), one that wants a password is offered with that said, one not looked into is offered unchecked; a
         share of folders and no video file is offered as each of the folders `folders_of` picks of it. The number of a card
-        is the one the memory of the folders gives."""
+        is the one the memory of the folders gives. A candidate that has no title of its own (a pasted link) keeps the title
+        `titles` has of its folder: the name the cloud gives a share is what is offered only for a folder not known yet."""
         assert self._folders is not None
         cards = []
         for candidate in candidates:
@@ -380,6 +382,7 @@ class Share139Client:
                 and len(checked.folders) > 1 else []
             for folder, name in [(str(each["caID"]), f"{title} / {each.get('caName') or each['caID']}") for each in picked] \
                     or [("root", title)]:
+                name = (not candidate.title and (titles or {}).get((candidate.link_id, folder))) or name
                 card = await self._folders.share_folder_register(
                     candidate.link_id, folder, password=candidate.password, title=name, publisher_url=candidate.publisher_url,
                     published_at=candidate.published_at, found_by=candidate.found_by)
@@ -427,7 +430,9 @@ class Share139Client:
         words saying so."""
         candidates = [Candidate(link, code, "", "", "", "pasted") for link, code in pasted[:PASTED_AT_MOST]]
         dropped: list[str] = []
-        cards = await self._offer(self._checker(), candidates, lambda checked: list(checked.folders[:PASTED_FOLDERS_AT_MOST]), dropped)
+        known = {(each["link_id"], each["folder_id"]): each["title"] for each in await self._folders.share_folders() if each["title"]}
+        cards = await self._offer(self._checker(), candidates, lambda checked: list(checked.folders[:PASTED_FOLDERS_AT_MOST]), dropped,
+                                  known)
         if not cards and dropped:
             raise AppError(reason("app_share_gone", app=self.profile.label, links=", ".join(dropped)))
         return cards

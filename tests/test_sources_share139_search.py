@@ -357,6 +357,18 @@ async def test_a_pasted_share_is_looked_into_and_offered_by_the_name_the_cloud_g
     assert data.names == ["无上神帝 4K"] and cloud.asked[-1]["passwd"] == "ab12"
 
 
+async def test_a_pasted_share_the_search_found_before_keeps_its_title_and_the_way_it_was_found(world):
+    cloud, _clock, client, repo = world
+    cloud.channels["yunpan139"] = post(1, f"名称：{TITLE} 4K", share("known0001"))
+    cloud.cloud["known0001"] = {**videos("1.mp4"), "lkName": "万丨界丨独丨尊"}
+    found = await client().search_page(TITLE, 1)
+    pasted = await client().search_page(share("known0001"), 1)
+    # The name the cloud gives a share is what a folder not known yet is offered by (publishers write it so no search finds it).
+    assert [(each["id"], each["name"]) for each in pasted.cards] == [(found.cards[0]["id"], f"{TITLE} 4K")]
+    (held,) = await repo.share_folders()
+    assert (held["title"], held["found_by"], held["publisher_url"]) == (f"{TITLE} 4K", "telegram", "https://t.me/yunpan139/1")
+
+
 async def test_a_pasted_share_its_owner_deleted_says_so_and_one_that_wants_a_code_is_offered_again_when_the_code_comes(world):
     cloud, _clock, client, _repo = world
     app = client()

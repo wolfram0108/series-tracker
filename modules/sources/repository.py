@@ -175,17 +175,18 @@ class SourcesRepository:
     async def share_folder_register(self, link_id: str, folder_id: str, *, password: str = "", title: str = "",
                                     publisher_url: str = "", published_at: str = "", found_by: str = "") -> int:
         """The card of a folder of a share: the number it has, or the next one when it is found for the first time. What is
-        known of it again (a title, the code the post gives) replaces what was; an empty value does not."""
+        known of it again (a title, the code the post gives) replaces what was; an empty value does not. How it was found is
+        how it was found first."""
         now = datetime.now(timezone.utc).isoformat()
 
         def write(conn) -> int:
-            held = conn.execute("SELECT card, password, title, publisher_url, published_at FROM share139_folders"
+            held = conn.execute("SELECT card, password, title, publisher_url, published_at, found_by FROM share139_folders"
                                 " WHERE link_id = ? AND folder_id = ?", (link_id, folder_id)).fetchone()
             if held is not None:
                 conn.execute("UPDATE share139_folders SET password = ?, title = ?, publisher_url = ?, published_at = ?,"
                              " found_by = ?, seen_at = ? WHERE card = ?",
                              (password or held["password"], title or held["title"], publisher_url or held["publisher_url"],
-                              published_at or held["published_at"], found_by, now, held["card"]))
+                              published_at or held["published_at"], held["found_by"] or found_by, now, held["card"]))
                 return held["card"]
             card = conn.execute("SELECT COALESCE(MAX(card), ?) + 1 FROM share139_folders", (SHARE_CARDS_FROM - 1,)).fetchone()[0]
             conn.execute("INSERT INTO share139_folders (card, link_id, folder_id, password, title, publisher_url, published_at,"
