@@ -16,8 +16,8 @@ def draft(**changes) -> VoiceSettingsDraft:
     return VoiceSettingsDraft(**{"priority": ["kodik", "cvh"], "voice_groups": {}, "voice_languages": languages, **changes})
 
 
-def problems(form: VoiceSettingsDraft, player_groups=None) -> list[tuple[str, str]]:
-    return [(each.field, each.detail.code) for each in editor.check(form, player_groups or {})]
+def problems(form: VoiceSettingsDraft, player_groups=None, kept=()) -> list[tuple[str, str]]:
+    return [(each.field, each.detail.code) for each in editor.check(form, player_groups or {}, kept=kept)]
 
 
 def test_a_good_form_has_no_problems():
@@ -39,6 +39,38 @@ def test_a_player_the_stored_player_groups_mention_may_stand_in_the_order():
     assert problems(draft(priority=["kodik", "anilibria"]), groups) == []
     assert problems(draft(priority=["kodik", "Aniliberty"]), groups) == []
     assert problems(draft(priority=["kodik", "anilibria"])) == [("priority", "priority_unknown_player")]
+
+
+def test_a_player_stored_already_does_not_lock_the_groups_while_the_sources_do_not_show_it():
+    # The lines of the provider are in the stored order; with the provider not up the sources do not name them.
+    stored = ["line:CO4K", "kodik", "cvh"]
+    form = draft(priority=stored, players_off=["line:CO4K"], voice_groups={"New Horizons Studio": []})
+    assert problems(form) == [("priority", "priority_unknown_player"), ("players_off", "priority_unknown_player")]
+    assert problems(form, kept=[*stored, "line:CO4K"]) == []
+    # only a player the user did not save before must be one the sources know
+    assert problems(draft(priority=[*stored, "line:other"]), kept=stored) == [("priority", "priority_unknown_player")]
+
+
+def test_a_key_the_form_only_brings_back_is_neither_checked_nor_written():
+    # The order holds a line of the provider that the sources do not name now (the provider is not up).
+    saved = parse({"voices.source_priority": '["line:CO4K", "kodik"]', "voices.groups": '{"Old": []}',
+                   "voices.languages": '{"Old": "rus"}'})
+    system = ["kodik", "cvh"]
+    brought_back = ["line:CO4K", "kodik", "cvh"]  # what the screen showed: the saved order, then the players the sources know
+    form = draft(priority=brought_back, voice_groups={"Old": [], "New Horizons Studio": []})
+    keys = editor.changed(form, saved, system)
+    assert keys == {"voices.groups", "voices.languages"}
+    assert editor.check(form, {}, system, keys=keys) == []  # the groups are saved whatever the order holds
+    assert set(editor.stored(editor.clean(form), keys)) == keys  # and the order is not rewritten
+
+    moved = draft(priority=["kodik", "line:CO4K", "cvh"], voice_groups={"Old": []})
+    assert editor.changed(moved, saved, system) == {"voices.source_priority"}  # the order alone changed
+
+
+def test_a_stored_value_that_was_refused_is_written_again_by_any_save():
+    saved = parse({"voices.source_priority": '{"a": 1}'})
+    assert editor.changed(draft(priority=list(saved.priority)), saved) == {"voices.source_priority"}
+    assert editor.changed(draft(priority=list(DEFAULT_PRIORITY)), parse({})) == set()  # nothing stored, nothing changed
 
 
 def test_a_group_may_be_empty_and_a_row_left_blank_is_not_a_group():

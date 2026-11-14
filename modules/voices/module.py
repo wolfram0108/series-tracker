@@ -23,8 +23,11 @@ Queries:
       of the order, not for a count.
 Command:
   voices.settings.set VoiceSettingsDraft -> VoiceSettingsSaved: groups, their languages and order are checked
-      (editor.check: a known language or none) and written in one step through settings.values.set_many, or
-      refused with coded problems and nothing written; the next read of the settings uses the new values, no restart.
+      (editor.check: a known language or none; a player must be one the sources know unless it is stored already) and
+      written in one step through settings.values.set_many, or refused with coded problems and nothing written; the next
+      read of the settings uses the new values, no restart. Only the keys the form changes (editor.changed) are checked
+      and written: the groups are saved whatever the order of sources holds (a provider that is not up leaves its lines
+      unknown), and the order whatever the groups hold.
 Events out:
   voices.settings.changed VoiceSettingsView — the settings as they apply after a save, so that every open settings screen
       shows them without asking back.
@@ -98,9 +101,11 @@ class VoicesModule(BaseModule):
         draft = VoiceSettingsDraft.model_validate(env.payload)
         current = await self._settings()
         players = await self._players()
-        problems = editor.check(draft, current.player_groups, [each["name"] for each in players])
-        if not problems:
-            await self.request("settings.values.set_many", {"values": editor.stored(editor.clean(draft))})
+        system = [each["name"] for each in players]
+        keys = editor.changed(draft, current, system)
+        problems = editor.check(draft, current.player_groups, system, kept=[*current.priority, *current.players_off], keys=keys)
+        if not problems and keys:
+            await self.request("settings.values.set_many", {"values": editor.stored(editor.clean(draft), keys)})
         view = editor.view(await self._settings(), players)
         if not problems:
             self.log.info("озвучки: настройки сохранены")

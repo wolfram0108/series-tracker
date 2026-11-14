@@ -7,7 +7,7 @@ with coded problems; a refused value is never written and never quietly replaced
 from __future__ import annotations
 
 import json
-from typing import Mapping, Sequence
+from typing import Collection, Mapping, Sequence
 
 from core.contracts import Reason, SettingProblem, VoiceSettingsDraft, VoiceSettingsView
 from core.reasons import parse as parse_reason, reason
@@ -85,15 +85,38 @@ def _language_problems(draft: VoiceSettingsDraft) -> list[SettingProblem]:
             for name in _cleaned(draft.voice_groups) if fold_name(name) and languages.get(name) not in (None, *LANGUAGES)]
 
 
+_KEYS = (PRIORITY_KEY, PLAYERS_OFF_KEY, VOICE_GROUPS_KEY, LANGUAGES_KEY)
+
+
+def changed(draft: VoiceSettingsDraft, saved: VoiceSettings, system: Sequence[str] = ()) -> set[str]:
+    """The stored keys this save changes: a value that differs from what applies now, or whose stored value was refused (a
+    save puts it right). A key the form only brings back as it was is neither checked nor written: the groups are saved
+    whatever the order of sources holds, and the order whatever the groups hold."""
+    cleaned = clean(draft)
+    now = {PRIORITY_KEY: effective_order(saved.priority, system), PLAYERS_OFF_KEY: list(saved.players_off),
+           VOICE_GROUPS_KEY: {name: list(triggers) for name, triggers in saved.voice_groups.items()},
+           LANGUAGES_KEY: dict(saved.voice_languages)}
+    given = {PRIORITY_KEY: cleaned.priority, PLAYERS_OFF_KEY: cleaned.players_off,
+             VOICE_GROUPS_KEY: cleaned.voice_groups, LANGUAGES_KEY: cleaned.voice_languages}
+    return {key for key in _KEYS if given[key] != now[key] or key in saved.rejected}
+
+
 def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]],
-          system: Sequence[str] = ()) -> list[SettingProblem]:
-    """Every reason this form cannot be saved; empty when it can."""
+          system: Sequence[str] = (), kept: Sequence[str] = (), keys: Collection[str] | None = None) -> list[SettingProblem]:
+    """Every reason this form cannot be saved; empty when it can. Only the stored `keys` it changes are checked (all of
+    them when not given). `kept` are the players of the order and of the off-list that are stored already: the sources may
+    not show one of them now (the provider of the lines is not up), and it is no error of the user's. Only a player new
+    here must be a known one."""
+    wanted = set(_KEYS if keys is None else keys)
     problems = []
     names = [name.strip() for name in draft.priority if name.strip()]
-    if not names:
+    if PRIORITY_KEY in wanted and not names:
         problems.append(_problem("priority", reason("priority_empty")))
-    known = {fold_name(name) for name in player_names(player_groups, system)}
-    for field, listed in (("priority", names), ("players_off", [name.strip() for name in draft.players_off])):
+    known = {fold_name(name) for name in (*player_names(player_groups, system), *kept)}
+    for key, field, listed in ((PRIORITY_KEY, "priority", names),
+                               (PLAYERS_OFF_KEY, "players_off", [name.strip() for name in draft.players_off])):
+        if key not in wanted:
+            continue
         seen: set[str] = set()
         for name in listed:
             if fold_name(name) in seen:
@@ -101,7 +124,11 @@ def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]],
             elif fold_name(name) not in known:
                 problems.append(_problem(field, reason("priority_unknown_player", player=name)))
             seen.add(fold_name(name))
-    return problems + _group_problems(draft.voice_groups) + _language_problems(draft)
+    if VOICE_GROUPS_KEY in wanted:
+        problems += _group_problems(draft.voice_groups)
+    if wanted & {VOICE_GROUPS_KEY, LANGUAGES_KEY}:
+        problems += _language_problems(draft)
+    return problems
 
 
 def clean(draft: VoiceSettingsDraft) -> VoiceSettingsDraft:
@@ -113,12 +140,13 @@ def clean(draft: VoiceSettingsDraft) -> VoiceSettingsDraft:
     return VoiceSettingsDraft(priority=priority, voice_groups=groups, voice_languages=languages, players_off=off)
 
 
-def stored(draft: VoiceSettingsDraft) -> dict[str, str]:
-    """The values to write, keyed as the settings table holds them."""
+def stored(draft: VoiceSettingsDraft, keys: Collection[str] | None = None) -> dict[str, str]:
+    """The values to write, keyed as the settings table holds them; only `keys` of them when given."""
     def dump(value: object) -> str:
         return json.dumps(value, ensure_ascii=False)
-    return {PRIORITY_KEY: dump(draft.priority), PLAYERS_OFF_KEY: dump(draft.players_off), VOICE_GROUPS_KEY: dump(draft.voice_groups),
-            LANGUAGES_KEY: dump(draft.voice_languages)}
+    values = {PRIORITY_KEY: dump(draft.priority), PLAYERS_OFF_KEY: dump(draft.players_off), VOICE_GROUPS_KEY: dump(draft.voice_groups),
+              LANGUAGES_KEY: dump(draft.voice_languages)}
+    return values if keys is None else {key: value for key, value in values.items() if key in keys}
 
 
 def effective_order(priority: Sequence[str], system: Sequence[str]) -> list[str]:
