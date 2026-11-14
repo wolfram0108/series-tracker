@@ -15,9 +15,12 @@ import { sanitizePath } from "../../lib/fsnames"
 import { t, type MessageKey } from "../../i18n"
 import { useApi } from "../../composables/useApi"
 import { useDownloadLimits } from "../../composables/useDownloadLimits"
+import { useAction } from "../../composables/useAction"
 import { useConfirm } from "../../composables/useConfirm"
 import { useScannerStore } from "../../stores/scanner"
 import { reasonText } from "../../lib/reason"
+import LoadGate from "../LoadGate.vue"
+import { useLoad } from "../../composables/useLoad"
 
 // Вкладка «Отладка»: сканер, сохранённые пути, флаги/параметры конвейера,
 // просмотр и очистка БД. Контракт проверен по modules/gateway/api_settings.py.
@@ -50,9 +53,9 @@ async function setEnabled(value: boolean) {
   enabled.value = value
   await saveScanner()
 }
-async function scanAll() {
+const scanAll = useAction(async () => {
   await request(api.POST("/api/scanner/scan_all", {}), { errorMessage: t("debug.syncAll.failed") })
-}
+})
 
 // --- флаги конвейера (GET/POST → {enabled}) ---------------------------
 const FLAGS = [
@@ -67,9 +70,9 @@ async function setFlag(flag: (typeof FLAGS)[number], value: boolean) {
 }
 
 type FlagPath = (typeof FLAGS)[number]["path"]
-async function loadFlag(path: FlagPath): Promise<boolean> {
+async function loadFlag(path: FlagPath): Promise<boolean | null> {
   const d = (await request(api.GET(path))) as { enabled?: boolean } | null
-  return !!d?.enabled
+  return d === null ? null : !!d.enabled
 }
 async function saveFlag(path: FlagPath, value: boolean, label: string) {
   const ok = await request(api.POST(path, { body: { enabled: value } }), {
@@ -96,9 +99,9 @@ async function saveLimits(field: keyof typeof limits.value) {
   await saveShared({ [field]: limits.value[field].trim() })
 }
 
-async function loadNum(path: "/api/settings/sources_term", fallback: number): Promise<string> {
+async function loadNum(path: "/api/settings/sources_term", fallback: number): Promise<string | null> {
   const d = (await request(api.GET(path))) as { value?: number } | null
-  return String(d?.value ?? fallback)
+  return d === null ? null : String(d.value ?? fallback)
 }
 
 // --- срок актуальности опроса источников (sources, term.py; GET/POST → {value}) ----
@@ -111,7 +114,7 @@ async function saveSourcesTerm() {
   if (saved !== null) {
     toast.add({ severity: "info", summary: t("debug.sourcesTerm.label"), detail: String(saved.value), life: 2000 })
   }
-  sourcesTerm.value = await loadNum("/api/settings/sources_term", 1)
+  sourcesTerm.value = (await loadNum("/api/settings/sources_term", 1)) ?? sourcesTerm.value
 }
 
 // сохранённые пути
@@ -194,91 +197,101 @@ async function clearTable() {
   }
 }
 
-onMounted(async () => {
+// Everything the tab shows is read together; the form is put on show when it all has come (components/LoadGate.vue).
+async function readAll(): Promise<boolean> {
   syncFromStore()
-  void loadPaths()
-  void loadTables()
-  for (const flag of FLAGS) flags[flag.key] = await loadFlag(flag.path)
-  void loadLimits()
-  sourcesTerm.value = await loadNum("/api/settings/sources_term", 1)
-})
+  const [flagValues, term] = await Promise.all([
+    Promise.all(FLAGS.map((flag) => loadFlag(flag.path))),
+    loadNum("/api/settings/sources_term", 1),
+    loadPaths(), loadTables(), loadLimits(),
+  ])
+  if (flagValues.some((each) => each === null) || term === null) return false
+  FLAGS.forEach((flag, at) => { flags[flag.key] = flagValues[at] === true })
+  sourcesTerm.value = term
+  return true
+}
+const gate = useLoad(readAll)
+onMounted(gate.run)
 </script>
 
 <template>
-  <div class="sheet settings-debug">
-    <!-- Сканер -->
-    <SheetRow :caption="t('debug.sync.title')">
-      <div class="sheet-pair">
-        <SheetField :label="t('series.autoSync')" control>
-          <StSwitch :model-value="enabled" @update:model-value="setEnabled" />
-        </SheetField>
-        <SheetField :label="t('debug.autoSync.interval')" control>
-          <StNumber v-model="interval" @change="saveScanner" />
-        </SheetField>
-      </div>
-      <div class="sheet-line">
-        <Button
-          :label="t('debug.syncAll.button')"
-          icon="pi pi-refresh"
-          :disabled="scanner.status?.is_scanning || scanner.status?.is_awaiting_tasks"
-          @click="scanAll"
-        />
-      </div>
-    </SheetRow>
-
-    <!-- Параметры конвейера и отладка -->
-    <SheetRow :caption="t('debug.pipeline.title')">
-      <div class="sheet-pair">
-        <SheetField v-for="flag in FLAGS" :key="flag.key" :label="t(flag.label)" :title="t(flag.hint)" control>
-          <StSwitch :model-value="flags[flag.key]" @update:model-value="setFlag(flag, $event)" />
-        </SheetField>
-        <SheetField v-for="each in LIMITS" :key="each.field" :label="t(each.label)" :title="each.hint ? t(each.hint) : undefined" control>
-          <StNumber v-model="limits[each.field]" @change="saveLimits(each.field)" />
-        </SheetField>
-        <SheetField :label="t('debug.sourcesTerm.label')" :title="t('debug.sourcesTerm.hint')" control>
-          <StNumber v-model="sourcesTerm" @change="saveSourcesTerm" />
-        </SheetField>
-      </div>
-      <p class="sheet-hint">{{ t("debug.downloads.multiAtOnce", { count: multiAtOnce }) }}</p>
-    </SheetRow>
-
-    <!-- База данных -->
-    <SheetRow :caption="t('debug.db.title')">
-      <div class="sheet-line">
-        <Button :label="t('debug.db.view')" icon="pi pi-table" severity="info" @click="showDb = true" />
-        <span class="sheet-hint">{{ t("debug.db.viewHint") }}</span>
-      </div>
-      <p class="sheet-hint is-danger">{{ t("debug.db.clearWarning") }}</p>
-      <SheetField :label="t('debug.db.clear')" icon="pi pi-trash">
-        <StSelect v-model="selectedTable" :options="tableOptions" :placeholder="t('debug.db.chooseTable')" />
-        <div class="constructor-item item-label clear-desc">{{ tableDescription }}</div>
-        <div class="constructor-item item-button-group">
-          <button class="btn-icon btn-delete" :title="t('debug.db.clear')" :disabled="!selectedTable" @click="clearTable">
-            <i class="pi pi-trash" />
-          </button>
+  <LoadGate :state="gate.state.value" :rows="6" @retry="gate.run">
+    <div class="sheet settings-debug">
+      <!-- Сканер -->
+      <SheetRow :caption="t('debug.sync.title')">
+        <div class="sheet-pair">
+          <SheetField :label="t('series.autoSync')" control>
+            <StSwitch :model-value="enabled" @update:model-value="setEnabled" />
+          </SheetField>
+          <SheetField :label="t('debug.autoSync.interval')" control>
+            <StNumber v-model="interval" @change="saveScanner" />
+          </SheetField>
         </div>
-      </SheetField>
-    </SheetRow>
-
-    <!-- Сохранённые пути -->
-    <SheetRow :caption="t('savedPaths.title')" :count="paths.length">
-      <div v-if="paths.length" class="saved-paths-list">
-        <div v-for="p in paths" :key="p.id" class="saved-path-row">
-          <span class="saved-path-value">{{ p.path }}</span>
-          <Button icon="pi pi-times" severity="danger" text rounded :title="t('common.delete')" @click="removePath(p.id)" />
+        <div class="sheet-line">
+          <Button
+            :label="t('debug.syncAll.button')"
+            icon="pi pi-refresh"
+            :loading="scanAll.pending()"
+            :disabled="scanner.status?.is_scanning || scanner.status?.is_awaiting_tasks"
+            @click="scanAll.run()"
+          />
         </div>
-      </div>
-      <p v-else class="sheet-hint">{{ t("debug.paths.empty") }}</p>
-      <SheetField :label="t('debug.paths.new')" icon="pi pi-folder">
-        <StInput v-model="newPath" placeholder="/nas/media/..." @keyup.enter="addPath" />
-        <div class="constructor-item item-button-group">
-          <StBtn icon="pi pi-plus" variant="add" :disabled="!newPath.trim()" :title="t('common.add')" :aria-label="t('common.add')" @click="addPath" />
-        </div>
-      </SheetField>
-    </SheetRow>
+      </SheetRow>
 
-    <DatabaseViewerModal v-if="showDb" @close="showDb = false" />
-  </div>
+      <!-- Параметры конвейера и отладка -->
+      <SheetRow :caption="t('debug.pipeline.title')">
+        <div class="sheet-pair">
+          <SheetField v-for="flag in FLAGS" :key="flag.key" :label="t(flag.label)" :title="t(flag.hint)" control>
+            <StSwitch :model-value="flags[flag.key]" @update:model-value="setFlag(flag, $event)" />
+          </SheetField>
+          <SheetField v-for="each in LIMITS" :key="each.field" :label="t(each.label)" :title="each.hint ? t(each.hint) : undefined" control>
+            <StNumber v-model="limits[each.field]" @change="saveLimits(each.field)" />
+          </SheetField>
+          <SheetField :label="t('debug.sourcesTerm.label')" :title="t('debug.sourcesTerm.hint')" control>
+            <StNumber v-model="sourcesTerm" @change="saveSourcesTerm" />
+          </SheetField>
+        </div>
+        <p class="sheet-hint">{{ t("debug.downloads.multiAtOnce", { count: multiAtOnce }) }}</p>
+      </SheetRow>
+
+      <!-- База данных -->
+      <SheetRow :caption="t('debug.db.title')">
+        <div class="sheet-line">
+          <Button :label="t('debug.db.view')" icon="pi pi-table" severity="info" @click="showDb = true" />
+          <span class="sheet-hint">{{ t("debug.db.viewHint") }}</span>
+        </div>
+        <p class="sheet-hint is-danger">{{ t("debug.db.clearWarning") }}</p>
+        <SheetField :label="t('debug.db.clear')" icon="pi pi-trash">
+          <StSelect v-model="selectedTable" :options="tableOptions" :placeholder="t('debug.db.chooseTable')" />
+          <div class="constructor-item item-label clear-desc">{{ tableDescription }}</div>
+          <div class="constructor-item item-button-group">
+            <button class="btn-icon btn-delete" :title="t('debug.db.clear')" :disabled="!selectedTable" @click="clearTable">
+              <i class="pi pi-trash" />
+            </button>
+          </div>
+        </SheetField>
+      </SheetRow>
+
+      <!-- Сохранённые пути -->
+      <SheetRow :caption="t('savedPaths.title')" :count="paths.length">
+        <div v-if="paths.length" class="saved-paths-list">
+          <div v-for="p in paths" :key="p.id" class="saved-path-row">
+            <span class="saved-path-value">{{ p.path }}</span>
+            <Button icon="pi pi-times" severity="danger" text rounded :title="t('common.delete')" @click="removePath(p.id)" />
+          </div>
+        </div>
+        <p v-else class="sheet-hint">{{ t("debug.paths.empty") }}</p>
+        <SheetField :label="t('debug.paths.new')" icon="pi pi-folder">
+          <StInput v-model="newPath" placeholder="/nas/media/..." @keyup.enter="addPath" />
+          <div class="constructor-item item-button-group">
+            <StBtn icon="pi pi-plus" variant="add" :disabled="!newPath.trim()" :title="t('common.add')" :aria-label="t('common.add')" @click="addPath" />
+          </div>
+        </SheetField>
+      </SheetRow>
+
+      <DatabaseViewerModal v-if="showDb" @close="showDb = false" />
+    </div>
+  </LoadGate>
 </template>
 
 <style scoped>

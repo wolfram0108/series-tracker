@@ -3,6 +3,7 @@ import { computed, ref } from "vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { stopReading } from "../../composables/sourceCalls"
+import { useSSE } from "../../composables/useSSE"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 import { stateLabel, type StateName } from "../../lib/states"
@@ -31,6 +32,8 @@ const voices = useVoicesStore()
 const reads = useSeriesReadsStore()
 const seriesStore = useSeriesStore()
 const { request } = useApi()
+// The queues are pictures the stream brings: before it is up the window knows nothing of them, so it does not say they are empty.
+const { connected: live } = useSSE()
 
 const picked = ref<number | null>(null)
 const filter = computed(() => props.seriesId ?? picked.value)
@@ -121,7 +124,7 @@ const str = (value: unknown) => String(value ?? "")
             <span v-if="q.conform.daemon.gpu_name || q.conform.daemon.device" class="pill">{{ str(q.conform.daemon.gpu_name || q.conform.daemon.device) }}</span>
           </div>
         </template>
-        <div v-if="!section.shown.length" class="queue-empty">{{ t("agents.empty") }}</div>
+        <div v-if="!section.shown.length" class="queue-empty">{{ live ? t("agents.empty") : t("common.fetching") }}</div>
         <div v-else class="agents-cards">
           <WorkCard
             v-for="view in section.shown" :key="view.id" :view="view" :series-name="nameOf(view)" :busy="pending.has(view.id)"

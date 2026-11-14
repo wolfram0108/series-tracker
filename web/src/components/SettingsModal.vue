@@ -26,7 +26,7 @@ watch(tab, (next) => {
 })
 
 // ссылка на активную вкладку с методом save() (для кнопки в футере)
-const tabRef = ref<{ save?: () => Promise<boolean> } | null>(null)
+const tabRef = ref<{ save?: () => Promise<boolean>; ready?: boolean } | null>(null)
 const savable = computed(() => tab.value === "auth")
 const saving = ref(false)
 async function onSave() {
@@ -71,6 +71,7 @@ const tabs = [
         :label="t('common.save')"
         icon="pi pi-check"
         :loading="saving"
+        :disabled="!tabRef?.ready"
         @click="onSave"
       />
       <Button :label="t('common.close')" icon="pi pi-times" severity="secondary" @click="emit('close')" />

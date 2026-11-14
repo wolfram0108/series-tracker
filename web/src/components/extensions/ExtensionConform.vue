@@ -10,6 +10,8 @@ import { api } from "../../api/client"
 import type { components } from "../../api/schema"
 import { useApi } from "../../composables/useApi"
 import { useSSE } from "../../composables/useSSE"
+import LoadGate from "../LoadGate.vue"
+import { useLoad } from "../../composables/useLoad"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 import { useConformStore } from "../../stores/conform"
@@ -63,10 +65,12 @@ function adopt(view: View) {
   take("drift", shown == null ? "" : String(shown))
 }
 
-async function load() {
+async function load(): Promise<boolean> {
   const view = await request(api.GET("/api/conform/settings"), { errorMessage: t("conform.settings.loadFailed") })
   if (view) adopt(view)
+  return !!view
 }
+const gate = useLoad(load)
 
 const dirty = computed(() => !!core.value && (url.value !== core.value.url || here.value !== core.value.work_dir
   || there.value !== core.value.work_dir_remote))
@@ -134,7 +138,7 @@ watch(() => store.settings, (next) => {
   if (next) adopt(next)
 })
 watch(useSSE().connected, (up) => {
-  if (up) void load()
+  if (up) void gate.run()
 })
 
 const daemon = computed(() => queues.conform?.daemon)
@@ -151,69 +155,71 @@ const edges = computed(() => [
 // The rest of the tab comes with the address, as it is typed.
 const named = computed(() => url.value.trim() !== "")
 
-onMounted(load)
+onMounted(gate.run)
 </script>
 
 <template>
-  <div class="sheet" @change="save" @keydown.enter="save">
-    <SheetRow :caption="t('extensions.sheet.connection')">
-      <div v-if="named && core?.url" class="pills">
-        <template v-if="daemon?.up">
-          <span class="pill pill-success"><i class="pi pi-check-circle" /> {{ t("agents.conform.daemon.up") }}</span>
-          <span v-if="daemon.version" class="pill">{{ t("agents.conform.daemon.version", { version: daemon.version }) }}</span>
-          <span v-if="daemon.gpu_name || daemon.device" class="pill">{{ daemon.gpu_name || daemon.device }}</span>
-        </template>
-        <span v-else-if="daemon?.error" class="pill pill-danger">{{ t("agents.conform.daemon.down", { error: reasonText(daemon.error) }) }}</span>
-        <span v-else class="pill pill-info">{{ t("conform.settings.connecting") }}</span>
-      </div>
-      <div class="sheet-pair">
-        <SheetField :label="t('conform.settings.url')" icon="pi pi-link">
-          <StInput v-model="url" />
-        </SheetField>
-      </div>
-    </SheetRow>
-
-    <template v-if="named">
-      <SheetRow :caption="t('extensions.sheet.paths')">
+  <LoadGate :state="gate.state.value" :rows="3" @retry="gate.run">
+    <div class="sheet" @change="save" @keydown.enter="save">
+      <SheetRow :caption="t('extensions.sheet.connection')">
+        <div v-if="named && core?.url" class="pills">
+          <template v-if="daemon?.up">
+            <span class="pill pill-success"><i class="pi pi-check-circle" /> {{ t("agents.conform.daemon.up") }}</span>
+            <span v-if="daemon.version" class="pill">{{ t("agents.conform.daemon.version", { version: daemon.version }) }}</span>
+            <span v-if="daemon.gpu_name || daemon.device" class="pill">{{ daemon.gpu_name || daemon.device }}</span>
+          </template>
+          <span v-else-if="daemon?.error" class="pill pill-danger">{{ t("agents.conform.daemon.down", { error: reasonText(daemon.error) }) }}</span>
+          <span v-else class="pill pill-info">{{ t("conform.settings.connecting") }}</span>
+        </div>
         <div class="sheet-pair">
-          <SheetField :label="t('conform.settings.local')" icon="pi pi-folder">
-            <StInput v-model="here" />
-          </SheetField>
-          <SheetField :label="t('conform.settings.daemon')" icon="pi pi-arrow-right">
-            <StInput v-model="there" />
+          <SheetField :label="t('conform.settings.url')" icon="pi pi-link">
+            <StInput v-model="url" />
           </SheetField>
         </div>
       </SheetRow>
 
-      <SheetRow v-if="params" :caption="t('extensions.sheet.params')">
-        <div class="sheet-pair">
-          <SheetField :label="t('conform.params.method')" :title="t('conform.params.methodHint')" control>
-            <SelectButton :model-value="params.audio_method" :options="methods" option-label="label" option-value="value"
-                          :allow-empty="false" :aria-label="t('conform.params.method')"
-                          @update:model-value="setParams({ audio_method: $event })" />
-          </SheetField>
-          <SheetField :label="t('conform.params.drift')" :title="t('conform.params.driftHint', { value: domain?.drift_default ?? '' })" control>
-            <span v-if="domain" class="item-hint">{{ t("conform.params.driftRange", { low: domain.drift_min, high: domain.drift_max }) }}</span>
-            <StNumber v-model="drift" decimal @change="setDrift" />
-          </SheetField>
-          <SheetField :label="t('conform.params.keepTmp')" :title="t('conform.params.keepTmpHint')" control>
-            <StSwitch :model-value="params.keep_tmp" @update:model-value="setParams({ keep_tmp: $event })" />
-          </SheetField>
-          <SheetField :label="t('conform.params.fill')" :title="t('conform.params.fillHint')" control>
-            <StSwitch :model-value="params.fill_silence" @update:model-value="setParams({ fill_silence: $event })" />
-          </SheetField>
-          <SheetField :label="t('extensions.conform.edges')" :title="t('conform.params.edgesHint')" wide control>
-            <SelectButton :model-value="params.extend_edges" :options="edges" option-label="label" option-value="value"
-                          :allow-empty="false" :aria-label="t('extensions.conform.edges')"
-                          @update:model-value="setParams({ extend_edges: $event })" />
-          </SheetField>
-          <SheetField :label="t('conform.settings.clearFinished')" :title="t('conform.settings.clearFinishedHint')" wide control>
-            <StSwitch :model-value="core?.clear_finished ?? false" @update:model-value="setClear($event)" />
-          </SheetField>
-        </div>
-      </SheetRow>
-    </template>
+      <template v-if="named">
+        <SheetRow :caption="t('extensions.sheet.paths')">
+          <div class="sheet-pair">
+            <SheetField :label="t('conform.settings.local')" icon="pi pi-folder">
+              <StInput v-model="here" />
+            </SheetField>
+            <SheetField :label="t('conform.settings.daemon')" icon="pi pi-arrow-right">
+              <StInput v-model="there" />
+            </SheetField>
+          </div>
+        </SheetRow>
 
-    <p v-for="(problem, index) in problems" :key="index" class="sheet-problem">{{ reasonText(problem.detail) }}</p>
-  </div>
+        <SheetRow v-if="params" :caption="t('extensions.sheet.params')">
+          <div class="sheet-pair">
+            <SheetField :label="t('conform.params.method')" :title="t('conform.params.methodHint')" control>
+              <SelectButton :model-value="params.audio_method" :options="methods" option-label="label" option-value="value"
+                            :allow-empty="false" :aria-label="t('conform.params.method')"
+                            @update:model-value="setParams({ audio_method: $event })" />
+            </SheetField>
+            <SheetField :label="t('conform.params.drift')" :title="t('conform.params.driftHint', { value: domain?.drift_default ?? '' })" control>
+              <span v-if="domain" class="item-hint">{{ t("conform.params.driftRange", { low: domain.drift_min, high: domain.drift_max }) }}</span>
+              <StNumber v-model="drift" decimal @change="setDrift" />
+            </SheetField>
+            <SheetField :label="t('conform.params.keepTmp')" :title="t('conform.params.keepTmpHint')" control>
+              <StSwitch :model-value="params.keep_tmp" @update:model-value="setParams({ keep_tmp: $event })" />
+            </SheetField>
+            <SheetField :label="t('conform.params.fill')" :title="t('conform.params.fillHint')" control>
+              <StSwitch :model-value="params.fill_silence" @update:model-value="setParams({ fill_silence: $event })" />
+            </SheetField>
+            <SheetField :label="t('extensions.conform.edges')" :title="t('conform.params.edgesHint')" wide control>
+              <SelectButton :model-value="params.extend_edges" :options="edges" option-label="label" option-value="value"
+                            :allow-empty="false" :aria-label="t('extensions.conform.edges')"
+                            @update:model-value="setParams({ extend_edges: $event })" />
+            </SheetField>
+            <SheetField :label="t('conform.settings.clearFinished')" :title="t('conform.settings.clearFinishedHint')" wide control>
+              <StSwitch :model-value="core?.clear_finished ?? false" @update:model-value="setClear($event)" />
+            </SheetField>
+          </div>
+        </SheetRow>
+      </template>
+
+      <p v-for="(problem, index) in problems" :key="index" class="sheet-problem">{{ reasonText(problem.detail) }}</p>
+    </div>
+  </LoadGate>
 </template>

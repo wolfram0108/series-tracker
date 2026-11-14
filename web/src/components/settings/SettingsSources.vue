@@ -11,6 +11,8 @@ import { useApi } from "../../composables/useApi"
 import { useSSE } from "../../composables/useSSE"
 import { t } from "../../i18n"
 import { useSourcesStore, type SourcesSettingsView } from "../../stores/sources"
+import LoadGate from "../LoadGate.vue"
+import { useLoad } from "../../composables/useLoad"
 
 // The tab «Источники». The top row (like the groups of voice-overs) chooses a tracker; under it lie the mirrors of the
 // chosen one, each change handed to the core at once. The tab ends with every domain the service reads pages of now.
@@ -34,17 +36,19 @@ const options = computed(() => [
   ...trackers.value.map((each) => ({ label: each.display_name, value: each.id as number | null })),
 ])
 
-async function load() {
+async function load(): Promise<boolean> {
   const next = await request(api.GET("/api/sources/settings"))
   if (next) view.value = next
+  return !!next
 }
+const gate = useLoad(load)
 
 watch(() => sourcesStore.settings, (next) => {
   if (next) view.value = next
 })
 // A connection that came back may have missed a save.
 watch(useSSE().connected, (up) => {
-  if (up) void load()
+  if (up) void gate.run()
 })
 
 function choose(id: number | null) {
@@ -87,38 +91,40 @@ async function removeMirror(index: number) {
   if (tracker) await keep(tracker, mirrorsOf(tracker).filter((_, at) => at !== index))
 }
 
-onMounted(load)
+onMounted(gate.run)
 </script>
 
 <template>
-  <div class="sheet settings-sources">
-    <SheetRow class="sources-editor" :caption="t('settings.sources.trackers')">
-      <SheetField :label="t('settings.sources.tracker')" icon="pi pi-wifi">
-        <StSelect :model-value="selected" :options="options" :placeholder="t('settings.sources.select')" @update:model-value="choose($event as number | null)" />
-      </SheetField>
-      <template v-if="chosen">
-        <div v-if="mirrorsOf(chosen).length" class="sheet-line">
-          <span v-for="(mirror, index) in mirrorsOf(chosen)" :key="mirror" class="mirror-pill">
-            {{ mirror }}
-            <button class="mirror-pill-remove" :disabled="busy" :title="t('settings.sources.mirror.remove')" :aria-label="t('settings.sources.mirror.remove')" @click="removeMirror(index)" />
-          </span>
-        </div>
-        <SheetField :label="t('settings.sources.mirror.new')" icon="pi pi-globe">
-          <StInput v-model="newMirror" :placeholder="t('settings.sources.mirror.newHint')" @keyup.enter="addMirror" />
-          <div class="constructor-item item-button-group">
-            <StBtn icon="pi pi-plus" variant="add" :disabled="busy || !newMirror.trim()" :title="t('settings.sources.mirror.add')" :aria-label="t('settings.sources.mirror.add')" @click="addMirror" />
-          </div>
+  <LoadGate :state="gate.state.value" :rows="2" :fields="1" @retry="gate.run">
+    <div class="sheet settings-sources">
+      <SheetRow class="sources-editor" :caption="t('settings.sources.trackers')">
+        <SheetField :label="t('settings.sources.tracker')" icon="pi pi-wifi">
+          <StSelect :model-value="selected" :options="options" :placeholder="t('settings.sources.select')" @update:model-value="choose($event as number | null)" />
         </SheetField>
-      </template>
-    </SheetRow>
-    <SheetRow v-if="readers.length" :caption="t('settings.sources.domains.title')" class="parsed-domains">
-      <div v-for="reader in readers" :key="`${reader.kind}:${reader.name}`" class="sheet-line domains-row">
-        <span class="domains-name">{{ reader.name }}</span>
-        <span class="domains-kind">{{ t(`settings.sources.domains.kind.${reader.kind === "tracker" ? "tracker" : "site"}`) }}</span>
-        <span v-for="domain in reader.domains ?? []" :key="domain" class="mirror-pill">{{ domain }}</span>
-      </div>
-    </SheetRow>
-  </div>
+        <template v-if="chosen">
+          <div v-if="mirrorsOf(chosen).length" class="sheet-line">
+            <span v-for="(mirror, index) in mirrorsOf(chosen)" :key="mirror" class="mirror-pill">
+              {{ mirror }}
+              <button class="mirror-pill-remove" :disabled="busy" :title="t('settings.sources.mirror.remove')" :aria-label="t('settings.sources.mirror.remove')" @click="removeMirror(index)" />
+            </span>
+          </div>
+          <SheetField :label="t('settings.sources.mirror.new')" icon="pi pi-globe">
+            <StInput v-model="newMirror" :placeholder="t('settings.sources.mirror.newHint')" @keyup.enter="addMirror" />
+            <div class="constructor-item item-button-group">
+              <StBtn icon="pi pi-plus" variant="add" :disabled="busy || !newMirror.trim()" :title="t('settings.sources.mirror.add')" :aria-label="t('settings.sources.mirror.add')" @click="addMirror" />
+            </div>
+          </SheetField>
+        </template>
+      </SheetRow>
+      <SheetRow v-if="readers.length" :caption="t('settings.sources.domains.title')" class="parsed-domains">
+        <div v-for="reader in readers" :key="`${reader.kind}:${reader.name}`" class="sheet-line domains-row">
+          <span class="domains-name">{{ reader.name }}</span>
+          <span class="domains-kind">{{ t(`settings.sources.domains.kind.${reader.kind === "tracker" ? "tracker" : "site"}`) }}</span>
+          <span v-for="domain in reader.domains ?? []" :key="domain" class="mirror-pill">{{ domain }}</span>
+        </div>
+      </SheetRow>
+    </div>
+  </LoadGate>
 </template>
 
 <style scoped>

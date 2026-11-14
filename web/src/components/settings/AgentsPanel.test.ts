@@ -8,6 +8,13 @@ import { nextTick } from "vue"
 const client = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }))
 vi.mock("../../api/client", () => ({ api: client }))
 vi.mock("../../composables/sourceCalls", () => ({ stopReading: vi.fn().mockResolvedValue({ ok: true, data: {} }) }))
+// The queues are brought by the stream: whether it is up decides whether an empty queue is told as empty.
+const sse = vi.hoisted(() => ({ live: null as null | { value: boolean } }))
+vi.mock("../../composables/useSSE", async () => {
+  const { ref } = await import("vue")
+  sse.live = ref(true)
+  return { useSSE: () => ({ connected: sse.live }) }
+})
 import { stopReading } from "../../composables/sourceCalls"
 import AgentsPanel from "./AgentsPanel.vue"
 import { useQueuesStore, type ConformTask, type DownloadCard, type PackCard } from "../../stores/queues"
@@ -18,6 +25,7 @@ import { t } from "../../i18n"
 let mounted: VueWrapper | null = null
 beforeEach(() => {
   setActivePinia(createPinia())
+  sse.live!.value = true
   client.DELETE.mockReset().mockResolvedValue({ data: { success: true } })
 })
 afterEach(() => mounted?.unmount())
@@ -115,5 +123,14 @@ describe("the agents", () => {
     queues.setConform({ daemon: { up: false, error: '{"code":"conform_down","error":"x"}' }, tasks: [] })
     const w = mountPanel()
     expect(sectionOf(w, "conform").find(".queue-empty").text()).toContain(t("agents.conform.daemon.down", { error: t("reason.conform_down", { error: "x" }) }))
+  })
+
+  it("does not say a queue is empty before the stream that brings the queues is up", async () => {
+    sse.live!.value = false
+    const w = mountPanel()
+    expect(sectionOf(w, "slicing").find(".queue-empty").text()).toBe(t("common.fetching"))
+    sse.live!.value = true
+    await nextTick()
+    expect(sectionOf(w, "slicing").find(".queue-empty").text()).toBe(t("agents.empty"))
   })
 })

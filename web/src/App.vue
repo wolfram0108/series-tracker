@@ -21,6 +21,7 @@ import { useUiStore } from "./stores/ui"
 import { useAuthStore } from "./stores/auth"
 import { useApi } from "./composables/useApi"
 import { useConfirm } from "./composables/useConfirm"
+import { useAction } from "./composables/useAction"
 import { useSSE } from "./composables/useSSE"
 import { api } from "./api/client"
 
@@ -55,15 +56,16 @@ async function onLogout() {
 // через ui.activeSeriesId (его ставит ui.openStatus + viewing).
 const openModal = ref<null | "settings" | "extensions" | "logs" | "add">(null)
 
-async function onCancelScan(id: number) {
+// A press that came while the same action of the same series is not answered is not an action of its own (composables/useAction.ts).
+const cancelScan = useAction(async (id: number) => {
   const r = (await request(
     api.POST("/api/series/{series_id}/scan/cancel", { params: { path: { series_id: id } } }),
   )) as { cancelled?: boolean } | null
   if (r === null) return
   toast.add({ severity: "info", summary: t(r.cancelled ? "sync.stopped" : "sync.notRunning"), life: 3000 })
-}
+}, (id) => String(id))
 
-async function onScan(id: number) {
+const scan = useAction(async (id: number) => {
   // Ручной скан (по кнопке) уведомляет о результате; ошибку покажет useApi.
   // Автоскан — в фоне и молча (решение пользователя).
   const r = (await request(
@@ -75,22 +77,22 @@ async function onScan(id: number) {
       ? { severity: "success", summary: t("app.sync.done"), life: 3000 }
       : { severity: "info", summary: t("app.sync.noUpdates"), life: 3000 },
   )
-}
-function onToggle(id: number, enabled: boolean) {
-  void request(
+}, (id) => String(id))
+const toggleAuto = useAction(async (id: number, enabled: boolean) => {
+  await request(
     api.POST("/api/series/{series_id}/toggle_auto_scan", {
       params: { path: { series_id: id } },
       body: { enabled },
     }),
   )
-}
+}, (id) => String(id))
 function onOpenStatus(id: number) {
   void ui.openStatus(id) // ставит activeSeriesId + POST state ['viewing']
 }
 function onCloseStatus() {
   void ui.closeStatus() // POST state [] (снятие viewing)
 }
-async function onDelete(id: number) {
+const remove = useAction(async (id: number) => {
   const s = seriesStore.byId(id)
   // The qBittorrent checkbox is for torrent series only: video sources have no torrent.
   // delete_from_qb убирает запись из qB; файлы на диске остаются.
@@ -109,7 +111,7 @@ async function onDelete(id: number) {
     }),
   )
   if (ok !== null) seriesStore.remove(id) // оптимистично; SSE series_deleted подтвердит
-}
+}, (id) => String(id))
 </script>
 
 <template>
@@ -130,10 +132,10 @@ async function onDelete(id: number) {
         :series="s"
         :saving="seriesStore.isSaving(s.id)"
         @open-status="onOpenStatus"
-        @scan="onScan"
-        @cancel-scan="onCancelScan"
-        @delete="onDelete"
-        @toggle-auto-scan="onToggle"
+        @scan="scan.run"
+        @cancel-scan="cancelScan.run"
+        @delete="remove.run"
+        @toggle-auto-scan="toggleAuto.run"
       />
       <!-- Nothing is said of "no series" before the list has been read, and nothing of it where it could not be read. -->
       <div v-if="!seriesStore.list.length" class="empty-state" :role="seriesStore.loaded ? undefined : 'status'">

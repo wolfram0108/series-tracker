@@ -56,3 +56,10 @@
   }
   .pi-spin { animation-duration: 1s !important; animation-iteration-count: infinite !important; }
 }
+
+/* The skeleton of a form that is being read (components/LoadGate.vue): the rows of a sheet, the caption and the fields at their own
+   height, so that the form takes its place without moving what is round it. */
+/* It comes into sight after a moment (as the strip of a lost stream does), so that a read that is quick shows no flicker of grey. */
+.load-skeleton { animation: loadAppear 0.2s 0.2s backwards; }
+@keyframes loadAppear { from { opacity: 0; } }
+.load-failed { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 3rem 1rem; color: var(--text-muted); text-align: center; }

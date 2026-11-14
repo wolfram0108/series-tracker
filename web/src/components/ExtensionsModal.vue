@@ -19,7 +19,7 @@ const tabs = [
 </script>
 
 <template>
-  <ModalShell size="xl" @close="emit('close')">
+  <ModalShell size="xl" fixed-height @close="emit('close')">
     <template #title><i class="pi pi-objects-column"></i> {{ t("extensions.title") }}</template>
     <template #header-extra>
       <ModalTabs v-model="tab" :tabs="tabs" />

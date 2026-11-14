@@ -58,6 +58,7 @@ export const ru = {
   "common.networkFailed": "Нет связи с сервером",
   "common.notDone": "Действие не выполнено",
   "common.retry": "Повторить",
+  "load.failed": "Не удалось прочитать. Данные не загружены.",
   "common.checkFields": "Проверьте поля",
   "common.yes": "Да",
   "common.no": "Нет",
