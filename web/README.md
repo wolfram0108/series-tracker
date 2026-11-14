@@ -1,5 +1,35 @@
-# Vue 3 + TypeScript + Vite
+# Интерфейс (web)
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Vue 3 + TypeScript + Vite + PrimeVue + Pinia. Боевой интерфейс отдаётся шлюзом с корня `/` из `web/dist` (в git не входит,
+собирается на месте). Старый интерфейс (`/legacy`) — архив; правки в `legacy_frontend/` на боевой экран не влияют.
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+## Команды
+
+| Задача | Команда |
+|---|---|
+| Сборка (типы + бандл) | `npm run build` |
+| Только типы | `npm run typecheck` |
+| Тесты | `npx vitest run src` |
+| Типы API после новой конечной точки | `npm run gen:api` |
+| Разработка | `npm run dev` (запросы `/api` идут на `127.0.0.1:5000`) |
+
+Приёмка в браузере — на стенде, из корня репозитория (`tests/test_ui_*.py`, `-m ui`): путь пользователя, доступность
+(`tests/test_ui_a11y.py`, axe-core), потеря связи, ширины окон. Порядок запуска — в `CLAUDE.md`, «Команды».
+
+## Устройство
+
+- `src/api` — клиент по контракту шлюза (`schema.d.ts` порождается из его OpenAPI; тело запроса, которого контракт не называет,
+  принимается как JSON-значение — `client.ts`).
+- `src/stores` — состояние (Pinia); обновляется пакетами потока событий (`composables/useSSE.ts`, `useRealtime.ts`), экран не
+  опрашивает ядро и не доспрашивает деталей. Потеря потока видна полосой (`ConnectionBanner.vue`).
+- `src/components` — экраны и окна. Формы — на «листе»: `SheetRow`, `SheetField`, `StSwitch`, `StNumber`, `StInput`, `StSelect`.
+  Окно — `ModalShell` (диалог, фокус, Escape достаётся верхнему слою: `composables/useLayers.ts`).
+- `src/i18n/ru.ts` — каталог текстов; в коде экрана нет ни одной строки для пользователя (сторож — `i18n/literals.test.ts`).
+- `src/styles` — токены (`tokens.css`) и стили по областям.
+- Страницы на образцах (`/#gallery`, `/#card-colors`) — отдельные куски сборки, грузятся только по своему якорю.
+
+## Правила
+
+- Текст — ключом каталога; раскладка — интринсик (`grid auto-fit`, `clamp`, контейнерные запросы), без порогов по ширине окна.
+- Escape, Tab и фокус — через слои (`useLayers`); список, который раскрывается из поля, — `useDropList`.
+- Элемент без кнопки, который нажимается, получает клавиатуру директивой `v-press` либо становится кнопкой.

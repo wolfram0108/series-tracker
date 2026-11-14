@@ -10,11 +10,9 @@
 .add-hint { color: var(--text-muted); margin: 8px 0 0; }
 .add-error { color: var(--color-red-1); margin: 8px 0 0; }
 .relocation-planned { color: var(--text-muted); margin: 0.5rem 0 0; }
-.add-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .mt-2 { margin-top: 8px; }
 .mt-3 { margin-top: 16px; }
 .mb-2 { margin-bottom: 8px; }
-@media (max-width: 720px) { .add-grid-2 { grid-template-columns: 1fr; } }
 
 .modern-label {
   display: block;

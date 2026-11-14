@@ -57,8 +57,14 @@ async def locked(tmp_path):
 
 async def test_a_session_that_ended_while_the_window_was_open_brings_the_login(locked):
     page = locked.page
-    await locked.first_run()
-    await expect(page.locator(".empty-state")).to_be_visible()
+    # Every response of the service that holds a session writes its cookie again: the cookie is cleared only after the window has
+    # had every answer it asks for after the login (the scanner, the stream; the list is told by its text), or a late one gives it back.
+    async with page.expect_response(lambda r: r.url.endswith("/api/scanner/status") and r.status == 200) as scanner, \
+            page.expect_response(lambda r: "/api/stream" in r.url and r.status == 200) as stream:
+        await locked.first_run()
+    await scanner.value
+    await stream.value
+    await expect(page.get_by_text(text("app.empty"))).to_be_visible()
     await page.context.clear_cookies()  # the session ends; the stream that was open is cut when the service goes and comes back
     await locked._unserve()
     await locked._serve()
