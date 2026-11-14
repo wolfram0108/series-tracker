@@ -332,6 +332,7 @@ export const ru = {
   "reason.site_not_found": "для этого адреса нет сайта",
   "reason.read_failed": "чтение страницы не удалось",
   "reason.read_cancelled": "чтение страницы остановлено пользователем",
+  "reason.provider_not_connected": "внешнее приложение не подключено",
   "reason.provider_unavailable": "внешний поставщик источников не отвечает",
   "reason.provider_incompatible": "внешний поставщик источников говорит на протоколе {protocol}, принимается {accepted}",
   "reason.provider_stream_broken": "внешний поставщик источников оборвал чтение страницы",

@@ -3,6 +3,7 @@ the player and the alignment service as models — the full circle of the plan o
 import asyncio
 import json
 import os
+import sqlite3
 import subprocess
 
 import pytest
@@ -436,6 +437,80 @@ async def test_a_card_whose_parser_gives_a_video_at_an_address_without_an_extens
     assert "1080p" in asset["name"], asset["name"]
     held = await mkv.contents(os.path.join(stand.library, asset["name"]))
     assert [track.language for track in held.audio] == ["chi"]
+
+
+async def _series_of_an_application(stand) -> int:
+    """A series whose one source is a card of an application, its card read by the user: the table is in force."""
+    stand.site.app_card(219017, "万界独尊", {1: 1080}, files=True)
+    await stand.configure(["Оригинал"], {"Оригинал": "chi"})
+    made = await stand.call("POST", "/api/parser-profiles", {"name": "серии 半日"})
+    label = json.dumps([{"type": "text", "value": "第"}, {"type": "number"}, {"type": "text", "value": "集"}],
+                       ensure_ascii=False)
+    await stand.call("POST", f"/api/parser-profiles/{made['id']}/rules", {
+        "name": "серия", "continue_after_match": False,
+        "action_pattern": json.dumps([{"action_type": "extract_single", "action_pattern": label},
+                                      {"action_type": "assign_voiceover", "action_pattern": "Оригинал"}]),
+        "conditions": [{"condition_type": "contains", "pattern": label, "logical_operator": "AND"}]})
+    series = await stand.call("POST", "/api/series", {
+        "name": "Сериал", "name_en": "Serial", "site": "banri", "save_path": stand.library,
+        "sources": [{"url": "app://banri/219017", "source_type": "web_video", "parser_profile_id": made["id"]}]})
+    await stand.read_card("app://banri/219017")
+    return series["series_id"]
+
+
+@needs_provider
+async def test_with_the_provider_down_every_try_of_the_user_is_refused_in_words_and_nothing_changes(stand):
+    """The provider of the applications is gone. «Сканировать» is refused at once — no sync opens, so no read and no download
+    can begin; «Перечитать» says the application is not connected; the search says so; nothing begins."""
+    series_id = await _series_of_an_application(stand)
+    states = stand.bus.subscribe("sources.provider.state")
+    await asyncio.to_thread(stand.provider_http.kill)
+    while stand.module("sources").connector.state != "down":
+        await asyncio.wait_for(states.queue.get(), STAND_LIMIT_S)
+
+    refused = await stand.api.post(f"/api/series/{series_id}/scan")
+    assert refused.status_code == 409 and "provider_not_connected" in refused.text, (refused.status_code, refused.text)
+    ended = stand.bus.subscribe("sources.table.failed")
+    await stand.call("POST", "/api/sources/read", {"url": "app://banri/219017"})
+    packet = (await asyncio.wait_for(ended.queue.get(), STAND_LIMIT_S)).payload
+    assert packet["url"] == "app://banri/219017" and json.loads(packet["reason"])["code"] == "provider_not_connected"
+    searched = await stand.api.post("/api/sources/search", json={"query": "万界独尊", "page": 1})
+    assert searched.status_code == 409 and "provider_not_connected" in searched.text, (searched.status_code, searched.text)
+
+    # Nothing began: no run, no file, no download, nothing recorded as the failure of a source.
+    await stand.bus.settled()
+    view = await stand.call("GET", f"/api/series/{series_id}/plan")
+    assert not view["running"] and not view["assets"] and stand.files() == []
+    with sqlite3.connect(stand.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM plan_failures").fetchone() == (0,)
+        assert conn.execute("SELECT COUNT(*) FROM download_tasks").fetchone() == (0,)
+
+
+@needs_provider
+async def test_a_provider_that_falls_in_the_middle_of_a_download_is_lived_through_the_run_closes_and_no_source_is_blamed(stand, monkeypatch):
+    """The sync is under way, a file is being fetched — and the provider dies. The download is nobody's failure and is left for
+    the next sync; the run closes by itself, the series is free, and nothing of the source is recorded as failed."""
+    import threading
+
+    monkeypatch.setattr("modules.downloads.module.RETRY_DELAY_S", 0.0)
+    series_id = await _series_of_an_application(stand)
+    fetching = threading.Event()
+
+    async def hung(request, told):
+        fetching.set()  # the provider is in the middle of the file: it never ends, as the process dies under it
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(stand.provider, "_fetch", hung)
+    ended = stand.bus.subscribe("scan.run.changed")
+    await stand.call("POST", f"/api/series/{series_id}/scan")
+    assert await asyncio.to_thread(fetching.wait, STAND_LIMIT_S)
+    await asyncio.to_thread(stand.provider_http.kill)
+    await stand._run_end(ended, series_id)
+
+    view = await stand.call("GET", f"/api/series/{series_id}/plan")
+    assert not view["running"] and not view["assets"] and stand.files() == []
+    with sqlite3.connect(stand.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM plan_failures").fetchone() == (0,)
 
 
 async def test_a_title_whose_voice_over_plays_in_alloha_is_downloaded_by_its_player_and_built(stand):

@@ -355,7 +355,9 @@ class DownloadsModule(BaseModule):
         try:
             reply = await self.request("sources.video.stream", payload)
             if reply.get("error"):
-                return Stream(url, error=(reply["error"], Failed.BROKEN if reply.get("transient") else Failed.FINAL))
+                # `unasked`: the player was not reached (a provider that is not up), the failure is nobody's.
+                kind = Failed.UNASKED if reply.get("unasked") else Failed.BROKEN if reply.get("transient") else Failed.FINAL
+                return Stream(url, error=(reply["error"], kind))
             if reply.get("handled"):
                 by_player = bool(reply.get("player_fetch"))
                 return Stream(reply["stream_url"], reply.get("headers"), progressive=bool(reply.get("progressive")),

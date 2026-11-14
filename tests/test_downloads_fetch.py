@@ -232,6 +232,20 @@ async def test_fetch_stream_error_of_the_provider_is_the_error_of_the_job(system
 
 
 @pytest.mark.asyncio
+async def test_a_link_whose_provider_is_not_up_is_nobodys_failure_and_never_goes_to_the_generic_downloader(system, tmp_path, monkeypatch):
+    """`sources` says the player was not reached (`unasked`): the job is asked again later, the source is not blamed and yt-dlp
+    is not handed a link it cannot open."""
+    monkeypatch.setattr("modules.downloads.module.RETRY_DELAY_S", 0.0)
+    bus, fake, dl, probe = system
+    link = "app://mock/7#line=X&item=t"
+    fake.stream_replies[link] = {"handled": True, "error": '{"code":"provider_not_connected","state":"none"}',
+                                 "transient": True, "unasked": True}
+    (done,) = await _fetch(probe, bus, 1, jobs=[{"key": "v:1", "url": link, "path": str(tmp_path / "a.mp4"), "series_id": 3}])
+    assert done["ok"] is False and parse(done["error"])["code"] == "provider_not_connected"
+    assert done["transient"] is True and dl.started == []
+
+
+@pytest.mark.asyncio
 async def test_fetch_unreachable_sources_is_an_error_not_a_blind_download(system, tmp_path, monkeypatch):
     monkeypatch.setattr("modules.downloads.module.RETRY_DELAY_S", 0.0)
     bus, fake, dl, probe = system

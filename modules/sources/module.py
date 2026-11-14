@@ -16,7 +16,8 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    task however many ask — and the reply is `reading` at once, with the last
                                    complete table when there is one; the end comes as the events below.
                                    `failed` in the reply means no read began (`site_not_found`: no site for the
-                                   address). `url` of the reply is the canonical address the site gives: the key
+                                   address; `provider_not_connected`: the provider that reads it is not up, and
+                                   «Перечитать» of it is answered by the event `sources.table.failed` with the same reason). `url` of the reply is the canonical address the site gives: the key
                                    of the table and the `url` of the events. `refresh` false reads nothing and
                                    says how the page stands: `reading` while a read goes, `failed` (with the
                                    reason) when the last read failed, `ready` for a complete table however old,
@@ -60,7 +61,14 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    of search the provider of the socket names (contracts/provider_socket.md), or of the
                                    one named, as the provider gives it, or the reason it gave none (`provider_unavailable`
                                    when it cannot be reached). A card picked is a source by the address the provider
-                                   gives (for video applications `app://<application>/<card>`)
+                                   gives (for video applications `app://<application>/<card>`). With the provider not up
+                                   (none configured, not heard yet, dropped, another protocol) the search is refused:
+                                   NotAllowed `provider_not_connected`
+  sources.pages.check {urls} → {blocked: [{url, reason}]}: the pages among `urls` that cannot be read now because the
+                                   provider that reads them is not up (`provider_not_connected`, `provider_incompatible`).
+                                   A page of the provider's world is one a site of its manifest reads, or an address that
+                                   is no web address and no site reads (modules/sources/provider/gate.py). Scan asks it
+                                   before it opens a sync of a series, whatever else the series is made of
   sources.term.get {} → {hours}: the term of what the sources answered (term.py), whole hours
   sources.term.set {hours} → {ok, hours, reason?}: a whole number of hours from one is stored (`sources_term_hours` of the
                                    settings) and is the term of every reader of the module at once; any other value is
@@ -119,7 +127,7 @@ from typing import Callable, Iterable
 from core import BaseModule, compute, ids
 from core import storage
 from core.contracts.voices import PLAYERS_OFF_KEY
-from core.contracts import (AppSearchReply, AppSearchRequest, ParsedDomains, PlayerFacts, PlayerPlace,
+from core.contracts import (AppSearchReply, AppSearchRequest, NotAllowed, ParsedDomains, PlayerFacts, PlayerPlace,
                             PlayersListReply, PlayersListRequest, SiteResolveRequest,
                             SourcesSettingsView, TableGetRequest, TrackerMirrors)
 from core.deadlines import TABLE_READ_S
@@ -133,7 +141,8 @@ from . import anilibria, delivery, parsers
 from .browser_pool import BrowserPool
 from .delivery import Delivery
 from .parsers import SourceParseError
-from .provider import Connector, ProviderClient
+from .provider import Connector, ProviderClient, is_web_address, not_connected
+from .provider import block as provider_block
 from .repository import SourcesRepository
 from .term import DEFAULT_HOURS, TERM_KEY, Term, hours_of
 from .players.alloha_session import Profile as AllohaProfile
@@ -205,7 +214,7 @@ class SourcesModule(BaseModule):
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
             players=self.players, clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent, term=self.term,
-            holding=self.browsers.held, off=lambda: self.players_off)
+            holding=self.browsers.held, off=lambda: self.players_off, blocked=self._provider_block)
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(
@@ -231,6 +240,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.site.resolve", self.on_site_resolve)
         self.handle("sources.settings.get", self.on_settings_get)
         self.handle("sources.apps.search", self.on_apps_search)
+        self.handle("sources.pages.check", self.on_pages_check)
         self.handle("sources.players.list", self.on_players_list)
         self.handle("sources.term.get", self.on_term_get)
         self.handle("sources.term.set", self.on_term_set)
@@ -548,12 +558,26 @@ class SourcesModule(BaseModule):
         socket names (or of the one named), each as the provider gives it, or the reason it gave none. No provider, no source of
         search: the reply is empty."""
         request = AppSearchRequest.model_validate(env.payload)
-        found = await self.connector.search(request) if self.connector is not None else []
-        return AppSearchReply(apps=found).model_dump(mode="json")
+        if (why := not_connected(self.connector)) is not None:
+            raise NotAllowed(why)  # the search is the provider's: with none up there is nothing to search, and the user is told
+        return AppSearchReply(apps=await self.connector.search(request)).model_dump(mode="json")
+
+    def _provider_block(self, url: str) -> str | None:
+        """The reason a page cannot be read now because the provider that reads it is not up; None for any other page."""
+        return provider_block(self.connector, self.sites, url)
+
+    async def on_pages_check(self, env: Envelope) -> dict:
+        """payload: {urls}; reply: {blocked: [{url, reason}]} — the pages among them that cannot be read now for want of the
+        provider that reads them (none configured, not heard yet, dropped, another protocol). A synchronization asks before
+        it opens: a series with such a page is not synchronized, whatever its other pages are."""
+        blocked = [{"url": url, "reason": why} for url in env.payload.get("urls") or []
+                   if (why := self._provider_block(url)) is not None]
+        return {"blocked": blocked}
 
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}
-        reply: {handled, stream_url, headers, progressive, playlist, player_fetch, fetch_by?} | {handled, error, transient}.
+        reply: {handled, stream_url, headers, progressive, playlist, player_fetch, fetch_by?} | {handled, error, transient,
+        unasked?}. `unasked`: the player was not reached (the provider is not up), so the error is nobody's failure.
         `progressive` marks one ready file that a server may be asked for in parts; `playlist` an HLS playlist that is
         downloaded by its segments; `player_fetch` that the player downloads the file itself (`sources.video.fetch`), and
         `fetch_by` `provider` that the player is a provider of the socket, which takes the whole file by its own way.
@@ -576,6 +600,12 @@ class SourcesModule(BaseModule):
                 "player_fetch": bool(stream_info.get("player_fetch")),
                 **({"fetch_by": stream_info["fetch_by"]} if stream_info.get("fetch_by") else {}),
             }
+        if not is_web_address(url):
+            # A link of the provider's world no player owns: no generic downloader can open it. With the provider not up nobody
+            # was asked (`unasked`: asked again later, never the source's failure); with it up the link is nobody's (`final`).
+            if (why := not_connected(self.connector)) is not None:
+                return {"handled": True, "error": why, "transient": True, "unasked": True}
+            return {"handled": True, "error": reason("not_a_link_of_the_provider", url=url), "transient": False}
         return {"handled": False}
 
     async def on_video_fetch(self, env: Envelope) -> dict:

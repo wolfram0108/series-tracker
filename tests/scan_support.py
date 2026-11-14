@@ -69,6 +69,7 @@ class World(BaseModule):
     def __init__(self, bus) -> None:
         self.order: list[str] = []
         self.pages: dict[str, Page] = {}
+        self.blocked: dict[str, str] = {}
         self.recompute_error: str | None = None
         self.settings_values = {"scan_interval_minutes": "60"}
         # Whether each executor has work of the series when a run asks (`<owner>.work.get`); none by default.
@@ -101,6 +102,7 @@ class World(BaseModule):
         h("rules.profiles.export", self.on_profiles_export)
         h("voices.settings.export", self.on_voices_export)
         h("sources.table.get", self.on_table)
+        h("sources.pages.check", self.on_pages_check)
         h("sources.table.cancel", self.on_table_cancel)
         h("planner.sync.cancel", self.on_planner_cancel)
         h("torrents.queue.get", self.on_torrent_queue)
@@ -187,6 +189,10 @@ class World(BaseModule):
                 self.finish(request.url)
         self.asked.put_nowait(request.url)
         return reply.model_dump(mode="json")
+
+    async def on_pages_check(self, env) -> dict:
+        """The pages `sources` says it cannot read now for want of a provider: `blocked` maps a page to its reason."""
+        return {"blocked": [{"url": url, "reason": self.blocked[url]} for url in env.payload["urls"] if url in self.blocked]}
 
     async def on_torrent_queue(self, env) -> dict:
         return {"count": 0}

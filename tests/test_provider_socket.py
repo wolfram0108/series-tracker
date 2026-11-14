@@ -11,7 +11,8 @@ import os
 
 import pytest
 
-from core import BaseModule, Bus
+from core import BaseModule, Bus, BusRequestError
+from core.contracts import NotAllowed
 from core.db import Database
 from modules.sources.module import SourcesModule
 from modules.sources.provider import ProviderClient, RemoteFamily
@@ -42,6 +43,13 @@ async def state_is(sub, state: str) -> dict:
         got = await nxt(sub)
         if got["state"] == state:
             return got
+
+
+async def settled_down(system) -> None:
+    """The provider is gone for good: the feed may have reopened once against the server that was still closing, and the state
+    says `down` only after its last drop is counted."""
+    while system.sources.connector.state != "down":
+        await nxt(system.states)
 
 
 class System:
@@ -301,18 +309,26 @@ async def test_a_provider_that_goes_down_is_a_state_and_a_reason_and_keeps_its_s
     await system.read()
     await system.server.down()
     assert json.loads((await state_is(system.states, "down"))["reason"])["code"] == "provider_unavailable"
+    await settled_down(system)
+    # A synchronization asks which pages the provider that is down reads: it opens no sync of a series that has one.
+    (blocked,) = (await system.probe.request("sources.pages.check", {"urls": [CARD, "https://example.org/p"]}))["blocked"]
+    assert blocked["url"] == CARD and json.loads(blocked["reason"])["state"] == "down"
     # The pages of its sites are still its sites': nothing is forgotten, the last table serves.
     assert system.sources.tables.resolve(CARD).site == "mock"
+    # A read the user asks for is not begun: the module says the provider is not connected, and the last table serves.
     failed = await system.read()
-    assert json.loads(failed["reason"])["code"] == "provider_unavailable"
+    assert json.loads(failed["reason"]) == {"code": "provider_not_connected", "state": "down"}
     assert len((await system.table())["table"]["rows"]) == 3
     fetched = await fetch(system, target=str(tmp_path / "e.mp4"))
     assert fetched["ok"] is False and fetched["kind"] == "unasked" and "provider_unavailable" in fetched["error"]
-    found = (await system.probe.request("sources.apps.search", {"query": "名"}))["apps"]
-    assert [json.loads(each["reason"])["code"] for each in found] == ["provider_unavailable"]
+    with pytest.raises(BusRequestError) as searched:
+        await system.probe.request("sources.apps.search", {"query": "名"})
+    assert "provider_not_connected" in str(searched.value)
     await system.server.up()
     await state_is(system.states, "up")
     assert system.mock.reads_begun == 1  # the read that failed while the provider was down never reached it
+    assert (await system.probe.request("sources.pages.check", {"urls": [CARD]})) == {"blocked": []}
+    assert (await system.read())["url"] == CARD and system.mock.reads_begun == 2  # back: the same page is read as it was
 
 
 async def test_the_saved_manifest_registers_the_sites_before_the_provider_is_reached(tmp_path):
@@ -338,8 +354,49 @@ async def test_the_saved_manifest_registers_the_sites_before_the_provider_is_rea
 async def test_a_module_with_no_provider_has_no_socket_and_reads_what_it_has(tmp_path):
     sources = SourcesModule(Bus(), Database(str(migrated(tmp_path / "s.db"))), torrent_cache_dir=str(tmp_path / "cache"))
     assert sources.connector is None
-    found = await sources.on_apps_search(type("Env", (), {"payload": {"query": "x"}})())
-    assert found == {"apps": []}
+    with pytest.raises(NotAllowed) as refused:  # the search is the provider's: nothing to search, and the user is told so
+        await sources.on_apps_search(type("Env", (), {"payload": {"query": "x"}})())
+    assert json.loads(str(refused.value)) == {"code": "provider_not_connected", "state": "none"}
+
+
+async def test_with_no_provider_every_try_of_the_user_at_its_world_says_it_is_not_connected_and_begins_nothing(tmp_path):
+    bus = Bus()
+    sources = SourcesModule(bus, Database(str(migrated(tmp_path / "s.db"))), torrent_cache_dir=str(tmp_path / "cache"))
+    probe = Probe(bus)
+    ended = bus.subscribe("sources.table.ready", "sources.table.failed")
+    await sources.start()
+    await probe.start()
+    try:
+        # «Перечитать»: the read is not begun, the page says why.
+        probe.send_command("sources.table.read", {"url": CARD})
+        got = await nxt(ended)
+        assert got["url"] == CARD and json.loads(got["reason"]) == {"code": "provider_not_connected", "state": "none"}
+        # What a synchronization asks before it opens: the pages of the provider's world, whether or not a site was ever heard of.
+        asked = [CARD, "https://example.org/p/1", "app://other/3/"]
+        assert [each["url"] for each in (await probe.request("sources.pages.check", {"urls": asked}))["blocked"]] == [CARD, "app://other/3/"]
+        # A link of that world is nobody's failure and never goes to the generic downloader; a web address is the downloader's.
+        link = await probe.request("sources.video.stream", {"url": LINK})
+        assert link["handled"] and link["unasked"] and link["transient"] and json.loads(link["error"])["code"] == "provider_not_connected"
+        assert await probe.request("sources.video.stream", {"url": "https://example.org/x"}) == {"handled": False}
+    finally:
+        await probe.stop()
+        await sources.stop()
+
+
+async def test_a_provider_that_was_never_reached_is_not_connected_either_and_its_page_is_not_read(tmp_path):
+    mock = MockProvider()
+    async with serving(mock) as gone:
+        await gone.down()
+        built = await start(tmp_path, mock, gone)
+        try:
+            await state_is(built.states, "down")
+            failed = await built.read()
+            reason = json.loads(failed["reason"])
+            assert reason["code"] == "provider_not_connected" and reason["state"] == "down"
+            assert mock.reads_begun == 0 and (await built.table())["state"] == "failed"
+        finally:
+            await built.probe.stop()
+            await built.sources.stop()
 
 
 # --- the pages no source lists --------------------------------------------------------------------------------------------------------
@@ -431,7 +488,7 @@ async def test_a_page_no_site_reads_now_still_serves_the_table_it_had_so_a_sourc
             await sources.repo.save_table(_stored(CARD, "line:X", [1080]))
             for refresh in (True, False):
                 got = await sources.on_table_get(type("Env", (), {"payload": {"url": CARD, "refresh": refresh}})())
-                assert got["state"] == "failed" and json.loads(got["reason"])["code"] == "site_not_found"
+                assert got["state"] == "failed" and json.loads(got["reason"])["code"] == "provider_not_connected"
                 assert [row["player"] for row in got["table"]["rows"]] == ["line:X"]
             never = await sources.on_table_get(type("Env", (), {"payload": {"url": "app://mock/99"}})())
             assert never["state"] == "failed" and never["table"] is None

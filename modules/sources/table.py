@@ -118,8 +118,12 @@ class TableReader:
                  http: Callable[[], httpx.AsyncClient], *, players: PlayerRegistry, clock: Callable[[], datetime] = utc_now,
                  term: Term | None = None, safeguard_s: float = TABLE_READ_S, recent: int | None = None,
                  holding: Callable[[], AbstractAsyncContextManager] | None = None,
-                 off: Callable[[], frozenset[str]] | None = None) -> None:
+                 off: Callable[[], frozenset[str]] | None = None,
+                 blocked: Callable[[str], str | None] | None = None) -> None:
         self._repo, self._sites, self._publish, self._http, self._players = repo, sites, publish, http, players
+        # The reason a page cannot be read now for want of the provider that reads it (modules/sources/provider/gate.py), or
+        # None: a read of such a page is not begun, it says why.
+        self._blocked = blocked if blocked is not None else (lambda url: None)
         # The players switched off for every source, as they are when a read begins.
         self._off = off if off is not None else (lambda: frozenset())
         self._clock, self._safeguard_s, self._recent = clock, safeguard_s, recent
@@ -144,7 +148,8 @@ class TableReader:
             except Exception:  # noqa: BLE001 - a store that cannot be read has no table to give; the refusal is the answer
                 self._log.exception("the table of %s could not be read for a page no site reads", request.url)
                 held = None
-            return TableGetReply(url=request.url, state=TableState.FAILED, table=held, reason=reason("site_not_found"))
+            return TableGetReply(url=request.url, state=TableState.FAILED, table=held,
+                                 reason=self._blocked(request.url) or reason("site_not_found"))
         site, key = found
         async with self._gate:
             stored = await self._repo.stored(key)
@@ -158,6 +163,9 @@ class TableReader:
                 # that was read is read again by a synchronization only (its rows are the setting of its source).
                 return self._as_it_is(key, stored)
             if key not in self._reading:
+                if (why := self._blocked(key)) is not None:
+                    # The page would be read by a provider that is not up: no read begins, the last table stays in force.
+                    return TableGetReply(url=key, state=TableState.FAILED, table=table, reason=why)
                 self._launch(site, key, rows=request.rows)
             return TableGetReply(url=key, state=TableState.READING, table=table)
 
@@ -178,11 +186,14 @@ class TableReader:
         nothing that an earlier read left for sharing (`ReadContext.fresh`)."""
         found = self._resolve(request.url)
         if found is None:
-            self._publish(FAILED_TOPIC, TableFailed(url=request.url, reason=reason("site_not_found"))
+            self._publish(FAILED_TOPIC, TableFailed(url=request.url, reason=self._blocked(request.url) or reason("site_not_found"))
                           .model_dump(mode="json"))
             return
         site, key = found
         if key not in self._reading:
+            if (why := self._blocked(key)) is not None:
+                self._publish(FAILED_TOPIC, TableFailed(url=key, reason=why).model_dump(mode="json"))
+                return
             self._launch(site, key, fresh=True, rows=request.rows)
 
     async def cancel(self, url: str) -> bool:

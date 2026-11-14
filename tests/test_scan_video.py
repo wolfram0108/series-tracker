@@ -434,6 +434,32 @@ async def test_the_scheduled_pass_over_all_series_hands_the_sync_to_the_planner(
     assert rig.world.payloads["planner.sync"] == [{"series_id": rig.series_id, "download": True}]
 
 
+async def test_a_series_whose_page_a_provider_that_is_not_up_reads_is_not_synchronized_and_nothing_is_written(rig):
+    """The provider of the external sources is not connected: the button says so and nothing begins — no command is written, no
+    step is asked, no run is opened, the series stays free for the next try."""
+    rig.world.blocked[URL1] = reason("provider_not_connected", state="none")
+    with pytest.raises(BusRequestError) as refused:
+        await rig.run()
+    assert "provider_not_connected" in str(refused.value)
+    assert rig.world.order == [] and rig.query("SELECT * FROM scan_tasks") == []
+    rig.world.blocked.clear()  # the provider is up: the same series synchronizes
+    assert (await rig.run())["sources"][0]["state"] == "ready"
+
+
+async def test_a_series_with_one_page_of_a_provider_that_is_not_up_is_refused_whatever_its_other_pages_are(duo):
+    duo.world.blocked[URL2] = reason("provider_not_connected", state="down")
+    with pytest.raises(BusRequestError) as refused:
+        await duo.run()
+    assert "provider_not_connected" in str(refused.value) and duo.world.order == []
+
+
+async def test_the_scheduled_pass_skips_a_series_a_provider_that_is_not_up_reads_and_asks_nobody(rig):
+    rig.sql("UPDATE series SET auto_scan_enabled=1 WHERE id=?", (rig.series_id,))
+    rig.world.blocked[URL1] = reason("provider_not_connected", state="connecting")
+    await rig.scan._scan_all()
+    assert rig.world.order == [] and rig.query("SELECT * FROM scan_tasks") == []
+
+
 async def test_a_restart_runs_again_a_scan_whose_command_carries_a_choice_of_an_earlier_version(rig):
     with sqlite3.connect(rig.db_path) as conn:
         conn.execute("INSERT INTO scan_tasks (series_id, status, task_data, results_data) VALUES (?, 'processing', '[]', ?)",

@@ -277,7 +277,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 **(body.model_dump(exclude_none=True) if body is not None else {})})
         except BusRequestError as exc:
             msg = relayed(str(exc))
-            code = 409 if code_of(str(exc)) == "not_allowed" else 500
+            # A refusal of the state of the series or of the provider that reads its pages (NotAllowed) is a conflict, not a failure.
+            code = 409 if code_of(str(exc)) == "not_allowed" or str(exc).startswith("NotAllowed") else 500
             return JSONResponse({"success": False, "error": msg},
                                 status_code=code)
         return {"success": True, **result}

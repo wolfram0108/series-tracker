@@ -47,6 +47,7 @@ class Connector:
         self._log = log or logging.getLogger("sources")
         self.manifest: Manifest | None = None
         self.state = "connecting"
+        self.why = ""  # the reason of the state, as the event gives it (`incompatible` names the protocol it was told)
         # What this connector put into the registries, so that a manifest that changes takes out exactly that.
         self._sites_ours: list[str] = []
         self._players_ours: list[str] = []
@@ -74,7 +75,7 @@ class Connector:
         if state == self.state and not why:
             return
         changed = state != self.state
-        self.state = state
+        self.state, self.why = state, why
         if changed:
             self._log.info("поставщик %s: %s%s", self.client.url, state, f" ({why})" if why else "")
             self._publish(STATE_TOPIC, ProviderState(provider=self.manifest.provider.id if self.manifest else self.client.url,

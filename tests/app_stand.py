@@ -145,6 +145,24 @@ class Served:
         self.server.should_exit = True
         self.thread.join(10)
 
+    def kill(self) -> None:
+        """A process that dies: no graceful end, its sockets are closed where they stand (the kernel does that for a process that
+        is gone), whatever they were carrying; nothing listens any more."""
+        self.server.force_exit = True
+        self.server.should_exit = True
+        # Until the server has stopped listening it may still take a connection: every one it holds is closed, again and again.
+        for _ in range(500):
+            for connection in list(self.server.server_state.connections):
+                held = connection.transport.get_extra_info("socket")
+                if held is not None:
+                    try:
+                        held.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass  # already closed
+            self.thread.join(0.02)
+            if not self.thread.is_alive():
+                return
+
 
 @dataclass
 class Release:

@@ -82,7 +82,7 @@ from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, 
 from core.db import Database
 from core.envelope import Envelope
 from core.ignored import parse_memory
-from core.reasons import reason
+from core.reasons import describe, reason
 from . import sync
 from .errors import ScanAborted, ScanError, SyncFailed
 from .repository import ScanRepository
@@ -438,6 +438,10 @@ class ScanModule(BaseModule):
                           download: bool = True, resume: int | None = None, scope: SyncScope | None = None) -> dict:
         """A scan of one series, a task of its own: a stop of it by the user (scan.run.cancel) stops it alone, not the
         pass over all series it may be a part of."""
+        # A new sync of a series whose source is read by a provider that is not up does not open (a sync the start took up
+        # again goes on as it was). Asked before the series is taken: nothing is written, the user is told why.
+        if resume is None and (why := await self._provider_blocks(series_id)) is not None:
+            raise availability.NotAllowed(why)
         # Refused or taken at once, in the handler: a second scan of the series is refused from this moment on.
         self._require_idle(series_id)
         self._running.add(series_id)
@@ -449,6 +453,23 @@ class ScanModule(BaseModule):
             if self._passes.get(series_id) is passing:
                 self._passes.pop(series_id, None)
             self._running.discard(series_id)
+
+    async def _provider_blocks(self, series_id: int, series: dict | None = None) -> str | None:
+        """The reason a video series cannot be synchronized now: one of its pages is read by a provider of external sources
+        that is not up (`sources.pages.check`). None when nothing stops it, and when the question cannot be put — the sync
+        then says for itself what is wrong with the series or the page."""
+        try:
+            if series is None:
+                series = await self.request("catalog.series.get", {"series_id": series_id})
+            if series.get("kind") != "video":
+                return None
+            urls = [each.url for each in _sources_of(series)]
+            if not urls:
+                return None
+            blocked = (await self.request("sources.pages.check", {"urls": urls})).get("blocked") or []
+        except (BusRequestError, asyncio.TimeoutError):
+            return None
+        return blocked[0]["reason"] if blocked else None
 
     async def on_run_cancel(self, env: Envelope) -> dict:
         """The user stops the sync of a series: the pass of the scan, the reads of its pages (failed, and not begun again
@@ -895,6 +916,9 @@ class ScanModule(BaseModule):
                     continue
                 if self._state(s["id"]) != availability.SERIES_IDLE:
                     self.log.info("автоскан: сериал %d пропущен — идёт его синхронизация", s["id"])
+                    continue
+                if (why := await self._provider_blocks(s["id"], s)) is not None:
+                    self.log.info("автоскан: сериал %d пропущен — %s", s["id"], describe(why))
                     continue
                 try:
                     await self._run_series(s["id"], force)
