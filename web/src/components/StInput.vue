@@ -5,12 +5,15 @@ import { t } from "../i18n"
 
 // Floating-label поле (constructor-item item-floating-label). Иконка —
 // отдельным StIcon перед ним (как в оригинале). Опц. пароль-глазик.
+// Без `label` — простое поле: подпись ему даёт сегмент группы (StLabel), значение — `placeholder` пока пусто.
 const props = withDefaults(defineProps<{
   modelValue?: string
-  label: string
+  label?: string
+  placeholder?: string
+  ariaLabel?: string
   type?: "text" | "password"
   kind?: FsKind
-}>(), { modelValue: "", type: "text" })
+}>(), { modelValue: "", type: "text", label: undefined, placeholder: undefined, ariaLabel: undefined })
 
 const emit = defineEmits<{ "update:modelValue": [string] }>()
 const id = useId()
@@ -46,7 +49,27 @@ watch(() => props.modelValue, (v) => {
 </script>
 
 <template>
-  <div class="constructor-item item-floating-label">
+  <div v-if="label === undefined" class="constructor-item item-plain">
+    <input
+      :id="id"
+      class="item-input"
+      :type="eType"
+      :value="modelValue"
+      :placeholder="placeholder"
+      :aria-label="ariaLabel"
+      @input="onInput"
+    />
+    <button
+      v-if="type === 'password'"
+      type="button"
+      class="password-toggle-btn"
+      :title="show ? t('common.hide') : t('common.show')"
+      @click="show = !show"
+    >
+      <i class="pi" :class="show ? 'pi-eye-slash' : 'pi-eye'" />
+    </button>
+  </div>
+  <div v-else class="constructor-item item-floating-label">
     <input
       :id="id"
       class="item-input"

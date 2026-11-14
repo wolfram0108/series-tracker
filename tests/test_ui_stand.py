@@ -370,16 +370,16 @@ async def test_the_head_of_a_block_says_on_the_left_and_does_on_the_right_nothin
 
 
 async def test_the_buttons_of_the_header_of_the_application_keep_their_words_while_it_has_room_and_are_icons_when_it_has_not(ui):
-    """The header of the application: add, the log and the settings are one word each while the header has room for them and
-    their icons alone when it has not; the hints are their names, none leaves the header or loses its name."""
+    """The header of the application: add, the log, the extensions and the settings are one word each while the header has room
+    for them (66rem) and their icons alone when it has not; the hints are their names, none leaves the header or loses its name."""
     await series_in_browser(ui, (1,))
     page = ui.page
     header = page.locator(".page-header")
     await page.add_style_tag(content=".p-toast { display: none !important; }")  # the notices of the setup must not cover the pictures
     names = {text("header.add"): text("header.addSeries"), text("header.log"): text("header.logs"),
-             text("settings.title"): text("settings.title")}
+             text("header.extensions"): text("header.extensions"), text("settings.title"): text("settings.title")}
     assert all(len(word.split()) == 1 for word in names), "the words of the buttons are one word each"
-    for width in (1440, 940, 930, 700, 520, 380):
+    for width in (1440, 1120, 1100, 940, 700, 520, 380):
         await page.set_viewport_size({"width": width, "height": 900})
         await ui.shot_of(header, f"30-app-header-{width}")
         room = (await header.bounding_box())["width"]
@@ -389,7 +389,7 @@ async def test_the_buttons_of_the_header_of_the_application_keep_their_words_whi
             await expect(button).to_be_visible()
             await expect(button).to_have_attribute("aria-label", name)
             label = button.locator(".p-button-label")
-            if room >= 56 * 16:
+            if room >= 66 * 16:
                 await expect(label).to_have_text(word)
                 await expect(label).to_be_visible()
             else:
@@ -399,7 +399,7 @@ async def test_the_buttons_of_the_header_of_the_application_keep_their_words_whi
         # The row holds the title and the buttons: where the words are kept nothing wraps under the title.
         tops = {round((await button.bounding_box())["y"] / 10) for button in await header.locator(".header-actions button").all()}
         title = await header.locator(".page-title").bounding_box()
-        if room >= 56 * 16:
+        if room >= 66 * 16:
             assert len(tops) == 1 and (await header.locator(".header-actions button").first.bounding_box())["y"] < title["y"] + title["height"], width
 
 

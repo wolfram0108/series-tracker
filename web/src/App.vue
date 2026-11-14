@@ -7,6 +7,7 @@ import AppHeader from "./components/AppHeader.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import ConfirmDialog from "./components/ConfirmDialog.vue"
 import SettingsModal from "./components/SettingsModal.vue"
+import ExtensionsModal from "./components/ExtensionsModal.vue"
 import LogsModal from "./components/LogsModal.vue"
 import AddSeriesModal from "./components/AddSeriesModal.vue"
 import StatusModal from "./components/StatusModal.vue"
@@ -50,7 +51,7 @@ async function onLogout() {
 
 // какая модалка открыта (одна за раз). Статус-окно управляется отдельно
 // через ui.activeSeriesId (его ставит ui.openStatus + viewing).
-const openModal = ref<null | "settings" | "logs" | "add">(null)
+const openModal = ref<null | "settings" | "extensions" | "logs" | "add">(null)
 
 async function onCancelScan(id: number) {
   const r = (await request(
@@ -115,6 +116,7 @@ async function onDelete(id: number) {
     <AppHeader
       @add="openModal = 'add'"
       @logs="openModal = 'logs'"
+      @extensions="openModal = 'extensions'"
       @settings="openModal = 'settings'"
       @logout="onLogout"
     />
@@ -134,6 +136,7 @@ async function onDelete(id: number) {
     </div>
 
     <SettingsModal v-if="openModal === 'settings'" @close="openModal = null" />
+    <ExtensionsModal v-if="openModal === 'extensions'" @close="openModal = null" />
     <LogsModal v-if="openModal === 'logs'" @close="openModal = null" />
     <AddSeriesModal v-if="openModal === 'add'" @close="openModal = null" @created="seriesStore.load()" />
     <StatusModal

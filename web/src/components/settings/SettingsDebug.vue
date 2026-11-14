@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue"
+import { ref, computed, onMounted, watch } from "vue"
 import Button from "primevue/button"
 import ToggleSwitch from "primevue/toggleswitch"
 import InputText from "primevue/inputtext"
@@ -7,11 +7,11 @@ import { useToast } from "primevue/usetoast"
 import StGroup from "../StGroup.vue"
 import StSelect from "../StSelect.vue"
 import DatabaseViewerModal from "./DatabaseViewerModal.vue"
-import SettingsConformServer from "./SettingsConformServer.vue"
 import { api } from "../../api/client"
 import { sanitizePath } from "../../lib/fsnames"
 import { t, type MessageKey } from "../../i18n"
 import { useApi } from "../../composables/useApi"
+import { useDownloadLimits } from "../../composables/useDownloadLimits"
 import { useConfirm } from "../../composables/useConfirm"
 import { useScannerStore } from "../../stores/scanner"
 import { reasonText } from "../../lib/reason"
@@ -51,7 +51,6 @@ async function scanAll() {
 const forceReplace = ref(false)
 const lessStrict = ref(false)
 const slicingDelete = ref(false)
-const conformClear = ref(false)
 
 async function loadFlag(path: string): Promise<boolean> {
   const d = (await request(api.GET(path as never))) as { enabled?: boolean } | null
@@ -65,30 +64,16 @@ async function saveFlag(path: string, value: boolean, label: string) {
 }
 
 // --- числовые параметры yt-dlp (GET/POST → {value}) -------------------
-// --- пределы загрузок по способу (downloads, limits.py; GET/POST /api/settings/download_limits) ----
-interface DownloadLimits { threads_total: number; threads_per_file: number; single_at_once: number; provider_at_once: number; multi_at_once: number }
-const limits = ref({ threads_total: "32", threads_per_file: "16", single_at_once: "4", provider_at_once: "2" })
-const multiAtOnce = ref(2)
-
-function showLimits(got: DownloadLimits) {
-  limits.value = { threads_total: String(got.threads_total), threads_per_file: String(got.threads_per_file),
-                   single_at_once: String(got.single_at_once), provider_at_once: String(got.provider_at_once) }
-  multiAtOnce.value = got.multi_at_once
-}
-async function loadLimits() {
-  const got = (await request(api.GET("/api/settings/download_limits" as never))) as DownloadLimits | null
-  if (got) showLimits(got)
-}
-async function saveLimits() {
-  const body = { threads_total: limits.value.threads_total.trim(), threads_per_file: limits.value.threads_per_file.trim(),
-                 single_at_once: limits.value.single_at_once.trim(), provider_at_once: limits.value.provider_at_once.trim() }
-  const saved = (await request(api.POST("/api/settings/download_limits" as never, { body } as never))) as DownloadLimits | null
-  if (saved !== null) {
-    showLimits(saved)
-    toast.add({ severity: "info", summary: t("debug.downloads.saved"), life: 2000 })
-  } else {
-    await loadLimits()
-  }
+// --- пределы загрузок по способу (общее состояние с окном расширений: composables/useDownloadLimits.ts) ----
+const { limits: shared, load: loadLimits, save: saveShared } = useDownloadLimits()
+const limits = ref({ threads_total: "32", threads_per_file: "16", single_at_once: "4" })
+const multiAtOnce = computed(() => shared.value?.multi_at_once ?? 2)
+watch(shared, (got) => {
+  if (got) limits.value = { threads_total: String(got.threads_total), threads_per_file: String(got.threads_per_file), single_at_once: String(got.single_at_once) }
+}, { immediate: true })
+// A field writes only itself: the other limits are the core's until their own fields are changed.
+async function saveLimits(field: keyof typeof limits.value) {
+  await saveShared({ [field]: limits.value[field].trim() })
 }
 
 async function loadNum(path: string, fallback: number): Promise<string> {
@@ -196,7 +181,6 @@ onMounted(async () => {
   forceReplace.value = await loadFlag("/api/settings/force_replace")
   lessStrict.value = await loadFlag("/api/settings/less_strict_scan")
   slicingDelete.value = await loadFlag("/api/settings/slicing_delete_source")
-  conformClear.value = await loadFlag("/api/settings/conform_clear_finished")
   void loadLimits()
   sourcesTerm.value = await loadNum("/api/settings/sources_term", 1)
 })
@@ -242,27 +226,19 @@ onMounted(async () => {
             <ToggleSwitch v-model="slicingDelete" @change="saveFlag('/api/settings/slicing_delete_source', slicingDelete, t('debug.flag.slicingDelete'))" />
             <span>{{ t("debug.flag.slicingDelete") }}</span>
           </label>
-          <label class="debug-switch" :title="t('conform.settings.clearFinishedHint')">
-            <ToggleSwitch v-model="conformClear" @change="saveFlag('/api/settings/conform_clear_finished', conformClear, t('conform.settings.clearFinished'))" />
-            <span>{{ t("conform.settings.clearFinished") }}</span>
-          </label>
         </div>
         <div class="nums-row">
           <div class="num-field" :title="t('debug.downloads.threadsTotalHint')">
             <span>{{ t("debug.downloads.threadsTotal") }}</span>
-            <InputText v-model="limits.threads_total" inputmode="numeric" class="num-input" @change="saveLimits" />
+            <InputText v-model="limits.threads_total" inputmode="numeric" class="num-input" @change="saveLimits('threads_total')" />
           </div>
           <div class="num-field">
             <span>{{ t("debug.downloads.threadsPerFile") }}</span>
-            <InputText v-model="limits.threads_per_file" inputmode="numeric" class="num-input" @change="saveLimits" />
+            <InputText v-model="limits.threads_per_file" inputmode="numeric" class="num-input" @change="saveLimits('threads_per_file')" />
           </div>
           <div class="num-field" :title="t('debug.downloads.singleAtOnceHint')">
             <span>{{ t("debug.downloads.singleAtOnce") }}</span>
-            <InputText v-model="limits.single_at_once" inputmode="numeric" class="num-input" @change="saveLimits" />
-          </div>
-          <div class="num-field" :title="t('debug.downloads.providerAtOnceHint')">
-            <span>{{ t("debug.downloads.providerAtOnce") }}</span>
-            <InputText v-model="limits.provider_at_once" inputmode="numeric" class="num-input" @change="saveLimits" />
+            <InputText v-model="limits.single_at_once" inputmode="numeric" class="num-input" @change="saveLimits('single_at_once')" />
           </div>
           <div class="num-field muted-hint">{{ t("debug.downloads.multiAtOnce", { count: multiAtOnce }) }}</div>
           <div class="num-field" :title="t('debug.sourcesTerm.hint')">
@@ -272,8 +248,6 @@ onMounted(async () => {
         </div>
       </div>
     </div>
-
-    <SettingsConformServer />
 
     <!-- База данных -->
     <div class="modern-fieldset">

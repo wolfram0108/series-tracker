@@ -2,6 +2,7 @@
 import { ref, computed, watch } from "vue"
 import Button from "primevue/button"
 import ModalShell from "./ModalShell.vue"
+import ModalTabs from "./ModalTabs.vue"
 import SettingsAgents from "./settings/SettingsAgents.vue"
 import SettingsAuth from "./settings/SettingsAuth.vue"
 import SettingsAccount from "./settings/SettingsAccount.vue"
@@ -53,19 +54,7 @@ const tabs = [
   <ModalShell size="xl" fixed-height @close="emit('close')">
     <template #title><i class="pi pi-cog"></i> {{ t("settings.title") }}</template>
     <template #header-extra>
-      <div class="header-tabs st-tabs">
-        <button
-          v-for="tb in tabs"
-          :key="tb.value"
-          class="st-tab"
-          :class="{ active: tab === tb.value }"
-          :title="tb.label"
-          @click="tab = tb.value"
-        >
-          <i class="pi tab-icon" :class="tb.icon"></i>
-          <span class="tab-label" :data-text="tb.label"><span class="tl-text">{{ tb.label }}</span></span>
-        </button>
-      </div>
+      <ModalTabs v-model="tab" :tabs="tabs" />
     </template>
 
     <SettingsAuth v-if="tab === 'auth'" ref="tabRef" />

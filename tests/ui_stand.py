@@ -152,21 +152,30 @@ class UiStand(AppStand):
     async def close_settings(self) -> None:
         await self.page.locator(".modal-footer, .modern-footer").get_by_role("button", name="Закрыть").click()
 
+    async def extensions(self, tab: str) -> None:
+        await self.page.get_by_role("button", name=text("header.extensions")).click()
+        await self.page.locator(f".st-tab[title='{tab}']").click()
+
+    async def close_extensions(self) -> None:
+        await self.close_settings()  # the same footer: a window of the shell
+
     async def set_up(self, groups: list[str], languages: dict[str, str] | None = None) -> None:
         """What the user sets once: the address of the alignment service and its work folder, the groups of voice-overs,
         each given the language of its voice-over under it (`languages`: group → ISO 639-2; Russian for the others)."""
         page = self.page
         work = os.path.join(self.root, "work")
         connected = self.bus.subscribe("conform.daemon.up")
-        await self.settings("Отладка")
+        await self.extensions(text("extensions.tab.conform"))
+        # Without an address the tab is the line of the address; the folders come with it.
         await page.get_by_label(text("conform.settings.url")).fill(self.daemon_http.url)
         await page.get_by_label(text("conform.settings.local")).fill(work)
         await page.get_by_label(text("conform.settings.daemon")).fill(work)
-        # The block of the alignment server writes its address and folders when a field is left or Enter is pressed.
+        # The tab of the alignment server writes its address and folders when a field is left or Enter is pressed.
         await page.get_by_label(text("conform.settings.daemon")).press("Enter")
         await asyncio.wait_for(connected.queue.get(), 30)
         await expect(page.get_by_text(text("agents.conform.daemon.up"))).to_be_visible()
-        await page.locator(f".st-tab[title='{text('settings.tab.voices')}']").click()
+        await self.close_extensions()
+        await self.settings(text("settings.tab.voices"))
         for group in groups:
             await page.get_by_label(text("voices.settings.group.new")).fill(group)
             code = (languages or {}).get(group, "rus")

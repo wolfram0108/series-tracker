@@ -7,10 +7,11 @@ import { t } from "../i18n"
 
 // Шапка приложения: заголовок + индикаторы агентов (реактивно из стора) +
 // кнопки действий (открытие модалок — обрабатывает родитель).
-// The buttons with a word fold to their icon before the header is too narrow to hold them in its row (FoldButton, the header is its room).
+// The buttons with a word fold to their icon before the header is too narrow to hold them in its row (FoldButton, the header is its room):
+// four words are held from 66rem, the tier `xl`.
 const ind = useIndicatorsStore()
 const auth = useAuthStore()
-defineEmits<{ (e: "add"): void; (e: "logs"): void; (e: "settings"): void; (e: "logout"): void }>()
+defineEmits<{ (e: "add"): void; (e: "logs"): void; (e: "extensions"): void; (e: "settings"): void; (e: "logout"): void }>()
 </script>
 
 <template>
@@ -24,9 +25,10 @@ defineEmits<{ (e: "add"): void; (e: "logs"): void; (e: "settings"): void; (e: "l
       </div>
     </div>
     <div class="header-actions">
-      <FoldButton :label="t('header.add')" :hint="t('header.addSeries')" icon="pi pi-plus" fold="lg" @click="$emit('add')" />
-      <FoldButton :label="t('header.log')" :hint="t('header.logs')" icon="pi pi-book" severity="secondary" fold="lg" @click="$emit('logs')" />
-      <FoldButton :label="t('settings.title')" icon="pi pi-cog" severity="success" fold="lg" @click="$emit('settings')" />
+      <FoldButton :label="t('header.add')" :hint="t('header.addSeries')" icon="pi pi-plus" fold="xl" @click="$emit('add')" />
+      <FoldButton :label="t('header.log')" :hint="t('header.logs')" icon="pi pi-book" severity="secondary" fold="xl" @click="$emit('logs')" />
+      <FoldButton :label="t('header.extensions')" icon="pi pi-objects-column" severity="help" fold="xl" @click="$emit('extensions')" />
+      <FoldButton :label="t('settings.title')" icon="pi pi-cog" severity="success" fold="xl" @click="$emit('settings')" />
       <Button
         v-if="auth.authenticated"
         :title="t('header.logout', { name: auth.username ?? '' })"

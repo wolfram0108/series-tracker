@@ -16,11 +16,16 @@ import StInput from "./components/StInput.vue"
 import StSelect from "./components/StSelect.vue"
 import StBtn from "./components/StBtn.vue"
 import FoldButton from "./components/FoldButton.vue"
+import InfoTile from "./components/InfoTile.vue"
+import SheetRow from "./components/SheetRow.vue"
+import StControl from "./components/StControl.vue"
+import StLabel from "./components/StLabel.vue"
+import StValue from "./components/StValue.vue"
 import QueuePanel from "./components/status/output/QueuePanel.vue"
 import ReadProgress from "./components/status/output/ReadProgress.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import Toast from "primevue/toast"
-import { t, tAround } from "./i18n"
+import { t, tAround, tn } from "./i18n"
 import { SERIES_STATES, stateLabel, stateWord } from "./lib/states"
 import {
   DISABLED_SAMPLE, EXCLUDED_BY_RULE, FRONT_EPISODE_TITLE, LOGS, MISSING_EPISODE, PASSWORD_SAMPLE,
@@ -154,6 +159,15 @@ const settingsTabs = [
 ]
 // The words around the name of the open tab, which the body shows in bold.
 const settingsBody = tAround("gallery.settings.body", "tab")
+// The widths (rem) of the rooms the sheet is shown in: its caption stands beside its body where both fit and above it where not.
+const SHEET_ROOMS = [26, 40, 64]
+const sheetUrl = ref("http://127.0.0.1:5100")
+const sheetOn = ref(true)
+const sheetNote = (sources: number, lines: number) =>
+  t("extensions.chines.appNote", { sources: tn("extensions.chines.sources", sources), lines: tn("extensions.chines.lines", lines) })
+const SHEET_TILES = [{ title: "半日 Banri", note: sheetNote(10, 7) }, { title: "橘汁 Juzi", note: sheetNote(8, 6) },
+  { title: "米诺 AppMN", note: sheetNote(2, 2) }, { title: "139云盘 139 Cloud", note: sheetNote(0, 2) }]
+
 // The widths (rem) of the rooms the folding button is shown in: it folds at the tier it names (30, 42, 56, 66 rem).
 const FOLD_ROOMS = [24, 36, 48, 60, 72]
 const HEAD_ROOMS = [24, 40, 72]
@@ -482,6 +496,43 @@ const rtPass = ref("password123")
     </section>
 
     <section class="wide-section">
+      <h2>{{ t("gallery.sheet.h2") }}</h2>
+      <p class="muted small">{{ t("gallery.sheet.hint") }}</p>
+      <div v-for="width in SHEET_ROOMS" :key="width" class="sheet-demo">
+        <span class="muted small">{{ t("gallery.fold.room", { width }) }}</span>
+        <div class="fold-demo-room" :style="{ width: `${width}rem` }">
+          <div class="sheet">
+            <SheetRow :caption="t('extensions.sheet.connection')">
+              <div class="sheet-pair">
+                <StGroup>
+                  <StLabel icon="pi pi-link" :text="t('extensions.chines.address')" />
+                  <StInput v-model="sheetUrl" :aria-label="t('extensions.chines.address')" />
+                </StGroup>
+                <StGroup class="is-readonly">
+                  <StLabel icon="pi pi-folder" :text="t('extensions.chines.downloadsDir')"><span class="mark">{{ t("extensions.chines.fromConform") }}</span></StLabel>
+                  <StValue value="/nas/work/downloads" mono />
+                </StGroup>
+              </div>
+            </SheetRow>
+            <SheetRow :caption="t('extensions.sheet.params')">
+              <div class="sheet-pair">
+                <StGroup>
+                  <StLabel :text="t('conform.params.keepTmp')" />
+                  <StControl><ToggleSwitch v-model="sheetOn" :aria-label="t('conform.params.keepTmp')" /></StControl>
+                </StGroup>
+              </div>
+            </SheetRow>
+            <SheetRow :caption="t('extensions.sheet.apps')" :count="SHEET_TILES.length">
+              <div class="tile-grid">
+                <InfoTile v-for="tile in SHEET_TILES" :key="tile.title" :title="tile.title" :note="tile.note" />
+              </div>
+            </SheetRow>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wide-section">
       <h2>{{ t("gallery.same.h2") }}</h2>
       <p class="muted small">{{ t("gallery.same.hint") }}</p>
       <div v-for="width in SAME_ROOMS" :key="width" class="head-demo-wrap">
@@ -651,6 +702,7 @@ small { color: #888; font-weight: 400; font-size: 0.6em; }
 .muted { color: var(--text-muted); }
 .small { font-size: 0.85rem; }
 .fold-demo { margin-top: 0.75rem; }
+.sheet-demo { margin-top: 0.75rem; }
 .head-demo-wrap { margin-top: 0.75rem; }
 .head-demo { padding: 0.4rem 0.6rem; background: var(--bg-light); border-radius: 8px; }
 .fold-demo-room { max-width: 100%; border: 1px dashed var(--color-gray-200); border-radius: 8px; padding: 0.5rem; margin-top: 0.25rem; }

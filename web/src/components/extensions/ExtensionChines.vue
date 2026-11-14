@@ -1,0 +1,160 @@
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from "vue"
+import InputText from "primevue/inputtext"
+import InfoTile from "../InfoTile.vue"
+import SheetRow from "../SheetRow.vue"
+import StControl from "../StControl.vue"
+import StGroup from "../StGroup.vue"
+import StInput from "../StInput.vue"
+import StLabel from "../StLabel.vue"
+import StValue from "../StValue.vue"
+import { api } from "../../api/client"
+import type { components } from "../../api/schema"
+import { useApi } from "../../composables/useApi"
+import { useDownloadLimits } from "../../composables/useDownloadLimits"
+import { useSSE } from "../../composables/useSSE"
+import { t, tn } from "../../i18n"
+import { reasonText } from "../../lib/reason"
+import { useProviderStore, type ProviderView } from "../../stores/provider"
+
+// The tab «Чинес» of the extensions: the provider of external sources — its address and token, the state of the socket and what its
+// manifest says, how many downloads of it go at once, the folder it writes to, and its applications. Without an address there is the
+// line of the address and nothing else: the rest comes with the address, as it is typed. The address and the token are written when a
+// field is left or Enter is pressed; the core takes them at once and tells the whole picture again, every open screen shows it.
+type Problem = components["schemas"]["SettingProblem"]
+
+const { request } = useApi()
+const store = useProviderStore()
+const limits = useDownloadLimits()
+
+const url = ref("")
+const token = ref("")
+const problems = ref<Problem[]>([])
+const atOnce = ref("")
+// The address the core holds: what is typed follows the core while it was not changed by hand.
+const held = ref("")
+
+const view = computed(() => store.view)
+const named = computed(() => url.value.trim() !== "")
+const apps = computed(() => view.value?.apps ?? [])
+const stale = computed(() => view.value?.state === "down" || view.value?.state === "incompatible")
+
+function adopt(next: ProviderView): void {
+  const was = held.value
+  held.value = next.url
+  if (url.value === was) url.value = next.url
+}
+
+async function load(): Promise<void> {
+  const got = await request(api.GET("/api/provider"), { errorMessage: t("extensions.chines.loadFailed") })
+  if (got) store.apply(got)
+}
+
+async function save(clearToken = false): Promise<void> {
+  // The token this save carries; a token typed while it is on its way belongs to the next save, not to this one.
+  const sent = clearToken ? "" : token.value
+  if (url.value.trim() === held.value && sent === "" && !clearToken) return
+  const reply = await request(
+    api.PUT("/api/provider", { body: { url: url.value, ...(clearToken || sent !== "" ? { token: sent } : {}) } }),
+    { errorMessage: t("extensions.chines.saveFailed") },
+  )
+  if (!reply) return
+  problems.value = reply.problems
+  if (reply.saved) {
+    // What was typed is forgotten by the screen once the core holds it; a later typing stays.
+    if (sent !== "" && token.value === sent) token.value = ""
+    store.apply(reply.provider)
+  }
+}
+
+// The limit of the downloads that go at once is shared with the debug tab (the other limits are its own).
+async function saveAtOnce(): Promise<void> {
+  await limits.save({ provider_at_once: atOnce.value.trim() })
+}
+watch(limits.limits, (got) => {
+  if (got) atOnce.value = String(got.provider_at_once)
+}, { immediate: true })
+
+watch(view, (next) => {
+  if (next) adopt(next)
+}, { immediate: true })
+// A connection that came back may have missed a change.
+watch(useSSE().connected, (up) => {
+  if (up) void load()
+})
+
+const appNote = (app: { sources: number; lines: number }) =>
+  t("extensions.chines.appNote", { sources: tn("extensions.chines.sources", app.sources), lines: tn("extensions.chines.lines", app.lines) })
+
+onMounted(() => {
+  void load()
+  void limits.load()
+})
+</script>
+
+<template>
+  <div class="sheet" @change="save()" @keydown.enter="save()">
+    <SheetRow :caption="t('extensions.sheet.connection')">
+      <div v-if="named && view && view.state !== 'none'" class="pills">
+        <template v-if="view.state === 'up'">
+          <span class="pill pill-success"><i class="pi pi-check-circle" /> {{ t("extensions.chines.up") }}</span>
+          <span v-if="view.provider" class="pill">{{ t("extensions.chines.provider", { provider: view.provider, version: view.version ?? "" }) }}</span>
+          <span v-if="view.protocol != null" class="pill">{{ t("extensions.chines.protocol", { protocol: view.protocol }) }}</span>
+          <span v-if="view.revision" class="pill font-mono">{{ t("extensions.chines.revision", { revision: view.revision }) }}</span>
+        </template>
+        <span v-else-if="view.state === 'connecting'" class="pill pill-info">{{ t("extensions.chines.connecting") }}</span>
+        <span v-else class="pill pill-danger">{{ t("extensions.chines.unavailable", { error: reasonText(view.reason) }) }}</span>
+      </div>
+      <div class="sheet-pair">
+        <StGroup :state="problems.some((each) => each.field === 'url') ? 'invalid' : null">
+          <StLabel icon="pi pi-link" :text="t('extensions.chines.address')" />
+          <StInput v-model="url" :placeholder="t('extensions.chines.addressExample')" :aria-label="t('extensions.chines.address')" />
+        </StGroup>
+        <StGroup v-if="named">
+          <StLabel icon="pi pi-key" :text="t('extensions.chines.token')" />
+          <StInput v-model="token" type="password" :placeholder="view?.has_token ? t('extensions.chines.tokenKept') : undefined"
+                   :aria-label="t('extensions.chines.token')" />
+          <div v-if="view?.has_token && !token" class="constructor-item item-button-group">
+            <button type="button" class="btn-icon btn-delete" :title="t('extensions.chines.tokenClear')"
+                    :aria-label="t('extensions.chines.tokenClear')" @click="save(true)">
+              <i class="pi pi-times" />
+            </button>
+          </div>
+        </StGroup>
+      </div>
+      <p v-for="(problem, index) in problems" :key="index" class="sheet-problem">{{ reasonText(problem.detail) }}</p>
+    </SheetRow>
+
+    <template v-if="named">
+      <SheetRow :caption="t('extensions.sheet.params')">
+        <div class="sheet-pair">
+          <StGroup :title="t('debug.downloads.providerAtOnceHint')">
+            <StLabel :text="t('extensions.chines.atOnce')" />
+            <StControl>
+              <InputText v-model="atOnce" inputmode="numeric" class="chines-num" :aria-label="t('extensions.chines.atOnce')" @change="saveAtOnce" />
+            </StControl>
+          </StGroup>
+        </div>
+      </SheetRow>
+
+      <SheetRow :caption="t('extensions.sheet.paths')">
+        <div class="sheet-pair">
+          <StGroup class="is-readonly">
+            <StLabel icon="pi pi-folder" :text="t('extensions.chines.downloadsDir')"><span class="mark">{{ t("extensions.chines.fromConform") }}</span></StLabel>
+            <StValue :value="view?.downloads_dir ?? ''" mono />
+          </StGroup>
+        </div>
+      </SheetRow>
+
+      <SheetRow v-if="apps.length" :caption="t('extensions.sheet.apps')" :count="apps.length">
+        <div class="tile-grid" :class="{ 'is-stale': stale }">
+          <InfoTile v-for="app in apps" :key="app.name" :title="app.label" :note="appNote(app)" />
+        </div>
+      </SheetRow>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.chines-num { inline-size: 5rem; }
+</style>

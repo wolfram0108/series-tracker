@@ -8,6 +8,7 @@ import { useSeriesReadsStore } from "../stores/seriesReads"
 import { useCompositionStore } from "../stores/composition"
 import type { components } from "../api/schema"
 import { useConformStore, type ConformSettingsView } from "../stores/conform"
+import { useProviderStore, type ProviderView } from "../stores/provider"
 import { useVoicesStore, type VoiceSettingsView } from "../stores/voices"
 import { useSourcesStore, type SourcesSettingsView } from "../stores/sources"
 import { usePlanStore } from "../stores/plan"
@@ -29,6 +30,7 @@ export function setupRealtime(): void {
   const sources = useSourcesStore()
   const plan = usePlanStore()
   const conform = useConformStore()
+  const provider = useProviderStore()
 
   sse.on("series_updated", (d) => series.applyDelta(d as SeriesDelta))
   sse.on("series_added", (d) => series.upsert(d as Series))
@@ -45,6 +47,7 @@ export function setupRealtime(): void {
   sse.on("voice_settings_update", (d) => voices.applySettings(d as VoiceSettingsView))
   sse.on("sources_settings_update", (d) => sources.applySettings(d as SourcesSettingsView))
   sse.on("conform_settings_update", (d) => conform.applySettings(d as ConformSettingsView))
+  sse.on("provider_update", (d) => provider.apply(d as ProviderView))
 
   sse.on("scanner_status_update", (d) => scanner.set(d as ScannerStatus))
 

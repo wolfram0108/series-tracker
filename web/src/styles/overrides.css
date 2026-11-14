@@ -33,6 +33,11 @@
   box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3) !important;
   color: #fff !important;
 }
+.p-button-help {
+  background: linear-gradient(135deg, #7952b3 0%, #5a3d8a 100%) !important;
+  box-shadow: 0 2px 8px rgba(111, 66, 193, 0.3) !important;
+  color: #fff !important;
+}
 .p-button-success {
   background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%) !important;
   box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3) !important;
