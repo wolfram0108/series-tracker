@@ -72,10 +72,16 @@ Events (owner: sources):
   sources.settings.changed SourcesSettingsView          the mirrors of a tracker were saved: every open settings
                                                         screen shows them without asking back
   sources.table.failed {url, reason}                    the read failed; the last complete table still serves
+  sources.pages.forgotten {urls}                        the tables of these pages are gone: no source lists them
   sources.table.trace {url, site, kind: begin | end, …}  what a read does, for its dump (modules/runlog): `end` carries
                                                         the seconds of the read and what every player of the page gave
                                                         (rows by state, frames, the causes of the rows without a video)
-Events in: settings.changed {key: sources_term_hours} — the term of what the sources answered (term.py): the tables of
+Events in: series.source.added | .updated {changed has url} | .removed, series.deleted, system.started — the tables of pages
+belong to the sources of the series: the module asks the catalog which pages its sources list (`catalog.series.list`) and
+forgets the table of a page that was listed and is not any more at once, and of a page that never was (a preview, one left
+from before) when its table is past the term; a read of it that goes is stopped first. `series.deleted` is answered with
+`series.purged {owner: sources}` (the cascade of Р-19).
+settings.changed {key: sources_term_hours} — the term of what the sources answered (term.py): the tables of
 pages, the listings of VK channels and the addresses parsers of applications gave are current for that many hours.
 settings.changed {key: voices.players_off} — the players the owner switched off for every source: a read asks none of
 them (ReadContext.off) and keeps their rows of the last read as they were; a player switched on is asked at the next
@@ -203,6 +209,10 @@ class SourcesModule(BaseModule):
         self.apps: list[AppPlayer] = []
         # One term of what the sources answered for every reader of the module; the setting changes it for all at once.
         self.term = Term()
+        # The pages some source lists, as the catalog said at the last change of the sources (None until it was asked), and
+        # the lock that makes one such change one step: the topics of the change are taken by tasks of their own.
+        self._listed: set[str] | None = None
+        self._listing = asyncio.Lock()
         # The players switched off for every source (the setting of the voices module, kept here as the event says it).
         self.players_off: frozenset[str] = frozenset()
         for profile in apps:
@@ -260,6 +270,43 @@ class SourcesModule(BaseModule):
         self.handle("sources.term.get", self.on_term_get)
         self.handle("sources.term.set", self.on_term_set)
         self.handle("settings.changed", self.on_settings_changed)
+        # The tables of pages belong to the sources of the series: a page no source lists any more is forgotten.
+        for topic in ("system.started", "series.source.added", "series.source.updated", "series.source.removed"):
+            self.handle(topic, self.on_pages_listing)
+        self.handle("series.deleted", self.on_series_deleted)
+
+    async def on_pages_listing(self, env: Envelope) -> None:
+        """The service started or a source came, went or changed its address: the pages the sources list are counted
+        again and the table of every page that is no longer listed goes (an update that changes no address changes
+        nothing here)."""
+        if env.topic == "series.source.updated" and "url" not in (env.payload.get("changed") or []):
+            return
+        await self._forget_unlisted_pages()
+
+    async def on_series_deleted(self, env: Envelope) -> None:
+        """Cascade of a deleted series (Р-19): the tables of the pages only it listed go, and the owner reports it."""
+        if await self._forget_unlisted_pages():
+            self.publish_event("series.purged", {"series_id": env.payload["series_id"], "owner": self.name})
+
+    async def _forget_unlisted_pages(self) -> bool:
+        """Ask the catalog which pages its sources list and forget the stored pages that none does. False when the catalog
+        could not be asked: nothing is forgotten then, and the next change counts again."""
+        async with self._listing:
+            try:
+                series = await self.request("catalog.series.list", {})
+                if not isinstance(series, list):
+                    raise TypeError("the list of series is no list")
+                listed =self.tables.keys_of([source["url"] for one in series for source in one.get("sources") or []])
+                gone = await self.tables.forget(listed, self._listed or set())
+            except Exception:  # noqa: BLE001 - the tables stay as they are; a table kept is no loss
+                self.log.exception("the pages no source lists were not counted")
+                return False
+            self._listed = listed
+            if gone:
+                self.log.info("страницы без источника забыты вместе с таблицами: %d (%s)", len(gone),
+                              ", ".join(sorted(gone))[:600])
+                self.publish_event("sources.pages.forgotten", {"urls": sorted(gone)})
+            return True
 
     async def on_start(self) -> None:
         self._http = bounded_client(timeout=20.0, follow_redirects=True, limits=CONNECTIONS)

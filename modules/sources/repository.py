@@ -132,6 +132,16 @@ class SourcesRepository:
                 row.link, row.video, json.dumps(row.site_fields, ensure_ascii=False), row.part)))
         await self._db.execute_many(statements)
 
+    async def pages(self) -> list[dict]:
+        """Every page the module holds a record of: its address, the end of its last complete table (none while it was
+        never read completely) and how its last read stands."""
+        return await self._db.fetch_all("SELECT url, read_at, state FROM release_tables")
+
+    async def forget_pages(self, urls: list[str]) -> None:
+        """The records of these pages go with their rows, in one transaction."""
+        await self._db.execute_many([statement for url in urls for statement in (
+            ("DELETE FROM release_rows WHERE url = ?", (url,)), ("DELETE FROM release_tables WHERE url = ?", (url,)))])
+
     async def mark_reading(self, url: str, site: str, since: str) -> None:
         """Record that a read of the page began; the last complete table stays as it is."""
         await self._db.execute(

@@ -40,9 +40,9 @@
 | `gateway.sse.clients {count}` | gateway | catalog (0 → сброс viewing), scan (>0 → публикация статуса), conform и voices (снимок при подключении) | — |
 | `series.added {…сериал, kind, sources}` | catalog | composition, gateway | `series_added` |
 | `series.updated {series_id, …поля, statuses, is_busy}` | catalog, metadata | composition (сезон карточки), torrents (память исключений), gateway | `series_updated` (дельта) |
-| `series.deleted {series_id, delete_from_qb}` | catalog | все владельцы серийных таблиц (scan, torrents, downloads, slicing, renaming, library, metadata, voices, composition), gateway | `series_deleted {id}` |
+| `series.deleted {series_id, delete_from_qb}` | catalog | все владельцы серийных таблиц (scan, torrents, downloads, slicing, renaming, library, metadata, voices, composition, planner, sources), gateway | `series_deleted {id}` |
 | `series.purged {series_id, owner}` | владельцы серийных таблиц | catalog (учёт отчётов о чистке) | — |
-| `series.source.added \| .updated \| .removed {series_id, source_id}` — `SourceEvent` | catalog | composition, gateway | `series_sources_changed` (`SourceChanged`: плюс `what`) |
+| `series.source.added \| .updated \| .removed {series_id, source_id}` — `SourceEvent` | catalog | composition, sources (таблицы страниц, которых не перечисляет ни один источник, забываются; `.updated` — только со сменой адреса), gateway | `series_sources_changed` (`SourceChanged`: плюс `what`) |
 | `series.status.contribution {source, series_id, flags}` — вклад в статус сериала: scan — `scanning` (открытый прогон, на экране «Обработка»), slicing — `slicing`, voices — по этапам допущенных озвучек: `downloading` (качается файл), `aligning` (задание у службы выравнивания), `waiting` (ждёт очереди, референса или выкладки), downloads — `packing` (сборка контейнеров), загрузка и прочее | scan, downloads, torrents, slicing, voices | catalog | — |
 | `series.status.changed {series_id, statuses, is_busy}` | catalog | gateway | `series_updated` |
 | `series.busy.contribution` / `series.busy.changed` | library, renaming / catalog | catalog / gateway | `series_updated` |
@@ -54,6 +54,7 @@
 | `composition.series.reading {series_id, source_id, url, phase, current, total, rate, active}` — как далеко прочитана страница источника сериала, кто бы ни просил чтение (синхронизация, пользователь, срок); `active: false` — чтение кончилось | composition | gateway | `series_read_progress` |
 | `sources.table.ready {url, read_at}` — полная таблица сохранена; части страницы, которые чтение не получило, названы в `ReleaseTable.unread`, их строки — из прошлого чтения (Р-78) | sources | composition, scan, gateway | `sources_table_ready` |
 | `sources.table.failed {url, reason}` — чтение не удалось, действует прежняя полная таблица | sources | composition, scan, gateway | `sources_table_failed` |
+| `sources.pages.forgotten {urls}` — таблицы этих страниц удалены: их не перечисляет ни один источник (Р-101) | sources | — | — |
 | `sources.table.trace {url, site, kind, …}` — что делает чтение страницы, для его дампа: `begin {fresh}` — страница взята на чтение; `end {ok, reason, seconds, rows, players: [{player, label, rows, states, heights}], causes: [{player, state, reason, rows}], unread}` — чем чтение кончилось: строки каждого плеера по состояниям, кадры, каждая причина строки без видео со счётом | sources | runlog (дамп чтения) | — |
 | `rules.profile.changed {profile_id}` | rules | composition | — |
 | `composition.changed {series_id, rev, episodes, summary_only}` — `CompositionChanged`; `episodes` пусто — весь сериал; `summary_only` — изменились только сводки источников | composition | scan, voices, gateway | `composition_changed` |

@@ -190,6 +190,36 @@ class TableReader:
         await asyncio.gather(task, return_exceptions=True)
         return True
 
+    def keys_of(self, urls: list[str]) -> set[str]:
+        """The keys of the tables the addresses name (the canonical form of each); an address no site reads names none."""
+        return {found[1] for found in map(self._resolve, urls) if found is not None}
+
+    async def forget(self, listed: set[str], was_listed: set[str]) -> list[str]:
+        """Forget the pages no source lists (`listed` holds the keys that are listed): a page that was listed a moment ago
+        (`was_listed`) goes at once, a page that never was (a preview, a page left from before this was kept) goes when its
+        table is past the term, so that a page the user looked at and is about to add is not lost. A read that goes is
+        stopped first: its end must not write the page again. Returns the keys forgotten."""
+        async with self._gate:
+            gone = [page["url"] for page in await self._repo.pages() if page["url"] not in listed
+                    and (page["url"] in was_listed or not self._fresh_at(page["read_at"]))]
+        stopping = [self._reading[key] for key in gone if key in self._reading]
+        for key in gone:
+            if key in self._reading:
+                self._cancelled.add(key)
+                self._reading[key].cancel()
+        await asyncio.gather(*stopping, return_exceptions=True)
+        async with self._gate:
+            await self._repo.forget_pages(gone)
+        return gone
+
+    def _fresh_at(self, read_at: str | None) -> bool:
+        try:
+            age = self._clock() - datetime.fromisoformat(read_at or "")
+        except (TypeError, ValueError):
+            return False
+        # A table "from the future" means the clock moved back: it is not trusted.
+        return timedelta(0) <= age < self._term.delta
+
     def resolve(self, url: str) -> SiteResolveReply:
         """Which site reads the address and its canonical form, with no network."""
         found = self._resolve(url)
@@ -226,12 +256,7 @@ class TableReader:
         return (site, site.canonical_url(url)) if site is not None else None
 
     def _fresh(self, table: ReleaseTable) -> bool:
-        try:
-            age = self._clock() - datetime.fromisoformat(table.read_at or "")
-        except (TypeError, ValueError):
-            return False
-        # A table "from the future" means the clock moved back: it is not trusted.
-        return timedelta(0) <= age < self._term.delta
+        return self._fresh_at(table.read_at)
 
     def _stamp(self) -> str:
         return self._clock().astimezone(timezone.utc).isoformat()

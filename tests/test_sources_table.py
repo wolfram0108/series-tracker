@@ -15,6 +15,7 @@ import pytest
 from core import BaseModule, Bus
 from core.contracts import ReleaseTable, RowState, RowVoice, TableGetRequest, TableRow, UnreadPart
 from core.db import Database
+from core.envelope import Envelope
 from core.reasons import parse, reason
 from modules.settings import SettingsModule
 from modules.sources.module import SourcesModule
@@ -902,3 +903,152 @@ def test_the_sites_of_two_module_instances_do_not_meet(db_path, tmp_path):
     second = SourcesModule(Bus(), Database(str(db_path)))
 
     assert first.sites.find(PAGE) is not None and second.sites.find(PAGE) is None
+
+
+# --- the tables belong to the sources of the series (Р-101) -----------------------------------------------------------
+
+class Catalog(BaseModule):
+    """The catalog as `sources` asks it: the series with the addresses of their sources."""
+
+    name = "catalog"
+
+    def __init__(self, bus) -> None:
+        self.series: dict[int, list[str]] = {}
+        self.failing = False
+        self.asked = 0
+        super().__init__(bus)
+
+    def register(self) -> None:
+        self.handle("catalog.series.list", self.on_list)
+
+    async def on_list(self, env) -> list[dict]:
+        self.asked += 1
+        if self.failing:
+            raise RuntimeError("the catalog is down")
+        return [{"id": series_id, "sources": [{"url": url} for url in urls]} for series_id, urls in self.series.items()]
+
+
+@dataclass
+class Pages:
+    system: System
+    catalog: Catalog
+    purged: object
+    forgotten: object
+
+    async def counted(self) -> dict:
+        """The sources are counted once more and the count is over: the cascade of a series that never was reports it."""
+        self.system.probe.publish_event("series.deleted", {"series_id": 99, "delete_from_qb": False})
+        return await self.system.next(self.purged)
+
+    def source_removed(self, series_id: int = 1) -> None:
+        self.system.probe.publish_event("series.source.removed", {"series_id": series_id, "source_id": 1})
+
+
+@pytest.fixture
+async def pages(db_path, tmp_path):
+    built = await build(db_path, tmp_path / "cache")
+    catalog = Catalog(built.bus)
+    await catalog.start()
+    yield Pages(built, catalog, built.bus.subscribe("series.purged"), built.bus.subscribe("sources.pages.forgotten"))
+    await catalog.stop()
+    await built.stop()
+
+
+async def test_the_table_of_a_page_whose_source_was_removed_is_forgotten_at_once_with_its_rows(pages):
+    pages.catalog.series = {1: [PAGE]}
+    await pages.system.warm()
+    await pages.counted()
+    assert await pages.system.stored() is not None
+
+    pages.catalog.series = {}
+    pages.source_removed()
+
+    assert (await pages.system.next(pages.forgotten)) == {"urls": [PAGE]}
+    assert await pages.system.stored() is None
+    assert await pages.system.stored_texts() == []
+
+
+async def test_a_deleted_series_takes_the_tables_of_its_pages_and_sources_reports_it(pages):
+    pages.catalog.series = {1: [PAGE], 2: [OTHER_PAGE]}
+    await pages.system.warm()
+    await pages.system.warm(OTHER_PAGE)
+    await pages.counted()
+
+    del pages.catalog.series[1]
+    pages.system.probe.publish_event("series.deleted", {"series_id": 1, "delete_from_qb": False})
+
+    assert await pages.system.next(pages.purged) == {"series_id": 1, "owner": "sources"}
+    assert await pages.system.stored() is None
+    assert await pages.system.stored(OTHER_PAGE) is not None
+
+
+async def test_a_page_another_series_still_lists_keeps_its_table(pages):
+    pages.catalog.series = {1: [PAGE], 2: [PAGE]}
+    await pages.system.warm()
+    await pages.counted()
+
+    del pages.catalog.series[1]
+    pages.system.probe.publish_event("series.deleted", {"series_id": 1, "delete_from_qb": False})
+    await pages.system.next(pages.purged)
+
+    assert await pages.system.stored() is not None
+
+
+async def test_a_page_never_listed_keeps_its_table_for_the_term_and_loses_it_after(pages):
+    """A page the user looked at in the window and may add after: its table is not forgotten before the term ends."""
+    pages.catalog.series = {1: [PAGE]}
+    await pages.system.warm(OTHER_PAGE)
+
+    await pages.counted()
+    assert await pages.system.stored(OTHER_PAGE) is not None
+
+    pages.system.clock.advance(hours=2)
+    await pages.counted()
+    assert (await pages.system.next(pages.forgotten)) == {"urls": [OTHER_PAGE]}
+    assert await pages.system.stored(OTHER_PAGE) is None
+
+
+async def test_a_page_whose_source_changed_its_address_is_forgotten_and_a_change_of_anything_else_is_not_counted(pages):
+    pages.catalog.series = {1: [PAGE]}
+    await pages.system.warm()
+    await pages.counted()
+    asked = pages.catalog.asked
+
+    await pages.system.sources.on_pages_listing(Envelope(topic="series.source.updated", kind="event",
+                                                         payload={"series_id": 1, "source_id": 1, "changed": ["color"]}))
+    assert pages.catalog.asked == asked
+
+    pages.catalog.series = {1: [OTHER_PAGE]}
+    pages.system.probe.publish_event("series.source.updated", {"series_id": 1, "source_id": 1, "changed": ["url"]})
+    assert (await pages.system.next(pages.forgotten)) == {"urls": [PAGE]}
+
+
+async def test_the_read_of_a_page_that_goes_is_stopped_and_its_end_does_not_write_the_page_again(pages):
+    pages.catalog.series = {1: [PAGE]}
+    await pages.system.warm()
+    await pages.counted()
+    pages.system.site.go.clear()
+    pages.system.probe.send_command("sources.table.read", {"url": PAGE})
+    assert await entry(pages.system.site) == PAGE
+
+    pages.catalog.series = {}
+    pages.source_removed()
+
+    assert (await pages.system.next(pages.forgotten)) == {"urls": [PAGE]}
+    assert await pages.system.stored() is None
+    assert await pages.system.next(pages.system.failed) == {"url": PAGE, "reason": reason("read_cancelled")}
+    assert pages.system.sources.tables._reading == {}
+
+
+async def test_a_catalog_that_does_not_answer_forgets_nothing(pages):
+    pages.catalog.series = {1: [PAGE]}
+    await pages.system.warm()
+    await pages.counted()
+
+    pages.catalog.failing = True
+    pages.catalog.series = {}
+    pages.system.probe.publish_event("series.deleted", {"series_id": 1, "delete_from_qb": False})
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(pages.purged.queue.get(), ABSENCE_WINDOW_S)
+    assert await pages.system.stored() is not None
