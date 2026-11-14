@@ -4,7 +4,8 @@
 > когда аудит безопасности даёт «зелёный свет». Ведётся по этапам; каждый
 > этап — отдельный согласованный коммит с проверкой.
 > Связано: [STATUS.md](STATUS.md), [deployment.md](deployment.md),
-> находка про утечку секрета — [../contracts/findings.md](../contracts/findings.md).
+> находка про утечку секрета — [../contracts/findings.md](../contracts/findings.md),
+> постановка задачи на поиск уязвимостей — [security_review.md](security_review.md).
 
 ---
 
