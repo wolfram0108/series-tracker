@@ -153,6 +153,9 @@ async def sync(series_id: int) -> None:
         await listening.wait()
         pressed = await http.post(f"/api/series/{series_id}/scan")
         print("sync", pressed.status_code, pressed.text[:200])
+        if pressed.status_code >= 400:
+            ending.cancel()  # a refused sync never goes «scanning»: nothing to wait for
+            return
         statuses = await ending
         plan = (await http.get(f"/api/series/{series_id}/plan")).json()
         print(f"ended in {time.perf_counter() - started:.1f} s, statuses {statuses}")
