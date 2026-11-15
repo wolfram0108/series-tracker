@@ -46,6 +46,17 @@ describe("planDubs", () => {
     expect(planDubs(view).map((dub) => dub.state)).toEqual(["error", "error", "planned"])
   })
 
+  it("is no error when the next source gave what the failed attempt was for: the file holds the voice-over from another row", () => {
+    const failure = { kind: "download" as const, row: rowRef(8, "cvh"), video: null, voice: "A", episodes: [[1, 1]], covered: true }
+    const view = planView({
+      failures: [failure, { ...failure, kind: "align" as const }],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "S01E01.mp4"), [goalTrack("A", "download", rowRef(8, "cvh"))])],
+    })
+    expect(planDubs(view).map((dub) => dub.state)).toEqual(["planned"])
+    const lacked = [failure, { ...failure, kind: "align" as const }].map((each) => ({ ...each, covered: false }))
+    expect(planDubs({ ...view, failures: lacked }).map((dub) => dub.state)).toEqual(["error"])
+  })
+
   it("names a voice-over the user switched off for the episode off, even with a failure of it, and absent elsewhere", () => {
     const view = planView({
       failures: [{ kind: "align", row: rowRef(8, "b"), video: null, voice: "B", episodes: [[1, 1]], covered: false }],
@@ -61,6 +72,14 @@ describe("planDubs", () => {
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "S01E01.mp4")), goal([1, 2], goalVideo("asset", rowRef(7, "r2"), "S01E02.mp4"))],
     })
     expect(planDubs(view, { 1: ["B"] }).map((dub) => [dub.episode, dub.state, dub.source_id])).toEqual([[1, "error", 8], [2, "absent", null]])
+  })
+
+  it("leaves a voice-over the plan passes over absent, not an error, when another source made its failed attempt good", () => {
+    const view = planView({
+      failures: [{ kind: "align", row: rowRef(8, "b"), video: null, voice: "B", episodes: [[1, 1]], covered: true }],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "S01E01.mp4"))],
+    })
+    expect(planDubs(view, { 1: ["B"] }).map((dub) => [dub.state, dub.source_id])).toEqual([["absent", null]])
   })
 
   it("takes online from the asset's track when the file holds it, from a download when it does not, and leaves it unknown otherwise", () => {
@@ -116,6 +135,14 @@ describe("planFiles", () => {
     expect(planFiles({ ...view, failures: [], running: true }).map((file) => file.status)).toEqual(["pending", "pending", "pending"])
   })
 
+  it("makes no error of a failed download another source made good", () => {
+    const view = planView({
+      failures: [{ kind: "download", row: rowRef(7, "r1"), video: null, voice: null, covered: true }],
+      episodes: [goal([1, 1], goalVideo("download", rowRef(7, "r1"), null))],
+    })
+    expect(planFiles(view).map((file) => file.status)).toEqual(["pending"])
+  })
+
   it("carries the cut of a held file, and the cut the next build puts in as pending", () => {
     const cutOf = rowRef(9, "c")
     const compilation = rowRef(9, "c")
@@ -147,6 +174,8 @@ describe("planCuts", () => {
     expect(planCuts({ ...view, running: true }).map((each) => each.status)).toEqual(["aligning", "aligning"])
     const failed = planCuts({ ...view, failures: [{ kind: "cut", row: rowRef(9, "c"), video: rowRef(9, "c"), voice: null, covered: false }] })
     expect(failed.map((each) => each.status)).toEqual(["failed", "planned"])
+    const covered = planCuts({ ...view, failures: [{ kind: "cut", row: rowRef(9, "c"), video: rowRef(9, "c"), voice: null, covered: true }] })
+    expect(covered.map((each) => each.status)).toEqual(["planned", "planned"])
   })
 
   it("shows a held cut as done with the key of its compilation, and an episode of parts with its part", () => {

@@ -2,6 +2,7 @@
 import { computed, ref } from "vue"
 import { t } from "../../../i18n"
 import { cancelDelete } from "../../../composables/outputCalls"
+import { lacking } from "../../../lib/plan"
 import { usePlanStore } from "../../../stores/plan"
 import type { components } from "../../../api/schema"
 
@@ -16,7 +17,7 @@ const view = computed(() => plan.forSeries(props.seriesId))
 const commands = computed(() => view.value?.commands ?? [])
 const failures = computed(() => view.value?.failures?.length ?? 0)
 // A failure is «covered» when another source gave what the attempt was for: it costs the series nothing. The rest lack something.
-const open = computed(() => (view.value?.failures ?? []).filter((each) => !each.covered).length)
+const open = computed(() => (view.value ? lacking(view.value).length : 0))
 const problems = computed(() => view.value?.problems?.length ?? 0)
 const busy = ref(false)
 

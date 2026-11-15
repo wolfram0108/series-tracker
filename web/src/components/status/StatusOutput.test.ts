@@ -217,6 +217,24 @@ describe("StatusOutput", () => {
     expect(calls.deleteFromPlan).not.toHaveBeenCalled()
   })
 
+  it("does not colour an episode as failed when the next source made its failed attempt good: the file holds the voice-over", async () => {
+    const planWith = (covered: boolean) => planView({
+      assets: [fileOfEpisodeOne([assetTrack("AniStar", rowRef(8, "k2"), true, { player: "kodik" })])],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"),
+        [goalTrack("AniStar", "download", rowRef(8, "k1"), { player: "cvh" })])],
+      failures: [{ kind: "download", row: rowRef(8, "k1"), video: null, voice: "AniStar", episodes: [[1, 1]], covered }],
+    })
+    givePlan(planWith(false))
+    const lacking = mountOutput()
+    await flushPromises()
+    expect(lacking.find(".episode-card[data-episode='1']").attributes("data-state")).toBe("failed")
+    lacking.unmount()
+    givePlan(planWith(true))
+    const made = mountOutput()
+    await flushPromises()
+    expect(made.find(".episode-card[data-episode='1']").attributes("data-state")).not.toBe("failed")
+  })
+
   it("resets every failed attempt of the episode opened, as the button of the series does for all of them", async () => {
     givePlan(planView({
       assets: [fileOfEpisodeOne()],

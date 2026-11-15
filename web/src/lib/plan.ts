@@ -6,6 +6,7 @@ import { spansOf } from "./ranges"
 type Schemas = components["schemas"]
 export type PlannerView = Schemas["PlannerView"]
 export type PlanRowRef = Schemas["PlanRowRef"]
+export type PlanFailure = Schemas["PlanFailure"]
 export type SeasonVoiceOrder = Schemas["SeasonVoiceOrder"]
 
 /** The state of a voice-over of an episode as the strip of the episode shows it. */
@@ -120,8 +121,12 @@ export function planNames(view: PlannerView | undefined): PlanName[] {
   return (view?.episodes ?? []).map((goal) => ({ season: goal.slot[0], episode: goal.slot[1], part: partOf(goal.slot), name: goal.name }))
 }
 
+/** The failed attempts the series lacks something for. One another source made good (`covered`: the voice-over or the video came
+ *  from the next source) is the normal course of the work, never an error; every error of a failure is read through this. */
+export const lacking = (view: PlannerView): PlanFailure[] => (view.failures ?? []).filter((each) => !each.covered)
+
 function failed(view: PlannerView, kind: string, row: PlanRowRef): boolean {
-  return (view.failures ?? []).some((each) => each.kind === kind && sameRow(each.row, row))
+  return lacking(view).some((each) => each.kind === kind && sameRow(each.row, row))
 }
 
 /** The key of the compilation of a row, as the layout names its compilations; a row it does not name keys itself. */
@@ -129,8 +134,8 @@ export type CompilationKey = (row: PlanRowRef) => string
 const ownKey: CompilationKey = (row) => JSON.stringify(row)
 
 /** The voice-overs of every episode: a track the file holds is done; one the plan gets is planned, or while the sync runs what
- *  its work is at (`live`: queued, downloading, aligning); one whose download or alignment failed is an error until the
- *  failures are reset. A voice-over of the order of the season that the plan has no way to get for the episode is absent: the
+ *  its work is at (`live`: queued, downloading, aligning); one whose download or alignment failed, with no other source giving
+ *  it, is an error until the failures are reset. A voice-over of the order of the season that the plan has no way to get for the episode is absent: the
  *  episode is put together in part. */
 export function planDubs(view: PlannerView | undefined, orders: Record<number, readonly string[]> = {}, live: Live = NO_LIVE): VoiceDub[] {
   if (!view) return []
@@ -162,7 +167,7 @@ export function planDubs(view: PlannerView | undefined, orders: Record<number, r
       // of the episode); else no source gives it.
       const off = (goal.voices_off ?? []).includes(voice)
       const failure = off ? undefined
-        : (view.failures ?? []).find((each) => each.voice === voice && (each.episodes ?? []).some((slot) => sameSlot(slot, goal.slot)))
+        : lacking(view).find((each) => each.voice === voice && (each.episodes ?? []).some((slot) => sameSlot(slot, goal.slot)))
       dubs.push({ season, episode, part: partOf(goal.slot), voice_key: voice, voice_label: voice,
                   state: off ? "off" : failure ? "error" : "absent",
                   source_id: failure ? failure.row.source_id : null, player: null, online: null })
@@ -250,7 +255,7 @@ export function planCuts(view: PlannerView | undefined, keyOf: CompilationKey = 
     const [season, episode] = goal.slot
     const held = (view.assets ?? []).find((asset) => asset.name === goal.video.file)
     if (goal.video.kind === "cut") {
-      const status = (view.failures ?? []).some((each) => each.kind === "cut" && sameRow(each.video, goal.video.row))
+      const status = lacking(view).some((each) => each.kind === "cut" && sameRow(each.video, goal.video.row))
         ? "failed" : view.running ? "aligning" : "planned"
       cuts.push({ season, episode, part: partOf(goal.slot) ?? 0,
                   cut_key: goal.video.cut_of ? keyOf(goal.video.cut_of) : ownKey(goal.video.row), status })
