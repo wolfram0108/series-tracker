@@ -178,6 +178,20 @@ class SettingsSet(SettingRecord):
     """The command `composition.settings.set`."""
 
 
+class SettingsSetMany(BaseModel):
+    """The command `composition.settings.set_many`: several levers of one series set in one write — one revision, one
+    event, one recount of the plan. The items are applied in order; one refused item refuses them all."""
+
+    series_id: int
+    items: list[SettingsSet] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _items_are_of_the_series(self):
+        if any(item.series_id != self.series_id for item in self.items):
+            raise ValueError("every item is a lever of the series of the command")
+        return self
+
+
 class SettingsReset(_Scope):
     """The command `composition.settings.reset`: the levers of the level go back to the level above.
 

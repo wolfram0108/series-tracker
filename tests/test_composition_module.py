@@ -18,7 +18,7 @@ from composition_fakes import (HOST, OTHER_PAGE, PAGE, FakeCatalog, FakeRules, F
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.contracts import (CompositionPreviewReply, CompositionReply, EffectiveLever, Level, QueuesReply, ReleaseTable, RowState,
                             Queue, TargetKind, ValueShape,
-                            RowVoice, SettingsReset, SettingsSet, SourceStatus, TableRow, TableState,
+                            RowVoice, SettingsReset, SettingsSet, SettingsSetMany, SourceStatus, TableRow, TableState,
                             group_target, variant_target)
 from core.db import Database
 from core.reasons import parse, reason
@@ -82,6 +82,10 @@ class System:
         command = SettingsSet(series_id=series_id, season=season, episode=episode, lever=lever, target=target,
                               value=value)
         return await self.probe.request("composition.settings.set", command.model_dump(mode="json"), timeout=STUCK_S)
+
+    async def set_many(self, series_id: int, items: list[dict]) -> dict:
+        command = SettingsSetMany(series_id=series_id, items=[SettingsSet(series_id=series_id, **item) for item in items])
+        return await self.probe.request("composition.settings.set_many", command.model_dump(mode="json"), timeout=STUCK_S)
 
     async def reset(self, series_id: int, *, season=None, episode=None, lever=None, target=None) -> dict:
         command = SettingsReset(series_id=series_id, season=season, episode=episode, lever=lever, target=target)
@@ -680,6 +684,83 @@ async def test_the_markup_that_follows_the_reference_makes_its_groups_its_own_wi
     await s.reset(series_id, season=1, lever="reference.same")
     shown = await queues_of(s, series_id, season=1)
     assert [each.same for each in shown.reference.rows] == [None, None, None] and [each.same for each in shown.markup.rows] == [1, 1, None]
+
+
+# --- several levers in one command: one write, one revision, one event ----------------------------------------------
+
+def allow_items(source_id: int, players: tuple[str, ...], value, **level) -> list[dict]:
+    return [dict(lever="reference.allow", target=variant_target("Ruchime", source_id, player), value=value, **level)
+            for player in players]
+
+
+@pytest.mark.asyncio
+async def test_several_levers_are_set_in_one_write_with_one_revision_and_one_event(system):
+    """The boxes of a queue all taken off at once are one change of the series: the plan is counted once for them."""
+    s = system
+    series_id = await laid_out(s, rich_standard())
+    source_id = only_source(s, series_id)
+    rev = (await s.get(series_id)).rev
+    items = allow_items(source_id, ("vk", "kodik", "allvideo"), False, season=1)
+    assert await s.set_many(series_id, items) == {"ok": True}
+    events = s.taken(s.changed)
+    assert [event["rev"] for event in events] == [rev + 1] and events[0]["episodes"] == season_one(1, 2, 3, 4, 5)
+    assert [each.allowed for each in (await queues_of(s, series_id, season=1)).reference.rows] == [False, False, False]
+    assert await s.set_many(series_id, items) == {"ok": True}  # the same values again change nothing and tell nobody
+    assert s.taken(s.changed) == []
+
+
+@pytest.mark.asyncio
+async def test_one_item_the_registry_refuses_refuses_them_all_and_nothing_is_stored(system):
+    s = system
+    series_id = await laid_out(s, rich_standard())
+    source_id = only_source(s, series_id)
+    good = allow_items(source_id, ("vk",), False, season=1)
+    with pytest.raises(BusRequestError) as caught:
+        await s.set_many(series_id, [*good, dict(lever="reference.allow", season=1, value="no", target=good[0]["target"])])
+    assert code_of(caught.value) == "bad_value"
+    with pytest.raises(BusRequestError) as caught:
+        await s.set_many(series_id, [*good, dict(lever="no.such.lever", season=1, value=True)])
+    assert code_of(caught.value) == "unknown_lever"
+    assert s.sql("SELECT COUNT(*) FROM output_settings") == [(0,)] and s.taken(s.changed) == []
+
+
+def test_a_command_of_several_levers_has_levers_of_its_series_only_and_at_least_one():
+    own = SettingsSet(series_id=1, lever="voice.take", value=False, target=group_target("A"))
+    assert SettingsSetMany(series_id=1, items=[own]).items == [own]
+    with pytest.raises(ValueError):
+        SettingsSetMany(series_id=2, items=[own])
+    with pytest.raises(ValueError):
+        SettingsSetMany(series_id=1, items=[])
+
+
+@pytest.mark.asyncio
+async def test_the_boxes_of_the_markup_that_follows_the_reference_ticked_together_make_its_queue_its_own_once(system):
+    """Stage 14 in a batch: each item reads the records the ones before it left, as when they are set one by one, so the
+    queue of the reference is copied once to a level, and a level below the one that was copied inherits it."""
+    s = system
+    series_id = await laid_out(s, rich_standard())
+    source_id = only_source(s, series_id)
+    items = [dict(lever="markup.allow", target=variant_target("Ruchime", source_id, player), value=False, **level)
+             for level in ({"season": 1}, {"season": 1, "episode": 3}) for player in ("vk", "kodik")]
+    assert await s.set_many(series_id, items) == {"ok": True}
+    assert s.sql("SELECT season, episode FROM output_settings WHERE lever = 'markup.order'") == [(1, None)]
+    shown = await queues_of(s, series_id, season=1, episode=3)
+    assert not shown.markup_follows and [(each.player, each.allowed) for each in shown.markup.rows] == [
+        ("vk", False), ("kodik", False), ("allvideo", True)]
+    assert [each.allowed for each in (await queues_of(s, series_id, season=1)).reference.rows] == [True, True, True]
+
+
+@pytest.mark.asyncio
+async def test_several_levers_of_a_series_whose_sync_is_under_way_are_refused_as_one_lever_is(system):
+    from core.contracts import RUN_CHANGED
+    s = system
+    series_id = await laid_out(s, rich_standard())
+    source_id = only_source(s, series_id)
+    s.probe.publish_event(RUN_CHANGED, {"series_id": series_id, "active": True})
+    await s.bus.settled()
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await s.set_many(series_id, allow_items(source_id, ("vk", "kodik"), False, season=1))
+    assert s.sql("SELECT COUNT(*) FROM output_settings") == [(0,)]
 
 
 # --- M-34: a lever and a consumer added through the registries alone -------------------------------------------------

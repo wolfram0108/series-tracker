@@ -53,6 +53,10 @@ Queries:
       at a level. Refused with ValueError(reason) — `unknown_lever`, `bad_target` or `bad_value` — and nothing is stored.
       The first edit of the markup reference on a level that follows the reference writes the queue shown (the order of
       the reference, the variants it leaves out and the groups of equal variants it shows) with the edit, in one write.
+  composition.settings.set_many {series_id, items: [SettingsSet…]} → {ok}: the same, for several levers at once (the
+      boxes the user ticked in a queue, all of them off): applied in order, one write, one revision, one
+      `composition.changed`, so the plan of the series is counted once for all of them. A refused item refuses the whole
+      command and nothing is stored. `composition.settings.set` is the command of one item.
   composition.settings.reset {series_id, season?, episode?, lever?, target?, queue?} → {ok}: the levers of the level
       (or the one named, or those of the queue named) go back to the level above. Refused the same way when the lever or
       the target is not the registry's.
@@ -108,7 +112,7 @@ from core import BaseModule, compute
 from core.contracts import (COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ORDER, REFERENCE_SAME, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
-                            RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
+                            RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet, SettingsSetMany,
                             QueuesGet, QueuesReply, SourceEvent, SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState,
                             VoiceOrderSet, VoiceSettingsView, VoiceTitleSet, SeriesReadProgress, TableProgress)
 from core.db import Database
@@ -186,6 +190,7 @@ class CompositionModule(BaseModule):
         self.handle("composition.recompute", self.on_recompute, concurrent=True)
         self.handle("composition.preview", self.on_preview, concurrent=True)
         self.handle("composition.settings.set", self.on_settings_set)
+        self.handle("composition.settings.set_many", self.on_settings_set_many)
         self.handle("composition.settings.reset", self.on_settings_reset)
         self.handle("series.added", self.on_series_added)
         self.handle("series.updated", self.on_series_updated)
@@ -385,47 +390,65 @@ class CompositionModule(BaseModule):
         return {"rev": outcome.rev, "changed": outcome.changed}
 
     async def on_settings_set(self, env: Envelope) -> dict:
-        record = SettingsSet.model_validate(env.payload)
-        problem = settings.validate(record)
-        if problem is not None:
-            raise ValueError(problem)
-        self._require_editable(record.series_id)
-        await self._require_pickable(record)
-        if record.lever == COMPILATION_MEMBER and record.value:
-            stored = await self.repo.stored(record.series_id)
-            if not compilations.fits(stored.rows, settings.canonical(stored.records), record.season, record.episode,
-                                     record.value, _source_order(stored)):
-                raise ValueError(reason("compilation_not_better"))
-        if record.lever in (MARKUP_ORDER, MARKUP_ALLOW, MARKUP_SAME):
-            return await self._set_markup(record)
-        return await self._edit(record.series_id, lambda records: settings.apply_set(records, record))
+        return await self._set([SettingsSet.model_validate(env.payload)])
 
-    async def _set_markup(self, record: SettingsSet) -> dict:
-        """A lever of the markup reference (stage 14). While the level follows the reference, the first edit makes its
-        queue its own: the queue of the reference as the level shows it — its order and the variants it leaves out — is
-        written as the order of the markup reference, then the edit; from then on the two queues are apart."""
-        stored = await self.repo.stored(record.series_id)
-        lines, levers, order, _ = await self._level_of(stored, settings.canonical(stored.records), record)
-        copied: list[SettingRecord] = []
-        if queues.follows_reference(levers):
-            shown, _ = queues.markup(lines, levers, order, record.episode)
-            scope = dict(series_id=record.series_id, season=record.season, episode=record.episode,
-                         compilation=record.compilation)
-            copied.append(SettingRecord(**scope, lever=MARKUP_ORDER, value=[
-                {"group": row.group, "source_id": row.source_id, "player": row.player} for row in shown.rows]))
-            copied += [SettingRecord(**scope, lever=MARKUP_ALLOW, target=variant_target(row.group, row.source_id, row.player),
-                                     value=False) for row in shown.rows if not row.allowed]
-            # The variants the reference's queue shows as equal are equal in the queue that is made its own.
-            same = queues.same_groups(shown.rows)
-            if same:
-                copied.append(SettingRecord(**scope, lever=MARKUP_SAME, value=same))
+    async def on_settings_set_many(self, env: Envelope) -> dict:
+        return await self._set(SettingsSetMany.model_validate(env.payload).items)
 
-        def change(records):
-            for each in copied:
-                records = settings.apply_set(records, each)
-            return settings.apply_set(records, record)
+    async def _set(self, items: list[SettingsSet]) -> dict:
+        """The one way a lever is set, one item or many: every item is checked before anything is written, then all of
+        them are applied in order in one write, so that the count that follows is one."""
+        for record in items:
+            problem = settings.validate(record)
+            if problem is not None:
+                raise ValueError(problem)
+        series_id = items[0].series_id
+        self._require_editable(series_id)
+        for record in items:
+            await self._require_pickable(record)
+            if record.lever == COMPILATION_MEMBER and record.value:
+                stored = await self.repo.stored(series_id)
+                if not compilations.fits(stored.rows, settings.canonical(stored.records), record.season, record.episode,
+                                         record.value, _source_order(stored)):
+                    raise ValueError(reason("compilation_not_better"))
+        writes = await self._writes_of(series_id, items)
+        return await self._edit(series_id, lambda records: _applied(records, writes))
 
-        return await self._edit(record.series_id, change)
+    async def _writes_of(self, series_id: int, items: list[SettingsSet]) -> list[SettingRecord]:
+        """What the items write, in order. The first edit of the markup reference on a level that follows the reference
+        makes its queue its own (stage 14): the queue of the reference as the level shows it — its order, the variants it
+        leaves out and the groups of equal variants — is written before the edit, so that from then on the two queues are
+        apart. Each item is read against the records the items before it left."""
+        if not any(record.lever in (MARKUP_ORDER, MARKUP_ALLOW, MARKUP_SAME) for record in items):
+            return list(items)
+        stored = await self.repo.stored(series_id)
+        records = settings.canonical(stored.records)
+        writes: list[SettingRecord] = []
+        for record in items:
+            if record.lever in (MARKUP_ORDER, MARKUP_ALLOW, MARKUP_SAME):
+                for copy in await self._markup_copy(stored, records, record):
+                    records = settings.apply_set(records, copy)
+                    writes.append(copy)
+            records = settings.apply_set(records, record)
+            writes.append(record)
+        return writes
+
+    async def _markup_copy(self, stored, records: list[SettingRecord], record: SettingsSet) -> list[SettingRecord]:
+        lines, levers, order, _ = await self._level_of(stored, records, record)
+        if not queues.follows_reference(levers):
+            return []
+        shown, _ = queues.markup(lines, levers, order, record.episode)
+        scope = dict(series_id=record.series_id, season=record.season, episode=record.episode,
+                     compilation=record.compilation)
+        copied = [SettingRecord(**scope, lever=MARKUP_ORDER, value=[
+            {"group": row.group, "source_id": row.source_id, "player": row.player} for row in shown.rows])]
+        copied += [SettingRecord(**scope, lever=MARKUP_ALLOW, target=variant_target(row.group, row.source_id, row.player),
+                                 value=False) for row in shown.rows if not row.allowed]
+        # The variants the reference's queue shows as equal are equal in the queue that is made its own.
+        same = queues.same_groups(shown.rows)
+        if same:
+            copied.append(SettingRecord(**scope, lever=MARKUP_SAME, value=same))
+        return copied
 
     def _require_editable(self, series_id: int) -> None:
         """A lever of a series whose sync is under way is not changed: the sync works by what it found (the table of
@@ -872,6 +895,13 @@ def _derive(series_id: int, inputs: list[SourceInput], groups: dict[str, str | N
     touched = project.touched_episodes(stored.rows, result.rows) if rows_changed else set()
     return _Derived(result, gone, records, records != before, orders, moved, headers_changed, rows_changed,
                     summaries_changed, touched)
+
+
+def _applied(records: list[SettingRecord], writes: list[SettingRecord]) -> list[SettingRecord]:
+    """The records after the writes of one command, in order."""
+    for each in writes:
+        records = settings.apply_set(records, each)
+    return records
 
 
 def _source_order(stored) -> dict[int, int]:

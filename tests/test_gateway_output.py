@@ -2,10 +2,10 @@
 Each answer is one owner's answer as it is; the gateway merges nothing and knows nothing of sites or players."""
 import pytest
 
-from core.contracts import CompositionReply, OutputSwitch, Reference, SettingsReset, SettingsSet
+from core.contracts import CompositionReply, OutputSwitch, Reference, SettingsReset, SettingsSet, SettingsSetMany
 from core.reasons import parse, reason
 from gateway_fakes import published, serving
-from modules.gateway.schemas import OutputSettingsReset, OutputSettingsSet, OutputSwitchBody
+from modules.gateway.schemas import OutputSettingsBatch, OutputSettingsReset, OutputSettingsSet, OutputSwitchBody
 
 VIDEO = {"id": 1, "kind": "video", "sources": []}
 TORRENT = {"id": 2, "kind": "torrent", "sources": []}
@@ -181,6 +181,37 @@ async def test_a_lever_the_registry_refuses_is_a_400_with_the_code(tmp_path, cod
     assert parse(response.json()["error"]) == {"code": code, "params": {"lever": "x"}}
 
 
+async def test_several_levers_are_one_command_with_the_series_of_the_path_in_each(tmp_path):
+    async with serving(tmp_path, {"composition.settings.set_many": {"ok": True}}) as (client, owners, _, _):
+        response = await client.put("/api/series/1/output/settings/batch", json={"items": [
+            {"season": 1, "lever": "reference.allow", "target": "variant:a", "value": False},
+            {"season": 1, "episode": 2, "lever": "voice.take", "target": "group:Group", "value": True}]})
+    assert response.status_code == 200 and response.json() == {"success": True}
+    assert owners.asked("composition.settings.set_many") == [{"series_id": 1, "items": [
+        {"series_id": 1, "season": 1, "episode": None, "compilation": None, "lever": "reference.allow",
+         "target": "variant:a", "value": False},
+        {"series_id": 1, "season": 1, "episode": 2, "compilation": None, "lever": "voice.take",
+         "target": "group:Group", "value": True}]}]
+
+
+async def test_levers_the_registry_refuses_in_a_batch_are_a_400_with_the_code(tmp_path):
+    refusal = ValueError(reason("bad_value", lever="reference.allow"))
+    async with serving(tmp_path, {"composition.settings.set_many": refusal}) as (client, _, _, _):
+        response = await client.put("/api/series/1/output/settings/batch", json={"items": [
+            {"lever": "reference.allow", "value": 1}]})
+    assert response.status_code == 400 and response.json()["success"] is False
+    assert parse(response.json()["error"]) == {"code": "bad_value", "params": {"lever": "reference.allow"}}
+
+
+@pytest.mark.parametrize("body", [{"items": []}, {}, {"items": [{"episode": 2, "lever": "voice.take"}]},
+                                  {"items": [{"lever": "voice.take", "series_id": 2}]}])
+async def test_a_batch_that_breaks_the_contract_is_a_malformed_request_and_asks_nobody(tmp_path, body):
+    async with serving(tmp_path, {"composition.settings.set_many": {"ok": True}}) as (client, owners, _, spy):
+        response = await client.put("/api/series/1/output/settings/batch", json=body)
+    assert response.status_code == 422
+    assert owners.asked("composition.settings.set_many") == [] and topics(spy) == []
+
+
 async def test_the_name_of_a_track_is_set_with_the_series_of_the_path_on_one_line(tmp_path):
     async with serving(tmp_path, {"composition.voice_title.set": {"ok": True}}) as (client, owners, _, _):
         response = await client.put("/api/series/1/output/voice-title", json={"label": "AniLiberty", "title": " ПМ_aniliberty "})
@@ -267,6 +298,7 @@ async def test_a_command_to_a_module_that_is_not_there_is_a_503(tmp_path):
 
 def test_the_body_of_a_lever_has_the_fields_of_the_command_but_the_series():
     assert set(OutputSettingsSet.model_fields) == set(SettingsSet.model_fields) - {"series_id"}
+    assert set(OutputSettingsBatch.model_fields) == set(SettingsSetMany.model_fields) - {"series_id"}
     assert set(OutputSettingsReset.model_fields) == set(SettingsReset.model_fields) - {"series_id"}
     assert set(OutputSwitchBody.model_fields) == set(OutputSwitch.model_fields) - {"series_id"}
 

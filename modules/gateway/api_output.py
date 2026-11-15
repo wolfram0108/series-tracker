@@ -16,12 +16,12 @@ from pydantic import BaseModel, ValidationError
 from core import BusRequestError
 from core.reasons import reason, relayed
 from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitch, PlanDelete, PlannerView,
-                            PlanRowRef, QueuesGet, QueuesReply, Reference, SeriesKind, SettingsReset, SettingsSet,
+                            PlanRowRef, QueuesGet, QueuesReply, Reference, SeriesKind, SettingsReset, SettingsSet, SettingsSetMany,
                             VoiceOrderSet, VoiceTitleSet)
 
 from .routing import admitted, refusal
-from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse, OutputSettingsReset, OutputSettingsSet,
-                      OutputSwitchBody, VoiceOrderBody, VoiceTitleBody)
+from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse, OutputSettingsBatch, OutputSettingsReset,
+                      OutputSettingsSet, OutputSwitchBody, VoiceOrderBody, VoiceTitleBody)
 
 _ERR = {code: {"model": ErrorResponse} for code in (400, 404, 500, 503)}
 _ERR1 = {code: {"model": ErrorOnly} for code in (404, 500)}
@@ -151,6 +151,20 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             async with admitted(gw, series_id):
                 await gw.request("composition.settings.set", command.model_dump(mode="json"))
+        except BusRequestError as exc:
+            return refusal(exc)
+        return {"success": True}
+
+    @r.put("/api/series/{series_id}/output/settings/batch", response_model=OkResponse, response_model_exclude_none=True,
+           responses=_ERR)
+    async def set_output_settings_batch(series_id: int, body: OutputSettingsBatch):
+        """Sets several levers in one write: the boxes the user ticked, or all of a queue's off. One count of the plan
+        follows for all of them; one item the registry refuses refuses all, with its code, and nothing is stored."""
+        command = _contract(SettingsSetMany, series_id=series_id,
+                            items=[{**item.model_dump(), "series_id": series_id} for item in body.items])
+        try:
+            async with admitted(gw, series_id):
+                await gw.request("composition.settings.set_many", command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}

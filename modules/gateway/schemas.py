@@ -266,6 +266,12 @@ class OutputSettingsSet(RequestModel):
     value: Any = None
 
 
+class OutputSettingsBatch(RequestModel):
+    """The body of the command `composition.settings.set_many` without the series: the levers to set, each as the body of
+    one lever, applied in order in one write."""
+    items: list[OutputSettingsSet] = Field(min_length=1)
+
+
 class OutputSettingsReset(RequestModel):
     """The body of the command `composition.settings.reset` without the series; `queue` takes every lever of that queue
     on the level back (the markup reference, stage 14)."""

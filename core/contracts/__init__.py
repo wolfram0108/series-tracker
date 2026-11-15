@@ -17,7 +17,7 @@ from .packing import PACK_STAGES, JournalStep, PackCard, PackFigures, PackJourna
 from .conform_settings import ConformDomain, ConformParams, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
 from .provider_settings import ProviderApp, ProviderSaved, ProviderSettingsDraft, ProviderView
 from .output_settings import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, GroupQueue, GroupVariant, PlayerVariant, Queue, QueueRow, QueueView, QueuesGet, QueuesReply, EffectiveLever, EpisodeSettings, LeverSpec,
-                              Level, LevelSettings, SettingRecord, SettingsReset, SettingsSet,
+                              Level, LevelSettings, SettingRecord, SettingsReset, SettingsSet, SettingsSetMany,
                               TargetKind, ValueShape, group_target, parse_group_target, parse_variant_target, variant_target)
 from .reference import CutPicture, OutputSwitch, Reference, ReferenceChanged, ReferenceMark
 from .release_table import (LINE_FIELDS, LINE_SEPARATOR, ParsedDomains, PlayerFacts, PlayerPlace, PlayersListReply,
@@ -46,7 +46,7 @@ __all__ = ["AppCard", "AppResults", "AppSearchReply", "AppSearchRequest", "PACK_
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan", "VoiceTitleSet",
            "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary",
-           "MARKUP_ALLOW", "MARKUP_ORDER", "MARKUP_SAME", "REFERENCE_ALLOW", "REFERENCE_ORDER", "REFERENCE_SAME", "VOICE_ALLOW", "VOICE_ORDER", "VOICE_TAKE", "GroupQueue", "GroupVariant", "PlayerVariant", "Queue", "QueueRow", "QueueView", "QueuesGet", "QueuesReply", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "SettingRecord", "SettingsReset", "SettingsSet",
+           "MARKUP_ALLOW", "MARKUP_ORDER", "MARKUP_SAME", "REFERENCE_ALLOW", "REFERENCE_ORDER", "REFERENCE_SAME", "VOICE_ALLOW", "VOICE_ORDER", "VOICE_TAKE", "GroupQueue", "GroupVariant", "PlayerVariant", "Queue", "QueueRow", "QueueView", "QueuesGet", "QueuesReply", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "SettingRecord", "SettingsReset", "SettingsSet", "SettingsSetMany",
            "TargetKind", "ValueShape",
            "group_target", "parse_group_target", "parse_variant_target", "variant_target",
            "CutPicture", "OutputSwitch", "Reference", "ReferenceChanged", "ReferenceMark",

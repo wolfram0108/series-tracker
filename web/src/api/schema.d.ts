@@ -721,6 +721,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/series/{series_id}/output/settings/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Output Settings Batch
+         * @description Sets several levers in one write: the boxes the user ticked, or all of a queue's off. One count of the plan
+         *     follows for all of them; one item the registry refuses refuses all, with its code, and nothing is stored.
+         */
+        put: operations["set_output_settings_batch_api_series__series_id__output_settings_batch_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/series/{series_id}/output/voice-order": {
         parameters: {
             query?: never;
@@ -2850,6 +2871,15 @@ export interface components {
             message?: string | null;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * OutputSettingsBatch
+         * @description The body of the command `composition.settings.set_many` without the series: the levers to set, each as the body of
+         *     one lever, applied in order in one write.
+         */
+        OutputSettingsBatch: {
+            /** Items */
+            items: components["schemas"]["OutputSettingsSet"][];
         };
         /**
          * OutputSettingsReset
@@ -6603,6 +6633,77 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["OutputSettingsSet"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_output_settings_batch_api_series__series_id__output_settings_batch_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutputSettingsBatch"];
             };
         };
         responses: {

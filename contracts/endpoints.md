@@ -210,6 +210,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | GET | `/api/series/{series_id}/output` | Референс каждой серии и отметка (`scan.output.get`) | — |
 | GET | `/api/series/{series_id}/output/queues?season=&episode=` | Очередь референса и очереди озвучек групп уровня в порядке ядра, со значениями рычагов (`composition.queues.get`); серия без сезона — 422 | — |
 | PUT | `/api/series/{series_id}/output/settings` | Значение рычага на уровне сериала, сезона или серии (`composition.settings.set`); вариант в очереди референса без одиночной играющей строки и вариант в очереди озвучки без играющей строки — отказ `not_allowed` | — |
+| PUT | `/api/series/{series_id}/output/settings/batch` | Несколько рычагов одной записью (`composition.settings.set_many`): галочки очереди, «снять все»; одна ревизия, один пересчёт плана; отказ одного пункта отказывает всем | — |
 | POST | `/api/series/{series_id}/output/dubs/retry` | «Повторить»: неудачные и отклонённые озвучки охвата (`season`, `episode?`, `part?`, `voice_label?`) начинаются заново и идут в загрузку сразу (`voices.dubs.retry`) | — |
 | POST | `/api/series/{series_id}/output/dubs/redo` | «Пересоздать»: озвучки охвата с уложенной дорожкой делаются заново сразу (`voices.dubs.redo`); контейнер берёт новые дорожки в синхронизации | — |
 | POST | `/api/series/{series_id}/output/reference/refetch` | «Скачать заново»: референс серии (`season`, `episode`, `part?`) скачивается заново сразу; файл заменяется, когда новый целый (`downloads.reference.refetch`) | — |
@@ -271,6 +272,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | Статус-окно: раздел «Выход» — референсы | GET | `/api/series/{series_id}/output` |
 | Статус-окно: раздел «Выход» — отключить или включить серию, выделенные серии, сезон | PUT | `/api/series/{series_id}/output/switch` |
 | Статус-окно: раздел «Выход» — рычаг | PUT | `/api/series/{series_id}/output/settings` |
+| Статус-окно: раздел «Выход» — галочки очереди разом | PUT | `/api/series/{series_id}/output/settings/batch` |
 | Статус-окно: раздел «Выход» — сбросить рычаги уровня | POST | `/api/series/{series_id}/output/settings/reset` |
 | Статус-окно: раздел «Выход» — имена файлов | GET | `/api/series/{series_id}/rename_preview` |
 | Статус-окно: раздел «Выход» — синхронизировать | POST | `/api/series/{series_id}/scan` |
@@ -795,6 +797,12 @@ voice_group, height, reason}`; `mark` — `by_level` | `own` | `other_player` | 
 **PUT `/api/series/{series_id}/output/settings`** — тело `{season?, episode?, lever, target?, value}`; уровень — сериал
 (без сезона), сезон или серия (сезон и серия). Ответ `{success}`. 400 с кодом: `unknown_lever`, `bad_target`,
 `bad_value`; 422 — серия без сезона или неизвестное поле тела.
+
+**PUT `/api/series/{series_id}/output/settings/batch`** — тело `{items: [{season?, episode?, lever, target?, value}, …]}`,
+не меньше одного пункта; каждый пункт — тело одиночной записи, серия берётся из пути. Пункты применяются по порядку одной
+записью: одна ревизия раскладки, одно событие, один пересчёт плана на все. Отказ одного пункта (коды те же, что у
+одиночной записи) отказывает всем, ничего не пишется. Ответ `{success}`; 422 — пустой список, пункт без сезона у серии
+или неизвестное поле.
 
 **POST `/api/series/{series_id}/output/settings/reset`** — тело `{season?, episode?, lever?, target?}`; без `lever`
 возвращаются все рычаги уровня. Ответ `{success}`; отказы — как у записи.
