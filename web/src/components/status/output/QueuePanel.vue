@@ -3,7 +3,7 @@ import { computed } from "vue"
 import type { components } from "../../../api/schema"
 import { t } from "../../../i18n"
 import type { QueueName, QueueRow, SourceMark as Mark } from "../../../lib/output"
-import type { Held } from "../../../lib/plan"
+import type { FailedAttempt, Held } from "../../../lib/plan"
 import type { SameGroups } from "../../../lib/same"
 import QueueTable from "./QueueTable.vue"
 
@@ -28,7 +28,9 @@ const props = withDefaults(defineProps<{
   held?: Held | null
   /** The variant the plan takes for the reference of the episode: the queue's mark of the reference stands on it. */
   taken?: Held | null
-}>(), { fromReference: false, busy: false, hint: undefined, follows: false, held: null, taken: null })
+  /** The attempts of the plan that failed for the episode, for the rows of the queue they were of. */
+  failed?: FailedAttempt[]
+}>(), { fromReference: false, busy: false, hint: undefined, follows: false, held: null, taken: null, failed: () => [] })
 
 const emit = defineEmits<{
   (e: "order", rows: QueueRow[]): void
@@ -80,7 +82,7 @@ const hint = computed(() => props.hint ?? (props.queue === "reference" ? t("outp
     <p v-if="fromReference" class="queue-note">{{ t("output.queue.fromReference") }}</p>
     <p v-if="view && (view.rows ?? []).length === 0" class="queue-note">{{ t("output.queue.empty") }}</p>
     <QueueTable
-      v-else-if="view" :rows="view.rows ?? []" :queue="queue" :marks="marks" :level="level !== 'episode'" :held="held" :taken="taken" :busy="busy"
+      v-else-if="view" :rows="view.rows ?? []" :queue="queue" :marks="marks" :level="level !== 'episode'" :held="held" :taken="taken" :failed="failed" :busy="busy"
       @order="emit('order', $event)" @allow="(row, allowed) => emit('allow', row, allowed)" @same="emit('same', $event)"
     />
     <p v-else class="queue-note">{{ t("common.fetching") }}</p>

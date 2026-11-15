@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import type { Queues } from "../../../composables/outputCalls"
-import type { HeldFile, Taken } from "../../../lib/plan"
+import type { FailedAttempt, HeldFile, Taken } from "../../../lib/plan"
 import type { SameGroups } from "../../../lib/same"
 import { useCardGrid } from "../../../composables/useCardGrid"
 import { sharing } from "../../../lib/sharing"
@@ -40,8 +40,10 @@ const props = withDefaults(defineProps<{
   held?: HeldFile | null
   /** The variant the plan takes for the reference of the opened episode. */
   taken?: Taken | null
+  /** The attempts of the plan that failed for the opened episode: its queues mark the rows they were of. */
+  failed?: FailedAttempt[]
   busy?: boolean
-}>(), { mode: "cards", opened: null, busy: false, taken: null })
+}>(), { mode: "cards", opened: null, busy: false, taken: null, failed: () => [] })
 
 const emit = defineEmits<{
   (e: "open", episode: number | null): void
@@ -175,7 +177,7 @@ const rows = computed<CompilationRow[]>(() => {
           >{{ item.view.episode }}</button>
           <EpisodeDetail
             v-if="opened?.view.episode === item.view.episode" :view="item.view" :cells="item.cells" :status="item.status"
-            :marks="marks" :queues="queues" :held="held" :taken="taken" :busy="busy" :compilations="rows"
+            :marks="marks" :queues="queues" :held="held" :taken="taken" :failed="failed" :busy="busy" :compilations="rows"
             @close="emit('open', null)" @step="step" @switch="emit('member', item.view.episode, $event ? '' : head.key)"
             @member="emit('member', item.view.episode, $event)" @retry-cut="emit('retry', item.view.episode)"
             @retry-failed="emit('retry-failed', item.view.episode)"

@@ -108,6 +108,9 @@ class PlanFailure(BaseModel):
     # offline: the failure is still counted, only not placed.
     episodes: list[list[int]] = Field(default_factory=list)
     voice: str | None = None
+    # The variant of its row in the layout (voice-over, source, player), as the queues name their rows: a queue marks the
+    # row whose attempt failed. None when the row is offline.
+    variant: PlanVariant | None = None
     # The series lacks nothing for it: every episode of its row has a file holding what the attempt was for (another
     # source gave it). Only a failure not covered makes the series an error.
     covered: bool = False

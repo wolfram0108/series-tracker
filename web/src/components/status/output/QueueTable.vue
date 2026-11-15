@@ -3,7 +3,7 @@ import Button from "primevue/button"
 import { computed, ref, watch } from "vue"
 import { t } from "../../../i18n"
 import type { QueueName, QueueRow, SourceMark as Mark } from "../../../lib/output"
-import { isVariantOf, type Held } from "../../../lib/plan"
+import { isVariantOf, type FailedAttempt, type Held } from "../../../lib/plan"
 import { heldFirst, joined, left, rowKey, sizeOf, split, type SameGroups } from "../../../lib/same"
 import OrderList from "../../OrderList.vue"
 import SameMenu, { type SameItem } from "./SameMenu.vue"
@@ -26,7 +26,9 @@ const props = withDefaults(defineProps<{
   held?: Held | null
   /** The variant the plan takes for the reference of the episode: the row that is it is the reference, whatever its place. */
   taken?: Held | null
-}>(), { level: false, busy: false, held: null, taken: null })
+  /** The attempts of the plan that failed for the episode: the row of the variant an attempt was of says so. */
+  failed?: FailedAttempt[]
+}>(), { level: false, busy: false, held: null, taken: null, failed: () => [] })
 
 const emit = defineEmits<{
   (e: "order", rows: QueueRow[]): void
@@ -56,6 +58,9 @@ const markOf = (row: QueueRow, rows: readonly QueueRow[]): string => !row.allowe
   : isFirst(row, rows) ? t(props.queue === "reference" ? "output.queue.reference"
     : props.queue === "markup" ? "output.queue.markup" : "output.queue.taken") : ""
 const isHeld = (row: QueueRow): boolean => isVariantOf(props.held, row)
+// A queue of voice-overs is one group's: its rows are named by source and player alone.
+const failureOf = (row: QueueRow): FailedAttempt | undefined => props.failed.find((each) =>
+  each.held.source_id === row.source_id && each.held.player === row.player && (props.queue === "voice" || row.group === each.held.group))
 const height = (row: QueueRow): string => row.height == null ? "—"
   : t(props.level ? "output.heightUpTo" : "output.height", { height: row.height })
 const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" : t(`output.level.${row.allowed_level}`)
@@ -153,6 +158,8 @@ const onMenu = (key: string): void => {
               <td class="queue-mark-cell"><span class="queue-mark">
                 <span v-if="markOf(row, items)" class="pill" :class="row.allowed ? (queue !== 'voice' ? 'pill-primary' : 'pill-success') : 'pill-secondary'">{{ markOf(row, items) }}</span>
                 <span v-if="isHeld(row)" class="pill pill-info queue-held">{{ t("output.queue.held") }}</span>
+                <span v-if="failureOf(row)" class="pill queue-failed" :class="failureOf(row)!.covered ? 'pill-secondary' : 'pill-danger'"
+                      :title="t('output.queue.failedHint')">{{ t(`output.queue.failed.${failureOf(row)!.kind}`) }}</span>
                 <span v-if="levelOf(row)" class="queue-level">{{ levelOf(row) }}</span>
               </span></td>
             </tr>

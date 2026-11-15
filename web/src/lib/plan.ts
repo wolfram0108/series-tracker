@@ -202,6 +202,16 @@ export interface Held { source_id: number; player: string; group?: string }
 export const isVariantOf = (held: Held | null | undefined, row: { group: string; source_id: number; player: string }): boolean =>
   held != null && row.source_id === held.source_id && row.player === held.player && (held.group == null || row.group === held.group)
 
+/** An attempt of the plan that failed for an episode: what it was and the variant of its row, as a queue names its rows. A queue
+ *  marks the row; `covered`: another source gave what the attempt was for, so the mark is no error. */
+export interface FailedAttempt { kind: "download" | "align" | "cut"; held: Held; covered: boolean }
+
+export function failedOf(view: PlannerView | undefined, season: number, episode: number): FailedAttempt[] {
+  return (view?.failures ?? []).flatMap((each) => each.variant && (each.episodes ?? []).some((slot) => slot[0] === season && slot[1] === episode)
+    ? [{ kind: each.kind, covered: each.covered, held: { source_id: each.variant.source_id, player: each.variant.player, group: each.variant.group } }]
+    : [])
+}
+
 /** What the file of an episode holds now — the fact, as against what the order of a queue or the plan chooses: the source and
  *  the player of its video (of the picture, for a cut) and of each of its voice-overs by group, the own sound of the video
  *  among them. None for an episode with no file. */

@@ -17,7 +17,7 @@ import { liveEntries, liveFrom } from "../lib/live"
 import { useSeriesStore } from "../stores/series"
 import { usePlanStore } from "../stores/plan"
 import { useLayoutStore } from "../stores/layout"
-import { fileOf, heldFile, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, takenOf as takenIn, trackOf, type CompilationKey, type HeldFile, type Taken } from "../lib/plan"
+import { failedOf as failedIn, fileOf, heldFile, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, takenOf as takenIn, trackOf, type CompilationKey, type FailedAttempt, type HeldFile, type Taken } from "../lib/plan"
 import type { SameGroups } from "../lib/same"
 import {
   deleteFromPlan, fetchPlan, fetchQueues, resetFailures,
@@ -214,6 +214,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   /** What the file of an episode holds now (lib/plan.ts `heldFile`), for the window of the episode. */
   const heldOf = (season: number, episode: number, part: number | null = null): HeldFile | null => heldFile(plan.forSeries(seriesId), season, episode, part)
   const takenOf = (season: number, episode: number, part: number | null = null): Taken => takenIn(plan.forSeries(seriesId), season, episode, part)
+  const failedOf = (season: number, episode: number): FailedAttempt[] => failedIn(plan.forSeries(seriesId), season, episode)
   // The queues as the window shows them: the core's, with the boxes the user changed that the core does not hold yet.
   const shownQueues = computed<Record<string, Queues>>(() => {
     const changes = [...sending.value.values(), ...staged.value.values()]
@@ -377,6 +378,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const heldCount = computed(() => staged.value.size)
 
   return { composition, references, loading, ready, failure, busy, heldCount, answer, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
-    sync, retryFailed, retrySeason, retryEpisode, voiceOrders, order, rename, marks, loadQueues, queuesOf, heldOf, takenOf, setOrder, setAllowed, setSame, setTaken, resetOrder,
+    sync, retryFailed, retrySeason, retryEpisode, voiceOrders, order, rename, marks, loadQueues, queuesOf, heldOf, takenOf, failedOf, setOrder, setAllowed, setSame, setTaken, resetOrder,
     retry, redo, refetch, compilations, cuts, member, takeCompilation, retryCut, labels }
 }

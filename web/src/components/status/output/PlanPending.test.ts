@@ -6,11 +6,11 @@ import PlanPending from "./PlanPending.vue"
 import * as calls from "../../../composables/outputCalls"
 import { usePlanStore } from "../../../stores/plan"
 import { t } from "../../../i18n"
-import { planView, rowRef } from "../../../lib/plan.fixtures"
+import { failure as attempt, planView, rowRef } from "../../../lib/plan.fixtures"
 
 vi.mock("../../../composables/outputCalls")
 
-const failure = (key: string, covered: boolean) => ({ kind: "align" as const, row: rowRef(90, key), video: null, episodes: [[1, 498]], voice: "ПВА ШОУ", covered })
+const failure = (key: string, covered: boolean) => attempt({ kind: "align", row: rowRef(90, key), episodes: [[1, 498]], voice: "ПВА ШОУ", covered })
 
 describe("what the plan holds for the next sync, as chips", () => {
   beforeEach(() => setActivePinia(createPinia()))

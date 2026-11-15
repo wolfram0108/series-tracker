@@ -50,7 +50,8 @@ def placed(failed: Iterable[tuple], rows: Iterable[OnlineRow] = ()) -> list[dict
         held = by_id.get(key[1], [])
         found.append({"key": key, "kind": key[0], "row": _row(key[1]), "video": _row(key[2]) if len(key) > 2 else None,
                       "episodes": sorted({tuple(slot) for row in held for slot in _slots(row)}),
-                      "voice": next((row.group for row in held if row.group), None)})
+                      "voice": next((row.group for row in held if row.group), None),
+                      "variant": _variant(held[0].variant) if held else None})
     return found
 
 

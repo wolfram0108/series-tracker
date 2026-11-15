@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { fileOf, heldFile, isVariantOf, planCuts, planDubs, planFiles, seasonVoiceOrders, takenMarkup, takenOf, takenReference, trackOf } from "./plan"
 import { liveFrom } from "./live"
-import { asset, assetTrack, goal, goalTrack, goalVideo, planView, rowRef } from "./plan.fixtures"
+import { asset, assetTrack, failure, goal, goalTrack, goalVideo, planView, rowRef } from "./plan.fixtures"
 
 describe("planDubs", () => {
   it("names absent a voice-over of the order of the season the plan cannot get for the episode", () => {
@@ -40,26 +40,26 @@ describe("planDubs", () => {
     const tracks = [goalTrack("A", "download", rowRef(8, "a")), goalTrack("B", "realign", rowRef(8, "b")),
       goalTrack("C", "realign", rowRef(8, "c"))]
     const view = planView({
-      failures: [{ kind: "download", row: rowRef(8, "a"), video: null, voice: null, covered: false }, { kind: "align", row: rowRef(8, "b"), video: null, voice: null, covered: false }],
+      failures: [failure({ kind: "download", row: rowRef(8, "a"), video: null, voice: null, covered: false }), failure({ kind: "align", row: rowRef(8, "b"), video: null, voice: null, covered: false })],
       episodes: [goal([1, 1], goalVideo("download", rowRef(7, "r1"), "S01E01.mp4"), tracks)],
     })
     expect(planDubs(view).map((dub) => dub.state)).toEqual(["error", "error", "planned"])
   })
 
   it("is no error when the next source gave what the failed attempt was for: the file holds the voice-over from another row", () => {
-    const failure = { kind: "download" as const, row: rowRef(8, "cvh"), video: null, voice: "A", episodes: [[1, 1]], covered: true }
+    const attempt = failure({ kind: "download", row: rowRef(8, "cvh"), voice: "A", episodes: [[1, 1]], covered: true })
     const view = planView({
-      failures: [failure, { ...failure, kind: "align" as const }],
+      failures: [attempt, { ...attempt, kind: "align" as const }],
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "S01E01.mp4"), [goalTrack("A", "download", rowRef(8, "cvh"))])],
     })
     expect(planDubs(view).map((dub) => dub.state)).toEqual(["planned"])
-    const lacked = [failure, { ...failure, kind: "align" as const }].map((each) => ({ ...each, covered: false }))
+    const lacked = [attempt, { ...attempt, kind: "align" as const }].map((each) => ({ ...each, covered: false }))
     expect(planDubs({ ...view, failures: lacked }).map((dub) => dub.state)).toEqual(["error"])
   })
 
   it("names a voice-over the user switched off for the episode off, even with a failure of it, and absent elsewhere", () => {
     const view = planView({
-      failures: [{ kind: "align", row: rowRef(8, "b"), video: null, voice: "B", episodes: [[1, 1]], covered: false }],
+      failures: [failure({ kind: "align", row: rowRef(8, "b"), video: null, voice: "B", episodes: [[1, 1]], covered: false })],
       episodes: [{ ...goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "S01E01.mp4")), voices_off: ["B"] },
         goal([1, 2], goalVideo("asset", rowRef(7, "r2"), "S01E02.mp4"))],
     })
@@ -68,7 +68,7 @@ describe("planDubs", () => {
 
   it("makes a voice-over the plan passes over for its failed attempt an error of the episodes of its row, not absent", () => {
     const view = planView({
-      failures: [{ kind: "align", row: rowRef(8, "b"), video: null, voice: "B", episodes: [[1, 1]], covered: false }],
+      failures: [failure({ kind: "align", row: rowRef(8, "b"), video: null, voice: "B", episodes: [[1, 1]], covered: false })],
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "S01E01.mp4")), goal([1, 2], goalVideo("asset", rowRef(7, "r2"), "S01E02.mp4"))],
     })
     expect(planDubs(view, { 1: ["B"] }).map((dub) => [dub.episode, dub.state, dub.source_id])).toEqual([[1, "error", 8], [2, "absent", null]])
@@ -76,7 +76,7 @@ describe("planDubs", () => {
 
   it("leaves a voice-over the plan passes over absent, not an error, when another source made its failed attempt good", () => {
     const view = planView({
-      failures: [{ kind: "align", row: rowRef(8, "b"), video: null, voice: "B", episodes: [[1, 1]], covered: true }],
+      failures: [failure({ kind: "align", row: rowRef(8, "b"), video: null, voice: "B", episodes: [[1, 1]], covered: true })],
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "S01E01.mp4"))],
     })
     expect(planDubs(view, { 1: ["B"] }).map((dub) => [dub.state, dub.source_id])).toEqual([["absent", null]])
@@ -122,7 +122,7 @@ describe("planFiles", () => {
 
   it("makes a download that failed an error, one under way downloading while the sync runs, and one not reached pending", () => {
     const view = planView({
-      failures: [{ kind: "download", row: rowRef(7, "r1"), video: null, voice: null, covered: false }],
+      failures: [failure({ kind: "download", row: rowRef(7, "r1"), video: null, voice: null, covered: false })],
       episodes: [
         goal([1, 1], goalVideo("download", rowRef(7, "r1"), null)),
         goal([1, 2], goalVideo("download", rowRef(7, "r2"), null)),
@@ -137,7 +137,7 @@ describe("planFiles", () => {
 
   it("makes no error of a failed download another source made good", () => {
     const view = planView({
-      failures: [{ kind: "download", row: rowRef(7, "r1"), video: null, voice: null, covered: true }],
+      failures: [failure({ kind: "download", row: rowRef(7, "r1"), video: null, voice: null, covered: true })],
       episodes: [goal([1, 1], goalVideo("download", rowRef(7, "r1"), null))],
     })
     expect(planFiles(view).map((file) => file.status)).toEqual(["pending"])
@@ -172,9 +172,9 @@ describe("planCuts", () => {
     const view = planView({ episodes: [goal([1, 1], cut), goal([1, 2], goalVideo("cut", rowRef(9, "d"), null))] })
     expect(planCuts(view).map((each) => each.status)).toEqual(["planned", "planned"])
     expect(planCuts({ ...view, running: true }).map((each) => each.status)).toEqual(["aligning", "aligning"])
-    const failed = planCuts({ ...view, failures: [{ kind: "cut", row: rowRef(9, "c"), video: rowRef(9, "c"), voice: null, covered: false }] })
+    const failed = planCuts({ ...view, failures: [failure({ kind: "cut", row: rowRef(9, "c"), video: rowRef(9, "c"), voice: null, covered: false })] })
     expect(failed.map((each) => each.status)).toEqual(["failed", "planned"])
-    const covered = planCuts({ ...view, failures: [{ kind: "cut", row: rowRef(9, "c"), video: rowRef(9, "c"), voice: null, covered: true }] })
+    const covered = planCuts({ ...view, failures: [failure({ kind: "cut", row: rowRef(9, "c"), video: rowRef(9, "c"), voice: null, covered: true })] })
     expect(covered.map((each) => each.status)).toEqual(["planned", "planned"])
   })
 

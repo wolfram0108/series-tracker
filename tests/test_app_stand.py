@@ -262,6 +262,8 @@ async def test_a_voice_over_file_shorter_than_any_episode_is_broken_and_the_next
     (track,) = asset["tracks"]
     assert failure["kind"] == "download" and failure["covered"] and track["group"] == "AnimeVost", view
     assert track["row"] != failure["row"], (track, failure)
+    # The window marks the row of the queue whose attempt failed by this variant.
+    assert failure["variant"]["group"] == "AnimeVost" and failure["variant"]["source_id"] == failure["row"]["source_id"], failure
 
 
 async def test_the_voice_overs_of_an_episode_go_to_the_service_as_one_job_and_one_that_did_not_come_holds_none_back(stand):

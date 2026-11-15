@@ -17,7 +17,7 @@ import { t } from "../../i18n"
 import type { Reference, Row } from "../../lib/output"
 import { QUEUE_PAUSE_MS } from "../../lib/queueChange"
 import type { PlannerView } from "../../lib/plan"
-import { asset, assetTrack, goal, goalTrack, goalVideo, planView, rowRef } from "../../lib/plan.fixtures"
+import { asset, assetTrack, failure, goal, goalTrack, goalVideo, planView, rowRef } from "../../lib/plan.fixtures"
 
 const frame = () => new Promise<void>((done) => requestAnimationFrame(() => done()))  // the reads of the layout (lib/layout.ts)
 
@@ -205,7 +205,7 @@ describe("StatusOutput", () => {
       assets: [fileOfEpisodeOne()],
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"),
         [goalTrack("AniStar", "download", rowRef(8, "k1"), { player: "kodik" })])],
-      failures: [{ kind: "download", row: rowRef(8, "k1"), video: null, voice: null, covered: false }],
+      failures: [failure({ kind: "download", row: rowRef(8, "k1"), video: null, voice: null, covered: false })],
     }))
     const w = mountOutput()
     await flushPromises()
@@ -222,7 +222,7 @@ describe("StatusOutput", () => {
       assets: [fileOfEpisodeOne([assetTrack("AniStar", rowRef(8, "k2"), true, { player: "kodik" })])],
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"),
         [goalTrack("AniStar", "download", rowRef(8, "k1"), { player: "cvh" })])],
-      failures: [{ kind: "download", row: rowRef(8, "k1"), video: null, voice: "AniStar", episodes: [[1, 1]], covered }],
+      failures: [failure({ kind: "download", row: rowRef(8, "k1"), video: null, voice: "AniStar", episodes: [[1, 1]], covered })],
     })
     givePlan(planWith(false))
     const lacking = mountOutput()
@@ -240,7 +240,7 @@ describe("StatusOutput", () => {
       assets: [fileOfEpisodeOne()],
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"),
         [goalTrack("AniStar", "download", rowRef(8, "k1"), { player: "kodik" })])],
-      failures: [{ kind: "download", row: rowRef(7, "r1-1"), video: null, voice: null, covered: false }],
+      failures: [failure({ kind: "download", row: rowRef(7, "r1-1"), video: null, voice: null, covered: false })],
     }))
     const w = mountOutput()
     await flushPromises()
@@ -257,7 +257,7 @@ describe("StatusOutput", () => {
       assets: [fileOfEpisodeOne()],
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"),
         [goalTrack("AniStar", "download", rowRef(8, "k1"), { player: "kodik" })])],
-      failures: [{ kind: "download", row: rowRef(8, "k1"), video: null, voice: null, covered: false }],
+      failures: [failure({ kind: "download", row: rowRef(8, "k1"), video: null, voice: null, covered: false })],
     }))
     const w = mountOutput()
     await flushPromises()

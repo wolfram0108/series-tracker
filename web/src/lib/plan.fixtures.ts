@@ -36,3 +36,7 @@ export const asset = (name: string, row: Ref, tracks: Schemas["PlanAssetTrack"][
   video: { source: "", player: "vibix", group: null, height: 1080, link: "", label: "", row, cut_of: cutOf, online: true, ...video },
   tracks, timeline: null,
 })
+
+/** An attempt that failed, with the fields a test does not name at their defaults (not placed, not covered). */
+export const failure = (fields: Pick<Schemas["PlanFailure"], "kind" | "row"> & Partial<Schemas["PlanFailure"]>): Schemas["PlanFailure"] =>
+  ({ video: null, episodes: [], voice: null, variant: null, covered: false, ...fields })

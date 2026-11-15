@@ -112,6 +112,9 @@ async def test_a_download_that_failed_is_shown_and_tried_again_after_the_failure
     await page.locator(".episode-card").first.dblclick()
     row = page.locator(".episode-detail tr[data-group='AnimeVost']")
     await expect(row.locator(".pill")).to_have_text(state("failed"))
+    await page.locator(".episode-detail .st-tab", has_text="AnimeVost").click()
+    await expect(page.locator(".episode-detail .queue-failed")).to_have_text(text("output.queue.failed.download"))
+    await page.locator(".episode-detail .st-tab", has_text=text("output.tab.tracks")).click()
     await ui.shot("20-download-failed")
     asked = len(ui.host.served)
     await ui.press_sync(series_id)
@@ -424,6 +427,23 @@ async def test_the_sync_of_an_episode_makes_that_episode_alone_the_series_is_bus
     assert len(ui.files()) == 2 and set(made) <= set(ui.files())
     await expect(page.locator(".episode-card[data-state='done']")).to_have_count(2)
     await ui.check(series_id)
+
+
+async def test_an_episode_whose_only_video_failed_has_the_row_of_the_reference_marked_in_its_queue(ui):
+    """The card says «нет референса» and the queue shows the row as the first one; the row says its download failed."""
+    ui.site.release("ref", "AniStar")
+    ui.site.episode("ref", 1, height=720)
+    series_id = await ui.make_series(["ref"])
+    ui.site.gone("ref", 1)
+    page = ui.page
+    await ui.open_output(SERIES)
+    await ui.press_sync(series_id)
+    await expect(page.locator(".episode-card[data-state='failed']")).to_have_count(1)
+    await expect(page.locator(".episode-card .card-ref")).to_contain_text(text("output.reference.none"))
+    await page.locator(".episode-card").first.dblclick()
+    await page.locator(".episode-detail .st-tab", has_text=text("output.tab.reference")).click()
+    await expect(page.locator(".episode-detail .queue-failed")).to_have_text(text("output.queue.failed.download"))
+    await ui.shot("27-no-reference-row-failed")
 
 
 async def test_a_download_rebuilt_on_the_next_source_is_one_card_in_the_agents_and_stays_after_the_sync(ui):

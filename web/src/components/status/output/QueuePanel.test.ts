@@ -186,3 +186,34 @@ describe("«Снять все»", () => {
     expect(w.find(".variant-row input[type=checkbox]").attributes("data-lever-free")).toBeDefined()
   })
 })
+
+describe("the attempts of the plan that failed for the episode", () => {
+  const attempt = (player: string, covered = false) =>
+    ({ kind: "download" as const, covered, held: { source_id: 55, player, group: "OnWave" } })
+
+  it("marks the row of a variant whose attempt failed, as the plan will not take it, beside the mark of the first one taken", () => {
+    const w = mount(QueuePanel, { props: { queue: "voice", level: "episode", marks: {}, failed: [attempt("cvh")],
+      view: { order_level: "default", same_level: "default", rows: [row("cvh"), row("kodik")] } } })
+    const rows = w.findAll(".variant-row")
+    expect(rows[0].find(".queue-failed").text()).toBe(t("output.queue.failed.download"))
+    expect(rows[0].find(".queue-failed").classes()).toContain("pill-danger")
+    expect(rows[0].find(".pill").text()).toBe(t("output.queue.taken"))
+    expect(rows[1].find(".queue-failed").exists()).toBe(false)
+  })
+
+  it("makes the mark quiet when another source gave what the attempt was for, and names the kind of the attempt", () => {
+    const w = mount(QueuePanel, { props: { queue: "voice", level: "episode", marks: {},
+      failed: [{ ...attempt("cvh", true), kind: "align" as const }],
+      view: { order_level: "default", same_level: "default", rows: [row("cvh"), row("kodik")] } } })
+    const mark = w.find(".queue-failed")
+    expect([mark.text(), mark.classes().includes("pill-secondary"), mark.classes().includes("pill-danger")])
+      .toEqual([t("output.queue.failed.align"), true, false])
+  })
+
+  it("keeps the group apart in a queue of single videos: the failed variant of another group is no mark of this row", () => {
+    const w = mount(QueuePanel, { props: { queue: "reference", level: "episode", marks: {},
+      failed: [{ kind: "download" as const, covered: false, held: { source_id: 55, player: "cvh", group: "Another" } }],
+      view: { order_level: "default", same_level: "default", rows: [row("cvh")] } } })
+    expect(w.find(".queue-failed").exists()).toBe(false)
+  })
+})

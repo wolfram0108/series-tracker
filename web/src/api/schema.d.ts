@@ -3274,6 +3274,8 @@ export interface components {
              * @default null
              */
             voice: string | null;
+            /** @default null */
+            variant: components["schemas"]["PlanVariant"] | null;
             /**
              * Covered
              * @default false
