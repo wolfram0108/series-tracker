@@ -806,6 +806,83 @@ async def test_a_queue_dragged_by_its_handle_holds_the_new_order_until_the_core_
     await ui.shot("41-queue-refused")
 
 
+def batches_of(page) -> list:
+    """What the window sends for the boxes of a queue: every PUT to the levers of the series, as (the path after the series, the body)."""
+    sent: list = []
+    page.on("request", lambda request: sent.append((request.url.split("/output/", 1)[1], request.post_data_json))
+            if request.method == "PUT" and "/output/settings" in request.url else None)
+    return sent
+
+
+async def reference_queue(ui):
+    page = ui.page
+    await page.locator(".episode-card").first.dblclick()
+    detail = page.locator(".episode-detail")
+    await detail.locator(".st-tab", has_text=text("output.tab.reference")).click()
+    rows = detail.locator(".queue-table .variant-row")
+    await expect(rows).to_have_count(2)
+    return detail, rows.locator("input[type=checkbox]")
+
+
+async def test_the_boxes_of_a_queue_show_at_once_and_go_to_the_core_as_one_command_after_the_pause(ui):
+    """The user's path: he clears the boxes of the queue of the reference of an episode one after another. Each shows cleared at
+    once, the bar says the changes are not sent, a press that brings a box back to what the core holds is no change, and
+    nothing goes while he presses. After his pause the core gets ONE command with the boxes, and the queue reads as the core
+    holds it."""
+    series_id = await synced_in_browser(ui, (1,))
+    page = ui.page
+    detail, boxes = await reference_queue(ui)
+    sent = batches_of(page)
+    unsent = page.locator(".output-unsent")
+
+    await boxes.nth(0).uncheck()
+    await expect(unsent).to_contain_text("1")
+    await boxes.nth(0).check()  # back to what the core holds: no change at all
+    await expect(unsent).to_have_count(0)
+    await boxes.nth(0).uncheck()
+    await boxes.nth(1).uncheck()
+    await expect(unsent).to_contain_text("2")
+    await expect(boxes.nth(0)).not_to_be_checked()
+    await expect(boxes.nth(1)).not_to_be_checked()
+    assert sent == []  # the user is still pressing: nothing has gone
+    await ui.shot_of(detail, "44-boxes-held")
+
+    async with page.expect_response(lambda response: response.url.endswith("/output/settings/batch")):
+        pass  # the pause ends by itself, and the core answers the one command
+    await expect(unsent).to_have_count(0)
+    await expect(boxes.nth(0)).not_to_be_checked()
+    await expect(boxes.nth(1)).not_to_be_checked()
+    await expect(page.locator(".output-failure")).to_have_count(0)
+    assert [(path, [(each["lever"], each["value"]) for each in body["items"]]) for path, body in sent] == [
+        ("settings/batch", [("reference.allow", False), ("reference.allow", False)])], sent
+    queues = await ui.call("GET", f"/api/series/{series_id}/output/queues?season=1&episode=1")
+    assert [row["allowed"] for row in queues["reference"]["rows"]] == [False, False]
+
+
+async def test_clear_all_clears_every_box_of_the_queue_and_sends_them_as_one_command(ui):
+    """«Снять все» in the tools of a queue clears the box of every row it takes: the boxes show cleared at once, the button is
+    off with nothing taken, and the core gets the boxes as one command after the pause."""
+    series_id = await synced_in_browser(ui, (1,))
+    page = ui.page
+    detail, boxes = await reference_queue(ui)
+    sent = batches_of(page)
+    clear = detail.locator(".queue-clear")
+    await expect(clear).to_have_text(text("output.queue.clearAll"))
+    await expect(clear).to_be_enabled()
+
+    await clear.click()
+    await expect(boxes.nth(0)).not_to_be_checked()
+    await expect(boxes.nth(1)).not_to_be_checked()
+    await expect(clear).to_be_disabled()
+    await ui.shot_of(detail, "45-cleared-all")
+    async with page.expect_response(lambda response: response.url.endswith("/output/settings/batch")):
+        pass
+    await expect(page.locator(".output-unsent")).to_have_count(0)
+    assert [(path, len(body["items"])) for path, body in sent] == [("settings/batch", 2)], sent
+    queues = await ui.call("GET", f"/api/series/{series_id}/output/queues?season=1&episode=1")
+    assert [row["allowed"] for row in queues["reference"]["rows"]] == [False, False]
+
+
 async def test_the_name_of_a_track_given_on_its_chip_is_its_title_in_the_file_after_a_sync_with_nothing_fetched(ui):
     """A press on the name of a chip of «Дорожки в контейнере» makes it a field; the name is kept for the series and, at the next
     sync, the tracks are copied into a file whose track bears it (the group stays its tag): nothing is downloaded or

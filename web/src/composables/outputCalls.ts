@@ -73,6 +73,13 @@ export function setLever(seriesId: number, body: Schemas["OutputSettingsSet"]): 
   }), OUTPUT_WORDS)
 }
 
+/** Several levers in one command: one write, one count of the plan for all of them; a refused one refuses them all. */
+export function setLevers(seriesId: number, items: Schemas["OutputSettingsSet"][]): Promise<Answer<unknown>> {
+  return call(() => api.PUT("/api/series/{series_id}/output/settings/batch", {
+    params: { path: { series_id: seriesId } }, body: { items },
+  }), OUTPUT_WORDS)
+}
+
 export function setVoiceOrder(seriesId: number, body: Schemas["VoiceOrderBody"]): Promise<Answer<unknown>> {
   return call(() => api.PUT("/api/series/{series_id}/output/voice-order", {
     params: { path: { series_id: seriesId } }, body,

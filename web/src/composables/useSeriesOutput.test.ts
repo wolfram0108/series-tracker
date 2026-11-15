@@ -5,12 +5,13 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import { useSeriesOutput } from "./useSeriesOutput"
 import * as calls from "./outputCalls"
-import type { Composition } from "./outputCalls"
+import type { Composition, Queues } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
 import { useCompositionStore } from "../stores/composition"
 import { usePlanStore } from "../stores/plan"
-import { groupTarget, resetBody, setBody, type Reference, type Row } from "../lib/output"
+import { groupTarget, resetBody, setBody, variantTarget, type QueueRow, type Reference, type Row } from "../lib/output"
+import { QUEUE_PAUSE_MS } from "../lib/queueChange"
 import { SPECS, AVAILABILITY } from "../lib/output.fixtures"
 import type { PlannerView } from "../lib/plan"
 import { asset, assetTrack, goal, goalTrack, goalVideo, planView, rowRef } from "../lib/plan.fixtures"
@@ -73,12 +74,29 @@ beforeEach(() => {
   vi.mocked(calls.deleteFromPlan).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.setLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.resetLever).mockReset().mockResolvedValue(ok({ success: true }))
+  vi.mocked(calls.setLevers).mockReset().mockResolvedValue(ok({ success: true }))
+  vi.mocked(calls.fetchQueues).mockReset().mockResolvedValue(ok(seasonQueues()))
   vi.mocked(calls.syncSeries).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.resetFailures).mockReset().mockResolvedValue(ok({ success: true, reset: 1 }))
   vi.mocked(calls.switchOutput).mockReset().mockResolvedValue(ok({ success: true }))
 })
 
-afterEach(() => mounted.splice(0).forEach((wrapper) => wrapper.unmount()))
+afterEach(() => {
+  mounted.splice(0).forEach((wrapper) => wrapper.unmount())
+  vi.useRealTimers()
+})
+
+// The queues of the season the boxes tests press: the reference of two variants, the voice-over AniStar of one.
+const variant = (group: string, source_id: number, player: string, allowed = true): QueueRow => ({
+  group, source_id, player, player_label: player, episodes: "1", stale: "", allowed, allowed_level: allowed ? "default" : "season",
+})
+const seasonQueues = (allowed = true): Queues => ({
+  series_id: 1, season: 1, episode: null, markup_follows: true,
+  reference: { order_level: "default", same_level: "default", rows: [variant("Ruchime", 7, "vibix", allowed), variant("AniStar", 8, "kodik", allowed)] },
+  groups: [{ group: "AniStar", take: allowed, take_level: allowed ? "default" : "season", order_level: "default", same_level: "default",
+    rows: [variant("AniStar", 8, "kodik", allowed)] }],
+})
+const timers = (): void => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }) }
 
 describe("useSeriesOutput", () => {
   it("reads the layout and the plan of a video series and joins the references of the plan into episodes", async () => {
@@ -305,5 +323,138 @@ describe("useSeriesOutput", () => {
     expect(vi.mocked(calls.deleteFromPlan).mock.calls).toEqual([
       [1, { kind: "track", name: "S01E01.mp4", dub: rowRef(8, "a1") }],
       [1, { kind: "track", name: "S01E03.mp4", dub: rowRef(8, "a3") }]])
+  })
+
+  describe("the boxes of a queue", () => {
+    const SEASON = { season: 1 }
+    const target = (group: string, source: number, player: string) => variantTarget(group, source, player)
+
+    it("shows a press at once and sends the presses of a pause as one command, not one by one", async () => {
+      timers()
+      const output = setup()
+      await flushPromises()
+      await output.loadQueues(1)
+      const [vibix, kodik] = output.queuesOf(1)!.reference!.rows!
+      output.setAllowed(SEASON, "reference", vibix, false)
+      expect(output.queuesOf(1)!.reference!.rows!.map((each) => each.allowed)).toEqual([false, true])
+      expect(output.queuesOf(1)!.reference!.rows![0].allowed_level).toBe("season")
+      output.setAllowed(SEASON, "reference", kodik, false)
+      expect(output.heldCount.value).toBe(2)
+      expect(output.busy.value).toBe(false) // nothing of the window waits for the core: the next press is taken
+      expect(calls.setLevers).not.toHaveBeenCalled()
+      expect(calls.setLever).not.toHaveBeenCalled()
+
+      vi.mocked(calls.fetchQueues).mockResolvedValue(ok(seasonQueues(false)))
+      await vi.advanceTimersByTimeAsync(QUEUE_PAUSE_MS)
+      expect(calls.setLevers).toHaveBeenCalledTimes(1)
+      expect(calls.setLevers).toHaveBeenCalledWith(1, [
+        setBody(SEASON, "reference.allow", target("Ruchime", 7, "vibix"), false),
+        setBody(SEASON, "reference.allow", target("AniStar", 8, "kodik"), false)])
+      expect(output.heldCount.value).toBe(0)
+      expect(output.failure.value).toBeNull()
+      // The queues were read once more after the write, and the boxes show what the core holds.
+      expect(calls.fetchQueues).toHaveBeenLastCalledWith(1, 1, null, null)
+      expect(output.queuesOf(1)!.reference!.rows!.map((each) => each.allowed)).toEqual([false, false])
+    })
+
+    it("sends nothing for a press that brings a box back to what the core holds", async () => {
+      timers()
+      const output = setup()
+      await flushPromises()
+      await output.loadQueues(1)
+      const [vibix] = output.queuesOf(1)!.reference!.rows!
+      output.setAllowed(SEASON, "reference", vibix, false)
+      output.setAllowed(SEASON, "reference", { ...vibix, allowed: false }, true)
+      expect(output.heldCount.value).toBe(0)
+      await vi.advanceTimersByTimeAsync(QUEUE_PAUSE_MS * 2)
+      expect(calls.setLevers).not.toHaveBeenCalled()
+    })
+
+    it("takes the box of a voice-over group at all in the same command as the boxes of the variants", async () => {
+      timers()
+      const output = setup()
+      await flushPromises()
+      await output.loadQueues(1)
+      output.setTaken(SEASON, "AniStar", false)
+      output.setAllowed(SEASON, "voice", output.queuesOf(1)!.groups![0].rows![0], false)
+      expect(output.queuesOf(1)!.groups![0].take).toBe(false)
+      expect(output.queuesOf(1)!.groups![0].rows![0].allowed).toBe(false)
+      await vi.advanceTimersByTimeAsync(QUEUE_PAUSE_MS)
+      expect(calls.setLevers).toHaveBeenCalledWith(1, [
+        setBody(SEASON, "voice.take", groupTarget("AniStar"), false),
+        setBody(SEASON, "voice.allow", target("AniStar", 8, "kodik"), false)])
+    })
+
+    it("goes back to what the core holds, with its words, when the core refuses the command", async () => {
+      timers()
+      vi.mocked(calls.setLevers).mockResolvedValue({ ok: false, text: "Синхронизация идёт" })
+      const output = setup()
+      await flushPromises()
+      await output.loadQueues(1)
+      output.setAllowed(SEASON, "reference", output.queuesOf(1)!.reference!.rows![0], false)
+      await vi.advanceTimersByTimeAsync(QUEUE_PAUSE_MS)
+      expect(output.failure.value).toBe("Синхронизация идёт")
+      expect(output.queuesOf(1)!.reference!.rows!.map((each) => each.allowed)).toEqual([true, true])
+    })
+
+    it("sends what is held before any other lever, so the core gets the changes in the order they were made", async () => {
+      timers()
+      const output = setup()
+      await flushPromises()
+      await output.loadQueues(1)
+      output.setAllowed(SEASON, "reference", output.queuesOf(1)!.reference!.rows![0], false)
+      await output.set(SEASON, "voice.take", groupTarget("AniStar"), false)
+      expect(calls.setLevers).toHaveBeenCalledTimes(1)
+      expect(calls.setLever).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(calls.setLevers).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(calls.setLever).mock.invocationCallOrder[0])
+      await vi.advanceTimersByTimeAsync(QUEUE_PAUSE_MS * 2)
+      expect(calls.setLevers).toHaveBeenCalledTimes(1) // the pause had nothing left to send
+    })
+
+    it("takes a press while a command is on its way and sends it after that one", async () => {
+      timers()
+      let finish!: (value: Answer<unknown>) => void
+      vi.mocked(calls.setLevers).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+      const output = setup()
+      await flushPromises()
+      await output.loadQueues(1)
+      const [vibix, kodik] = output.queuesOf(1)!.reference!.rows!
+      output.setAllowed(SEASON, "reference", vibix, false)
+      await vi.advanceTimersByTimeAsync(QUEUE_PAUSE_MS)
+      expect(output.busy.value).toBe(false)
+      output.setAllowed(SEASON, "reference", kodik, false)
+      // The box sent stays as the user made it while the core has not answered, the new one is held.
+      expect(output.queuesOf(1)!.reference!.rows!.map((each) => each.allowed)).toEqual([false, false])
+      await vi.advanceTimersByTimeAsync(QUEUE_PAUSE_MS)
+      expect(calls.setLevers).toHaveBeenCalledTimes(1) // it waits for the first
+      finish(ok({ success: true }))
+      await vi.advanceTimersByTimeAsync(0)
+      await flushPromises()
+      expect(calls.setLevers).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(calls.setLevers).mock.calls[1][1]).toEqual([setBody(SEASON, "reference.allow", target("AniStar", 8, "kodik"), false)])
+    })
+
+    it("sends what is held when the window goes", async () => {
+      timers()
+      const output = setup()
+      await flushPromises()
+      await output.loadQueues(1)
+      output.setAllowed(SEASON, "reference", output.queuesOf(1)!.reference!.rows![0], false)
+      mounted.splice(0).forEach((wrapper) => wrapper.unmount())
+      await vi.advanceTimersByTimeAsync(0)
+      expect(calls.setLevers).toHaveBeenCalledTimes(1)
+    })
+
+    it("sends what is held when the page is hidden", async () => {
+      timers()
+      const output = setup()
+      await flushPromises()
+      await output.loadQueues(1)
+      output.setAllowed(SEASON, "reference", output.queuesOf(1)!.reference!.rows![0], false)
+      vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+      document.dispatchEvent(new Event("visibilitychange"))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(calls.setLevers).toHaveBeenCalledTimes(1)
+    })
   })
 })

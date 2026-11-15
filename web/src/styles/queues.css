@@ -7,8 +7,8 @@
 .queue-tools .queue-take { display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; }
 .queue-tools .queue-level { font-size: 0.75rem; border-radius: 6px; padding: 0.05rem 0.5rem; background: var(--color-gray-200); color: var(--color-gray-600); }
 .queue-tools .queue-level.is-own { background: rgba(13, 110, 253, 0.15); color: #0a58ca; font-weight: 600; }
-.queue-back { border: none; background: none; color: var(--color-blue); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
-.queue-back:disabled { opacity: 0.5; cursor: default; }
+.queue-back, .queue-clear { border: none; background: none; color: var(--color-blue); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
+.queue-back:disabled, .queue-clear:disabled { opacity: 0.5; cursor: default; }
 .queue-note { margin: 0; color: var(--text-muted); font-size: 0.85rem; }
 
 .queue-table { inline-size: 100%; border-collapse: collapse; border: 1px solid var(--border-color); font-size: 0.85rem; }

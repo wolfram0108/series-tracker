@@ -127,7 +127,7 @@ const onMenu = (key: string): void => {
                 :class="[{ 'is-first': isFirst(row, items), 'is-skipped': !row.allowed, 'is-stale': row.stale !== '' && row.stale === row.episodes },
                          row.same != null ? ['in-same', `same-tone-${toneOf(row.same)}`] : null]">
               <td class="queue-take">
-                <input type="checkbox" :checked="row.allowed" :disabled="busy" :aria-label="t('output.queue.take')"
+                <input type="checkbox" data-lever-free :checked="row.allowed" :disabled="busy" :aria-label="t('output.queue.take')"
                        @change="emit('allow', row, ($event.target as HTMLInputElement).checked)" />
               </td>
               <td class="queue-handle">

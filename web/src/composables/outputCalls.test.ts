@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const client = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }))
 vi.mock("../api/client", () => ({ api: client }))
 
-import { fetchComposition, resetFailures, resetLever, setLever, switchOutput, syncSeries } from "./outputCalls"
+import { fetchComposition, resetFailures, resetLever, setLever, setLevers, switchOutput, syncSeries } from "./outputCalls"
 
 beforeEach(() => Object.values(client).forEach((fn) => fn.mockReset()))
 
@@ -20,6 +20,13 @@ describe("the calls to the output of the core", () => {
     client.PUT.mockResolvedValueOnce({ data: { success: true } })
     expect(await setLever(1, body)).toEqual({ ok: true, data: { success: true } })
     expect(client.PUT).toHaveBeenCalledWith("/api/series/{series_id}/output/settings", { params: { path: { series_id: 1 } }, body })
+  })
+
+  it("sends several levers in one command to the batch of the series", async () => {
+    const items = [{ season: 1, lever: "reference.allow", target: "variant:a", value: false }, { season: 1, lever: "voice.take", target: "group:A", value: true }]
+    client.PUT.mockResolvedValueOnce({ data: { success: true } })
+    expect(await setLevers(1, items)).toEqual({ ok: true, data: { success: true } })
+    expect(client.PUT).toHaveBeenCalledWith("/api/series/{series_id}/output/settings/batch", { params: { path: { series_id: 1 } }, body: { items } })
   })
 
   it("resets the levers of a series with its body", async () => {

@@ -15,6 +15,7 @@ import { useSeriesReadsStore } from "../../stores/seriesReads"
 import { usePlanStore } from "../../stores/plan"
 import { t } from "../../i18n"
 import type { Reference, Row } from "../../lib/output"
+import { QUEUE_PAUSE_MS } from "../../lib/queueChange"
 import type { PlannerView } from "../../lib/plan"
 import { asset, assetTrack, goal, goalTrack, goalVideo, planView, rowRef } from "../../lib/plan.fixtures"
 
@@ -93,12 +94,13 @@ beforeEach(() => {
   vi.mocked(calls.fetchComposition).mockReset().mockResolvedValue(ok(composition()))
   vi.mocked(calls.fetchPlan).mockReset().mockResolvedValue(ok({ ...planView(), references: windowReferences() }))
   vi.mocked(calls.fetchQueues).mockReset().mockResolvedValue(ok(queues()))
-  for (const each of [calls.switchOutput, calls.syncSeries, calls.setLever, calls.resetLever, calls.deleteFromPlan])
+  for (const each of [calls.switchOutput, calls.syncSeries, calls.setLever, calls.setLevers, calls.resetLever, calls.deleteFromPlan])
     vi.mocked(each).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.resetFailures).mockReset().mockResolvedValue(ok({ success: true, reset: 1 }))
 })
 afterEach(() => {
   mounted.splice(0).forEach((wrapper) => wrapper.unmount())
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -303,7 +305,7 @@ describe("StatusOutput", () => {
     expect(calls.deleteFromPlan).toHaveBeenCalledWith(1, { kind: "video", name: "S01E01.mp4" })
   })
 
-  it("sends the order the user dragged a queue into, and a variant left out, as levers of the episode", async () => {
+  it("sends the order the user dragged a queue into at once, and the variants he left out as one command after a pause", async () => {
     const w = mountOutput()
     await flushPromises()
     await w.findAll(".episode-card")[0].trigger("dblclick")
@@ -312,12 +314,60 @@ describe("StatusOutput", () => {
     const rows = w.findAll(".variant-row")
     expect(rows.map((each) => each.find(".queue-player").text())).toEqual(["Vibix", "Kodik"])
     await rows[1].find(".order-handle").trigger("keydown", { key: "ArrowUp" })
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
     await rows[0].find("input[type=checkbox]").setValue(false)
+    await rows[1].find("input[type=checkbox]").setValue(false)
+    expect(w.find(".output-unsent").text()).toContain("2")
+    expect(w.findAll(".variant-row").map((each) => (each.find("input[type=checkbox]").element as HTMLInputElement).checked)).toEqual([false, false])
     expect(vi.mocked(calls.setLever).mock.calls).toEqual([
       [1, { season: 1, episode: 1, lever: "reference.order", target: null, value: [
         { group: "AniStar", source_id: 8, player: "kodik" }, { group: "Ruchime", source_id: 7, player: "vibix" }] }],
-      [1, { season: 1, episode: 1, lever: "reference.allow", target: 'variant:["Ruchime",7,"vibix"]', value: false }],
     ])
+    expect(calls.setLevers).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(QUEUE_PAUSE_MS)
+    expect(vi.mocked(calls.setLevers).mock.calls).toEqual([[1, [
+      { season: 1, episode: 1, lever: "reference.allow", target: 'variant:["Ruchime",7,"vibix"]', value: false },
+      { season: 1, episode: 1, lever: "reference.allow", target: 'variant:["AniStar",8,"kodik"]', value: false },
+    ]]])
+    await flushPromises()
+    expect(w.find(".output-unsent").exists()).toBe(false)
+  })
+
+  it("takes a press on a box while a command of the window is on its way, as the other levers do not", async () => {
+    let finish!: (value: Answer<unknown>) => void
+    vi.mocked(calls.setLever).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    const w = mountOutput()
+    await flushPromises()
+    await w.findAll(".episode-card")[0].trigger("dblclick")
+    await flushPromises()
+    await button(w, t("output.tab.reference"))!.trigger("click")
+    const rows = w.findAll(".variant-row")
+    await rows[1].find(".order-handle").trigger("keydown", { key: "ArrowUp" })
+    expect(w.find(".status-output").classes()).toContain("is-waiting") // a command is on its way: the levers are held
+    const box = w.findAll(".variant-row")[0].find("input[type=checkbox]")
+    await box.trigger("click")
+    expect((box.element as HTMLInputElement).checked).toBe(false) // taken, though the row is a lever that is held
+    await w.findAll(".variant-row")[1].find(".order-handle").trigger("keydown", { key: "ArrowDown" })
+    expect(calls.setLever).toHaveBeenCalledTimes(1) // the handle is held
+    finish(ok({ success: true }))
+    await flushPromises()
+  })
+
+  it("clears every box of a queue with «Снять все», and sends them as one command", async () => {
+    const w = mountOutput()
+    await flushPromises()
+    await w.findAll(".episode-card")[0].trigger("dblclick")
+    await flushPromises()
+    await button(w, t("output.tab.reference"))!.trigger("click")
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    await w.find(".queue-clear").trigger("click")
+    expect(w.findAll(".variant-row").map((each) => (each.find("input[type=checkbox]").element as HTMLInputElement).checked)).toEqual([false, false])
+    expect((w.find(".queue-clear").element as HTMLButtonElement).disabled).toBe(true) // nothing is taken now
+    await vi.advanceTimersByTimeAsync(QUEUE_PAUSE_MS)
+    expect(vi.mocked(calls.setLevers).mock.calls).toEqual([[1, [
+      { season: 1, episode: 1, lever: "reference.allow", target: 'variant:["Ruchime",7,"vibix"]', value: false },
+      { season: 1, episode: 1, lever: "reference.allow", target: 'variant:["AniStar",8,"kodik"]', value: false },
+    ]]])
   })
 
   it("opens the settings of the series as the same queues for the whole series", async () => {

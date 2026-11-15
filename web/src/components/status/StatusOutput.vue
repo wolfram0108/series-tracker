@@ -190,7 +190,12 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
 <template>
   <div ref="root" class="status-output fold-room" :class="{ 'is-waiting': waiting }" @keydown="onKey" @keyup="onKey">
     <div class="output-actions fold-head">
-      <div class="fold-said"><PlanPending :series-id="props.seriesId" /></div>
+      <div class="fold-said">
+        <PlanPending :series-id="props.seriesId" />
+        <span v-if="output.heldCount.value" class="pill pill-warning output-unsent" role="status" :title="t('output.queue.unsentHint')">
+          <i class="pi pi-clock" aria-hidden="true" />{{ t("output.queue.unsent", { count: output.heldCount.value }) }}
+        </span>
+      </div>
       <div class="fold-does">
         <FoldButton :label="t('output.settings.series')" icon="pi pi-sliders-h" severity="info" class="output-series-settings"
                     :disabled="!output.ready.value" @click="openSettings(null)" />
@@ -296,6 +301,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
 <style scoped>
 .status-output { display: flex; flex-direction: column; gap: 0.9rem; }
 .status-output.is-waiting :deep([data-lever]), .status-output.is-waiting :deep([data-lever] *) { cursor: progress; }
+.status-output.is-waiting :deep([data-lever-free]), .status-output.is-waiting :deep([data-lever-free] *) { cursor: auto; }
 .output-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
 .output-grow { flex: 1 1 auto; }
 .output-filters { display: flex; flex-wrap: wrap; gap: 0.3rem; }

@@ -40,6 +40,9 @@ const emit = defineEmits<{
 }>()
 
 const own = computed(() => props.view?.order_level === props.level)
+// «Снять все» clears the box of every row the queue takes: one press of each, so they go to the core as one change.
+const taking = computed(() => (props.view?.rows ?? []).filter((row) => row.allowed))
+const clearAll = (): void => { for (const row of taking.value) emit("allow", row, false) }
 // The groups of equal variants have a level of their own, as the order has: told where they come from, taken back there.
 const hasSame = computed(() => props.queue !== "voice" && props.view !== undefined && (props.view.same_level ?? "default") !== "default")
 const ownSame = computed(() => props.view?.same_level === props.level)
@@ -53,12 +56,14 @@ const hint = computed(() => props.hint ?? (props.queue === "reference" ? t("outp
     <div class="queue-tools">
       <span>{{ hint }}</span>
       <span class="queue-grow" />
-      <label v-if="queue === 'voice' && view" class="queue-take" data-lever>
+      <label v-if="queue === 'voice' && view" class="queue-take" data-lever-free>
         <input type="checkbox" :checked="view.take !== false" :disabled="busy"
                @change="emit('take', ($event.target as HTMLInputElement).checked)" />
         {{ t("output.queue.takeVoice") }}
         <span v-if="view.take_level && view.take_level !== 'default'" class="queue-level">{{ t(`output.level.${view.take_level}`) }}</span>
       </label>
+      <button v-if="(view?.rows ?? []).length" type="button" class="queue-clear" data-lever-free :disabled="busy || !taking.length"
+              :title="t('output.queue.clearAllHint')" @click="clearAll">{{ t("output.queue.clearAll") }}</button>
       <span class="queue-levels">
         <span v-if="view && follows" class="queue-level queue-follows">{{ t("output.queue.followsReference") }}</span>
         <span v-else-if="view" class="queue-level" :class="{ 'is-own': own }">{{ t(`output.level.${view.order_level}`) }}</span>

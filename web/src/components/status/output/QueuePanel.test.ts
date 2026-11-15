@@ -161,3 +161,28 @@ describe("the queue of the markup reference says what the plan takes and what th
     expect(shown.map((each) => each.find(".queue-held").exists())).toEqual([false, false, true])
   })
 })
+
+describe("«Снять все»", () => {
+  const view = (rows: ReturnType<typeof row>[]) => ({ order_level: "default" as const, same_level: "default" as const, rows })
+
+  it("presses the box of each row the queue takes once, and leaves the rows it does not take", async () => {
+    const w = mount(QueuePanel, { props: { queue: "reference", level: "season", marks: {},
+      view: view([row("cvh"), { ...row("kodik"), allowed: false }, row("vibix")]) } })
+    await w.find(".queue-clear").trigger("click")
+    expect(w.emitted("allow")).toEqual([[expect.objectContaining({ player: "cvh" }), false], [expect.objectContaining({ player: "vibix" }), false]])
+  })
+
+  it("is off when no row is taken, and absent for a queue without rows", async () => {
+    const none = [{ ...row("cvh"), allowed: false }]
+    const w = mount(QueuePanel, { props: { queue: "voice", level: "season", marks: {}, view: view(none) } })
+    expect((w.find(".queue-clear").element as HTMLButtonElement).disabled).toBe(true)
+    await w.setProps({ view: view([]) })
+    expect(w.find(".queue-clear").exists()).toBe(false)
+  })
+
+  it("is a lever that is never held, as the boxes are", () => {
+    const w = mount(QueuePanel, { props: { queue: "reference", level: "season", marks: {}, view: view([row("cvh")]) } })
+    expect(w.find(".queue-clear").attributes("data-lever-free")).toBeDefined()
+    expect(w.find(".variant-row input[type=checkbox]").attributes("data-lever-free")).toBeDefined()
+  })
+})

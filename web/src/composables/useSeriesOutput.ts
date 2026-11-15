@@ -1,10 +1,12 @@
 import type { SyncScope } from "./syncRun"
-import { computed, onMounted, onUnmounted, ref, watch, type Ref } from "vue"
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch, type Ref } from "vue"
 import { t } from "../i18n"
 import {
   bySeason, groupTarget, joinEpisodes, orderValue, queueLevers, resetBody, setBody, sourceMarks, variantTarget,
   type QueueName, type QueueRow, type Reference, type Scope,
 } from "../lib/output"
+import { Gather } from "../lib/gather"
+import { QUEUE_PAUSE_MS, bodyOf, changeKey, coreValue, queueKey, scopeKey, withChanges, type QueueChange } from "../lib/queueChange"
 import { nextAnswer, type ChangeAnswer } from "../lib/changeAnswer"
 import { sharing } from "../lib/sharing"
 import { reasonText } from "../lib/reason"
@@ -19,7 +21,7 @@ import { fileOf, heldFile, planCuts, planDubs, planFiles, planNames, seasonVoice
 import type { SameGroups } from "../lib/same"
 import {
   deleteFromPlan, fetchPlan, fetchQueues, resetFailures,
-  cancelSync, resetLever, setLever, setVoiceOrder, setVoiceTitle, switchOutput, syncSeries, type Composition, type MediaFile,
+  cancelSync, resetLever, setLever, setLevers, setVoiceOrder, setVoiceTitle, switchOutput, syncSeries, type Composition, type MediaFile,
   type Queues,
 } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
@@ -116,12 +118,14 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     failure.value = broken && !broken.ok ? broken.text : null
   }
 
-  // A refusal stays in `failure` until the next action; the words are also returned for the caller.
+  // A refusal stays in `failure` until the next action; the words are also returned for the caller. What the user ticked in
+  // the queues and the core does not hold yet goes first, so the core gets the changes in the order they were made.
   async function act(send: () => Promise<Answer<unknown>>, flag: Ref<boolean>): Promise<string | null> {
     failure.value = null
     flag.value = true
     let ok = false
     try {
+      if (!gather.idle) await gather.flush()
       const reply = await send()
       ok = reply.ok
       if (reply.ok) return null
@@ -172,8 +176,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
 
   // The queues of the levels the window has open, read when one is opened and again with every new layout.
   const levelQueues = ref<Record<string, Queues>>({})
-  const queueKey = (season: number | null, episode: number | null, compilation: string | null = null): string =>
-    JSON.stringify([season, episode, compilation])
   const queuesAsked = new Map<string, number>()
   async function loadQueues(season: number | null, episode: number | null = null, compilation: string | null = null): Promise<void> {
     const key = queueKey(season, episode, compilation)
@@ -187,8 +189,15 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   /** What the file of an episode holds now (lib/plan.ts `heldFile`), for the window of the episode. */
   const heldOf = (season: number, episode: number, part: number | null = null): HeldFile | null => heldFile(plan.forSeries(seriesId), season, episode, part)
   const takenOf = (season: number, episode: number, part: number | null = null): Taken => takenIn(plan.forSeries(seriesId), season, episode, part)
+  // The queues as the window shows them: the core's, with the boxes the user changed that the core does not hold yet.
+  const shownQueues = computed<Record<string, Queues>>(() => {
+    const changes = [...sending.value.values(), ...staged.value.values()]
+    if (changes.length === 0) return levelQueues.value
+    return Object.fromEntries(Object.entries(levelQueues.value).map(([key, queues]) =>
+      [key, withChanges(queues, changes.filter((each) => scopeKey(each.scope) === key))] as const))
+  })
   const queuesOf = (season: number | null, episode: number | null = null, compilation: string | null = null): Queues | undefined =>
-    levelQueues.value[queueKey(season, episode, compilation)]
+    shownQueues.value[queueKey(season, episode, compilation)]
   const reloadQueues = (): void => {
     for (const key of Object.keys(levelQueues.value)) {
       const [season, episode, compilation] = JSON.parse(key) as [number | null, number | null, string | null]
@@ -216,10 +225,47 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     if (!lever) return Promise.resolve(null)
     return set(scope, lever, queue === "voice" && group !== null ? groupTarget(group) : null, orderValue(queue, rows))
   }
-  const setAllowed = (scope: Scope, queue: QueueName, row: QueueRow, allowed: boolean): Promise<string | null> => {
+  // The boxes of a queue are gathered (lib/gather.ts): a press shows at once, the presses of a pause go to the core as one
+  // command, and a press that undoes a held one is no change. The core's words of a refusal come as `failure`.
+  const staged = shallowRef<ReadonlyMap<string, QueueChange>>(new Map())
+  const sending = shallowRef<ReadonlyMap<string, QueueChange>>(new Map())
+  const gather = new Gather<QueueChange>({ pause: QUEUE_PAUSE_MS, changed: (held) => { staged.value = held }, send: sendChanges })
+
+  // One batch of boxes: the core takes all or none. What the user sees stands until the queues read after the write land (or
+  // the refusal comes), so a box does not jump back to the old value between the answer and the read.
+  async function sendChanges(changes: QueueChange[]): Promise<string | null> {
+    sending.value = new Map([...sending.value, ...changes.map((each) => [changeKey(each), each] as const)])
+    failure.value = null
+    try {
+      const reply = await setLevers(seriesId, changes.map(bodyOf))
+      if (!reply.ok) {
+        failure.value = reply.text
+        return reply.text
+      }
+      const open = new Set(Object.keys(levelQueues.value))
+      await Promise.all([...new Set(changes.map((each) => each.scope))].filter((scope) => open.has(scopeKey(scope)))
+        .map((scope) => loadQueues(scope.season ?? null, scope.episode ?? null, scope.compilation ?? null)))
+      return null
+    } finally {
+      const rest = new Map(sending.value)
+      for (const each of changes) if (rest.get(changeKey(each)) === each) rest.delete(changeKey(each))
+      sending.value = rest
+    }
+  }
+
+  // A press: the box the user sees is the held change, else the one on its way, else the core's. A press that brings the
+  // box back to what the core holds sends nothing.
+  const stage = (change: QueueChange): void => {
+    const key = changeKey(change)
+    const base = sending.value.get(key)?.value ?? coreValue(levelQueues.value[scopeKey(change.scope)], change)
+    if (change.value === base) gather.drop(key)
+    else gather.put(key, change)
+  }
+  const setAllowed = (scope: Scope, queue: QueueName, row: QueueRow, allowed: boolean): void => {
     const lever = leversOf(queue).allow
-    if (!lever) return Promise.resolve(null)
-    return set(scope, lever, variantTarget(row.group, row.source_id, row.player), allowed)
+    if (!lever) return
+    stage({ kind: "allow", scope, queue, lever, target: variantTarget(row.group, row.source_id, row.player), value: allowed,
+      group: row.group, source_id: row.source_id, player: row.player })
   }
   // The variants of a queue of single videos the user declared equal: the whole value of the lever, none to go back to the level above.
   const setSame = (scope: Scope, queue: QueueName, groups: SameGroups | null): Promise<string | null> => {
@@ -227,9 +273,9 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     if (!lever) return Promise.resolve(null)
     return groups === null ? reset(scope, lever, null) : set(scope, lever, null, groups)
   }
-  const setTaken = (scope: Scope, group: string, taken: boolean): Promise<string | null> => {
+  const setTaken = (scope: Scope, group: string, taken: boolean): void => {
     const lever = leversOf("voice").take
-    return lever ? set(scope, lever, groupTarget(group), taken) : Promise.resolve(null)
+    if (lever) stage({ kind: "take", scope, queue: "voice", lever, target: groupTarget(group), value: taken, group })
   }
   // "As the level above": the order of the queue on this level goes back to the level above; the markup reference goes
   // back whole, its order and its boxes, so that with nothing above it follows the reference again (stage 14).
@@ -277,6 +323,17 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
 
   if (kind === "video") {
     onUnmounted(layouts.hold(seriesId))
+    // What is held goes when the window goes, and when the page is hidden or closed: the pause is for the user's next press.
+    const hidden = (): void => { if (document.visibilityState === "hidden") void gather.flush() }
+    onMounted(() => {
+      document.addEventListener("visibilitychange", hidden)
+      window.addEventListener("pagehide", hidden)
+    })
+    onUnmounted(() => {
+      document.removeEventListener("visibilitychange", hidden)
+      window.removeEventListener("pagehide", hidden)
+      void gather.flush()
+    })
     // What the window already read is shown as it is; the news since then come as events.
     onMounted(() => void load(false))
     // The layout moved to a newer revision: the output is read again. The same or an older revision changes nothing.
@@ -290,7 +347,9 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     })
   }
 
-  return { composition, references, loading, ready, failure, busy, answer, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
+  const heldCount = computed(() => staged.value.size)
+
+  return { composition, references, loading, ready, failure, busy, heldCount, answer, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
     sync, retryFailed, retrySeason, retryEpisode, voiceOrders, order, rename, marks, loadQueues, queuesOf, heldOf, takenOf, setOrder, setAllowed, setSame, setTaken, resetOrder,
     retry, redo, refetch, compilations, cuts, member, takeCompilation, retryCut, labels }
 }
