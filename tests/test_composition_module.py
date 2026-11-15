@@ -724,6 +724,30 @@ async def test_one_item_the_registry_refuses_refuses_them_all_and_nothing_is_sto
     assert s.sql("SELECT COUNT(*) FROM output_settings") == [(0,)] and s.taken(s.changed) == []
 
 
+@pytest.mark.asyncio
+async def test_the_levers_of_every_episode_are_counted_again_off_the_loop_for_a_change_of_a_lever(system, monkeypatch):
+    """Tenths of a second over a big layout: a recount on the loop would stop every module and every window with it."""
+    import threading
+    from modules.composition import module as composition_module
+    threads: list[str] = []
+    counted = composition_module._settings_of
+
+    def watched(*args):
+        threads.append(threading.current_thread().name)
+        return counted(*args)
+
+    monkeypatch.setattr(composition_module, "_settings_of", watched)
+    s = system
+    series_id = await laid_out(s, rich_standard())
+    source_id = only_source(s, series_id)
+    assert await s.set(series_id, "reference.allow", False, season=1,
+                       target=variant_target("Ruchime", source_id, "vk")) == {"ok": True}
+    assert threads and all(name.startswith("compute") for name in threads), threads
+    threads.clear()
+    assert await s.set_many(series_id, allow_items(source_id, ("kodik", "allvideo"), False, season=1)) == {"ok": True}
+    assert threads and all(name.startswith("compute") for name in threads), threads
+
+
 def test_a_command_of_several_levers_has_levers_of_its_series_only_and_at_least_one():
     own = SettingsSet(series_id=1, lever="voice.take", value=False, target=group_target("A"))
     assert SettingsSetMany(series_id=1, items=[own]).items == [own]

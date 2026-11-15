@@ -495,13 +495,8 @@ class CompositionModule(BaseModule):
             after = change(before)
             if after == before:
                 return {"ok": True}
-            episodes = project.layout_episodes(stored.rows)
-            order = _source_order(stored)
-            touched = settings.affected(_settings_of(stored.rows, before, episodes, order),
-                                        _settings_of(stored.rows, after, episodes, order))
-            # A header that no episode follows still changes on the screen: that is told to windows, not to consumers.
-            shown = bool(touched) or _headers(stored.rows, before, episodes, order) != _headers(stored.rows, after,
-                                                                                               episodes, order)
+            # The levers of every episode counted twice is tenths of a second over a big layout: off the loop.
+            touched, shown = await compute.run(_effect_of, stored, before, after)
             rev = stored.rev + 1 if shown else None
             await self.repo.write(series_id, records=after, rev=rev)
             if shown:
@@ -907,6 +902,18 @@ def _applied(records: list[SettingRecord], writes: list[SettingRecord]) -> list[
 def _source_order(stored) -> dict[int, int]:
     """The place of every source of the series, for the rule of compilations."""
     return {each.source_id: place for place, each in enumerate(stored.sources)}
+
+
+def _effect_of(stored, before, after) -> tuple[set[tuple[int, int]], bool]:
+    """What a change of the records does: the episodes whose levers come out differently (told to consumers), and whether
+    a window has anything new to show. A header that no episode follows still changes on the screen: that is told to
+    windows, not to consumers."""
+    episodes = project.layout_episodes(stored.rows)
+    order = _source_order(stored)
+    touched = settings.affected(_settings_of(stored.rows, before, episodes, order),
+                                _settings_of(stored.rows, after, episodes, order))
+    shown = bool(touched) or _headers(stored.rows, before, episodes, order) != _headers(stored.rows, after, episodes, order)
+    return touched, shown
 
 
 def _settings_of(rows, records, episodes, order) -> list[EpisodeSettings]:
