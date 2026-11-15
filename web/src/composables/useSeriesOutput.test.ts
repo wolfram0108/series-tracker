@@ -149,7 +149,7 @@ describe("useSeriesOutput", () => {
     expect(calls.fetchComposition).toHaveBeenCalledTimes(1)
   })
 
-  it("reads the plan again when the layout gets a newer revision, and not for the same one or for another series", async () => {
+  it("reads the layout again when it gets a newer revision, and not for the same one or for another series — and not the plan, which the core pushes", async () => {
     setup()
     await flushPromises()
     const before = vi.mocked(calls.fetchComposition).mock.calls.length
@@ -167,24 +167,49 @@ describe("useSeriesOutput", () => {
     store.applyChanged({ series_id: 1, rev: 2, episodes: [], summary_only: false })
     await flushPromises()
     expect(calls.fetchComposition).toHaveBeenCalledTimes(before + 2)
-    expect(calls.fetchPlan).toHaveBeenCalledTimes(plansBefore + 2)
+    expect(calls.fetchPlan).toHaveBeenCalledTimes(plansBefore) // the plan of the change comes as a packet, counted once
   })
 
-  it("shows what a read begun after the news brought, not the older answer of the read that was under way", async () => {
-    let late!: (answer: Answer<Composition>) => void
-    vi.mocked(calls.fetchComposition)
-      .mockImplementationOnce(() => new Promise<Answer<Composition>>((resolve) => { late = resolve }))
-      .mockResolvedValueOnce(ok(composition({ rev: 2 })))
+  it("reads the plan for a newer revision when the window has none yet, and its failure shows until a read of it succeeds", async () => {
+    vi.mocked(calls.fetchPlan).mockResolvedValueOnce({ ok: false, text: "План не посчитан" })
     const output = setup()
     await flushPromises()
+    expect(output.ready.value).toBe(false)
+    expect(output.failure.value).toBe("План не посчитан")
+    useCompositionStore().applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false })
+    await flushPromises()
+    expect(calls.fetchPlan).toHaveBeenCalledTimes(2)
+    expect(output.ready.value).toBe(true)
+    expect(output.failure.value).toBeNull()
+  })
+
+  it("keeps the failure of the plan while only the layout is read again", async () => {
+    vi.mocked(calls.fetchPlan).mockResolvedValue({ ok: false, text: "План не посчитан" })
+    const output = setup()
+    await flushPromises()
+    useCompositionStore().applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false })
+    await flushPromises()
+    expect(output.failure.value).toBe("План не посчитан")
+    vi.mocked(calls.fetchComposition).mockResolvedValue({ ok: false, text: "Выход не построен" })
     useCompositionStore().applyChanged({ series_id: 1, rev: 2, episodes: [], summary_only: false })
     await flushPromises()
-    // The news came while the first read was under way: one more read follows it, and its answer is the last word.
-    expect(calls.fetchComposition).toHaveBeenCalledTimes(1)
-    late(ok(composition({ rev: 1 })))
+    expect(output.failure.value).toBe("Выход не построен") // the layout's words first
+  })
+
+  it("lets a read of the plan land that a read of the layout overtakes", async () => {
+    givePlan(planned, [reference()])
+    const output = setup()
     await flushPromises()
-    expect(calls.fetchComposition).toHaveBeenCalledTimes(2)
-    expect(output.composition.value?.rev).toBe(2)
+    let land!: (answer: Answer<PlannerView>) => void
+    vi.mocked(calls.fetchPlan).mockReturnValueOnce(new Promise((resolve) => { land = resolve }))
+    useSSE().connected.value = true // the connection came back: both are read
+    await flushPromises()
+    useCompositionStore().applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false }) // a layout read overtakes
+    await flushPromises()
+    land(ok({ ...planned, references: [reference({ mark: "own", height: 720 })] }))
+    await flushPromises()
+    expect(output.references.value.map((each) => each.mark)).toEqual(["own"])
+    expect(output.loading.value).toBe(false)
   })
 
   it("shows the words of a refused layout and keeps the references of the plan that did come", async () => {

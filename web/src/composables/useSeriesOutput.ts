@@ -104,18 +104,43 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   // the layout alone would show every episode as having no reference. A torrent series has nothing to wait for.
   const ready = computed(() => kind === "torrent" || (composition.value !== null && plan.forSeries(seriesId) != null))
 
-  // Of several reads in flight only the one asked last may write: a late reply to an older ask must not roll back.
-  let asked = 0
-  async function load(fresh = true): Promise<void> {
-    const ask = ++asked
+  // The layout and the plan are read apart, and a read is taken back only by a later read of the same thing: a late reply to an
+  // older ask must not roll back, and a read of the plan that a read of the layout overtakes still lands. The words of a failure
+  // are those of the layout, else of the plan, until the read that failed is made again.
+  let layoutAsked = 0
+  let planAsked = 0
+  let reading = 0
+  const failed: { layout: string | null; plan: string | null } = { layout: null, plan: null }
+  const reported = (): void => { failure.value = failed.layout ?? failed.plan }
+
+  async function readLayout(fresh: boolean): Promise<void> {
+    const ask = ++layoutAsked
+    reading += 1
     loading.value = true
-    const [layout, planned] = await Promise.all([
-      fresh ? layouts.refresh(seriesId) : layouts.ensure(seriesId), fetchPlan(seriesId)])
-    if (ask !== asked) return
-    loading.value = false
-    if (planned.ok) plan.apply(planned.data)
-    const broken = [layout, planned].find((answer) => !answer.ok)
-    failure.value = broken && !broken.ok ? broken.text : null
+    const answer = await (fresh ? layouts.refresh(seriesId) : layouts.ensure(seriesId))
+    reading -= 1
+    loading.value = reading > 0
+    if (ask !== layoutAsked) return
+    failed.layout = answer.ok ? null : answer.text
+    reported()
+  }
+
+  async function readPlan(): Promise<void> {
+    const ask = ++planAsked
+    reading += 1
+    loading.value = true
+    const answer = await fetchPlan(seriesId)
+    reading -= 1
+    loading.value = reading > 0
+    if (ask !== planAsked) return
+    if (answer.ok) plan.apply(answer.data)
+    failed.plan = answer.ok ? null : answer.text
+    reported()
+  }
+
+  /** Reads both: when the window opens, when its connection came back, and for the button that tries again. */
+  const load = async (fresh = true): Promise<void> => {
+    await Promise.all([readLayout(fresh), readPlan()])
   }
 
   // A refusal stays in `failure` until the next action; the words are also returned for the caller. What the user ticked in
@@ -336,9 +361,11 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     })
     // What the window already read is shown as it is; the news since then come as events.
     onMounted(() => void load(false))
-    // The layout moved to a newer revision: the output is read again. The same or an older revision changes nothing.
+    // The layout moved to a newer revision: the layout is read again, and so are the queues. The same or an older revision changes
+    // nothing. The plan is the core's push (plan_update), counted once for the change: it is read only if the window has none yet.
     watch(() => store.layoutChanged[seriesId]?.rev, () => {
-      void load()
+      void readLayout(true)
+      if (plan.forSeries(seriesId) == null) void readPlan()
       reloadQueues()
     })
     // A connection that came back may have missed events: the output is read again.

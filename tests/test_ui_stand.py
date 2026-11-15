@@ -827,12 +827,16 @@ async def reference_queue(ui):
 async def test_the_boxes_of_a_queue_show_at_once_and_go_to_the_core_as_one_command_after_the_pause(ui):
     """The user's path: he clears the boxes of the queue of the reference of an episode one after another. Each shows cleared at
     once, the bar says the changes are not sent, a press that brings a box back to what the core holds is no change, and
-    nothing goes while he presses. After his pause the core gets ONE command with the boxes, and the queue reads as the core
-    holds it."""
+    nothing goes while he presses. After his pause the core gets ONE command with the boxes, the queue reads as the core
+    holds it, and the plan of the change comes as the core's own packet: the window does not ask for it again."""
     series_id = await synced_in_browser(ui, (1,))
     page = ui.page
     detail, boxes = await reference_queue(ui)
     sent = batches_of(page)
+    plan_reads: list = []
+    page.on("request", lambda request: plan_reads.append(request.url)
+            if request.method == "GET" and re.search(r"/api/series/\d+/plan$", request.url) else None)
+    pushes = ui.bus.subscribe("planner.series.changed")
     unsent = page.locator(".output-unsent")
 
     await boxes.nth(0).uncheck()
@@ -857,6 +861,8 @@ async def test_the_boxes_of_a_queue_show_at_once_and_go_to_the_core_as_one_comma
         ("settings/batch", [("reference.allow", False), ("reference.allow", False)])], sent
     queues = await ui.call("GET", f"/api/series/{series_id}/output/queues?season=1&episode=1")
     assert [row["allowed"] for row in queues["reference"]["rows"]] == [False, False]
+    await asyncio.wait_for(pushes.queue.get(), STAND_LIMIT_S)  # the plan of the change is the core's packet
+    assert plan_reads == [], plan_reads
 
 
 async def test_clear_all_clears_every_box_of_the_queue_and_sends_them_as_one_command(ui):
