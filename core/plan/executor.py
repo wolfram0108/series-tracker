@@ -40,6 +40,14 @@ class Made:
     value: object
     file: object = None
     retimed: bool = False
+    # Where the sound of the step's row is, when it is not the first sound of `file`: another file beside the video (a
+    # track of a torrent release lying in its own file) and the index of its stream there (stage 15, И-3, И-5).
+    sound: str | None = None
+    stream: int = 0
+
+    @property
+    def sound_file(self) -> object:
+        return self.sound or self.file
 
 
 @dataclass(frozen=True)

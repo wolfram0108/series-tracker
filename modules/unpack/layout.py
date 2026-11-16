@@ -21,6 +21,9 @@ from core.reasons import reason
 
 KEYS_SEP = "/"
 TRACK_KINDS = {"audio": "audio", "subtitle": "subtitles"}
+# The kinds of tracks that are rows of the table: the sound. Subtitles are laid out in the editor; they join the output by
+# their own order (DESIGN.md, 7.1, step 8), not as voice-overs.
+ROW_KINDS = {"audio"}
 # The states of a release whose files the table names; a first download is no part of the series yet.
 SHOWN = {ReleaseState.READY, ReleaseState.UPDATING, ReleaseState.FAILED, ReleaseState.ARCHIVED}
 
@@ -185,8 +188,8 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                     kind = TRACK_KINDS[s["kind"]]
                     entry = track(EditorTab.STREAMS, item, stream_line(s["kind"], s["index"], s["language"], s["title"],
                                                                        s["codec"]), kind, s)
-                    if release.state in SHOWN and not entry["excluded"]:
-                        rows.append(_row(release, item, track_link(release.release, video, s["index"]), video, where,
+                    if release.state in SHOWN and not entry["excluded"] and kind in ROW_KINDS:
+                        rows.append(_row(release, item, track_link(release.release, video, _nth(streams, s)), video, where,
                                          kind, entry, s, height, state, why))
             if len(paths) != 1:
                 continue
@@ -203,9 +206,11 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                                                                          "title": "", "codec": "", "forced": False}]:
                     item = item_of(release.release, f.path)
                     entry = track(tab, item, track_file_line(f.path, where.word), track_kind, s)
-                    if release.state in SHOWN and not entry["excluded"] and s.get("kind") in TRACK_KINDS:
+                    if release.state in SHOWN and not entry["excluded"] and s.get("kind") in TRACK_KINDS \
+                            and track_kind in ROW_KINDS:
                         rows.append(_row(release, item_of(release.release, f.path, s["index"]),
-                                         track_link(release.release, video, s["index"], file=f.path), video, where,
+                                         track_link(release.release, video, _nth(_probed(inputs, release.release, f.path), s),
+                                                    file=f.path), video, where,
                                          track_kind, entry, s, height, state, why))
         for f in release.files:  # the sound and subtitles files no video took: listed so that they can be placed
             kind, item = kind_of(f.path), item_of(release.release, f.path)
@@ -223,6 +228,12 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                                                   "language": f["language"], "subtitle_type": f["subtitle_type"]})
     view["folders"] = sorted(named.values(), key=lambda each: (each["kind"], each["name"]))
     return view, rows
+
+
+def _nth(streams: list[dict], stream: dict) -> int:
+    """The number of a track among the tracks of its kind in its file (`-map <file>:a:<n>`, the `dub_atracks` of the
+    alignment service): what the link of a row names, not the index of the stream in the file."""
+    return [each["index"] for each in streams if each["kind"] == stream["kind"]].index(stream["index"])
 
 
 def _row_state(release: ReleaseView) -> tuple[RowState, str | None]:

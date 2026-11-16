@@ -62,11 +62,11 @@ def test_every_track_of_a_placed_video_and_of_a_sound_beside_it_is_a_row_with_th
                                       "Show/Show - 01.rus.ass": streams(("subtitle", 0, "rus", "Надписи"))}},
                     results={"files": numbered({p.path: (1, 1) for p in r.files})})
     view, rows = compose(inputs)
+    # The link names the n-th sound of its file (`-map <file>:a:<n>`), not the index of the stream; subtitles are laid
+    # out in the editor and are no rows of voice-overs.
     assert [(row.key, row.voice.name, row.voice.kind, row.link) for row in rows] == [
-        ("page/Show/Show - 01.mkv#1", "Original", "audio", track_link("page", "Show/Show - 01.mkv", 1)),
-        ("page/Show/Show - 01.rus.mka#0", "", "audio", track_link("page", "Show/Show - 01.mkv", 0, file="Show/Show - 01.rus.mka")),
-        ("page/Show/Show - 01.rus.ass#0", "Надписи", "subtitles",
-         track_link("page", "Show/Show - 01.mkv", 0, file="Show/Show - 01.rus.ass"))]
+        ("page/Show/Show - 01.mkv#1", "Original", "audio", track_link("page", "Show/Show - 01.mkv", 0)),
+        ("page/Show/Show - 01.rus.mka#0", "", "audio", track_link("page", "Show/Show - 01.mkv", 0, file="Show/Show - 01.rus.mka"))]
     assert all(row.heights == [1080] for row in rows)
     assert all(row.text == "S01E01 | Show/Show - 01.mkv" and row.player == "torrent:page" for row in rows)
     assert {row.timeline for row in rows} == {"page/Show/Show - 01.mkv"}  # one video, one timeline, whatever file a track is in

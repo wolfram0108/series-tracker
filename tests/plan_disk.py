@@ -510,7 +510,7 @@ class DiskWorld(World):
                     raise Passing
                 return None
             if op.kind == "download_video":
-                video = Video(row.id, row.snapshot(), row.slot, row.id)
+                video = Video(row.id, row.snapshot(), row.slot, row.timeline)
                 self.content[video.key] = (await asyncio.to_thread(self.codec.picture, path),)
                 return Made(video, path)
             if op.kind == "download_dub":

@@ -95,9 +95,9 @@ def player_of(release: str) -> str:
 
 
 def track_link(release: str, video: str, stream: int, file: str | None = None) -> str:
-    """`torrent:<release>/<video>#<stream>`: the stream `stream` of the video file `video` (paths in the release); a track of
-    an external file names it with `?file=<path>`, the stream being that file's. The video of the row is always the video
-    file, so every track of one video is known as one video whatever file it lies in."""
+    """`torrent:<release>/<video>#<n>`: the n-th track of its kind (0 the first sound) in the video file `video` (paths in
+    the release); a track of an external file names it with `?file=<path>`, the number being that file's. The video of the
+    row is always the video file, so every track of one video is known as one video whatever file it lies in."""
     link = f"{_SCHEME}{quote(release, safe='')}/{quote(video, safe='/')}"
     if file is not None:
         link += f"?file={quote(file, safe='/')}"

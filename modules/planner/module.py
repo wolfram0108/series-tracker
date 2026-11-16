@@ -102,6 +102,7 @@ from core.clock import beat_while
 from core.dump import plain
 from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView, SyncScope, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
+from core.contracts.torrent import parse_link
 from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
 from core.envelope import Envelope
 from core.ffprobe import END_SLACK_S, duration_of
@@ -112,7 +113,7 @@ from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, ju
 from core.plan.files import Library, as_in_file, container_json, container_of, label_of
 from core.plan.inputs import assets_against, choices_of, online_of
 from core.plan.marks import references_of
-from core.plan.planner import Plan, cut_video, name_of
+from core.plan.planner import Plan, cut_video, name_of, video_op
 from core.plan.tables import RowId, Track, Video
 from core.voice_names import Groups
 
@@ -202,6 +203,8 @@ class BusSync(SeriesSync):
         self.keys: set[str] = set()
         self.committing = False  # the end of the sync is being written: a stop waits for it
         # A VK video whose stream request fails may be handed to the downloader itself (as the service always did).
+        # The page of every source: a row of a torrent source is taken from the folder of its release on that page.
+        self.source_urls = {each.id: each.url for each in map(SeriesSource.model_validate, series.get("sources", []))}
         self.vk_sources = {each.id for each in map(SeriesSource.model_validate, series.get("sources", []))
                            if each.source_type == SourceType.VK_VIDEO}
         # The marks of the sources as the window «Выход» shows them: the place in the list and the colour of each.
@@ -361,6 +364,8 @@ class BusSync(SeriesSync):
 
     async def _download(self, op):
         row = op.subject
+        if parse_link(row.link) is not None:
+            return await self._take(op, row)
         key = self._key(op.id)
         path = os.path.join(self.downloads_dir, self._download_name(op, row, key))
         await storage.call(os.makedirs, self.downloads_dir, exist_ok=True)
@@ -379,10 +384,30 @@ class BusSync(SeriesSync):
                                describe(finished.get("error") or ""))
             return None
         if op.kind == "download_video":
-            return Made(Video(row.id, row.snapshot(), row.slot, row.id), path, retimed=await self._retimed(row.id, path))
+            return Made(Video(row.id, row.snapshot(), row.slot, row.timeline), path, retimed=await self._retimed(row.id, path))
         if op.kind == "download_dub":
             return Made(row, path)
         return Made(None, path)
+
+    async def _take(self, op, row):
+        """A row of a torrent source is not downloaded (stage 15, И-4): its file lies in the folder of its release, and the
+        step reads it there. Nothing is copied, and the file is never removed by the sync: it is the release's."""
+        release, video, file, stream = parse_link(row.link)
+        url = self.source_urls.get(row.id.source_id)
+        reply = await self.m.request("torrents.releases.get", {"url": url}) if url else {}
+        kept = next((each for each in reply.get("releases") or [] if each["release"] == release), None)
+        if kept is None or kept["state"] != "ready" or not kept.get("folder"):
+            raise Passing(reason("torrent_not_ready", release=release))
+        video_path, sound_path = os.path.join(kept["folder"], video), os.path.join(kept["folder"], file)
+        for path in {video_path, sound_path}:
+            if not await storage.call(os.path.exists, path):
+                raise Passing(reason("torrent_file_missing", path=path))
+        sound = sound_path if file != video else None
+        if op.kind == "download_video":
+            return Made(Video(row.id, row.snapshot(), row.slot, row.timeline), video_path, sound=sound, stream=stream)
+        if op.kind == "download_dub":
+            return Made(row, video_path, sound=sound, stream=stream)
+        return Made(None, video_path)
 
     async def _retimed(self, row_id, path: str) -> bool:
         """The length of a row's video is known only once it is downloaded: a video the library holds of the same row
@@ -490,13 +515,16 @@ class BusSync(SeriesSync):
         ref_atrack = 0
         if goal.video.kind == "asset":
             ref_atrack = await self.files.stream_of(goal.video.container, goal.video.container.video.id, True)
+        elif goal.video.kind == "download" and results[video_op(goal)].sound is None:
+            ref_atrack = results[video_op(goal)].stream  # the own sound of a video of a torrent release in its file
         dubs, streams, copied = [], [], {}
         for op in ops:
             way = op.subject[1]
             # Each voice-over is the file of its voice in the job, whatever it came from: the queue of the service and the window
             # name it by that file. A file of the library is shared by its voice-overs: all of one file the same inode.
             if way.kind == "download":
-                path, stream = results[f"dub:{way.dub}"].file, 0
+                taken = results[f"dub:{way.dub}"]
+                path, stream = taken.sound_file, taken.stream
             else:
                 path, stream = await self.files.source_of(way.container, way.dub, way.own)
             dub = await self._own(copied.get(path, path), os.path.join(folder, "dub", sanitize_name(way.voice) + os.path.splitext(path)[1]))

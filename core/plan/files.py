@@ -139,11 +139,15 @@ class Library:
             video = video_of(goal, results)
             video_path = self.video_path(goal, results)
             identity = mkv.identity(video.timeline.source_id, video.timeline.row_key)
-            own_stream = await self.stream_of(goal.video.container, video.id, True) if goal.video.kind == "asset" else 0
+            if goal.video.kind == "asset":
+                own_path, own_stream = video_path, await self.stream_of(goal.video.container, video.id, True)
+            else:
+                taken = results[video_op(goal)]
+                own_path, own_stream = taken.sound_file, taken.stream
             titles, languages = dict(goal.titles), dict(goal.languages)
             # A video without a group is only that of a file made of a row of no group, which the plan takes no more.
             label = video.snapshot.group or "—"
-            sound = mkv.AudioIn(label, video_path, own_stream, identity, own=True, title=titles.get(label, ""),
+            sound = mkv.AudioIn(label, own_path, own_stream, identity, own=True, title=titles.get(label, ""),
                                 language=languages.get(label, ""))
             tracks, made_tracks, packed = [], [], []
             for way in goal.tracks:
@@ -152,8 +156,9 @@ class Library:
                     made_tracks.append(Track(way.dub, way.snapshot, slot, video.timeline))
                     if path != self.path(way.container.name):
                         packed.append(os.path.relpath(path, self.root))
-                elif way.kind == "timeline":  # the sound of the download of the timeline: in step with the video as it is
-                    path, stream = results[f"row:{way.row.id}"].file, 0
+                elif way.kind == "timeline":  # the sound of a row on the video's timeline: in step with the video as it is
+                    taken = results[f"row:{way.row.id}"]
+                    path, stream = taken.sound_file, taken.stream
                     made_tracks.append(Track(way.dub, way.snapshot, slot, video.timeline))
                 else:
                     aligned = results[f"align:{slot}:{way.voice}"]

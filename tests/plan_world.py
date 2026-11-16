@@ -220,7 +220,7 @@ class World(SeriesSync):
             row = op.subject
             if row.id in self.download_fails:
                 return None
-            video = Video(row.id, row.snapshot(), row.slot, row.id)
+            video = Video(row.id, row.snapshot(), row.slot, row.timeline)
             self.content[video.key] = self._truth(("site", row.id))
             return Made(video)
         if op.kind == "download_picture":

@@ -344,6 +344,8 @@ export const ru = {
   "reason.torrent_file_broken": "торрент-файл не читается: {detail}",
   "reason.torrent_gone_from_client": "раздачи нет в qBittorrent",
   "reason.torrent_updating": "раздача обновляется",
+  "reason.torrent_not_ready": "раздача «{release}» не готова",
+  "reason.torrent_file_missing": "файла раздачи нет на месте: {path}",
   "reason.torrent_track_not_streamed": "дорожка раздачи берётся из её файла, а не из потока",
   "reason.read_cancelled": "чтение страницы остановлено пользователем",
   "reason.provider_not_connected": "внешнее приложение не подключено",
