@@ -21,8 +21,7 @@ class FakeNeighbours(BaseModule):
     name = "fake_neighbours"
 
     def __init__(self, bus):
-        self.media_items: list[dict] = []
-        self.sliced: list[dict] = []
+        self.names: list[str] = []  # the files of the asset of the plan
         self.active_torrents: list[dict] = []
         self.set_location_calls: list[dict] = []
         self.reprocess_calls: list[int] = []
@@ -30,23 +29,14 @@ class FakeNeighbours(BaseModule):
         super().__init__(bus)
 
     def register(self):
-        self.handle("scan.media.list", self.on_media)
         self.handle("planner.files.get", self.on_files)
-        self.handle("slicing.files.list", self.on_sliced)
         self.handle("torrents.db.active", self.on_active)
         self.handle("torrents.set_location", self.on_set_location)
         self.handle("renaming.reprocess", self.on_reprocess)
 
-    async def on_media(self, env):
-        return self.media_items
-
     async def on_files(self, env):
         # The asset of the plan of a video series: its files, as the planner holds them.
-        return {"names": [each["final_filename"] for each in self.media_items if each.get("final_filename")]
-                + [each["file_path"] for each in self.sliced]}
-
-    async def on_sliced(self, env):
-        return self.sliced
+        return {"names": list(self.names)}
 
     async def on_active(self, env):
         return self.active_torrents
@@ -120,8 +110,7 @@ async def apply(probe):
 async def test_a_save_plans_the_move_and_the_sync_makes_it(started):
     runner, fake, probe, db_path, old_dir, new_dir = started
     bus = runner.bus
-    fake.media_items = [{"unique_id": "u1", "final_filename": "Show s01e01.mp4"}]
-    fake.sliced = [{"id": 1, "file_path": "Show s01e02.mp4"}]
+    fake.names = ["Show s01e01.mp4", "Show s01e02.mp4"]
     for f in ("Show s01e01.mp4", "Show s01e02.mp4"):
         open(os.path.join(old_dir, f), "wb").close()
     sub_planned = bus.subscribe("library.relocation.planned")
@@ -227,8 +216,7 @@ async def test_relocate_sanitizes_target_path(system, tmp_path):
 async def test_a_relocation_a_restart_interrupted_is_taken_up_when_the_system_has_started_and_a_plan_is_not(started):
     runner, fake, probe, db_path, old_dir, new_dir = started
     bus = runner.bus
-    fake.media_items = [{"unique_id": "u1", "final_filename": "Show s01e01.mp4"}]
-    fake.sliced = []
+    fake.names = ["Show s01e01.mp4"]
     open(os.path.join(old_dir, "Show s01e01.mp4"), "wb").close()
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO relocation_tasks (series_id, new_path, status, created_at) "

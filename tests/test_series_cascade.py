@@ -82,8 +82,6 @@ async def test_child_tables_reject_unknown_series(db_path):
     inserts = [
         "INSERT INTO scan_tasks (series_id, created_at, status, task_data, "
         "results_data) VALUES (9999, '2026-01-01', 'processing', '[]', '{}')",
-        "INSERT INTO slicing_tasks (media_item_unique_id, series_id, status) "
-        "VALUES ('u', 9999, 'pending')",
         "INSERT INTO renaming_tasks (series_id, status, task_type) "
         "VALUES (9999, 'error', 'mass_vk_reprocess')",
         "INSERT INTO relocation_tasks (series_id, new_path, status) "
@@ -152,8 +150,6 @@ async def test_delete_during_scan_leaves_no_rows(db_path):
         result = await asyncio.wait_for(task, 15)
         assert result.get("aborted") is True
         assert source.asked == ["sources.table.get"]  # the scan went no further than the step it was in
-        assert await db.fetch_all("SELECT * FROM media_items WHERE series_id=?",
-                                  (series_id,)) == []
         assert await db.fetch_all("SELECT * FROM scan_tasks WHERE series_id=?",
                                   (series_id,)) == []
     finally:

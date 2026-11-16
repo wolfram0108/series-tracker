@@ -7,10 +7,10 @@ f-strings of modules/ (docstrings are not SQL): `FROM`, `INTO`, `UPDATE`, `JOIN`
 `INSERT OR ... INTO` and `REPLACE INTO` too) followed by a table name. A mention in a module that is not the
 owner is a violation and is never excused here: the guard shows the state of the code as it is.
 
-One table is owned by columns (project rule: a table or a column belongs to exactly one module): media_items, see
-COLUMN_OWNERS. Its rows belong to the owner of the table, so creating and deleting rows is the owner's; a write of
-a column goes to the owner of that column; a foreign write is a violation. Reading rows is permitted only to the
-modules in PLAN_READERS and is printed as ДОПУЩЕНО with its ground.
+A table may be owned by columns (project rule: a table or a column belongs to exactly one module), see COLUMN_OWNERS
+(none since the old path of the cutting left, 2026-11-17). Its rows belong to the owner of the table, so creating and
+deleting rows is the owner's; a write of a column goes to the owner of that column; a foreign write is a violation.
+Reading rows is permitted only to the modules in PLAN_READERS and is printed as ДОПУЩЕНО with its ground.
 """
 from __future__ import annotations
 
@@ -49,13 +49,9 @@ OWNERS: dict[str, tuple[str, str]] = {
                     ("torrents", "migration 0069 and the docstring of modules/torrents/module.py (stage 15)")),
     **dict.fromkeys(("unpack_streams", "unpack_folders", "unpack_assignments", "unpack_sources"),
                     ("unpack", "migration 0069 and the docstring of modules/unpack/module.py (stage 15)")),
-    "media_items": ("scan", "ARCHITECTURE.md section 3 and docstring of modules/scan/repository.py: the rows belong to scan"),
-    "slicing_tasks": ("slicing", "docstring of modules/slicing/module.py: 'Владение: slicing_tasks, sliced_files'"),
-    "sliced_files": ("slicing", "docstring of modules/slicing/module.py"),
     "renaming_tasks": ("renaming", "docstring of modules/renaming/repository.py"),
     "relocation_tasks": ("library", "docstring of modules/library/repository.py"),
     "scan_tasks": ("scan", "docstring of modules/scan/repository.py"),
-    "scan_references": ("scan", "migration 0028 (scan); docstring of modules/scan/repository.py"),
     "parser_profiles": ("rules", "docstring of modules/rules/repository.py"),
     "parser_rules": ("rules", "docstring of modules/rules/repository.py"),
     "parser_rule_conditions": ("rules", "docstring of modules/rules/repository.py"),
@@ -78,28 +74,14 @@ OWNERS: dict[str, tuple[str, str]] = {
 
 # table -> {column: (owner module, ground)}: columns whose owner is not the owner of the table.
 COLUMN_OWNERS: dict[str, dict[str, tuple[str, str]]] = {
-    "media_items": {
-        "status": ("downloads", "docstring of modules/downloads/repository.py: media_items.status / final_filename"),
-        "rename_to": ("downloads", "docstring of modules/downloads/repository.py: media_items.status / final_filename / rename_to"),
-        "final_filename": ("downloads", "docstring of modules/downloads/repository.py: media_items.status / final_filename"),
-        "file_rev": ("downloads", "migration 0039: the revision of the file of a row, counted by downloads"),
-        "slicing_status": ("slicing", "docstring of modules/slicing/repository.py: media_items.slicing_status / chapters / chapters_filtered"),
-        "chapters": ("slicing", "docstring of modules/slicing/repository.py: media_items.slicing_status / chapters / chapters_filtered"),
-        "chapters_filtered": ("slicing", "docstring of modules/slicing/repository.py: media_items.slicing_status / chapters / chapters_filtered"),
-    },
 }
 
 # (table, module) -> ground: a module that is not the owner but may read the rows of the table.
 PLAN_READERS: dict[tuple[str, str], str] = {
-    ("media_items", "downloads"): "docstring of modules/downloads/repository.py: the executor of the plan reads the rows of the plan, which are scan's",
-    ("media_items", "slicing"): "docstring of modules/slicing/repository.py: the other columns are read; slicing is outside the architecture of stage 10 (D-34: the code is not touched)",
 }
 
 # (file, function, ground): a write whose columns are not known statically, by the owner of the table.
-DYNAMIC_COLUMNS_ALLOWED: list[tuple[str, str, str]] = [
-    ("modules/scan/repository.py", "ScanRepository.save_outcome",
-     "the columns are the keys of the plan row fields built by scan; the docstring says the columns of other modules are never written (not provable statically)"),
-]
+DYNAMIC_COLUMNS_ALLOWED: list[tuple[str, str, str]] = []
 
 # Names that follow FROM/INTO/UPDATE/JOIN but are not tables of the application.
 NOT_APPLICATION_TABLES = frozenset({"sqlite_master", "sqlite_schema", "sqlite_sequence", "sqlite_temp_master"})
@@ -322,6 +304,7 @@ def check_table_owners(root: Path, tables: set[str], owners: dict[str, tuple[str
     outcome = Outcome()
     known = global_constants(root)
     mentioned_by: dict[str, dict[str, list[tuple[str, Mention]]]] = {}
+    defined: set[tuple[str, str]] = set()  # (file, qualified name) of every function of modules/
     for path in python_files(root / "modules"):
         parts = path.relative_to(root).parts
         if len(parts) < 3:
@@ -333,6 +316,9 @@ def check_table_owners(root: Path, tables: set[str], owners: dict[str, tuple[str
         except SyntaxError as error:
             outcome.violations.append(Violation(rel(root, path), error.lineno or 0, f"файл не разобран: {error.msg}"))
             continue
+        # The qualified name of a function is that of the first statement of its body (guard_common.qualname_of).
+        defined |= {(rel(root, path), qualname_of(node.body[0]))
+                    for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.body}
         for mention in sql_mentions(tree, source, known):
             where = rel(root, path)
             if mention.dynamic:
@@ -366,6 +352,12 @@ def check_table_owners(root: Path, tables: set[str], owners: dict[str, tuple[str
                                    dynamic_columns)
                 elif module != owner:
                     outcome.violations.append(Violation(where, mention.line, f"таблица «{table}» принадлежит модулю {owner}; SQL модуля {module} её называет"))
+    # A permit whose function is gone is stale: it would excuse whatever comes to stand under its name.
+    for kind, permits in (("динамическое имя таблицы", dynamic_allowed), ("динамические колонки", dynamic_columns)):
+        for where, function, _ground in permits:
+            if (where, function) not in defined:
+                outcome.violations.append(Violation(GUARD_PATH, 0, f"допуск «{kind}» для {where}:{function} не используется: "
+                                                                   "функции нет, в сторожe устаревшая запись"))
     for table in sorted(set(owners) - tables):
         outcome.violations.append(Violation(GUARD_PATH, 0, f"владелец назначен таблице «{table}», которой нет в миграциях"))
     for table in sorted(set(column_owners) - set(owners)):

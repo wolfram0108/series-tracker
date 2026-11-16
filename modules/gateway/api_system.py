@@ -12,7 +12,7 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
 from core import BusRequestError
-from core.contracts import DownloadCard, PackCard, SlicingCard
+from core.contracts import DownloadCard, PackCard
 from core.reasons import reason, relayed
 
 from .schemas import ConformJobChange, ErrorOnly, ErrorResponse, OkResponse, QueueTask, ScannerStatus
@@ -83,15 +83,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                 status_code=500)
         return {"success": True,
                 "message": reason("queue_tasks_removed", count=reply["deleted"])}
-
-    @r.get("/api/slicing/queue", response_model=list[SlicingCard])
-    async def slicing_queue():
-        """The cards of the slicing (core/contracts/slicing.py): a task of the queue with the compilation and its episodes."""
-        try:
-            reply = await gw.request("slicing.queue.get", {})
-        except BusRequestError:
-            return []
-        return reply["tasks"]
 
     @r.get("/api/pack/queue", response_model=list[PackCard])
     async def pack_queue():

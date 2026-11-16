@@ -31,15 +31,6 @@ def db_path(tmp_path):
              (10, "d", "renamed", '{"season":0,"episode":1}'),   # спешел
              (10, "e", "renamed", '{"episode":1}'),               # без сезона
              (11, "f", "renamed", '{"season":7,"episode":1}')])   # неактивна
-        for uid, ep, se in [("u1", 1, 1), ("u2", 2, 1), ("u3", 1, 2),
-                            ("u0", 9, 0)]:  # u0 — спешел (сезон 0)
-            conn.execute(
-                "INSERT INTO media_items (series_id, unique_id, source_url, "
-                "publication_date, plan_status, status, is_ignored_by_user, "
-                "is_available, slicing_status, final_filename, episode_start, "
-                "season) VALUES (1,?,?,?,?,?,0,1,'none',?,?,?)",
-                (uid, "x", "2026-01-01 00:00:00", "candidate", "completed",
-                 f"{uid}.mp4", ep, se))
         conn.commit()
     return str(path)
 

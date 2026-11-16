@@ -17,7 +17,6 @@ from modules.library import LibraryModule
 from modules.metadata import MetadataModule
 from modules.renaming import RenamingModule
 from modules.scan.repository import ScanRepository
-from modules.slicing.repository import SlicingRepository
 from series_factory import insert_series, source
 from settle import settle
 from schema_db import migrated
@@ -32,17 +31,6 @@ def db_path(tmp_path):
         insert_series(conn, id=2, name="ВК", name_en="Show", site="vk", save_path="/media/s",
                       url="u|q", source_type="vk_video")
         # данные для каскада удаления серии 2
-        conn.execute(
-            "INSERT INTO media_items (series_id, unique_id, episode_start, "
-            "plan_status, status, is_ignored_by_user, source_url, "
-            "publication_date, final_filename, slicing_status, "
-            "is_available) VALUES (2, 'uid1', 1, 'in_plan_single', "
-            "'completed', 0, 'http://v/1', '2026-01-01 00:00:00', "
-            "'Show s01e01.mp4', 'none', 1)")
-        conn.execute(
-            "INSERT INTO sliced_files (series_id, "
-            "source_media_item_unique_id, episode_number, file_path, "
-            "status) VALUES (2, 'uid1', 1, '/media/s/e1.mp4', 'completed')")
         conn.execute(
             "INSERT INTO renaming_tasks (series_id, status, task_type) "
             "VALUES (2, 'error', 'mass_vk_reprocess')")
@@ -352,7 +340,6 @@ async def test_delete_cascade_by_owners(db_path, tmp_path):
 
         await settle(bus, *modules)  # the cascade is an event: it ends when every owner has handled it
         assert await _empty("series", "id=2")
-        assert await _empty("media_items")
         assert await _empty("renaming_tasks")
         assert await _empty("series_tmdb_mappings")
     finally:

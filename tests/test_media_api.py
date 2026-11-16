@@ -1,6 +1,5 @@
-"""Тесты блока «media-items и операции серии» этапа 5 (Р-21):
-главы/нарезка через готовые контракты slicing, ignore → пересборка
-плана, композиция по владельцам, rename_preview, переобработки."""
+"""The points of the operations of a series (Р-21): the composition by its owner, the reprocessing of names, the names of
+the source files; the points of the old path of the cutting of compilations are gone with it."""
 import os
 import sqlite3
 
@@ -12,58 +11,22 @@ from core.contracts.availability import Action, NotAllowed, refusal
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.gateway import GatewayModule
-from modules.renaming import RenamingModule
 from modules.scan import ScanModule
-from modules.slicing import SlicingModule
 from series_factory import insert_series
 from settle import settle
 from schema_db import migrated
 from core.reasons import reason
 
-CHAPTERS = [
-    {"time": "00:01:00", "title": "Серия 1"},
-    {"time": "00:21:00", "title": "Серия 2"},
-    {"time": "00:41:00", "title": "Серия 3"},
-]
-
-
-async def fake_fetch(url):
-    return [dict(c) for c in CHAPTERS]
-
-
-async def fake_ffmpeg(source, start, duration, output):
-    return True, ""
-
-
 @pytest.fixture
 def db_path(tmp_path):
     path = tmp_path / "test.db"
     migrated(path)
-    # save_path VK-серии — реальный каталог в tmp: нарезка проверяет
-    # наличие исходника на диске (исходник кладёт тест перед slice).
     media_s = tmp_path / "media_s"
     media_s.mkdir()
     with sqlite3.connect(path) as conn:
         insert_series(conn, id=1, url="http://x", source_type="torrent")
         insert_series(conn, id=2, name="ВК", name_en="Show", site="vk", save_path=str(media_s),
                       url="u|q", source_type="vk_video")
-        # одиночный скачанный эпизод
-        conn.execute(
-            "INSERT INTO media_items (series_id, unique_id, episode_start, "
-            "plan_status, status, is_ignored_by_user, source_url, "
-            "publication_date, final_filename, slicing_status, "
-            "is_available, source_title) VALUES (2, 'uid1', 1, "
-            "'in_plan_single', 'completed', 0, 'http://v/1', "
-            "'2026-01-01 00:00:00', 'Show s01e01.mp4', 'none', 1, "
-            "'Серия 1')")
-        # компиляция для глав/нарезки
-        conn.execute(
-            "INSERT INTO media_items (series_id, unique_id, episode_start, "
-            "episode_end, plan_status, status, is_ignored_by_user, "
-            "source_url, publication_date, slicing_status, is_available, "
-            "source_title) VALUES (2, 'uid2', 1, 3, 'in_plan_compilation', "
-            "'pending', 0, 'http://v/2', '2026-01-02 00:00:00', 'none', 1, "
-            "'Серии 1-3')")
         conn.commit()
     return str(path)
 
@@ -77,11 +40,6 @@ class Neighbours(BaseModule):
         super().__init__(bus)
 
     def register(self):
-        async def format_filename(env):
-            ep = env.payload.get("episode_override") \
-                or env.payload["media_item"].get("episode_start")
-            return {"filename": f"Show s01e{ep:02d}.mp4"}
-
         async def files_for_series(env):
             if env.payload["series_id"] != 1:  # the owner has no torrent files of a video series
                 return []
@@ -115,7 +73,6 @@ class Neighbours(BaseModule):
 
         self.handle("scan.series.prepare", series_prepare)
         self.handle("composition.get", composition_get)
-        self.handle("rules.format_filename", format_filename)
         self.handle("torrents.db.files.for_series", files_for_series)
         self.handle("renaming.reprocess", reprocess)
         self.handle("scan.series.run", series_run)
@@ -130,65 +87,13 @@ async def system(db_path, tmp_path):
                             templates_dir=str(tmp_path))
     neighbours = Neighbours(bus)
     scan = ScanModule(bus, db, scheduler_tick=None)
-    slicing = SlicingModule(bus, db, ffmpeg=fake_ffmpeg,
-                            fetch_chapters=fake_fetch)
-    runner = Runner(bus, [gateway, CatalogModule(bus, db), scan, slicing,
-                          neighbours])
+    runner = Runner(bus, [gateway, CatalogModule(bus, db), scan, neighbours])
     await runner.start()
     transport = httpx.ASGITransport(app=gateway.app)
     async with httpx.AsyncClient(transport=transport,
                                  base_url="http://test") as client:
         yield bus, db, client, neighbours
     await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_media_items_iso_dates(system):
-    _, _, client, _ = system
-    resp = await client.get("/api/series/2/media-items")
-    items = {i["unique_id"]: i for i in resp.json()}
-    assert items["uid1"]["publication_date"] == "2026-01-01T00:00:00"
-
-
-@pytest.mark.asyncio
-async def test_chapters_and_slice_flow(system):
-    _, db, client, _ = system
-    resp = await client.post("/api/media-items/uid2/chapters")
-    assert resp.status_code == 200
-    assert [c["title"] for c in resp.json()] == ["Серия 1", "Серия 2",
-                                                 "Серия 3"]
-    # находка 53: проверка глав НЕ переводит в pending — статус остаётся
-    row = await db.fetch_one(
-        "SELECT slicing_status FROM media_items WHERE unique_id='uid2'")
-    assert row["slicing_status"] == "none"
-
-    # исходник компиляции кладём на диск (нарезка проверяет наличие)
-    srow = await db.fetch_one("SELECT save_path FROM series WHERE id=2")
-    open(os.path.join(srow["save_path"], "comp.mp4"), "wb").close()
-    await db.execute("UPDATE media_items SET final_filename='comp.mp4' "
-                     "WHERE unique_id='uid2'")
-
-    # нарезка запускается после проверки глав (не заблокирована)
-    resp = await client.post("/api/media-items/uid2/slice")
-    assert resp.status_code == 200
-    assert resp.json()["success"] is True
-
-    # теперь задача запущена (pending) — повторный запуск отвергается
-    resp = await client.post("/api/media-items/uid2/slice")
-    assert resp.status_code == 409
-
-    resp = await client.post("/api/media-items/uid404/chapters")
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_chapters_filtered_status_message(system):
-    _, _, client, _ = system
-    resp = await client.post("/api/media-items/uid2/chapters/filtered")
-    body = resp.json()
-    assert body["expected_count"] == 3
-    assert len(body["filtered_chapters"]) == 3
-    assert body["status_message"] == reason("chapters_count_match", got=3)
 
 
 @pytest.mark.asyncio
@@ -225,35 +130,6 @@ async def test_torrent_refresh_prepares_composition(system):
 
 
 @pytest.mark.asyncio
-async def test_rename_preview_shape(db_path, tmp_path):
-    bus = Bus()
-    db = Database(db_path)
-    gateway = GatewayModule(bus, static_dir=str(tmp_path), auth_required=False,
-                            templates_dir=str(tmp_path))
-    neighbours = Neighbours(bus)
-    runner = Runner(bus, [gateway, CatalogModule(bus, db),
-                          ScanModule(bus, db, scheduler_tick=None),
-                          SlicingModule(bus, db, ffmpeg=fake_ffmpeg,
-                                        fetch_chapters=fake_fetch),
-                          RenamingModule(bus, db), neighbours])
-    await runner.start()
-    try:
-        transport = httpx.ASGITransport(app=gateway.app)
-        async with httpx.AsyncClient(transport=transport,
-                                     base_url="http://test") as client:
-            resp = await client.get("/api/series/2/rename_preview")
-            body = resp.json()
-            by_uid = {p["unique_id"]: p for p in body["preview"]}
-            # uid1 уже скачан с верным именем — переименование не нужно
-            assert by_uid["uid1"]["current_filename"] == "Show s01e01.mp4"
-            assert by_uid["uid1"]["new_filename_preview"] == \
-                "Show s01e01.mp4"
-            assert body["needs_rename_count"] == 0
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
 async def test_reprocess_is_a_sync_without_download_and_is_refused_while_one_runs(system):
     """The files take the names of the rules in a sync alone (И-59): the route starts one that fetches nothing and never
     renames by itself; while a sync of the series runs it is refused with the reason of the table of what is allowed."""
@@ -276,7 +152,6 @@ async def test_source_filenames_are_the_torrent_files_and_a_video_series_has_non
     # the lines for the rules test of a video series come from composition.preview, not from this list
     resp = await client.get("/api/series/2/source-filenames")
     assert resp.json() == []
-    assert not any(call[0] == "scan.media.list" for call in neighbours.calls)
 
 
 @pytest.mark.asyncio
@@ -291,3 +166,9 @@ async def test_removed_endpoints_gone(system):
     # stage 10: the merge of slicing and scan answers and the duplicate of reprocess are gone
     assert (await client.get("/api/series/2/sliced-files")).status_code in (404, 405)
     assert (await client.post("/api/series/2/reprocess_vk_files")).status_code in (404, 405)
+    # 2026-11-17: the old path of the cutting of compilations is gone with its points
+    for method, path in (("get", "/api/series/2/media-items"), ("post", "/api/media-items/u/chapters"),
+                         ("post", "/api/media-items/u/slice"), ("post", "/api/series/2/deep-adoption"),
+                         ("get", "/api/series/2/rename_preview"), ("get", "/api/slicing/queue"),
+                         ("get", "/api/settings/slicing_delete_source")):
+        assert (await getattr(client, method)(path)).status_code in (404, 405), path

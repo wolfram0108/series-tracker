@@ -50,7 +50,8 @@ def check_owners(root, tables, owners, dynamic_allowed=None, **kw):
     kw.setdefault("column_owners", {})
     kw.setdefault("plan_readers", {})
     kw.setdefault("dynamic_columns", [])
-    return table_owners.check_table_owners(root, tables, owners, dynamic_allowed, **kw)
+    # The permits of the real tree name its functions: a synthetic tree is checked with the permits the test gives.
+    return table_owners.check_table_owners(root, tables, owners, [] if dynamic_allowed is None else dynamic_allowed, **kw)
 
 
 def places(outcome: Outcome) -> set[tuple[str, int]]:
@@ -269,6 +270,15 @@ OWN_SQL = {
 def test_tables_mentioned_only_by_their_owners_pass(tmp_path):
     root = write_tree(tmp_path, OWN_SQL)
     assert check_owners(root, TABLES, OWNERS).violations == []
+
+
+def test_a_permit_of_dynamic_sql_for_a_function_that_is_gone_is_a_stale_permit_and_one_in_use_is_not(tmp_path):
+    root = write_tree(tmp_path, OWN_SQL)
+    outcome = check_owners(root, TABLES, OWNERS, [("modules/m1/repository.py", "Repo.gone", "x")],
+                           dynamic_columns=[("modules/m1/repository.py", "Repo.read", "y")])
+    assert [v.reason for v in outcome.violations] == [
+        "допуск «динамическое имя таблицы» для modules/m1/repository.py:Repo.gone не используется: функции нет, "
+        "в сторожe устаревшая запись"]
 
 
 @pytest.mark.parametrize("sql", [

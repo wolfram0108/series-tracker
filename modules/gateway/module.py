@@ -170,7 +170,6 @@ SSE_MAP: dict[str, Outgoing] = {
     "torrents.preview.ready": Outgoing("preview_naming_ready"),
     "torrents.preview.failed": Outgoing("preview_naming_failed"),
     "downloads.queue.changed": Outgoing("download_queue_update", _bare_tasks, latest=_whole),
-    "slicing.queue.changed": Outgoing("slicing_queue_update", _bare_tasks, latest=_whole),
     "scan.status.changed": Outgoing("scanner_status_update"),
     "series.source.added": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "added"}),
     "series.source.updated": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "updated"}),

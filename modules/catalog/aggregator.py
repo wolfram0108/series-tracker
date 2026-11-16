@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 HIERARCHY = [
-    "error", "scanning", "checking", "slicing", "aligning", "packing",
+    "error", "scanning", "checking", "aligning", "packing",
     "renaming", "metadata", "activating",
     "downloading", "idle", "queued", "ready", "viewing", "waiting",
 ]

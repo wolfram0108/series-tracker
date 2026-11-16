@@ -198,15 +198,6 @@ class LibraryModule(BaseModule):
             await storage.call(self._move_one, old_base, new_base, rel, timeout=storage.MOVE_TIMEOUT_S,
                                owns=(os.path.join(old_base, rel), os.path.join(new_base, rel)))
 
-    async def _sliced_files(self, series_id: int) -> list[dict]:
-        try:
-            return await self.request("slicing.files.list",
-                                      {"series_id": series_id})
-        except BusRequestError as exc:
-            if NO_HANDLER in str(exc):
-                return []
-            raise
-
     @staticmethod
     def _move_one(old_base: str, new_base: str, rel: str) -> None:
         old_abs = os.path.join(old_base, rel)

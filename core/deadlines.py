@@ -64,16 +64,14 @@ _QUICK = (
 
 _FUSES: dict[str, float] = {
     **dict.fromkeys(_QUICK, QUICK_S),
-    **dict.fromkeys(("conform.submit", "rules.format_torrent_file", "slicing.chapters.mark", "slicing.source.delete",
-                     "slicing.task.create", "torrents.db.active", "sources.table.get", "unpack.table.get",
+    **dict.fromkeys(("conform.submit", "rules.format_torrent_file", "torrents.db.active", "sources.table.get", "unpack.table.get",
                      "unpack.editor.get"), SERVICE_S),
     # The search of the applications: a session opened (two requests, again after a refusal) and a page of the search.
-    **dict.fromkeys(("slicing.verify", "sources.apps.search", "sources.video.stream", "torrents.add",
+    **dict.fromkeys(("sources.apps.search", "sources.video.stream", "torrents.add",
                      "torrents.db.deactivate_all", "torrents.drive_incomplete", "torrents.fs.verify"), HEAVY_S),
     "sources.torrent_file.get": FETCH_S,
-    **dict.fromkeys(("renaming.preview", "renaming.process_torrent", "rules.apply", "slicing.chapters.filtered",
-                     "slicing.chapters.get", "sources.parse", "sources.releases.get"), RULES_S),
-    **dict.fromkeys(("renaming.reprocess", "torrents.register", "slicing.deep_adoption"), BATCH_S),
+    **dict.fromkeys(("renaming.process_torrent", "rules.apply", "sources.parse", "sources.releases.get"), RULES_S),
+    **dict.fromkeys(("renaming.reprocess", "torrents.register"), BATCH_S),
     "torrents.composition": 900.0,
     # The fetch of a page of a service with credentials; it covers an anti-bot challenge solved by a browser (up to 45 s).
     "trackerauth.fetch": 150.0,

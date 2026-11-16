@@ -23,7 +23,6 @@ from modules.rules import RulesModule
 from modules.runlog import RunlogModule
 from modules.scan import ScanModule
 from modules.settings import SettingsModule
-from modules.slicing import SlicingModule
 from modules.sources import SourcesModule
 from modules.sources.provider import ProviderClient
 from modules.sources.table import utc_now
@@ -84,7 +83,6 @@ def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, l
         ScanModule(bus, db),
         DownloadsModule(bus, db),
         RenamingModule(bus, db),
-        SlicingModule(bus, db),
         VoicesModule(bus, db),
         # The plan of every video series and its sync (stage 12): downloads, cuts, alignments, containers, the journal.
         PlannerModule(bus, db),

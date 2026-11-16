@@ -35,20 +35,6 @@ def test_a_source_cannot_name_a_series_twice_or_a_missing_one(conn):
         conn.execute("INSERT INTO series_sources (series_id, url, source_type) VALUES (999, 'u', 'torrent')")
 
 
-def test_a_reference_of_a_slot_is_one_with_or_without_a_part_and_its_mark_is_one_of_the_five(conn):
-    insert = ("INSERT INTO scan_references (series_id, season, episode, part, mark, source_id, row_key, unique_id) "
-              "VALUES (5, 1, 1, ?, 'by_level', 1, 'k', 'u1')")
-    for part in (None, 1, 2):
-        conn.execute(insert, (part,))
-    for part in (None, 1):
-        with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(insert, (part,))
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("INSERT INTO scan_references (series_id, season, episode, mark) VALUES (5, 1, 9, 'maybe')")
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("INSERT INTO scan_references (series_id, season, episode, mark) VALUES (999, 1, 9, 'none')")
-
-
 def test_a_torrent_is_one_row_per_hash_of_a_series_that_is_there(conn):
     conn.execute("INSERT INTO torrent_progress (qb_hash, series_id, status) VALUES ('hash-a', 5, 'x')")
     with pytest.raises(sqlite3.IntegrityError):

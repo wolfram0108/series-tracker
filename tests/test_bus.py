@@ -96,7 +96,7 @@ async def test_publish_delivers_to_matching_subscribers():
     bus = Bus()
     sub_exact = bus.subscribe("downloads.task.finished")
     sub_wild = bus.subscribe("downloads.#")
-    sub_other = bus.subscribe("slicing.#")
+    sub_other = bus.subscribe("voices.#")
 
     n = bus.publish(Envelope(topic="downloads.task.finished", kind="event",
                              payload={"uid": "x"}))

@@ -146,7 +146,7 @@ class MetadataModule(BaseModule):
 
     async def on_seasons_recompute(self, env: Envelope) -> dict:
         """Пересчёт числа серий многосезонной серии. Реальные сезоны берём из
-        нейминга (торрент: Season NN; VK: media_items.season), счётчики серий
+        нейминга (торрент: Season NN; видео: сезоны плана), счётчики серий
         по сезонам — из TMDB (кэш в маппинге; сеть только на новый сезон),
         total = сумма по реальным сезонам (сезон 0/спешелы исключены, реш. #2).
         Публикует series.updated с обновлённым tmdb_info → карточка без F5.

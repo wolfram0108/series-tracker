@@ -16,23 +16,18 @@ from schema_db import migrated
 
 
 class FakeNeighbours(BaseModule):
-    """catalog + rules + scan + downloads + slicing + torrents одним фейком."""
+    """catalog + rules + torrents одним фейком."""
     name = "fake_neighbours"
 
     def __init__(self, bus, series):
         self.series = series
-        self.media_items: list[dict] = []
-        self.sliced: list[dict] = []
-        self.set_filename_calls: list[dict] = []
         self.rename_calls: list[dict] = []
         self.qbt_files: dict[str, list] = {}
         self.db_files: dict[str, list] = {}
         self.renames: list[dict] = []
         self.upserts: list[dict] = []
         self.active_torrents: list[dict] = []
-        self.fail_format = False
         self.torrent_profiles: list = []
-        self.format_series: list[dict] = []
         self.collide_name: str | None = None  # одно имя на все файлы
         self.files_block: "asyncio.Event | None" = None  # C9: блок files.get
         self.files_calls = 0
@@ -42,12 +37,7 @@ class FakeNeighbours(BaseModule):
     def register(self):
         h = self.handle
         h("catalog.series.get", self.on_series)
-        h("rules.format_filename", self.on_format)
         h("rules.format_torrent_file", self.on_format_torrent)
-        h("scan.media.list", self.on_media)
-        h("downloads.item.set_filename", self.on_set_filename)
-        h("downloads.items.rename", self.on_rename_items)
-        h("slicing.files.list", self.on_sliced)
         h("torrents.db.active", self.on_active)
         h("torrents.files.get", self.on_qbt_files)
         h("torrents.db.files.list", self.on_db_files)
@@ -56,14 +46,6 @@ class FakeNeighbours(BaseModule):
 
     async def on_series(self, env):
         return self.series
-
-    async def on_format(self, env):
-        if self.fail_format:
-            raise RuntimeError("профиль сломан (имитация)")
-        self.format_series.append(env.payload["series"])
-        item = env.payload["media_item"]
-        ep = env.payload.get("episode_override") or item["episode_start"]
-        return {"filename": f"Show s01e{ep:02d}.mp4"}
 
     async def on_format_torrent(self, env):
         self.torrent_profiles.append(env.payload["profile_id"])
@@ -75,22 +57,6 @@ class FakeNeighbours(BaseModule):
                     "extracted": {"episode": 1}}
         return {"filename": f"Season 01/Show {base}",
                 "extracted": {"episode": 1}}
-
-    async def on_media(self, env):
-        return self.media_items
-
-    async def on_set_filename(self, env):
-        self.set_filename_calls.append(env.payload)
-
-    async def on_rename_items(self, env):
-        """The owner of the files of a video series: it moves them and says how many names changed."""
-        self.rename_calls.append(env.payload)
-        current = {item["unique_id"]: item["final_filename"] for item in self.media_items}
-        return {"renamed": len([key for key, name in env.payload["names"].items() if current.get(key) != name])}
-
-    async def on_sliced(self, env):
-        return self.sliced
-
 
     async def on_active(self, env):
         return self.active_torrents
@@ -167,11 +133,6 @@ class WatchedLock(asyncio.Lock):
         if self.locked():
             self.contended.set()
         return await super().acquire()
-
-
-def _item(uid, ep, filename):
-    return {"unique_id": uid, "episode_start": ep, "status": "completed",
-            "final_filename": filename, "source_title": f"Серия {ep}"}
 
 
 def _renaming_tasks(db_path):
@@ -386,31 +347,8 @@ async def test_a_torrent_series_without_a_profile_is_skipped_by_the_reprocess(sy
 
 
 @pytest.mark.asyncio
-async def test_preview_names_the_rows_of_a_video_series(system):
-    _, fake, probe, _, _ = system
-    fake.media_items = [_item("u1", 1, "старое имя 1.mp4"), _item("u2", 2, "Show s01e02.mp4")]
-
-    reply = await probe.request("renaming.preview", {"series_id": 2}, timeout=10)
-
-    assert reply["needs_rename_count"] == 1
-    assert [(row["unique_id"], row["new_filename_preview"]) for row in reply["preview"]] == [
-        ("u1", "Show s01e01.mp4"), ("u2", "Show s01e02.mp4")]
-
-
-@pytest.mark.asyncio
-async def test_preview_gives_every_row_the_numbers_of_its_slot(system):
-    _, fake, probe, _, _ = system
-    fake.media_items = [{**_item("u1", 3, "a.mp4"), "season": 2, "part": 1}]
-
-    reply = await probe.request("renaming.preview", {"series_id": 2}, timeout=10)
-
-    assert [(row["season"], row["episode"], row["part"]) for row in reply["preview"]] == [(2, 3, 1)]
-
-
-@pytest.mark.asyncio
 async def test_a_reprocess_a_restart_interrupted_is_run_again_when_the_system_has_started_and_not_before(started):
     bus, fake, renaming, probe, db_path, media = started
-    fake.media_items = [_item("u1", 1, "старое имя 1.mp4")]
     open(os.path.join(media, "старое имя 1.mp4"), "wb").close()
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO renaming_tasks (series_id, status, attempts, created_at, task_type, task_data) "
@@ -424,18 +362,3 @@ async def test_a_reprocess_a_restart_interrupted_is_run_again_when_the_system_ha
     assert env.payload == {"series_id": 2}
     # The files of a video series take their names from its plan: the task ends and renames nothing.
     assert not fake.rename_calls and _renaming_tasks(db_path) == []
-
-
-@pytest.mark.asyncio
-async def test_a_sliced_file_whose_new_name_is_taken_keeps_its_name_and_says_nothing_of_a_new_one(system):
-    _, fake, probe, _, media = system
-    fake.media_items = [_item("parent", 1, "Show s01e01.mp4")]
-    fake.media_items[0]["episode_end"] = 3
-    fake.sliced = [{"id": 5, "source_media_item_unique_id": "parent", "episode_number": 2, "file_path": "кусок 2.mp4"}]
-    open(os.path.join(media, "кусок 2.mp4"), "wb").close()
-    open(os.path.join(media, "Show s01e02.mp4"), "wb").close()  # somebody else's file lies under the name
-
-    reply = await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
-
-    assert reply == {"renamed": 0}
-    assert os.path.exists(os.path.join(media, "кусок 2.mp4"))

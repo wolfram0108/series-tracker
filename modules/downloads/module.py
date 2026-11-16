@@ -5,8 +5,6 @@ time with `downloads.fetch` and hears its end. This module resolves the stream b
 fetches it under a fuse of silence, retries a failure of the moment and tells the window what is under way. It keeps no
 record of a fetch: the owner of the work asks again after a stop.
 
-Owns the columns media_items.status and final_filename that the torrent pipeline writes through it (slicing).
-
 Queries / commands:
   downloads.fetch {key, url, path, max_height?, series_id?, whole?, ytdlp?, need?, variant?} - the stream behind the link
       into an absolute path. `need` (DownloadNeed) names what the fetch is for and `variant` (DownloadVariant) which row it
@@ -26,7 +24,6 @@ Queries / commands:
   downloads.queue.clear {} -> {deleted} - the waiting fetches are dropped (their owners hear them end, failed).
   downloads.cancel {task_id} -> {cancelled} - one fetch (`fetch:<key>`) stops; its owner hears it end, failed.
   downloads.card.remove {id} -> {removed} - the user removes a card that stayed after its sync.
-  downloads.item.set_filename, downloads.item.set_status - slicing reports a name and a status of a file it made or took over.
 
 Events out:
   downloads.fetch.started {key, series_id, path}, downloads.fetch.finished {key, ok, error, transient, path, series_id}.
@@ -167,8 +164,6 @@ class DownloadsModule(BaseModule):
         self.handle("sources.video.progress", self.on_player_progress)
         self.handle(WORK_WITHDRAWN, self.on_work_withdrawn)
         self.handle("downloads.withdraw", self.on_withdraw, concurrent=True)
-        self.handle("downloads.item.set_filename", self.on_set_filename)
-        self.handle("downloads.item.set_status", self.on_set_status)
         self.handle("series.deleted", self.on_series_deleted)
         self.handle(RUN_CHANGED, self.on_run_changed)
         self.handle("downloads.card.remove", self.on_card_remove)
@@ -268,14 +263,6 @@ class DownloadsModule(BaseModule):
             self._finished(job, False, reason("queue_cleared_by_user"), False)
         self._announce_queue()
         return {"deleted": len(waiting)}
-
-    async def on_set_filename(self, env: Envelope) -> None:
-        """final_filename is our column; renaming reports the new name after reprocessing (Р-15)."""
-        await self.repo.set_item_filename(env.payload["unique_id"], env.payload["filename"])
-
-    async def on_set_status(self, env: Envelope) -> None:
-        """status is our column; slicing marks an adopted compilation as downloaded (deep adoption)."""
-        await self.repo.set_item_status(env.payload["unique_id"], env.payload["status"])
 
     async def on_queue_get(self, env: Envelope) -> dict:
         tasks = self._queue()

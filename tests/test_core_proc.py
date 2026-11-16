@@ -73,18 +73,6 @@ async def test_the_duration_query_of_a_stalled_downloader_ends_with_unknown_and_
 
 
 @pytest.mark.asyncio
-async def test_the_chapters_query_of_a_stalled_downloader_fails_and_stops_it(tmp_path):
-    from modules.slicing import chapters
-    spy = Spy()
-    with patch("core.proc.asyncio.create_subprocess_exec", spy), \
-            patch.object(chapters, "program", return_value=stalled_downloader(tmp_path)), \
-            patch.object(chapters, "YTDLP_TIMEOUT", 0.3):
-        with pytest.raises(RuntimeError):
-            await chapters.fetch_chapters("https://example.test/v")
-    assert not alive(spy.started[0].pid)
-
-
-@pytest.mark.asyncio
 async def test_a_program_started_inside_a_hold_keeps_the_hold_until_it_has_ended(tmp_path):
     from core import storage
     path = str(tmp_path / "e.mp4")

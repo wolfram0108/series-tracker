@@ -4,8 +4,7 @@ Queries:
   renaming.reprocess {series_id} — массовая переобработка имён по виду
       сериала `kind` из catalog (контракт Р-12: сканер вызывает перед
       каждым сканом; тот же запрос — «сохранили свойства сериала в UI»,
-      этап 5): video → переименование скачанных файлов и нарезанных детей
-      на диске по готовым номерам строк (профиль не нужен); torrent →
+      этап 5): video → имена файлов даёт план сериала (modules/planner); torrent →
       ревизия имён файлов всех активных раздач в qBit по профилю
       торрентного источника (без профиля — пропуск).
   renaming.process_torrent {series_id, qb_hash, dry_run?} —
@@ -25,10 +24,8 @@ renaming.reprocess после пересчёта плана, в том же пр
 downloads: здесь считаются имена всех готовых файлов, а переносит их владелец
 (downloads.items.rename: обязательство записывается до переноса, кольцо
 из обмениваемых имён разрывается, чужой файл не затирается, новое имя
-объявляется после переноса). Физика нарезанных файлов (os.rename) и rename
-в qBit — здесь. Чужие колонки — командами владельцам: slicing.file.set_path
-(slicing — фейк до своего разбора; путь сообщается только после переноса или
-если файла нет), torrents.db.files.upsert.
+объявляется после переноса). Rename в qBit — здесь. Чужие колонки — командами
+владельцам: torrents.db.files.upsert.
 
 Ресьюмабельность: запись renaming_tasks живёт на время работы
 (и держит is_busy-семантику); незавершённые при старте перевыполняются
@@ -40,7 +37,7 @@ import asyncio
 import os
 import re
 
-from core import NO_HANDLER, BaseModule, BusRequestError, storage, torrent_profile_id
+from core import BaseModule, BusRequestError, storage, torrent_profile_id
 from core.contracts import SeriesKind
 from core.db import Database
 from core.envelope import Envelope
@@ -94,7 +91,6 @@ class RenamingModule(BaseModule):
         self.handle("renaming.reprocess", self.on_reprocess, concurrent=True)
         self.handle("renaming.process_torrent", self.on_process_torrent,
                     concurrent=True)
-        self.handle("renaming.preview", self.on_preview, concurrent=True)
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("system.started", self.on_system_started)
 
@@ -106,51 +102,6 @@ class RenamingModule(BaseModule):
                           "(задача %d, сериал %d)", task["id"],
                           task["series_id"])
             self.spawn(self._safe_reprocess(task["series_id"], resume_of=task["id"]))
-
-    async def on_preview(self, env: Envelope) -> dict:
-        """Контракт GET rename_preview (Р-21): тот же обход, что
-        у переобработки VK, но без касания диска и БД."""
-        series_id = env.payload["series_id"]
-        series = await self.request("catalog.series.get",
-                                    {"series_id": series_id})
-        items = await self.request("scan.media.list",
-                                   {"series_id": series_id})
-        items_map = {i["unique_id"]: i for i in items}
-        preview = []
-        needs = 0
-        for item in items:
-            current = item.get("final_filename")
-            reply = await self.request("rules.format_filename", {
-                "series": series, "media_item": item,
-                "original_filename": current})
-            new_name = reply["filename"]
-            if current and current != new_name:
-                needs += 1
-            # The numbers are the row's own (the constructor's): a window puts the name where its episode is.
-            preview.append({"unique_id": item["unique_id"],
-                            "type": "media_item",
-                            "season": item.get("season"),
-                            "episode": item.get("episode_start"),
-                            "part": item.get("part"),
-                            "current_filename": current,
-                            "new_filename_preview": new_name})
-        for child in await self._sliced_files(series_id):
-            parent = items_map.get(child["source_media_item_unique_id"])
-            if not parent:
-                continue
-            current = child.get("file_path")
-            reply = await self.request("rules.format_filename", {
-                "series": series, "media_item": parent,
-                "episode_override": child["episode_number"],
-                "original_filename": current})
-            new_name = reply["filename"]
-            if current and current != new_name:
-                needs += 1
-            preview.append({"unique_id": f"sliced-{child['id']}",
-                            "type": "sliced_file",
-                            "current_filename": current,
-                            "new_filename_preview": new_name})
-        return {"preview": preview, "needs_rename_count": needs}
 
     # --- массовая переобработка ------------------------------------------------------
 
@@ -204,17 +155,6 @@ class RenamingModule(BaseModule):
     def _busy(self, series_id: int, busy: bool) -> None:
         self.publish_event("series.busy.contribution", {
             "source": "renaming", "series_id": series_id, "busy": busy})
-
-    async def _sliced_files(self, series_id: int) -> list[dict]:
-        try:
-            return await self.request("slicing.files.list",
-                                      {"series_id": series_id})
-        except BusRequestError as exc:
-            if NO_HANDLER in str(exc):
-                self.log.warning("модуль slicing ещё не подключён — "
-                                 "нарезанные файлы пропущены")
-                return []
-            raise
 
     async def _rename_on_disk(self, base: str, old_rel: str,
                               new_rel: str) -> str:

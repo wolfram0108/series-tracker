@@ -45,7 +45,6 @@ LOGGING_MODULES = {
         {"name": "unpack"},
         {"name": "downloads"},
         {"name": "planner"},
-        {"name": "slicing"},
         {"name": "renaming"},
         {"name": "library"},
         {"name": "voices"},
@@ -165,11 +164,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                       response_model=DynamicObject)
     async def less_strict_scan(request: Request):
         return await _setting_flag("debug_less_strict_scan", request)
-
-    @route_per_method(r, "/api/settings/slicing_delete_source",
-                      methods=["GET", "POST"], response_model=DynamicObject)
-    async def slicing_delete_source(request: Request):
-        return await _setting_flag("slicing_delete_source_file", request)
 
     @route_per_method(r, "/api/settings/conform_clear_finished", methods=["GET", "POST"],
                       response_model=DynamicObject)

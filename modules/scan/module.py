@@ -45,7 +45,6 @@ Commands:
       schedule from the settings).
 
 Events (outgoing):
-  scan.plan.updated {series_id} — a row of a torrent series was switched off or on by the user.
   scan.status.changed {scanner_enabled, scan_interval, is_scanning, is_awaiting_tasks, next_scan_time} — the state
       of the scheduler (the contract of the old scanner_status_update).
   series.status.contribution — the fold of scanning/error (R-11); the carrier of the error is scan_tasks.status='error'.
@@ -188,8 +187,6 @@ class ScanModule(BaseModule):
         self.handle("scan.run.cancel", self.on_run_cancel, concurrent=True)
         self.handle("scan.series.prepare", self.on_prepare, concurrent=True)
         self.handle("scan.all.start", self.on_scan_all)
-        self.handle("scan.media.list", self.on_media_list)
-        self.handle("scan.item.set_ignored", self.on_set_ignored)
         self.handle("scan.output.switch", self.on_output_switch)
         self.handle("scan.edit.begin", self.on_edit_begin)
         self.handle("scan.edit.end", self.on_edit_end)
@@ -251,19 +248,6 @@ class ScanModule(BaseModule):
             if series.get("kind") != "video":
                 raise ScanError(reason("scope_video_only"))
         return await self._run_series(series_id, bool(force), download=p.get("download", True), scope=scope)
-
-    async def on_media_list(self, env: Envelope) -> list[dict]:
-        """Состав медиа-элементов серии (владелец строк — scan, Р-12);
-        читают renaming (переобработка имён) и UI (этап 5)."""
-        return await self.repo.items_for_series(env.payload["series_id"])
-
-    async def on_set_ignored(self, env: Envelope) -> None:
-        """is_ignored_by_user is our column; the UI and slicing set it (a row of a torrent series)."""
-        item = await self.repo.get_item(env.payload["unique_id"])
-        if item is None:
-            return
-        await self.repo.set_ignored(item["unique_id"], bool(env.payload["is_ignored"]))
-        self.publish_event("scan.plan.updated", {"series_id": item["series_id"]})
 
     # --- the admission of a change by the user (I-60) ------------------------------------------------------------
 
@@ -355,8 +339,8 @@ class ScanModule(BaseModule):
         return {"success": True}
 
     async def on_series_deleted(self, env: Envelope) -> None:
-        """Каскад Р-19: владелец чистит media_items и scan_tasks; идущий
-        скан серии прерывается (Д2 — как у загрузки, нарезки и переноса)."""
+        """The cascade of Р-19: the owner cleans scan_tasks; a scan of the series under way is stopped (Д-2, as a download
+        and a relocation are)."""
         series_id = env.payload["series_id"]
         self._aborted.add(series_id)
         # A count of the plan that is writing finishes first; one that comes after sees the series aborted.

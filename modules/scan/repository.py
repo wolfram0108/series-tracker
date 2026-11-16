@@ -1,11 +1,4 @@
-"""Repository of scan: the tables scan_tasks and media_items (scan_references is no longer written: the reference of a
-video series is its plan's, modules/planner).
-
-media_items: the rows and plan_status belong to scan (agreed in place of catalog); status and final_filename belong
-to downloads, slicing_status and chapters* to slicing and are never written here.
-
-scan_references: the outcome of the choice of the reference for every slot (season, episode, part), including the
-slots that have no row in media_items (`none`, `unfit`).
+"""Repository of scan: the table scan_tasks (the reference of a video series is its plan's, modules/planner).
 
 scan_tasks: the journal that lets a torrent scan resume. The plan of replacements is persisted BEFORE it is carried
 out (task_data) and the results of the additions as they come (results_data); status='error' with a message is the
@@ -78,29 +71,7 @@ class ScanRepository:
         row["results_data"] = json.loads(row["results_data"] or "{}")
         return row
 
-    # --- media_items: строки и план ---------------------------------------------
-
-    _BOOLS = ("is_ignored_by_user", "is_available")
-
-    async def items_for_series(self, series_id: int) -> list[dict]:
-        rows = await self._db.fetch_all(
-            "SELECT * FROM media_items WHERE series_id=?", (series_id,))
-        return self._db.coerce_bools(rows, self._BOOLS)
-
     async def delete_for_series(self, series_id: int) -> None:
-        """Каскад Р-19: серия удалена — наши таблицы чистятся."""
-        await self._db.execute(
-            "DELETE FROM media_items WHERE series_id=?", (series_id,))
+        """The cascade of Р-19: a series deleted, our table is cleaned."""
         await self._db.execute(
             "DELETE FROM scan_tasks WHERE series_id=?", (series_id,))
-        await self._db.execute(
-            "DELETE FROM scan_references WHERE series_id=?", (series_id,))
-
-    async def set_ignored(self, unique_id: str, ignored: bool) -> None:
-        await self._db.execute(
-            "UPDATE media_items SET is_ignored_by_user=? WHERE unique_id=?",
-            (1 if ignored else 0, unique_id))
-
-    async def get_item(self, unique_id: str) -> dict | None:
-        return await self._db.fetch_one(
-            "SELECT * FROM media_items WHERE unique_id=?", (unique_id,))
