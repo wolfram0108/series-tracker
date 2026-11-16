@@ -82,8 +82,6 @@ async def test_child_tables_reject_unknown_series(db_path):
     inserts = [
         "INSERT INTO scan_tasks (series_id, created_at, status, task_data, "
         "results_data) VALUES (9999, '2026-01-01', 'processing', '[]', '{}')",
-        "INSERT INTO download_tasks (task_key, series_id, status, task_type) "
-        "VALUES ('k', 9999, 'pending', 'vk_video')",
         "INSERT INTO slicing_tasks (media_item_unique_id, series_id, status) "
         "VALUES ('u', 9999, 'pending')",
         "INSERT INTO renaming_tasks (series_id, status, task_type) "

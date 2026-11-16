@@ -468,7 +468,6 @@ async def test_with_the_provider_down_every_try_of_the_user_is_refused_in_words_
     assert not view["running"] and not view["assets"] and stand.files() == []
     with sqlite3.connect(stand.db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM plan_failures").fetchone() == (0,)
-        assert conn.execute("SELECT COUNT(*) FROM download_tasks").fetchone() == (0,)
 
 
 async def test_a_provider_that_falls_in_the_middle_of_a_download_is_lived_through_the_run_closes_and_no_source_is_blamed(stand, monkeypatch):

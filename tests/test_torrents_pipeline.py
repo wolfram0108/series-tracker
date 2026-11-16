@@ -621,7 +621,7 @@ async def test_monitor_progress_and_contribution(system):
 
 @pytest.mark.asyncio
 async def test_progress_lives_in_the_table_of_torrents_and_downloads_never_sees_it(system):
-    """One row per infohash in torrent_progress, announced to the interface; download_tasks of downloads stays empty."""
+    """One row per infohash in torrent_progress, announced to the interface."""
     bus, qbt, _, probe, db_path = system
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO torrents (series_id, torrent_id, link, is_active, qb_hash) "
@@ -640,8 +640,6 @@ async def test_progress_lives_in_the_table_of_torrents_and_downloads_never_sees_
     assert announced[0]["status"] == "downloading" and announced[0]["dlspeed"] == 1000
     assert announced[0]["series_name"] == "Т"
     assert not {"task_key", "task_type", "video_url", "save_path"} & set(announced[0])
-    with sqlite3.connect(db_path) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM download_tasks").fetchone()[0] == 0
     queue = await probe.request("torrents.db.progress.list", {}, timeout=5)
     assert [t["qb_hash"] for t in queue["tasks"]] == ["h5"]
 

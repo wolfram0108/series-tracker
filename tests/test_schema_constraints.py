@@ -57,25 +57,6 @@ def test_a_torrent_is_one_row_per_hash_of_a_series_that_is_there(conn):
         conn.execute("INSERT INTO torrent_progress (qb_hash, series_id, status) VALUES ('hash-c', 99, 'x')")
 
 
-def test_a_folder_of_a_public_share_is_one_card(conn):
-    add = "INSERT INTO share139_folders (card, link_id, folder_id, found_at, seen_at) VALUES (?, ?, ?, 'now', 'now')"
-    conn.execute(add, (1000000, "link", "root"))
-    conn.execute(add, (1000001, "link", "sub"))
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute(add, (1000002, "link", "root"))
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute(add, (1000000, "other", "root"))
-
-
-def test_two_parts_of_one_voice_over_are_two_rows_and_a_part_is_one_row(conn):
-    add = ("INSERT INTO voice_dubs (series_id, season, episode, part, voice_key, voice_label, chain, updated_at) "
-           "VALUES (5, 1, 1, ?, 'blackcat', 'BlackCat', '[]', 'now')")
-    conn.execute(add, (1,))
-    conn.execute(add, (2,))
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute(add, (2,))
-
-
 def _release(conn, url="https://kinozal.tv/details.php?id=7", release="t1", infohash=None) -> int:
     return conn.execute("INSERT INTO torrent_releases (url, release, state, infohash, updated_at) "
                         "VALUES (?, ?, 'listed', ?, 'now')", (url, release, infohash)).lastrowid
