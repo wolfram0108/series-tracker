@@ -28,8 +28,8 @@ Queries:
       — имя файла торрента с сезонной папкой; правила профиля profile_id
       (обязателен, иначе ValueError) применяются к имени файла.
       filename=None — сезон не определить, файл пропускается.
-  rules.profiles.list → [profile]
-  rules.profiles.create {name} → {id}
+  rules.profiles.list {kind?} → [profile] (kind: series — по умолчанию, или torrent — профили редактора торрента)
+  rules.profiles.create {name, kind?} → {id}
   rules.profiles.update {profile_id, data} → {ok}
   rules.profiles.delete {profile_id} → {ok}
       — профиль и его правила удаляются одной транзакцией; профиль, назначенный
@@ -188,12 +188,14 @@ class RulesModule(BaseModule):
         return {"profiles": profiles}
 
     async def on_profiles_list(self, env: Envelope) -> list[dict]:
-        return await self.repo.list_profiles()
+        """{kind?} → the profiles of that kind (`series` when not said: the profiles of the torrent editor are not
+        profiles of a series)."""
+        return await self.repo.list_profiles((env.payload or {}).get("kind") or "series")
 
     # --- constructor CRUD: each write resets the cache and announces the change ---
 
     async def on_profile_create(self, env: Envelope) -> dict:
-        profile_id = await self.repo.create_profile(env.payload["name"])
+        profile_id = await self.repo.create_profile(env.payload["name"], env.payload.get("kind") or "series")
         return {"id": profile_id}
 
     async def on_profile_update(self, env: Envelope) -> dict:

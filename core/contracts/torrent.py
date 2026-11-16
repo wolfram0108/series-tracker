@@ -122,3 +122,84 @@ def video_of_link(link: str) -> str:
     """Which video a track row is: the video file in its release (the video track of a source is never compared by content)."""
     parsed = parse_link(link)
     return f"{parsed[0]}/{parsed[1]}" if parsed else ""
+
+
+# --- the lines of the torrent editor (its four tabs), the input of the rules of each tab -----------------------------
+
+class EditorTab(StrEnum):
+    FILES = "files"
+    VOICES = "voices"
+    SUBTITLES = "subtitles"
+    STREAMS = "streams"
+
+
+class FileKind(StrEnum):
+    VIDEO = "video"
+    AUDIO = "audio"
+    SUBTITLES = "subtitles"
+    FONT = "font"
+    OTHER = "other"
+
+
+# The words of the kinds in a line, as the mockup of the editor shows them; a rule matches the word, not the code.
+KIND_WORDS = {FileKind.VIDEO: "видео", FileKind.AUDIO: "звук", FileKind.SUBTITLES: "субтитры", FileKind.FONT: "шрифт",
+              FileKind.OTHER: "другое"}
+_EXTENSIONS = {
+    FileKind.VIDEO: {"mkv", "mp4", "avi", "m2ts", "ts", "mov", "wmv", "webm", "m4v", "flv", "mpg", "mpeg", "vob", "ogm"},
+    FileKind.AUDIO: {"mka", "ac3", "eac3", "dts", "aac", "flac", "mp3", "m4a", "ogg", "opus", "wav", "thd", "dtshd", "mp2"},
+    FileKind.SUBTITLES: {"ass", "ssa", "srt", "sup", "sub", "idx", "vtt"},
+    FileKind.FONT: {"ttf", "otf", "ttc"},
+}
+_SEP = " | "
+
+
+def extension_of(path: str) -> str:
+    name = path.rsplit("/", 1)[-1]
+    return name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+
+def kind_of(path: str) -> FileKind:
+    ext = extension_of(path)
+    return next((kind for kind, known in _EXTENSIONS.items() if ext in known), FileKind.OTHER)
+
+
+def _split(path: str) -> tuple[str, str]:
+    folder, _, name = path.rpartition("/")
+    return folder, name
+
+
+def episode_word(season: int | None, episode: int | None, last: int | None = None) -> str:
+    """`S01E05` (`S01E05-E06` for a file of several episodes): one spelling of the place of a file in every line."""
+    if episode is None:
+        return ""
+    word = f"S{season or 0:02d}E{episode:02d}"
+    return f"{word}-E{last:02d}" if last is not None and last != episode else word
+
+
+def files_line(path: str) -> str:
+    """A line of the tab «Файлы»: `D:<folder> | <name> | K:<kind> | X:<extension>`."""
+    folder, name = _split(path)
+    parts = [f"D:{folder}" if folder else "", name, f"K:{KIND_WORDS[kind_of(path)]}", f"X:{extension_of(path)}"]
+    return _SEP.join(part for part in parts if part and not part.endswith(":"))
+
+
+def track_file_line(path: str, place: str) -> str:
+    """A line of the tabs «Озвучки» and «Субтитры»: `D:<folder> | <name> | X:<extension> | S:<S01E05>`."""
+    folder, name = _split(path)
+    parts = [f"D:{folder}" if folder else "", name, f"X:{extension_of(path)}", f"S:{place}" if place else ""]
+    return _SEP.join(part for part in parts if part and not part.endswith(":"))
+
+
+STREAM_KINDS = {"video": "видео", "audio": "звук", "subtitle": "субтитры"}
+
+
+def stream_line(kind: str, index: int, language: str = "", title: str = "", codec: str = "") -> str:
+    """A line of the tab «Контейнеры», one per stream: `T:<kind> | A:<number> | L:<language> | N:<title> | C:<codec>`."""
+    parts = [f"T:{STREAM_KINDS.get(kind, kind)}", f"A:{index}", f"L:{language}" if language else "",
+             f"N:{title}" if title else "", f"C:{codec}" if codec else ""]
+    return _SEP.join(part for part in parts if part)
+
+
+# What a rule of the editor may set besides numbers: the folder of a voice-over or of subtitles by its name, the language,
+# the type of subtitles (DESIGN.md, 4.1).
+SUBTITLE_TYPES = ("full", "signs", "forced")

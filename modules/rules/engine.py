@@ -15,6 +15,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.contracts.torrent import SUBTITLE_TYPES
 from core.reasons import reason
 
 EXTRACT_KEYS = {
@@ -32,6 +33,10 @@ EXTRACT_TYPES = ("extract_single", "extract_range", "extract_season",
 ASSIGN_TYPES = ("assign_voiceover", "assign_episode", "assign_season",
                 "assign_part", "assign_quality", "assign_resolution",
                 "assign_range")
+# The actions of the torrent editor (stage 15): a value set as it is, under its own key of the result.
+EDITOR_ASSIGN = {"assign_voice_folder": "voice_folder", "assign_subtitle_folder": "subtitle_folder",
+                 "assign_language": "language", "assign_subtitle_type": "subtitle_type"}
+ASSIGN_TYPES = ASSIGN_TYPES + tuple(EDITOR_ASSIGN)
 ACTION_TYPES = ("exclude",) + EXTRACT_TYPES + ASSIGN_TYPES
 BLOCK_TYPES = ("text", "number", "range", "add", "subtract", "whitespace",
                "any_text", "start_of_line", "end_of_line", "or")
@@ -524,6 +529,13 @@ def _run_actions(title: str, rule: CompiledRule,
             produced = True
         elif a_type == "assign_resolution":
             extracted["resolution"] = action.raw_value
+            produced = True
+        elif a_type in EDITOR_ASSIGN:
+            value = str(action.raw_value or "").strip()
+            if not value or (a_type == "assign_subtitle_type" and value not in SUBTITLE_TYPES):
+                errors.append(reason("rule_value_bad", rule=rule.name, action=a_type, value=value))
+                continue
+            extracted[EDITOR_ASSIGN[a_type]] = value
             produced = True
         elif a_type == "assign_range":
             extracted.pop("episode", None)

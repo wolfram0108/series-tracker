@@ -19,7 +19,9 @@ WEB = Path(__file__).resolve().parent.parent / "web" / "src"
 VOCABULARY = WEB / "lib" / "ruleVocabulary.ts"
 
 # Типы, которые движок умеет, а панель сознательно не предлагает.
-ENGINE_ONLY = {"extract_part"}
+ENGINE_ONLY = {"extract_part",
+               # The actions of the torrent editor: offered by the cards of the editor's tabs, not of the rules of a series.
+               "assign_voice_folder", "assign_subtitle_folder", "assign_language", "assign_subtitle_type"}
 
 
 def _const_block(path: Path, name: str) -> str | None:

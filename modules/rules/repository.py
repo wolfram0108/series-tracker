@@ -31,9 +31,9 @@ class RulesRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    async def list_profiles(self) -> list[dict]:
+    async def list_profiles(self, kind: str = "series") -> list[dict]:
         return await self._db.fetch_all(
-            "SELECT id, name FROM parser_profiles ORDER BY id")
+            "SELECT id, name FROM parser_profiles WHERE kind=? ORDER BY id", (kind,))
 
     async def get_rules(self, profile_id: int) -> list[dict]:
         rules = await self._db.fetch_all(
@@ -51,12 +51,12 @@ class RulesRepository:
 
     # --- CRUD конструктора (Р-22) ----------------------------------------------
 
-    async def create_profile(self, name: str) -> int:
+    async def create_profile(self, name: str, kind: str = "series") -> int:
         if await self._db.fetch_one(
                 "SELECT id FROM parser_profiles WHERE name=?", (name,)):
             raise ValueError(reason("profile_name_taken", name=name))
         return await self._db.insert(
-            "INSERT INTO parser_profiles (name) VALUES (?)", (name,))
+            "INSERT INTO parser_profiles (name, kind) VALUES (?, ?)", (name, kind))
 
     async def profile_exists(self, profile_id: int) -> bool:
         return await self._db.fetch_one(
