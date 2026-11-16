@@ -130,3 +130,55 @@ def test_a_container_carries_its_provenance_and_gives_it_back(media):
     assert asyncio.run(container.provenance_of(again)) == newer
     assert asyncio.run(container.provenance_of(video)) is None  # a file not built here carries none
     assert sorted(os.listdir(tmp)) == sorted(set(os.listdir(tmp)) - {"first.mkv.provenance.json"})
+
+
+def _torrent_video(tmp) -> str:
+    """A Matroska file as a release gives it: a picture, a sound, ASS subtitles in two languages (one forced), a font they
+    are drawn with, and two chapters."""
+    ass = tmp / "signs.ass"
+    ass.write_text("[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Kurinto,20\n\n"
+                   "[Events]\nFormat: Layer, Start, End, Style, Text\nDialogue: 0,0:00:00.50,0:00:01.50,Default,Надпись\n",
+                   encoding="utf-8")
+    font = tmp / "Kurinto.ttf"
+    font.write_bytes(b"\x00\x01\x00\x00" + b"font" * 64)
+    chapters = tmp / "chapters.txt"
+    chapters.write_text(";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1500\ntitle=Пролог\n"
+                        "[CHAPTER]\nTIMEBASE=1/1000\nSTART=1500\nEND=3000\ntitle=Серия\n", encoding="utf-8")
+    return make(tmp / "E01.mkv", "-f", "lavfi", "-i", "testsrc=duration=3:size=160x90:rate=10",
+                "-f", "lavfi", "-i", "sine=frequency=300:duration=3", "-i", str(ass), "-i", str(ass), "-i", str(chapters),
+                "-map", "0", "-map", "1", "-map", "2", "-map", "3", "-map_chapters", "4", "-c:v", "mpeg4", "-c:a", "aac",
+                "-c:s", "copy", "-metadata:s:s:0", "language=rus", "-metadata:s:s:0", "title=Надписи",
+                "-disposition:s:0", "forced", "-metadata:s:s:1", "language=eng",
+                "-attach", str(font), "-metadata:s:t", "mimetype=application/x-truetype-font",
+                "-metadata:s:t", "filename=Kurinto.ttf")
+
+
+def test_the_chapters_subtitles_and_fonts_of_a_matroska_video_go_with_it_and_the_table_is_one(media):
+    from core.ffprobe import layout_of
+    tmp, _video, dubs, _ = media
+    video = _torrent_video(tmp)
+    out = str(tmp / "built.mkv")
+    tracks = [AudioIn("Оригинал", video, 0, "1:E01", own=True), AudioIn("ruchime", dubs["ruchime"], 0, "1:E01")]
+    assert asyncio.run(container.build(out, video, "1:E01", tracks, provenance={"video": "E01"})) is None
+
+    layout, _ = asyncio.run(layout_of(out))
+    subtitles = [s for s in layout["streams"] if s["kind"] == "subtitle"]
+    attached = [s["filename"] for s in layout["streams"] if s["kind"] == "attachment"]
+    assert [(s["codec"], s["language"], s["title"], s["forced"]) for s in subtitles] == [
+        ("ass", "rus", "Надписи", True), ("ass", "eng", "", False)]
+    assert sorted(attached) == ["Kurinto.ttf", container.PROVENANCE]
+    assert layout["chapters"] == 2
+
+    again = str(tmp / "again.mkv")  # a container rebuilt from itself keeps them, and the table of the build is still one
+    assert asyncio.run(container.build(again, out, "1:E01", [AudioIn("Оригинал", out, 0, "1:E01", own=True)],
+                                       provenance={"video": "E01"})) is None
+    layout, _ = asyncio.run(layout_of(again))
+    assert sorted(s["filename"] for s in layout["streams"] if s["kind"] == "attachment") == ["Kurinto.ttf", container.PROVENANCE]
+    assert len([s for s in layout["streams"] if s["kind"] == "subtitle"]) == 2 and layout["chapters"] == 2
+
+
+def test_a_video_of_another_container_carries_its_chapters_and_no_subtitles(media):
+    tmp, video, dubs, _ = media
+    out = str(tmp / "plain.mkv")
+    assert asyncio.run(container.build(out, video, "1:x", [AudioIn("a", video, 0, "1:x", own=True)])) is None
+    assert codecs(out) == ["mpeg4", "aac"]

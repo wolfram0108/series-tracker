@@ -760,6 +760,11 @@
        "title": "Text",
        "type": "string"
       },
+      "timeline": {
+       "default": "",
+       "title": "Timeline",
+       "type": "string"
+      },
       "video": {
        "default": "",
        "title": "Video",
@@ -968,6 +973,11 @@
     "text": {
      "default": "",
      "title": "Text",
+     "type": "string"
+    },
+    "timeline": {
+     "default": "",
+     "title": "Timeline",
      "type": "string"
     },
     "video": {

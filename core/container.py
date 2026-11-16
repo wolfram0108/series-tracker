@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Sequence
 
-from .ffprobe import film_stream, streams_of
+from .ffprobe import film_stream, layout_of, streams_of
 from .proc import LOST, program, run_capture, run_lines
 
 # What a build tells as it goes (`build(report=…)`): the stage and its figures — "build" {progress, speed_x, eta,
@@ -134,8 +134,22 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     cmd += ["-map", f"0:{film['index']}"]
     for track in tracks:
         cmd += ["-map", f"{index_of[track.path]}:a:{track.stream}"]
-    cmd += ["-map_metadata", "-1", "-map_chapters", "-1", "-c", "copy", "-max_interleave_delta", "0",
+    # What the file of the video carries besides its picture goes with it (stage 15, DESIGN.md 7.1, 7.2): its chapters, and
+    # from a Matroska file its subtitles and the fonts they are drawn with (another container's subtitles may not be copied
+    # into Matroska as they are). The table of a container built here is no font: it is written anew below.
+    subtitles, fonts = await _carried(video)
+    for stream in subtitles + fonts:
+        cmd += ["-map", f"0:{stream['index']}"]
+    cmd += ["-map_metadata", "-1", "-map_chapters", "0", "-c", "copy", "-max_interleave_delta", "0",
             "-metadata", f"ST_VIDEO={video_identity}", "-metadata", f"ST_PUBLICATION={publication}"]
+    for number, stream in enumerate(subtitles):
+        cmd += [*([f"-metadata:s:s:{number}", f"language={stream['language']}"] if stream["language"] else []),
+                *([f"-metadata:s:s:{number}", f"title={stream['title']}"] if stream["title"] else []),
+                f"-disposition:s:{number}", "+".join(flag for flag, on in (("default", stream["default"]),
+                                                                           ("forced", stream["forced"])) if on) or "0"]
+    for number, stream in enumerate(fonts):
+        cmd += [f"-metadata:s:t:{number}", f"filename={stream['filename']}",
+                f"-metadata:s:t:{number}", f"mimetype={stream['mimetype'] or 'application/x-truetype-font'}"]
     for number, track in enumerate(tracks):
         cmd += [f"-metadata:s:a:{number}", f"title={track.shown}",
                 *([f"-metadata:s:a:{number}", f"language={track.language}"] if track.language else []),
@@ -150,7 +164,8 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
         attached = output + "." + PROVENANCE
         with open(attached, "w", encoding="utf-8") as out:
             json.dump(provenance, out, ensure_ascii=False, sort_keys=True)
-        cmd += ["-attach", attached, "-metadata:s:t", "mimetype=application/json", "-metadata:s:t", f"filename={PROVENANCE}"]
+        table = f"-metadata:s:t:{len(fonts)}"
+        cmd += ["-attach", attached, table, "mimetype=application/json", table, f"filename={PROVENANCE}"]
     cmd += ["-progress", "pipe:1", "-nostats", "-f", "matroska", output]
     length = expected.duration if expected is not None else 0.0
     fields: dict[str, str] = {}
@@ -177,6 +192,18 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     if made is not None and made.publication != publication:
         return "container_publication_wrong"
     return problem_of(made, video_identity, signature_of(tracks), expected.duration if expected is not None else None)
+
+
+async def _carried(video: str) -> tuple[list[dict], list[dict]]:
+    """The subtitles and the font attachments of a Matroska file of the video (core.ffprobe.layout_of); none of another."""
+    if os.path.splitext(video)[1].lower() not in (".mkv", ".mka", ".mks"):
+        return [], []
+    layout, _said = await layout_of(video, timeout=READ_TIMEOUT_S)
+    streams = (layout or {}).get("streams") or []
+    subtitles = [each for each in streams if each["kind"] == "subtitle"]
+    fonts = [each for each in streams if each["kind"] == "attachment" and each["filename"]
+             and each["filename"] != PROVENANCE]
+    return subtitles, fonts
 
 
 def progress_of(fields: dict[str, str], length: float) -> dict:
