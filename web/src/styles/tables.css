@@ -83,7 +83,7 @@
 }
 
 /* An episode its source did not give in its last read (it stands from an earlier read): the same mark in every table. */
-.stale-episodes { background: var(--stale-ground); border-bottom: 2px solid var(--stale-mark); padding: 0 0.2rem; }
+.stale-episodes { background: var(--stale-ground); border-bottom: 0.125rem solid var(--stale-mark); padding: 0 0.2rem; }
 tr.is-stale > td { background: var(--stale-ground); }
 
 /* The action of a row of a table (a word on a plain button: «Скачать заново», «Повторить»): one look wherever a table has one. */

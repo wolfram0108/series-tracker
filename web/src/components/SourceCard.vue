@@ -264,7 +264,7 @@ async function copyAddress(): Promise<void> {
 .player-tab { padding-block: 0.3rem; font-size: 0.85rem; }
 .player-rows { color: var(--text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
 .player-tab.is-off .player-name { text-decoration: line-through; }
-.player-tab.is-stale { background: var(--stale-ground); border-bottom: 2px solid var(--stale-mark); }
+.player-tab.is-stale { background: var(--stale-ground); border-bottom: 0.125rem solid var(--stale-mark); }
 .player-top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.9rem; font-size: 0.875rem; color: var(--color-gray-600); }
 .player-top b { color: #2c3e50; }
 /* The switch of a player stands in the corner, as every switch of the window does. */

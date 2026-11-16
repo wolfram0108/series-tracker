@@ -1,7 +1,8 @@
 """Guard: the added or changed lines of web/src (.vue, .css, .ts) keep the layout intrinsic (law-ui).
 
 Violations, per added line since the base commit:
-  - `@media` or `@container` conditioned on width (min-width, max-width, width, ranges, inline-size), and
+  - `@media` conditioned on width (min-width, max-width, width, ranges, inline-size): a threshold of the window; a
+    container query is the measure the law of the interfaces names (law-ui, 2: the container, not the window), and
     `matchMedia` with a width;
   - a size in px outside `clamp()` in a layout property (width/height families, margin, padding, gap, offsets,
     flex-basis, grid templates and the like) or in a custom property named like a size;
@@ -36,7 +37,7 @@ _SIZE_WORDS = re.compile(r"(width|height|size|gap|space|spacing|padding|margin|i
 _NOT_LAYOUT_WORDS = re.compile(r"(font|text|line|letter|icon|radius|shadow|border|outline)")
 _DECLARATION = re.compile(r"(?<![\w-])(--[\w-]+|[A-Za-z][\w-]*)\s*:\s*")
 _PX = re.compile(r"(?<![\w.#-])(\d+(?:\.\d+)?|\.\d+)px\b")
-_MEDIA = re.compile(r"@(?:media|container)\b([^{]*)", re.I)
+_MEDIA = re.compile(r"@media\b([^{]*)", re.I)
 _WIDTH_CONDITION = re.compile(r"(?:min-|max-)?(?:device-)?width|inline-size|width\s*[<>]|[<>]=?\s*width", re.I)
 _MATCH_MEDIA = re.compile(r"matchMedia\s*\(\s*[`'\"][^`'\"]*width", re.I)
 

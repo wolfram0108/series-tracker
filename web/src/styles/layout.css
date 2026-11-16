@@ -34,7 +34,7 @@
   text-align: center; padding: 48px 16px; color: var(--text-muted);
   font-size: 1.05rem;
 }
-.empty-state .empty-retry { margin-top: 12px; }
+.empty-state .empty-retry { margin-top: 0.75rem; }
 /* The stream is lost: a strip over the windows, at the top of the screen, so that nothing under it moves. It is invisible for its first
    second (ConnectionBanner.vue): a break the browser mends at once is not shown. */
 .connection-banner {

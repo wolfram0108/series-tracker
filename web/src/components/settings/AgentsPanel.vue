@@ -139,19 +139,19 @@ const str = (value: unknown) => String(value ?? "")
 </template>
 
 <style scoped>
-.agents-panel { display: flex; flex-direction: column; gap: 20px; }
-.agents-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.agents-panel { display: flex; flex-direction: column; gap: 1.25rem; }
+.agents-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem 0.875rem; }
 .agents-select { inline-size: min(22rem, 100%); }
 /* The series of the window is not a choice but a name: it has the whole row (the chips go under it), not a plate of a picker's width that breaks it into lines. */
 .agents-select.is-readonly { flex: 1 1 100%; inline-size: auto; }
-.agents-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
+.agents-chips { display: flex; flex-wrap: wrap; gap: 0.375rem; margin-inline-start: auto; }
 /* An empty queue is a chip that is quiet: its tint and its edge are the faded ones, its words are not (4.5:1 on its tint). */
 .agents-chip.is-empty {
   background-color: color-mix(in srgb, var(--tone) 12%, transparent);
   border-color: color-mix(in srgb, var(--tone-end) 30%, transparent);
   color: color-mix(in srgb, var(--tone-end) 72%, black);
 }
-.agents-cards { display: flex; flex-direction: column; gap: 8px; }
-.agents-daemon { display: flex; flex-wrap: wrap; gap: 8px; }
-.queue-empty { padding: 16px; text-align: center; color: var(--text-muted); background: var(--bg-light); border-radius: var(--border-radius); }
+.agents-cards { display: flex; flex-direction: column; gap: 0.5rem; }
+.agents-daemon { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.queue-empty { padding: 1rem; text-align: center; color: var(--text-muted); background: var(--bg-light); border-radius: var(--border-radius); }
 </style>

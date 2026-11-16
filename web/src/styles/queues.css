@@ -42,7 +42,7 @@
 .queue-table .variant-row.same-tone-3 { --same-ink: var(--same-3); }
 .same-pick {
   display: inline-grid; place-items: center; inline-size: 1.5rem; block-size: 1.5rem; padding: 0; border-radius: 50%;
-  border: 1.5px solid #ced4da; background: var(--bg-white); color: #adb5bd; cursor: pointer; font: inherit;
+  border: 0.0938rem solid #ced4da; background: var(--bg-white); color: #adb5bd; cursor: pointer; font: inherit;
 }
 .same-pick i { font-size: 0.7rem; }
 .same-pick:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text-muted); }
@@ -53,7 +53,7 @@
   font: inherit; font-size: 0.75rem; font-weight: 700; color: #fff; background: var(--same-ink); font-variant-numeric: tabular-nums;
 }
 .same-chip i { font-size: 0.7rem; }
-.same-chip.on { outline: 2px solid #343a40; outline-offset: 1px; }
+.same-chip.on { outline: 0.125rem solid #343a40; outline-offset: 1px; }
 .same-pickbar {
   display: flex; align-items: center; gap: 0.75rem; padding: 0.45rem 0.8rem; border-radius: 10px; font-size: 0.85rem;
   background: rgba(13, 110, 253, 0.08); border: 1px solid rgba(13, 110, 253, 0.25);

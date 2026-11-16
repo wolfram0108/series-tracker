@@ -129,7 +129,7 @@
 
 /* группа иконочных кнопок внутри группы (item-button-group + btn-icon) */
 .item-button-group {
-  display: flex; align-items: stretch; flex-shrink: 0; gap: 2px; overflow: hidden;
+  display: flex; align-items: stretch; flex-shrink: 0; gap: 0.125rem; overflow: hidden;
   border-radius: var(--inner-border-radius); /* the corners of every item of a group, its buttons too */
 }
 .btn-icon {

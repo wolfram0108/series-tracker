@@ -48,7 +48,7 @@
 
 /* секции и пилюли глав */
 .chapter-section { margin-bottom: 15px; }
-.chapter-section h3 { font-size: 0.9rem; font-weight: 600; margin: 0 0 8px; color: #495057; }
+.chapter-section h3 { font-size: 0.9rem; font-weight: 600; margin: 0 0 0.5rem; color: #495057; }
 .chapter-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .chapter-pill {
   display: inline-flex; align-items: center;
@@ -63,7 +63,7 @@
 
 .chapter-controls { display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #dee2e6; flex-wrap: wrap; }
 .chapter-selection { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px; margin-top: 12px; }
-.chapter-selection h3 { font-size: 0.9rem; font-weight: 600; margin: 0 0 10px; color: #495057; }
+.chapter-selection h3 { font-size: 0.9rem; font-weight: 600; margin: 0 0 0.625rem; color: #495057; }
 .chapter-checkbox-list { max-height: 200px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 4px; padding: 8px; background: #fff; }
 .chapter-checkbox-list .chk-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .chapter-checkbox-list label { font-size: 0.8rem; color: #495057; cursor: pointer; }

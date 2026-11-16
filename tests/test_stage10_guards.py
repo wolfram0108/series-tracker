@@ -1013,7 +1013,7 @@ UI_CSS = '''
     @media (min-width: 600px) { .a { color: red } } /* BAD */
     @media (max-width: 40rem) { .a { color: red } } /* BAD */
     @media (width >= 600px) { .a { color: red } } /* BAD */
-    @container (min-width: 20rem) { .a { color: red } } /* BAD */
+    @container (min-width: 20rem) { .a { color: red } } /* the container is the measure of law-ui, not the window */
     @media (prefers-color-scheme: dark) { .a { color: red } }
     @media (hover: hover) { .a { color: red } }
     .a { width: 300px } /* BAD */
