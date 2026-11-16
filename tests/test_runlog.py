@@ -8,7 +8,7 @@ import logging
 import os
 
 from core import Bus, Runner
-from core.contracts.release_table import TABLE_TRACE
+from core.contracts.release_table import TABLE_TRACE_TOPIC
 from core.contracts.work import RUN_CHANGED
 from core.envelope import Envelope
 from modules.runlog import RunlogModule
@@ -114,7 +114,7 @@ async def test_without_a_folder_nothing_is_written_and_the_bus_is_not_looked_at(
 
 
 def traced(url: str, kind: str, **more) -> Envelope:
-    return Envelope(topic=TABLE_TRACE, kind="event", payload={"url": url, "site": "fake", "kind": kind, **more})
+    return Envelope(topic=TABLE_TRACE_TOPIC, kind="event", payload={"url": url, "site": "fake", "kind": kind, **more})
 
 
 async def test_a_read_of_a_page_outside_a_sync_is_dumped_whole_in_a_file_of_its_page(tmp_path):
@@ -139,8 +139,8 @@ async def test_a_read_of_a_page_outside_a_sync_is_dumped_whole_in_a_file_of_its_
     (name,) = os.listdir(folder)
     got = lines(os.path.join(folder, name))
     assert [(each["e"], each.get("topic") or each.get("message", "")[:13]) for each in got] == [
-        ("open", ""), ("bus", TABLE_TRACE), ("bus", "sources.table.progress"), ("log", "плеер line:x,"),
-        ("bus", TABLE_TRACE), ("close", "")]
+        ("open", ""), ("bus", TABLE_TRACE_TOPIC), ("bus", "sources.table.progress"), ("log", "плеер line:x,"),
+        ("bus", TABLE_TRACE_TOPIC), ("close", "")]
     assert got[0]["url"] == url and got[-1] == {"t": got[-1]["t"], "e": "close", "url": url, "stopped": False}
     assert got[4]["payload"]["rows"] == 499
 
@@ -159,5 +159,5 @@ async def test_a_read_inside_the_sync_of_a_series_is_in_the_dump_of_that_sync_an
     finally:
         await runner.stop()
     (path,) = dumps(tmp_path, 5)
-    assert [each.get("topic") for each in lines(path) if each["e"] == "bus"] == [RUN_CHANGED, TABLE_TRACE, TABLE_TRACE, RUN_CHANGED]
+    assert [each.get("topic") for each in lines(path) if each["e"] == "bus"] == [RUN_CHANGED, TABLE_TRACE_TOPIC, TABLE_TRACE_TOPIC, RUN_CHANGED]
     assert not os.path.exists(os.path.join(tmp_path, "reads"))
