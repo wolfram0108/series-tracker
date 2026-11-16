@@ -3,7 +3,9 @@
 What the model does is what the real client was measured to do (tools/collectors/qbit_behaviour.py, qBittorrent 5.2.1;
 the observations are kept in tests/samples/qbit/update_5_2_1.json and replayed by tests/test_qbit_model.py):
 
-- a torrent added stopped does not look at the disk: its progress is 0 until a recheck;
+- a torrent added stopped does not look at the disk: its progress is 0 until a recheck; one added started does;
+- a start asked while a check runs is lost (the torrent stays stopped): the model's check is instant, so it does not
+  reproduce that, and the application never asks it (an update is added started);
 - a recheck hashes the pieces from the files on disk, writes no data, leaves a stopped torrent stopped, and renames a file
   left incomplete to `<name>.!qB` (the client's `incomplete_files_ext`) and a complete one back;
 - a file with priority 0 is never created; a start with nobody seeding writes nothing;
@@ -382,6 +384,8 @@ class QbitModel:
             t = _Torrent(h, form.get("savepath") or "/downloads", form.get("category") or "", stopped, added_on=self._clock)
             if blob is not None:
                 self._attach_meta(t, blob)
+                if not stopped:
+                    self._recheck(t)  # measured: a torrent added started looks at the files on disk by itself
             self.torrents[h] = t
             if t.category:
                 self.categories.setdefault(t.category, "")
@@ -540,10 +544,11 @@ class UpdateScenario:
                 raise TimeoutError(f"{h}: {got[0]['state'] if got else 'absent'}")
             await asyncio.sleep(0.05)
 
-    async def add(self, meta: bytes, h: str) -> None:
+    async def add(self, meta: bytes, h: str, *, stopped: bool = True) -> None:
+        flag = "true" if stopped else "false"
         got = await self.client._request(
             "POST", "/api/v2/torrents/add", conflict_ok=True,
-            data={"savepath": self.save_path, "category": self.category, "paused": "true", "stopped": "true"},
+            data={"savepath": self.save_path, "category": self.category, "paused": flag, "stopped": flag},
             files={"torrents": ("probe.torrent", meta, "application/x-bittorrent")})
         if got.status_code == 409:
             raise RuntimeError(f"{h} already in the client")
@@ -576,13 +581,7 @@ class UpdateScenario:
                     piece=PIECE, h1=h1, h2=h2)
         self.folder.mkdir(mode=0o777)
         self.folder.chmod(0o777)
-        for rel, content in v1:
-            target = self.folder / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content)
-            target.chmod(0o666)
-            for parent in target.relative_to(self.folder).parents:
-                (self.folder / parent).chmod(0o777)
+        self._lay(v1)
         await self.observe("A", "disk_before_add", None)
         await self.add(meta1, h1)
         await self.observe("A", "added_stopped", h1)
@@ -610,4 +609,32 @@ class UpdateScenario:
         await self.client.delete([h2], delete_files=True)
         await self.gone(h2)
         await self.observe("D", "v2_deleted_with_files", None)
+
+        # E: the update added started on the files of v1, no recheck asked: does the client look at the disk by itself?
+        self._lay(v1)
+        await self.add(meta2, h2, stopped=False)
+        await self.settle(h2, lambda t: t["state"] not in CHECKING)
+        await self.observe("E", "v2_added_started", h2)
+        await self.client.delete([h2], delete_files=True)
+        await self.gone(h2)
+
+        # F: added stopped, the recheck asked and the start asked at once, not after the check (measured: the start is lost).
+        self._lay(v1)
+        await self.add(meta2, h2)
+        await self.client.recheck([h2])
+        await self.client.resume([h2])
+        await self.settle(h2, lambda t: t["state"] not in CHECKING and t["progress"] > 0)
+        await self.observe("F", "v2_rechecked_and_started_at_once", h2)
+        await self.client.delete([h2], delete_files=True)
+        await self.gone(h2)
+        await self.observe("F", "v2_deleted_with_files", None)
         return [h1, h2]
+
+    def _lay(self, files: list[tuple[str, bytes]]) -> None:
+        for rel, content in files:
+            target = self.folder / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+            target.chmod(0o666)
+            for parent in target.relative_to(self.folder).parents:
+                (self.folder / parent).chmod(0o777)

@@ -1,5 +1,5 @@
 {
- "measured": "2026-11-16, tools/collectors/qbit_behaviour.py, raw qbit_behaviour__20261116T193718Z__probe.jsonl",
+ "measured": "2026-11-16, tools/collectors/qbit_behaviour.py, raw qbit_behaviour__20261116T195834Z__probe.jsonl",
  "client": {
   "version": "v5.2.1",
   "incomplete_files_ext": true
@@ -834,6 +834,249 @@
     }
    ],
    "written": []
+  },
+  {
+   "scenario": "E",
+   "step": "v2_added_started",
+   "info": {
+    "state": "stalledDL",
+    "progress": 0.5985,
+    "amount_left": 1583028
+   },
+   "files": [
+    {
+     "name": "Show/E01.mkv",
+     "progress": 1,
+     "priority": 1,
+     "piece_range": [
+      0,
+      5
+     ]
+    },
+    {
+     "name": "Show/E02.mkv",
+     "progress": 0.9917,
+     "priority": 1,
+     "piece_range": [
+      5,
+      9
+     ]
+    },
+    {
+     "name": "Show/E03.mkv",
+     "progress": 0,
+     "priority": 1,
+     "piece_range": [
+      9,
+      12
+     ]
+    },
+    {
+     "name": "Show/E04.mkv",
+     "progress": 0,
+     "priority": 1,
+     "piece_range": [
+      12,
+      14
+     ]
+    },
+    {
+     "name": "Show/Sound/E01.mka",
+     "progress": 0,
+     "priority": 1,
+     "piece_range": [
+      14,
+      15
+     ]
+    }
+   ],
+   "pieces": [
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "disk": [
+    {
+     "path": "Show",
+     "dir": true,
+     "size": 0
+    },
+    {
+     "path": "Show/E01.mkv",
+     "dir": false,
+     "size": 1311720
+    },
+    {
+     "path": "Show/E02.mkv.!qB",
+     "dir": false,
+     "size": 1056353
+    },
+    {
+     "path": "Show/Sound",
+     "dir": true,
+     "size": 0
+    },
+    {
+     "path": "Show/Sound/E01.mka.!qB",
+     "dir": false,
+     "size": 263143
+    },
+    {
+     "path": "Show/old_name.mkv",
+     "dir": false,
+     "size": 524343
+    }
+   ],
+   "written": [
+    "Show/E01.mkv",
+    "Show/old_name.mkv"
+   ]
+  },
+  {
+   "scenario": "F",
+   "step": "v2_rechecked_and_started_at_once",
+   "info": {
+    "state": "stoppedDL",
+    "progress": 0.5985,
+    "amount_left": 1583028
+   },
+   "files": [
+    {
+     "name": "Show/E01.mkv",
+     "progress": 1,
+     "priority": 1,
+     "piece_range": [
+      0,
+      5
+     ]
+    },
+    {
+     "name": "Show/E02.mkv",
+     "progress": 0.9917,
+     "priority": 1,
+     "piece_range": [
+      5,
+      9
+     ]
+    },
+    {
+     "name": "Show/E03.mkv",
+     "progress": 0,
+     "priority": 1,
+     "piece_range": [
+      9,
+      12
+     ]
+    },
+    {
+     "name": "Show/E04.mkv",
+     "progress": 0,
+     "priority": 1,
+     "piece_range": [
+      12,
+      14
+     ]
+    },
+    {
+     "name": "Show/Sound/E01.mka",
+     "progress": 0,
+     "priority": 1,
+     "piece_range": [
+      14,
+      15
+     ]
+    }
+   ],
+   "pieces": [
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "disk": [
+    {
+     "path": "Show",
+     "dir": true,
+     "size": 0
+    },
+    {
+     "path": "Show/E01.mkv",
+     "dir": false,
+     "size": 1311720
+    },
+    {
+     "path": "Show/E02.mkv.!qB",
+     "dir": false,
+     "size": 1056353
+    },
+    {
+     "path": "Show/Sound",
+     "dir": true,
+     "size": 0
+    },
+    {
+     "path": "Show/Sound/E01.mka.!qB",
+     "dir": false,
+     "size": 263143
+    },
+    {
+     "path": "Show/old_name.mkv",
+     "dir": false,
+     "size": 524343
+    }
+   ],
+   "written": [
+    "Show/E01.mkv",
+    "Show/old_name.mkv"
+   ],
+   "not_modeled": "a start asked during a check is lost by the client; the model's check is instant"
+  },
+  {
+   "scenario": "F",
+   "step": "v2_deleted_with_files",
+   "info": null,
+   "files": null,
+   "pieces": null,
+   "disk": [
+    {
+     "path": "Show",
+     "dir": true,
+     "size": 0
+    },
+    {
+     "path": "Show/old_name.mkv",
+     "dir": false,
+     "size": 524343
+    }
+   ],
+   "written": [
+    "Show/old_name.mkv"
+   ]
   }
  ]
 }

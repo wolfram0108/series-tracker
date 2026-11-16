@@ -56,6 +56,8 @@ async def test_the_update_scenario_gives_what_the_real_client_gave(qbit, tmp_pat
     want = json.loads(SAMPLE.read_text(encoding="utf-8"))["observations"]
     assert [(o["scenario"], o["step"]) for o in got] == [(o["scenario"], o["step"]) for o in want]
     for mine, real in zip(got, want):
+        if real.get("not_modeled"):
+            continue
         for field in real.get("stale", []):
             # The real client reports these of before a priority change until the torrent runs; the model is current.
             mine["info"].pop(field)
