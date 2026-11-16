@@ -1,5 +1,5 @@
-/* Поле constructor-group: сегменты в одной рамке — подпись (иконка + слова), значение (поле, выбор, управление), кнопки; собирается
-   компонентом SheetField. Простые контролы (кнопки, switch, select, таблица) — PrimeVue. */
+/* The field constructor-group: segments in one frame, the label (an icon and words), the value (a field, a choice, a control),
+   the buttons; SheetField makes it. The plain controls (buttons, switch, select, table) are PrimeVue's. */
 
 .input-constructor-group {
   /* a group is not lower than its row, and grows when its text wraps instead of cutting it */

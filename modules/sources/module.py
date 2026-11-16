@@ -480,7 +480,7 @@ class SourcesModule(BaseModule):
 
         raise SourceParseError(reason("tracker_no_impl", service=service))
 
-    # --- браузерный пул (astar/anilibria_tv, Р-9): modules/sources/browser_pool.py ---------
+    # --- the browser pool (astar/anilibria_tv, Р-9): modules/sources/browser_pool.py ---------
 
     async def _browser_html(self, service: str, url: str) -> str:
         """HTML страницы трекера через браузер. Подготовка страницы

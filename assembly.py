@@ -80,7 +80,7 @@ def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, l
                       provider_reconnect=options.provider_reconnect),
         MetadataModule(bus, db),
         LibraryModule(bus, db),
-        # scan/downloads/renaming — после catalog/settings/sources/rules: их reconcile при старте шлёт запросы соседям.
+        # scan/downloads/renaming after catalog/settings/sources/rules: their reconcile at the start asks those neighbours.
         ScanModule(bus, db),
         DownloadsModule(bus, db),
         RenamingModule(bus, db),

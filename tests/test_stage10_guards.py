@@ -897,6 +897,13 @@ def test_docstrings_are_checked_only_on_request_and_the_contract_of_module_py_is
                                ("modules/a/module.py", 3), ("modules/a/other.py", 1)}
 
 
+def test_a_proper_name_in_an_english_comment_is_no_russian_and_russian_words_around_it_are(tmp_path):
+    head = {**PY_BASE, "modules/a/z.py": "x = 1  # the button «Удалить» of the window «Выход» (Р-99, Д-19, ЭТАП_11, С-4…С-7)\n"
+                                          "y = 2  # кнопка «Удалить»\n"}
+    repo, base = two_commits(tmp_path, PY_BASE, head)
+    assert places(comment_language.check_comment_language(repo, base, "HEAD")) == {("modules/a/z.py", 2)}
+
+
 def test_an_old_russian_comment_on_an_unchanged_line_is_not_judged(tmp_path):
     repo, base = two_commits(tmp_path, PY_BASE, {**PY_BASE, "modules/a/y.py": "# fine\n"})
     assert comment_language.check_comment_language(repo, base, "HEAD").violations == []
@@ -977,6 +984,7 @@ def test_every_trace_of_an_assistant_in_a_message_is_found(tmp_path, message):
     "Правка: ввод адреса, новые тесты, стили",
     "Типы интерфейса — сгенерированные из схемы API",
     "Правило — в CLAUDE.md",
+    "Каталог .claude/ — вне git",  # the folder of the settings of a tool, a path and no authorship
 ])
 def test_an_honest_message_passes_and_words_are_matched_whole(tmp_path, message):
     repo, base = two_commits(tmp_path, {"a": "1\n"}, {"a": "2\n"}, message)

@@ -82,7 +82,7 @@ async function saveFlag(path: FlagPath, value: boolean, label: string) {
 }
 
 // --- числовые параметры yt-dlp (GET/POST → {value}) -------------------
-// --- пределы загрузок по способу (общее состояние с окном расширений: composables/useDownloadLimits.ts) ----
+// --- the limits of the downloads by way (a state shared with the window of the extensions: composables/useDownloadLimits.ts) ----
 const { limits: shared, load: loadLimits, save: saveShared } = useDownloadLimits()
 const limits = ref({ threads_total: "32", threads_per_file: "16", single_at_once: "4" })
 const LIMITS = [
@@ -104,7 +104,7 @@ async function loadNum(path: "/api/settings/sources_term", fallback: number): Pr
   return d === null ? null : String(d.value ?? fallback)
 }
 
-// --- срок актуальности опроса источников (sources, term.py; GET/POST → {value}) ----
+// --- the term of what the sources answered (sources, term.py; GET/POST → {value}) ----
 const sourcesTerm = ref("1")
 
 async function saveSourcesTerm() {
@@ -217,7 +217,7 @@ onMounted(gate.run)
 <template>
   <LoadGate :state="gate.state.value" :rows="6" @retry="gate.run">
     <div class="sheet settings-debug">
-      <!-- Сканер -->
+      <!-- Scanner -->
       <SheetRow :caption="t('debug.sync.title')">
         <div class="sheet-pair">
           <SheetField :label="t('series.autoSync')" control>
@@ -238,7 +238,7 @@ onMounted(gate.run)
         </div>
       </SheetRow>
 
-      <!-- Параметры конвейера и отладка -->
+      <!-- The pipeline and debugging -->
       <SheetRow :caption="t('debug.pipeline.title')">
         <div class="sheet-pair">
           <SheetField v-for="flag in FLAGS" :key="flag.key" :label="t(flag.label)" :title="t(flag.hint)" control>
@@ -254,7 +254,7 @@ onMounted(gate.run)
         <p class="sheet-hint">{{ t("debug.downloads.multiAtOnce", { count: multiAtOnce }) }}</p>
       </SheetRow>
 
-      <!-- База данных -->
+      <!-- Database -->
       <SheetRow :caption="t('debug.db.title')">
         <div class="sheet-line">
           <Button :label="t('debug.db.view')" icon="pi pi-table" severity="info" @click="showDb = true" />
@@ -272,7 +272,7 @@ onMounted(gate.run)
         </SheetField>
       </SheetRow>
 
-      <!-- Сохранённые пути -->
+      <!-- Saved paths -->
       <SheetRow :caption="t('savedPaths.title')" :count="paths.length">
         <div v-if="paths.length" class="saved-paths-list">
           <div v-for="p in paths" :key="p.id" class="saved-path-row">

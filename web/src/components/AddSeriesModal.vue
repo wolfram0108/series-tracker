@@ -506,7 +506,7 @@ onBeforeUnmount(() => {
         />
       </SheetRow>
 
-      <!-- Качество -->
+      <!-- Quality -->
       <SheetRow v-if="showQualityBlock" :caption="t('seriesForm.qualityChoice')">
         <template v-if="qualitySelector === 'anilibria'">
           <SheetField v-if="isQualityOptionsReady && qualityOptionsAnilibria.length" :label="t('common.quality')" icon="pi pi-video">

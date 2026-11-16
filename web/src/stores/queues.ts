@@ -36,8 +36,8 @@ export type PackJournal = components["schemas"]["PackJournal"]
  *  push-событиями SSE; HTTP-загрузка — через настройки/агентов при открытии. */
 // Each queue is a picture the core pushes whole and the window only reads, so it is held without a deep proxy.
 export const useQueuesStore = defineStore("queues", () => {
-  const agent = shallowRef<QueueTask[]>([]) // agent_queue_update (у задач есть hash)
-  const torrents = shallowRef<QueueTask[]>([]) // torrent_progress_update (мониторинг)
+  const agent = shallowRef<QueueTask[]>([]) // agent_queue_update (its tasks have a hash)
+  const torrents = shallowRef<QueueTask[]>([]) // torrent_progress_update (the monitor)
   const downloads = shallowRef<DownloadCard[]>([]) // download_queue_update: the cards of the downloads (core/contracts/downloads.py)
   const slicing = shallowRef<SlicingCard[]>([]) // slicing_queue_update: the cards of the slicing (core/contracts/slicing.py)
   const conform = shallowRef<ConformPicture | null>(null) // conform_queue_update (alignment daemon)

@@ -102,4 +102,4 @@
   box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.25) !important;
 }
 
-/* Составное поле (подпись-сегмент + input) — группа constructor-group (SheetField, styles/fields.css). */
+/* A field of segments (a label and an input) is a group constructor-group (SheetField, styles/fields.css). */

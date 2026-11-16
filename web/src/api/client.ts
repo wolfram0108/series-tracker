@@ -12,8 +12,7 @@ type WithBody<Operation, Method> = Method extends Writing
   : Operation
 type Contract = { [Path in keyof paths]: { [Method in keyof paths[Path]]: WithBody<paths[Path][Method], Method> } }
 
-/** Типизированный HTTP-клиент на сгенерированных из OpenAPI типах.
- *  baseUrl пустой (относительные пути): в dev Vite проксирует /api → :5000,
- *  в проде фронт (/v2) и API (/api) на одном origin. Все маршруты
- *  доступны строго по контракту schema.d.ts. */
+/** The typed HTTP client on the types generated from the OpenAPI document.
+ *  An empty baseUrl (relative paths): in dev Vite proxies /api to :5000, in production the front and the API are on
+ *  one origin. Every route is reached only by the contract of schema.d.ts. */
 export const api = createClient<Contract>({ baseUrl: "" })

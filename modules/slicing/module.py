@@ -78,7 +78,7 @@ async def _cut(executable: str, source: str, start: str, duration: str | None, t
     command += ["-c", "copy", tmp]
     success = False
     try:
-        # The deadline and a cancellation (the deletion of a series, Д2) stop ffmpeg inside run_capture.
+        # The deadline and a cancellation (the deletion of a series, Д-2) stop ffmpeg inside run_capture.
         try:
             code, _, stderr = await run_capture(command, timeout=FFMPEG_TIMEOUT)
         except asyncio.TimeoutError:

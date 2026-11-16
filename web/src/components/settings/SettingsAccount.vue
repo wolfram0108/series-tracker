@@ -10,10 +10,9 @@ import { useApi } from "../../composables/useApi"
 import { useAuthStore } from "../../stores/auth"
 import { t, tAround } from "../../i18n"
 
-// Вкладка «Аккаунт»: смена пароля администратора. POST /api/auth/password
-// (за «замком»): обновляет хэш. Текущий пароль не запрашивается — активная
-// сессия уже подтверждает владельца (решение для однопользовательского
-// приложения). Поля — SheetField с валидацией рамкой; результат — Toast.
+// The tab «Аккаунт»: the password of the administrator. POST /api/auth/password (behind the lock) changes the hash. The
+// current password is not asked: the session already proves the owner of a one-user application. The fields are
+// SheetField with their frame for validity; the outcome is a Toast.
 const auth = useAuthStore()
 const toast = useToast()
 const { request, loading } = useApi()

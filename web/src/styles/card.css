@@ -97,7 +97,7 @@
 .btn-delete { background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); box-shadow: 0 0 8px rgba(0, 0, 0, 0.4); }
 .action-btn:disabled { opacity: 0.6; cursor: not-allowed; filter: none; }
 
-/* --- слои статуса: цвет — состояния сериала по словарю (lib/states.ts, data-state), порядок — z-index слоя --- */
+/* --- the layers of the status: the colour is the state of the series by the vocabulary (lib/states.ts, data-state), the order the z-index of the layer --- */
 .layer-stripes { position: absolute; inset: 0; }
 .color-layer {
   position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 0;

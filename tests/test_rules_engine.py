@@ -834,7 +834,7 @@ def test_or_out_of_place_or_with_an_empty_text_is_refused_on_saving(specs):
         validate_rule({"conditions": [_cond(_blocks(*specs))]})
 
 
-# --- правило «Таблица»: строки — те же обычные правила ------------------------------------------
+# --- the rule «Таблица»: its rows are ordinary rules -----------------------------------------------
 
 def _table(rule_id, name, action_type, rows, continue_after=True):
     return {"id": rule_id, "name": name, "priority": rule_id, "continue_after_match": continue_after,

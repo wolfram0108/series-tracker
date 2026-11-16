@@ -9,9 +9,8 @@ import { t } from "../../i18n"
 import LoadGate from "../LoadGate.vue"
 import { useLoad } from "../../composables/useLoad"
 
-// Вкладка «Авторизация»: учётки сервисов (qBittorrent/Kinozal/VK/RuTracker/
-// TMDB). GET /api/auth — загрузка, POST /api/auth — сохранение. Поля — через
-// листа (SheetRow/SheetField), пароли с глазиком (StInput type=password).
+// The tab «Авторизация»: the accounts of the services (qBittorrent, Kinozal, VK, RuTracker, TMDB). GET /api/auth reads them,
+// POST /api/auth saves them. The fields are those of a sheet (SheetRow/SheetField), a password with its eye.
 interface Creds {
   qbittorrent: { url: string; username: string; password: string }
   kinozal: { username: string; password: string }

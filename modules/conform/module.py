@@ -147,7 +147,7 @@ def job_label(label: str | None, key: str | None) -> str | None:
 
 _KEY_SUFFIX = re.compile(r"(?:^|\s+)#(\S+)$")
 _JOB_ID = re.compile(r"[\w-]+")
-# A plot is named after the file of its voice-over (`<series> s06e08 — озвучка AniLiberty__track.png`): any name of one file
+# A plot is named after the file of its voice-over (`<series> s06e08 — <voice-over> AniLiberty__track.png`): any name of one file
 # of the folder of the job, nothing that leaves it (no separator of a path, no control character).
 _PLOT_NAME = re.compile(r"[^/\\\x00-\x1f]+\.png")
 

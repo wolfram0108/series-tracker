@@ -55,7 +55,7 @@ defineProps<{ tmdb: TmdbChoice; seasonless?: boolean }>()
       </div>
     </div>
 
-    <!-- выбранный без поиска (предзаполнен из tmdb_info) -->
+    <!-- chosen without a search (filled in from tmdb_info) -->
     <div v-else-if="tmdb.selected.value" class="card-final card-tmdb status-success">
       <div class="info-column">
         <span class="card-title">{{ tmdb.name(tmdb.selected.value) }} <small class="tmdb-year">({{ tmdb.selected.value.year }})</small></span>

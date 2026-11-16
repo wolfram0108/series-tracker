@@ -9,6 +9,7 @@ of the module and is Russian by the convention of the project; other docstrings 
 from __future__ import annotations
 
 import ast
+import re
 import io
 import tokenize
 from pathlib import Path
@@ -42,6 +43,16 @@ def python_docstrings(text: str, filename: str) -> list[tuple[int, int, str]]:
     return found
 
 
+# Proper names keep their spelling inside an English comment: the label of a decision of the project's registries (Р-99,
+# Д-19, И-3, ЭТАП_11) and a text of the interface quoted as it is shown («Удалить»), so that both are found by a search.
+_NAMES = re.compile(r"«[^»\n]*»|(?<![А-Яа-яЁё])[А-ЯЁ]{1,5}[-_]\d+(?:[.…–-]+[А-ЯЁ]{0,5}[-_]?\d+)*")
+
+
+def russian(text: str) -> bool:
+    """Whether a comment holds Cyrillic once the proper names it may quote are set aside."""
+    return bool(CYRILLIC.search(_NAMES.sub("", text)))
+
+
 def check_comment_language(root: Path, base: str = DEFAULT_BASE, head: str = "HEAD", docstrings: bool = False) -> Outcome:
     outcome = Outcome()
     for path, lines in sorted(added_lines(root, base, head, PYTHON_SPECS).items()):
@@ -49,7 +60,7 @@ def check_comment_language(root: Path, base: str = DEFAULT_BASE, head: str = "HE
         try:
             comments = python_comments(text)
             for line, comment in comments:
-                if line in lines and CYRILLIC.search(comment):
+                if line in lines and russian(comment):
                     outcome.violations.append(Violation(path, line, f"комментарий с кириллицей: {comment.strip()[:80]}"))
             if docstrings:
                 for first, last, doc in python_docstrings(text, path):
@@ -63,7 +74,7 @@ def check_comment_language(root: Path, base: str = DEFAULT_BASE, head: str = "HE
             continue
         for comment in web_comments(file_text(root, head, path), path):
             hit = sorted(n for n in range(comment.first_line, comment.last_line + 1) if n in lines)
-            if hit and CYRILLIC.search(comment.text):
+            if hit and russian(comment.text):
                 shown = " ".join(comment.text.split())[:80]
                 outcome.violations.append(Violation(path, hit[0], f"комментарий с кириллицей: {shown}"))
     return outcome

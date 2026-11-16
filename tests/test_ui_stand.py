@@ -994,7 +994,7 @@ async def test_the_markup_reference_set_in_its_tab_lays_the_episode_onto_it_and_
     # The window shows the sounds in the order the file holds them: the original last.
     await expect(page.locator(".voice-order-item").last).to_contain_text("Оригинал")
     await expect(page.locator(".voice-order-item.is-fixed")).to_have_count(1)
-    # Every sound of the file has its cell, the own sound of the cut (ПВА) the reference's.
+    # Every sound of the file has its cell, the own sound of the cut (PVA) the reference's.
     await expect(card.locator("[data-state='done']")).to_have_count(3)
     await expect(card.locator("[data-state='done'].is-reference")).to_have_count(1)
     await ui.shot("61-markup-synced")

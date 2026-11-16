@@ -728,7 +728,7 @@ async def test_a_rule_with_a_wrong_assigned_range_is_not_saved(system):
         await new_rule(probe, profile, "склейка", [assign("assign_range", "110-109")])
 
 
-# --- правило «Таблица» ------------------------------------------------------------------------------
+# --- the rule «Таблица» -------------------------------------------------------------------------------
 
 def voices_table(*pairs) -> dict:
     return {"action_type": "assign_voiceover",

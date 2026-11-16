@@ -16,11 +16,9 @@ import PatternPalette from "./PatternPalette.vue"
 
 export type { PatternBlock }
 
-// Конструктор паттерна: контейнер блоков (DnD-перестановка) + палитра
-// (PatternPalette, клон при перетаскивании). Общий для условий «ЕСЛИ» и действий «ТО».
-// Блоки мутируются на месте (vuedraggable :list по ссылке родителя).
-// Порт логики из static/js/components/settingsParser.js (cloneBlock,
-// isBlockEditable, getBlockDisplayText, updateBlockValue, getBlockClasses).
+// The editor of a pattern: the container of its blocks (reordered by drag and drop) and the palette (PatternPalette,
+// a clone on a drag). One for the conditions «ЕСЛИ» and the actions «ТО». The blocks change in place (vuedraggable :list
+// by the parent's reference). The logic came from the old static/js/components/settingsParser.js.
 
 const props = withDefaults(defineProps<{
   blocks: PatternBlock[]

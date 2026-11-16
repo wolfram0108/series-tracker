@@ -653,7 +653,7 @@ async def _phase_download(video_url: str, full_output_path: str,
         if not stopped:
             code = await exited(proc)
     finally:
-        if code is None:  # отмена/сбой — убить процесс (находка 45)
+        if code is None:  # a cancellation or a failure: the process is killed (finding 45)
             code = await stop(proc)
     tail = await _stderr_tail(stderr_task, lines)
 

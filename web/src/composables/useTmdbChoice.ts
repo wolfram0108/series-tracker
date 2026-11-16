@@ -25,8 +25,9 @@ export function useTmdbChoice(host: { query: () => string; season: () => string;
     return m ? parseInt(m[1], 10) : 1
   })
 
-  // Отображаемое имя: русское, если перевод реально есть (name ≠ original); иначе английское (для азиатских релизов без ru TMDB
-  // кладёт в name оригинал-иероглифы); иначе — что есть. Применяется и в списке, и в имени каталога.
+  // The name shown: the Russian one when a translation really exists (name ≠ original); else the English one (for an Asian
+  // release without a Russian title TMDB puts the original characters into name); else what there is. The list and the
+  // name of the folder both take it.
   function name(r: TmdbResult): string {
     const ru = (r.name || "").trim()
     const orig = (r.original_name || "").trim()
@@ -36,7 +37,7 @@ export function useTmdbChoice(host: { query: () => string; season: () => string;
     return ru || en || orig
   }
 
-  // «Имя (год) [tmdbid-XXXX]» (шаблон Jellyfin/Plex); год опускается, если его нет
+  // `Name (year) [tmdbid-XXXX]`, the form of Jellyfin and Plex; the year is left out when there is none
   const catalogName = computed(() => {
     if (!selected.value) return ""
     const shown = name(selected.value)

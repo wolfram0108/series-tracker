@@ -32,10 +32,9 @@ import { useScannerStore } from "./stores/scanner"
 import { useAuthStore } from "./stores/auth"
 import { api } from "./api/client"
 
-// Страницы на образцах вместо приложения, по якорю: #gallery — галерея
-// согласованных форм/объектов (Ф2), #card-colors — подбор цветов карточки
-// неполной серии на настоящих компонентах. Живые данные им не нужны, и боевому приложению они не нужны:
-// каждая — отдельный кусок сборки, который грузится только по своему якорю.
+// Pages on samples instead of the application, by the anchor: #gallery, the gallery of the agreed forms (Ф-2), #card-colors,
+// the colours of the card of an incomplete episode on the real components. They need no live data, and the application
+// does not need them: each is a chunk of the build loaded only by its anchor.
 const PAGES = {
   gallery: () => import("./Gallery.vue"),
   "card-colors": () => import("./tools/CardColors.vue"),
@@ -59,8 +58,8 @@ function mount(page: Component): void {
 if (sample) void sample().then((module) => mount(module.default))
 else mount(App)
 
-// Ф3: real-time слой — стартовая загрузка + SSE-подписки сторов (только для
-// реального приложения; страницам на образцах живые данные не нужны).
+// Ф-3: the real-time layer, the first load and the SSE subscriptions of the stores (the application only: the pages on
+// samples need no live data).
 if (!onSamples) {
   // Перехват 401: запрос, отклонённый замком, открывает модалку входа.
   // /api/login и /api/me исключены — их 401 штатный, не повод для модалки.

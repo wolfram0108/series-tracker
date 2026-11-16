@@ -209,8 +209,8 @@
 /* секции и список глав */
 .chapter-section { margin-bottom: 15px; }
 .chapter-section:last-child { margin-bottom: 0; } /* без хвоста перед footer */
-/* margin: 0 — гасим браузерный margin-top заголовка (reboot'а в проекте нет),
-   иначе над «Активные главы» висит лишний отступ ~1.7em */
+/* margin: 0 takes off the browser's margin-top of a heading (the project has no reboot): else a gap of
+   about 1.7em hangs above «Активные главы» */
 .chapter-section h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--text-muted); }
 .chapter-list { display: flex; flex-wrap: wrap; gap: 6px; } /* отступ снизу даёт сама секция */
 
