@@ -853,3 +853,24 @@ def test_a_file_that_stands_under_a_number_another_file_takes_is_of_the_same_gro
     assert [each.slots for each in step.plan.groups if (1, 4) in each.slots] == [((1, 4), (1, 5))]
     assert sorted(each.name for each in world.containers.values() if not each.off) == [
         "s01e04 [AniStar] 1080p.mkv", "s01e05 [AniStar] 480p.mkv"]
+
+
+def test_rows_of_one_timeline_are_one_video_and_their_tracks_are_taken_as_they_are():
+    """Stage 15, И-1…И-3: the tracks of one file of a release share its timeline. The reference is one of them; the
+    others are its own tracks, taken with no alignment; another track chosen first later makes no other video."""
+    from core.plan.planner import plan
+    from core.plan.tables import Choices, Inputs, OnlineRow, RowId
+
+    def track(stream: int, group: str, position: int) -> OnlineRow:
+        return OnlineRow(RowId(1, f"page/E01.mkv#{stream}", "page/E01.mkv"), 1, 1, 1, "torrent:page", group, 1080,
+                         link=f"torrent:page/E01.mkv#{stream}", position=position, timeline_key="page/E01.mkv")
+
+    rows = (track(1, "Оригинал", 0), track(2, "Студия", 1))
+    first = plan(Inputs(rows, (), Choices(groups={1: ("Оригинал", "Студия")})))
+    goal = first.goal((1, 1))
+    assert goal.video.kind == "download" and goal.video.timeline == RowId(1, "page/E01.mkv", "page/E01.mkv")
+    assert [(way.voice, way.kind) for way in goal.tracks] == [("Студия", "timeline")]
+    assert not any(op.kind == "align" for op in first.ops)
+
+    flipped = plan(Inputs(rows, (), Choices(groups={1: ("Студия", "Оригинал")}, reference={(1, 1): (("Студия", 1, "torrent:page"),)})))
+    assert flipped.goal((1, 1)).video.key == goal.video.key  # the same video whichever of its rows is the reference

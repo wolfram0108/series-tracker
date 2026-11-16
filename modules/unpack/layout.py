@@ -241,6 +241,8 @@ def _row(release: ReleaseView, key: str, link: str, video: str, where: Place, ki
                     text=f"{where.word} | {video}", voice=RowVoice(name=entry["folder"] or stream.get("title") or "",
                                                                    kind=kind),
                     heights=[height] if height else [], state=state, reason=why, link=link,
+                    # Every track of the file is on the file's own timeline: in step with its video (DESIGN.md, 7.0).
+                    timeline=item_of(release.release, video),
                     site_fields={"language": entry["language"], "codec": stream.get("codec") or "",
                                  "channels": stream.get("channels"), "forced": entry["subtitle_type"] == "forced",
                                  "subtitle_type": entry["subtitle_type"], "default": bool(stream.get("default")),

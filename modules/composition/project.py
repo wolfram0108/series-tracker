@@ -195,7 +195,7 @@ def _left_by_source(item: SourceInput) -> Iterator[tuple[CompositionRow, TableRo
                 series_id=item.source.series_id, source_id=item.source.id, row_key=row.key, excluded=True,
                 exclusion=out[row.key], player=row.player, player_label=row.player_label,
                 group=row.group, text=row.text, heights=list(row.heights), state=row.state, published=row.published,
-                link=row.link, video=row.video), row
+                link=row.link, video=row.video, timeline=row.timeline), row
 
 
 def _row_of(source: SeriesSource, row: TableRow, result: RuleResult, name: str, groups: Mapping[str, str | None],
@@ -205,7 +205,7 @@ def _row_of(source: SeriesSource, row: TableRow, result: RuleResult, name: str, 
         series_id=source.series_id, source_id=source.id, row_key=row.key, **_numbers_of(result),
         voice_group=group, voice_label=label, voice_name=name, voice_unknown=number, player=row.player,
         player_label=row.player_label, group=row.group, text=row.text, heights=list(row.heights), state=row.state,
-        published=row.published, link=row.link, video=row.video)
+        published=row.published, link=row.link, video=row.video, timeline=row.timeline)
 
 
 def _numbers_of(result: RuleResult) -> dict:

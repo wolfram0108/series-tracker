@@ -1,5 +1,5 @@
 """The torrent source (stage 15): the releases of a page and their files (module `torrents`), the probed streams, the manual
-layout and the rules of the torrent editor (module `unpack`), the kind of a profile of rules.
+layout and the rules of the torrent editor (module `unpack`), the kind of a profile of rules, the timeline of a row.
 
 A release is keyed by the page and its own id on the page, not by a series: the page of one tracker in two series is one
 download. What rules give is counted from the rules every time (a rule reaches new files of an update); only what the user
@@ -107,6 +107,10 @@ def upgrade() -> None:
             streams_profile_id INTEGER REFERENCES parser_profiles (id)
         )
     """)
+    # The timeline of a row (DESIGN.md, 7.0): the key of its video as a timeline; empty is the row itself (a row of a site
+    # is one video). The tracks of one file of a release share it.
+    op.execute("ALTER TABLE release_rows ADD COLUMN timeline TEXT NOT NULL DEFAULT ''")
+    op.execute("ALTER TABLE composition_rows ADD COLUMN timeline TEXT NOT NULL DEFAULT ''")
     # The profiles of the torrent editor are not profiles of a series: the list of the rules of the series shows none of them.
     op.execute("ALTER TABLE parser_profiles ADD COLUMN kind TEXT NOT NULL DEFAULT 'series' "
                "CHECK (kind IN ('series', 'torrent'))")
@@ -114,6 +118,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("ALTER TABLE parser_profiles DROP COLUMN kind")
+    op.execute("ALTER TABLE composition_rows DROP COLUMN timeline")
+    op.execute("ALTER TABLE release_rows DROP COLUMN timeline")
     for table in ("unpack_sources", "unpack_assignments", "unpack_folders", "unpack_streams",
                   "torrent_release_versions", "torrent_release_files", "torrent_releases"):
         op.execute(f"DROP TABLE {table}")

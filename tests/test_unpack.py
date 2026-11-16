@@ -69,6 +69,7 @@ def test_every_track_of_a_placed_video_and_of_a_sound_beside_it_is_a_row_with_th
          track_link("page", "Show/Show - 01.mkv", 0, file="Show/Show - 01.rus.ass"))]
     assert all(row.heights == [1080] for row in rows)
     assert all(row.text == "S01E01 | Show/Show - 01.mkv" and row.player == "torrent:page" for row in rows)
+    assert {row.timeline for row in rows} == {"page/Show/Show - 01.mkv"}  # one video, one timeline, whatever file a track is in
     assert view["unplaced"] == {"files": 0, "voices": 1, "subtitles": 1, "streams": 1}
 
 

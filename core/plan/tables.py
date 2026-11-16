@@ -72,6 +72,14 @@ class OnlineRow:
     # window shows what the file holds of it as not online now.
     current: bool = True
     player_label: str = ""  # the player as the layout names it (the window «Выход» shows this)
+    # The key of the row's video as a timeline (TableRow.timeline, DESIGN.md stage 15, 7.0): rows of one source with one
+    # timeline are one video in step with each other; empty is the row itself.
+    timeline_key: str = ""
+
+    @property
+    def timeline(self) -> RowId:
+        """The timeline of the row's video: the row itself, or the video its rows share."""
+        return RowId(self.id.source_id, self.timeline_key, self.id.video) if self.timeline_key else self.id
 
     @property
     def source_id(self) -> int:
@@ -113,7 +121,9 @@ class Video:
 
     @property
     def key(self) -> tuple:
-        return ("cut", self.cut_of, self.timeline) if self.cut_of is not None else ("row", self.id)
+        # A video is known by its timeline: another row of the same video makes no other video (stage 15, И-2); a video
+        # downloaded from a row is on the row's own timeline, so for a row of a site it is the row.
+        return ("cut", self.cut_of, self.timeline) if self.cut_of is not None else ("row", self.timeline)
 
 
 @dataclass(frozen=True)

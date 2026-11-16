@@ -199,13 +199,15 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
     output only (`online_of`): a file made before of a row no group took stays as it is and takes no new work."""
     choices = inputs.choices
     online = {row.id: row for row in inputs.online}
+    # A timeline is found as its row is: a row's own timeline is the row, a timeline several rows share is each of them.
+    on_timeline = {**{row.timeline: row for row in inputs.online}, **online}
     singles = [row for row in inputs.online if not row.compilation]
     deleted_videos = {each[1] for each in choices.delete if each[0] == "video"}
     deleted_tracks = {(each[1], each[2]) for each in choices.delete if each[0] == "track"}
     containers = sorted(inputs.containers, key=lambda each: each.name)
 
     def video_slot(video: Video) -> Slot:
-        row = online.get(video.timeline if video.cut_of is not None else video.id)
+        row = on_timeline.get(video.timeline) if video.cut_of is not None else online.get(video.id)
         return row.slot if row is not None and not row.compilation else video.episode
 
     def track_slot(track: Track) -> Slot:
@@ -320,12 +322,12 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
     if not off:
         for row in singles:
             if not row.playable or ("download", row.id) in inputs.failed or (row.variant in denied and
-                                                                              ("row", row.id) != timeline):
+                                                                              ("row", row.timeline) != timeline):
                 continue
-            held = next((way for _, way in candidates if way.key == ("row", row.id) and not gone(way)), None)
+            held = next((way for _, way in candidates if way.key == ("row", row.timeline) and not gone(way)), None)
             if held is not None and held.snapshot.height >= row.height:
                 continue  # the asset holds this video at least as high: no download of it
-            way = VideoWay("download", ("row", row.id), row.id, row.snapshot(), row=row)
+            way = VideoWay("download", ("row", row.timeline), row.timeline, row.snapshot(), row=row)
             candidates.append((video_rank(row.variant, row.height, False, row.id), way))
         candidates += _cuts(slot, inputs, by_slot.compilations, singles,
                             [each for each in candidates if not gone(each[1])], video_rank, denied, markup)
@@ -393,7 +395,9 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
                                         in preferred else len(preferred)),
                                        *criteria(VOICE_RANKING, row.height, row.player, row.id.source_id),
                                        row.position, repr(row.id)))
-        if rows and rows[0].id == video.timeline and cut:
+        # The sound of a row on the video's own timeline is in step with it as it is: the timeline of a cut, or another
+        # track of the same video (stage 15, И-3).
+        if rows and rows[0].timeline == video.timeline:
             tracks.append(TrackWay(voice, rows[0].id, rows[0].snapshot(), "timeline", row=rows[0]))
             continue
         if rows:
@@ -464,8 +468,8 @@ def _markup_of(inputs: Inputs, episode, singles: list[OnlineRow], files: list[Co
     for row in singles:
         if row.playable and row.variant not in denied and ("download", row.id) not in inputs.failed:
             found.append((rank(row.variant, row.height, row.player, row.id, False),
-                          Markup(row.id, row.group, row.height, row, row.variant)))
-    online = {row.id: row for row in singles}
+                          Markup(row.timeline, row.group, row.height, row, row.variant)))
+    online = {**{row.timeline: row for row in singles}, **{row.id: row for row in singles}}
     for container in files:
         timeline = container.video.timeline
         shot = timeline_shot(container)
@@ -510,7 +514,7 @@ def _cuts(slot, inputs, compilations, singles, candidates, video_rank, denied, m
         return (row.playable and row.height > floor and row.variant not in denied
                 and ("download", row.id) not in failed and ("cut", row.id, timeline) not in failed)
 
-    pictures = [row for row in singles if markup is not None and row.id != timeline and fits(row)]
+    pictures = [row for row in singles if markup is not None and row.timeline != timeline and fits(row)]
     covering = [row for row in compilations if word is not None and fits(row) and row.season == slot[0]
                 and row.start <= slot[1] <= row.end and row.id not in inputs.choices.off_compilations]
     named = [row for row in covering if row.id == word]
@@ -523,7 +527,7 @@ def _cuts(slot, inputs, compilations, singles, candidates, video_rank, denied, m
         if any(way.key == key and way.snapshot.height >= row.height for _, way in candidates):
             continue  # the asset holds this cut already, as high as the picture is now
         # The library holds the download of the picture's row as high: the cut takes that file.
-        picture = next((way.container for _, way in held if way.kind == "asset" and way.key == ("row", row.id)
+        picture = next((way.container for _, way in held if way.kind == "asset" and way.key == ("row", row.timeline)
                         and way.snapshot.height >= row.height), None)
         way = VideoWay("cut", key, timeline, row.snapshot(), row=row, ref2=ref2, picture=picture)
         found.append((video_rank(row.variant, row.height, False, row.id), way))

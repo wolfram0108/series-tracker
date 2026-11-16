@@ -54,6 +54,9 @@ class TableRow(BaseModel):
     # Which video the row is, as its host numbers it (release players' `video_of` of the link): two rows of one player with
     # one video are the same video whatever page shows them. Empty when the link names no video of its host's own.
     video: str = ""
+    # The key of the video of the row as a timeline: rows of one source with one timeline show one video in step with each
+    # other (the tracks of one file of a torrent release). Empty: the row itself, as a row of a site is one video.
+    timeline: str = ""
     # The site's own numbers and marks, for a human and for debugging; no decision reads them.
     site_fields: dict[str, Any] = Field(default_factory=dict)
     # The part of the page the row was read from (the catalog of a player, the page of an episode); empty for the rows the

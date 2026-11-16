@@ -61,6 +61,8 @@ class CompositionRow(BaseModel):
     # Which video the row is, as its host numbers it (release players' `video_of` of the link): two rows of one player with
     # one video are the same video whatever page shows them. Empty when the link names no video of its host's own.
     video: str = ""
+    # The key of the video of the row as a timeline (TableRow.timeline); empty: the row itself.
+    timeline: str = ""
     # The source did not give this episode of this player in its last read (a part of the page that did not answer, or a
     # read that failed): the row stands from an earlier read, and every window shows it as not current.
     stale: bool = False
