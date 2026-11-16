@@ -6,12 +6,59 @@ such a row is a release: `torrent:<release>`, a line of the player `torrent`; it
 """
 from __future__ import annotations
 
+from enum import StrEnum
 from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, ConfigDict, Field
 
 TORRENT_PLAYER = "torrent"
 _SCHEME = "torrent:"
+# A release of a page changed: its state, its version, its files (`ReleaseView`); `unpack` reads the files of a ready one.
+RELEASE_CHANGED_TOPIC = "torrents.release.changed"
+# The folder the releases are downloaded to (the staging folder of the torrent sources), a key of `settings`.
+STAGING_DIR_KEY = "torrents.staging_dir"
+
+
+class ReleaseState(StrEnum):
+    """`metadata`: a magnet waits for the list of its files; `downloading`: the first version is being downloaded, the
+    source is not in the series yet; `ready`: every wanted file is there; `updating`: a new version is being checked and
+    downloaded, the whole release is unavailable; `failed`: see `reason`; `archived`: the files were removed (a release
+    no longer watched, after what was taken from it lives in the output files)."""
+
+    METADATA = "metadata"
+    DOWNLOADING = "downloading"
+    READY = "ready"
+    UPDATING = "updating"
+    FAILED = "failed"
+    ARCHIVED = "archived"
+
+
+class ReleaseFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    size: int
+    progress: float = 0.0
+    priority: int = 1
+
+
+class ReleaseView(BaseModel):
+    """A release `torrents` keeps for a page. `folder` is where its files are (`folder/path`); `pending` a newer version
+    the page lists that waits for the end of a sync of a series with this source."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+    release: str
+    title: str = ""
+    published: str | None = None
+    infohash: str | None = None
+    state: ReleaseState
+    reason: str | None = None
+    watched: bool = True
+    folder: str | None = None
+    pending: bool = False
+    files: list[ReleaseFile] = Field(default_factory=list)
 
 
 class PageRelease(BaseModel):

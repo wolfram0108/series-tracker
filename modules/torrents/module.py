@@ -70,6 +70,24 @@ download_tasks принадлежит downloads, торрентов в ней н
 событие torrents.progress.changed отдают {tasks: [{id, qb_hash, series_id, series_name, status,
 progress, dlspeed, eta, error_message, created_at, updated_at}]}.
 
+The releases of the torrent sources (stage 15, modules/torrents/releases.py; tables torrent_releases,
+torrent_release_files, torrent_release_versions), keyed by the page and the id of the release on it, never by a series:
+  torrents.releases.get {url} → {releases: [ReleaseView]} — the releases kept for the page (core/contracts/torrent.py)
+  torrents.release.download {url, release} → ReleaseView — «Скачать»: the release as the page lists it now
+      (sources.releases.get) goes to the client started, category st-source, into <torrents.staging_dir>/<site>-<key>;
+      refused (NotAllowed) without the staging folder, for a release the page does not list or that has no .torrent
+  torrents.release.check {url} → {releases} — the page is read now: a watched release it lists in another version (another
+      infohash, else another date) begins its update — the old version leaves the client without its files, the new one
+      comes started into the same folder, the client checks the files there and downloads the rest; while a sync of a
+      series with the page runs (scan.run.changed) the update waits for its end. Also once a term of the sources.
+  torrents.release.watch {url, release, watched} → ReleaseView — the automatic update on or off
+  torrents.release.priorities {url, release, skip: [path]} (command) — the files not to download
+  torrents.release.drop_files {url, release} (command) — a release no longer watched gives up its files (archived)
+  Event torrents.release.changed ReleaseView — state, version or files changed; `ready` once every wanted file is there
+  (an update ends by removing the files of the old version the new one does not list). A page no source lists any more
+  (series.source.removed, series.deleted) leaves the client with its files and its folder. settings.changed
+  {key: torrents.staging_dir} moves every release to the new folder (setLocation).
+
 Переименование файлов — query renaming.process_torrent (зона renaming);
 мониторинг прогресса — адаптивный опрос qBit (часто при активности,
 редко в покое), события только при изменениях.
@@ -82,7 +100,8 @@ import json
 import os
 
 from core import BaseModule, BusRequestError, storage, torrent_profile_id
-from core.contracts import SeriesKind
+from core.contracts import RUN_CHANGED, RunChanged, SeriesKind
+from core.contracts.torrent import STAGING_DIR_KEY
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason, relayed
@@ -92,7 +111,8 @@ from . import pipeline, selection
 from .infohash import (TorrentParseError, infohash_candidates,
                        infohash_from_magnet, torrent_file_list)
 from .qbt_client import QbtClient, QbtError
-from .repository import TorrentsRepository
+from .releases import Releases
+from .repository import ReleaseStore, TorrentsRepository
 
 # state-исключения для downloading (старый sync_torrent_statuses +
 # stopped*-имена поколения qBit 5.x)
@@ -152,6 +172,11 @@ class TorrentsModule(BaseModule):
         self._pipeline_poll = pipeline_poll
         self._monitor_active = monitor_active
         self._monitor_idle = monitor_idle
+        # The releases of the torrent sources (stage 15), beside the pipeline of the torrent series until those are gone.
+        self._release_wake = asyncio.Event()
+        self.releases = Releases(
+            ReleaseStore(db), client=lambda: self.qbt, request=lambda topic, payload: self.request(topic, payload),
+            publish=lambda topic, payload: self.publish_event(topic, payload), wake=self._release_wake.set)
         super().__init__(bus)
 
     def register(self) -> None:
@@ -185,6 +210,15 @@ class TorrentsModule(BaseModule):
                     concurrent=True)
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("series.updated", self.on_series_updated)
+        self.handle("torrents.releases.get", self.on_releases_get)
+        self.handle("torrents.release.download", self.on_release_download)
+        self.handle("torrents.release.check", self.on_release_check)
+        self.handle("torrents.release.watch", self.on_release_watch)
+        self.handle("torrents.release.priorities", self.on_release_priorities)
+        self.handle("torrents.release.drop_files", self.on_release_drop_files)
+        self.handle(RUN_CHANGED, self.on_run_changed)
+        self.handle("series.source.removed", self.on_source_removed)
+        self.handle("settings.changed", self.on_settings_changed)
         self.handle("trackerauth.credentials.changed",
                     self.on_credentials_changed)
 
@@ -237,6 +271,7 @@ class TorrentsModule(BaseModule):
         await self._recover_tasks()
         self.spawn(self._pipeline_loop(), lasting=True)
         self.spawn(self._monitor_loop(), lasting=True)
+        await self._start_releases()
 
     async def _reconcile_with_qbt(self) -> None:
         """Сверка БД с реальным qBit при старте (crash-tolerance): если
@@ -934,6 +969,7 @@ class TorrentsModule(BaseModule):
         self._names_cache.pop(series_id, None)
         if dropped:
             self._broadcast_queue()
+        await self._forget_unlisted_pages()
         self.publish_event("series.purged",
                            {"series_id": series_id, "owner": self.name})
 
@@ -1244,3 +1280,112 @@ class TorrentsModule(BaseModule):
         self._flags_cache[series_id] = flags
         self.publish_event("series.status.contribution", {
             "source": "torrents", "series_id": series_id, "flags": flags})
+
+
+    # --- the releases of the torrent sources (stage 15, modules/torrents/releases.py) ------------------------------
+
+    async def _start_releases(self) -> None:
+        try:
+            stored = (await self.request("settings.value.get", {"key": STAGING_DIR_KEY})).get("value")
+        except Exception:  # noqa: BLE001 - without the setting no download begins; the moving releases are still followed
+            self.log.exception("the staging folder of the torrent sources was not read")
+            stored = None
+        self.releases.staging = stored or ""
+        try:
+            runs = (await self.request("scan.runs.get", {})).get("runs") or []
+            for run in runs:
+                self.releases.runs[run["series_id"]] = await self._pages_of(run["series_id"])
+        except Exception:  # noqa: BLE001 - an update that begins in a run is the worse loss: none begins until the next run news
+            self.log.exception("the open syncs were not read; the updates wait for the news of a run")
+        self.spawn(self._release_loop(), lasting=True)
+        self.spawn(self._watch_loop(), lasting=True)
+
+    async def _canonical(self, url: str) -> str:
+        resolved = await self.request("sources.site.resolve", {"url": url})
+        return resolved.get("canonical_url") or url
+
+    async def _pages_of(self, series_id: int) -> set[str]:
+        series = await self.request("catalog.series.get", {"series_id": series_id})
+        return {await self._canonical(source["url"]) for source in (series or {}).get("sources") or []}
+
+    async def on_releases_get(self, env: Envelope) -> dict:
+        """{url} → {releases: [ReleaseView]}: the releases kept for the page."""
+        url = await self._canonical(env.payload["url"])
+        return {"releases": [view.model_dump(mode="json") for view in await self.releases.of_page(url)]}
+
+    async def on_release_download(self, env: Envelope) -> dict:
+        """{url, release} → ReleaseView: «Скачать» — the release goes to the client; a refusal is NotAllowed with its reason."""
+        return (await self.releases.download(await self._canonical(env.payload["url"]), env.payload["release"])
+                ).model_dump(mode="json")
+
+    async def on_release_check(self, env: Envelope) -> dict:
+        """{url} → {releases}: the page is read now; the watched releases it lists newer begin their update or wait."""
+        return {"releases": await self.releases.check(await self._canonical(env.payload["url"]))}
+
+    async def on_release_watch(self, env: Envelope) -> dict:
+        url = await self._canonical(env.payload["url"])
+        return (await self.releases.watch(url, env.payload["release"], bool(env.payload["watched"]))).model_dump(mode="json")
+
+    async def on_release_priorities(self, env: Envelope) -> None:
+        url = await self._canonical(env.payload["url"])
+        await self.releases.priorities(url, env.payload["release"], set(env.payload.get("skip") or []))
+
+    async def on_release_drop_files(self, env: Envelope) -> None:
+        url = await self._canonical(env.payload["url"])
+        await self.releases.drop_files(url, env.payload["release"])
+
+    async def on_run_changed(self, env: Envelope) -> None:
+        run = RunChanged.model_validate(env.payload)
+        pages = await self._pages_of(run.series_id) if run.active else set()
+        await self.releases.run_changed(run.series_id, run.active, pages)
+
+    async def on_source_removed(self, env: Envelope) -> None:
+        await self._forget_unlisted_pages()
+
+    async def _forget_unlisted_pages(self) -> None:
+        """The releases of a page no source of any series lists any more leave the client with their files."""
+        try:
+            series = await self.request("catalog.series.list", {})
+            listed = {await self._canonical(source["url"]) for one in series for source in one.get("sources") or []}
+        except Exception:  # noqa: BLE001 - nothing is removed on a list that could not be read
+            self.log.exception("the pages of the sources were not counted; no release is forgotten")
+            return
+        for url in {row["url"] for row in await self.releases.store.all()} - listed:
+            await self.releases.forget(url)
+
+    async def on_settings_changed(self, env: Envelope) -> None:
+        if env.payload.get("key") == STAGING_DIR_KEY:
+            await self.releases.relocate(env.payload.get("value") or "")
+
+    async def _release_loop(self) -> None:
+        while True:
+            if not await self.releases.moving():
+                self._release_wake.clear()
+                await self._release_wake.wait()
+                continue
+            try:
+                await self.releases.tick()
+            except QbtError as exc:
+                self.log.warning("раздачи источников: qBittorrent недоступен: %s", exc)
+            except Exception:  # noqa: BLE001 - one bad tick does not end the following of the releases
+                self.log.exception("ошибка такта раздач источников")
+            # The client pushes nothing: while a release moves its state is read at the pace of the monitor, sooner on a word.
+            self._release_wake.clear()
+            try:
+                await asyncio.wait_for(self._release_wake.wait(), self._monitor_active)
+            except TimeoutError:
+                pass
+
+    async def _watch_loop(self) -> None:
+        """The watched pages are read again once a term of the sources (the time is the subject: how often a site is asked)."""
+        while True:
+            try:
+                hours = float((await self.request("sources.term.get", {})).get("hours") or 1)
+            except Exception:  # noqa: BLE001 - the term of the sources at its default
+                hours = 1.0
+            await asyncio.sleep(hours * 3600)
+            for url in sorted({row["url"] for row in await self.releases.store.all() if row["watched"]}):
+                try:
+                    await self.releases.check(url)
+                except Exception:  # noqa: BLE001 - one page that cannot be read leaves the others checked
+                    self.log.exception("проверка обновления %s не удалась", url)

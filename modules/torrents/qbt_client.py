@@ -126,12 +126,16 @@ class QbtClient:
         return "ok"
 
     async def add_torrent_file(self, content: bytes, save_path: str, *,
-                               paused: bool = True) -> str:
+                               paused: bool = True,
+                               category: str | None = None) -> str:
         """Добавляет .torrent. Возвращает 'ok' | 'fails' (= уже существует?)."""
         flag = "true" if paused else "false"
+        data = {"savepath": save_path, "paused": flag, "stopped": flag}
+        if category:
+            data["category"] = category
         resp = await self._request(
             "POST", "/api/v2/torrents/add", conflict_ok=True,
-            data={"savepath": save_path, "paused": flag, "stopped": flag},
+            data=data,
             files={"torrents": ("file.torrent", content,
                                 "application/x-bittorrent")})
         return self._add_verdict(resp)

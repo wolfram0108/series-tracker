@@ -379,3 +379,59 @@ class TorrentsRepository:
         таблица мониторинга в UI)."""
         return await self._db.fetch_all(
             "SELECT * FROM torrent_progress ORDER BY id")
+
+
+class ReleaseStore:
+    """The releases of the torrent sources (stage 15): tables torrent_releases, torrent_release_files and
+    torrent_release_versions, keyed by the page and the id of the release on it."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def get(self, url: str, release: str) -> dict | None:
+        return await self._db.fetch_one("SELECT * FROM torrent_releases WHERE url=? AND release=?", (url, release))
+
+    async def of_page(self, url: str) -> list[dict]:
+        return await self._db.fetch_all("SELECT * FROM torrent_releases WHERE url=? ORDER BY id", (url,))
+
+    async def all(self) -> list[dict]:
+        return await self._db.fetch_all("SELECT * FROM torrent_releases ORDER BY id")
+
+    async def files(self, release_id: int) -> list[dict]:
+        return await self._db.fetch_all(
+            "SELECT path, size, progress, priority FROM torrent_release_files WHERE release_id=? ORDER BY path",
+            (release_id,))
+
+    async def save(self, url: str, release: str, **fields) -> int:
+        """Insert the release or change the fields given; returns its id."""
+        fields["updated_at"] = _now()
+        found = await self.get(url, release)
+        if found is None:
+            columns = ["url", "release", *fields]
+            return await self._db.insert(
+                f"INSERT INTO torrent_releases ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
+                (url, release, *fields.values()))
+        await self._db.execute(f"UPDATE torrent_releases SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?",
+                               (*fields.values(), found["id"]))
+        return found["id"]
+
+    async def add_version(self, release_id: int, infohash: str, published: str | None) -> None:
+        await self._db.execute(
+            "INSERT OR IGNORE INTO torrent_release_versions (release_id, infohash, published, added_at) VALUES (?, ?, ?, ?)",
+            (release_id, infohash, published, _now()))
+
+    async def versions(self, release_id: int) -> list[dict]:
+        return await self._db.fetch_all(
+            "SELECT infohash, published, added_at FROM torrent_release_versions WHERE release_id=? ORDER BY added_at",
+            (release_id,))
+
+    async def set_files(self, release_id: int, files: list[dict]) -> None:
+        """The files of the version in the client, as it lists them now: what it no longer lists goes."""
+        statements = [("DELETE FROM torrent_release_files WHERE release_id=?", (release_id,))]
+        statements += [("INSERT INTO torrent_release_files (release_id, path, size, progress, priority) VALUES (?, ?, ?, ?, ?)",
+                        (release_id, f["path"], f["size"], min(1.0, max(0.0, f["progress"])), max(0, f["priority"])))
+                       for f in files]
+        await self._db.execute_many(statements)
+
+    async def delete(self, release_id: int) -> None:
+        await self._db.execute("DELETE FROM torrent_releases WHERE id=?", (release_id,))

@@ -40,6 +40,8 @@ OWNERS: dict[str, tuple[str, str]] = {
     "torrent_files": ("torrents", "docstring of modules/torrents/module.py: 'torrent_files is ours'"),
     "agent_tasks": ("torrents", "docstring of modules/torrents/module.py: the pipeline machine over agent_tasks"),
     "torrent_progress": ("torrents", "migration 0031: 'owned by torrents alone'; docstring of modules/torrents/repository.py"),
+    **dict.fromkeys(("torrent_releases", "torrent_release_files", "torrent_release_versions"),
+                    ("torrents", "migration 0069 and the docstring of modules/torrents/module.py (stage 15)")),
     "media_items": ("scan", "ARCHITECTURE.md section 3 and docstring of modules/scan/repository.py: the rows belong to scan"),
     "download_tasks": ("downloads", "docstring of modules/downloads/module.py: 'Владение: download_tasks'"),
     "pack_publications": ("downloads", "migration 0038: 'The table belongs to downloads'; docstring of modules/downloads/packing.py"),
