@@ -1,17 +1,12 @@
-"""Тесты модуля renaming: соседи — фейки, ФС и renaming_tasks настоящие."""
+"""The module renaming: the neighbours are fakes, the file system is real."""
 import asyncio
-import itertools
-import os
 import sqlite3
 
 import pytest
 
-from core import BaseModule, Bus, BusRequestError, Runner
-from core.db import Database
-from core.envelope import Envelope
+from core import BaseModule, Bus, Runner
 from modules.renaming import RenamingModule
 from series_factory import insert_series
-from settle import settle
 from schema_db import migrated
 
 
@@ -91,7 +86,7 @@ def _source(source_type, profile_id=None, source_id=1):
 
 def _torrent(series, profile_id=1):
     """The same series as a torrent one: its single source is a torrent with the profile."""
-    return {**series, "kind": "torrent", "sources": [_source("torrent", profile_id)]}
+    return {**series, "sources": [_source("torrent", profile_id)]}
 
 
 @pytest.fixture
@@ -104,11 +99,11 @@ async def started(tmp_path):
         insert_series(conn, id=2, name="Show", name_en="Show", site="vk", save_path=str(media), state="waiting",
                       url="u|q/2", source_type="vk_video")
         conn.commit()
-    series = {"id": 2, "name_en": "Show", "kind": "video", "save_path": str(media), "season": None,
+    series = {"id": 2, "name_en": "Show", "save_path": str(media), "season": None,
               "sources": [_source("vk_video", profile_id=1)]}
     bus = Bus()
     fake = FakeNeighbours(bus, series)
-    renaming = RenamingModule(bus, Database(str(db_path)))
+    renaming = RenamingModule(bus)
     probe = Probe(bus)
     runner = Runner(bus, [fake, renaming, probe])
     await runner.start()
@@ -133,12 +128,6 @@ class WatchedLock(asyncio.Lock):
         if self.locked():
             self.contended.set()
         return await super().acquire()
-
-
-def _renaming_tasks(db_path):
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        return [dict(r) for r in conn.execute("SELECT * FROM renaming_tasks")]
 
 
 @pytest.mark.asyncio
@@ -195,10 +184,9 @@ async def test_process_torrent_uses_original_path_from_db(system):
 
 
 @pytest.mark.asyncio
-async def test_sim_C9_pipeline_rename_serializes_with_reprocess(started):
-    """C9: переименование конвейера (process_torrent) и reprocess (от save)
-    делят per-series лок — НЕ переименовывают одни файлы параллельно
-    (иначе кривые имена, как у «Путешествия»)."""
+async def test_sim_C9_two_renames_of_one_series_never_run_at_once(started):
+    """C9: two renames of the files of one series share its lock and never rename the same files in parallel (else
+    crooked names, as «Путешествие» had)."""
     _, fake, renaming, probe, _, media = started
     lock = renaming._locks[2] = WatchedLock()  # the lock of the series, seen
     fake.series = _torrent(fake.series)
@@ -213,13 +201,13 @@ async def test_sim_C9_pipeline_rename_serializes_with_reprocess(started):
         timeout=10))
     await asyncio.wait_for(fake.files_entered.wait(), 5)  # it has entered and holds the lock
     t2 = asyncio.create_task(probe.request(
-        "renaming.reprocess", {"series_id": 2}, timeout=10))
-    await asyncio.wait_for(lock.contended.wait(), 5)  # reprocess is queued for the lock
-    assert fake.files_calls == 1  # reprocess ЖДЁТ лок, в files.get не вошёл
+        "renaming.process_torrent", {"series_id": 2, "qb_hash": "h"}, timeout=10))
+    await asyncio.wait_for(lock.contended.wait(), 5)  # the second is queued for the lock
+    assert fake.files_calls == 1  # it waits for the lock and has not asked for the files
 
-    fake.files_block.set()  # отпускаем конвейерный rename
+    fake.files_block.set()  # the first goes on
     await asyncio.gather(t1, t2)
-    assert fake.files_calls >= 2  # reprocess отработал ПОСЛЕ, не параллельно
+    assert fake.files_calls >= 2  # the second ran after the first, not alongside
 
 
 @pytest.mark.asyncio
@@ -331,34 +319,3 @@ async def test_the_profile_asked_for_is_the_one_of_the_torrent_source(system):
     await probe.request("renaming.process_torrent", {"series_id": 2, "qb_hash": "hp"}, timeout=10)
 
     assert fake.torrent_profiles == [5]
-
-
-@pytest.mark.asyncio
-async def test_a_torrent_series_without_a_profile_is_skipped_by_the_reprocess(system):
-    _, fake, probe, _, _ = system
-    fake.series = _torrent(fake.series, profile_id=None)
-    fake.active_torrents = [{"qb_hash": "h", "torrent_id": "t"}]
-    fake.qbt_files["h"] = [{"name": "a.mkv"}]
-
-    reply = await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
-
-    assert reply == {"renamed": 0, "skipped": True}
-    assert fake.torrent_profiles == [] and fake.renames == []
-
-
-@pytest.mark.asyncio
-async def test_a_reprocess_a_restart_interrupted_is_run_again_when_the_system_has_started_and_not_before(started):
-    bus, fake, renaming, probe, db_path, media = started
-    open(os.path.join(media, "старое имя 1.mp4"), "wb").close()
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("INSERT INTO renaming_tasks (series_id, status, attempts, created_at, task_type, task_data) "
-                     "VALUES (2, 'in_progress', 0, '2026-11-02 10:00:00', 'reprocess', '{}')")
-        conn.commit()
-    sub = bus.subscribe("renaming.finished")
-    await settle(bus, renaming)  # nothing in the module looks for such a task by itself
-    assert os.path.exists(os.path.join(media, "старое имя 1.mp4")) and sub.queue.empty() and not fake.rename_calls
-    bus.publish(Envelope(topic="system.started", kind="event"))
-    env = await asyncio.wait_for(sub.queue.get(), 5)
-    assert env.payload == {"series_id": 2}
-    # The files of a video series take their names from its plan: the task ends and renames nothing.
-    assert not fake.rename_calls and _renaming_tasks(db_path) == []

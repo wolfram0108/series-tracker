@@ -15,7 +15,7 @@ from core import BusRequestError
 from core.reasons import code_of, reason, relayed
 from .routing import admitted
 
-from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, FailuresReset, FailuresResetBody, OkResponse, SyncCancelled, SyncScopeBody,
+from .schemas import (CreatedSeries, ErrorResponse, FailuresReset, FailuresResetBody, OkResponse, SyncCancelled, SyncScopeBody,
                       QueueTask, SeriesCreate, SeriesObject, SeriesUpdate)
 
 # Общая документация веток ошибок (отдаются через JSONResponse, на них
@@ -84,7 +84,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.post("/api/series", response_model=CreatedSeries, responses=_ERRORS)
     async def add_series(body: SeriesCreate):
-        data = body.model_dump(mode="json", exclude={"tmdb_data", "torrents"}, exclude_unset=True)
+        data = body.model_dump(mode="json", exclude={"tmdb_data"}, exclude_unset=True)
         try:
             series = await gw.request("catalog.series.create", {"data": data})
         except BusRequestError as exc:
@@ -93,13 +93,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         if body.tmdb_data:
             await gw.request("metadata.map.set", {
                 "series_id": series_id, "tmdb_data": body.tmdb_data})
-        if body.torrents:
-            try:
-                await gw.request("torrents.db.add", {
-                    "series_id": series_id, "torrents": body.torrents})
-            except BusRequestError as exc:
-                gw.log.warning("торренты формы добавления не записаны "
-                               "(модуль torrents недоступен?): %s", exc)
         return {"success": True, "series_id": series_id}
 
     # ВАЖНО: статический путь регистрируется до /{series_id}.
@@ -123,13 +116,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError as exc:
             return _error_response(exc, with_success=False)
         s["last_scan_time"] = _iso(s.get("last_scan_time"))
-        # `sources` decides which address is a tracker's; a series with no such address has no tracker_info.
-        for source in s["sources"]:
-            reply = await gw.request("sources.tracker.resolve",
-                                     {"url": source["url"]})
-            if reply["tracker"]:
-                s["tracker_info"] = reply["tracker"]
-                break
         reply = await gw.request("metadata.map.get",
                                  {"series_id": series_id})
         _attach_tmdb(s, reply["mapping"])
@@ -163,10 +149,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.delete("/api/series/{series_id}", response_model=OkResponse,
               response_model_exclude_none=True, responses=_ERRORS)
-    async def delete_series(series_id: int, delete_from_qb: bool = False):
+    async def delete_series(series_id: int):
         try:
-            await gw.request("catalog.series.delete", {
-                "series_id": series_id, "delete_from_qb": delete_from_qb})
+            await gw.request("catalog.series.delete", {"series_id": series_id})
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True}
@@ -251,24 +236,15 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return _error_response(exc)
         return {"success": True}
 
-    @r.get("/api/series/{series_id}/torrents/history",
-           response_model=list[DynamicObject])
-    async def torrents_history(series_id: int):
-        try:
-            return await gw.request("torrents.db.history",
-                                    {"series_id": series_id})
-        except BusRequestError:
-            return []
-
     @r.post("/api/series/{series_id}/scan", response_model=OkResponse,
             response_model_exclude_none=True,
             responses={409: {"model": ErrorResponse},
                        500: {"model": ErrorResponse}})
     async def scan_series(series_id: int, body: SyncScopeBody | None = None, download: bool = True):
         """Синхронный скан одной серии, как в оригинале: HTTP ждёт
-        результата; force_replace scan берёт из настройки отладки.
+        результата.
         download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается.
-        С телом (сезон, серия сезона) — синхронизация в рамках сезона или серии видео-сериала: источники те же, исполняется
+        С телом (сезон, серия сезона) — синхронизация в рамках сезона или серии: источники те же, исполняется
         то, что касается области (серия компиляции приводит всю компиляцию); сериал занят на всё время."""
         try:
             result = await gw.request("scan.series.run", {

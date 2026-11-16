@@ -1,6 +1,5 @@
-"""Тесты блока «настройки и справочники» этапа 5 (Р-22): авторизации,
-parse_url, настройки и debug-группы, конструктор правил, трекеры,
-каталоги, админ-вкладка БД."""
+"""The block «settings and references» of stage 5 (R-22): the credentials, the settings and the debug groups, the
+constructor of rules, the trackers, the folders, the admin tab of the database."""
 import json
 import sqlite3
 
@@ -18,7 +17,6 @@ from modules.settings import SettingsModule
 from modules.sources import SourcesModule
 from modules.trackerauth import TrackerauthModule
 from modules.voices import VoicesModule
-from core import ids
 from core.reasons import parse
 from series_factory import insert_series
 from schema_db import migrated
@@ -138,60 +136,8 @@ async def test_a_secret_is_given_only_when_the_eye_of_its_field_asks_for_it_and_
 
 
 @pytest.mark.asyncio
-async def test_parse_url_form(system):
+async def test_debug_groups(system):
     _, _, client = system
-    resp = await client.post("/api/parse_url", json={"url": "http://kinozal.tv/details.php?id=1"})
-    body = resp.json()
-    assert body["success"] is True
-    assert body["title"] == {"ru": "Тайтл", "en": "Title"}
-    t = body["torrents"][0]
-    assert t["date_time"] == "2026-01-01 00:00"  # date_marker → date_time
-    # torrent_id посчитан в sources по формуле-констрейнту (core/ids)
-    assert t["torrent_id"] == ids.torrent_id("http://kinozal.tv/dl/1",
-                                             "2026-01-01 00:00")
-    assert body["tracker_info"]["canonical_name"] == "kinozal"
-
-
-A_SITE_PAGE = {"ruchime": "https://1.ruchime.org/release/x/episode-3?off=vk#top",
-               "dunhuatv": "https://www.dunhuatv.ru/28-x-smotret-onlajn.html?a=1#cvh=2",
-               "vk_channel": "https://vk.com/@chan/videos|запрос"}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("site", sorted(A_SITE_PAGE))
-async def test_parse_url_refuses_a_page_a_site_reads_with_a_code_and_reads_nothing(system, site):
-    """The gateway knows no site: `sources` says that a site reads the address, and the page is not parsed."""
-    _, _, client = system
-    resp = await client.post("/api/parse_url", json={"url": A_SITE_PAGE[site]})
-    assert resp.status_code == 400
-    assert parse(resp.json()["error"]) == {"code": "not_a_torrent_page", "params": {}}
-
-
-@pytest.mark.asyncio
-async def test_parse_url_of_a_torrent_page_has_only_what_a_torrent_form_needs(system):
-    _, _, client = system
-    body = (await client.post("/api/parse_url", json={"url": "http://kinozal.tv/details.php?id=1"})).json()
-    assert set(body) == {"success", "title", "torrents", "tracker_info"}
-
-
-@pytest.mark.asyncio
-async def test_parse_url_of_an_address_nobody_reads_says_so_in_the_words_of_sources(system):
-    _, _, client = system
-    resp = await client.post("/api/parse_url", json={"url": "http://nowhere.test/page"})
-    assert resp.status_code == 400
-    assert parse(resp.json()["error"])["code"] == "tracker_unknown_url"
-
-
-@pytest.mark.asyncio
-async def test_settings_flags_and_debug_groups(system):
-    _, _, client = system
-    resp = await client.get("/api/settings/force_replace")
-    assert resp.json() == {"enabled": False}
-    await client.post("/api/settings/force_replace",
-                      json={"enabled": True})
-    resp = await client.get("/api/settings/force_replace")
-    assert resp.json() == {"enabled": True}
-
     # debug-флаги: структура с бэкенда + включение группы (принцип 6)
     resp = await client.get("/api/settings/debug_flags")
     body = resp.json()

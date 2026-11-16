@@ -12,7 +12,6 @@ import os
 import re
 
 from core import season as season_rule
-from core.contracts import SeriesKind
 from core.fsnames import sanitize_name as sanitize
 
 
@@ -107,16 +106,8 @@ def format_name(series: dict, metadata: dict,
         parts.append(f"{resolution_str}p" if resolution_str.isdigit()
                      else sanitize(resolution_str))
 
-    extension = ".mkv"
-    if series.get("kind") == SeriesKind.VIDEO:
-        # A download is an .mp4 until the end of its sync packs it into the container of the episode (stage 11): a packed
-        # file keeps its .mkv through every renaming.
-        packed = bool(original_filename) and os.path.splitext(original_filename)[1].lower() == ".mkv"
-        extension = ".mkv" if packed else ".mp4"
-    elif original_filename:
-        ext = os.path.splitext(original_filename)[1]
-        if ext:
-            extension = ext.lower()
+    # A file keeps its own extension; a name of no file yet is the one of the container of an episode.
+    extension = (os.path.splitext(original_filename)[1].lower() if original_filename else "") or ".mkv"
 
     basename = " ".join(filter(None, parts)) + extension
 

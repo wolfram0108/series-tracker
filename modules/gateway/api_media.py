@@ -11,7 +11,7 @@ from core import BusRequestError
 from core.reasons import reason
 
 from .routing import refusal
-from .schemas import ErrorOnly, ErrorResponse, NamingPreviewAccepted, NamingPreviewRequest, OkResponse
+from .schemas import ErrorOnly, ErrorResponse, OkResponse
 
 # Документация веток ошибок (отдаются JSONResponse, response_model на них
 # не распространяется). _ERR — тело {success, error}; _ERR1 — {error}.
@@ -47,14 +47,5 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return []
         return [os.path.basename(f["original_path"]) for f in files]
-
-    # --- the file lists of releases for the naming preview of the add window ---------
-
-    @r.post("/api/preview/naming/fetch", response_model=NamingPreviewAccepted, responses=_ERR1)
-    async def preview_naming_fetch(body: NamingPreviewRequest):
-        """Starts the fetch of the file lists of the releases and answers at once with {accepted: [torrent_id]};
-        the lists come as the events preview_naming_ready and preview_naming_failed, published by the owner."""
-        gw.send_command("torrents.preview.fetch", {"items": body.model_dump(mode="json", exclude_unset=True)["items"]})
-        return {"accepted": [item.torrent_id for item in body.items]}
 
     return r

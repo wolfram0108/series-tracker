@@ -24,9 +24,9 @@ const summary: SourceSummary = {
 }
 const ok = <T>(data: T) => ({ ok: true as const, data })
 
-function setup(kind: "torrent" | "video" = "video", initial: SeriesSource[] = [source()]) {
+function setup(initial: SeriesSource[] = [source()]) {
   let sources!: ReturnType<typeof useSeriesSources>
-  mount(defineComponent({ setup() { sources = useSeriesSources(1, kind, initial); return () => h("div") } }))
+  mount(defineComponent({ setup() { sources = useSeriesSources(1, initial); return () => h("div") } }))
   return sources
 }
 
@@ -34,7 +34,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.mocked(calls.fetchSources).mockReset().mockResolvedValue(ok([source()]))
   vi.mocked(output.fetchComposition).mockReset().mockResolvedValue(ok({ sources: [summary], rows: [] }) as never)
-  vi.mocked(calls.resolveAddress).mockReset().mockResolvedValue(ok({ site: "ruchime", canonical_url: PAGE }))
+  vi.mocked(calls.resolveAddress).mockReset().mockResolvedValue(ok({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" }))
   vi.mocked(calls.createSource).mockReset().mockResolvedValue(ok({ id: 8 }))
   vi.mocked(calls.changeSource).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.removeSource).mockReset().mockResolvedValue(ok({ success: true }))
@@ -66,7 +66,6 @@ describe("useSeriesSources", () => {
     expect(sources.tablesLoading.value).toBe(true)
     await again
     expect(sources.tablesLoading.value).toBe(false)
-    expect(setup("torrent").waiting.value).toBe(false)
   })
 
   it("counts the players of a source from the layout once: the news of a page changes its state and recounts no row", async () => {
@@ -96,11 +95,11 @@ describe("useSeriesSources", () => {
     expect(sources.items.value).toHaveLength(1)
   })
 
-  it("reads no layout for a torrent series: it has no table", async () => {
-    setup("torrent", [source({ source_type: "torrent", url: "https://kinozal.tv/details.php?id=1" })])
+  it("reads the layout of a series of a torrent source as of any series: a torrent page is a table too", async () => {
+    setup([source({ source_type: "torrent", url: "https://kinozal.tv/details.php?id=1" })])
     await flushPromises()
     expect(calls.fetchSources).toHaveBeenCalledTimes(1)
-    expect(output.fetchComposition).not.toHaveBeenCalled()
+    expect(output.fetchComposition).toHaveBeenCalled()
   })
 
   it("reads the sources again when the layout of the series changes, and not for another series", async () => {
@@ -120,7 +119,7 @@ describe("useSeriesSources", () => {
     vi.mocked(calls.readPageNow).mockReset().mockResolvedValue(ok({ success: true }))
     const channel = source({ source_type: "vk_video", url: "https://vk.com/video/@c|Тайтл" })
     vi.mocked(calls.fetchSources).mockResolvedValue(ok([channel]))
-    const sources = setup("video", [channel])
+    const sources = setup([channel])
     await flushPromises()
     await sources.reread(7)
     expect(calls.readPageNow).toHaveBeenCalledWith("https://vk.com/video/@c|Тайтл", "all")

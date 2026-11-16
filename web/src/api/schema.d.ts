@@ -287,23 +287,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/series/{series_id}/torrents/history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Torrents History */
-        get: operations["torrents_history_api_series__series_id__torrents_history_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/series/{series_id}/scan": {
         parameters: {
             query?: never;
@@ -316,9 +299,9 @@ export interface paths {
         /**
          * Scan Series
          * @description Синхронный скан одной серии, как в оригинале: HTTP ждёт
-         *     результата; force_replace scan берёт из настройки отладки.
+         *     результата.
          *     download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается.
-         *     С телом (сезон, серия сезона) — синхронизация в рамках сезона или серии видео-сериала: источники те же, исполняется
+         *     С телом (сезон, серия сезона) — синхронизация в рамках сезона или серии: источники те же, исполняется
          *     то, что касается области (серия компиляции приводит всю компиляцию); сериал занят на всё время.
          */
         post: operations["scan_series_api_series__series_id__scan_post"];
@@ -561,10 +544,8 @@ export interface paths {
         };
         /**
          * Composition
-         * @description The composition window: the layout of a video series (`composition`, rows the constructor excluded
-         *     only with `include_excluded`; `sources_only` leaves out the rows, levels and settings), or the composition of
-         *     a torrent series (`torrents`; `refresh` fetches
-         *     the release first).
+         * @description The composition window: the layout of the series (`composition`, rows the constructor excluded only with
+         *     `include_excluded`; `sources_only` leaves out the rows, levels and settings).
          */
         get: operations["composition_api_series__series_id__composition_get"];
         put?: never;
@@ -1072,27 +1053,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/preview/naming/fetch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview Naming Fetch
-         * @description Starts the fetch of the file lists of the releases and answers at once with {accepted: [torrent_id]};
-         *     the lists come as the events preview_naming_ready and preview_naming_failed, published by the owner.
-         */
-        post: operations["preview_naming_fetch_api_preview_naming_fetch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/auth": {
         parameters: {
             query?: never;
@@ -1126,63 +1086,6 @@ export interface paths {
         get: operations["get_auth_secret_api_auth__service__secret_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/parse_url": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Parse Url
-         * @description A torrent page for the add form. A page that a site reads is no torrent page: `composition.preview`
-         *     shows it, and here it is refused with a code.
-         */
-        post: operations["parse_url_api_parse_url_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/force_replace": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Force Replace */
-        get: operations["force_replace_api_settings_force_replace_get"];
-        put?: never;
-        /** Force Replace */
-        post: operations["force_replace_api_settings_force_replace_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/less_strict_scan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Less Strict Scan */
-        get: operations["less_strict_scan_api_settings_less_strict_scan_get"];
-        put?: never;
-        /** Less Strict Scan */
-        post: operations["less_strict_scan_api_settings_less_strict_scan_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2881,30 +2784,6 @@ export interface components {
             consumer: string;
             queue: components["schemas"]["Queue"];
         };
-        /** NamingPreviewAccepted */
-        NamingPreviewAccepted: {
-            /** Accepted */
-            accepted: (string | number | null)[];
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * NamingPreviewItem
-         * @description A release of the add form: a magnet is fetched through qBit, a link is a .torrent.
-         */
-        NamingPreviewItem: {
-            /** Torrent Id */
-            torrent_id?: string | number | null;
-            /** Magnet */
-            magnet?: string | null;
-            /** Link */
-            link?: string | null;
-        };
-        /** NamingPreviewRequest */
-        NamingPreviewRequest: {
-            /** Items */
-            items?: components["schemas"]["NamingPreviewItem"][];
-        };
         /**
          * OkResponse
          * @description Стандартный успех: {success: true[, message]}.
@@ -3109,11 +2988,6 @@ export interface components {
             /** Url */
             url: string;
         };
-        /** ParseUrlRequest */
-        ParseUrlRequest: {
-            /** Url */
-            url: string;
-        };
         /**
          * ParsedDomains
          * @description The domains a reader of pages takes addresses of: a tracker (its domain and mirrors, as the settings hold them) or
@@ -3126,32 +3000,6 @@ export interface components {
             kind: string;
             /** Domains */
             domains?: string[];
-        };
-        /**
-         * ParsedUrl
-         * @description A parsed torrent page for the add form. A page that a site reads is not a torrent page: it is refused
-         *     with the reason `not_a_torrent_page` and shown by `composition.preview`.
-         */
-        ParsedUrl: {
-            /** Success */
-            success: boolean;
-            /** Title */
-            title?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Torrents
-             * @default []
-             */
-            torrents: {
-                [key: string]: unknown;
-            }[];
-            /** Tracker Info */
-            tracker_info?: {
-                [key: string]: unknown;
-            } | null;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * PlanAsset
@@ -3923,8 +3771,6 @@ export interface components {
             scanner_enabled: boolean;
             /** Is Scanning */
             is_scanning: boolean;
-            /** Is Awaiting Tasks */
-            is_awaiting_tasks: boolean;
             /** Scan Interval */
             scan_interval: number;
             /** Next Scan Time */
@@ -3977,21 +3823,11 @@ export interface components {
             } | null;
             /** Sources */
             sources: components["schemas"]["SourceDraft"][];
-            /** Torrents */
-            torrents?: {
-                [key: string]: unknown;
-            }[];
         };
-        /**
-         * SeriesKind
-         * @description What a series is to the rest of the system: a series has sources of one kind, a torrent one or a video one.
-         * @enum {string}
-         */
-        SeriesKind: "torrent" | "video";
         /**
          * SeriesObject
          * @description A series (list and card). The fields that are always there are declared; the conditional ones
-         *     (tracker_info for a series with a tracker address, downloaded_episodes_count in the list) pass through
+         *     (downloaded_episodes_count in the list) pass through
          *     extra='allow'. The address, type and profile are fields of the sources (`sources`), not of the series.
          *     Do NOT apply exclude_none to a series: the null fields (quality_override, tmdb_info) must stay.
          */
@@ -4008,7 +3844,6 @@ export interface components {
             save_path: string;
             /** Season */
             season?: string | null;
-            kind: components["schemas"]["SeriesKind"];
             /** Sources */
             sources: components["schemas"]["SeriesSource"][];
             /** Auto Scan Enabled */
@@ -4642,7 +4477,7 @@ export interface components {
         /** StreamEvent */
         StreamEvent: {
             /** @enum {string} */
-            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "torrent_release_update" | "torrent_editor_update" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_read_progress" | "conform_queue_update" | "pack_queue_update" | "pack_journal_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "conform_settings_update" | "provider_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
+            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "torrent_release_update" | "torrent_editor_update" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_read_progress" | "conform_queue_update" | "pack_queue_update" | "pack_journal_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "conform_settings_update" | "provider_update" | "relocation_started" | "relocation_finished";
             data: unknown;
         };
     };
@@ -5054,9 +4889,7 @@ export interface operations {
     };
     delete_series_api_series__series_id__delete: {
         parameters: {
-            query?: {
-                delete_from_qb?: boolean;
-            };
+            query?: never;
             header?: never;
             path: {
                 series_id: number;
@@ -5349,37 +5182,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    torrents_history_api_series__series_id__torrents_history_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                series_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -6238,7 +6040,6 @@ export interface operations {
     composition_api_series__series_id__composition_get: {
         parameters: {
             query?: {
-                refresh?: boolean;
                 include_excluded?: boolean;
                 sources_only?: boolean;
             };
@@ -6256,7 +6057,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CompositionReply"] | components["schemas"]["DynamicObject"][];
+                    "application/json": components["schemas"]["CompositionReply"];
                 };
             };
             /** @description Not Found */
@@ -7500,57 +7301,6 @@ export interface operations {
             };
         };
     };
-    preview_naming_fetch_api_preview_naming_fetch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NamingPreviewRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NamingPreviewAccepted"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-        };
-    };
     get_auth_api_auth_get: {
         parameters: {
             query?: never;
@@ -7618,155 +7368,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    parse_url_api_parse_url_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ParseUrlRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ParsedUrl"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-        };
-    };
-    force_replace_api_settings_force_replace_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"];
-                };
-            };
-        };
-    };
-    force_replace_api_settings_force_replace_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"];
-                };
-            };
-        };
-    };
-    less_strict_scan_api_settings_less_strict_scan_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"];
-                };
-            };
-        };
-    };
-    less_strict_scan_api_settings_less_strict_scan_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"];
                 };
             };
         };

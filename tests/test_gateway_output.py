@@ -7,8 +7,8 @@ from core.reasons import parse, reason
 from gateway_fakes import published, serving
 from modules.gateway.schemas import OutputSettingsBatch, OutputSettingsReset, OutputSettingsSet, OutputSwitchBody
 
-VIDEO = {"id": 1, "kind": "video", "sources": []}
-TORRENT = {"id": 2, "kind": "torrent", "sources": []}
+VIDEO = {"id": 1, "sources": []}
+TORRENT = {"id": 2, "sources": [{"id": 5, "url": "https://kinozal.tv/details.php?id=1", "source_type": "torrent"}]}
 LAYOUT = {"series_id": 1, "rev": 3, "levels": [], "settings": [], "sources": [
     {"source_id": 4, "url": "https://x.test/p", "status": "ready", "reason": None, "read_at": None, "players": []}],
     "rows": [{"series_id": 1, "source_id": 4, "row_key": "r1", "excluded": False, "exclusion": None, "season": 1,
@@ -28,14 +28,13 @@ def topics(spy) -> list[str]:
 # --- the composition ---------------------------------------------------------------------------------
 
 
-async def test_the_composition_of_a_video_series_is_the_layout_of_composition(tmp_path):
-    answers = {"catalog.series.get": card_of, "composition.get": LAYOUT, "torrents.composition": []}
+async def test_the_composition_of_a_series_is_the_layout_of_composition(tmp_path):
+    answers = {"catalog.series.get": card_of, "composition.get": LAYOUT}
     async with serving(tmp_path, answers) as (client, owners, _, spy):
         response = await client.get("/api/series/1/composition")
     assert response.status_code == 200
     assert CompositionReply.model_validate(response.json()) == CompositionReply.model_validate(LAYOUT)
     assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": False, "sources_only": False}]
-    assert owners.asked("torrents.composition") == [] and owners.asked("scan.series.prepare") == []
     # Nothing is merged in: the layout is asked for alone, the references have their own point.
     assert [t for t in topics(spy) if t not in ("catalog.series.get", "composition.get")] == []
 
@@ -45,15 +44,6 @@ async def test_the_rows_the_constructor_excluded_come_only_when_asked_for(tmp_pa
     async with serving(tmp_path, answers) as (client, owners, _, _):
         await client.get("/api/series/1/composition?include_excluded=true")
     assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": True, "sources_only": False}]
-
-
-async def test_refresh_does_not_start_a_scan_of_a_video_series(tmp_path):
-    answers = {"catalog.series.get": card_of, "composition.get": LAYOUT, "scan.series.run": {},
-               "scan.series.prepare": {}}
-    async with serving(tmp_path, answers) as (client, owners, _, spy):
-        assert (await client.get("/api/series/1/composition?refresh=true")).status_code == 200
-    assert owners.asked("scan.series.run") == [] and owners.asked("scan.series.prepare") == []
-    assert "scan.series.run" not in topics(spy)
 
 
 async def test_a_scan_of_a_series_downloads_unless_the_window_asks_for_the_status_alone(tmp_path):
@@ -100,23 +90,12 @@ async def test_the_reset_of_failed_attempts_may_name_the_level_it_is_of_and_an_u
         {"series_id": 1, "season": 1, "episode": 2, "voice": "AniStar"}, {"series_id": 1, "season": 1, "kind": "cut"}]
 
 
-async def test_the_composition_of_a_torrent_series_is_the_torrent_plan_with_iso_dates(tmp_path):
-    plan = [{"id": 1, "original_path": "Dir/T.S01E01.mkv", "source_data": {"publication_date": "2026-01-01 00:00:00"}}]
-    answers = {"catalog.series.get": card_of, "torrents.composition": plan, "composition.get": LAYOUT}
+async def test_a_series_with_a_torrent_source_has_the_layout_of_composition_too(tmp_path):
+    """A torrent is a source like any other (stage 15): its series is laid out by composition, as every series."""
+    answers = {"catalog.series.get": card_of, "composition.get": LAYOUT}
     async with serving(tmp_path, answers) as (client, owners, _, _):
-        response = await client.get("/api/series/2/composition")
-    assert response.json()[0]["source_data"]["publication_date"] == "2026-01-01T00:00:00"
-    assert owners.asked("torrents.composition") == [{"series_id": 2, "refresh": False}]
-    assert owners.asked("composition.get") == []
-
-
-async def test_refresh_of_a_torrent_series_fetches_the_release_before_the_plan(tmp_path):
-    answers = {"catalog.series.get": card_of, "scan.series.prepare": {"tasks_created": 1},
-               "torrents.composition": []}
-    async with serving(tmp_path, answers) as (client, owners, _, _):
-        assert (await client.get("/api/series/2/composition?refresh=true")).status_code == 200
-    assert [t for t, _ in owners.calls] == ["catalog.series.get", "scan.series.prepare", "torrents.composition"]
-    assert owners.asked("torrents.composition") == [{"series_id": 2, "refresh": True}]
+        assert (await client.get("/api/series/2/composition")).status_code == 200
+    assert owners.asked("composition.get") == [{"series_id": 2, "include_excluded": False, "sources_only": False}]
 
 
 async def test_the_composition_of_an_unknown_series_is_not_found(tmp_path):

@@ -17,9 +17,8 @@ import { api } from "../api/client"
 
 type Schemas = components["schemas"]
 
-/** Связывает SSE-события со сторами и открывает соединение. Вызывается один
- *  раз при старте приложения (после установки Pinia). Маппинг 1:1 с SSE_MAP
- *  бэка; renaming_complete — для статус-модалки (подключится в Ф4). */
+/** Binds the SSE events to the stores and opens the connection; called once at the start of the application (after
+ *  Pinia is installed). The events are those of SSE_MAP of the core. */
 export function setupRealtime(): void {
   const sse = useSSE()
   const series = useSeriesStore()
@@ -71,7 +70,6 @@ export function setupRealtime(): void {
   sse.on("relocation_finished", () => {
     void series.load()
   })
-  // renaming_complete — обновление состава в статус-модалке (Ф4)
 
   // A connection that came back may have missed events (the end of a read, of a sync, a restart of the service): the
   // soft news of the pages are dropped, the list of series and the scanner are read again as at the start, and every

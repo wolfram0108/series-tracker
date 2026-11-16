@@ -189,13 +189,10 @@ def test_extract_part():
 
 def test_formatter_part_suffix():
     from modules.rules.formatter import format_name
-    series = {"name_en": "Show", "kind": "video"}
-    # Без части -> Show s01e08.mp4
-    assert format_name(series, {"season": 1, "episode": 8}) == "Show s01e08.mp4"
-    # С частью 1 -> Show s01e08 Part 1.mp4
-    assert format_name(series, {"season": 1, "episode": 8, "part": 1}) == "Show s01e08 Part 1.mp4"
-    # С частью 2 -> Show s01e08 Part 2.mp4
-    assert format_name(series, {"season": 1, "episode": 8, "part": 2}) == "Show s01e08 Part 2.mp4"
+    series = {"name_en": "Show"}
+    assert format_name(series, {"season": 1, "episode": 8}) == "Show s01e08.mkv"
+    assert format_name(series, {"season": 1, "episode": 8, "part": 1}) == "Show s01e08 Part 1.mkv"
+    assert format_name(series, {"season": 1, "episode": 8, "part": 2}) == "Show s01e08 Part 2.mkv"
 
 
 # --- тесты блока диапазона («Диапазон») ------------------------------------------
@@ -648,7 +645,7 @@ def test_unknown_action_type_disables_rule_not_profile():
 # --- file name from ready-made numbers: no rule is applied to it --------------------
 
 def _series(**kw):
-    base = {"name_en": "Show", "kind": "torrent", "season": "1"}
+    base = {"name_en": "Show", "season": "1"}
     base.update(kw)
     return base
 
@@ -704,22 +701,19 @@ def test_range_and_part_and_voiceover_of_the_item_reach_the_name():
     assert _name(_series(), item) == "Show s01e03-e05 Part 2 [AniLibria] 1080p.mkv"
 
 
-def test_extension_follows_the_kind_of_the_series_not_a_source_type():
+def test_a_file_keeps_its_own_extension_whatever_its_sources():
     from modules.rules import formatter
     item = _item()
-    video = _series(kind="video")
-    torrent = _series(kind="torrent")
-    metadata = formatter.build_metadata(video, item)
-    # A video series: a download is an .mp4, a container packed at the end of a sync stays an .mkv (stage 11).
-    assert formatter.format_name(video, metadata, original_filename="x.mkv").endswith(".mkv")
-    assert formatter.format_name(video, metadata, original_filename="x.mp4").endswith(".mp4")
-    assert formatter.format_name(video, metadata, original_filename="x.avi").endswith(".mp4")
-    assert formatter.format_name(video, metadata).endswith(".mp4")
+    series = _series()
+    metadata = formatter.build_metadata(series, item)
+    assert formatter.format_name(series, metadata, original_filename="x.mkv").endswith(".mkv")
+    assert formatter.format_name(series, metadata, original_filename="x.mp4").endswith(".mp4")
+    assert formatter.format_name(series, metadata, original_filename="x.avi").endswith(".avi")
+    assert formatter.format_name(series, metadata).endswith(".mkv")
     # a leftover source_type must not decide anything any more
-    legacy = _series(kind="torrent", source_type="vk_video")
+    legacy = _series(source_type="vk_video")
     assert formatter.format_name(legacy, formatter.build_metadata(legacy, item),
                                  original_filename="x.avi").endswith(".avi")
-    assert formatter.format_name(torrent, formatter.build_metadata(torrent, item)).endswith(".mkv")
 
 
 # --- the action that assigns a range of episodes: the constructor names it, the table does not ------------------

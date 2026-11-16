@@ -6,7 +6,6 @@ import { api } from "../api/client"
 export interface ScannerStatus {
   scanner_enabled: boolean
   is_scanning: boolean
-  is_awaiting_tasks: boolean
   scan_interval: number
   next_scan_time: string | null
 }

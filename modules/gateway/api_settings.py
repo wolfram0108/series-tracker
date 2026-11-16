@@ -19,11 +19,10 @@ from core import logging as core_logging
 from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView,
                             PlayersListReply, ProviderSaved, ProviderSettingsDraft, ProviderView, VoiceSettingsDraft,
                             VoiceSettingsSaved, VoiceSettingsView)
-from core.contracts import SourceType
 from core.reasons import code_of, reason, relayed
 
 from .routing import refusal, route_per_method
-from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse, ParsedUrl, ParseUrlRequest
+from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse
 
 # Документация веток ошибок (JSONResponse, response_model не трогает).
 _ERR = {c: {"model": ErrorResponse} for c in (400, 403, 404, 409, 500)}
@@ -122,26 +121,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 "key": "tmdb_token", "value": tmdb["token"]})
         return {"success": True}
 
-    # --- разбор URL (форма добавления) ---------------------------------------------
-
-    @r.post("/api/parse_url", response_model=ParsedUrl, response_model_exclude_unset=True, responses=_ERR1)
-    async def parse_url(body: ParseUrlRequest):
-        """A torrent page for the add form. A page that a site reads is no torrent page: `composition.preview`
-        shows it, and here it is refused with a code."""
-        try:
-            site = await gw.request("sources.site.resolve", {"url": body.url})
-            if site["site"] is not None and site.get("source_type") != SourceType.TORRENT.value:
-                return JSONResponse({"error": reason("not_a_torrent_page")}, status_code=400)
-            result = await gw.request("sources.parse", {"url": body.url})
-        except BusRequestError as exc:
-            return refusal(exc, 400, with_success=False)
-        torrents = [{**rel,
-                     "link": rel.get("link") or rel.get("magnet"),
-                     "date_time": rel.get("date_marker")}
-                    for rel in result.get("releases", [])]
-        return {"success": True, "title": result.get("title"),
-                "torrents": torrents, "tracker_info": result.get("tracker")}
-
     # --- настройки -------------------------------------------------------------------
 
     async def _setting_flag(key: str, request: Request,
@@ -155,15 +134,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         reply = await gw.request("settings.value.get", {"key": key})
         return {response_key: (reply.get("value") or "false") == "true"}
 
-    @route_per_method(r, "/api/settings/force_replace", methods=["GET", "POST"],
-                      response_model=DynamicObject)
-    async def force_replace(request: Request):
-        return await _setting_flag("debug_force_replace", request)
-
-    @route_per_method(r, "/api/settings/less_strict_scan", methods=["GET", "POST"],
-                      response_model=DynamicObject)
-    async def less_strict_scan(request: Request):
-        return await _setting_flag("debug_less_strict_scan", request)
 
     @route_per_method(r, "/api/settings/conform_clear_finished", methods=["GET", "POST"],
                       response_model=DynamicObject)

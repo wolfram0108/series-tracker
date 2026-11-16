@@ -20,15 +20,13 @@ const props = withDefaults(defineProps<{
   busy?: boolean
   /** The tables of the sources have not been read: the cards say so and wait. */
   waiting?: boolean
-  /** A torrent series has one source: no source is added to it or removed from it. */
-  editable?: boolean
   /** Takes the typed address and says whether a source was made of it; the field is cleared only then. */
   adder: (address: string) => Promise<boolean>
   /** The names of the series the search of the video applications offers (its own, the original one of TMDB). */
   names?: { text: string; mark?: string }[]
   /** Names that cost a request (the original name of TMDB): asked once, when the search is first opened. */
   loadNames?: () => Promise<{ text: string; mark?: string }[]>
-}>(), { error: "", busy: false, editable: true, names: () => [], loadNames: undefined })
+}>(), { error: "", busy: false, names: () => [], loadNames: undefined })
 
 const emit = defineEmits<{
   (e: "remove", id: string | number): void
@@ -124,10 +122,10 @@ function clear(): void {
   <div class="sources stack">
     <SourceCard
       v-for="(item, index) in items" :key="item.id" :item="item" :profiles="profiles" :busy="busy" :waiting="waiting" :place="index + 1"
-      @change="emit('change', item.id, $event)" @remove="editable && emit('remove', item.id)"
+      @change="emit('change', item.id, $event)" @remove="emit('remove', item.id)"
       @reread="emit('reread', item.id)" @stop="emit('stop', item.id)"
     />
-    <div v-if="editable" class="stack">
+    <div class="stack">
       <div class="st-tabs st-tabs-wrap source-mode" role="tablist" :aria-label="t('sources.mode.label')">
         <button
           type="button" class="st-tab" role="tab" :class="{ active: mode === 'address' }" :aria-selected="mode === 'address'"

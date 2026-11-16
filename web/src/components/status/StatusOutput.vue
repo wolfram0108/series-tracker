@@ -32,7 +32,7 @@ import SourceMark from "./output/SourceMark.vue"
 // data is the core's: every change goes to it and comes back as events.
 const props = defineProps<{ seriesId: number; seriesName: string }>()
 
-const output = useSeriesOutput(props.seriesId, "video")
+const output = useSeriesOutput(props.seriesId)
 const series = useSeriesStore()
 // A sync of the series holds the levers for real, and they fade; a change of the window on its way holds them without a fade
 // (lib/lever.ts), so that a press does not make every control of the tab blink.

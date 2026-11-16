@@ -938,7 +938,7 @@ class Pages:
 
     async def counted(self) -> dict:
         """The sources are counted once more and the count is over: the cascade of a series that never was reports it."""
-        self.system.probe.publish_event("series.deleted", {"series_id": 99, "delete_from_qb": False})
+        self.system.probe.publish_event("series.deleted", {"series_id": 99})
         return await self.system.next(self.purged)
 
     def source_removed(self, series_id: int = 1) -> None:
@@ -976,7 +976,7 @@ async def test_a_deleted_series_takes_the_tables_of_its_pages_and_sources_report
     await pages.counted()
 
     del pages.catalog.series[1]
-    pages.system.probe.publish_event("series.deleted", {"series_id": 1, "delete_from_qb": False})
+    pages.system.probe.publish_event("series.deleted", {"series_id": 1})
 
     assert await pages.system.next(pages.purged) == {"series_id": 1, "owner": "sources"}
     assert await pages.system.stored() is None
@@ -989,7 +989,7 @@ async def test_a_page_another_series_still_lists_keeps_its_table(pages):
     await pages.counted()
 
     del pages.catalog.series[1]
-    pages.system.probe.publish_event("series.deleted", {"series_id": 1, "delete_from_qb": False})
+    pages.system.probe.publish_event("series.deleted", {"series_id": 1})
     await pages.system.next(pages.purged)
 
     assert await pages.system.stored() is not None
@@ -1048,7 +1048,7 @@ async def test_a_catalog_that_does_not_answer_forgets_nothing(pages):
 
     pages.catalog.failing = True
     pages.catalog.series = {}
-    pages.system.probe.publish_event("series.deleted", {"series_id": 1, "delete_from_qb": False})
+    pages.system.probe.publish_event("series.deleted", {"series_id": 1})
 
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(pages.purged.queue.get(), ABSENCE_WINDOW_S)

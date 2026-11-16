@@ -2,7 +2,7 @@
 of the whole application (tests/app_stand.py) are built by this one function, so that what a stand runs is the service."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
 
@@ -82,7 +82,7 @@ def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, l
         # scan/downloads/renaming after catalog/settings/sources/rules: their reconcile at the start asks those neighbours.
         ScanModule(bus, db),
         DownloadsModule(bus, db),
-        RenamingModule(bus, db),
+        RenamingModule(bus),
         VoicesModule(bus, db),
         # The plan of every video series and its sync (stage 12): downloads, cuts, alignments, containers, the journal.
         PlannerModule(bus, db),

@@ -13,10 +13,6 @@ const { state, confirm, cancel } = useConfirm()
   <ModalShell v-if="state.visible" :title="state.title" @close="cancel">
     <!-- Plain text: a message carries names the user typed (a series, a table), never markup. -->
     <p class="confirm-message">{{ state.message }}</p>
-    <label v-if="state.checkbox" class="confirm-checkbox">
-      <input type="checkbox" v-model="state.checkbox.checked" />
-      <span>{{ state.checkbox.text }}</span>
-    </label>
     <template #footer>
       <Button :label="t('common.cancel')" icon="pi pi-times" severity="secondary" @click="cancel" />
       <Button :label="t('common.confirm')" icon="pi pi-check" severity="danger" @click="confirm" />
@@ -26,6 +22,4 @@ const { state, confirm, cancel } = useConfirm()
 
 <style scoped>
 .confirm-message { margin: 0 0 4px; }
-.confirm-checkbox { display: flex; align-items: center; gap: 8px; margin-top: 16px; cursor: pointer; }
-.confirm-checkbox input { width: 18px; height: 18px; }
 </style>

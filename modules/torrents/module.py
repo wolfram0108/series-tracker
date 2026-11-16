@@ -33,7 +33,7 @@ Queries/commands конвейера (контракты Р-12, их ждёт sca
   torrents.fs.verify {series_id}        → {missing, recheck_started}
       — проверка файлов на диске + recheck-задачи для пропавших
       (вызывается сканом и при открытии модалки — решение Р-13/Р-14)
-      A series of kind `video` answers {0, 0} at once: it has no torrent files.
+      A series with no file of the pipeline answers {0, 0} at once.
   torrents.preview.fetch {items: [{torrent_id, magnet?, link?}]}
       — command: the file lists of the releases of the add form, for the
         preview of the naming. Each release ends with the event
@@ -100,7 +100,7 @@ import json
 import os
 
 from core import BaseModule, BusRequestError, storage, torrent_profile_id
-from core.contracts import RUN_CHANGED, RunChanged, SeriesKind
+from core.contracts import RUN_CHANGED, RunChanged
 from core.contracts.torrent import STAGING_DIR_KEY
 from core.db import Database
 from core.envelope import Envelope
@@ -943,19 +943,18 @@ class TorrentsModule(BaseModule):
             env.payload["series_id"])}
 
     async def on_series_deleted(self, env: Envelope) -> None:
-        """Каскад Р-19: чистим реестр, файлы, задачи конвейера; по флагу
-        delete_from_qb — записи в qBittorrent (файлы не трогаем);
-        кэш .torrent-файлов чистит sources по нашим командам."""
+        """Cascade R-19: the registry, the files and the tasks of the pipeline go; the torrents leave qBittorrent with
+        their files left in place (they lie in the library), as a release of a source leaves it with its series; the
+        cache of the .torrent files is dropped by sources on our commands."""
         series_id = env.payload["series_id"]
         rows = await self.repo.history(series_id)
-        if env.payload.get("delete_from_qb"):
-            hashes = [r["qb_hash"] for r in rows if r.get("qb_hash")]
-            if hashes:
-                try:
-                    await self.qbt.delete(hashes, delete_files=False)
-                except QbtError as exc:
-                    self.log.warning("удаление серии %d: записи в qBit не "
-                                     "удалены: %s", series_id, exc)
+        hashes = [r["qb_hash"] for r in rows if r.get("qb_hash")]
+        if hashes:
+            try:
+                await self.qbt.delete(hashes, delete_files=False)
+            except QbtError as exc:
+                self.log.warning("удаление серии %d: записи в qBit не "
+                                 "удалены: %s", series_id, exc)
         for r in rows:
             if r.get("torrent_id"):
                 self.send_command("sources.torrent_file.drop",
@@ -981,13 +980,14 @@ class TorrentsModule(BaseModule):
 
     async def on_fs_verify(self, env: Envelope) -> dict:
         """Файлы на диске: 100%-скачанный renamed без файла → missing →
-        recheck-задача (восстановление силами qBit). Вызывается сканом
-        и при открытии модалки (вместо фоновой проверки раз в 60 с)."""
+        recheck-задача (восстановление силами qBit). Вызывается при
+        открытии окна сериала (вместо фоновой проверки раз в 60 с)."""
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
-        # A video series has no torrent files: nothing to check or to warn about here.
-        if series["kind"] == SeriesKind.VIDEO:
+        files = await self.repo.files_for_series(series_id)
+        # A series with no file of the old pipeline has nothing to check or to warn about here.
+        if not files:
             return {"missing": 0, "recheck_started": 0}
         # F7: путь/NAS недоступен → НЕ помечать всё ложно missing и не
         # запускать массовый recheck. Пропускаем сверку до восстановления.
@@ -997,7 +997,7 @@ class TorrentsModule(BaseModule):
             return {"missing": 0, "recheck_started": 0}
         missing_hashes: set[str] = set()
         missing = 0
-        for f in await self.repo.files_for_series(series_id):
+        for f in files:
             # Исключённого файла на диске нет по замыслу: без этой ветки
             # он на каждом скане уезжал бы в missing и тянул recheck.
             if f.get("is_excluded"):

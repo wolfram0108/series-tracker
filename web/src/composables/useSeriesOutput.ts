@@ -28,11 +28,11 @@ import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
 
 /**
- * The output of a video series as its window reads it: episodes joined from the layout, references, levers and
- * voice-overs. A torrent series has no output and loads nothing. Changes come as events: a new layout reads the
+ * The output of a series as its window reads it: episodes joined from the layout, references, levers and
+ * voice-overs. Changes come as events: a new layout reads the
  * output again, a reference packet is merged in, and a connection that came back reads it again.
  */
-export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
+export function useSeriesOutput(seriesId: number) {
   const store = useCompositionStore()
   const plan = usePlanStore()
   const seriesStore = useSeriesStore()
@@ -61,8 +61,8 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     composition.value?.voice_titles ?? {}))
   const seasonVoices = computed<Record<number, string[]>>(() => Object.fromEntries(
     voiceOrders.value.map((each) => [each.season, (each.voices ?? []).map((voice) => voice.label)] as const)))
-  // A video series has not been read yet when it is shown first: the window must not say "nothing here" for that moment.
-  const loading = ref(kind === "video")
+  // A series has not been read yet when it is shown first: the window must not say "nothing here" for that moment.
+  const loading = ref(true)
   const failure = ref<string | null>(null)
   // A lever is on its way to the core / a pass over the series is running: the controls that start them wait.
   const busy = ref(false)
@@ -100,9 +100,9 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     return failed ? t("output.layoutFailed", { reason: reasonText(failed.reason) }) : ""
   })
   const seasons = sharing(() => bySeason(views.value))
-  // A video series has something to show only when its layout and its plan have both been read: the state of every episode is the plan's, so
-  // the layout alone would show every episode as having no reference. A torrent series has nothing to wait for.
-  const ready = computed(() => kind === "torrent" || (composition.value !== null && plan.forSeries(seriesId) != null))
+  // A series has something to show only when its layout and its plan have both been read: the state of every episode is the plan's, so
+  // the layout alone would show every episode as having no reference.
+  const ready = computed(() => composition.value !== null && plan.forSeries(seriesId) != null)
 
   // The layout and the plan are read apart, and a read is taken back only by a later read of the same thing: a late reply to an
   // older ask must not roll back, and a read of the plan that a read of the layout overtakes still lands. The words of a failure
@@ -347,33 +347,31 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     return name ? act(() => deleteFromPlan(seriesId, { kind: "video", name }), busy) : null
   }
 
-  if (kind === "video") {
-    onUnmounted(layouts.hold(seriesId))
-    // What is held goes when the window goes, and when the page is hidden or closed: the pause is for the user's next press.
-    const hidden = (): void => { if (document.visibilityState === "hidden") void gather.flush() }
-    onMounted(() => {
-      document.addEventListener("visibilitychange", hidden)
-      window.addEventListener("pagehide", hidden)
-    })
-    onUnmounted(() => {
-      document.removeEventListener("visibilitychange", hidden)
-      window.removeEventListener("pagehide", hidden)
-      void gather.flush()
-    })
-    // What the window already read is shown as it is; the news since then come as events.
-    onMounted(() => void load(false))
-    // The layout moved to a newer revision: the layout is read again, and so are the queues. The same or an older revision changes
-    // nothing. The plan is the core's push (plan_update), counted once for the change: it is read only if the window has none yet.
-    watch(() => store.layoutChanged[seriesId]?.rev, () => {
-      void readLayout(true)
-      if (plan.forSeries(seriesId) == null) void readPlan()
-      reloadQueues()
-    })
-    // A connection that came back may have missed events: the output is read again.
-    watch(useSSE().connected, (up) => {
-      if (up) void load()
-    })
-  }
+  onUnmounted(layouts.hold(seriesId))
+  // What is held goes when the window goes, and when the page is hidden or closed: the pause is for the user's next press.
+  const hidden = (): void => { if (document.visibilityState === "hidden") void gather.flush() }
+  onMounted(() => {
+    document.addEventListener("visibilitychange", hidden)
+    window.addEventListener("pagehide", hidden)
+  })
+  onUnmounted(() => {
+    document.removeEventListener("visibilitychange", hidden)
+    window.removeEventListener("pagehide", hidden)
+    void gather.flush()
+  })
+  // What the window already read is shown as it is; the news since then come as events.
+  onMounted(() => void load(false))
+  // The layout moved to a newer revision: the layout is read again, and so are the queues. The same or an older revision changes
+  // nothing. The plan is the core's push (plan_update), counted once for the change: it is read only if the window has none yet.
+  watch(() => store.layoutChanged[seriesId]?.rev, () => {
+    void readLayout(true)
+    if (plan.forSeries(seriesId) == null) void readPlan()
+    reloadQueues()
+  })
+  // A connection that came back may have missed events: the output is read again.
+  watch(useSSE().connected, (up) => {
+    if (up) void load()
+  })
 
   const heldCount = computed(() => staged.value.size)
 

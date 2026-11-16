@@ -1,7 +1,6 @@
-"""Module scan — the orchestrator of scans: the schedule, the torrent scan, and, for a series of kind `video`, the run
-of its synchronization.
+"""Module scan — the orchestrator of syncs: the schedule and the run of the synchronization of a series.
 
-A video series is not read here. The tables of its pages are read by `sources`, the numbers come from the constructor
+A series is not read here. The tables of its pages are read by `sources`, the numbers come from the constructor
 through `composition`; scan waits for the tables, asks for the layout to be counted from them and hands the series to
 the planner (modules/planner), which chooses the reference of every episode, does the work and applies it. The run stays
 open until the planner has no work of the series left.
@@ -10,18 +9,17 @@ Queries:
   scan.runs.get → {runs: [{series_id, snapshot}], as_of} — the open runs of syncs as their commands are written (an
       executor that starts again takes them before its works: И-60), as of the generation `as_of` of the announcements of
       runs (RunChanged.seq): a series whose announcement is newer than that is told by the announcement, not by the reading.
-  scan.series.run {series_id, force_replace?, download?, season?, episode?} → {changed, ...}. With a season (and an
-      episode of it) the sync of a video series covers it alone (SyncScope): the tables of every source are read and the
+  scan.series.run {series_id, download?, season?, episode?} → {changed, ...}. With a season (and an
+      episode of it) the sync covers it alone (SyncScope): the tables of every source are read and the
       layout is counted as for the whole series, and the planner carries out the groups of its plan that hold the scope (a
-      compilation with its cuts goes whole); the series is busy for all of it. A series of another kind refuses it
-      (`scope_video_only`). The scope is written with the command: a restart takes the sync up as it was.
+      compilation with its cuts goes whole); the series is busy for all of it. The scope is written with the command: a restart takes the sync up as it was.
       changed tells whether anything was
-      actually changed: torrent — tasks were created; video — the references or the rows of the plan differ from
-      what they were before the run. A video series answers {kind: "video", changed, sources: [{source_id, url,
+      actually changed: the references or the rows of the plan differ from
+      what they were before the run. The answer is {changed, sources: [{source_id, url,
       state: ready | stale | skipped, reason}], references: {by_level, own, other_player, none, unfit}, in_plan}.
       `stale` — the read of the page failed and the last complete table stays in force; `skipped` — it failed and there is no table.
       A scan of a series that is being scanned is refused by the table of what is allowed (`not_allowed`, the state
-      `scanning`; finding 27) with the code every module refuses by. The steps of a video series
+      `scanning`; finding 27) with the code every module refuses by. The steps of a sync
       are tied by signals: sources.table.get for every source at once and the wait for sources.table.ready / .failed
       of its page, composition.recompute (its answer means the layout is counted from these tables), then
       planner.sync {download}: the planner counts the plan of the series and carries it out. A failed step is the one
@@ -31,9 +29,6 @@ Queries:
   scan.run.cancel {series_id} → {cancelled}: the user stops the sync of the series: the pass of the scan stops (the
       reads of its pages too, sources.table.cancel), then every work of its run (planner.sync.cancel). Nothing of it is
       applied, the run closes and is not taken up again at the start. False when no sync of the series went.
-  scan.series.prepare {series_id} → the summary of a torrent scan without a download: the torrent is added to
-      qBittorrent, split into its files (torrent_files) and left paused — the user picks the episodes in the
-      composition, the next scan starts the download.
   scan.output.switch {series_id, season, episodes?, off} → {success}: switches episodes of a season, one or many at once
       in one change (without `episodes`, the whole season), off or on in the memory of the series (ignored_seasons,
       ignored_episodes), for the rows that exist and for those a new release brings; switching a season on switches on
@@ -45,7 +40,7 @@ Commands:
       schedule from the settings).
 
 Events (outgoing):
-  scan.status.changed {scanner_enabled, scan_interval, is_scanning, is_awaiting_tasks, next_scan_time} — the state
+  scan.status.changed {scanner_enabled, scan_interval, is_scanning, next_scan_time} — the state
       of the scheduler (the contract of the old scanner_status_update).
   series.status.contribution — the fold of scanning/error (R-11); the carrier of the error is scan_tasks.status='error'.
   series.purged {series_id, owner} — report: the tables of the series are cleaned.
@@ -57,13 +52,11 @@ Events (outgoing):
 
 Events (incoming):
   sources.table.ready / .failed {url, ...} — the verdicts a synchronization waits for.
-  torrents.queue.changed {count} — the pipeline is empty: after a full pass the next scan is set when count=0.
 
-Neighbours (all over the bus): catalog.series.get / .list (kind, sources), composition.recompute, sources.table.get,
-planner.sync / .work.get, library.relocation.apply, renaming.reprocess (a torrent series). Scan asks nothing of composition at start: its state is its own database.
+Neighbours (all over the bus): catalog.series.get / .list (sources), composition.recompute, sources.table.get,
+planner.sync / .work.get, library.relocation.apply. Scan asks nothing of composition at start: its state is its own database.
 
-Resumability: the plan of replacements of a torrent scan is in scan_tasks BEFORE it is carried out; additions are
-idempotent (local infohash, R-2: adding again = existed); on_start goes on with the unfinished tasks. A video series
+Resumability: the command of a sync is in scan_tasks BEFORE anything is waited for; a restart runs it again. A series
 keeps its references and rows in the database; what a restart interrupted is brought back by the events of
 composition and by the next scan.
 """
@@ -75,7 +68,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from core import NO_HANDLER, BaseModule, BusRequestError, torrent_source
+from core import NO_HANDLER, BaseModule, BusRequestError
 from core.deadlines import EDIT_STUCK_S, TABLE_WAIT_S
 from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, OutputSwitch, RunChanged, SeriesSource, Slot, SyncScope, WorkState)
 from core.db import Database
@@ -83,12 +76,11 @@ from core.envelope import Envelope
 from core.ignored import parse_memory
 from core.reasons import describe, reason
 from . import sync
-from .errors import ScanAborted, ScanError, SyncFailed
+from .errors import ScanAborted, SyncFailed
 from .repository import ScanRepository
-from .torrent import TorrentScan
 from .sync import TableSignals
 
-# The executor whose work a run of a video series waits for (`<owner>.work.get`, events `work.series.state`): the planner
+# The executor whose work a run of a series waits for (`<owner>.work.get`, events `work.series.state`): the planner
 # downloads, cuts, aligns, builds and applies the plan of the series (modules/planner).
 RUN_EXECUTORS = ("planner",)
 
@@ -133,14 +125,6 @@ def _sources_of(series: dict) -> list[SeriesSource]:
     return [SeriesSource.model_validate(each) for each in series.get("sources", [])]
 
 
-def _torrent_source(series: dict) -> SeriesSource:
-    """The source of a torrent series: the address and the profile of a torrent live in the source (Д-38)."""
-    found = torrent_source(series)
-    if found is None:
-        raise ScanError(reason("torrent_source_missing", name=series.get("name")))
-    return SeriesSource.model_validate(found)
-
-
 class ScanModule(BaseModule):
     name = "scan"
 
@@ -176,16 +160,13 @@ class ScanModule(BaseModule):
         self._edits_over: dict[int, asyncio.Event] = {}
         self._aborted: set[int] = set()
         self._scan_all_running = False
-        self._awaiting_pipeline = False
         super().__init__(bus)
-        self._torrents = TorrentScan(self.repo, self.request, self.log, self._aborted)
 
     def register(self) -> None:
         # concurrent: долгий скан одного сериала не должен блокировать
         # очередь запросов к модулю (защита от гонки — set _running).
         self.handle("scan.series.run", self.on_run, concurrent=True)
         self.handle("scan.run.cancel", self.on_run_cancel, concurrent=True)
-        self.handle("scan.series.prepare", self.on_prepare, concurrent=True)
         self.handle("scan.all.start", self.on_scan_all)
         self.handle("scan.output.switch", self.on_output_switch)
         self.handle("scan.edit.begin", self.on_edit_begin)
@@ -195,7 +176,6 @@ class ScanModule(BaseModule):
         self.handle("sources.table.ready", self.on_table_ready)
         self.handle("sources.table.failed", self.on_table_failed)
         self.handle(WORK_STATE, self.on_work_state)
-        self.handle("torrents.queue.changed", self.on_queue_changed)
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("settings.changed", self.on_settings_changed)
         self.handle("gateway.sse.clients", self.on_sse_clients)
@@ -235,19 +215,9 @@ class ScanModule(BaseModule):
 
     async def on_run(self, env: Envelope) -> dict:
         p = env.payload
-        force = p.get("force_replace")
-        if force is None:  # как старый роут: режим из настройки отладки
-            force = await self._debug_force_replace()
-        # download=False — «полный процесс без загрузки» (сохранение свойств
-        # VK-серии): пере-скан по профилю + переименование + усыновление, но
-        # БЕЗ постановки новых загрузок (контракт «Сохранить → усыновление»).
         series_id = int(p["series_id"])
-        scope = SyncScope.of(p)  # a season, or an episode of it: the sync covers it alone (a video series)
-        if scope is not None:
-            series = await self.request("catalog.series.get", {"series_id": series_id})
-            if series.get("kind") != "video":
-                raise ScanError(reason("scope_video_only"))
-        return await self._run_series(series_id, bool(force), download=p.get("download", True), scope=scope)
+        scope = SyncScope.of(p)  # a season, or an episode of it: the sync covers it alone
+        return await self._run_series(series_id, download=p.get("download", True), scope=scope)
 
     # --- the admission of a change by the user (I-60) ------------------------------------------------------------
 
@@ -354,18 +324,11 @@ class ScanModule(BaseModule):
         self.publish_event("series.purged",
                            {"series_id": series_id, "owner": self.name})
 
-    async def on_prepare(self, env: Envelope) -> dict:
-        """Контракт «Получить данные» торрент-композиции: раздача попадает
-        в клиент и разбирается на состав, закачка не начинается."""
-        return await self._prepare_series(int(env.payload["series_id"]))
-
     async def on_scan_all(self, env: Envelope) -> dict:
         if self._scan_all_running:
             self.log.warning("полный проход уже идёт — повтор отклонён")
             return {"started": False}
-        force = bool((env.payload or {}).get("force_replace")) \
-            or await self._debug_force_replace()
-        self._spawn(self._scan_all(force))
+        self._spawn(self._scan_all())
         return {"started": True}
 
     async def on_status_get(self, env: Envelope) -> dict:
@@ -389,9 +352,6 @@ class ScanModule(BaseModule):
         настроек не жила на дефолтах до первого изменения (Р-20)."""
         if env.payload.get("count", 0) > 0:
             await self._broadcast_status()
-
-    async def _debug_force_replace(self) -> bool:
-        return await self._setting("debug_force_replace", "false") == "true"
 
     # --- signals of the neighbours ---------------------------------------------------------------
 
@@ -418,8 +378,7 @@ class ScanModule(BaseModule):
             self.log.error("синхронизация: запрос %s не выполнен: %s: %s", topic, type(exc).__name__, exc)
             raise SyncFailed(reason("scan_step_failed", step=topic)) from exc
 
-    async def _run_series(self, series_id: int, force: bool = False,
-                          download: bool = True, resume: int | None = None, scope: SyncScope | None = None) -> dict:
+    async def _run_series(self, series_id: int, download: bool = True, resume: int | None = None, scope: SyncScope | None = None) -> dict:
         """A scan of one series, a task of its own: a stop of it by the user (scan.run.cancel) stops it alone, not the
         pass over all series it may be a part of."""
         # A new sync of a series whose source is read by a provider that is not up does not open (a sync the start took up
@@ -429,7 +388,7 @@ class ScanModule(BaseModule):
         # Refused or taken at once, in the handler: a second scan of the series is refused from this moment on.
         self._require_idle(series_id)
         self._running.add(series_id)
-        passing = self.spawn(self._pass_series(series_id, force, download, resume, scope), name=f"scan.pass:{series_id}")
+        passing = self.spawn(self._pass_series(series_id, download, resume, scope), name=f"scan.pass:{series_id}")
         self._passes[series_id] = passing
         try:
             return await passing
@@ -439,14 +398,12 @@ class ScanModule(BaseModule):
             self._running.discard(series_id)
 
     async def _provider_blocks(self, series_id: int, series: dict | None = None) -> str | None:
-        """The reason a video series cannot be synchronized now: one of its pages is read by a provider of external sources
+        """The reason a series cannot be synchronized now: one of its pages is read by a provider of external sources
         that is not up (`sources.pages.check`). None when nothing stops it, and when the question cannot be put — the sync
         then says for itself what is wrong with the series or the page."""
         try:
             if series is None:
                 series = await self.request("catalog.series.get", {"series_id": series_id})
-            if series.get("kind") != "video":
-                return None
             urls = [each.url for each in _sources_of(series)]
             if not urls:
                 return None
@@ -489,9 +446,9 @@ class ScanModule(BaseModule):
             self.log.info("сериал %d: синхронизация остановлена пользователем", series_id)
         return {"cancelled": stopped}
 
-    async def _pass_series(self, series_id: int, force: bool, download: bool, resume: int | None,
+    async def _pass_series(self, series_id: int, download: bool, resume: int | None,
                            scope: SyncScope | None = None) -> dict:
-        """The command is written down before anything is waited for, so that a restart finds it: a video synchronization
+        """The command is written down before anything is waited for, so that a restart finds it: a synchronization
         is a task of `scan_tasks` until it ends (`resume` is the task a restart found)."""
         try:
             await self._edits_finished(series_id)
@@ -508,31 +465,18 @@ class ScanModule(BaseModule):
             self._owned.add(intent)
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
-            video = series.get("kind") == "video"
-            if not video:  # a torrent scan writes the task of its own plan
-                await self.repo.delete_task(intent)
-                intent = None
-            if video:
-                if not any(each.parser_profile_id for each in _sources_of(series)):
-                    self._announce_run(series_id, True)
-                    raise SyncFailed(reason("scan_no_profile"))
-                # The run is told once, with its snapshot: no step of it has begun before (I-60).
-                await self._take_snapshot(series, intent)
+            if not any(each.parser_profile_id for each in _sources_of(series)):
                 self._announce_run(series_id, True)
-            elif not _torrent_source(series).parser_profile_id:
-                raise ScanError(reason("scan_no_profile"))
+                raise SyncFailed(reason("scan_no_profile"))
+            # The run is told once, with its snapshot: no step of it has begun before (I-60).
+            await self._take_snapshot(series, intent)
+            self._announce_run(series_id, True)
             # Прошлая ошибка сбрасывается новым сканом (Р-11).
             await self.repo.delete_error_tasks(series_id)
             series = await self._relocate(series)
-            if video:
-                result = await self._sync_video(series, download, scope)
-                await self._hold_run(series_id, intent)
-                intent = None  # the run keeps the command now: it ends when the works of the run end
-            else:
-                await self._reprocess_names(series_id)
-                # Without download a torrent series is a sync of its names alone: the trackers are not asked.
-                result = (await self._torrents.scan(series, _torrent_source(series), force) if download
-                          else {"changed": False})
+            result = await self._sync(series, download, scope)
+            await self._hold_run(series_id, intent)
+            intent = None  # the run keeps the command now: it ends when the works of the run end
             self._contribute(series_id, scanning=series_id in self._runs, error=series_id in self._failed)
             # Многосезонный агрегат TMDB: реальные сезоны могли измениться
             # (новый сезон/файлы) — пересчитать число серий по сезонам.
@@ -574,38 +518,6 @@ class ScanModule(BaseModule):
             self._running.discard(series_id)
             self._owned.discard(intent)
 
-    async def _prepare_series(self, series_id: int) -> dict:
-        """Состав раздачи для композиции без запуска закачки.
-
-        Отдельный путь, а не флаг скана: здесь нет ни переобработки имён,
-        ни диспетчеризации — только «добудь раздачу и покажи, что в ней»."""
-        self._require_idle(series_id)
-        self._running.add(series_id)
-        self._contribute(series_id, scanning=True, error=False)
-        try:
-            series = await self.request("catalog.series.get",
-                                        {"series_id": series_id})
-            if series.get("kind") == "video":
-                raise ScanError(reason("prepare_torrent_only"))
-            await self.repo.delete_error_tasks(series_id)
-            result = await self._torrents.scan(series, _torrent_source(series), False, prepare=True)
-            self._contribute(series_id, scanning=False, error=False)
-            return result
-        except ScanAborted as exc:
-            self.log.info("подготовка сериала %d прервана: %s", series_id, exc)
-            self._contribute(series_id, scanning=False, error=False)
-            return {"source_type": "torrent", "tasks_created": 0,
-                    "changed": False, "aborted": True}
-        except Exception as exc:
-            if await self._series_alive(series_id) \
-                    and not await self._has_error_task(series_id):
-                task_id = await self.repo.create_task(series_id, [])
-                await self.repo.set_error(task_id, str(exc))
-            self._contribute(series_id, scanning=False, error=True)
-            raise
-        finally:
-            self._running.discard(series_id)
-
     async def _has_error_task(self, series_id: int) -> bool:
         return any(t["series_id"] == series_id
                    for t in await self.repo.error_tasks())
@@ -633,21 +545,9 @@ class ScanModule(BaseModule):
             return series
         return await self.request("catalog.series.get", {"series_id": series["id"]})
 
-    async def _reprocess_names(self, series_id: int) -> None:
-        """Переобработка имён до скана — request/reply вместо
-        create+sleep-поллинга до 600 с (находка 16)."""
-        try:
-            await self.request("renaming.reprocess", {"series_id": series_id})
-        except BusRequestError as exc:
-            if NO_HANDLER in str(exc):
-                self.log.warning("модуль renaming ещё не подключён — "
-                                 "переобработка перед сканом пропущена")
-            else:
-                raise
+    # --- synchronisation and the plan of references ----------------------------------
 
-    # --- video branch: synchronisation and the plan of references ----------------------------------
-
-    async def _sync_video(self, series: dict, download: bool, scope: SyncScope | None = None) -> dict:
+    async def _sync(self, series: dict, download: bool, scope: SyncScope | None = None) -> dict:
         """Tables of all sources -> layout -> references and plan -> (with download) the download and the voice-overs. A sync
         of a season or of an episode reads the tables of every source and counts the layout as the sync of the series does;
         only what the planner carries out is the scope's (planner.sync).
@@ -670,7 +570,7 @@ class ScanModule(BaseModule):
         self._alive(series_id)
         accepted = await self._step("planner.sync", {"series_id": series_id, "download": download,
                                                      **({} if scope is None else scope.named())})
-        return {"kind": "video", "changed": bool((accepted or {}).get("accepted")),
+        return {"changed": bool((accepted or {}).get("accepted")),
                 "sources": [each.as_dict() for each in tables]}
 
     def _state(self, series_id: int) -> str:
@@ -800,13 +700,14 @@ class ScanModule(BaseModule):
         except (json.JSONDecodeError, TypeError, ValueError):
             return set()
 
-    # --- торрент-ветка -------------------------------------------------------------
+    # --- resumption -----------------------------------------------------------------------------------
 
     async def _resume(self, task: dict) -> None:
-        """A task a restart found: a video synchronization is run again from its written command, a torrent scan
-        goes on from its journal."""
+        """A task a restart found: a synchronization is run again from its written command. A task of the torrent scan
+        that left with stage 15 has nothing to run it: it goes."""
         if not task["results_data"].get("video_sync"):
-            await self._resume_task(task)
+            self.log.warning("сериал %d: задача %d прежнего торрент-скана снята при старте", task["series_id"], task["id"])
+            await self.repo.delete_task(task["id"])
             return
         if task["id"] in self._owned:  # the scan of this very command is running in this process
             return
@@ -831,26 +732,6 @@ class ScanModule(BaseModule):
         except Exception:  # noqa: BLE001 - the failure is kept as the error task of the series
             self.log.exception("возобновление синхронизации сериала %d не удалось", series_id)
 
-    async def _resume_task(self, task: dict) -> None:
-        series_id = task["series_id"]
-        if series_id in self._running:
-            return
-        self._running.add(series_id)
-        self._contribute(series_id, scanning=True, error=False)
-        try:
-            series = await self.request("catalog.series.get",
-                                        {"series_id": series_id})
-            await self._torrents.execute(
-                task["id"], series, task["task_data"],
-                dict(task["results_data"]))
-            self._contribute(series_id, scanning=False, error=False)
-        except Exception:
-            self.log.exception("возобновление задачи %d не удалось",
-                               task["id"])
-            self._contribute(series_id, scanning=False, error=True)
-        finally:
-            self._running.discard(series_id)
-
     # --- свёртка статусов (Р-11) ------------------------------------------------
 
     def _contribute(self, series_id: int, *, scanning: bool,
@@ -871,7 +752,7 @@ class ScanModule(BaseModule):
                 self.log.exception("ошибка такта планировщика")
 
     async def _scheduler_tick(self) -> None:
-        if self._scan_all_running or self._awaiting_pipeline:
+        if self._scan_all_running:
             return
         if await self._setting("scanner_agent_enabled", "false") != "true":
             return
@@ -885,7 +766,7 @@ class ScanModule(BaseModule):
             self.log.info("настало время планового сканирования")
             self._spawn(self._scan_all())
 
-    async def _scan_all(self, force: bool = False) -> None:
+    async def _scan_all(self) -> None:
         self._scan_all_running = True
         await self._broadcast_status()
         stopped = False
@@ -894,10 +775,6 @@ class ScanModule(BaseModule):
             for s in all_series:
                 if not s.get("auto_scan_enabled"):
                     continue
-                if await self._pipeline_busy(s["id"]):
-                    self.log.info("автоскан: сериал %d пропущен — у него "
-                                  "активные задачи конвейера", s["id"])
-                    continue
                 if self._state(s["id"]) != availability.SERIES_IDLE:
                     self.log.info("автоскан: сериал %d пропущен — идёт его синхронизация", s["id"])
                     continue
@@ -905,7 +782,7 @@ class ScanModule(BaseModule):
                     self.log.info("автоскан: сериал %d пропущен — %s", s["id"], describe(why))
                     continue
                 try:
-                    await self._run_series(s["id"], force)
+                    await self._run_series(s["id"])
                 except Exception as exc:  # noqa: BLE001 — проход не прерываем
                     self.log.error("автоскан сериала %d: %s", s["id"], exc)
         except asyncio.CancelledError:
@@ -914,45 +791,9 @@ class ScanModule(BaseModule):
         finally:
             self._scan_all_running = False
             if not stopped:
-                self._awaiting_pipeline = True
-                await self._broadcast_status()
-                await self._check_pipeline_empty()
-
-    async def _pipeline_busy(self, series_id: int) -> bool:
-        """Поведение старого автоскана: сериал с активными задачами
-        конвейера не сканируется (ручной скан — без этой проверки)."""
-        try:
-            queue = await self.request("torrents.queue.get",
-                                       {"series_id": series_id})
-            return queue.get("count", 0) > 0
-        except BusRequestError as exc:
-            if NO_HANDLER in str(exc):
-                return False
-            raise
-
-    async def _check_pipeline_empty(self) -> None:
-        """После прохода: если конвейер уже пуст — назначить следующий
-        скан сразу, не дожидаясь события."""
-        try:
-            queue = await self.request("torrents.queue.get", {})
-            count = queue.get("count", 0) if isinstance(queue, dict) \
-                else len(queue)
-        except BusRequestError as exc:
-            if NO_HANDLER not in str(exc):
-                raise
-            self.log.warning("конвейер torrents ещё не подключён — "
-                             "следующий скан назначается сразу")
-            count = 0
-        if count == 0:
-            await self._schedule_next()
-
-    async def on_queue_changed(self, env: Envelope) -> None:
-        if self._awaiting_pipeline and env.payload.get("count", 0) == 0:
-            self.log.info("конвейер опустел — назначаю следующий скан")
-            await self._schedule_next()
+                await self._schedule_next()
 
     async def _schedule_next(self) -> None:
-        self._awaiting_pipeline = False
         interval = int(await self._setting("scan_interval_minutes", "60"))
         next_time = datetime.now(timezone.utc) + timedelta(minutes=interval)
         await self.request("settings.value.set", {
@@ -973,7 +814,6 @@ class ScanModule(BaseModule):
             "scan_interval":
                 int(await self._setting("scan_interval_minutes", "60")),
             "is_scanning": self._scan_all_running or bool(self._running),
-            "is_awaiting_tasks": self._awaiting_pipeline,
             "next_scan_time": await self._setting("next_scan_timestamp", None),
         }
 

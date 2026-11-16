@@ -1,6 +1,5 @@
 """The points of the operations of a series (Р-21): the composition by its owner, the reprocessing of names, the names of
 the source files; the points of the old path of the cutting of compilations are gone with it."""
-import os
 import sqlite3
 
 import httpx
@@ -15,7 +14,6 @@ from modules.scan import ScanModule
 from series_factory import insert_series
 from settle import settle
 from schema_db import migrated
-from core.reasons import reason
 
 @pytest.fixture
 def db_path(tmp_path):
@@ -52,31 +50,15 @@ class Neighbours(BaseModule):
             return {"series_id": env.payload["series_id"], "rev": 2, "rows": [], "sources": [], "levels": [],
                     "settings": []}
 
-        async def reprocess(env):
-            self.calls.append(("reprocess", env.payload))
-            return {"renamed": 0}
-
-
         async def series_run(env):
             self.calls.append(("scan.series.run", env.payload))
             if self.sync_running:
                 raise NotAllowed(refusal(Action.SYNC, "scanning"))
             return {"changed": False}
 
-        async def torrents_composition(env):
-            self.calls.append(("torrents.composition", env.payload))
-            return [{"id": 1, "original_path": "Dir/T.S01E01.mkv"}]
-
-        async def series_prepare(env):
-            self.calls.append(("scan.series.prepare", env.payload))
-            return {"source_type": "torrent", "tasks_created": 1}
-
-        self.handle("scan.series.prepare", series_prepare)
         self.handle("composition.get", composition_get)
         self.handle("torrents.db.files.for_series", files_for_series)
-        self.handle("renaming.reprocess", reprocess)
         self.handle("scan.series.run", series_run)
-        self.handle("torrents.composition", torrents_composition)
 
 
 @pytest.fixture
@@ -97,36 +79,13 @@ async def system(db_path, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_composition_routes_by_the_kind_of_the_series(system):
+async def test_the_composition_of_a_series_is_the_layout_of_composition_whatever_its_sources(system):
     _, _, client, neighbours = system
-    # торрент-серия → torrents.composition (фейк)
-    resp = await client.get("/api/series/1/composition")
-    assert resp.json()[0]["original_path"] == "Dir/T.S01E01.mkv"
-    assert ("torrents.composition",
-            {"series_id": 1, "refresh": False}) in neighbours.calls
-
-    # a video series: the layout of composition as it is; the plan and the scan are not mixed in
-    resp = await client.get("/api/series/2/composition")
-    assert resp.status_code == 200
-    assert resp.json() == {"series_id": 2, "rev": 2, "rows": [], "sources": [], "levels": [], "settings": [], "levers": [], "availability": {}, "compilations": [],
-                           "voice_orders": [], "voice_titles": {}}
-    assert ("composition.get",
-            {"series_id": 2, "include_excluded": False, "sources_only": False}) in neighbours.calls
-    assert not any(call[0] in ("torrents.composition", "scan.series.prepare") and call[1]["series_id"] == 2
-                   for call in neighbours.calls)
-
-
-@pytest.mark.asyncio
-async def test_torrent_refresh_prepares_composition(system):
-    """«Получить данные» торрент-серии: сначала добыть раздачу и разобрать
-    состав, потом отдать композицию."""
-    _, _, client, neighbours = system
-    resp = await client.get("/api/series/1/composition?refresh=true")
-    assert resp.status_code == 200
-    assert ("scan.series.prepare", {"series_id": 1}) in neighbours.calls
-    order = [c[0] for c in neighbours.calls]
-    assert order.index("scan.series.prepare") < \
-        order.index("torrents.composition")
+    for series_id in (1, 2):  # a series of a torrent source and one of video sources
+        resp = await client.get(f"/api/series/{series_id}/composition")
+        assert resp.status_code == 200
+        assert ("composition.get",
+                {"series_id": series_id, "include_excluded": False, "sources_only": False}) in neighbours.calls
 
 
 @pytest.mark.asyncio

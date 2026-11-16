@@ -3,16 +3,14 @@
 Сериал и его источники (Д-38). Источник — адрес страницы или `channel|query`
 канала VK; он несёт вид (`torrent`, `vk_video`, `web_video`), профиль
 конструктора и выбор по источнику (сезон каталога Vibix, отключённые
-плееры, имя озвучки). Поля источника — контракт SeriesSource. Торрентный
-сериал тоже имеет один источник. Адрес, вид и профиль у самого сериала
+плееры, имя озвучки). Поля источника — контракт SeriesSource. Источники
+любых видов живут в одном сериале (этап 15). Адрес, вид и профиль у самого сериала
 исчезли; запись этих полей (url, source_type, parser_profile_id,
 vk_search_mode, vk_quality_priority) в catalog.series.create/update — отказ
 ValueError с названием поля.
 
-Вид сериала `kind` — `torrent`, если среди источников есть торрент, иначе
-`video`; считается одной функцией (series_sources.kind_of) и отдаётся рядом
-со списком источников `sources` (по position, затем id) в каждом ответе о
-сериале.
+Список источников `sources` (по position, затем id) отдаётся в каждом
+ответе о сериале.
 
 Отказы — ValueError с кодом core/reasons: `no_source` (создание без
 источника), `last_source` (удаление единственного источника), `source_exists`
@@ -33,8 +31,8 @@ Commands:
       — открытие/закрытие модалки (действия пользователя).
 
 Queries:
-  catalog.series.list           → [{...series, kind, sources, statuses: [...]}]
-  catalog.series.get {series_id} → {...series, kind, sources, statuses: [...]}
+  catalog.series.list           → [{...series, sources, statuses: [...]}]
+  catalog.series.get {series_id} → {...series, sources, statuses: [...]}
   catalog.series.create {data}   → {...series} (+ событие series.added,
       затем series.source.added на каждый начальный источник)
       — data.sources: список источников (минимум один), каждый — поля
@@ -43,7 +41,7 @@ Queries:
   catalog.series.update {series_id, fields} → {applied: {...}}
       (+ событие series.updated с применёнными полями — дельта SSE);
       источники здесь не меняются
-  catalog.series.delete {series_id, delete_from_qb?} → {ok}
+  catalog.series.delete {series_id} → {ok}
       — удаляет строку series вместе с её источниками и публикует
       series.deleted (отдельных series.source.removed нет); владельцы
       остальных таблиц чистят своё по подписке (Р-19, событийный каскад)
@@ -85,7 +83,7 @@ from core.reasons import reason
 
 from .aggregator import StatusAggregator
 from .repository import CatalogRepository
-from .series_sources import checked_fields, checked_sources, refuse_mixed_kinds, refuse_removed_fields
+from .series_sources import checked_fields, checked_sources, refuse_removed_fields
 
 # Columns that end up as path components on disk; the owner normalises
 # them on every write so no client can store an unusable name.
@@ -94,7 +92,7 @@ _NAME_FIELDS = ("name_en", "quality_override", "resolution_override")
 
 # Владельцы серийных таблиц: после series.deleted каждый чистит своё и
 # отчитывается series.purged. Молчание — обрыв каскада.
-PURGE_OWNERS = ("scan", "torrents", "renaming", "library", "metadata", "composition", "planner", "sources")
+PURGE_OWNERS = ("scan", "torrents", "library", "metadata", "composition", "planner", "sources")
 
 # Сколько ждём отчёты владельцев, прежде чем считать каскад оборванным.
 PURGE_REPORT_TIMEOUT = 15.0
@@ -275,9 +273,7 @@ class CatalogModule(BaseModule):
         self._busy.pop(series_id, None)
         self.log.info("сериал %d удалён; каскад — у владельцев таблиц",
                       series_id)
-        self.publish_event("series.deleted", {
-            "series_id": series_id,
-            "delete_from_qb": bool(env.payload.get("delete_from_qb"))})
+        self.publish_event("series.deleted", {"series_id": series_id})
         self._spawn(self._await_purge_reports(series_id))
         return {"ok": True}
 
@@ -296,8 +292,6 @@ class CatalogModule(BaseModule):
         await self._require_series(series_id)
         self._require_free(series_id)
         draft = checked_fields(env.payload["source"])
-        refuse_mixed_kinds([each["source_type"] for each in await self.repo.list_sources(series_id)]
-                           + [draft["source_type"]])
         source_id = await self.repo.add_source(series_id, draft)
         self.log.info("сериал %d: добавлен источник %d", series_id, source_id)
         await self._publish_source("added", series_id, source_id)
@@ -309,10 +303,6 @@ class CatalogModule(BaseModule):
         await self._require_own(stored, env.payload.get("series_id"))
         self._require_free(stored["series_id"])
         values = checked_fields(env.payload["fields"], stored)
-        if "source_type" in values:
-            others = [each["source_type"] for each in await self.repo.list_sources(stored["series_id"])
-                      if each["id"] != source_id]
-            refuse_mixed_kinds(others + [values["source_type"]])
         # A value equal to the stored one is no change, so it raises no event and no recount downstream.
         applied = {name: value for name, value in values.items() if value != stored[name]}
         if applied:

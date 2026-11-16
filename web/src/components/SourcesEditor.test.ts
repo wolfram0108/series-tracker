@@ -128,11 +128,10 @@ describe("SourcesEditor", () => {
     expect(text).toContain("чтение страницы не удалось")
   })
 
-  it("keeps the address of a torrent source and offers neither adding nor removing", () => {
+  it("keeps the address of a torrent source and offers to add another source beside it, as for any source", () => {
     const torrent = itemOfSource(stored({ source_type: "torrent", url: "https://kinozal.tv/details.php?id=1" }), null, null)
-    const w = mountEditor([torrent], { editable: false })
-    expect(w.find("button.source-remove").exists()).toBe(false)
-    expect(w.find(".source-add").exists()).toBe(false)
+    const w = mountEditor([torrent])
+    expect(w.find(".source-add").exists()).toBe(true)
     expect(w.find(".item-value").text()).toBe("https://kinozal.tv/details.php?id=1")
     expect(w.find(".players").exists()).toBe(false)
   })

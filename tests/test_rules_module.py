@@ -446,7 +446,7 @@ async def test_the_layout_that_hears_the_event_gets_the_new_rules_at_once(system
 # --- rules.format_filename: numbers are ready, no rule is applied ---------------------------------
 
 def card(**fields) -> dict:
-    return {"name_en": "Show", "kind": "video", "season": None, **fields}
+    return {"name_en": "Show", "season": None, **fields}
 
 
 def item(**fields) -> dict:
@@ -476,7 +476,7 @@ async def test_the_name_takes_the_numbers_of_the_item_and_never_applies_rules_ag
     system.rules.repo.get_rules = counting
 
     name = await filename(probe, card(parser_profile_id=profile), item(voiceover_tag="Студия"))
-    assert name == "Show s01e05 [Студия] 1080p.mp4"
+    assert name == "Show s01e05 [Студия] 1080p.mkv"
     assert reads == [], "the profile is not read for a file name"
 
 
@@ -484,8 +484,8 @@ async def test_the_name_takes_the_numbers_of_the_item_and_never_applies_rules_ag
 async def test_the_name_of_a_range_a_part_and_an_override(system):
     probe = system.probe
     spliced = item(episode_start=3, episode_end=5, part=2)
-    assert await filename(probe, card(), spliced) == "Show s01e03-e05 Part 2 1080p.mp4"
-    assert await filename(probe, card(), spliced, episode_override=4) == "Show s01e04 Part 2 1080p.mp4"
+    assert await filename(probe, card(), spliced) == "Show s01e03-e05 Part 2 1080p.mkv"
+    assert await filename(probe, card(), spliced, episode_override=4) == "Show s01e04 Part 2 1080p.mkv"
     assert await filename(probe, card(), item(), original_filename="Season 01/old.mp4") \
         == "Season 01/Show s01e05 1080p.mp4"
 
@@ -494,27 +494,26 @@ async def test_the_name_of_a_range_a_part_and_an_override(system):
 async def test_a_single_episode_is_named_alike_whether_its_end_is_empty_or_equal_to_its_start(system):
     probe = system.probe
     for end in (None, 5):
-        assert await filename(probe, card(), item(episode_end=end)) == "Show s01e05 1080p.mp4"
-        assert await filename(probe, card(), item(episode_end=end, part=2)) == "Show s01e05 Part 2 1080p.mp4"
+        assert await filename(probe, card(), item(episode_end=end)) == "Show s01e05 1080p.mkv"
+        assert await filename(probe, card(), item(episode_end=end, part=2)) == "Show s01e05 Part 2 1080p.mkv"
 
 
 @pytest.mark.asyncio
-async def test_the_extension_follows_the_kind_of_the_series(system):
+async def test_a_file_keeps_its_extension_and_a_name_of_no_file_is_a_container(system):
     probe = system.probe
-    assert (await filename(probe, card(kind="video"), item(), original_filename="x.mkv")).endswith(".mkv")  # packed
-    assert (await filename(probe, card(kind="video"), item(), original_filename="x.mp4")).endswith(".mp4")
-    assert (await filename(probe, card(kind="video"), item())).endswith(".mp4")
-    assert (await filename(probe, card(kind="torrent"), item(), original_filename="x.AVI")).endswith(".avi")
-    assert (await filename(probe, card(kind="torrent"), item())).endswith(".mkv")
+    assert (await filename(probe, card(), item(), original_filename="x.mkv")).endswith(".mkv")
+    assert (await filename(probe, card(), item(), original_filename="x.mp4")).endswith(".mp4")
+    assert (await filename(probe, card(), item(), original_filename="x.AVI")).endswith(".avi")
+    assert (await filename(probe, card(), item())).endswith(".mkv")
     # the column that left the series decides nothing
-    assert (await filename(probe, card(kind="torrent", source_type="vk_video"), item())).endswith(".mkv")
+    assert (await filename(probe, card(source_type="vk_video"), item())).endswith(".mkv")
 
 
 @pytest.mark.asyncio
 async def test_the_card_fills_what_the_item_does_not_have(system):
     probe = system.probe
     series = card(season="Season 3", quality_override="BDRip", resolution_override="2160p")
-    assert await filename(probe, series, item(season=None)) == "Show s03e05 BDRip 2160p.mp4"
+    assert await filename(probe, series, item(season=None)) == "Show s03e05 BDRip 2160p.mkv"
 
 
 # --- rules.format_torrent_file: the profile is a parameter ----------------------------------------
@@ -530,7 +529,7 @@ async def test_the_torrent_file_is_named_by_the_profile_of_the_request(system):
     profile = await new_profile(probe)
     await new_rule(probe, profile, "сезон и серия", [extract("extract_season", "S", "N"),
                                                      extract("extract_single", "E", "N")])
-    series = card(kind="torrent")
+    series = card()
     reply = await torrent_name(probe, series, "Show.S02E05.mkv", profile_id=profile)
     assert reply["filename"] == "Season 02/Show s02e05.mkv"
     assert (reply["extracted"]["season"], reply["extracted"]["episode"]) == (2, 5)

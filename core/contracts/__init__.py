@@ -25,7 +25,7 @@ from .release_table import (LINE_FIELDS, LINE_SEPARATOR, ParsedDomains, PlayerFa
                             SeriesReadProgress, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableRow,
                             TableState, UnreadPart, line_of, place_of)
 from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, RulesProfileChanged
-from .series_sources import SeriesKind, SeriesSource, SourceChanged, SourceEvent, SourceType
+from .series_sources import SeriesSource, SourceChanged, SourceEvent, SourceType
 from .voice_groups import GroupsResolveReply, GroupsResolveRequest
 from .availability import Action, NotAllowed, allowed, refusal, require, variant_state
 from .work import RUN_CHANGED, WORK_STATE, WORK_WITHDRAWN, RunChanged, RunSnapshot, Slot, WorkState, WorkWithdrawn, slot_of
@@ -41,7 +41,7 @@ __all__ = ["AppCard", "AppResults", "AppSearchReply", "AppSearchRequest", "PACK_
            "LINE_SEPARATOR", "ParsedDomains", "PlayerFacts", "PlayerPlace", "PlayersListReply", "PlayersListRequest", "SourcesSettingsView", "TrackerMirrors", "ReleaseTable", "RowState", "RowVoice", "SiteResolveReply", "SiteResolveRequest", "TableFailed", "TableGetReply", "TableGetRequest",
            "SeriesReadProgress", "TableProgress", "TableReady", "TableRow", "TableState", "UnreadPart", "line_of", "place_of", "LINE_FIELDS",
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
-           "SeriesKind", "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",
+           "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan", "VoiceTitleSet",
            "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary",

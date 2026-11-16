@@ -71,7 +71,7 @@ class Neighbours(BaseModule):
         self.handle("rules.format_filename", self.on_format_filename)
 
     async def on_series(self, env: Envelope) -> dict:
-        return {"id": SERIES, "name": "Сериал", "kind": "video", "save_path": self.library, "ignored_seasons": "[]",
+        return {"id": SERIES, "name": "Сериал", "save_path": self.library, "ignored_seasons": "[]",
                 "ignored_episodes": "{}", "sources": [
                     {"id": source, "series_id": SERIES, "url": f"https://site/{source}", "source_type": "web_video"}
                     for source in (1, 2, 3, 4)]}

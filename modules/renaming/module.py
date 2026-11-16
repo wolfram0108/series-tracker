@@ -1,35 +1,14 @@
-"""Модуль renaming — приведение имён файлов к строгому формату (Р-15).
+"""Module renaming — the names of the files of the releases of the old torrent pipeline inside qBittorrent (R-15; it
+leaves with step 11 of stage 15).
 
 Queries:
-  renaming.reprocess {series_id} — массовая переобработка имён по виду
-      сериала `kind` из catalog (контракт Р-12: сканер вызывает перед
-      каждым сканом; тот же запрос — «сохранили свойства сериала в UI»,
-      этап 5): video → имена файлов даёт план сериала (modules/planner); torrent →
-      ревизия имён файлов всех активных раздач в qBit по профилю
-      торрентного источника (без профиля — пропуск).
-  renaming.process_torrent {series_id, qb_hash, dry_run?} —
-      переименование файлов одной раздачи (контракт Р-14: стадия
-      'renaming' конвейера). dry_run — только разбор состава правилами
-      и запись в torrent_files (статус pending_rename), qBit не
-      трогается: состав нужен до закачки, чтобы отобрать серии.
+  renaming.process_torrent {series_id, qb_hash, dry_run?} — the files of one release are renamed (contract R-14: the
+      stage 'renaming' of the pipeline). dry_run only lays the release out by the rules and writes torrent_files
+      (status pending_rename) without touching qBit: the files are needed before the download to pick the episodes.
 
-Имя готового файла видео-сериала — функция строки плана, но файлы переименовываются только в синхронизации: скан вызывает
-renaming.reprocess после пересчёта плана, в том же проходе. Пересчёт плана по событию (правка правил, выключение серии)
-файлы не трогает.
-
-Событие renaming.finished {series_id} — контракт SSE renaming_complete.
-
-Имена вычисляет rules (rules.format_filename / format_torrent_file —
-Р-15, дифф 349/349 с реальными именами). Файлы видео-сериала принадлежат
-downloads: здесь считаются имена всех готовых файлов, а переносит их владелец
-(downloads.items.rename: обязательство записывается до переноса, кольцо
-из обмениваемых имён разрывается, чужой файл не затирается, новое имя
-объявляется после переноса). Rename в qBit — здесь. Чужие колонки — командами
-владельцам: torrents.db.files.upsert.
-
-Ресьюмабельность: запись renaming_tasks живёт на время работы
-(и держит is_busy-семантику); незавершённые при старте перевыполняются
-(операция идемпотентна: уже переименованное пропускается).
+The names come from rules (rules.format_torrent_file — R-15, 349/349 against the real names); the rename in qBit is
+done here. The columns of others are commands to their owners: torrents.db.files.upsert. The module keeps no table of
+its own; the operation is idempotent: what is renamed already is skipped.
 """
 from __future__ import annotations
 
@@ -37,15 +16,9 @@ import asyncio
 import os
 import re
 
-from core import BaseModule, BusRequestError, storage, torrent_profile_id
-from core.contracts import SeriesKind
-from core.db import Database
+from core import BaseModule, BusRequestError, torrent_profile_id
 from core.envelope import Envelope
 
-from .repository import RenamingRepository
-
-# What became of a file the renaming was to move.
-MOVED, ABSENT, BLOCKED = "moved", "absent", "blocked"
 _VIDEO_EXT = (".mkv", ".avi", ".mp4", ".mov", ".wmv", ".webm", ".ts", ".m4v")
 _AUDIO_EXT = (".mka", ".ac3", ".dts", ".aac", ".flac", ".wav", ".ogg", ".eac3", ".m4a")
 _SUB_EXT = (".ass", ".srt", ".vtt", ".sub")
@@ -82,121 +55,20 @@ def _folder_tag(rel_dir: str) -> str:
 class RenamingModule(BaseModule):
     name = "renaming"
 
-    def __init__(self, bus, db: Database) -> None:
-        self.repo = RenamingRepository(db)
+    def __init__(self, bus) -> None:
         self._locks: dict[int, asyncio.Lock] = {}
         super().__init__(bus)
 
     def register(self) -> None:
-        self.handle("renaming.reprocess", self.on_reprocess, concurrent=True)
-        self.handle("renaming.process_torrent", self.on_process_torrent,
-                    concurrent=True)
-        self.handle("series.deleted", self.on_series_deleted)
-        self.handle("system.started", self.on_system_started)
-
-    async def on_system_started(self, env: Envelope) -> None:
-        """Every module is up: a переобработка, прерванная рестартом, выполняется заново — ей нужны соседи, которые на
-        старте этого модуля ещё не отвечают."""
-        for task in await self.repo.unfinished():
-            self.log.info("перевыполнение незавершённой переобработки "
-                          "(задача %d, сериал %d)", task["id"],
-                          task["series_id"])
-            self.spawn(self._safe_reprocess(task["series_id"], resume_of=task["id"]))
-
-    # --- массовая переобработка ------------------------------------------------------
-
-    async def on_reprocess(self, env: Envelope) -> dict:
-        return await self._reprocess(env.payload["series_id"])
-
-
-    async def _safe_reprocess(self, series_id: int,
-                              resume_of: int | None = None) -> None:
-        try:
-            if resume_of is not None:
-                await self.repo.delete(resume_of)
-            await self._reprocess(series_id)
-        except Exception:  # noqa: BLE001
-            self.log.exception("перевыполнение переобработки сериала %d "
-                               "не удалось", series_id)
-
-    async def _reprocess(self, series_id: int) -> dict:
-        lock = self._locks.setdefault(series_id, asyncio.Lock())
-        async with lock:  # повторный запрос дожидается и выполняется следом
-            series = await self.request("catalog.series.get",
-                                        {"series_id": series_id})
-            video = series["kind"] == SeriesKind.VIDEO
-            # Video names come from the numbers of the rows; only a torrent file is named by a profile.
-            if not video and torrent_profile_id(series) is None:
-                self.log.warning("переобработка %d пропущена: профиль "
-                                 "правил не назначен", series_id)
-                return {"renamed": 0, "skipped": True}
-
-            await self.repo.delete_errors(series_id)
-            task_type = ("mass_vk_reprocess" if video
-                         else "mass_torrent_reprocess")
-            task_id = await self.repo.create(series_id, task_type)
-            self._busy(series_id, True)
-            try:
-                if video:
-                    renamed = 0  # the files of a video series take their names from its plan (modules/planner)
-                else:
-                    renamed = await self._reprocess_torrents(series)
-                await self.repo.delete(task_id)
-            except Exception as exc:
-                await self.repo.set_error(task_id, str(exc))
-                raise
-            finally:
-                # busy — только активная работа: ошибка не блокирует
-                # карточку навечно (Р-17, находка 36)
-                self._busy(series_id, False)
-            self.publish_event("renaming.finished", {"series_id": series_id})
-            return {"renamed": renamed}
-
-    def _busy(self, series_id: int, busy: bool) -> None:
-        self.publish_event("series.busy.contribution", {
-            "source": "renaming", "series_id": series_id, "busy": busy})
-
-    async def _rename_on_disk(self, base: str, old_rel: str,
-                              new_rel: str) -> str:
-        """MOVED: the file lies under the new name now; ABSENT: there is no file to move; BLOCKED: the new name is taken
-        by another file, which is left alone, and the file keeps its name."""
-        old_abs = os.path.join(base, old_rel)
-        new_abs = os.path.join(base, new_rel)
-        if await storage.call(os.path.exists, new_abs):
-            self.log.warning("файл с новым именем уже существует: %s",
-                             new_abs)
-            return BLOCKED
-        if not await storage.call(os.path.exists, old_abs):
-            self.log.error("исходный файл не найден: %s", old_abs)
-            return ABSENT
-
-        def _do() -> None:
-            os.makedirs(os.path.dirname(new_abs), exist_ok=True)
-            os.rename(old_abs, new_abs)
-
-        await storage.call(_do, owns=(old_abs, new_abs))
-        self.log.info("переименован: %s -> %s", old_rel, new_rel)
-        return MOVED
-
+        self.handle("renaming.process_torrent", self.on_process_torrent, concurrent=True)
 
     # --- торренты: файлы внутри qBittorrent ------------------------------------------------
-
-    async def _reprocess_torrents(self, series: dict) -> int:
-        renamed = 0
-        for torrent in await self.request("torrents.db.active",
-                                          {"series_id": series["id"]}):
-            if torrent.get("qb_hash"):
-                renamed += await self._process_torrent(series,
-                                                       torrent["qb_hash"])
-        return renamed
 
     async def on_process_torrent(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
-        # C9: тот же per-series лок, что и у reprocess — иначе save во время
-        # стадии RENAMING запускает ВТОРОЕ переименование тех же файлов
-        # параллельно (гонка, кривые имена). Сериализуем.
+        # C9: one lock per series, so that two stages of the pipeline never rename the same files at once.
         lock = self._locks.setdefault(series_id, asyncio.Lock())
         async with lock:
             renamed = await self._process_torrent(
@@ -413,10 +285,3 @@ class RenamingModule(BaseModule):
             await self.request("torrents.db.files.upsert",
                                {"qb_hash": qb_hash, "files": records})
         return renamed
-
-    async def on_series_deleted(self, env):
-        """Каскад Р-19: владелец чистит renaming_tasks."""
-        await self.repo.delete_for_series(env.payload["series_id"])
-        self.publish_event("series.purged",
-                           {"series_id": env.payload["series_id"],
-                            "owner": self.name})

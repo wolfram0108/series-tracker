@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from core.contracts import DubItem, SeriesKind, SeriesSource, SourceType
+from core.contracts import SeriesSource, SourceType
 
 
 class ApiModel(BaseModel):
@@ -78,7 +78,6 @@ class ErrorResponse(ApiModel):
 class ScannerStatus(ApiModel):
     scanner_enabled: bool
     is_scanning: bool
-    is_awaiting_tasks: bool
     scan_interval: int
     next_scan_time: str | None = None
 
@@ -112,22 +111,9 @@ class TmdbInfo(ApiModel):
     poster_path, last_updated, ...)."""
 
 
-class ParseUrlRequest(RequestModel):
-    url: str
-
-
-class ParsedUrl(ApiModel):
-    """A parsed torrent page for the add form. A page that a site reads is not a torrent page: it is refused
-    with the reason `not_a_torrent_page` and shown by `composition.preview`."""
-    success: bool
-    title: dict[str, Any] | None = None
-    torrents: list[dict[str, Any]] = []
-    tracker_info: dict[str, Any] | None = None
-
-
 class SeriesObject(ApiModel):
     """A series (list and card). The fields that are always there are declared; the conditional ones
-    (tracker_info for a series with a tracker address, downloaded_episodes_count in the list) pass through
+    (downloaded_episodes_count in the list) pass through
     extra='allow'. The address, type and profile are fields of the sources (`sources`), not of the series.
     Do NOT apply exclude_none to a series: the null fields (quality_override, tmdb_info) must stay."""
     id: int
@@ -135,8 +121,7 @@ class SeriesObject(ApiModel):
     name_en: str
     site: str
     save_path: str
-    season: str | None = None  # в БД season nullable
-    kind: SeriesKind
+    season: str | None = None  # nullable in the database
     sources: list[SeriesSource]
     auto_scan_enabled: bool
     is_busy: bool
@@ -220,32 +205,10 @@ class SeriesCreate(SeriesFields):
     site: str
     save_path: str
     sources: list[SourceDraft] = Field(min_length=1)
-    torrents: list[dict[str, Any]] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _torrents_belong_to_a_torrent_source(self):
-        if self.torrents and not any(each.source_type == SourceType.TORRENT for each in self.sources):
-            raise ValueError("torrents are the releases of a torrent source")
-        return self
 
 
 class SeriesUpdate(SeriesFields):
     """The properties of a series to save; only the fields sent change."""
-
-
-class NamingPreviewItem(RequestModel):
-    """A release of the add form: a magnet is fetched through qBit, a link is a .torrent."""
-    torrent_id: str | int | None = None
-    magnet: str | None = None
-    link: str | None = None
-
-
-class NamingPreviewRequest(RequestModel):
-    items: list[NamingPreviewItem] = Field(default_factory=list)
-
-
-class NamingPreviewAccepted(ApiModel):
-    accepted: list[str | int | None]
 
 
 class CreatedSeries(ApiModel):

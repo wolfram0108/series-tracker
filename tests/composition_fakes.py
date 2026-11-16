@@ -111,7 +111,7 @@ class FakeCatalog(BaseModule):
 
     def delete_series(self, series_id: int) -> None:
         del self.series[series_id]
-        self.publish_event("series.deleted", {"series_id": series_id, "delete_from_qb": False})
+        self.publish_event("series.deleted", {"series_id": series_id})
 
 
 class FakeSources(BaseModule):

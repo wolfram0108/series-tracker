@@ -1,4 +1,4 @@
-"""What stops a scan: shared by the scan of a video series and of a torrent series."""
+"""What stops a sync: a failed step, or the deletion of its series."""
 
 
 class ScanError(RuntimeError):

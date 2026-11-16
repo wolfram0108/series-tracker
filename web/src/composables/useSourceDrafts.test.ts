@@ -34,7 +34,7 @@ beforeEach(() => {
 
 describe("useSourceDrafts", () => {
   it("makes a web source of an address a site reads and starts the read of its page", async () => {
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockResolvedValueOnce(page())
     const drafts = useSourceDrafts()
     expect(await drafts.add(`${PAGE}?x=1`)).toEqual({ kind: "added" })
@@ -48,7 +48,7 @@ describe("useSourceDrafts", () => {
   })
 
   it("keeps the names the page gives once its table is read, and forgets them when the address changes", async () => {
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockResolvedValueOnce(page({ state: "ready", summary, names: ["Название", "Title"] }))
     const drafts = useSourceDrafts()
     await drafts.add(PAGE)
@@ -59,7 +59,7 @@ describe("useSourceDrafts", () => {
   })
 
   it("keeps a VK channel as channel and query and asks for that address", async () => {
-    site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino|тайтл" })
+    site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino|тайтл", source_type: "vk_video" })
     preview.mockResolvedValueOnce(page({ url: "https://vkvideo.ru/@kino|тайтл" }))
     const drafts = useSourceDrafts()
     await drafts.add("https://vkvideo.ru/@kino?q=тайтл")
@@ -70,7 +70,7 @@ describe("useSourceDrafts", () => {
   it("makes no draft of a VK channel without a query and reads nothing for it", async () => {
     const drafts = useSourceDrafts()
     for (const typed of ["https://vkvideo.ru/@kino", "https://vkvideo.ru/@kino| / "]) {
-      site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino|" })
+      site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino|", source_type: "vk_video" })
       expect(await drafts.add(typed)).toEqual({ kind: "refused", text: t("sources.vk.queryMissing") })
     }
     expect(drafts.items.value).toEqual([])
@@ -86,17 +86,17 @@ describe("useSourceDrafts", () => {
   })
 
   it("refuses the same source twice", async () => {
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockResolvedValueOnce(page())
     const drafts = useSourceDrafts()
     await drafts.add(PAGE)
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     expect(await drafts.add(PAGE)).toEqual({ kind: "refused", text: "Этот источник уже в списке" })
     expect(drafts.items.value).toHaveLength(1)
   })
 
   it("asks the preview again, reading nothing, once the core says the page is read", async () => {
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockResolvedValueOnce(page())
     const drafts = useSourceDrafts()
     await drafts.add(PAGE)
@@ -111,7 +111,7 @@ describe("useSourceDrafts", () => {
   })
 
   it("shows the progress of the read from the events while it goes", async () => {
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockResolvedValueOnce(page())
     const drafts = useSourceDrafts()
     await drafts.add(PAGE)
@@ -121,7 +121,7 @@ describe("useSourceDrafts", () => {
   })
 
   it("takes up a read that ended before the answer of the request arrived", async () => {
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockImplementationOnce(async () => {
       useSourceTablesStore().applyReady({ url: PAGE, read_at: "2026-11-01T10:00:00Z" })
       return page()
@@ -135,7 +135,7 @@ describe("useSourceDrafts", () => {
 
   it("does not ask in a loop when the answer still says reading and no news came after it", async () => {
     useSourceTablesStore().applyReady({ url: PAGE, read_at: "old" })
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockResolvedValue(page())
     const drafts = useSourceDrafts()
     await drafts.add(PAGE)
@@ -144,7 +144,7 @@ describe("useSourceDrafts", () => {
   })
 
   it("recounts on a profile and reads again on another query of a channel", async () => {
-    site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino|тайтл" })
+    site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino|тайтл", source_type: "vk_video" })
     preview.mockResolvedValue(page({ url: "https://vkvideo.ru/@kino|тайтл", state: "ready" }))
     const drafts = useSourceDrafts()
     await drafts.add("https://vkvideo.ru/@kino|тайтл")
@@ -157,7 +157,7 @@ describe("useSourceDrafts", () => {
   })
 
   it("recounts a draft from the table in hand when a choice of the source changes, reading nothing", async () => {
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockResolvedValue(page({ state: "ready", summary }))
     const drafts = useSourceDrafts()
     await drafts.add(PAGE)
@@ -170,7 +170,7 @@ describe("useSourceDrafts", () => {
   })
 
   it("draws the lines of a draft from the rows the core made by the profile, and from no other data", async () => {
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     const row = {
       series_id: 0, source_id: 0, row_key: "a", excluded: false, season: 1, episode_start: 1, episode_end: 12,
       voice_label: "Неизвестная озвучка 1", voice_name: "", voice_group: null, player: "vibix", player_label: "Vibix",
@@ -185,7 +185,7 @@ describe("useSourceDrafts", () => {
   })
 
   it("blocks the series while a source could not be read, and frees it once that source is removed", async () => {
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockResolvedValueOnce(page({ state: "failed", reason: '{"code":"read_failed"}' }))
     const drafts = useSourceDrafts()
     await drafts.add(PAGE)
@@ -196,7 +196,7 @@ describe("useSourceDrafts", () => {
   })
 
   it("reads a page now though its table is fresh, and asks for the result once the read has ended", async () => {
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockResolvedValueOnce(page({ state: "ready", summary }))
     vi.mocked(readPageNow).mockReset().mockResolvedValue({ ok: true, data: { success: true } })
     const drafts = useSourceDrafts()
@@ -213,7 +213,7 @@ describe("useSourceDrafts", () => {
   })
 
   it("says why the page could not be read now, and leaves the draft failed", async () => {
-    site({ site: "ruchime", canonical_url: PAGE })
+    site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockResolvedValueOnce(page({ state: "ready", summary }))
     vi.mocked(readPageNow).mockReset().mockResolvedValue({ ok: false, text: "Нет связи с сервером" })
     const drafts = useSourceDrafts()

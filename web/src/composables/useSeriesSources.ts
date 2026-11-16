@@ -18,9 +18,8 @@ import type { DraftPatch } from "./useSourceDrafts"
 /**
  * The sources of a stored series for its properties. An action goes to the core at once; what the core makes of
  * it (a new layout, a reading of a page) comes back as events, and the layout event is what reads the sources again.
- * A torrent series has one source and no table: only its address and profile show.
  */
-export function useSeriesSources(seriesId: number, kind: "torrent" | "video", initial: SeriesSource[]) {
+export function useSeriesSources(seriesId: number, initial: SeriesSource[]) {
   const tables = useSourceTablesStore()
   const composition = useCompositionStore()
   const sources = ref<SeriesSource[]>(initial)
@@ -35,7 +34,7 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
   const busy = ref(false)
   // The tables of the sources are the layout's: until it has been read a source shows what the series itself knows of it, not its table, and
   // the card says that the table is coming (`waiting`). A read that follows, with a layout on show, is told by the bar of the window only.
-  const tablesLoading = ref(kind === "video")
+  const tablesLoading = ref(true)
   const waiting = computed(() => tablesLoading.value && layouts.forSeries(seriesId) == null)
 
   // A recount of the layout that failed leaves the earlier layout in force; the window says so until the next one arrives.
@@ -70,16 +69,12 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
   let asked = 0
   async function load(fresh = true): Promise<void> {
     const ask = ++asked
-    if (kind === "video") tablesLoading.value = true
+    tablesLoading.value = true
     // The layout is asked for together with the sources: an ask of the output made by the same news is the same read.
-    const read = kind === "video" ? (fresh ? layouts.refresh(seriesId) : layouts.ensure(seriesId)) : null
+    const read = fresh ? layouts.refresh(seriesId) : layouts.ensure(seriesId)
     const listed = await fetchSources(seriesId)
     if (ask !== asked) return
     if (listed.ok) sources.value = listed.data
-    if (read === null) {
-      tablesLoading.value = false
-      return
-    }
     await read
     if (ask !== asked) return
     tablesLoading.value = false
@@ -162,7 +157,7 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (!answer.ok) error.value = answer.text
   }
 
-  if (kind === "video") onUnmounted(layouts.hold(seriesId))
+  onUnmounted(layouts.hold(seriesId))
   // What the window already read is shown as it is; the news since then come as events.
   onMounted(() => void load(false))
   // The layout of the series changed (a summary of a source too): the sources are read again.

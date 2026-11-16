@@ -24,7 +24,6 @@ class FakeNeighbours(BaseModule):
         self.names: list[str] = []  # the files of the asset of the plan
         self.active_torrents: list[dict] = []
         self.set_location_calls: list[dict] = []
-        self.reprocess_calls: list[int] = []
         self.fail_set_location = False
         super().__init__(bus)
 
@@ -32,7 +31,6 @@ class FakeNeighbours(BaseModule):
         self.handle("planner.files.get", self.on_files)
         self.handle("torrents.db.active", self.on_active)
         self.handle("torrents.set_location", self.on_set_location)
-        self.handle("renaming.reprocess", self.on_reprocess)
 
     async def on_files(self, env):
         # The asset of the plan of a video series: its files, as the planner holds them.
@@ -45,10 +43,6 @@ class FakeNeighbours(BaseModule):
         if self.fail_set_location:
             raise RuntimeError("qBittorrent не смог переместить (имитация)")
         self.set_location_calls.append(env.payload)
-
-    async def on_reprocess(self, env):
-        self.reprocess_calls.append(env.payload["series_id"])
-        return {"renamed": 0}
 
 
 class Probe(BaseModule):
@@ -128,7 +122,6 @@ async def test_a_save_plans_the_move_and_the_sync_makes_it(started):
     for f in ("Show s01e01.mp4", "Show s01e02.mp4"):
         assert os.path.exists(os.path.join(new_dir, f)) and not os.path.exists(os.path.join(old_dir, f))
     assert _save_path(db_path) == new_dir and _tasks(db_path) == []
-    assert fake.reprocess_calls == []  # the names are the sync's own step after the move
     assert await probe.request("library.relocation.get", {"series_id": 2}, timeout=5) == {"new_path": None}
     busy_seq = []
 

@@ -197,8 +197,10 @@ describe("the choices of a source", () => {
 
 describe("addresses", () => {
   it("makes a source of a channel of VK a video source of VK and any other site a web one", () => {
-    expect(sourceTypeOf({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino||search" })).toBe("vk_video")
-    expect(sourceTypeOf({ site: "ruchime", canonical_url: "https://1.ruchime.org/release/test" })).toBe("web_video")
+    expect(sourceTypeOf({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino||search", source_type: "vk_video" })).toBe("vk_video")
+    expect(sourceTypeOf({ site: "ruchime", canonical_url: "https://1.ruchime.org/release/test", source_type: "web_video" })).toBe("web_video")
+    // a tracker page is a site too (stage 15): the type is the site's word, not a guess from its name
+    expect(sourceTypeOf({ site: "kinozal", canonical_url: "https://kinozal.tv/details.php?id=1", source_type: "torrent" })).toBe("torrent")
     expect(sourceTypeOf({ site: null, canonical_url: null })).toBeNull()
   })
 

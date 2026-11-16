@@ -53,7 +53,7 @@ _QUICK = (
     "rules.rules.add", "rules.rules.delete", "rules.rules.list", "rules.rules.reorder", "rules.rules.update",
     "settings.paths.add", "settings.paths.list", "settings.paths.remove",
     "settings.value.set", "settings.values.by_prefix", "settings.values.set_many",
-    "sources.players.list", "sources.settings.get", "sources.site.resolve", "sources.tracker.resolve", "sources.tracker.set_mirrors",
+    "sources.players.list", "sources.settings.get", "sources.site.resolve", "sources.tracker.set_mirrors",
     "sources.trackers.list",
     "torrents.db.add", "torrents.db.files.for_series", "torrents.db.history",
     "torrents.queue.get",
@@ -71,7 +71,7 @@ _FUSES: dict[str, float] = {
                      "torrents.db.deactivate_all", "torrents.drive_incomplete", "torrents.fs.verify"), HEAVY_S),
     "sources.torrent_file.get": FETCH_S,
     **dict.fromkeys(("renaming.process_torrent", "rules.apply", "sources.parse", "sources.releases.get"), RULES_S),
-    **dict.fromkeys(("renaming.reprocess", "torrents.register"), BATCH_S),
+    **dict.fromkeys(("torrents.register",), BATCH_S),
     "torrents.composition": 900.0,
     # The fetch of a page of a service with credentials; it covers an anti-bot challenge solved by a browser (up to 45 s).
     "trackerauth.fetch": 150.0,
@@ -113,7 +113,7 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
 # The topics whose request has no fuse of its own (see the top).
 # The move of a series is one move for each file, each with its own (core.storage.MOVE_TIMEOUT_S). A file a player
 # downloads itself is as long as its episode: the asker watches its progress events under its fuse of silence.
-_UNBOUNDED = frozenset({"scan.series.run", "scan.series.prepare", "library.relocation.apply", "sources.video.fetch"})
+_UNBOUNDED = frozenset({"scan.series.run", "library.relocation.apply", "sources.video.fetch"})
 
 UNBOUNDED = None
 

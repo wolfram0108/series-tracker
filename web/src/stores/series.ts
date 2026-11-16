@@ -5,8 +5,8 @@ import type { components } from "../api/schema"
 
 type SeriesSource = components["schemas"]["SeriesSource"]
 
-/** Серия. Контракт бэка — extra="allow", поэтому помимо явных полей могут
- *  приходить и другие (tmdb_info, tracker_info, …) — отсюда index-signature. */
+/** A series. The contract of the core is extra="allow": fields beyond the declared ones may come (tmdb_info, …), hence
+ *  the index signature. */
 export interface Series {
   id: number
   name: string
@@ -16,8 +16,6 @@ export interface Series {
   is_busy?: boolean
   last_scan_time?: string | null
   season?: string | null
-  /** What the series is to the system: its sources are all torrent or all video ones. */
-  kind?: components["schemas"]["SeriesKind"]
   sources?: components["schemas"]["SeriesSource"][]
   [key: string]: unknown
 }

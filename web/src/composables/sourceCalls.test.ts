@@ -29,9 +29,9 @@ describe("the calls to the sources of the core", () => {
   })
 
   it("gives the data of an answer as it came", async () => {
-    client.POST.mockResolvedValueOnce({ data: { site: "ruchime", canonical_url: "https://1.ruchime.org/release/test" } })
+    client.POST.mockResolvedValueOnce({ data: { site: "ruchime", canonical_url: "https://1.ruchime.org/release/test", source_type: "web_video" } })
     expect(await resolveAddress("https://1.ruchime.org/release/test?x=1")).toEqual({
-      ok: true, data: { site: "ruchime", canonical_url: "https://1.ruchime.org/release/test" },
+      ok: true, data: { site: "ruchime", canonical_url: "https://1.ruchime.org/release/test", source_type: "web_video" },
     })
     expect(client.POST).toHaveBeenCalledWith("/api/sources/resolve", {
       body: { url: "https://1.ruchime.org/release/test?x=1" },

@@ -12,13 +12,6 @@ class SourceType(StrEnum):
     WEB_VIDEO = "web_video"
 
 
-class SeriesKind(StrEnum):
-    """What a series is to the rest of the system: a series has sources of one kind, a torrent one or a video one."""
-
-    TORRENT = "torrent"
-    VIDEO = "video"
-
-
 class SeriesSource(BaseModel):
     """`url` is a page address, or `channel|query` for a VK channel; the choices belong to the source, not the address."""
 

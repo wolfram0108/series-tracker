@@ -11,15 +11,15 @@ from modules.rules import formatter
 # --- юнит-кейсы формата --------------------------------------------------------------
 
 def test_format_basic_and_sanitize():
-    series = {"name_en": 'Bad: "Name"?', "kind": "video"}
+    series = {"name_en": 'Bad: "Name"?'}
     name = formatter.format_name(series, {"season": 2, "episode": 7,
                                           "voiceover": "AniLibria",
                                           "resolution": 1080})
-    assert name == "Bad Name s02e07 [AniLibria] 1080p.mp4"
+    assert name == "Bad Name s02e07 [AniLibria] 1080p.mkv"
 
 
 def test_format_compilation_range_and_subdir():
-    series = {"name_en": "Show", "kind": "video"}
+    series = {"name_en": "Show"}
     name = formatter.format_name(series, {"season": 1, "start": 1, "end": 3},
                                  original_filename="sub/old.mp4")
     assert name == "sub/Show s01e01-e03.mp4"
@@ -27,7 +27,7 @@ def test_format_compilation_range_and_subdir():
 
 def test_series_season_is_default_not_override():
     """Сезон карточки заполняет пропуск, но не спорит с распознанным."""
-    series = {"name_en": "Show", "season": "s03", "kind": "torrent"}
+    series = {"name_en": "Show", "season": "s03"}
     name = formatter.format_name(series, {"episode": 5},
                                  original_filename="x.mkv")
     assert name == "Show s03e05.mkv"
@@ -55,7 +55,7 @@ def test_torrent_season_folder_logic():
 # --- the name made from the record of a media item -----------------------------------------------------
 
 def video(name: str) -> dict:
-    return {"name_en": name, "kind": "video", "season": None}
+    return {"name_en": name, "season": None}
 
 
 @pytest.mark.parametrize("series, item, original, expected", [
@@ -74,7 +74,7 @@ def video(name: str) -> dict:
      "Show s01e12 [ПВА] 2160p.mkv"),
     (video("Show"), {"season": 1, "episode_start": 12, "episode_end": None, "part": 2, "resolution": 1080,
                      "voiceover_tag": "AniLibria"}, "x.mp4", "Show s01e12 Part 2 [AniLibria] 1080p.mp4"),
-    ({"name_en": "Show", "kind": "torrent", "season": "s02"}, {"season": None, "episode_start": 5, "episode_end": None,
+    ({"name_en": "Show", "season": "s02"}, {"season": None, "episode_start": 5, "episode_end": None,
                                                                "resolution": None, "voiceover_tag": None},
      "Show.S02E05.1080p.mkv", "Show s02e05.mkv"),
 ])

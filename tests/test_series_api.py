@@ -15,8 +15,6 @@ from modules.catalog import CatalogModule
 from modules.gateway import GatewayModule
 from modules.library import LibraryModule
 from modules.metadata import MetadataModule
-from modules.renaming import RenamingModule
-from modules.scan.repository import ScanRepository
 from series_factory import insert_series, source
 from settle import settle
 from schema_db import migrated
@@ -31,9 +29,6 @@ def db_path(tmp_path):
         insert_series(conn, id=2, name="ВК", name_en="Show", site="vk", save_path="/media/s",
                       url="u|q", source_type="vk_video")
         # данные для каскада удаления серии 2
-        conn.execute(
-            "INSERT INTO renaming_tasks (series_id, status, task_type) "
-            "VALUES (2, 'error', 'mass_vk_reprocess')")
         conn.execute(
             "INSERT INTO series_tmdb_mappings (series_id, tmdb_id, "
             "tmdb_season_number, total_episodes) VALUES (2, 99, 1, 12)")
@@ -59,13 +54,6 @@ class Neighbours(BaseModule):
         async def counts_torrent(env):
             return {"counts": {1: 3}}
 
-        async def resolve(env):
-            self.calls.append(("resolve", env.payload))
-            return {"tracker": {"canonical_name": "kinozal"} if "kinozal" in env.payload["url"] else None}
-
-        async def history(env):
-            return [{"id": 1, "torrent_id": "abc", "is_active": 1}]
-
         async def queue(env):
             return {"count": 1, "tasks": [
                 {"torrent_hash": "h1", "series_id": 1, "stage": "renaming"}]}
@@ -78,10 +66,6 @@ class Neighbours(BaseModule):
         async def fs_verify(env):
             self.calls.append(("fs.verify", env.payload))
             return {"missing": 0}
-
-        async def reprocess(env):
-            self.calls.append(("reprocess", env.payload))
-            return {"ok": True}
 
         async def plan_move(env):
             self.calls.append(("plan", env.payload))
@@ -100,23 +84,15 @@ class Neighbours(BaseModule):
         async def edit_end(env):
             self.calls.append(("edit.end", env.payload))
 
-        async def db_add(env):
-            self.calls.append(("torrents.db.add", env.payload))
-            return {"added": len(env.payload["torrents"])}
-
         self.handle("planner.downloaded_counts", counts_vk)
         self.handle("torrents.db.downloaded_counts", counts_torrent)
-        self.handle("sources.tracker.resolve", resolve)
-        self.handle("torrents.db.history", history)
         self.handle("torrents.queue.get", queue)
         self.handle("torrents.db.progress.list", progress)
         self.handle("torrents.fs.verify", fs_verify)
-        self.handle("renaming.reprocess", reprocess)
         self.handle("library.relocation.plan", plan_move)
         self.handle("scan.edit.begin", edit_begin)
         self.handle("scan.edit.end", edit_end)
         self.handle("library.relocation.get", planned_move)
-        self.handle("torrents.db.add", db_add)
 
         async def dubs(env):
             return {"items": [
@@ -165,9 +141,9 @@ async def test_series_list_shape(system):
     assert resp.status_code == 200
     data = {s["id"]: s for s in resp.json()}
     assert set(data) == {1, 2}
-    # the card: kind and sources come from the catalog, the series itself has no address
+    # the card: the sources come from the catalog, the series itself has no address and no kind
     torrent, vk = data[1], data[2]
-    assert torrent["kind"] == "torrent" and vk["kind"] == "video"
+    assert "kind" not in torrent and "kind" not in vk
     assert [(each["url"], each["source_type"]) for each in torrent["sources"]] == [
         ("http://kinozal.tv/details.php?id=7", "torrent")]
     assert [(each["url"], each["source_type"]) for each in vk["sources"]] == [("u|q", "vk_video")]
@@ -190,13 +166,11 @@ async def test_series_details_and_404(system):
     resp = await client.get("/api/series/1")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["kind"] == "torrent" and body["sources"][0]["source_type"] == "torrent"
-    # `sources` tells the tracker by the address of a source; the series itself has no address
-    assert body["tracker_info"] == {"canonical_name": "kinozal"}
-    assert ("resolve", {"url": "http://kinozal.tv/details.php?id=7"}) in neighbours.calls
+    assert body["sources"][0]["source_type"] == "torrent"
+    assert not {"kind", "tracker_info"} & set(body)
 
     video = (await client.get("/api/series/2")).json()
-    assert video["kind"] == "video" and "tracker_info" not in video and "availability" not in video
+    assert not {"kind", "tracker_info", "availability"} & set(video)
     # there is no report of players any more: the summary of the sources is composition's, the window takes it itself
     assert "scan.availability" not in topics(spy)
 
@@ -209,7 +183,7 @@ async def test_series_details_and_404(system):
 
 
 @pytest.mark.asyncio
-async def test_add_series_with_torrents_and_event(system):
+async def test_add_series_and_event(system):
     bus, _, client, neighbours = system
     sub = bus.subscribe("series.added")
     sources = bus.subscribe("series.source.added")
@@ -218,25 +192,16 @@ async def test_add_series_with_torrents_and_event(system):
         "name_en": "New", "site": "kinozal", "save_path": "/media/n",
         "sources": [{"url": "http://kinozal.tv/details.php?id=9", "source_type": "torrent"}],
         "tmdb_data": {"tmdb_id": 5, "tmdb_season_number": 1,
-                      "total_episodes": 8},
-        "torrents": [{"torrent_id": "t9", "link": "http://kinozal.tv/9",
-                      "date_time": "2026-01-01 00:00:00"}]})
+                      "total_episodes": 8}})
     assert resp.status_code == 200
     series_id = resp.json()["series_id"]
     env = await asyncio.wait_for(sub.queue.get(), 3)
     assert env.payload["id"] == series_id
     assert env.payload["name"] == "Новый"
-    assert env.payload["kind"] == "torrent"
     assert env.payload["statuses"] == ["waiting"]
     # the source appeared like any added later
     added = await asyncio.wait_for(sources.queue.get(), 3)
     assert added.payload["series_id"] == series_id
-    assert ("torrents.db.add",
-            {"series_id": series_id,
-             "torrents": [{"torrent_id": "t9",
-                           "link": "http://kinozal.tv/9",
-                           "date_time": "2026-01-01 00:00:00"}]}) \
-        in neighbours.calls
     # TMDB-маппинг записан владельцем
     details = (await client.get(f"/api/series/{series_id}")).json()
     assert details["tmdb_info"]["tmdb_id"] == 5
@@ -251,12 +216,9 @@ async def test_add_series_of_several_sources_keeps_their_order_and_choices(syste
                     {"url": "chan|query", "source_type": "vk_video", "players_off": ["vk"]}]})
     assert resp.status_code == 200
     details = (await client.get(f"/api/series/{resp.json()['series_id']}")).json()
-    assert details["kind"] == "video"
     assert [(each["url"], each["position"], each["vibix_season"], each["players_off"])
             for each in details["sources"]] == [("https://one.test/p", 0, 2, []), ("chan|query", 1, None, ["vk"])]
     assert all("vk_search_mode" not in each for each in details["sources"])
-    # no torrents in the form: nothing for the torrent module to write
-    assert not any(call[0] == "torrents.db.add" for call in neighbours.calls)
 
 
 @pytest.mark.asyncio
@@ -273,16 +235,16 @@ async def test_add_series_does_not_take_the_fields_that_left_the_series(system, 
 
 
 @pytest.mark.asyncio
-async def test_add_series_needs_a_source_and_torrents_need_a_torrent_source(system):
-    _, _, client, neighbours = system
+async def test_add_series_needs_a_source_and_takes_no_releases(system):
+    _, _, client, _ = system
     base = {"name": "Т", "name_en": "T", "site": "s", "save_path": "/media/t"}
     assert (await client.post("/api/series", json=base)).status_code == 422
     assert (await client.post("/api/series", json={**base, "sources": []})).status_code == 422
+    # the releases of a torrent page are its source's (stage 15), not a field of the form
     resp = await client.post("/api/series", json={
-        **base, "sources": [{"url": "https://one.test/p", "source_type": "web_video"}],
+        **base, "sources": [{"url": "http://kinozal.tv/details.php?id=9", "source_type": "torrent"}],
         "torrents": [{"torrent_id": "t9", "link": "http://kinozal.tv/9"}]})
     assert resp.status_code == 422
-    assert not any(call[0] == "torrents.db.add" for call in neighbours.calls)
 
 
 @pytest.mark.asyncio
@@ -319,8 +281,7 @@ async def test_delete_cascade_by_owners(db_path, tmp_path):
     # только в работе, подписка на series.deleted — чистая БД
     from modules.scan import ScanModule
     modules = [gateway, CatalogModule(bus, db), MetadataModule(bus, db),
-               ScanModule(bus, db, scheduler_tick=None), RenamingModule(bus, db),
-               LibraryModule(bus, db)]
+               ScanModule(bus, db, scheduler_tick=None), LibraryModule(bus, db)]
     runner = Runner(bus, modules)
     await runner.start()
     try:
@@ -331,7 +292,7 @@ async def test_delete_cascade_by_owners(db_path, tmp_path):
             resp = await client.delete("/api/series/2")
             assert resp.status_code == 200
             env = await asyncio.wait_for(sub.queue.get(), 3)
-            assert env.payload == {"series_id": 2, "delete_from_qb": False}
+            assert env.payload == {"series_id": 2}
 
         async def _empty(table, where="series_id=2"):
             rows = await db.fetch_all(
@@ -340,7 +301,6 @@ async def test_delete_cascade_by_owners(db_path, tmp_path):
 
         await settle(bus, *modules)  # the cascade is an event: it ends when every owner has handled it
         assert await _empty("series", "id=2")
-        assert await _empty("renaming_tasks")
         assert await _empty("series_tmdb_mappings")
     finally:
         await runner.stop()
@@ -351,7 +311,7 @@ async def test_delete_cascade_by_owners(db_path, tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("series_id", [1, 2])
-async def test_update_without_path_change_touches_no_file_whatever_the_kind(system, series_id):
+async def test_update_without_path_change_touches_no_file_whatever_the_sources(system, series_id):
     """A save changes the card and the plan only: the files follow it at the next sync (И-59), so the gateway asks no
     renaming, no relocation and no scan."""
     bus, db, client, neighbours = system
@@ -362,10 +322,9 @@ async def test_update_without_path_change_touches_no_file_whatever_the_kind(syst
     row = await db.fetch_one("SELECT name FROM series WHERE id=?", (series_id,))
     assert row["name"] == "Переименован"
     await settle(bus, neighbours)  # the command is background work of the gateway: done when the bus is quiet
-    assert all(c[0] != "reprocess" for c in neighbours.calls)
     # the path goes to library, which knows the series is there already
     assert ("plan", {"series_id": series_id, "new_path": "/media/t" if series_id == 1 else "/media/s"}) in neighbours.calls
-    # the layout of a video series is counted again on series.updated; the gateway starts no sync
+    # the layout of the series is counted again on series.updated; the gateway starts no sync
     assert "scan.series.run" not in topics(spy)
 
 
@@ -379,7 +338,6 @@ async def test_update_with_path_change_plans_the_move_and_the_card_shows_it(syst
     # save_path is written by library after the move in a sync; the gateway does not touch it
     row = await db.fetch_one("SELECT save_path FROM series WHERE id=1")
     assert row["save_path"] == "/media/t"
-    assert all(c[0] != "reprocess" for c in neighbours.calls)
     card = (await client.get("/api/series/1")).json()
     assert (card["save_path"], card["planned_save_path"]) == ("/media/t", "/media/new")
 
@@ -393,7 +351,7 @@ async def test_update_does_not_take_what_belongs_to_the_sources(system, removed)
     resp = await client.post("/api/series/1", json={"name": "Другой", **removed})
     assert resp.status_code == 422
     assert (await db.fetch_one("SELECT name FROM series WHERE id=1"))["name"] == "Тайтл"
-    assert not any(call[0] in ("reprocess", "relocate") for call in neighbours.calls)
+    assert not any(call[0] == "relocate" for call in neighbours.calls)
 
 
 # --- мелкие точки ------------------------------------------------------------------
@@ -431,7 +389,7 @@ async def test_state_route_drives_viewing_and_asks_each_owner_to_check_its_files
     env = await asyncio.wait_for(sub.queue.get(), 3)
     assert env.payload["series_id"] == series_id
     assert "viewing" in env.payload["statuses"]
-    # opening the window asks the owner of the torrent files to check its own with the disk; the gateway knows no kind
+    # opening the window asks the owner of the torrent files to check its own with the disk; the gateway chooses nothing
     await settle(bus, neighbours)
     assert ("fs.verify", {"series_id": series_id}) in neighbours.calls
     assert "catalog.series.get" not in topics(spy)
@@ -463,9 +421,6 @@ async def test_small_endpoints(system):
     # the priority of resolutions of the user left with its column: the rule of the reference applies
     resp = await client.put("/api/series/2/vk-quality-priority", json={"priority": ["1080p", "720p"]})
     assert resp.status_code in (404, 405)
-
-    resp = await client.get("/api/series/1/torrents/history")
-    assert resp.json()[0]["torrent_id"] == "abc"
 
     # the progress of the torrents comes from torrent_progress of the torrents module, not from the pipeline
     resp = await client.get("/api/series/active_torrents")

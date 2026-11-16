@@ -26,21 +26,14 @@ import LoadingMark from "../LoadingMark.vue"
 // профиля. Вся API профилей/правил живёт здесь; карточка правила и тест —
 // отдельные компоненты.
 
-// initialProfileId / testInitialTitles — опциональны: заданы при встраивании
-// раздела «Фильтры VK» вкладкой в окно добавления сериала (предвыбор профиля +
-// список файлов раздачи в шаг 3). В Настройках не передаются → поведение как было.
-// testFirst: при выборе профиля раскрывать сразу Шаг 3 (Тест) вместо Шага 2
-// (окно добавления — цель «проверить нейминг»). В Настройках не передаётся → Шаг 2.
+// testFirst: a profile picked opens the step of the test at once instead of its rules (the add window, whose aim is
+// to check the naming); the settings do not pass it.
 const props = defineProps<{
-  initialProfileId?: number | null
-  testInitialTitles?: string[]
   testInitialUrl?: string
   testFirst?: boolean
   /** The sources of the series the section stands in (its fields of the test offer them); none in the settings. */
   loadSources?: () => Promise<SourceAddress[]>
 }>()
-const emit = defineEmits<{ (e: "update:profileId", v: number | null): void }>()
-
 const { request } = useApi()
 const confirm = useConfirm()
 const toast = useToast()
@@ -60,7 +53,7 @@ interface RawRule {
 }
 
 const profiles = ref<Profile[]>([])
-const selectedProfileId = ref<number | null>(props.initialProfileId ?? null)
+const selectedProfileId = ref<number | null>(null)
 const newProfileName = ref("")
 const isLoading = ref(false)
 useBusyBar(() => isLoading.value)
@@ -361,16 +354,7 @@ watch(selectedProfileId, (id) => {
   } else {
     rules.value = []
   }
-  emit("update:profileId", id)  // синхронизация с формой окна добавления
 })
-
-// внешняя смена профиля (форма окна добавления) → отразить в разделе
-watch(
-  () => props.initialProfileId,
-  (v) => {
-    if (v !== undefined && v !== selectedProfileId.value) selectedProfileId.value = v ?? null
-  },
-)
 
 async function loadLineFields(): Promise<void> {
   const codes = await request(api.GET("/api/rules/line-fields"))
@@ -480,7 +464,6 @@ onMounted(() => {
         <div v-show="openStep === 'test'" class="accordion-body">
           <ParserTest
             :profile-id="selectedProfileId"
-            :initial-titles="testInitialTitles"
             :initial-url="testInitialUrl"
             :load-sources="loadSources"
             @lines="testLines = $event"

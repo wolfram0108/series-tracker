@@ -16,11 +16,9 @@ import { stateLabel } from "../../lib/states"
 // The test of a profile: the rows of a page (a site, or a channel of VK) or the file names of a series, or titles
 // typed in the field, each with the answer of the profile. The numbers in the answers are the constructor's alone.
 
-// initialTitles: filled by the add window with the files of the release. initialUrl: the chosen web source, so that
-// the page read is exactly that voice-over's.
+// initialUrl: the chosen source, so that the page read is exactly that voice-over's.
 const props = defineProps<{
   profileId: number
-  initialTitles?: string[]
   initialUrl?: string
   /** The sources of the series the test is for, as the series has them now; without it the fields offer nothing to paste. */
   loadSources?: () => Promise<SourceAddress[]>
@@ -52,13 +50,9 @@ const titles = ref("")
 watch(titles, (text) => emit("lines", text.split("\n").map((row) => row.trim()).filter((row) => row !== "")), { immediate: true })
 const loadedNames = ref<number | null>(null)
 
-if (props.initialTitles?.length) titles.value = props.initialTitles.join("\n")
 if (props.initialUrl) address.value = props.initialUrl
 watch(() => props.initialUrl, (v) => {
   if (v) address.value = v
-})
-watch(() => props.initialTitles, (v) => {
-  if (v?.length) titles.value = v.join("\n")
 })
 // A page read to its end offers its rows in the field, to be edited and tried again.
 watch(test.fetched, (rows) => {

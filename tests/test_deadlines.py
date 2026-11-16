@@ -7,7 +7,7 @@ import pytest
 from core import BaseModule, Bus
 from core import deadlines
 from core import module as module_base
-from core.deadlines import (HANDOVER_S, QUICK_S, RULES_S, STANDARD_S, TABLE_READ_S, TABLE_WAIT_S, deadline_of,
+from core.deadlines import (QUICK_S, RULES_S, STANDARD_S, TABLE_READ_S, TABLE_WAIT_S, deadline_of,
                             topics)
 
 
@@ -23,7 +23,7 @@ def test_a_topic_whose_work_is_a_step_for_each_unit_scales_with_the_units():
 
 def test_a_request_made_of_an_unbounded_number_of_steps_has_no_fuse_of_its_own():
     assert deadline_of("scan.series.run") is None
-    assert deadline_of("scan.series.prepare") is None
+    assert deadline_of("library.relocation.apply") is None
 
 
 def test_fuses_nest_the_outer_one_never_fires_before_an_inner_one():

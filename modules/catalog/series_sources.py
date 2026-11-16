@@ -1,10 +1,10 @@
-"""Pure rules of the sources of a series: what a source may carry, what kind a series is, what left `series`.
+"""Pure rules of the sources of a series: what a source may carry, what left `series`.
 
 No bus and no database here, so that the repository and the module apply the same rules.
 """
 from __future__ import annotations
 
-from core.contracts import SeriesKind, SeriesSource, SourceType
+from core.contracts import SeriesSource
 from core.row_limit import normalized
 from core.reasons import reason
 
@@ -14,24 +14,6 @@ REMOVED_FIELDS = ("url", "source_type", "parser_profile_id", "vk_search_mode", "
 
 # What a caller may write to a source; `id` and `series_id` belong to the table.
 SOURCE_FIELDS = ("position", "url", "source_type", "parser_profile_id", "vibix_season", "players_off", "rows_per_line")
-
-
-def kind_of_type(source_type: str) -> str:
-    """The kind of series a source of this type belongs to: a torrent, or video of any site."""
-    return (SeriesKind.TORRENT if source_type == SourceType.TORRENT else SeriesKind.VIDEO).value
-
-
-def kind_of(sources: list[dict]) -> str:
-    """The kind of a series: the kind of its sources, which refuse_mixed_kinds keeps one; `video` with none."""
-    torrent = any(kind_of_type(source["source_type"]) == SeriesKind.TORRENT for source in sources)
-    return (SeriesKind.TORRENT if torrent else SeriesKind.VIDEO).value
-
-
-def refuse_mixed_kinds(source_types: list[str]) -> None:
-    """A series is a torrent one or a video one: torrent files are not laid out into episodes (stage 10), so
-    the two do not meet in one series."""
-    if len({kind_of_type(each) for each in source_types}) > 1:
-        raise ValueError(reason("mixed_kinds"))
 
 
 def refuse_removed_fields(fields: dict) -> None:
@@ -74,7 +56,6 @@ def checked_sources(raw: object) -> list[dict]:
     drafts = []
     for index, source in enumerate(raw):
         drafts.append({"position": index, **checked_fields(source)})
-    refuse_mixed_kinds([draft["source_type"] for draft in drafts])
     urls = [draft["url"] for draft in drafts]
     for url in urls:
         if urls.count(url) > 1:

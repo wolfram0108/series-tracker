@@ -27,8 +27,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from core import NO_HANDLER, BaseModule, BusRequestError, sanitize_path, storage
-from core.contracts import SeriesKind
+from core import BaseModule, sanitize_path, storage
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
@@ -164,10 +163,8 @@ class LibraryModule(BaseModule):
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
             old_base, new_base = series["save_path"], task["new_path"]
-            if series["kind"] == SeriesKind.VIDEO:
-                await self._move_vk_files(series_id, old_base, new_base)
-            else:
-                await self._move_torrents(series_id, new_base)
+            await self._move_plan_files(series_id, old_base, new_base)
+            await self._move_torrents(series_id, new_base)
             await self.request("catalog.series.set_save_path", {
                 "series_id": series_id, "save_path": new_base})
             await self.repo.delete(task["id"])
@@ -190,9 +187,9 @@ class LibraryModule(BaseModule):
             self._relocations.pop(series_id, None)
             self._busy(series_id, False)
 
-    async def _move_vk_files(self, series_id: int, old_base: str,
-                             new_base: str) -> None:
-        # The files of a video series are the asset of its plan (modules/planner).
+    async def _move_plan_files(self, series_id: int, old_base: str,
+                               new_base: str) -> None:
+        # The files of a series are the asset of its plan (modules/planner).
         paths = list((await self.request("planner.files.get", {"series_id": series_id}))["names"])
         for rel in paths:
             await storage.call(self._move_one, old_base, new_base, rel, timeout=storage.MOVE_TIMEOUT_S,
@@ -208,6 +205,7 @@ class LibraryModule(BaseModule):
         os.rename(old_abs, new_abs)
 
     async def _move_torrents(self, series_id: int, new_base: str) -> None:
+        """The torrents of the old pipeline (stage 15, step 11) lie in the folder of the series: the client moves them."""
         for torrent in await self.request("torrents.db.active",
                                           {"series_id": series_id}):
             if torrent.get("qb_hash"):

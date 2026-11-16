@@ -677,7 +677,7 @@ async def test_progress_of_a_torrent_that_left_qbit_goes_and_a_deleted_series_ta
     qbt.torrents.pop("hb")
     assert await _wait(lambda: _progress_count(db_path) == 1 and _progress_value(db_path, "ha") == 20)
 
-    probe.publish_event("series.deleted", {"series_id": 1, "delete_from_qb": False})
+    probe.publish_event("series.deleted", {"series_id": 1})
     assert await _wait(lambda: _progress_count(db_path) == 0)
 
 

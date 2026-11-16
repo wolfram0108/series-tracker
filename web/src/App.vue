@@ -94,20 +94,14 @@ function onCloseStatus() {
 }
 const remove = useAction(async (id: number) => {
   const s = seriesStore.byId(id)
-  // The qBittorrent checkbox is for torrent series only: video sources have no torrent.
-  // delete_from_qb убирает запись из qB; файлы на диске остаются.
-  const isTorrent = (s?.kind ?? "torrent") === "torrent"
   const r = await confirm.open({
     title: t("app.delete.title"),
     message: t("app.delete.message", { name: s?.name ?? id }),
-    ...(isTorrent
-      ? { checkbox: { text: t("app.delete.fromQb"), checked: true } }
-      : {}),
   })
   if (!r.confirmed) return
   const ok = await request(
     api.DELETE("/api/series/{series_id}", {
-      params: { path: { series_id: id }, query: { delete_from_qb: r.checkboxChecked } },
+      params: { path: { series_id: id } },
     }),
   )
   if (ok !== null) seriesStore.remove(id) // оптимистично; SSE series_deleted подтвердит

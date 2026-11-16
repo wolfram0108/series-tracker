@@ -200,8 +200,8 @@ async def test_sse_contract_mappings_and_transforms(system):
                           "statuses": ["waiting"]}),
         Envelope(topic="torrents.queue.changed", kind="event",
                  payload={"count": 1, "tasks": [{"hash": "abc"}]}),
-        Envelope(topic="renaming.finished", kind="event",
-                 payload={"series_id": 5}),
+        Envelope(topic="library.relocation.finished", kind="event",
+                 payload={"series_id": 5, "success": True}),
     ], expected=4)
 
     # series_updated — дельта {id, statuses, is_busy}, не полный объект
@@ -212,7 +212,7 @@ async def test_sse_contract_mappings_and_transforms(system):
     # очереди — голый массив задач (контракт фронта this.agentQueue = data)
     assert events[2] == ("agent_queue_update", [{"hash": "abc"}])
     # события без трансформации проходят как есть
-    assert events[3] == ("renaming_complete", {"series_id": 5})
+    assert events[3] == ("relocation_finished", {"series_id": 5, "success": True})
 
 
 @pytest.mark.asyncio

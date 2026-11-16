@@ -1,6 +1,5 @@
 """The contracts between modules, checked from both sides: the producer's model, the consumer's reading,
 the interface's types, and the one place each policy lives in."""
-import importlib
 import inspect
 import re
 from pathlib import Path
@@ -9,7 +8,7 @@ import pytest
 
 from core import Bus
 from core.contracts import (AlignmentJob, Exclusion, JobStatus, Level, PlannerView, ReferenceMark, RowState,
-                            SeriesKind, SourceStatus, SourceType, SubmitOutcome, SubmitReply, TableState)
+                            SourceStatus, SourceType, SubmitOutcome, SubmitReply, TableState)
 from modules.conform.module import finished_view
 from modules.gateway import GatewayModule
 from modules.gateway.module import EVENT_PACKETS
@@ -26,7 +25,7 @@ def ts_block(name: str) -> str:
     return SCHEMA_TS[start:SCHEMA_TS.index("\n        };", start)]
 
 
-@pytest.mark.parametrize("enum", [ReferenceMark, SourceType, SeriesKind, SourceStatus, RowState, TableState, Exclusion,
+@pytest.mark.parametrize("enum", [ReferenceMark, SourceType, SourceStatus, RowState, TableState, Exclusion,
                                   Level])
 def test_every_value_of_a_public_enum_is_in_the_generated_types(enum):
     block = ts_block(enum.__name__)

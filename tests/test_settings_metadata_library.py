@@ -199,22 +199,17 @@ class _Neighbour(BaseModule):
     name = "neigh"
 
     def __init__(self, bus):
-        self.series = {"id": 1, "kind": "torrent", "season": ""}
+        self.series = {"id": 1, "season": ""}
         self.seasons = {"seasons": []}
         self.asked: list[str] = []
         super().__init__(bus)
 
     def register(self):
         self.handle("catalog.series.get", self._get)
-        self.handle("torrents.seasons", self._torrent_seasons)
         self.handle("planner.seasons", self._scan_seasons)
 
     async def _get(self, env):
         return self.series
-
-    async def _torrent_seasons(self, env):
-        self.asked.append("torrents.seasons")
-        return self.seasons
 
     async def _scan_seasons(self, env):
         self.asked.append("planner.seasons")
@@ -340,13 +335,13 @@ async def test_seasons_recompute_skips_single_and_no_tmdb(agg_system):
     # одиночный режим (season задан) → skip, total не трогаем
     await probe.request("metadata.map.set", {"series_id": 1, "tmdb_data": {
         "tmdb_id": 42, "tmdb_season_number": 1, "total_episodes": 26}}, timeout=5)
-    neigh.series = {"id": 1, "kind": "torrent", "season": "s01"}
+    neigh.series = {"id": 1, "season": "s01"}
     assert (await probe.request("metadata.seasons.recompute",
                                 {"series_id": 1}, timeout=5))["skipped"] == "single_season"
 
 
 @pytest.mark.asyncio
-async def test_the_seasons_come_from_the_owner_of_the_kind_of_the_series(agg_system, monkeypatch):
+async def test_the_seasons_come_from_the_plan_of_the_series(agg_system, monkeypatch):
     bus, neigh, mods = agg_system
     probe = mods[-1]
     await probe.request("settings.value.set", {"key": "tmdb_token", "value": "x"}, timeout=5)
@@ -354,12 +349,11 @@ async def test_the_seasons_come_from_the_owner_of_the_kind_of_the_series(agg_sys
     monkeypatch.setattr(httpx.AsyncClient, "get", _tmdb_details_stub([]))
     sub = bus.subscribe("series.updated")
 
-    # the recompute that map.set starts by itself is the one of a video series
-    neigh.series = {"id": 1, "kind": "video", "season": ""}
+    # the recompute that map.set starts by itself, then one asked for: a series of any sources asks its plan
+    neigh.series = {"id": 1, "season": ""}
     await probe.request("metadata.map.set", {"series_id": 1, "tmdb_data": {
         "tmdb_id": 42, "tmdb_season_number": 1}}, timeout=5)
     await asyncio.wait_for(sub.queue.get(), 2)
-    neigh.series = {"id": 1, "kind": "torrent", "season": ""}
     await probe.request("metadata.seasons.recompute", {"series_id": 1}, timeout=10)
 
-    assert neigh.asked == ["planner.seasons", "torrents.seasons"]
+    assert neigh.asked == ["planner.seasons", "planner.seasons"]

@@ -16,19 +16,15 @@ from pydantic import BaseModel, ValidationError
 from core import BusRequestError
 from core.reasons import reason, relayed
 from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitch, PlanDelete, PlannerView,
-                            PlanRowRef, QueuesGet, QueuesReply, Reference, SeriesKind, SettingsReset, SettingsSet, SettingsSetMany,
+                            PlanRowRef, QueuesGet, QueuesReply, Reference, SettingsReset, SettingsSet, SettingsSetMany,
                             VoiceOrderSet, VoiceTitleSet)
 
 from .routing import admitted, refusal
-from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse, OutputSettingsBatch, OutputSettingsReset,
+from .schemas import (ErrorOnly, ErrorResponse, OkResponse, OutputSettingsBatch, OutputSettingsReset,
                       OutputSettingsSet, OutputSwitchBody, VoiceOrderBody, VoiceTitleBody)
 
 _ERR = {code: {"model": ErrorResponse} for code in (400, 404, 500, 503)}
 _ERR1 = {code: {"model": ErrorOnly} for code in (404, 500)}
-
-
-def _iso(value):
-    return value.replace(" ", "T", 1) if isinstance(value, str) else value
 
 
 def _contract(model, **fields):
@@ -49,34 +45,20 @@ class PlanDeleteBody(BaseModel):
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
     r = APIRouter()
 
-    @r.get("/api/series/{series_id}/composition", response_model=CompositionReply | list[DynamicObject],
-           responses=_ERR1)
-    async def composition(series_id: int, refresh: bool = False, include_excluded: bool = False,
-                          sources_only: bool = False):
-        """The composition window: the layout of a video series (`composition`, rows the constructor excluded
-        only with `include_excluded`; `sources_only` leaves out the rows, levels and settings), or the composition of
-        a torrent series (`torrents`; `refresh` fetches
-        the release first)."""
+    @r.get("/api/series/{series_id}/composition", response_model=CompositionReply, responses=_ERR1)
+    async def composition(series_id: int, include_excluded: bool = False, sources_only: bool = False):
+        """The composition window: the layout of the series (`composition`, rows the constructor excluded only with
+        `include_excluded`; `sources_only` leaves out the rows, levels and settings)."""
         try:
-            series = await gw.request("catalog.series.get", {"series_id": series_id})
+            await gw.request("catalog.series.get", {"series_id": series_id})
         except BusRequestError:
             return JSONResponse({"error": reason("series_not_found")}, status_code=404)
         try:
-            if series["kind"] == SeriesKind.VIDEO:
-                return await gw.request("composition.get", CompositionGetRequest(
-                    series_id=series_id, include_excluded=include_excluded,
-                    sources_only=sources_only).model_dump(mode="json"))
-            if refresh:
-                # Fetch the release and split it into files without starting the download.
-                await gw.request("scan.series.prepare", {"series_id": series_id})
-            plan = await gw.request("torrents.composition", {"series_id": series_id, "refresh": refresh})
+            return await gw.request("composition.get", CompositionGetRequest(
+                series_id=series_id, include_excluded=include_excluded,
+                sources_only=sources_only).model_dump(mode="json"))
         except BusRequestError as exc:
             return JSONResponse({"error": relayed(str(exc))}, status_code=500)
-        for item in plan:
-            sd = item.get("source_data")
-            if sd:
-                sd["publication_date"] = _iso(sd.get("publication_date"))
-        return plan
 
     @r.get("/api/series/{series_id}/output", response_model=list[Reference], responses=_ERR1)
     async def output(series_id: int):

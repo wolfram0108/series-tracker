@@ -5,7 +5,7 @@
 остаются в схеме до зачистки после переключения.
 
 Address, kind and profile of a series live in its sources (series_sources, Д-38); a series is read
-together with them and with its `kind`.
+together with them.
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from core.contracts import SeriesSource
 from core.db import Database
 from core.reasons import reason
 
-from .series_sources import kind_of
 
 # Все живые колонки series, КРОМЕ state (см. докстринг).
 _COLUMNS = ("id, name, name_en, site, save_path, season, quality, "
@@ -82,7 +81,7 @@ class CatalogRepository:
 
     @staticmethod
     def _with_sources(row: dict, sources: list[dict]) -> dict:
-        return {**row, "kind": kind_of(sources), "sources": sources}
+        return {**row, "sources": sources}
 
     async def all_series(self) -> list[dict]:
         rows = await self._db.fetch_all(

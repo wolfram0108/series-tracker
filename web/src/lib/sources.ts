@@ -26,7 +26,7 @@ export type LayoutRow = Schemas["CompositionRow"]
 /** The player whose list holds several seasons of a catalog; the user picks the one that belongs to the source. */
 export const CATALOG_PLAYER = "vibix"
 /** The site of a VK channel is the only one whose source is of the type `vk_video`; any other site is `web_video`. */
-const CHANNEL_SITE = "vk_channel"
+const SOURCE_TYPES: readonly SourceType[] = ["torrent", "vk_video", "web_video"]
 
 export type SourceState = "reading" | "failed" | "absent" | "waiting" | "noProfile" | "ready"
 
@@ -334,10 +334,9 @@ export function seasonPositions(groups: number): number[] {
 
 // --- addresses -------------------------------------------------------------------------------------------------------
 
-/** The type of the source an address makes, from the site that reads it; null: no site does, so it is no video source. */
+/** The type of the source an address makes, as the site that reads it states it; null: no site reads it. */
 export function sourceTypeOf(reply: ResolveReply): SourceType | null {
-  if (!reply.site) return null
-  return reply.site === CHANNEL_SITE ? "vk_video" : "web_video"
+  return reply.site && SOURCE_TYPES.includes(reply.source_type as SourceType) ? (reply.source_type as SourceType) : null
 }
 
 /** Whether the reading of a page ended after the answer in hand was taken: that answer said `reading`, and the news of

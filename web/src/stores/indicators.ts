@@ -11,7 +11,7 @@ export const useIndicatorsStore = defineStore("indicators", () => {
 
   const monitoring = computed<boolean>(() => {
     const s = scanner.status
-    return s ? s.is_scanning || s.is_awaiting_tasks : false
+    return s ? s.is_scanning : false
   })
   // A card of a download that ended stays for a while after its sync: only one that waits or goes is work.
   const downloader = computed<boolean>(() => queues.downloads.some((card) => card.status !== "done" && card.status !== "failed"))

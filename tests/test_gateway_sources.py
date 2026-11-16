@@ -252,76 +252,18 @@ async def test_the_test_of_rules_needs_a_profile_and_a_page(tmp_path):
     assert owners.asked("composition.preview") == []
 
 
-# --- the torrent page of the add form -------------------------------------------------------------
-
-TORRENT_PAGE = {"title": {"ru": "Тайтл", "en": "Title"}, "tracker": {"canonical_name": "kinozal"},
-                "releases": [{"link": "http://kinozal.tv/dl/1", "magnet": None, "date_marker": "2026-01-01 00:00",
-                              "torrent_id": "t1"},
-                             {"link": None, "magnet": "magnet:?xt=1", "date_marker": "2026-01-02 00:00"}]}
-
-
-async def test_a_torrent_page_is_parsed_after_sources_said_no_site_reads_it(tmp_path):
-    answers = {"sources.site.resolve": {"site": None, "canonical_url": None}, "sources.parse": TORRENT_PAGE}
-    async with serving(tmp_path, answers) as (client, owners, _, _):
-        response = await client.post("/api/parse_url", json={"url": "http://kinozal.tv/details.php?id=1"})
-    body = response.json()
-    assert response.status_code == 200 and body["success"] is True
-    assert body["title"] == {"ru": "Тайтл", "en": "Title"} and body["tracker_info"] == {"canonical_name": "kinozal"}
-    assert [(each["link"], each["date_time"]) for each in body["torrents"]] == [
-        ("http://kinozal.tv/dl/1", "2026-01-01 00:00"), ("magnet:?xt=1", "2026-01-02 00:00")]
-    assert owners.asked("sources.parse") == [{"url": "http://kinozal.tv/details.php?id=1"}]
-    # What a site reads is not in this answer any more: no layout, no players, no sources of a web page.
-    assert not {"sources", "layout", "has_layout", "players", "selected_source", "source_type"} & set(body)
-
-
-async def test_a_page_a_site_reads_is_not_a_torrent_page_and_is_not_parsed(tmp_path):
-    answers = {"sources.site.resolve": {"site": "somesite", "canonical_url": "https://x.test/p"},
-               "sources.parse": TORRENT_PAGE}
-    async with serving(tmp_path, answers) as (client, owners, _, _):
-        response = await client.post("/api/parse_url", json={"url": "https://x.test/p"})
-    assert response.status_code == 400 and code_of(response) == "not_a_torrent_page"
-    assert owners.asked("sources.parse") == []
-
-
-async def test_an_address_no_tracker_knows_is_refused_with_the_words_of_sources(tmp_path):
-    answers = {"sources.site.resolve": {"site": None, "canonical_url": None},
-               "sources.parse": ValueError("трекер не распознан по URL: http://nowhere.test/")}
-    async with serving(tmp_path, answers) as (client, _, _, _):
-        response = await client.post("/api/parse_url", json={"url": "http://nowhere.test/"})
-    assert response.status_code == 400
-    assert response.json() == {"error": "трекер не распознан по URL: http://nowhere.test/"}
-
-
-# --- the naming preview of the add window ---------------------------------------------------------
-
-
-async def test_the_naming_preview_is_one_command_to_torrents_and_the_gateway_publishes_no_outcome(tmp_path):
-    items = [{"torrent_id": "t1", "link": "https://t.test/1.torrent"}, {"torrent_id": 2, "magnet": "magnet:?xt=urn:btih:ab"}]
-    async with serving(tmp_path, {"torrents.preview.fetch": None}) as (client, owners, _, spy):
-        response = await client.post("/api/preview/naming/fetch", json={"items": items})
-        sent = await owners.next("torrents.preview.fetch")
-        seen = published(spy)
-    assert response.status_code == 200 and response.json() == {"accepted": ["t1", 2]}
-    assert sent == {"items": items}
-    # One command and nothing else: no request to sources, no step per release, no event of torrents.
-    assert [(env.kind, env.topic) for env in seen] == [("command", "torrents.preview.fetch")]
-
-
-async def test_a_release_with_a_field_the_preview_does_not_know_is_refused(tmp_path):
-    async with serving(tmp_path, {"torrents.preview.fetch": None}) as (client, owners, _, _):
-        response = await client.post("/api/preview/naming/fetch", json={"items": [{"torrent_id": "t", "url": "x"}]})
-    assert response.status_code == 422 and owners.asked("torrents.preview.fetch") == []
-
-
 # --- what is gone ---------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("method,path", [
     ("post", "/api/parser-profiles/scrape-titles"), ("post", "/api/web_video/coverage"),
-    ("post", "/api/web_video/layout"), ("put", "/api/series/1/vk-quality-priority")])
+    ("post", "/api/web_video/layout"), ("put", "/api/series/1/vk-quality-priority"),
+    # the old form of a torrent series (stage 15): its parse of the page, its naming preview, its history of releases
+    ("post", "/api/parse_url"), ("post", "/api/preview/naming/fetch"), ("get", "/api/series/1/torrents/history"),
+    ("get", "/api/settings/force_replace"), ("get", "/api/settings/less_strict_scan")])
 async def test_the_points_of_the_old_reading_are_gone(tmp_path, method, path):
     async with serving(tmp_path, {}) as (client, _, _, _):
-        response = await getattr(client, method)(path, json={})
+        response = await (getattr(client, method)(path) if method == "get" else getattr(client, method)(path, json={}))
     assert response.status_code in (404, 405)
 
 

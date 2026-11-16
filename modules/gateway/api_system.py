@@ -45,9 +45,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             response_model_exclude_none=True,
             responses={409: {"model": ErrorResponse}})
     async def scan_all(request: Request):
-        data = await request.json() if await request.body() else {}
-        reply = await gw.request("scan.all.start", {
-            "force_replace": data.get("debug_force_replace", False)})
+        reply = await gw.request("scan.all.start", {})
         if not reply["started"]:
             return JSONResponse(
                 {"success": False, "error": reason("scan_all_running")},

@@ -1,4 +1,4 @@
-"""Scan on a series of kind `video`: the synchronization by signals, its command, its run and the switch of an output.
+"""Scan on a series: the synchronization by signals, its command, its run and the switch of an output.
 
 Catalog and scan are real, the other neighbours are the fake `World` of tests/scan_support.py. What a test waits for is
 a token or an event that a neighbour puts out, never time; the one number (STUCK_S) only ends a test that is stuck, and
@@ -76,11 +76,12 @@ def db_path(tmp_path):
 
 
 async def build(db_path: str, urls=(URL1,), *, table_wait_s: float = STUCK_S, profile: int | None = 1,
-                series_id: int | None = None, source_ids: tuple[int, ...] = ()) -> Rig:
+                series_id: int | None = None, source_ids: tuple[int, ...] = (), types: tuple[str, ...] = ()) -> Rig:
     db = Database(db_path)
     if series_id is None:
         created = await create_series(db, name="Т", name_en="T", site="x", save_path="/media/t", sources=[
-            source(url=url, source_type="web_video", parser_profile_id=profile) for url in urls])
+            source(url=url, source_type=types[i] if types else "web_video", parser_profile_id=profile)
+            for i, url in enumerate(urls)])
         series_id, source_ids = created.series_id, created.source_ids
     bus = Bus()
     world = World(bus)
@@ -234,6 +235,32 @@ async def test_a_synchronization_that_fails_leaves_its_command_as_the_error_of_t
     rig.world.recompute_error = None
     await rig.run()
     assert tasks_of(rig) == []
+
+
+async def test_a_series_with_a_torrent_source_is_synchronized_like_any_other(db_path):
+    """A torrent is a source like a site (stage 15): its page is a table the sync waits for with the others."""
+    rig = await build(db_path, (URL1, URL2), types=("torrent", "web_video"))
+    try:
+        await rig.run()
+        await rig.world.dispatched.get()
+        assert {f"sources.table.get {URL1}", f"sources.table.get {URL2}", f"planner.sync {rig.series_id}"} <= \
+            set(rig.world.order)
+    finally:
+        await rig.runner.stop()
+
+
+async def test_a_task_of_the_torrent_scan_that_left_is_dropped_at_a_restart(rig):
+    with sqlite3.connect(rig.db_path) as conn:
+        conn.execute("INSERT INTO scan_tasks (series_id, status, task_data, results_data) VALUES (?, 'processing', '[]', ?)",
+                     (rig.series_id, json.dumps({"0": {"hash": "h", "link_type": "file"}})))
+        conn.commit()
+    again = await build(rig.db_path, series_id=rig.series_id, source_ids=rig.source_ids)
+    try:
+        again.bus.publish(Envelope(topic="system.started", kind="event"))
+        await no_task_left(again)
+        assert again.world.order == []
+    finally:
+        await again.runner.stop()
 
 
 async def test_a_restart_in_the_middle_of_a_synchronization_runs_it_again_from_its_command_when_the_system_has_started(rig):

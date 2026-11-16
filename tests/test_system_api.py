@@ -75,7 +75,7 @@ async def test_scanner_status_shape(system):
     assert resp.status_code == 200
     body = resp.json()
     assert body == {"scanner_enabled": False, "scan_interval": 60,
-                    "is_scanning": False, "is_awaiting_tasks": False,
+                    "is_scanning": False,
                     "next_scan_time": None}
 
 

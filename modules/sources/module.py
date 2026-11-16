@@ -8,7 +8,6 @@ Queries:
   sources.torrent_file.get {url, torrent_id} → {content_b64} (Р-1, с кэшем)
   sources.torrent_file.drop {torrent_id} — чистка кэша (каскад Р-19)
   sources.trackers.list          → [{...}] (владелец таблицы trackers)
-  sources.tracker.resolve {url}  → {tracker|null} (tracker_info деталей)
 
 Tables of site pages (the one way to read a site page; sites are registered in `sites`, the core is `table.py`):
   sources.table.get {url, refresh?, rows?, by_sync?} → TableGetReply {url, state: ready | reading | failed | absent,
@@ -247,7 +246,6 @@ class SourcesModule(BaseModule):
         self.handle("sources.torrent_file.get", self.on_torrent_file)
         self.handle("sources.torrent_file.drop", self.on_torrent_file_drop)
         self.handle("sources.trackers.list", self.on_trackers_list)
-        self.handle("sources.tracker.resolve", self.on_tracker_resolve)
         self.handle("sources.tracker.set_mirrors", self.on_set_mirrors)
         self.handle("sources.video.stream", self.on_video_stream)
         self.handle("sources.video.fetch", self.on_video_fetch, concurrent=True)
@@ -386,10 +384,6 @@ class SourcesModule(BaseModule):
 
     async def on_trackers_list(self, env: Envelope) -> list[dict]:
         return await self.repo.all_trackers()
-
-    async def on_tracker_resolve(self, env: Envelope) -> dict:
-        """Трекер по URL серии (контракт tracker_info деталей, Р-19)."""
-        return {"tracker": await self.repo.resolve(env.payload["url"])}
 
     async def on_set_mirrors(self, env: Envelope) -> dict:
         """Зеркала трекера (вкладка настроек, Р-22)."""

@@ -82,8 +82,6 @@ async def test_child_tables_reject_unknown_series(db_path):
     inserts = [
         "INSERT INTO scan_tasks (series_id, created_at, status, task_data, "
         "results_data) VALUES (9999, '2026-01-01', 'processing', '[]', '{}')",
-        "INSERT INTO renaming_tasks (series_id, status, task_type) "
-        "VALUES (9999, 'error', 'mass_vk_reprocess')",
         "INSERT INTO relocation_tasks (series_id, new_path, status) "
         "VALUES (9999, '/media/new', 'processing')",
         "INSERT INTO series_sources (series_id, url, source_type) "
@@ -106,7 +104,6 @@ class SlowSource(BaseModule):
 
     def register(self):
         self.handle("sources.table.get", self.on_table, concurrent=True)
-        self.handle("renaming.reprocess", self.on_reprocess)
         self.handle("settings.value.get", self.on_get)
 
     async def on_get(self, env):
@@ -119,9 +116,6 @@ class SlowSource(BaseModule):
         url = env.payload["url"]
         table = ReleaseTable(url=url, site="vk_channel", complete=True)
         return TableGetReply(url=url, state=TableState.READY, table=table).model_dump(mode="json")
-
-    async def on_reprocess(self, env):
-        return {"ok": True}
 
 
 @pytest.mark.asyncio

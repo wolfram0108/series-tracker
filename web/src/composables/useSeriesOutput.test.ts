@@ -60,9 +60,9 @@ const givePlan = (view: PlannerView, references: Reference[] = []): void => {
 
 let mounted: VueWrapper[] = []
 
-function setup(kind: "torrent" | "video" = "video") {
+function setup() {
   let output!: ReturnType<typeof useSeriesOutput>
-  mounted.push(mount(defineComponent({ setup() { output = useSeriesOutput(1, kind); return () => h("div") } })))
+  mounted.push(mount(defineComponent({ setup() { output = useSeriesOutput(1); return () => h("div") } })))
   return output
 }
 
@@ -118,19 +118,6 @@ describe("useSeriesOutput", () => {
     expect(output.seasons.value.map((group) => group.season)).toEqual([1])
     expect(output.failure.value).toBeNull()
     expect(output.loading.value).toBe(false)
-  })
-
-  it("reads nothing for a torrent series and does not follow its layout or the connection", async () => {
-    const output = setup("torrent")
-    await flushPromises()
-    useSSE().connected.value = true
-    useCompositionStore().applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false })
-    await flushPromises()
-    expect(calls.fetchComposition).not.toHaveBeenCalled()
-    expect(calls.fetchPlan).not.toHaveBeenCalled()
-    expect(output.composition.value).toBeNull()
-    expect(output.references.value).toEqual([])
-    expect(output.views.value).toEqual([])
   })
 
   it("takes the references of the window from a packet of the plan, without a new read", async () => {

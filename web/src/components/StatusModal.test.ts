@@ -17,29 +17,24 @@ let mounted: VueWrapper | null = null
 beforeEach(() => setActivePinia(createPinia()))
 afterEach(() => mounted?.unmount())
 
-const STUBS = ["StatusProperties", "StatusComposition", "StatusOutput", "StatusHistory", "SettingsParser", "AgentsPanel"]
+const STUBS = ["StatusProperties", "StatusOutput", "SettingsParser", "AgentsPanel"]
 
 describe("the status window", () => {
-  it.each(["video", "torrent"])("of a %s series has the tab of the VK filters, the configurator of the profiles", async (kind) => {
-    client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", kind } }))
-    mounted = mount(StatusModal, { props: { seriesId: 40 }, global: { stubs: Object.fromEntries(STUBS.map((name) => [name, true])) } })
-    await flushPromises()
-    const tab = mounted.findAll(".st-tab").find((each) => each.attributes("title") === t("rules.tab"))
-    expect(tab).toBeDefined()
-    expect(mounted.find("settings-parser-stub").exists()).toBe(false) // read only when the tab is opened
-    await tab!.trigger("click")
-    expect(mounted.find("settings-parser-stub").exists()).toBe(true)
-  })
-
-  it.each([["video", false], ["torrent", true]])("of a %s series has the history of releases: %s", async (kind, has) => {
-    client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", kind } }))
-    mounted = mount(StatusModal, { props: { seriesId: 40 }, global: { stubs: Object.fromEntries(STUBS.map((name) => [name, true])) } })
-    await flushPromises()
-    expect(mounted.findAll(".st-tab").some((each) => each.attributes("title") === t("status.tab.history"))).toBe(has)
-  })
+  it.each([["video", "https://ruchime.org/x"], ["torrent", "https://kinozal.tv/details.php?id=1"]])(
+    "of a series of a %s source has the same tabs: properties, output, rules, agents", async (type, url) => {
+      client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", sources: [{ id: 1, url, source_type: type }] } }))
+      mounted = mount(StatusModal, { props: { seriesId: 40 }, global: { stubs: Object.fromEntries(STUBS.map((name) => [name, true])) } })
+      await flushPromises()
+      expect(mounted.findAll(".st-tab").map((each) => each.attributes("title")))
+        .toEqual([t("status.tab.properties"), t("output.tab"), t("rules.tab"), t("status.tab.agents")])
+      const tab = mounted.findAll(".st-tab").find((each) => each.attributes("title") === t("rules.tab"))
+      expect(mounted.find("settings-parser-stub").exists()).toBe(false) // read only when the tab is opened
+      await tab!.trigger("click")
+      expect(mounted.find("settings-parser-stub").exists()).toBe(true)
+    })
 
   it("builds a tab when it is first shown and keeps it: the window opened on its properties builds no other tab", async () => {
-    client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", kind: "video" } }))
+    client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", sources: [] } }))
     mounted = mount(StatusModal, { props: { seriesId: 40 }, global: { stubs: Object.fromEntries(STUBS.map((name) => [name, true])) } })
     await flushPromises()
     const built = () => ["status-properties", "status-output", "agents-panel"]
@@ -57,7 +52,7 @@ describe("the status window", () => {
   })
 
   it("keeps the rules as they were left when another tab is open: only the close of the window ends them", async () => {
-    client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", kind: "video" } }))
+    client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", sources: [] } }))
     mounted = mount(StatusModal, { props: { seriesId: 40 }, global: { stubs: Object.fromEntries(STUBS.map((name) => [name, true])) } })
     await flushPromises()
     const open = async (title: string) => {
@@ -74,7 +69,7 @@ describe("the status window", () => {
   })
 
   it("has the tab of the agents of this series, built when it is first shown and kept", async () => {
-    client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", kind: "video" } }))
+    client.GET.mockImplementation(async () => ({ data: { id: 40, name: "Владыка", sources: [] } }))
     mounted = mount(StatusModal, { props: { seriesId: 40 }, global: { stubs: Object.fromEntries(STUBS.map((name) => [name, true])) } })
     await flushPromises()
     expect(mounted.find("agents-panel-stub").exists()).toBe(false)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from "vue"
+import { ref, computed, onMounted, watch } from "vue"
 import Button from "primevue/button"
 import { useToast } from "primevue/usetoast"
 import SheetField from "../SheetField.vue"
@@ -57,30 +57,6 @@ const scanAll = useAction(async () => {
   await request(api.POST("/api/scanner/scan_all", {}), { errorMessage: t("debug.syncAll.failed") })
 })
 
-// --- флаги конвейера (GET/POST → {enabled}) ---------------------------
-const FLAGS = [
-  { key: "forceReplace", path: "/api/settings/force_replace", label: "debug.flag.forceReplace", hint: "debug.flag.forceReplace.hint" },
-  { key: "lessStrict", path: "/api/settings/less_strict_scan", label: "debug.flag.lessStrict", hint: "debug.flag.lessStrict.hint" },
-] as const satisfies readonly { key: string; path: string; label: MessageKey; hint: MessageKey }[]
-const flags = reactive({ forceReplace: false, lessStrict: false })
-async function setFlag(flag: (typeof FLAGS)[number], value: boolean) {
-  flags[flag.key] = value
-  await saveFlag(flag.path, value, t(flag.label))
-}
-
-type FlagPath = (typeof FLAGS)[number]["path"]
-async function loadFlag(path: FlagPath): Promise<boolean | null> {
-  const d = (await request(api.GET(path))) as { enabled?: boolean } | null
-  return d === null ? null : !!d.enabled
-}
-async function saveFlag(path: FlagPath, value: boolean, label: string) {
-  const ok = await request(api.POST(path, { body: { enabled: value } }), {
-    errorMessage: t("debug.flag.saveFailed"),
-  })
-  if (ok !== null) toast.add({ severity: "info", summary: label, detail: value ? t("common.enabled") : t("common.disabled"), life: 2000 })
-}
-
-// --- числовые параметры yt-dlp (GET/POST → {value}) -------------------
 // --- the limits of the downloads by way (a state shared with the window of the extensions: composables/useDownloadLimits.ts) ----
 const { limits: shared, load: loadLimits, save: saveShared } = useDownloadLimits()
 const limits = ref({ threads_total: "32", threads_per_file: "16", single_at_once: "4" })
@@ -192,13 +168,11 @@ async function clearTable() {
 // Everything the tab shows is read together; the form is put on show when it all has come (components/LoadGate.vue).
 async function readAll(): Promise<boolean> {
   syncFromStore()
-  const [flagValues, term] = await Promise.all([
-    Promise.all(FLAGS.map((flag) => loadFlag(flag.path))),
+  const [term] = await Promise.all([
     loadNum("/api/settings/sources_term", 1),
     loadPaths(), loadTables(), loadLimits(),
   ])
-  if (flagValues.some((each) => each === null) || term === null) return false
-  FLAGS.forEach((flag, at) => { flags[flag.key] = flagValues[at] === true })
+  if (term === null) return false
   sourcesTerm.value = term
   return true
 }
@@ -224,7 +198,7 @@ onMounted(gate.run)
             :label="t('debug.syncAll.button')"
             icon="pi pi-refresh"
             :loading="scanAll.pending()"
-            :disabled="scanner.status?.is_scanning || scanner.status?.is_awaiting_tasks"
+            :disabled="scanner.status?.is_scanning"
             @click="scanAll.run()"
           />
         </div>
@@ -233,9 +207,6 @@ onMounted(gate.run)
       <!-- The pipeline and debugging -->
       <SheetRow :caption="t('debug.pipeline.title')">
         <div class="sheet-pair">
-          <SheetField v-for="flag in FLAGS" :key="flag.key" :label="t(flag.label)" :title="t(flag.hint)" control>
-            <StSwitch :model-value="flags[flag.key]" @update:model-value="setFlag(flag, $event)" />
-          </SheetField>
           <SheetField v-for="each in LIMITS" :key="each.field" :label="t(each.label)" :title="each.hint ? t(each.hint) : undefined" control>
             <StNumber v-model="limits[each.field]" @change="saveLimits(each.field)" />
           </SheetField>

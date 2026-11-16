@@ -49,7 +49,6 @@ OWNERS: dict[str, tuple[str, str]] = {
                     ("torrents", "migration 0069 and the docstring of modules/torrents/module.py (stage 15)")),
     **dict.fromkeys(("unpack_streams", "unpack_folders", "unpack_assignments", "unpack_sources"),
                     ("unpack", "migration 0069 and the docstring of modules/unpack/module.py (stage 15)")),
-    "renaming_tasks": ("renaming", "docstring of modules/renaming/repository.py"),
     "relocation_tasks": ("library", "docstring of modules/library/repository.py"),
     "scan_tasks": ("scan", "docstring of modules/scan/repository.py"),
     "parser_profiles": ("rules", "docstring of modules/rules/repository.py"),

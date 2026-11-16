@@ -18,7 +18,6 @@ import json
 import httpx
 
 from core import BaseModule, BusRequestError
-from core.contracts import SeriesKind
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
@@ -174,10 +173,8 @@ class MetadataModule(BaseModule):
         return {"total": total, "seasons": sorted(real)}
 
     async def _real_seasons(self, series: dict) -> set[int]:
-        """Реальные сезоны из нейминга (≠0). Источник — владелец данных:
-        торрент → torrents.seasons, видео → planner.seasons (Р-7, чужое — query)."""
-        topic = ("planner.seasons" if series.get("kind") == SeriesKind.VIDEO
-                 else "torrents.seasons")
+        """Реальные сезоны из нейминга (≠0): сезоны файлов плана сериала (planner.seasons; Р-7, чужое — query)."""
+        topic = "planner.seasons"
         try:
             reply = await self.request(topic, {"series_id": series["id"]})
         except BusRequestError as exc:
