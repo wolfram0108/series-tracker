@@ -345,6 +345,7 @@ export const ru = {
   "reason.torrent_gone_from_client": "раздачи нет в qBittorrent",
   "reason.torrent_updating": "раздача обновляется",
   "reason.torrent_not_ready": "раздача «{release}» не готова",
+  "reason.conform_pair_unsupported": "дорожка лежит отдельным файлом рядом с видео раздачи: сервис выравнивания такую пару пока не принимает",
   "reason.torrent_file_missing": "файла раздачи нет на месте: {path}",
   "reason.torrent_track_not_streamed": "дорожка раздачи берётся из её файла, а не из потока",
   "reason.read_cancelled": "чтение страницы остановлено пользователем",

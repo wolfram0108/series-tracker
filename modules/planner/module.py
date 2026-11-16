@@ -464,6 +464,14 @@ class BusSync(SeriesSync):
         return job_key(self.series["id"], hashlib.md5("|".join(map(str, (self.series["id"], self.run_mark, *what))).encode()).hexdigest()[:12])
 
     async def _align(self, ops, results):
+        # A sound lying in its own file beside the video of a torrent release cannot be given to the service now: it takes
+        # a voice-over as a file of a picture and a number of its sound (stage 15, И-5; the task Т-13 of track-muxer). Such
+        # a pair is passed over for this sync with the next source taken; no copy of the video is made to carry it.
+        apart = [op for op in ops if op.subject[1].kind == "download" and results[f"dub:{op.subject[1].dub}"].sound]
+        if apart:
+            rest = [op for op in ops if op not in apart]
+            outcomes = await self._align(rest, results) if rest else {}
+            return {**outcomes, **{op.id: Crashed(reason("conform_pair_unsupported")) for op in apart}}
         goal = ops[0].subject[0]
         timeline = video_of(goal, results).timeline
         label = f"{self.series['name']} {label_of(goal.slot)}"
