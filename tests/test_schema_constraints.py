@@ -74,3 +74,70 @@ def test_two_parts_of_one_voice_over_are_two_rows_and_a_part_is_one_row(conn):
     conn.execute(add, (2,))
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(add, (2,))
+
+
+def _release(conn, url="https://kinozal.tv/details.php?id=7", release="t1", infohash=None) -> int:
+    return conn.execute("INSERT INTO torrent_releases (url, release, state, infohash, updated_at) "
+                        "VALUES (?, ?, 'listed', ?, 'now')", (url, release, infohash)).lastrowid
+
+
+def test_a_release_is_one_per_page_and_id_and_a_version_is_in_one_release_only(conn):
+    first = _release(conn, infohash="h1")
+    with pytest.raises(sqlite3.IntegrityError):
+        _release(conn)
+    with pytest.raises(sqlite3.IntegrityError):
+        _release(conn, release="t2", infohash="h1")
+    _release(conn, release="t3")
+    _release(conn, release="t4")  # releases not added to the client yet have no version
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE torrent_releases SET state = 'paused' WHERE id = ?", (first,))
+
+
+def test_the_files_and_versions_of_a_release_go_with_it(conn):
+    rid = _release(conn, infohash="h1")
+    conn.execute("INSERT INTO torrent_release_files (release_id, path, size) VALUES (?, 'Show/E01.mkv', 10)", (rid,))
+    conn.execute("INSERT INTO torrent_release_versions (release_id, infohash, added_at) VALUES (?, 'h1', 'now')", (rid,))
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO torrent_release_files (release_id, path, size) VALUES (?, 'Show/E01.mkv', 10)", (rid,))
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO torrent_release_files (release_id, path, size, progress) VALUES (?, 'b', 1, 1.5)", (rid,))
+    conn.execute("DELETE FROM torrent_releases WHERE id = ?", (rid,))
+    assert conn.execute("SELECT COUNT(*) FROM torrent_release_files").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM torrent_release_versions").fetchone()[0] == 0
+
+
+def test_a_manual_place_is_an_episode_of_a_season_for_a_file_and_a_folder_for_a_track(conn):
+    insert = ("INSERT INTO unpack_assignments (url, tab, item, season, episode, episode_last, folder, excluded) "
+              "VALUES ('u', ?, ?, ?, ?, ?, ?, ?)")
+    conn.execute(insert, ("files", "Show/E01.mkv", 1, 1, None, None, 0))
+    conn.execute(insert, ("files", "Show/E01-E02.mkv", 1, 1, 2, None, 0))
+    conn.execute(insert, ("files", "Show/extra.mkv", None, None, None, None, 1))
+    conn.execute(insert, ("voices", "Show/Sound/E01.mka", None, None, None, "Студия", 0))
+    conn.execute(insert, ("streams", "Show/E01.mkv#2", None, None, None, "Студия", 0))
+    for bad in (("files", "a", None, 1, None, None, 0), ("files", "b", 1, None, None, None, 0),
+                ("files", "c", 1, 1, None, "Студия", 0), ("files", "d", 1, 3, 2, None, 0),
+                ("voices", "e", None, None, None, None, 0), ("subtitles", "f", 1, 1, None, "Субтитры", 0),
+                ("other", "g", None, None, None, None, 1)):
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(insert, bad)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(insert, ("files", "Show/E01.mkv", 1, 2, None, None, 0))
+
+
+def test_a_folder_of_the_editor_is_one_by_its_name_and_of_a_known_type(conn):
+    conn.execute("INSERT INTO unpack_folders (url, kind, name, subtitle_type) VALUES ('u', 'subtitles', 'Надписи', 'signs')")
+    conn.execute("INSERT INTO unpack_folders (url, kind, name) VALUES ('u', 'voice', 'Надписи')")
+    for bad in ("('u', 'subtitles', 'Надписи', '')", "('u', 'voice', '', '')", "('u', 'subtitles', 'x', 'other')",
+                "('u', 'video', 'x', '')"):
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(f"INSERT INTO unpack_folders (url, kind, name, subtitle_type) VALUES {bad}")
+
+
+def test_a_profile_is_of_a_series_unless_said_to_be_of_the_torrent_editor(conn):
+    conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'p')")
+    conn.execute("INSERT INTO parser_profiles (id, name, kind) VALUES (2, 'q', 'torrent')")
+    assert conn.execute("SELECT kind FROM parser_profiles ORDER BY id").fetchall() == [("series",), ("torrent",)]
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO parser_profiles (id, name, kind) VALUES (3, 'r', 'other')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO unpack_sources (url, voices_profile_id) VALUES ('u', 99)")
