@@ -272,9 +272,10 @@ def test_the_progress_events_of_the_old_reading_are_not_in_the_map():
 
 def test_every_topic_of_the_map_is_named_by_a_module_that_publishes_it():
     """A topic renamed or removed in its owner must not stay in the map unnoticed."""
-    root = Path(__file__).resolve().parent.parent / "modules"
+    root = Path(__file__).resolve().parent.parent
     published = set()
-    for source in root.rglob("*.py"):
+    # The name of a topic of a contract lives in core/contracts as a constant the publisher takes.
+    for source in [*(root / "modules").rglob("*.py"), *(root / "core").rglob("*.py")]:
         if source.parent.name != "gateway":
             published |= set(re.findall(r'"([a-z_]+(?:\.[a-z_]+)+)"', source.read_text(encoding="utf-8")))
     assert [topic for topic in gateway_module.SSE_MAP if topic not in published] == []
