@@ -28,6 +28,7 @@ from modules.sources import SourcesModule
 from modules.sources.provider import ProviderClient
 from modules.sources.table import utc_now
 from modules.torrents import TorrentsModule
+from modules.unpack import UnpackModule
 from modules.trackerauth import TrackerauthModule
 from modules.voices import VoicesModule
 
@@ -96,5 +97,8 @@ def assemble(bus: Bus, db: Database, options: Options) -> tuple[GatewayModule, l
         # auth over the bus (Р-22) and reconnects on trackerauth.credentials.changed.
         TorrentsModule(bus, db, qbt_url=options.qbit_url, qbt_username=options.qbit_username,
                        qbt_password=options.qbit_password),
+        # The reading of the releases of the torrent sources (stage 15): it makes the preset of the editor at its start
+        # (rules, settings) and answers the table of a tracker's page.
+        UnpackModule(bus, db),
     ]
     return gateway, modules

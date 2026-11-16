@@ -176,3 +176,41 @@ def _number(word: str | None) -> float | None:
         return float(word) if word not in (None, "", "N/A") else None
     except ValueError:
         return None
+
+
+LAYOUT_ENTRIES = ("stream=index,codec_type,codec_name,channels,height:stream_tags=language,title,filename,mimetype"
+                  ":stream_disposition=default,forced,attached_pic")
+
+
+async def layout_of(path: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> tuple[dict | None, str]:
+    """What a file holds, for the editor of a torrent source: its streams (index, kind, codec, channels, height, language,
+    title, default, forced; an attachment with its file name) and how many chapters it has; None and what ffprobe said
+    when it could not read the file."""
+    executable = program("ffprobe")
+    if not executable:
+        return None, "ffprobe is not installed"
+    try:
+        async with _probes():
+            code, out, err = await run_capture([executable, "-v", "error", "-show_entries", LAYOUT_ENTRIES,
+                                                "-show_chapters", "-of", "json", path], timeout=timeout)
+    except TimeoutError:
+        return None, f"ffprobe gave no answer in {timeout:.0f} s"
+    except OSError as exc:
+        return None, f"ffprobe did not run: {exc}"
+    said = (err.decode(errors="replace").strip().splitlines() or [""])[-1]
+    if code not in (0, LOST) or not out.strip():
+        return None, said or f"ffprobe ended with {code}"
+    try:
+        answer = json.loads(out.decode())
+    except ValueError:
+        return None, said or "ffprobe gave no readable answer"
+    streams = []
+    for each in answer.get("streams") or []:
+        tags, disposition = each.get("tags") or {}, each.get("disposition") or {}
+        streams.append({"index": each.get("index"), "kind": each.get("codec_type") or "", "codec": each.get("codec_name") or "",
+                        "channels": each.get("channels"), "height": each.get("height"),
+                        "language": tags.get("language") or "", "title": tags.get("title") or "",
+                        "filename": tags.get("filename") or "", "mimetype": tags.get("mimetype") or "",
+                        "default": bool(disposition.get("default")), "forced": bool(disposition.get("forced")),
+                        "picture": bool(disposition.get("attached_pic"))})
+    return {"streams": streams, "chapters": len(answer.get("chapters") or [])}, said

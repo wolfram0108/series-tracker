@@ -1297,6 +1297,11 @@ class TorrentsModule(BaseModule):
                 self.releases.runs[run["series_id"]] = await self._pages_of(run["series_id"])
         except Exception:  # noqa: BLE001 - an update that begins in a run is the worse loss: none begins until the next run news
             self.log.exception("the open syncs were not read; the updates wait for the news of a run")
+        try:
+            if await self.releases.moving():
+                self._release_wake.set()  # releases moved when the service stopped: the client is asked at once
+        except Exception:  # noqa: BLE001 - the next word of a release wakes the following
+            self.log.exception("the releases of the torrent sources were not read at the start")
         self.spawn(self._release_loop(), lasting=True)
         self.spawn(self._watch_loop(), lasting=True)
 
@@ -1358,23 +1363,26 @@ class TorrentsModule(BaseModule):
             await self.releases.relocate(env.payload.get("value") or "")
 
     async def _release_loop(self) -> None:
+        """Woken by a word (a release added, its priorities changed); while a release moves the client is asked again at
+        the pace of the monitor, since it pushes nothing; when none moves the loop waits for the next word."""
         while True:
-            if not await self.releases.moving():
-                self._release_wake.clear()
-                await self._release_wake.wait()
-                continue
+            await self._release_wake.wait()
+            self._release_wake.clear()
             try:
                 await self.releases.tick()
+                moving = await self.releases.moving()
             except QbtError as exc:
                 self.log.warning("раздачи источников: qBittorrent недоступен: %s", exc)
+                moving = True
             except Exception:  # noqa: BLE001 - one bad tick does not end the following of the releases
                 self.log.exception("ошибка такта раздач источников")
-            # The client pushes nothing: while a release moves its state is read at the pace of the monitor, sooner on a word.
-            self._release_wake.clear()
+                moving = True
+            if not moving:
+                continue
             try:
                 await asyncio.wait_for(self._release_wake.wait(), self._monitor_active)
             except TimeoutError:
-                pass
+                self._release_wake.set()
 
     async def _watch_loop(self) -> None:
         """The watched pages are read again once a term of the sources (the time is the subject: how often a site is asked)."""

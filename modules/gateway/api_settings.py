@@ -19,6 +19,7 @@ from core import logging as core_logging
 from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView,
                             PlayersListReply, ProviderSaved, ProviderSettingsDraft, ProviderView, VoiceSettingsDraft,
                             VoiceSettingsSaved, VoiceSettingsView)
+from core.contracts import SourceType
 from core.reasons import code_of, reason, relayed
 
 from .routing import refusal, route_per_method
@@ -41,6 +42,7 @@ LOGGING_MODULES = {
     "pipeline": [
         {"name": "scan"},
         {"name": "torrents"},
+        {"name": "unpack"},
         {"name": "downloads"},
         {"name": "planner"},
         {"name": "slicing"},
@@ -129,7 +131,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         shows it, and here it is refused with a code."""
         try:
             site = await gw.request("sources.site.resolve", {"url": body.url})
-            if site["site"] is not None:
+            if site["site"] is not None and site.get("source_type") != SourceType.TORRENT.value:
                 return JSONResponse({"error": reason("not_a_torrent_page")}, status_code=400)
             result = await gw.request("sources.parse", {"url": body.url})
         except BusRequestError as exc:

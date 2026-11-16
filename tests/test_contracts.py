@@ -73,7 +73,12 @@ A_PAGE_OF = {"ruchime": "https://1.ruchime.org/release/x/episode-3?off=vk#top",
              "animesss": "https://animesss.com/aniserials/video/action/1171-x.html?a=1#top",
              "pvashow": "https://anime.pvashow.com/4-boevoj-master.html?a=1",
              "yummyani": "https://ru.yummyani.me/catalog/item/lyubov-pod-gipnozom/?a=1",
-             "maccms": "https://jszyapi.com/index.php/vod/detail/id/4794.html?ac=detail"}
+             "maccms": "https://jszyapi.com/index.php/vod/detail/id/4794.html?ac=detail",
+             "kinozal": "https://kinozal.tv/details.php?id=2034617",
+             "rutracker": "https://rutracker.org/forum/viewtopic.php?t=6543210",
+             "anilibria": "https://anilibria.top/anime/releases/release/kusuriya",
+             "anilibria_tv": "https://anilibria.tv/release/kusuriya.html",
+             "astar": "https://astar.bz/anime/1234-kusuriya.html"}
 
 
 def test_every_registered_site_declares_what_the_contract_asks():

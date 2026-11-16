@@ -122,6 +122,7 @@ class Releases:
         found = next((each for each in page.releases if each.release == release), None)
         if found is None:
             raise NotAllowed(reason("release_not_on_page", release=release))
+        found = _titled(page, found)
         row = await self.store.get(page.url, release)
         if row is not None and row["state"] not in (ReleaseState.FAILED, ReleaseState.ARCHIVED):
             return await self.view(row)
@@ -168,7 +169,7 @@ class Releases:
         if not rows:
             return []
         page = await self._page(url)
-        listed = {each.release: each for each in page.releases}
+        listed = {each.release: _titled(page, each) for each in page.releases}
         newer = []
         for row in rows:
             now = listed.get(row["release"])
@@ -321,6 +322,11 @@ class Releases:
             if row["infohash"] and qbt is not None:
                 await qbt.set_location(row["infohash"], folder)
             await self.store.save(row["url"], row["release"], folder=folder)
+
+
+def _titled(page: PageReleases, release: PageRelease) -> PageRelease:
+    """The name of a release as a window and the table show it: the title of the page, then the words of the release."""
+    return release.model_copy(update={"title": " · ".join(part for part in (page.title, release.title) if part)})
 
 
 def _is_newer(row: dict, now: PageRelease) -> bool:
