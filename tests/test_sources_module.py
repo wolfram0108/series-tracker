@@ -44,7 +44,8 @@ def test_a_module_given_no_sites_reads_the_builtin_ones_and_each_module_has_its_
     first, second = (SourcesModule(Bus(), Database(str(path))) for _ in range(2))
 
     assert [site.name for site in builtin_sites()] == ["ruchime", "dunhuatv", "animakima", "vk_channel", "animesss",
-                                                       "pvashow", "yummyani", "maccms"]
+                                                       "pvashow", "yummyani", "maccms", "kinozal", "rutracker", "anilibria",
+                                                       "anilibria_tv", "astar"]
     assert first.sites.find("https://1.ruchime.org/release/x").name == "ruchime"
     assert first.sites.find("https://vkvideo.ru/@chan|q").name == "vk_channel"
     assert first.sites.find(DOLLS).name == "dunhuatv" and first.sites.find("https://example.org/x") is None
@@ -72,7 +73,7 @@ async def test_the_settings_of_the_sources_are_the_mirrors_of_each_tracker_and_e
     assert len(trackers) == len(view["trackers"]) == len(await sources.repo.all_trackers())
     # The sites follow the registry: a site registered is listed with no change here.
     assert [(each["name"], each["domains"]) for each in readers if each["kind"] == "site"] == [
-        (site.name, list(site.domains)) for site in sources.sites]
+        (site.name, list(site.domains)) for site in sources.sites if site.source_type != "torrent"]
     assert ("maccms", ["jszyapi.com", "xinlangapi.com", "lziapi.com", "subocaiji.com"]) in [
         (each["name"], each["domains"]) for each in readers]
 

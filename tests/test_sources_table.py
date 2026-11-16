@@ -699,7 +699,8 @@ async def test_a_start_without_the_tables_still_serves_the_rest_of_the_module(tm
     with caplog.at_level(logging.ERROR, logger="sources"):
         system = await build(tmp_path / "empty.db", tmp_path / "cache")
     try:
-        assert [record.levelno for record in caplog.records if record.name == "sources"] == [logging.ERROR]
+        # Two failures, each said once: the mirrors of the trackers and the reads to take up again.
+        assert [record.levelno for record in caplog.records if record.name == "sources"] == [logging.ERROR] * 2
         assert (await system.get("https://nowhere.test/p/1"))["state"] == "failed"
     finally:
         await system.stop()

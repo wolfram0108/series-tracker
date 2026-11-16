@@ -140,10 +140,11 @@ from typing import Callable, Iterable
 
 from core import BaseModule, compute, ids
 from core import storage
+from core.contracts.torrent import PageReleases
 from core.contracts.voices import PLAYERS_OFF_KEY
 from core.contracts import (AppSearchReply, AppSearchRequest, NotAllowed, ParsedDomains, PlayerFacts, PlayerPlace,
                             PlayersListReply, PlayersListRequest, SiteResolveRequest,
-                            SourcesSettingsView, TableGetRequest, TrackerMirrors)
+                            SourceType, SourcesSettingsView, TableGetRequest, TrackerMirrors)
 from core.deadlines import TABLE_READ_S
 from core.db import Database
 from core.envelope import Envelope
@@ -157,6 +158,7 @@ from .delivery import Delivery
 from .parsers import SourceParseError
 from .provider import Connector, ProviderClient, ProviderHost, is_web_address, not_connected
 from .provider import block as provider_block
+from .releases import page_release
 from .repository import SourcesRepository
 from .term import DEFAULT_HOURS, TERM_KEY, Term, hours_of
 from .players.alloha_session import Profile as AllohaProfile
@@ -227,7 +229,8 @@ class SourcesModule(BaseModule):
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
             players=self.players, clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent, term=self.term,
-            holding=self.browsers.held, off=lambda: self.players_off, blocked=self._provider_block)
+            holding=self.browsers.held, off=lambda: self.players_off, blocked=self._provider_block,
+            ask=lambda topic, payload: self.request(topic, payload))
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(
@@ -239,6 +242,8 @@ class SourcesModule(BaseModule):
 
     def register(self) -> None:
         self.handle("sources.parse", self.on_parse)
+        self.handle("sources.releases.get", self.on_releases_get)
+        self.handle("unpack.table.changed", self.on_unpack_table_changed)
         self.handle("sources.torrent_file.get", self.on_torrent_file)
         self.handle("sources.torrent_file.drop", self.on_torrent_file_drop)
         self.handle("sources.trackers.list", self.on_trackers_list)
@@ -317,6 +322,7 @@ class SourcesModule(BaseModule):
         # The sites of the saved manifest first: a provider that is down at the start must not take its pages' tables out of
         # the hands of its sites (the next step forgets the pages no site reads).
         await self.provider.start()
+        await self._configure_trackers()
         try:
             await self.tables.resume()
         except Exception:  # noqa: BLE001 — the other duties of the module do not wait for the table reads
@@ -389,6 +395,7 @@ class SourcesModule(BaseModule):
         """Зеркала трекера (вкладка настроек, Р-22)."""
         await self.repo.set_mirrors(env.payload["tracker_id"],
                                     env.payload["mirrors"])
+        await self._configure_trackers()
         self.publish_event("sources.settings.changed", await self._settings())
         return {"ok": True}
 
@@ -399,6 +406,31 @@ class SourcesModule(BaseModule):
         path = self._cache_path(env.payload["torrent_id"])
         await storage.call(
             lambda: os.path.isfile(path) and os.remove(path), owns=path)
+
+    async def _configure_trackers(self) -> None:
+        """The sites of the trackers read the addresses of the mirrors the settings hold (table `trackers`)."""
+        try:
+            trackers = await self.repo.all_trackers()
+        except Exception:  # noqa: BLE001 - the sites keep their own domains; the next change of the mirrors tries again
+            self.log.exception("the mirrors of the trackers were not read")
+            return
+        self.sites.configure(tracker_mirrors={t["canonical_name"]: t["mirrors"] for t in trackers})
+
+    async def on_releases_get(self, env: Envelope) -> dict:
+        """payload: {url}; reply: PageReleases — the releases the page of a tracker lists now, read from the tracker
+        (stage 15): `release` is the id of a release on the page, the same for every version of it."""
+        url = env.payload["url"]
+        site = self.tables.resolve(url)
+        parsed = await self.on_parse(env)
+        page = PageReleases(url=site.canonical_url or url, site=parsed["service"],
+                            title=(parsed.get("title") or {}).get("ru") or "",
+                            releases=[page_release(parsed["service"], one) for one in parsed.get("releases") or []])
+        return page.model_dump(mode="json")
+
+    async def on_unpack_table_changed(self, env: Envelope) -> None:
+        """The tracks of a tracker's page changed (a release downloaded, read, updated, laid out anew): its table is made
+        again from them; the end comes as `sources.table.ready` as for any page."""
+        await self.tables.read(TableGetRequest(url=env.payload["url"]))
 
     async def on_parse(self, env: Envelope) -> dict:
         url = env.payload["url"]
@@ -530,7 +562,9 @@ class SourcesModule(BaseModule):
         trackers = [TrackerMirrors(id=each["id"], display_name=each["display_name"], mirrors=list(each.get("mirrors") or []))
                     for each in stored]
         readers = [ParsedDomains(name=each.display_name, kind="tracker", domains=each.mirrors) for each in trackers]
-        readers += [ParsedDomains(name=site.name, kind="site", domains=list(site.domains)) for site in self.sites]
+        # A tracker is listed once, as a tracker, though its page is read by a site of the registry too.
+        readers += [ParsedDomains(name=site.name, kind="site", domains=list(site.domains)) for site in self.sites
+                    if site.source_type != SourceType.TORRENT.value]
         return SourcesSettingsView(trackers=trackers, readers=readers).model_dump(mode="json")
 
     async def on_site_resolve(self, env: Envelope) -> dict:

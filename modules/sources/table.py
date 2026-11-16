@@ -16,7 +16,7 @@ import asyncio
 import time
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -119,7 +119,8 @@ class TableReader:
                  term: Term | None = None, safeguard_s: float = TABLE_READ_S, recent: int | None = None,
                  holding: Callable[[], AbstractAsyncContextManager] | None = None,
                  off: Callable[[], frozenset[str]] | None = None,
-                 blocked: Callable[[str], str | None] | None = None) -> None:
+                 blocked: Callable[[str], str | None] | None = None,
+                 ask: Callable[[str, dict], Awaitable[Any]] | None = None) -> None:
         self._repo, self._sites, self._publish, self._http, self._players = repo, sites, publish, http, players
         # The reason a page cannot be read now for want of the provider that reads it (modules/sources/provider/gate.py), or
         # None: a read of such a page is not begun, it says why.
@@ -127,6 +128,7 @@ class TableReader:
         # The players switched off for every source, as they are when a read begins.
         self._off = off if off is not None else (lambda: frozenset())
         self._clock, self._safeguard_s, self._recent = clock, safeguard_s, recent
+        self._ask = ask
         self._term = term if term is not None else Term()
         # What a read holds for its whole length (the browser of the module, kept between the rows of the page).
         self._holding = holding if holding is not None else _nothing
@@ -328,7 +330,7 @@ class TableReader:
         stored = (await self._repo.stored(key)).table
         off = self._off()
         context = ReadContext(http=self._http(), progress=progress, recent=self._recent, fresh=fresh,
-                              last_rows=tuple(stored.rows) if stored is not None else (), off=off, rows=spec)
+                              last_rows=tuple(stored.rows) if stored is not None else (), off=off, rows=spec, ask=self._ask)
         limit = asyncio.timeout(self._safeguard_s)
         try:
             async with limit:

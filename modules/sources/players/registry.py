@@ -17,6 +17,7 @@ from .cdnvideohub import CdnVideoHubPlayer, Measure
 from .contract import Player
 from .kodik import KodikPlayer
 from .maccms import MaccmsPlayer
+from .torrent import TorrentPlayer
 from .vibix import VibixPlayer
 from .vk import VkPlayer
 
@@ -38,9 +39,11 @@ class PlayerRegistry:
                  alloha_profile: Profile | None = None) -> "PlayerRegistry":
         """All the players: VK, AllVideo, Vibix (which needs the browser pool and the cache paths), CDN VideoHub (which
         measures the frame height of a stream the labels do not state), Kodik, the own player of animakima.ru, Alloha
-        (asked as its player asks, with the client profile of the environment) and the HLS of the MacCMS sites."""
+        (asked as its player asks, with the client profile of the environment), the HLS of the MacCMS sites and the releases
+        of the torrent sources."""
         return cls([VkPlayer(), AllVideoPlayer(), VibixPlayer(browser_getter, key_path, manifest_dir),
-                    CdnVideoHubPlayer(measure), KodikPlayer(), AnimakimaPlayer(), AllohaPlayer(alloha_profile), MaccmsPlayer()])
+                    CdnVideoHubPlayer(measure), KodikPlayer(), AnimakimaPlayer(), AllohaPlayer(alloha_profile), MaccmsPlayer(),
+                    TorrentPlayer()])
 
     def register(self, player: Player) -> None:
         if player.name in self._players:

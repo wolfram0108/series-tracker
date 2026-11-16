@@ -6,7 +6,7 @@ read per page, the storage, the events) belongs to the core in `table.py`; addin
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Iterable, Protocol
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable, Protocol
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -56,6 +56,9 @@ class ReadContext:
     # The players the owner switched off for every source (their names in the order of sources: `kodik`, `line:CO4K`):
     # a site asks none of them and lists no new row of them; the core keeps their rows of the last read as they were.
     off: frozenset[str] = frozenset()
+    # A request to another module over the bus (topic, payload) → answer: the table of a site whose rows another module
+    # makes (a tracker's page: the tracks `unpack` read); None where the reader has no bus (a test of a site alone).
+    ask: "Callable[[str, dict], Awaitable[Any]] | None" = None
 
 
 class TableDraft(BaseModel):

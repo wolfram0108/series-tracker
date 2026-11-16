@@ -334,6 +334,8 @@ export const ru = {
   "reason.release_off_contract": "{service}: разбор страницы не соответствует контракту провайдера",
   "reason.site_not_found": "для этого адреса нет сайта",
   "reason.read_failed": "чтение страницы не удалось",
+  "reason.unpack_not_running": "разбор раздач не запущен",
+  "reason.torrent_track_not_streamed": "дорожка раздачи берётся из её файла, а не из потока",
   "reason.read_cancelled": "чтение страницы остановлено пользователем",
   "reason.provider_not_connected": "внешнее приложение не подключено",
   "reason.provider_unavailable": "внешний поставщик источников не отвечает",
