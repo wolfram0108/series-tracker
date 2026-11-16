@@ -4,7 +4,8 @@ The rows come out of the real constructor: the stored tables of the pages go thr
 (modules/rules: compile_profile, process_title, result_of, settle_parts) and the layout (modules/composition/project),
 with the groups of voice-overs of the settings — the same functions the service runs. Other rules can be given in place of
 the stored ones: a situation «this rule is changed» is the real constructor run with them. The asset (files and tracks)
-comes from media_items and voice_dubs; the choices from the settings and the choice of the reference.
+is the table the planner keeps (plan_assets), read against the rows as the planner reads it; the choices come from the
+settings and the levers of the output.
 
 Nothing is written: the database is copied first (sqlite backup of a read-only connection), and every repository reads
 the copy."""
@@ -12,47 +13,49 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 import os
 import sqlite3
+import subprocess
 import sys
 from collections import Counter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from core.contracts import CompositionRow, RulesApplyReply, SeriesSource, SourceType  # noqa: E402
+from core.contracts import (CompositionGetRequest, CompositionReply, CompositionRow, RulesApplyReply,  # noqa: E402
+                            SeriesSource, SourceType)
 from core.db import Database  # noqa: E402
 from core.plan import inputs as plan_inputs  # noqa: E402
-from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Snapshot, Track, Video  # noqa: E402
+from core.plan.files import container_of  # noqa: E402
+from core.plan.tables import Container, Inputs, OnlineRow  # noqa: E402
 from modules.catalog.repository import CatalogRepository  # noqa: E402
 from modules.composition import project  # noqa: E402
+from modules.composition.module import layout_reply  # noqa: E402
 from modules.composition.repository import CompositionRepository  # noqa: E402
 from modules.rules.engine import compile_profile, process_title  # noqa: E402
 from modules.rules.module import result_of  # noqa: E402
 from modules.rules.numbering import settle_parts  # noqa: E402
 from modules.rules.repository import RulesRepository  # noqa: E402
 from modules.settings.repository import SettingsRepository  # noqa: E402
-from modules.sources.players.alloha import AllohaPlayer  # noqa: E402
-from modules.sources.players.allvideo import AllVideoPlayer  # noqa: E402
-from modules.sources.players.animakima import AnimakimaPlayer  # noqa: E402
-from modules.sources.players.cdnvideohub import CdnVideoHubPlayer  # noqa: E402
-from modules.sources.players.kodik import KodikPlayer  # noqa: E402
-from modules.sources.players.vibix import VibixPlayer  # noqa: E402
-from modules.sources.players.vk import VkPlayer  # noqa: E402
 from modules.sources.repository import SourcesRepository  # noqa: E402
+from modules.voices import editor  # noqa: E402
 from modules.voices.settings import PREFIX, parse  # noqa: E402
 
 PROD_DB = os.path.join(ROOT, "app.db")
 
 
 def copy_db(target: str) -> str:
-    """A copy of the service's database, made through a read-only connection."""
+    """A copy of the service's database, made through a read-only connection and brought to the head of the migrations of
+    this code (the copy only: the service's database may wait for its update)."""
     os.makedirs(os.path.dirname(target), exist_ok=True)
     source = sqlite3.connect(f"file:{PROD_DB}?mode=ro", uri=True)
     copy = sqlite3.connect(target)
     source.backup(copy)
     copy.close()
     source.close()
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=ROOT, check=True, capture_output=True,
+                   env={**os.environ, "ST_DB_URL": f"sqlite:///{os.path.abspath(target)}"}, timeout=120)
     return target
 
 
@@ -101,119 +104,12 @@ class RealSeries:
         return made.rows, {"card": card, "stored": stored, "places": places, "voices": voices}
 
 
-def online_of(rows: list[CompositionRow], places: dict[int, str], skipped: Counter) -> list[OnlineRow]:
-    return list(plan_inputs.online_of(rows, places))
-
-
-PLAYERS = (VkPlayer, AllVideoPlayer, CdnVideoHubPlayer, KodikPlayer, AnimakimaPlayer, AllohaPlayer, VibixPlayer)
-
-
-def number_of(player: str | None, link: str) -> str:
-    """The video a link names, as its host numbers it (the players' own `video_of`); '' when the link names none."""
-    if not link:
-        return ""
-    named = [each for each in PLAYERS if each.name == player]
-    for each in named or PLAYERS:
-        found = each.video_of(link)
-        if found:
-            return found
-    return ""
-
-
-def asset_of(path: str, series_id: int, online: list[OnlineRow], places: dict[int, str], order: list[str],
-             skipped: Counter) -> list[Container]:
-    """The files of the episodes and their tracks, as the database of the service records them."""
-    by_key = {(row.id.source_id, row.id.row_key): row for row in online}
-    by_link = {row.link: row for row in online if row.link}
-
-    def row_id(source_id, row_key, link: str = "", player: str | None = None) -> RowId:
-        """The row of a file: the online row while it names the same video; another video behind it (both numbers
-        known and different) is another row, offline (В-6)."""
-        found = by_key.get((source_id, row_key)) if row_key else by_link.get(link)
-        number = number_of(player or (found.player if found is not None else None), link)
-        if found is not None and not (number and found.id.video and number != found.id.video):
-            return found.id
-        return RowId(source_id if source_id is not None else -1, row_key or link, number)
-
+def asset_of(path: str, series_id: int, online: list[OnlineRow]) -> list[Container]:
+    """The files of the series as the planner keeps them (plan_assets), read against the rows of the sources."""
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    items = conn.execute("SELECT * FROM media_items WHERE series_id=? AND status='completed' AND final_filename IS NOT NULL "
-                         "AND plan_status='in_plan_single'", (series_id,)).fetchall()
-    dubs = conn.execute("SELECT * FROM voice_dubs WHERE series_id=? AND status='placed'", (series_id,)).fetchall()
+    rows = conn.execute("SELECT data FROM plan_assets WHERE series_id=? ORDER BY name", (series_id,)).fetchall()
     conn.close()
-    tracks_of: dict[tuple, list[Track]] = {}
-    for dub in dubs:
-        chain = json.loads(dub["chain"] or "[]")
-        if not chain:
-            skipped["озвучка без цепочки"] += 1
-            continue
-        candidate = chain[min(dub["attempt"], len(chain) - 1)]
-        source_id = candidate.get("source_id")
-        a_source, _, a_key = (dub["aligned_to"] or "").partition(":")
-        aligned_to = row_id(int(a_source), a_key) if a_source.isdigit() else RowId(-1, dub["aligned_to"] or "", "")
-        snapshot = Snapshot(places.get(source_id, ""), candidate.get("player", "?"), dub["voice_label"], 720,
-                            candidate.get("url", ""))
-        place = (dub["season"], dub["episode"]) + ((dub["part"],) if dub["part"] else ())
-        tracks_of.setdefault(place, []).append(
-            Track(row_id(source_id, candidate.get("row_key"), candidate.get("url", ""), candidate.get("player")),
-                  snapshot, place, aligned_to))
-    containers = []
-    for item in items:
-        slot = (item["season"], item["episode_start"]) + ((item["part"],) if item["part"] is not None else ())
-        own = row_id(item["source_id"], item["row_key"], item["source_url"] or "")
-        found = by_key.get((item["source_id"], item["row_key"]))
-        snapshot = Snapshot(places.get(item["source_id"], ""), found.player if found is not None else "?",
-                            item["voiceover_tag"], item["resolution"] or 0, item["source_url"] or "")
-        cut = json.loads(item["cut"]) if item["cut"] else None
-        if cut:
-            match = next((row for row in online if row.compilation and row.id.source_id == cut["source_id"]
-                          and (row.start, row.end) == (cut.get("start"), cut.get("end"))), None)
-            compilation = match.id if match is not None else RowId(cut["source_id"], cut.get("key", ""), "")
-            video = Video(compilation, Snapshot(places.get(cut["source_id"], ""), cut.get("player", "?"),
-                                                cut.get("voice_group"), cut.get("height") or 0), slot, own, cut_of=compilation)
-        else:
-            video = Video(own, snapshot, slot, own)
-        # A track is aligned to the video of its file: to the video the file holds, whatever is behind its row now.
-        held = [Track(each.dub, each.snapshot, each.episode, own) if (each.aligned_to.source_id, each.aligned_to.row_key)
-                == (own.source_id, own.row_key) else each for each in tracks_of.get(slot, ())]
-        mine = tuple(sorted(held, key=lambda track: (
-            order.index(track.group) if track.group in order else len(order), track.group or "")))
-        containers.append(Container(item["final_filename"], video, mine, bool(item["is_ignored_by_user"])))
-    return containers
-
-
-def choices_of(path: str, series_id: int, info: dict, online: list[OnlineRow]) -> Choices:
-    """What the user chose: the orders of the settings, and the levers of every episode as the service's own function
-    (modules/composition/settings.effective) resolves them through its levels, with the compilation it stands in — read by
-    the planner's own mapping (core/plan/inputs.py)."""
-    from modules.composition import compilations as membership
-    from modules.composition import settings as levers
-
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    off = {(season, episode) for season, episode in conn.execute(
-        "SELECT season, episode FROM scan_references WHERE series_id=? AND mark='off' AND part IS NULL", (series_id,))}
-    conn.close()
-    stored = info["stored"]
-    order = [label for season in sorted(stored.orders) for label in stored.orders[season]]
-    records = stored.records
-    rows = info["rows"]
-    source_order = {each.source_id: place for place, each in enumerate(stored.sources)}
-    members = membership.resolve(rows, records, source_order).members
-    episodes = []
-    for slot in sorted({row.slot[:2] for row in online if not row.compilation}):
-        stands = members.get(slot)
-        episodes.append((slot[0], slot[1], levers.effective(records, slot[0], slot[1],
-                                                             stands.key if stands is not None else None)))
-    by_key = plan_inputs.compilations_of(rows, online)
-    compilation_levers = [(key, levers.effective(records, row_id_season(online, row_id), None, key))
-                          for key, row_id in by_key.items()]
-    return plan_inputs.choices_of(rows, online, episodes, compilation_levers, players=info["voices"].priority,
-                                  player_groups=info["voices"].players, sources=[each.source_id for each in stored.sources],
-                                  voice_order=order, off_episodes=off)
-
-
-def row_id_season(online: list[OnlineRow], row_id: RowId) -> int:
-    return next(each.season for each in online if each.id == row_id)
+    return list(plan_inputs.assets_against([container_of(json.loads(data)) for (data,) in rows], online))
 
 
 def namer_of(series: dict):
@@ -234,14 +130,17 @@ def namer_of(series: dict):
 
 async def inputs_of(real: RealSeries, series_id: int, rules: dict[int, list[dict]] | None = None
                     ) -> tuple[Inputs, Counter, dict]:
-    """The tables of the planner for a real series, with `rules` in place of the stored rules of profiles."""
+    """The tables of the planner for a real series, with `rules` in place of the stored rules of profiles: the layout the
+    real constructor makes, answered as `composition.get` answers it, read by the planner's own function."""
     skipped: Counter = Counter()
     rows, info = await real.layout(series_id, rules)
-    online = online_of(rows, info["places"], skipped)
-    order = list(info["stored"].orders and [l for s in sorted(info["stored"].orders) for l in info["stored"].orders[s]])
-    containers = asset_of(real.path, series_id, online, info["places"], order, skipped)
+    stored = replace(info["stored"], rows=rows)
+    layout = CompositionReply.model_validate(layout_reply(CompositionGetRequest(series_id=series_id), stored))
+    voices = editor.view(info["voices"]).model_dump(mode="json")
+    online, choices = plan_inputs.planner_inputs(layout, info["card"], voices)
+    containers = asset_of(real.path, series_id, list(online))
     info["rows"] = rows
-    return Inputs(tuple(online), tuple(containers), choices_of(real.path, series_id, info, online)), skipped, info
+    return Inputs(online, tuple(containers), choices), skipped, info
 
 
 def same_layout(rows: list[CompositionRow], stored: list[CompositionRow]) -> list[str]:
@@ -256,35 +155,3 @@ def same_layout(rows: list[CompositionRow], stored: list[CompositionRow]) -> lis
 
 def run(coroutine):
     return asyncio.run(coroutine)
-
-
-def agreement(path: str, series_id: int, inputs: Inputs, made) -> tuple[Counter, Counter]:
-    """The planner's choices against the service's: the reference of every episode (scan_references) and the source of
-    every voice-over the service planned (voice_dubs: the candidate its attempts came to for a placed track, the first
-    of its chain for one to come)."""
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    service = {(r["season"], r["episode"]): (r["source_id"], r["row_key"]) for r in conn.execute(
-        "SELECT season, episode, source_id, row_key FROM scan_references WHERE series_id=? AND part IS NULL", (series_id,))}
-    links = {row.link: row for row in inputs.online}
-    planned = {}
-    for r in conn.execute("SELECT season, episode, voice_label, chain, attempt, status FROM voice_dubs WHERE series_id=? "
-                          "AND part=0", (series_id,)):
-        chain = json.loads(r["chain"] or "[]")
-        if chain:
-            used = chain[min(r["attempt"], len(chain) - 1)] if r["status"] == "placed" else chain[0]
-            found = links.get(used.get("url"))
-            planned[((r["season"], r["episode"]), r["voice_label"])] = (found.id.source_id, found.id.row_key) if found else None
-    conn.close()
-    references, voices = Counter(), Counter()
-    for goal in made.goals:
-        if len(goal.slot) != 2:
-            continue
-        mine = goal.video.timeline if goal.video.kind != "cut" else goal.video.ref2.timeline
-        theirs = service.get(goal.slot)
-        references["тот же" if theirs and (mine.source_id, mine.row_key) == theirs else "другой"] += 1
-        for way in goal.tracks:
-            theirs = planned.get((goal.slot, way.voice))
-            voices["у сервиса нет" if theirs is None else "тот же" if theirs == (way.dub.source_id, way.dub.row_key)
-                   else "другой"] += 1
-    return references, voices

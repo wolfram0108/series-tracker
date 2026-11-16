@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import sqlite3
 import sys
@@ -21,17 +20,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import plan_real  # noqa: E402
 
-from core.plan.files import Library, as_in_file, container_of  # noqa: E402
+from core.plan.files import Library, as_in_file  # noqa: E402
 from core.plan.inputs import assets_against  # noqa: E402
 from core.plan.planner import plan  # noqa: E402
 from core.plan.tables import Inputs  # noqa: E402
-
-
-def asset_of(path: str, series_id: int) -> list:
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    rows = conn.execute("SELECT data FROM plan_assets WHERE series_id=? ORDER BY name", (series_id,)).fetchall()
-    conn.close()
-    return [container_of(json.loads(data)) for (data,) in rows]
 
 
 async def series_report(real: plan_real.RealSeries, series_id: int) -> tuple[str, Counter]:
@@ -39,7 +31,7 @@ async def series_report(real: plan_real.RealSeries, series_id: int) -> tuple[str
     card = info["card"]
     files = Library(card["save_path"])
     held = [await as_in_file(files, each) if os.path.exists(files.path(each.name)) else None
-            for each in asset_of(real.path, series_id)]
+            for each in inputs.containers]
     missing = sum(1 for each in held if each is None)
     containers = assets_against([each for each in held if each is not None], inputs.online)
     made = plan(Inputs(inputs.online, tuple(containers), inputs.choices), plan_real.namer_of(card))

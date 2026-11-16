@@ -3,13 +3,16 @@ rows, the levers of every episode and of every compilation, the order of the voi
 and the order of the sources. Pure: the module of the planner and the checks on real series read the same way."""
 from __future__ import annotations
 
+import json
 from dataclasses import replace
-from typing import Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME,
                             VOICE_ALLOW,
-                            VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, Level, RowState, compilation_key,
+                            VOICE_ORDER, VOICE_TAKE, CompositionReply, CompositionRow, EffectiveLever, Level, RowState,
+                            SeriesSource, compilation_key,
                             parse_group_target, parse_variant_target)
+from core.ignored import parse_memory
 from core.variant_queue import Same
 from core.voice_names import Groups
 
@@ -121,3 +124,30 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                    reference_deny=reference_deny, voice_order=voice_orders, voice_deny=voice_deny, voice_off=voice_off,
                    member=member, own_reference=frozenset(own_reference), titles=dict(titles or {}), languages=dict(languages or {}),
                    markup=markup, markup_deny=markup_deny, same=same, markup_same=markup_same)
+
+
+def planner_inputs(layout: CompositionReply, series: Mapping[str, Any],
+                   voices: Mapping[str, Any]) -> tuple[tuple[OnlineRow, ...], Choices]:
+    """The rows and the choices of a series as the planner reads them: `layout` is the answer of `composition.get`,
+    `series` the card of the catalog, `voices` the view of the settings of the voice-overs (`voices.settings.get`). The
+    module of the planner and the tools on a real series read the series by this one function."""
+    places = {each.source_id: " / ".join(each.place) for each in layout.sources}
+    online = online_of(layout.rows, places)
+    try:
+        ignored_seasons = {int(each) for each in json.loads(series.get("ignored_seasons") or "[]")}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        ignored_seasons = set()
+    try:
+        ignored = parse_memory(json.loads(series.get("ignored_episodes") or "{}"))
+    except (json.JSONDecodeError, TypeError):
+        ignored = {}
+    slots = {row.slot[:2] for row in online if not row.compilation}
+    off = {slot for slot in slots if slot[0] in ignored_seasons or slot[1] in ignored.get(slot[0], set())}
+    order = {each.season: [span.label for span in each.voices] for each in layout.voice_orders}
+    sources = [SeriesSource.model_validate(each).id for each in series.get("sources", [])]
+    choices = choices_of(layout.rows, online, [(each.season, each.episode, each.levers) for each in layout.settings],
+                         [(each.compilation, each.levers) for each in layout.levels if each.compilation],
+                         players=voices.get("priority") or [], player_groups=Groups.of(voices.get("player_groups") or {}),
+                         sources=sources, voice_order=order, off_episodes=off, titles=layout.voice_titles,
+                         languages=voices.get("voice_languages") or {})
+    return online, choices

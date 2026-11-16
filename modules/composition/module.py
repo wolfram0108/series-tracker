@@ -240,7 +240,7 @@ class CompositionModule(BaseModule):
         request = CompositionGetRequest.model_validate(env.payload)
         stored = await self.repo.stored(request.series_id)
         # The layout of a series is thousands of rows: the reply is made off the loop.
-        return await compute.run(_layout_reply, request, stored)
+        return await compute.run(layout_reply, request, stored)
 
     async def on_queues_get(self, env: Envelope) -> dict:
         """The queues of a level in the order the core tries their variants: the same rule, the same order of players and
@@ -798,7 +798,7 @@ class CompositionModule(BaseModule):
             raise _Unavailable(topic) from exc
 
 
-def _layout_reply(request: CompositionGetRequest, stored) -> dict:
+def layout_reply(request: CompositionGetRequest, stored) -> dict:
     """`composition.get` answered from what is stored; pure, it runs in the pool of computation."""
     if request.sources_only:
         return CompositionReply(series_id=request.series_id, rev=stored.rev,

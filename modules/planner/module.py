@@ -107,15 +107,13 @@ from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
 from core.envelope import Envelope
 from core.ffprobe import END_SLACK_S, duration_of
 from core.fsnames import sanitize_name
-from core.ignored import parse_memory
 from core.reasons import describe, reason
 from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, judged, video_of
 from core.plan.files import Library, as_in_file, container_json, container_of, label_of
-from core.plan.inputs import assets_against, choices_of, online_of
+from core.plan.inputs import assets_against, planner_inputs
 from core.plan.marks import references_of
 from core.plan.planner import Plan, cut_video, name_of, video_op
 from core.plan.tables import RowId, Track, Video
-from core.voice_names import Groups
 
 from .packing import PackBook, card_id
 from .repository import PlannerRepository
@@ -828,26 +826,7 @@ class PlannerModule(BaseModule):
                                    await self.request("composition.get", {"series_id": series_id}))
         self._members[series_id] = {(each.ref.source_id, each.ref.row_key): each.ref for each in layout.compilations}
         voices = await self.request("voices.settings.get", {})
-        places = {each.source_id: " / ".join(each.place) for each in layout.sources}
-        online = online_of(layout.rows, places)
-        ignored_seasons = set()
-        try:
-            ignored_seasons = {int(each) for each in json.loads(series.get("ignored_seasons") or "[]")}
-        except (json.JSONDecodeError, TypeError, ValueError):
-            pass
-        try:
-            ignored = parse_memory(json.loads(series.get("ignored_episodes") or "{}"))
-        except (json.JSONDecodeError, TypeError):
-            ignored = {}
-        slots = {row.slot[:2] for row in online if not row.compilation}
-        off = {slot for slot in slots if slot[0] in ignored_seasons or slot[1] in ignored.get(slot[0], set())}
-        order = {each.season: [span.label for span in each.voices] for each in layout.voice_orders}
-        sources = [SeriesSource.model_validate(each).id for each in series.get("sources", [])]
-        choices = choices_of(layout.rows, online, [(each.season, each.episode, each.levers) for each in layout.settings],
-                             [(each.compilation, each.levers) for each in layout.levels if each.compilation],
-                             players=voices.get("priority") or [], player_groups=Groups.of(voices.get("player_groups") or {}),
-                             sources=sources, voice_order=order, off_episodes=off, titles=layout.voice_titles,
-                             languages=voices.get("voice_languages") or {})
+        online, choices = planner_inputs(layout, series, voices)
         return online, choices
 
     # --- the picture of the packing ------------------------------------------------------------------------------
