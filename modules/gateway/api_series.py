@@ -185,10 +185,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         topic = "catalog.viewing.start" if viewing else "catalog.viewing.stop"
         gw.send_command(topic, {"series_id": series_id})
         if viewing:
-            # Each owner of downloaded files checks its own and finds nothing of a foreign series, so the
-            # gateway needs no kind to choose between them.
-            for sync_topic in ("downloads.fs.sync", "torrents.fs.verify"):
-                gw.send_command(sync_topic, {"series_id": series_id})
+            # The owner of the files of the torrent pipeline checks its own and finds nothing of a foreign series, so
+            # the gateway needs no kind to choose.
+            gw.send_command("torrents.fs.verify", {"series_id": series_id})
         return {"success": True}
 
     @r.post("/api/series/{series_id}/toggle_auto_scan",

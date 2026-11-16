@@ -463,6 +463,16 @@ def test_every_pause_or_timed_wait_outside_the_permitted_places_is_a_violation(t
     assert all("вне допущенных мест" in v.reason for v in outcome.violations)
 
 
+def test_a_wait_of_a_condition_for_a_predicate_is_no_timed_wait_and_a_timed_one_of_any_object_is(tmp_path):
+    code = ("import asyncio\n\n\nclass Mod:\n    async def take(self, changed):\n"
+            "        await changed.wait_for(lambda: True)\n\n"
+            "    async def timed(self, events, future):\n        await events.wait_for(future, 5)\n"
+            "        await asyncio.wait_for(future, timeout=5)\n")
+    root = write_tree(tmp_path, {"modules/m/module.py": code})
+    outcome = no_wait_no_poll.check_waits(root, [], [])
+    assert sorted(v.line for v in outcome.violations) == [9, 10]
+
+
 def test_a_permitted_function_is_listed_and_never_a_violation(tmp_path):
     root = write_tree(tmp_path, {"modules/m/module.py": WAITS})
     allowed = [("modules/m/module.py", "Mod.poll", no_wait_no_poll.SUBJECT, "schedule"),

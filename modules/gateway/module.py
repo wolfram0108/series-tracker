@@ -177,6 +177,9 @@ SSE_MAP: dict[str, Outgoing] = {
     "series.source.removed": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "removed"}),
     "sources.table.progress": Outgoing("sources_table_progress", latest=lambda payload: payload.get("url")),
     "sources.table.ready": Outgoing("sources_table_ready"),
+    # The release of a torrent source and the editor of its page changed (stage 15): the tab «Торрент» shows them again.
+    "torrents.release.changed": Outgoing("torrent_release_update"),
+    "unpack.editor.changed": Outgoing("torrent_editor_update"),
     "sources.table.failed": Outgoing("sources_table_failed"),
     "composition.changed": Outgoing("composition_changed"),
     "composition.failed": Outgoing("composition_failed"),
@@ -374,6 +377,7 @@ class GatewayModule(BaseModule):
         from .api_settings import build_router as settings_router
         from .api_sources import build_router as sources_router
         from .api_system import build_router as system_router
+        from .api_torrents import build_router as torrents_router
         app.include_router(auth_router(self))
         app.include_router(series_router(self))
         app.include_router(sources_router(self))
@@ -381,6 +385,7 @@ class GatewayModule(BaseModule):
         app.include_router(system_router(self))
         app.include_router(media_router(self))
         app.include_router(settings_router(self))
+        app.include_router(torrents_router(self))
 
         legacy_index = os.path.join(self._templates_dir, "index.html")
         dist_index = os.path.join(self._web_dist_dir, "index.html")

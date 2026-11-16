@@ -660,7 +660,7 @@ async def test_files_list_triggers_verify(system):
 
 
 @pytest.mark.asyncio
-async def test_files_list_and_set_path_for_renaming(system):
+async def test_files_list_gives_the_sliced_files_of_a_series(system):
     _, _, _, probe, db_path, _ = system
     _add_compilation(db_path, slicing_status="completed")
     with sqlite3.connect(db_path) as conn:
@@ -672,11 +672,7 @@ async def test_files_list_and_set_path_for_renaming(system):
 
     files = await probe.request("slicing.files.list", {"series_id": 2},
                                 timeout=5)
-    assert len(files) == 1
-    probe.send_command("slicing.file.set_path",
-                       {"id": files[0]["id"], "path": "новое.mp4"})
-    assert await _wait(
-        lambda: _sliced(db_path, "comp1")[0]["file_path"] == "новое.mp4")
+    assert [each["file_path"] for each in files] == ["старое.mp4"]
 
 
 @pytest.mark.asyncio

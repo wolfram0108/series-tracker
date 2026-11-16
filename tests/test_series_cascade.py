@@ -111,7 +111,6 @@ class SlowSource(BaseModule):
     def register(self):
         self.handle("sources.table.get", self.on_table, concurrent=True)
         self.handle("renaming.reprocess", self.on_reprocess)
-        self.handle("downloads.fs.sync", self.on_fs_sync)
         self.handle("settings.value.get", self.on_get)
 
     async def on_get(self, env):
@@ -127,9 +126,6 @@ class SlowSource(BaseModule):
 
     async def on_reprocess(self, env):
         return {"ok": True}
-
-    async def on_fs_sync(self, env):
-        return {"adopted": 0, "lost": 0}
 
 
 @pytest.mark.asyncio

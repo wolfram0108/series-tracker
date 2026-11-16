@@ -100,11 +100,6 @@ class SlicingRepository:
         await self._db.execute(
             "UPDATE sliced_files SET status=? WHERE id=?", (status, file_id))
 
-    async def set_sliced_path(self, file_id: int, path: str) -> None:
-        await self._db.execute(
-            "UPDATE sliced_files SET file_path=? WHERE id=?",
-            (path, file_id))
-
     # --- media_items: наши колонки ----------------------------------------------------
 
     async def get_item(self, unique_id: str) -> dict | None:

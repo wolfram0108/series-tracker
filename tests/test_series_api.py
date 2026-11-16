@@ -87,10 +87,6 @@ class Neighbours(BaseModule):
                                "series_name": "Тайтл", "status": "downloading",
                                "progress": 55, "dlspeed": 1024, "eta": 60}]}
 
-        async def fs_sync(env):
-            self.calls.append(("fs.sync", env.payload))
-            return {"adopted": 0, "lost": 0}
-
         async def fs_verify(env):
             self.calls.append(("fs.verify", env.payload))
             return {"missing": 0}
@@ -126,7 +122,6 @@ class Neighbours(BaseModule):
         self.handle("torrents.db.history", history)
         self.handle("torrents.queue.get", queue)
         self.handle("torrents.db.progress.list", progress)
-        self.handle("downloads.fs.sync", fs_sync)
         self.handle("torrents.fs.verify", fs_verify)
         self.handle("renaming.reprocess", reprocess)
         self.handle("library.relocation.plan", plan_move)
@@ -449,10 +444,9 @@ async def test_state_route_drives_viewing_and_asks_each_owner_to_check_its_files
     env = await asyncio.wait_for(sub.queue.get(), 3)
     assert env.payload["series_id"] == series_id
     assert "viewing" in env.payload["statuses"]
-    # opening the window asks every owner of files to check its own with the disk; the gateway knows no kind
+    # opening the window asks the owner of the torrent files to check its own with the disk; the gateway knows no kind
     await settle(bus, neighbours)
     assert ("fs.verify", {"series_id": series_id}) in neighbours.calls
-    assert ("fs.sync", {"series_id": series_id}) in neighbours.calls
     assert "catalog.series.get" not in topics(spy)
     resp = await client.post(f"/api/series/{series_id}/state", json={"state": []})
     assert resp.status_code == 200

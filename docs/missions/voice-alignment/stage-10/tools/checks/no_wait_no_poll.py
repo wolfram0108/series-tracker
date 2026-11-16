@@ -40,28 +40,18 @@ ALLOWED_WAITS: list[tuple[str, str, str, str]] = [
      f"pace of requests to a host, 0.6 s (R-33) ({SECTION_7})"),
     ("modules/sources/policy.py", "*", RETRY,
      f"the retry policy and the pace of requests to sites and players ({SECTION_7}); it sleeps through core.retry"),
-    ("modules/voices/recovery.py", "Recovery._rest", SAFEGUARD,
-     f"rest of the cleanup and retry journal; the signal (wake) ends it early, the delay is the safeguard ({SECTION_7})"),
     ("modules/scan/sync.py", "TableSignals.verdict", SAFEGUARD,
      f"wait for the signal of a table, safeguard of twice the measured read ({SECTION_7}, last row)"),
     ("modules/catalog/module.py", "CatalogModule._await_purge_reports", SAFEGUARD,
      "the event of the last owner's report ends the wait; silence longer than PURGE_REPORT_TIMEOUT is a broken cascade"),
-    ("modules/slicing/module.py", "_cut", PROCESS,
-     f"wait for the ffmpeg process with a safeguard ({SECTION_7}, 'Таймауты')"),
     ("modules/downloads/ytdlp.py", "_next_line", PROCESS,
      f"wait for a line of the yt-dlp process; silence longer than STALL_TIMEOUT_S is the safeguard ({SECTION_7})"),
     ("modules/sources/players/vibix_protocol.py", "capture_with_browser", SAFEGUARD,
      f"response signal of the browser page with a safeguard ({SECTION_7}, 'Таймауты запросов к плеерам')"),
     ("modules/sources/players/vibix_protocol.py", "_manifest", SAFEGUARD,
      f"manifest response signal with a safeguard ({SECTION_7}, 'Таймауты запросов к плеерам')"),
-    ("modules/sources/players/alloha.py", "_Shown.answer", SAFEGUARD,
-     "the answer of the player (its POST of the files) ends the wait; ANSWER_TIMEOUT_S/SWITCH_TIMEOUT_S stop it"),
-    ("modules/sources/players/alloha.py", "_Shown.play", SAFEGUARD,
-     "the first request of the player to its CDN with the access headers ends the wait; PLAY_TIMEOUT_S stops it"),
     ("modules/conform/module.py", "ConformModule._run", BACKOFF,
      "reconnect to the alignment daemon, an external system, with a growing pause up to BACKOFF_MAX_S"),
-    ("modules/downloads/module.py", "DownloadsModule._run_download", RETRY,
-     "pause before a repeated download; the length comes from the Budget of core.retry"),
     ("modules/gateway/module.py", "GatewayModule._sse_batches", PROTOCOL,
      "the keepalive interval of the SSE stream: a comment line keeps the connection alive through proxies"),
     ("modules/torrents/module.py", "TorrentsModule._pipeline_loop", POLL,
@@ -79,6 +69,20 @@ ALLOWED_WAITS: list[tuple[str, str, str, str]] = [
     ("core/proc.py", "_reap", PROCESS, "wait for a killed program to be reaped, with a safeguard"),
     ("core/storage.py", "call", SAFEGUARD,
      "the end of a storage call ends the wait; the timeout stops waiting for a stuck call"),
+    ("core/clock.py", "beat_while", SUBJECT,
+     "a display of minutes and seconds changes once a second: the beat is what is shown"),
+    ("core/clock.py", "every", PROTOCOL, "the period an external protocol prescribes, given by the caller"),
+    ("core/proc.py", "_ended", SAFEGUARD,
+     "the report of the loop on a reaped child ends the wait; REAP_TIMEOUT_S stops waiting for a report never made"),
+    ("core/proc.py", "run_lines", PROCESS, "wait for a program read line by line, with its deadline"),
+    ("modules/downloads/hls_native.py", "fetch", DETECTION,
+     "a line of the segment reader ends the wait; silence longer than SILENCE_S is the failure of the download"),
+    ("modules/downloads/ytdlp.py", "_stderr_tail", SAFEGUARD,
+     "the end of stderr of an ended program ends the wait; a child that keeps the pipe open is not waited for"),
+    ("modules/sources/players/alloha_session.py", "AllohaSession.play", SAFEGUARD,
+     "the event of the edge on the socket of the player ends the wait; EDGE_TIMEOUT_S stops it"),
+    ("modules/sources/provider/connector.py", "Connector.run", BACKOFF,
+     "reconnect to the provider of the socket, an external system, with a growing pause"),
     ("core/db.py", "Database._ensure_wal", BACKOFF,
      "PRAGMA journal_mode does not wait for the busy timeout: the lock of the database file is retried until _WAL_TIMEOUT"),
 ]
@@ -87,12 +91,24 @@ ALLOWED_WAITS: list[tuple[str, str, str, str]] = [
 ALLOWED_TIMERS: list[tuple[str, str, str]] = [
     ("web/src/components/AddSeriesModal.vue", "debounceTimer",
      "debounce of the address input (500 ms): the delay of typing is the subject, not a poll of data"),
+    ("web/src/composables/useSSE.ts", "retryTimer",
+     "a dropped stream is connected again after a growing pause (backoff to the server); no data is polled"),
+    ("web/src/lib/gather.ts", "setTimeout(run, ms)",
+     "the pause of a debounce: changes made in quick succession go together once the user is quiet (law-ui)"),
     ("web/src/Gallery.vue", "simTimer",
      "the gallery page animates a card through its states by hand; no data is polled"),
 ]
 
 WAIT_NAMES = {"sleep", "wait_for"}
 _TIMER = re.compile(r"(?<![\w.$])(?:window\.|globalThis\.)?(setInterval|setTimeout|useIntervalFn|useTimeoutPoll|useTimeoutFn)\s*\(")
+
+
+def _predicate_wait(node: ast.Call) -> bool:
+    """`condition.wait_for(predicate)` of asyncio.Condition: a wait for a state a signal changes, with no time in it (one
+    argument, no timeout); `asyncio.wait_for(awaitable, timeout)` is the timed one."""
+    receiver = node.func.value if isinstance(node.func, ast.Attribute) else None
+    named_asyncio = isinstance(receiver, ast.Name) and receiver.id == "asyncio"
+    return receiver is not None and not named_asyncio and len(node.args) == 1 and not node.keywords
 
 
 def find_waits(tree: ast.Module) -> list[tuple[int, str, str]]:
@@ -108,6 +124,8 @@ def find_waits(tree: ast.Module) -> list[tuple[int, str, str]]:
         if name not in WAIT_NAMES:
             continue
         if name == "sleep" and node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value == 0:
+            continue
+        if name == "wait_for" and _predicate_wait(node):
             continue
         found.append((node.lineno, qualname_of(node), dotted_name(node.func) or name))
     return found

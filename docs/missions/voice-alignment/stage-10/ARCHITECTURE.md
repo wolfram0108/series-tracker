@@ -222,7 +222,7 @@ PID:<адрес сайта> | P:<плеер> | <название релиза> |
 | `composition.settings.set` | команда | `composition` | `{series_id, season?, episode?, lever, target?, value}` — значение рычага уровня |
 | `composition.settings.reset` | команда | `composition` | `{series_id, season?, episode?}` — уровень возвращается в наследование |
 | `scan.series.run` | запрос | `scan` | синхронизация сериала |
-| `scan.output.get` | запрос | `scan` | референс каждой серии (4.5) |
+| `planner.references.get` | запрос | `planner` | референс каждой серии (4.5); с этапа 12 его считает план, а не `scan` |
 
 ### 5.2. События
 
@@ -236,8 +236,6 @@ PID:<адрес сайта> | P:<плеер> | <название релиза> |
 | `voices.settings.changed` | `voices` | без изменений | composition, gateway |
 | `composition.changed` | `composition` | `series_id, rev, episodes` (затронутые серии; пусто — весь сериал) | scan, voices, gateway |
 | `composition.failed` | `composition` | `series_id, reason` | scan, gateway |
-| `scan.reference.changed` | `scan` | `series_id, season, episode, mark` | voices, gateway |
-| `voices.dub.changed`, `voices.dubs.snapshot` | `voices` | без изменений | gateway |
 | `work.withdrawn` | `voices` (владелец работы) | `series_id, keys?` (ключи выданной работы; без ключей — вся работа сериала) | `downloads` |
 
 Топики, уходящие из шины, перечислены в `REVISION.md`. Карта топиков проекта `contracts/bus_topics.md` обновляется

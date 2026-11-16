@@ -17,7 +17,7 @@ topic:sources.video.coverage — откуда: 1/3
 topic:sources.coverage.progress — откуда: 1/3
 def:on_video_coverage — откуда: 1/3
 topic:sources.video.scan — откуда: 1/4
-topic:sources.video.progress — откуда: 1/4
+topic:sources.video.progress — откуда: 1/4 — допуск: modules/sources/module.py, modules/downloads/module.py — причина: имя вернулось 12.11 (58b4b006) с другим смыслом — ход загрузки силами плеера (sources.video.fetch), не опрос серий
 def:on_video_scan — откуда: 1/4
 def:scan_episodes — откуда: 1/4
 topic:sources.vk.scan — откуда: 1/5

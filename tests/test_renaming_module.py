@@ -25,7 +25,6 @@ class FakeNeighbours(BaseModule):
         self.sliced: list[dict] = []
         self.set_filename_calls: list[dict] = []
         self.rename_calls: list[dict] = []
-        self.set_path_calls: list[dict] = []
         self.qbt_files: dict[str, list] = {}
         self.db_files: dict[str, list] = {}
         self.renames: list[dict] = []
@@ -49,7 +48,6 @@ class FakeNeighbours(BaseModule):
         h("downloads.item.set_filename", self.on_set_filename)
         h("downloads.items.rename", self.on_rename_items)
         h("slicing.files.list", self.on_sliced)
-        h("slicing.file.set_path", self.on_set_path)
         h("torrents.db.active", self.on_active)
         h("torrents.files.get", self.on_qbt_files)
         h("torrents.db.files.list", self.on_db_files)
@@ -93,8 +91,6 @@ class FakeNeighbours(BaseModule):
     async def on_sliced(self, env):
         return self.sliced
 
-    async def on_set_path(self, env):
-        self.set_path_calls.append(env.payload)
 
     async def on_active(self, env):
         return self.active_torrents
@@ -442,4 +438,4 @@ async def test_a_sliced_file_whose_new_name_is_taken_keeps_its_name_and_says_not
     reply = await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
 
     assert reply == {"renamed": 0}
-    assert os.path.exists(os.path.join(media, "кусок 2.mp4")) and fake.set_path_calls == []
+    assert os.path.exists(os.path.join(media, "кусок 2.mp4"))

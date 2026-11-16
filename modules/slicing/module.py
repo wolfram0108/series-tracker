@@ -14,7 +14,6 @@ Queries:
   slicing.files.list {series_id}              — для renaming (Р-15)
   slicing.queue.get
 Commands:
-  slicing.file.set_path {id, path}            — для renaming (Р-15)
 
 События: slicing.queue.changed {tasks} (контракт SSE
 slicing_queue_update), series.status.contribution {source: slicing}.
@@ -123,7 +122,6 @@ class SlicingModule(BaseModule):
         self.handle("slicing.files.list", self.on_files_list)
         self.handle("slicing.files.drop_for_source",
                     self.on_files_drop_for_source)
-        self.handle("slicing.file.set_path", self.on_file_set_path)
         self.handle("slicing.queue.get", self.on_queue_get)
         self.handle("series.deleted", self.on_series_deleted)
 
@@ -588,10 +586,6 @@ class SlicingModule(BaseModule):
             self.log.info("композиция: удалено %d записей о нарезке "
                           "устаревшей компиляции %s", deleted,
                           env.payload["unique_id"])
-
-    async def on_file_set_path(self, env: Envelope) -> None:
-        await self.repo.set_sliced_path(env.payload["id"],
-                                        env.payload["path"])
 
     async def on_queue_get(self, env: Envelope) -> dict:
         cards = await self._cards()

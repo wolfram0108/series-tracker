@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 
 from core import BaseModule, compute, storage
 from core.secrets import redacted
-from core.contracts.release_table import TABLE_TRACE
+from core.contracts.release_table import TABLE_TRACE_TOPIC
 from core.contracts.work import RUN_CHANGED
 from core.envelope import Envelope
 
@@ -171,7 +171,7 @@ class RunlogModule(BaseModule):
             series_id = int(payload["series_id"])
             if series_id not in self.runs or self.runs[series_id].closing:
                 self._open(series_id, {"series_id": series_id}, str(series_id))
-        elif env.topic == TABLE_TRACE and payload.get("kind") == "begin":
+        elif env.topic == TABLE_TRACE_TOPIC and payload.get("kind") == "begin":
             # A read inside the run of a series is in the dump of that run; one outside any is a run of its own.
             url = str(payload.get("url") or "")
             in_a_sync = any(isinstance(key, int) and not run.closing for key, run in self.runs.items())
@@ -179,7 +179,7 @@ class RunlogModule(BaseModule):
                 self._open(url, {"url": url}, os.path.join(READS, page_folder(url)))
         self.take(("bus", _now(), env))
         ended = (int(payload["series_id"]) if env.topic == RUN_CHANGED and not payload.get("active")
-                 else str(payload.get("url") or "") if env.topic == TABLE_TRACE and payload.get("kind") == "end" else None)
+                 else str(payload.get("url") or "") if env.topic == TABLE_TRACE_TOPIC and payload.get("kind") == "end" else None)
         run = self.runs.get(ended) if ended not in (None, "") else None
         if run is not None and not run.closing:
             run.lines.append(("close", _now(), {**run.subject, "stopped": False}))

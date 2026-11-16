@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 LINE_SEPARATOR = " | "
 # What a read of a page does, told for its dump (modules/sources/table.py tells it, modules/runlog keeps it):
 # {url, site, kind: "begin", fresh} and {url, site, kind: "end", ok, reason, seconds, rows, players, causes, unread}.
-TABLE_TRACE = "sources.table.trace"
+TABLE_TRACE_TOPIC = "sources.table.trace"
 
 
 class RowState(StrEnum):

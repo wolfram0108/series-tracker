@@ -22,7 +22,7 @@ import httpx
 
 from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress,
                             TableReady, TableRow, TableState, UnreadPart)
-from core.contracts.release_table import TABLE_TRACE
+from core.contracts.release_table import TABLE_TRACE_TOPIC
 from core.deadlines import TABLE_READ_S
 from core.logging import get_logger
 from core.reasons import EXTERNAL, describe, parse, reason
@@ -38,7 +38,7 @@ READY_TOPIC = "sources.table.ready"
 FAILED_TOPIC = "sources.table.failed"
 # What a read does, told as it happens for its dump (modules/runlog): `begin` when a page is taken for a read, `end`
 # with what the read came to — how long it took and what every player of the page gave.
-TRACE_TOPIC = TABLE_TRACE
+TRACE_TOPIC = TABLE_TRACE_TOPIC
 
 
 def _cause(exc: Exception) -> str:
