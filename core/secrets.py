@@ -14,7 +14,9 @@ MASK = "***"
 def redacted(payload):
     """A copy of the payload with every secret in it masked. For what is written down, never for what is sent."""
     if isinstance(payload, dict):
-        hides = payload.get("key") in SECRET_SETTING_KEYS
+        key = payload.get("key")
+        # A setting is named by a string; a field `key` of another message may hold anything (a list of keys).
+        hides = isinstance(key, str) and key in SECRET_SETTING_KEYS
         return {name: (MASK if value and (name in SECRET_FIELDS or (hides and name == "value")) else redacted(value))
                 for name, value in payload.items()}
     if isinstance(payload, (list, tuple)):

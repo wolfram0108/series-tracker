@@ -16,3 +16,9 @@ def test_the_value_of_a_secret_setting_is_masked_by_its_key_and_that_of_another_
 
 def test_an_empty_secret_is_not_made_to_look_set():
     assert redacted({"password": "", "secret": None}) == {"password": "", "secret": None}
+
+
+def test_a_field_key_that_holds_no_name_of_a_setting_is_told_as_it_is_and_breaks_nothing():
+    from core.secrets import MASK, redacted
+    told = redacted({"key": ["dub:1", "dub:2"], "value": "v", "inner": {"key": "tmdb_token", "value": "secret-token"}})
+    assert told == {"key": ["dub:1", "dub:2"], "value": "v", "inner": {"key": "tmdb_token", "value": MASK}}
