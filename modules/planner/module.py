@@ -739,6 +739,8 @@ class PlannerModule(BaseModule):
                           series_id, len(synced.plan.ops), len(synced.applied), len(synced.plan.groups),
                           len(synced.replanned))
             await self.count_changed(series_id)
+            if download:
+                await self._archive_releases(series, synced)
             try:
                 await self.clear_finished(sync.jobs)
                 if sync.conform_dir:
@@ -1051,6 +1053,31 @@ class PlannerModule(BaseModule):
             except (BusRequestError, asyncio.TimeoutError):
                 self.log.warning("задача %s сервиса выравнивания не снята: сервис не ответил", job_id)
                 return
+
+    async def _archive_releases(self, series: dict, synced) -> None:
+        """A release of a torrent source no longer watched gives up its files once a sync has built everything it was to
+        build (stage 15, 3а): every group applied, no step failed. A page another series lists keeps them: that series may
+        still take from it. A refusal or a silence leaves the files as they are; the next sync asks again."""
+        if synced.failed or len(synced.applied) != len(synced.plan.groups):
+            return
+        try:
+            pages = [source.url for source in map(SeriesSource.model_validate, series.get("sources", []))
+                     if source.source_type == SourceType.TORRENT]
+            if not pages:
+                return
+            listing = await self.request("catalog.series.list", {})
+            for url in pages:
+                shared = any(other["id"] != series["id"] and any(each["url"] == url for each in other.get("sources") or [])
+                             for other in listing)
+                if shared:
+                    continue
+                for release in (await self.request("torrents.releases.get", {"url": url})).get("releases") or []:
+                    if not release["watched"] and release["state"] == "ready":
+                        self.log.info("сериал %d: раздача %s %s без слежения собрана — её файлы удаляются", series["id"],
+                                      url, release["release"])
+                        self.send_command("torrents.release.drop_files", {"url": url, "release": release["release"]})
+        except Exception:  # noqa: BLE001 - the files of a release stay until the next sync; nothing is lost by waiting
+            self.log.exception("сериал %d: раздачи без слежения не разобраны", series["id"])
 
     async def _discard(self, sync: "BusSync | None") -> None:
         """What a stopped sync made aside goes: its downloads, the containers it built aside (no journal was written:
