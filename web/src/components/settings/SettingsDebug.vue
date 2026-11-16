@@ -61,9 +61,8 @@ const scanAll = useAction(async () => {
 const FLAGS = [
   { key: "forceReplace", path: "/api/settings/force_replace", label: "debug.flag.forceReplace", hint: "debug.flag.forceReplace.hint" },
   { key: "lessStrict", path: "/api/settings/less_strict_scan", label: "debug.flag.lessStrict", hint: "debug.flag.lessStrict.hint" },
-  { key: "slicingDelete", path: "/api/settings/slicing_delete_source", label: "debug.flag.slicingDelete", hint: "debug.flag.slicingDelete.hint" },
 ] as const satisfies readonly { key: string; path: string; label: MessageKey; hint: MessageKey }[]
-const flags = reactive({ forceReplace: false, lessStrict: false, slicingDelete: false })
+const flags = reactive({ forceReplace: false, lessStrict: false })
 async function setFlag(flag: (typeof FLAGS)[number], value: boolean) {
   flags[flag.key] = value
   await saveFlag(flag.path, value, t(flag.label))
@@ -154,13 +153,6 @@ const showDb = ref(false)
 const TABLE_DESCRIPTION_KEYS: Record<string, MessageKey> = {
   series: "debug.db.table.series",
   torrents: "debug.db.table.torrents",
-  media_items: "debug.db.table.media_items",
-  download_tasks: "debug.db.table.download_tasks",
-  slicing_tasks: "debug.db.table.slicing_tasks",
-  sliced_files: "debug.db.table.sliced_files",
-  advanced_renaming_patterns: "debug.db.table.advanced_renaming_patterns",
-  renaming_patterns: "debug.db.table.renaming_patterns",
-  season_patterns: "debug.db.table.season_patterns",
   settings: "debug.db.table.settings",
 }
 

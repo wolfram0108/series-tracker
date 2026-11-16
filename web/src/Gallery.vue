@@ -29,9 +29,9 @@ import { SERIES_STATES, stateLabel, stateWord } from "./lib/states"
 import {
   DISABLED_SAMPLE, EXCLUDED_BY_RULE, FRONT_EPISODE_TITLE, LOGS, MISSING_EPISODE,
   PROFILE_ANIME, PROFILE_DEFAULT, PROFILE_MOVIES, QUEUE_DOWNLOAD, QUEUE_MONITOR, QUEUE_PROCESSING,
-  QUEUE_SLICING, RICK_EPISODE_FILE, RICK_EPISODE_TITLE, RICK_RECEIVED_FILE,
-  RICK_SLICED_FILE, RICK_SLICED_TITLE, RICK_TEST_APPLIED, RICK_TEST_EXCLUDED, ROWS,
-  SERIES_FRONT, SERIES_FROM, SERIES_STRANGE, SLICING_SAMPLE,
+  RICK_EPISODE_FILE, RICK_EPISODE_TITLE, RICK_RECEIVED_FILE,
+  RICK_TEST_APPLIED, RICK_TEST_EXCLUDED, ROWS,
+  SERIES_FRONT, SERIES_FROM, SERIES_STRANGE,
   CHIP_FILE, READS, SAME_HELD, SAME_MARKS, SAME_QUEUE,
 } from "./gallery.fixtures"
 
@@ -46,7 +46,6 @@ const cards = [
   { id: 7, name: stateLabel(SERIES_STATES.error), site: "kinozal.me", auto_scan_enabled: true, statuses: ["error"] },
   { id: 8, name: t("gallery.card.severalStatuses"), site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "downloading", "metadata"] },
   { id: 9, name: t("gallery.card.mixedVk", { first: stateLabel(SERIES_STATES.ready), second: stateWord(SERIES_STATES.waiting) }), site: "vk_video", auto_scan_enabled: true, statuses: ["ready", "waiting"], tmdb: { downloaded: 7, total: 24 } },
-  { id: 10, name: stateLabel("slice"), site: "kinozal.me", auto_scan_enabled: true, statuses: ["slicing"] },
   { id: 11, name: t("gallery.card.alignAndPack"), site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "aligning", "packing", "downloading"] },
 ]
 
@@ -55,7 +54,6 @@ const cards = [
 const simStates: Record<string, string[]> = {
   [stateLabel(SERIES_STATES.waiting)]: ["waiting"],
   [stateLabel(SERIES_STATES.scanning)]: ["scanning"],
-  [stateLabel("slice")]: ["slicing"],
   [stateLabel("align")]: ["aligning"],
   [stateLabel("pack")]: ["packing"],
   [stateLabel(SERIES_STATES.downloading)]: ["downloading"],
@@ -290,22 +288,8 @@ const rtPass = ref("password123")
         </div>
       </div>
 
-      <h3 class="sub">{{ t("gallery.sub.sliced") }}</h3>
+      <h3 class="sub">{{ t("gallery.sub.missing") }}</h3>
       <div class="composition-cards-container">
-        <div class="card-final card-sliced">
-          <div class="info-column">
-            <div class="card-title-block">
-              <span class="card-title">{{ RICK_SLICED_TITLE }}</span>
-              <div class="quality-badge">720p</div>
-            </div>
-            <div class="path-line"><span class="path-pill"><span class="path-pill-label">{{ t("gallery.path.parent") }}</span><span class="path-pill-value">{{ SLICING_SAMPLE.title }}</span></span></div>
-            <div class="path-line"><span class="path-pill"><span class="path-pill-label">{{ t("composition.label.actual") }}</span><span class="path-pill-value">{{ RICK_SLICED_FILE }}</span></span></div>
-          </div>
-          <div class="pills-column">
-            <div class="pill"><i class="pi pi-images"></i><strong>{{ t("gallery.sliced.label") }}</strong></div>
-            <div class="pill"><i class="pi pi-check-circle"></i><span>{{ t("gallery.sliced.onPlace") }}</span></div>
-          </div>
-        </div>
         <div class="card-final card-missing">
           <span class="card-title">{{ t("gallery.missing.label", { code: MISSING_EPISODE }) }}</span>
           <i class="pi pi-eye-slash missing-icon"></i>
@@ -327,35 +311,6 @@ const rtPass = ref("password123")
         </div>
       </div>
 
-      <h3 class="sub">{{ t("gallery.sub.slicing") }}</h3>
-      <div class="slicing-card slicing-card-accent status-success">
-        <div class="slicing-card-header">
-          <strong class="compilation-title">{{ SLICING_SAMPLE.title }}</strong>
-          <div style="display: flex; gap: 8px">
-            <button class="control-btn" :title="t('slicing.check')"><i class="pi pi-search"></i></button>
-            <button class="control-btn text-info" :title="t('slicing.checkFilter')"><i class="pi pi-filter"></i></button>
-            <button class="control-btn text-primary" :title="t('gallery.slicing.cut')"><i class="pi pi-clone"></i></button>
-            <button class="control-btn text-danger" :title="t('gallery.slicing.deleteSource')"><i class="pi pi-trash"></i></button>
-          </div>
-        </div>
-        <div class="slicing-card-body">
-          <div class="chapter-section">
-            <h6>{{ t("slicing.chapters.active", { count: SLICING_SAMPLE.active.length }) }}</h6>
-            <div class="chapter-list">
-              <span v-for="c in SLICING_SAMPLE.active" :key="c" class="chapter-pill chapter-active">{{ c }}</span>
-            </div>
-          </div>
-          <div class="chapter-section">
-            <h6>{{ t("slicing.chapters.garbage", { count: SLICING_SAMPLE.garbage.length }) }}</h6>
-            <div class="chapter-list">
-              <span v-for="c in SLICING_SAMPLE.garbage" :key="c" class="chapter-pill chapter-garbage">{{ c }} <i class="pi pi-times-circle"></i></span>
-            </div>
-          </div>
-        </div>
-        <div class="slicing-card-footer card-footer-status">
-          <span>{{ SLICING_SAMPLE.status }}</span>
-        </div>
-      </div>
     </section>
 
     <section>
@@ -390,21 +345,6 @@ const rtPass = ref("password123")
               <span v-if="q.speed" class="m-speed">↓{{ q.speed }}</span>
               <span v-if="q.remux" class="m-size">remux</span>
               <span class="m-eta">ETA {{ q.eta }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <h3 class="sub">{{ t("agents.slicing.title") }}</h3>
-      <div class="composition-cards-container">
-        <div v-for="q in QUEUE_SLICING" :key="q.title" class="card-final card-queue">
-          <div class="queue-row">
-            <span class="queue-title">{{ q.title }}</span>
-            <div class="pill pill-info">{{ stateLabel(q.status) }}</div>
-          </div>
-          <div class="queue-row">
-            <div class="progress">
-              <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: (q.done / q.total * 100) + '%' }">{{ t("gallery.queue.chapters", { done: q.done, total: q.total }) }}</div>
             </div>
           </div>
         </div>

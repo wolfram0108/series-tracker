@@ -24,9 +24,6 @@ export interface ConformPicture {
   tasks: ConformTask[]
 }
 
-/** A task of the slicing of a compilation, with its episodes (core/contracts/slicing.py). */
-export type SlicingCard = components["schemas"]["SlicingCard"]
-
 /** A container a sync builds (pack_queue_update, core/contracts/packing.py). */
 export type PackCard = components["schemas"]["PackCard"]
 /** The journal of a series being carried out (pack_journal_update, core/contracts/packing.py). */
@@ -39,7 +36,6 @@ export const useQueuesStore = defineStore("queues", () => {
   const agent = shallowRef<QueueTask[]>([]) // agent_queue_update (its tasks have a hash)
   const torrents = shallowRef<QueueTask[]>([]) // torrent_progress_update (the monitor)
   const downloads = shallowRef<DownloadCard[]>([]) // download_queue_update: the cards of the downloads (core/contracts/downloads.py)
-  const slicing = shallowRef<SlicingCard[]>([]) // slicing_queue_update: the cards of the slicing (core/contracts/slicing.py)
   const conform = shallowRef<ConformPicture | null>(null) // conform_queue_update (alignment daemon)
   const pack = shallowRef<PackCard[]>([]) // pack_queue_update (the containers of the episodes)
   const journals = shallowRef<PackJournal[]>([]) // pack_journal_update (the journals being carried out)
@@ -47,11 +43,10 @@ export const useQueuesStore = defineStore("queues", () => {
   const setAgent = (t: QueueTask[]) => (agent.value = t)
   const setTorrents = (t: QueueTask[]) => (torrents.value = t)
   const setDownloads = (t: DownloadCard[]) => (downloads.value = t)
-  const setSlicing = (t: SlicingCard[]) => (slicing.value = t)
   const setConform = (p: ConformPicture) => (conform.value = p)
   const setPack = (t: PackCard[]) => (pack.value = t)
   const setJournals = (t: PackJournal[]) => (journals.value = t)
 
-  return { agent, torrents, downloads, slicing, conform, pack, journals, setAgent, setTorrents, setDownloads, setSlicing,
-    setConform, setPack, setJournals }
+  return { agent, torrents, downloads, conform, pack, journals, setAgent, setTorrents, setDownloads, setConform, setPack,
+    setJournals }
 })

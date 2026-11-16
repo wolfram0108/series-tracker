@@ -4,20 +4,20 @@ import { dubRows, formatDuration, isActive, resultMetrics, splitTitle, verdictOf
 import type { SourceMark } from "./output"
 import { phaseText, placeOf } from "./sources"
 import {
-  CONFORM_DUB_STATES, CONFORM_JOB_STATES, DOWNLOAD_STAGES, DOWNLOAD_STATES, PACK_STAGES, PACK_STATES, QBIT_STATES, SLICING_STATES,
+  CONFORM_DUB_STATES, CONFORM_JOB_STATES, DOWNLOAD_STAGES, DOWNLOAD_STATES, PACK_STAGES, PACK_STATES, QBIT_STATES,
   TORRENT_STAGES, capital, stateLabel, stateOf, stateWord, type StateName,
 } from "./states"
-import type { ConformTask, DownloadCard, PackCard, PackJournal, QueueTask, SlicingCard } from "../stores/queues"
+import type { ConformTask, DownloadCard, PackCard, PackJournal, QueueTask } from "../stores/queues"
 import type { SeriesRead } from "../stores/seriesReads"
 
 /**
- * One card of the work of an agent (the section «Агенты»): every agent — a download, an alignment, a packing, a slicing,
+ * One card of the work of an agent (the section «Агенты»): every agent — a download, an alignment, a packing,
  * the processing of a torrent, its monitor, the read of a page — is told to the window in this one form, and one component
  * draws it (components/settings/WorkCard.vue). The parts are the same in every card: the series it belongs to, the state
  * with its word and colour (lib/states.ts), the stages, the facts, the progress, the rows of what the work holds, the
  * log of attempts, the foot of the times. A card has the series it is of: the section filters by it.
  */
-export type WorkKind = "download" | "conform" | "pack" | "journal" | "slicing" | "processing" | "monitor" | "read"
+export type WorkKind = "download" | "conform" | "pack" | "journal" | "processing" | "monitor" | "read"
 export type StepState = "done" | "active" | "pending" | "failed" | "skipped"
 export type CellKind = "kept" | "new" | "own" | "gone" | "done" | "active" | "pending" | "failed"
 
@@ -278,23 +278,6 @@ export function conformWork(task: ConformTask, nameOf: (file: string) => string)
         : fact(t("agents.conform.elapsedLabel"), formatDuration(task.elapsed_s || 0))),
       ...fact(t("work.job"), task.id.slice(0, 8)),
     ],
-  }
-}
-
-// --- the slicing of a compilation ------------------------------------------------------------------------------------
-
-export function slicingWork(card: SlicingCard): WorkView {
-  const episodes = card.episodes ?? []
-  const cut = episodes.filter((each) => each.state === "done").length
-  return {
-    id: `slicing:${card.id}`, ref: String(card.id), kind: "slicing", seriesId: card.series_id, seriesName: "",
-    episode: slotLabel(card.season, card.episode_start, card.episode_end), what: t("work.kind.compilation"),
-    state: stateOf(SLICING_STATES, card.status) ?? "planned",
-    steps: [], cells: episodes.map((each) => ({ n: each.number, kind: each.state as CellKind })),
-    facts: [...fact(t("common.episodes"), t("download.value.of", { done: cut, all: episodes.length })), ...fact(t("work.label.source"), card.file)],
-    ...(card.status === "slicing" ? { bar: { percent: percentOf(cut, episodes.length) } } : {}),
-    rows: [], log: [], ...(card.error ? { note: reasonText(card.error) } : {}),
-    foot: fact(t("download.label.queuedAt"), clock(card.created_at ? `${card.created_at.replace(" ", "T")}Z` : "")),
   }
 }
 

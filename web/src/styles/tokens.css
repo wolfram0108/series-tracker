@@ -73,7 +73,6 @@
   --state-build: var(--state-pack); --state-build-end: var(--state-pack-end); --state-build-ink: #fff;
   --state-verify: var(--state-pack); --state-verify-end: var(--state-pack-end); --state-verify-ink: #fff;
   --state-apply: var(--state-pack); --state-apply-end: var(--state-pack-end); --state-apply-ink: #fff;
-  --state-slice: #fd7e14; --state-slice-end: color-mix(in srgb, #fd7e14 85%, black); --state-slice-ink: #fff;
   --state-read: #4fb3d9; --state-read-end: #3a9cc1; --state-read-ink: #fff;
   --state-sync: #cf9772; --state-sync-end: #bd8561; --state-sync-ink: #fff;
   --state-readDone: var(--state-done); --state-readDone-end: var(--state-done-end); --state-readDone-ink: #fff;

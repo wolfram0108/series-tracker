@@ -119,7 +119,6 @@
 .layer-ready      { z-index: 2; }
 .layer-downloading{ z-index: 3; }
 .layer-queued     { z-index: 4; }
-.layer-slicing    { z-index: 5; }
 .layer-aligning   { z-index: 6; }
 .layer-packing    { z-index: 7; }
 .layer-activating { z-index: 8; }

@@ -68,7 +68,7 @@ describe("the agents", () => {
     expect(seriesOfCards(w, "download")).toEqual(["46", "46", "50"])
     expect(seriesOfCards(w, "pack")).toEqual(["50"])
     expect(seriesOfCards(w, "conform")).toEqual(["46", null])
-    expect(sectionOf(w, "slicing").text()).toContain(t("agents.empty"))
+    expect(sectionOf(w, "read").text()).toContain(t("agents.empty"))
     expect(sectionOf(w, "conform").text()).toContain(t("agents.conform.daemon.up"))
     expect(w.find(".work-card .work-series").text()).toBe("#46")
     expect(w.find(".work-card").text()).toContain("Повелитель")
@@ -128,9 +128,9 @@ describe("the agents", () => {
   it("does not say a queue is empty before the stream that brings the queues is up", async () => {
     sse.live!.value = false
     const w = mountPanel()
-    expect(sectionOf(w, "slicing").find(".queue-empty").text()).toBe(t("common.fetching"))
+    expect(sectionOf(w, "read").find(".queue-empty").text()).toBe(t("common.fetching"))
     sse.live!.value = true
     await nextTick()
-    expect(sectionOf(w, "slicing").find(".queue-empty").text()).toBe(t("agents.empty"))
+    expect(sectionOf(w, "read").find(".queue-empty").text()).toBe(t("agents.empty"))
   })
 })

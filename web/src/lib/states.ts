@@ -34,7 +34,6 @@ export const STATE_ICONS = {
   build: "pi-wrench",
   verify: "pi-verified",
   apply: "pi-check-square",
-  slice: "pi-clone",
   read: "pi-globe",
   sync: "pi-th-large",
   readDone: "pi-table",
@@ -116,7 +115,7 @@ export const CONFORM_DUB_STATES: Readonly<Record<ConformDubState, StateName>> = 
 
 /** A status of a series on its card (modules/catalog/aggregator.py HIERARCHY). */
 export const SERIES_STATES = {
-  error: "failed", scanning: "sync", checking: "checking", slicing: "slice", aligning: "align", packing: "pack",
+  error: "failed", scanning: "sync", checking: "checking", aligning: "align", packing: "pack",
   renaming: "renaming", metadata: "metadata", activating: "activating", downloading: "download", idle: "idle",
   queued: "queued", ready: "done", viewing: "viewing", waiting: "planned",
 } as const satisfies Record<string, StateName>
@@ -144,9 +143,4 @@ export const QBIT_STATES = {
 export const AVAILABILITY_STATES = {
   idle: "idle", scanning: "sync", pending: "queued", downloading: "download", processing: "download", completed: "done",
   error: "failed", absent: "absent",
-} as const satisfies Record<string, StateName>
-
-/** A task of the slicing of a torrent compilation (modules/slicing: slicing_tasks.status). */
-export const SLICING_STATES = {
-  pending: "queued", slicing: "slice", completed: "done", error: "failed",
 } as const satisfies Record<string, StateName>

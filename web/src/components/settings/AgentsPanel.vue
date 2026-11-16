@@ -8,7 +8,7 @@ import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 import { stateLabel, type StateName } from "../../lib/states"
 import {
-  conformWork, downloadWork, journalWork, monitorWork, packWork, processingWork, readWork, slicingWork, type WorkAction, type WorkView,
+  conformWork, downloadWork, journalWork, monitorWork, packWork, processingWork, readWork, type WorkAction, type WorkView,
 } from "../../lib/work"
 import { useQueuesStore } from "../../stores/queues"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
@@ -46,7 +46,6 @@ const sections = computed<Section[]>(() => [
     views: (q.conform?.tasks ?? []).map((task) => conformWork(task, (file) => voices.dubName(task.id, file))) },
   { key: "pack", icon: "pi-box", title: t("agents.pack.title"), chip: stateLabel("pack"), tone: "pack",
     views: [...q.journals.map(journalWork), ...q.pack.map(packWork)] },
-  { key: "slicing", icon: "pi-clone", title: t("agents.slicing.title"), chip: stateLabel("slice"), tone: "slice", views: q.slicing.map(slicingWork) },
   { key: "processing", icon: "pi-cog", title: t("agents.processing.title"), chip: t("agents.chip.processing"), tone: "renaming",
     views: q.agent.map(processingWork) },
   { key: "monitor", icon: "pi-wifi", title: t("agents.torrents.title"), chip: t("agents.chip.torrents"), tone: "download",

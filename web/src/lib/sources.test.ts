@@ -93,7 +93,7 @@ describe("viewOf", () => {
 const layoutRow = (over: Partial<LayoutRow> = {}): LayoutRow => ({
   series_id: 1, source_id: 7, in_output: true, row_key: "r", excluded: false, season: 1, episode_start: 1, episode_end: 1,
   voice_label: "Ruchime", voice_name: "Ruchime", voice_group: null, player: "vk", player_label: "VK", group: "", text: "",
-  heights: [720, 1080], state: "playable", link: "", video: "", stale: false, ...over,
+  heights: [720, 1080], state: "playable", link: "", video: "", timeline: "", stale: false, ...over,
 })
 
 describe("what the source did not give in its last read", () => {

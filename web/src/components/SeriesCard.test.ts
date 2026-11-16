@@ -54,12 +54,12 @@ describe("SeriesCard", () => {
     rooms.mockRestore()
   })
 
-  it("names an open run a sync and gives slicing, alignment and packing a pill and a layer of their own", () => {
-    const working = { ...series, statuses: ["slicing", "aligning", "packing"] } as unknown as Series
+  it("names an open run a sync and gives alignment and packing a pill and a layer of their own", () => {
+    const working = { ...series, statuses: ["aligning", "packing"] } as unknown as Series
     const w = mount(SeriesCard, { props: { series: working } })
     expect(visible(w).sort()).toEqual(
-      ["Выравнивание", "Нарезка", "Упаковка"])
-    for (const layer of ["slicing", "aligning", "packing"]) {
+      ["Выравнивание", "Упаковка"])
+    for (const layer of ["aligning", "packing"]) {
       expect(w.find(`.layer-${layer}`).attributes("style")).not.toContain("width: 0%")
     }
     expect(w.find(".layer-downloading").attributes("style")).toContain("width: 0%")

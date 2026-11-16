@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
-import type { ConformResult, ConformTask, DownloadCard, PackCard, QueueTask, SlicingCard } from "../stores/queues"
+import type { ConformResult, ConformTask, DownloadCard, PackCard, QueueTask } from "../stores/queues"
 import { t } from "../i18n"
 import { PACK_STATES, capital, stateLabel, stateWord } from "./states"
 import {
-  conformWork, downloadWork, journalWork, monitorWork, packWork, processingWork, readWork, slicingWork, slotLabel,
+  conformWork, downloadWork, journalWork, monitorWork, packWork, processingWork, readWork, slotLabel,
 } from "./work"
 
 const cvh = { source_id: 55, source_n: 1, source_color: 0, place: "old.yummyani.me", player: "cvh", player_label: "CVH", height: 1080 }
@@ -151,30 +151,10 @@ describe("the work of an alignment", () => {
   })
 })
 
-const slicing = (over: Partial<SlicingCard> = {}): SlicingCard => ({
-  id: 3, series_id: 40, unique_id: "comp1", status: "slicing", file: "Lord.S01.mkv", season: 1, episode_start: 11, episode_end: 13,
-  episodes: [{ number: 11, state: "done" }, { number: 12, state: "active" }, { number: 13, state: "pending" }],
-  error: null, created_at: "2026-11-13 08:38:12.000000", ...over,
-})
-
-describe("the work of a slicing", () => {
-  it("writes the compilation by its episodes and shows each cut, with the share cut", () => {
+describe("the label of a slot", () => {
+  it("writes an episode and a range of episodes of a season", () => {
     expect(slotLabel(1, 11, 13)).toBe("s01e11–e13")
     expect(slotLabel(2, 5, 5)).toBe("s02e05")
-    const view = slicingWork(slicing())
-    expect([view.kind, view.seriesId, view.episode, view.what, view.state]).toEqual(["slicing", 40, "s01e11–e13", t("work.kind.compilation"), "slice"])
-    expect(view.cells.map((cell) => [cell.n, cell.kind])).toEqual([[11, "done"], [12, "active"], [13, "pending"]])
-    expect(view.bar).toEqual({ percent: 33 })
-    expect(view.facts[0].value).toBe("1 из 3")
-  })
-
-  it("a task that stopped says on which episode, and a task that waits has no progress", () => {
-    const failed = slicingWork(slicing({ status: "error", episodes: [{ number: 11, state: "done" }, { number: 12, state: "failed" }, { number: 13, state: "pending" }],
-      error: '{"code":"slicing_ffmpeg_failed","episode":12,"detail":"битый поток"}' }))
-    expect(failed.state).toBe("failed")
-    expect(failed.note).toContain("12")
-    expect(failed.cells[1].kind).toBe("failed")
-    expect(slicingWork(slicing({ status: "pending" })).bar).toBeUndefined()
   })
 })
 

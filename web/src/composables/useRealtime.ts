@@ -1,7 +1,7 @@
 import { watch } from "vue"
 import { useSSE } from "./useSSE"
 import { useSeriesStore, type Series, type SeriesDelta } from "../stores/series"
-import { useQueuesStore, type ConformPicture, type DownloadCard, type PackCard, type PackJournal, type QueueTask, type SlicingCard } from "../stores/queues"
+import { useQueuesStore, type ConformPicture, type DownloadCard, type PackCard, type PackJournal, type QueueTask } from "../stores/queues"
 import { useScannerStore, type ScannerStatus } from "../stores/scanner"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import { useSeriesReadsStore } from "../stores/seriesReads"
@@ -41,7 +41,6 @@ export function setupRealtime(): void {
   sse.on("agent_queue_update", (d) => queues.setAgent(d as QueueTask[]))
   sse.on("torrent_progress_update", (d) => queues.setTorrents(d as QueueTask[]))
   sse.on("download_queue_update", (d) => queues.setDownloads(d as DownloadCard[]))
-  sse.on("slicing_queue_update", (d) => queues.setSlicing(d as SlicingCard[]))
   sse.on("conform_queue_update", (d) => queues.setConform(d as ConformPicture))
   sse.on("pack_queue_update", (d) => queues.setPack(d as PackCard[]))
   sse.on("pack_journal_update", (d) => queues.setJournals(d as PackJournal[]))

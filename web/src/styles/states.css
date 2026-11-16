@@ -23,7 +23,6 @@
 [data-state="build"] { --tone: var(--state-build); --tone-end: var(--state-build-end); --tone-ink: var(--state-build-ink); }
 [data-state="verify"] { --tone: var(--state-verify); --tone-end: var(--state-verify-end); --tone-ink: var(--state-verify-ink); }
 [data-state="apply"] { --tone: var(--state-apply); --tone-end: var(--state-apply-end); --tone-ink: var(--state-apply-ink); }
-[data-state="slice"] { --tone: var(--state-slice); --tone-end: var(--state-slice-end); --tone-ink: var(--state-slice-ink); }
 [data-state="read"] { --tone: var(--state-read); --tone-end: var(--state-read-end); --tone-ink: var(--state-read-ink); }
 [data-state="sync"] { --tone: var(--state-sync); --tone-end: var(--state-sync-end); --tone-ink: var(--state-sync-ink); }
 [data-state="readDone"] { --tone: var(--state-readDone); --tone-end: var(--state-readDone-end); --tone-ink: var(--state-readDone-ink); }

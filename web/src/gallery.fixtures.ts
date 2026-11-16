@@ -18,16 +18,7 @@ export const RICK_TEST_APPLIED = "Рик и Морти 7 сезон 1 серия
 export const RICK_TEST_EXCLUDED = "Рик и Морти 7 сезон [трейлер]"
 export const EXCLUDED_BY_RULE = "правило «трейлер»"
 export const RICK_COMPILATION = "Рик и Морти 7 сезон [компиляция].mkv"
-export const RICK_SLICED_TITLE = "Рик и Морти s07e03"
-export const RICK_SLICED_FILE = "Рик и Морти s07e03.mkv"
 export const MISSING_EPISODE = "s07e05"
-
-export const SLICING_SAMPLE = {
-  title: RICK_COMPILATION,
-  active: ["00:00 (s07e01)", "22:14 (s07e02)", "44:30 (s07e03)"],
-  garbage: ["00:00 (Интро)", "21:50 (Реклама блогера)"],
-  status: "Готово к нарезке: 3 главы",
-}
 
 export const ROWS: { name: string; status: StateName; progress: number }[] = [
   { name: SERIES_FRONT, status: "download", progress: 45 },
@@ -51,10 +42,6 @@ export const QUEUE_DOWNLOAD: {
 }[] = [
   { file: "Рик и Морти s07e01.mp4", status: "download", cls: "pill-primary", progress: 62, speed: "2.1 MB/s", eta: "1:20", remux: false },
   { file: "Извне s01e04.mp4", status: "remux", cls: "pill-info", progress: 90, speed: "", eta: "0:10", remux: true },
-]
-
-export const QUEUE_SLICING: { title: string; status: StateName; done: number; total: number }[] = [
-  { title: SERIES_RICK, status: "slice", done: 2, total: 5 },
 ]
 
 export const QUEUE_MONITOR: {

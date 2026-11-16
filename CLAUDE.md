@@ -103,7 +103,7 @@ HTTP/SSE-точка; событие шины → SSE по таблице `SSE_MA
 `scan` (оркестратор + расписание) находит раздачи через `sources`
 (kinozal/rutracker/anilibria/VK), применяет `rules`, регистрирует в
 `torrents` (qBit) или ставит VK-загрузки в `downloads` (yt-dlp). Готовый
-файл: `slicing` → `renaming` → `library`. `catalog` агрегирует вклады
+файл: `renaming` → `library`. `catalog` агрегирует вклады
 статусов. `gateway` транслирует события в SSE и HTTP — в queries/commands
 (бизнес-логики в gateway нет).
 

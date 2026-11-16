@@ -25,7 +25,7 @@ const ok = <T>(data: T): Answer<T> => ({ ok: true, data })
 const row = (over: Partial<Row> = {}): Row => ({
   series_id: 1, source_id: 7, in_output: true, row_key: "row", excluded: false, season: 1, episode_start: 2, episode_end: 2,
   voice_label: "Ruchime", voice_name: "Ruchime", player: "vibix", player_label: "", group: "", text: "",
-  heights: [1080], state: "playable", link: "", video: "", stale: false, ...over,
+  heights: [1080], state: "playable", link: "", video: "", timeline: "", stale: false, ...over,
 })
 const reference = (over: Partial<Reference> = {}): Reference => ({
   season: 1, episode: 2, part: null, mark: "by_level", source_id: 7, row_key: "row", player: "vibix",

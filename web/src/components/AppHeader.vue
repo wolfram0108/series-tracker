@@ -21,7 +21,6 @@ defineEmits<{ (e: "add"): void; (e: "logs"): void; (e: "extensions"): void; (e: 
       <div class="agent-indicators">
         <div class="indicator" :class="{ 'ind-active': ind.monitoring }" :title="t('agents.torrents.title')"></div>
         <div class="indicator ind-small" :class="{ 'ind-active': ind.downloader }" :title="t('download.title')"></div>
-        <div class="indicator ind-small" :class="{ 'ind-active': ind.slicing }" :title="t('agents.slicing.title')"></div>
       </div>
     </div>
     <div class="header-actions">

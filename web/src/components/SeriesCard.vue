@@ -19,7 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const layerHierarchy = [
-  "waiting", "ready", "downloading", "queued", "slicing", "aligning", "packing", "activating",
+  "waiting", "ready", "downloading", "queued", "aligning", "packing", "activating",
   "checking", "renaming", "metadata", "scanning", "viewing", "error",
 ]
 // A status of the series is a state of the vocabulary (lib/states.ts): its word, its icon, its colour; `scanning` is an
@@ -64,8 +64,7 @@ const animationClass = computed(() => {
     if (["error", "ready"].includes(s[0])) return "stripes-stopped"
     if (["waiting", "viewing"].includes(s[0])) return "stripes-slow"
   }
-  const stillActive = ["scanning", "checking", "activating", "renaming", "metadata", "downloading", "slicing", "aligning",
-    "packing"]
+  const stillActive = ["scanning", "checking", "activating", "renaming", "metadata", "downloading", "aligning", "packing"]
   if ((s.includes("idle") || s.includes("queued")) && !s.some((x) => stillActive.includes(x)))
     return "stripes-stopped"
   return "stripes-normal"

@@ -14,7 +14,7 @@ type Schemas = components["schemas"]
 const row = (over: Partial<Row> = {}): Row => ({
   series_id: 1, source_id: 7, in_output: true, row_key: "row", excluded: false, season: 1, episode_start: 1, episode_end: 1,
   voice_label: "Ruchime", voice_name: "Ruchime", player: "vibix", player_label: "", group: "", text: "",
-  heights: [1080], state: "playable", link: "", video: "", stale: false, ...over,
+  heights: [1080], state: "playable", link: "", video: "", timeline: "", stale: false, ...over,
 })
 const ref = (season: number, episode: number, over: Partial<Reference> = {}): Reference =>
   ({ season, episode, part: null, mark: "by_level", source_id: null, row_key: null, player: null, voice_group: null, height: null,

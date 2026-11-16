@@ -5,7 +5,6 @@ import ModalShell from "./ModalShell.vue"
 import StatusProperties from "./status/StatusProperties.vue"
 import StatusComposition from "./status/StatusComposition.vue"
 import StatusOutput from "./status/StatusOutput.vue"
-import StatusSlicing from "./status/StatusSlicing.vue"
 import StatusHistory from "./status/StatusHistory.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
 import AgentsPanel from "./settings/AgentsPanel.vue"
@@ -37,7 +36,7 @@ const saveLabel = computed(() =>
   saving.value ? t("common.saving") : syncing.value ? t("status.syncing") : t("common.save"))
 const isVideo = computed(() => series.value?.kind === "video")
 
-type TabKey = "properties" | "composition" | "slicing" | "parser" | "agents" | "history"
+type TabKey = "properties" | "composition" | "parser" | "agents" | "history"
 const tab = ref<TabKey>("properties")
 // A tab is built when it is first shown and kept from then on: a window opened on one tab neither builds the others
 // (the output of a long series is thousands of elements) nor asks the core for what they show.
@@ -45,10 +44,10 @@ const built = ref(new Set<TabKey>([tab.value]))
 const tabs = computed(() => {
   const list = [{ value: "properties" as TabKey, label: t("status.tab.properties"), icon: "pi-info-circle" }]
   list.push({ value: "composition", label: isVideo.value ? t("output.tab") : t("status.tab.composition"), icon: "pi-sitemap" })
-  if (isVideo.value) list.push({ value: "slicing", label: t("status.tab.slicing"), icon: "pi-images" })
   list.push({ value: "parser", label: t("rules.tab"), icon: "pi-filter" })
   list.push({ value: "agents", label: t("status.tab.agents"), icon: "pi-server" })
-  list.push({ value: "history", label: t("status.tab.history"), icon: "pi-history" })
+  // The history of a torrent series is its releases; a video series has its sources and its plan instead.
+  if (!isVideo.value) list.push({ value: "history", label: t("status.tab.history"), icon: "pi-history" })
   return list
 })
 
@@ -128,19 +127,13 @@ onMounted(load)
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
       />
-      <StatusSlicing
-        v-if="isVideo && built.has('slicing')"
-        v-show="tab === 'slicing'"
-        :series-id="seriesId"
-        :series-name="String(series.name ?? '')"
-      />
       <SettingsParser
         v-if="built.has('parser')"
         v-show="tab === 'parser'"
         :load-sources="isVideo ? sourceAddresses : undefined"
       />
       <AgentsPanel v-if="built.has('agents')" v-show="tab === 'agents'" :series-id="seriesId" />
-      <StatusHistory v-if="built.has('history')" v-show="tab === 'history'" :series-id="seriesId" :kind="series.kind ?? 'torrent'" />
+      <StatusHistory v-if="!isVideo && built.has('history')" v-show="tab === 'history'" :series-id="seriesId" />
     </template>
 
     <template #footer>
