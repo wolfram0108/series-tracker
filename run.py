@@ -31,6 +31,7 @@ from assembly import Options, assemble
 from core import Bus, Envelope, Runner
 from core.db import Database
 from core.logging import configure, get_logger
+from core.schema import require_head
 from modules.sources.players.alloha_session import profile_of as alloha_profile_of
 
 configure()
@@ -42,6 +43,8 @@ read_recent = int(os.environ["ST_READ_RECENT"]) if os.environ.get("ST_READ_RECEN
 if read_recent is not None and os.environ.get("ST_STAND") != "1":
     # A table cut to the newest episodes drops the older ones from the plan, and their files with them.
     raise RuntimeError("ST_READ_RECENT limits what a site is read for and belongs to a stand only: it starts with ST_STAND=1")
+# The code runs only on the schema its migrations make: a restart before `alembic upgrade head` stops here with what to do.
+require_head(db_path)
 db = Database(db_path)
 
 # Ключ подписи сессионной куки входа: стабильный из .env, иначе сессии
