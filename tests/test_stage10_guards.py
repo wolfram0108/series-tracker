@@ -1156,6 +1156,7 @@ def test_a_request_without_a_fuse_of_its_own_and_a_wait_of_something_else_pass(t
             async def one(self):
                 await self.request("settings.value.get", {})
                 await self.client.get("http://x", timeout=10)
+                await (self.other or self.http).request(method, "http://x", headers={}, timeout=REQUEST_TIMEOUT_S)
     """})
     assert not bus_deadlines.check_deadlines(root).violations
 

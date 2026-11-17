@@ -1162,6 +1162,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/torrent_staging": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Torrent Staging
+         * @description The folder the releases of the torrent sources download into (torrents): {value} both ways; a value the module
+         *     refuses is 400 with its reason.
+         */
+        get: operations["torrent_staging_api_settings_torrent_staging_get"];
+        put?: never;
+        /**
+         * Torrent Staging
+         * @description The folder the releases of the torrent sources download into (torrents): {value} both ways; a value the module
+         *     refuses is 400 with its reason.
+         */
+        post: operations["torrent_staging_api_settings_torrent_staging_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/saved_paths": {
         parameters: {
             query?: never;
@@ -2017,6 +2043,11 @@ export interface components {
              * @default false
              */
             excluded: boolean;
+            /**
+             * In Order
+             * @default false
+             */
+            in_order: boolean;
         };
         /**
          * AttemptLine
@@ -4544,7 +4575,7 @@ export interface components {
         /** StreamEvent */
         StreamEvent: {
             /** @enum {string} */
-            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "torrent_release_update" | "torrent_editor_update" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_read_progress" | "conform_queue_update" | "pack_queue_update" | "pack_journal_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "conform_settings_update" | "provider_update" | "relocation_started" | "relocation_finished";
+            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "torrent_release_update" | "torrent_editor_update" | "torrent_read_update" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_read_progress" | "conform_queue_update" | "pack_queue_update" | "pack_journal_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "conform_settings_update" | "provider_update" | "relocation_started" | "relocation_finished";
             data: unknown;
         };
     };
@@ -7648,6 +7679,118 @@ export interface operations {
         };
     };
     sources_term_api_settings_sources_term_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DynamicObject"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    torrent_staging_api_settings_torrent_staging_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DynamicObject"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    torrent_staging_api_settings_torrent_staging_post: {
         parameters: {
             query?: never;
             header?: never;

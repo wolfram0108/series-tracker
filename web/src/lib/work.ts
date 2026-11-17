@@ -5,7 +5,7 @@ import type { SourceMark } from "./output"
 import { phaseText, placeOf } from "./sources"
 import {
   CONFORM_DUB_STATES, CONFORM_JOB_STATES, DOWNLOAD_STAGES, DOWNLOAD_STATES, PACK_STAGES, PACK_STATES, QBIT_STATES,
-  TORRENT_STAGES, capital, stateLabel, stateOf, stateWord, type StateName,
+  RELEASE_CODES, TORRENT_STAGES, capital, stateLabel, stateOf, stateWord, type StateName,
 } from "./states"
 import type { ConformTask, DownloadCard, PackCard, PackJournal, QueueTask } from "../stores/queues"
 import type { SeriesRead } from "../stores/seriesReads"
@@ -305,6 +305,7 @@ export function processingWork(task: QueueTask): WorkView {
 const MIB = 1024 * 1024
 /** A torrent in qBittorrent: how far it is, how fast, how long it takes still. */
 export function monitorWork(task: QueueTask): WorkView {
+  if (task.kind === "release") return releaseWork(task)
   const status = str(task.status)
   const progress = Number(task.progress) || 0
   const state = stateOf(QBIT_STATES, status) ?? "planned"
@@ -319,6 +320,22 @@ export function monitorWork(task: QueueTask): WorkView {
       ...(state === "download" && eta > 0 && eta < 8640000 ? fact(t("download.label.left"), duration(eta)) : []),
     ],
     ...(progress > 0 || state === "download" ? { bar: { percent: progress } } : {}),
+    rows: [], log: [], ...(task.error_message ? { note: reasonText(str(task.error_message)) } : {}), foot: [],
+  }
+}
+/** A release of a torrent source the client works on (torrents.progress.changed, kind «release»): its wanted files and how
+ *  far they are, one card per series with the page. */
+function releaseWork(task: QueueTask): WorkView {
+  const state = stateOf(RELEASE_CODES, str(task.status)) ?? "planned"
+  const done = Number(task.files_done) || 0
+  const total = Number(task.files_total) || 0
+  return {
+    id: `monitor:${str(task.qb_hash) || str(task.url)}:${str(task.series_id)}`, ref: str(task.qb_hash), kind: "monitor",
+    seriesId: Number(task.series_id) || null, seriesName: str(task.series_name), episode: "",
+    what: str(task.title) || placeOf(str(task.url)), state, steps: [], cells: [],
+    facts: [...fact(t("work.label.source"), placeOf(str(task.url))),
+      ...(total ? fact(t("work.label.files"), t("download.value.of", { done, all: total })) : [])],
+    ...(state === "download" || state === "update" ? { bar: { percent: Number(task.progress) || 0 } } : {}),
     rows: [], log: [], ...(task.error_message ? { note: reasonText(str(task.error_message)) } : {}), foot: [],
   }
 }

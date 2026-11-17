@@ -165,6 +165,19 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return {"success": True, "value": reply["hours"]}
         return {"value": (await gw.request("sources.term.get", {}))["hours"]}
 
+    @route_per_method(r, "/api/settings/torrent_staging", methods=["GET", "POST"], response_model=DynamicObject,
+                      responses=_ERR1)
+    async def torrent_staging(request: Request):
+        """The folder the releases of the torrent sources download into (torrents): {value} both ways; a value the module
+        refuses is 400 with its reason."""
+        if request.method == "POST":
+            data = await request.json()
+            reply = await gw.request("torrents.staging.set", {"value": data.get("value")})
+            if not reply.get("ok"):
+                return JSONResponse({"error": reply["reason"]}, status_code=400)
+            return {"success": True, "value": reply["value"]}
+        return {"value": (await gw.request("torrents.staging.get", {}))["value"]}
+
     @route_per_method(r, "/api/settings/saved_paths", methods=["GET", "POST", "DELETE"],
                       response_model=DynamicObject)
     async def saved_paths(request: Request):

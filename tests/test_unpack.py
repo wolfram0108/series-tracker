@@ -235,6 +235,17 @@ async def test_the_module_makes_its_preset_reads_a_ready_release_and_answers_the
     assert [each["reading"] for each in editor["view"]["releases"]] == [None]
 
 
+async def test_files_dropped_on_a_season_take_its_episodes_from_the_one_given_in_the_order_sent(bus_stand):
+    torrents, unpack, bus, root = bus_stand
+    ova = ["Bonus/OVA 1.mkv", "Bonus/OVA 2.mkv", "Bonus/OVA 3.mkv"]
+    torrents.releases = [release(ova)]
+    await torrents.request("unpack.assign", {"url": URL, "tab": "files", "items": [item_of("page", p) for p in ova],
+                                             "season": 0, "episode": 4, "episode_last": 9, "in_order": True})
+    editor = await torrents.request("unpack.editor.get", {"url": URL})
+    assert [(e["path"], e["place"], e["by"]) for e in editor["view"]["tabs"]["files"]] == [
+        (path, {"season": 0, "episode": 4 + n, "last": None}, "manual") for n, path in enumerate(ova)]
+
+
 async def test_the_files_of_a_season_every_series_with_the_page_excludes_are_not_downloaded(bus_stand):
     torrents, unpack, bus, root = bus_stand
     downloading = release(["Show/Season 1/Show - 01.mkv", "Show/Season 2/Show - 01.mkv"], state=ReleaseState.DOWNLOADING)
@@ -257,6 +268,23 @@ def test_the_fonts_of_subtitles_are_those_beside_them_else_of_the_nearest_folder
     assert fonts_of(paths, "Show/sub/Shift/E01.ass") == ["Show/sub/Cafe/fonts/a.ttf"]
     assert fonts_of(["Show/Subs/E01.ass", "Show/Fonts/b.otf"], "Show/Subs/E01.ass") == ["Show/Fonts/b.otf"]
     assert fonts_of(["E01.ass"], "E01.ass") == []
+
+
+def test_a_folder_of_subtitles_names_the_fonts_its_files_go_with_and_a_folder_of_a_voice_over_none():
+    paths = ["Show/E01.mkv", "Show/E02.mkv", "Show/sub/Cafe/E01.ass", "Show/sub/Cafe/E02.ass", "Show/sub/Cafe/fonts/a.ttf",
+             "Show/sub/Shift/E01.ass", "Show/Fonts/b.otf", "Show/Audio/JAM/E01.mka"]
+    r = release(paths)
+    places = {"Show/E01.mkv": (1, 1), "Show/E02.mkv": (1, 2), "Show/sub/Cafe/E01.ass": (1, 1), "Show/sub/Cafe/E02.ass": (1, 2),
+              "Show/sub/Shift/E01.ass": (1, 1), "Show/Audio/JAM/E01.mka": (1, 1)}
+    inputs = Inputs(releases=[r], manual={}, folders=[], streams={},
+                    results={"files": numbered(places),
+                             "subtitles": {item_of("page", p): {"subtitle_folder": p.split("/")[2]}
+                                           for p in paths if p.endswith(".ass")},
+                             "voices": {item_of("page", "Show/Audio/JAM/E01.mka"): {"voice_folder": "JAM"}}})
+    view, _rows = compose(inputs)
+    assert [(f["kind"], f["name"], f["fonts"]) for f in view["folders"]] == [
+        ("subtitles", "Cafe", ["Show/sub/Cafe/fonts/a.ttf"]), ("subtitles", "Shift", ["Show/sub/Cafe/fonts/a.ttf"]),
+        ("voice", "JAM", [])]
 
 
 def test_the_editor_tells_the_file_episode_and_stream_of_every_track_and_what_every_video_holds():

@@ -91,12 +91,36 @@ async function removeMirror(index: number) {
   if (tracker) await keep(tracker, mirrorsOf(tracker).filter((_, at) => at !== index))
 }
 
-onMounted(gate.run)
+// The folder of the releases of the torrent sources (torrents.staging_dir): written when the field is left or Enter is pressed;
+// the module refuses a path that is not absolute, and the field shows again what it holds. No module of torrents, no field.
+const staging = ref<string | null>(null)
+const stagingHeld = ref("")
+async function loadStaging(): Promise<void> {
+  const got = await api.GET("/api/settings/torrent_staging").catch(() => null)
+  const value = (got?.data as { value?: string } | undefined)?.value
+  if (typeof value === "string") staging.value = stagingHeld.value = value
+}
+async function commitStaging(): Promise<void> {
+  const value = (staging.value ?? "").trim()
+  if (staging.value === null || value === stagingHeld.value) return
+  const saved = await request(api.POST("/api/settings/torrent_staging", { body: { value } }),
+    { errorMessage: t("settings.sources.staging.saveFailed") }) as { value?: string } | null
+  if (saved?.value !== undefined) stagingHeld.value = saved.value
+  staging.value = stagingHeld.value
+}
+
+onMounted(() => { void gate.run(); void loadStaging() })
 </script>
 
 <template>
   <LoadGate :state="gate.state.value" :rows="2" :fields="1" @retry="gate.run">
     <div class="sheet settings-sources">
+      <SheetRow v-if="staging !== null" class="sources-staging" :caption="t('settings.sources.staging.title')">
+        <SheetField :label="t('settings.sources.staging.label')" icon="pi pi-folder" @focusout="commitStaging">
+          <StInput v-model="staging" @keyup.enter="commitStaging" />
+        </SheetField>
+        <p class="sheet-hint">{{ t("settings.sources.staging.hint") }}</p>
+      </SheetRow>
       <SheetRow class="sources-editor" :caption="t('settings.sources.trackers')">
         <SheetField :label="t('settings.sources.tracker')" icon="pi pi-wifi">
           <StSelect :model-value="selected" :options="options" :placeholder="t('settings.sources.select')" @update:model-value="choose($event as number | null)" />

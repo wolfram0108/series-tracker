@@ -182,6 +182,17 @@ describe("the work of a torrent", () => {
     expect([broken.state, broken.note]).toEqual(["failed", t("reason.qbt_error")])
     expect(monitorWork({ ...task, status: "somethingNew" }).word).toBe("somethingNew")
   })
+
+  it("the monitor tells a release of a torrent source by its title, page and wanted files, one card per series", () => {
+    const task: QueueTask = { kind: "release", qb_hash: "ab12", url: "https://kinozal.tv/details.php?id=7", release: "page",
+      title: "Сериал / WEB-DL", series_id: 46, series_name: "Повелитель", status: "updating", progress: 37.5, files_done: 2, files_total: 4 }
+    const view = monitorWork(task)
+    expect([view.id, view.seriesId, view.state, view.what, view.bar]).toEqual(
+      ["monitor:ab12:46", 46, "update", "Сериал / WEB-DL", { percent: 37.5 }])
+    expect(view.facts).toContainEqual({ key: t("work.label.files"), value: t("download.value.of", { done: 2, all: 4 }) })
+    const failed = monitorWork({ ...task, status: "failed", error_message: '{"code":"qbt_error"}' })
+    expect([failed.state, failed.bar, failed.note]).toEqual(["failed", undefined, t("reason.qbt_error")])
+  })
 })
 
 describe("the work of a read of a page", () => {

@@ -3,6 +3,7 @@ import type { CutState } from "./compilations"
 import type { DubState as ConformDubState } from "./conform"
 import type { EpisodeStatus, TrackState } from "./output"
 import type { SourceState } from "./sources"
+import type { SourceStage } from "./torrent"
 
 /**
  * The vocabulary of states (docs/interface_vocabulary.md): every state the window shows has one word (`state.<name>`
@@ -46,6 +47,10 @@ export const STATE_ICONS = {
   moving: "pi-arrow-right",
   idle: "pi-pause",
   viewing: "pi-eye",
+  notLoaded: "pi-cloud-download",
+  unpack: "pi-folder-open",
+  update: "pi-refresh",
+  archived: "pi-history",
 } as const
 
 export type StateName = keyof typeof STATE_ICONS
@@ -143,4 +148,15 @@ export const QBIT_STATES = {
 export const AVAILABILITY_STATES = {
   idle: "idle", scanning: "sync", pending: "queued", downloading: "download", processing: "download", completed: "done",
   error: "failed", absent: "absent",
+} as const satisfies Record<string, StateName>
+
+/** The release of a torrent source (lib/torrent.ts sourceState). */
+export const RELEASE_STATES: Readonly<Record<SourceStage, StateName>> = {
+  notLoaded: "notLoaded", download: "download", read: "unpack", ready: "done", update: "update", failed: "failed",
+  archived: "archived",
+}
+
+/** A release of a torrent source as the module torrents keeps it (core/contracts/torrent.py ReleaseState). */
+export const RELEASE_CODES = {
+  metadata: "metadata", downloading: "download", ready: "done", updating: "update", failed: "failed", archived: "archived",
 } as const satisfies Record<string, StateName>

@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.contracts import RowState, RowTrack, RowVoice, TableRow
-from core.contracts.torrent import (EditorTab, FileKind, ReleaseState, ReleaseView, episode_word, files_line, kind_of,
-                                    player_of, stream_line, track_file_line, track_link)
+from core.contracts.torrent import (EditorTab, FileKind, ReleaseState, ReleaseView, episode_word, files_line, fonts_of,
+                                    kind_of, player_of, stream_line, track_file_line, track_link)
 from core.reasons import reason
 
 KEYS_SEP = "/"
@@ -136,6 +136,9 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                             "unplaced": {tab.value: 0 for tab in EditorTab}, "containers": []}
     rows: list[TableRow] = []
     named: dict[tuple[str, str], dict] = {}  # the folders the layout names: (kind, name) → facts and counts
+    # The fonts a folder of subtitles goes with: those its external files are drawn with (fonts_of), by the release read.
+    fonts: dict[str, set[str]] = {}
+    paths_of: dict[str, list[str]] = {r.release: [f.path for f in r.files] for r in inputs.releases}
 
     def track(tab: str, item: str, line: str, kind: str, stream: dict | None, path: str = "",
               where: "Place | str | None" = None) -> dict:
@@ -153,6 +156,9 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                  "place": _place_json(where),
                  "stream": None if stream is None else {key: stream.get(key) for key in _STREAM_KEYS}}
         view["tabs"][tab].append(entry)
+        if folder and not excluded and tab == EditorTab.SUBTITLES and path:
+            owner = next(each for each in paths_of if item.startswith(f"{each}{KEYS_SEP}"))
+            fonts.setdefault(folder, set()).update(fonts_of(paths_of[owner], path))
         if folder and not excluded:
             named.setdefault((folder_kind, folder), {"kind": folder_kind, "name": folder, "items": 0,
                                                      "manual": (folder_kind, folder) in folder_facts,
@@ -235,6 +241,8 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
     for f in inputs.folders:  # the folders the user made, even empty
         named.setdefault((f["kind"], f["name"]), {"kind": f["kind"], "name": f["name"], "items": 0, "manual": True,
                                                   "language": f["language"], "subtitle_type": f["subtitle_type"]})
+    for each in named.values():
+        each["fonts"] = sorted(fonts.get(each["name"], ())) if each["kind"] == "subtitles" else []
     view["folders"] = sorted(named.values(), key=lambda each: (each["kind"], each["name"]))
     return view, rows
 

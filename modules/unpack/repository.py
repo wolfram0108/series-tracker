@@ -40,11 +40,15 @@ class UnpackRepository:
         return self._db.coerce_bools(rows, ("excluded",))
 
     async def assign(self, url: str, tab: str, items: list[str], *, season: int | None = None, episode: int | None = None,
-                     episode_last: int | None = None, folder: str | None = None, excluded: bool = False) -> None:
+                     episode_last: int | None = None, folder: str | None = None, excluded: bool = False,
+                     in_order: bool = False) -> None:
+        """`in_order`: the items in the order given take the episodes from `episode` on, one each."""
         await self._db.execute_many([
             ("INSERT OR REPLACE INTO unpack_assignments (url, tab, item, season, episode, episode_last, folder, excluded) "
-             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (url, tab, item, season, episode, episode_last, folder, int(excluded)))
-            for item in items])
+             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             (url, tab, item, season, episode + number if in_order and episode is not None else episode,
+              None if in_order else episode_last, folder, int(excluded)))
+            for number, item in enumerate(items)])
 
     async def unassign(self, url: str, tab: str, items: list[str]) -> None:
         await self._db.execute_many([("DELETE FROM unpack_assignments WHERE url=? AND tab=? AND item=?", (url, tab, item))

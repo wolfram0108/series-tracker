@@ -24,7 +24,7 @@ async def test_every_point_asks_its_owner_with_the_body_as_it_came(tmp_path):
             assert (await client.post(f"/api/torrent/{point}", json=body)).status_code == 200, point
     assert owners.asked("torrents.release.download") == [{"url": URL, "release": "page"}]
     assert owners.asked("unpack.assign") == [{"url": URL, "tab": "files", "items": ["page/E01.mkv"], "season": 1, "episode": 3,
-                                              "episode_last": None, "folder": None, "excluded": False}]
+                                              "episode_last": None, "folder": None, "excluded": False, "in_order": False}]
     assert owners.asked("unpack.folder.set") == [{"url": URL, "kind": "voice", "name": "JAM", "language": "rus",
                                                   "subtitle_type": ""}]
 

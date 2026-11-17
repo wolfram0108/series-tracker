@@ -29,7 +29,8 @@ function serve(first: object) {
 describe("the tab of the provider of external sources", () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    Object.values(client).forEach((fn) => fn.mockReset())
+    // A call a test does not answer gets an empty answer, as a core that says nothing back, not a missing one.
+    Object.values(client).forEach((fn) => fn.mockReset().mockResolvedValue({}))
   })
   afterEach(() => mounted?.unmount())
 

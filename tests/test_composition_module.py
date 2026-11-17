@@ -224,13 +224,12 @@ async def test_a_page_is_noted_by_the_address_the_sources_module_gave_not_by_the
 
 
 @pytest.mark.asyncio
-async def test_a_torrent_source_is_none_of_the_business_of_the_module(system):
+async def test_a_torrent_source_is_counted_as_any_source_by_the_table_of_its_page(system):
     s = system
-    series_id = await s.counted(lambda: s.catalog.add_series(
-        [source("https://kinozal.tv/details.php?id=1", source_type="torrent")]))
-    assert s.taken(s.changed) == [] and s.taken(s.failed) == [] and s.sources.requests == []
-    assert s.sql("SELECT COUNT(*) FROM composition_state") == [(0,)]
-    assert (await s.get(series_id)).rev == 0
+    torrent = "https://kinozal.tv/details.php?id=1"
+    series_id = await s.counted(lambda: s.catalog.add_series([source(torrent, source_type="torrent")]))
+    assert [request.url for request in s.sources.requests] == [torrent]
+    assert (await s.get(series_id)).sources[0].url == torrent
 
 
 @pytest.mark.asyncio

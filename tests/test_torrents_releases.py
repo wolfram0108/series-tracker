@@ -41,7 +41,8 @@ class World(BaseModule):
         for topic, handler in (("sources.releases.get", self.on_releases), ("sources.torrent_file.get", self.on_file),
                                ("sources.site.resolve", self.on_resolve), ("sources.term.get", self.on_term),
                                ("catalog.series.get", self.on_series), ("catalog.series.list", self.on_list),
-                               ("scan.runs.get", self.on_runs), ("settings.value.get", self.on_setting)):
+                               ("scan.runs.get", self.on_runs), ("settings.value.get", self.on_setting),
+                               ("settings.value.set", self.on_set)):
             self.handle(topic, handler)
 
     async def on_releases(self, env):
@@ -60,13 +61,18 @@ class World(BaseModule):
         return {"id": env.payload["series_id"], "sources": [{"url": u} for u in self.series.get(env.payload["series_id"], [])]}
 
     async def on_list(self, env):
-        return [{"id": sid, "sources": [{"url": u} for u in urls]} for sid, urls in self.series.items()]
+        return [{"id": sid, "name": f"Сериал {sid}", "sources": [{"url": u, "source_type": "torrent"} for u in urls]}
+                for sid, urls in self.series.items()]
 
     async def on_runs(self, env):
         return {"runs": [], "as_of": 0}
 
     async def on_setting(self, env):
         return {"key": env.payload["key"], "value": self.staging}
+
+    async def on_set(self, env):
+        self.staging = env.payload["value"]
+        return env.payload
 
     def lists(self, model: QbitModel, files, *, published: str, link: str, hold: bool = False) -> str:
         meta, h = model.seed(files, hold=hold)
@@ -120,6 +126,36 @@ async def test_a_release_downloads_into_its_folder_and_is_ready_when_every_file_
     assert model.torrents[h].category == "st-source"
     kept = (await world.request("torrents.releases.get", {"url": PAGE}))["releases"]
     assert [(each["release"], each["state"], each["infohash"]) for each in kept] == [("page", "ready", h)]
+
+
+async def test_the_monitor_shows_a_release_the_client_works_on_for_every_series_with_its_page_and_drops_it_once_ready(stand):
+    model, world, torrents, told = stand
+    world.series[2] = [PAGE]
+    h = world.lists(model, release(V1), published="d1", link="L1", hold=True)
+    monitor = torrents.bus.subscribe("torrents.progress.changed")
+    await world.request("torrents.release.download", {"url": PAGE, "release": "page"})
+
+    async def release_tasks(done: bool):
+        while True:
+            tasks = [t for t in (await monitor.queue.get()).payload["tasks"] if t.get("kind") == "release"]
+            if bool(tasks) != done and all(t["files_total"] for t in tasks):
+                return tasks
+    working = await asyncio.wait_for(release_tasks(False), LIMIT_S)
+    assert [(t["series_id"], t["series_name"], t["qb_hash"], t["status"], t["files_total"]) for t in working] == [
+        (1, "Сериал 1", h, "downloading", len(V1)), (2, "Сериал 2", h, "downloading", len(V1))]
+    assert all(0 <= t["progress"] < 100 and t["files_done"] < t["files_total"] for t in working)
+    model.deliver(h)
+    await until(told, "ready")
+    assert await asyncio.wait_for(release_tasks(True), LIMIT_S) == []
+
+
+async def test_the_folder_of_the_releases_is_an_absolute_path_written_to_the_settings(stand):
+    model, world, torrents, told = stand
+    refused = await world.request("torrents.staging.set", {"value": "staging"})
+    assert not refused["ok"] and "staging_dir_not_absolute" in refused["reason"]
+    assert await world.request("torrents.staging.set", {"value": " /nas/staging "}) == {"ok": True, "value": "/nas/staging"}
+    assert world.staging == "/nas/staging"
+    assert await world.request("torrents.staging.get", {}) == {"value": "/nas/staging"}
 
 
 async def test_no_download_begins_without_the_staging_folder_or_for_a_release_the_page_does_not_list(stand):

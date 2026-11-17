@@ -58,7 +58,7 @@ _QUICK = (
     "torrents.db.add", "torrents.db.files.for_series", "torrents.db.history",
     "torrents.queue.get",
     "trackerauth.credentials.get", "trackerauth.credentials.set", "trackerauth.secret.get",
-    "planner.work.get", "planner.delete", "planner.delete.cancel", "planner.failures.forget",
+    "planner.work.get",
     "planner.downloaded_counts", "planner.seasons", "sources.video.fetch.stop",
 )
 
@@ -79,8 +79,6 @@ _FUSES: dict[str, float] = {
     "planner.sync": QUICK_S,
     # A recount asks the rules once for each source of the series: the fuse of the table is for one source.
     "composition.recompute": RULES_S,
-    # A preview reads the table, applies the profile to its lines and asks for the groups of the names, one after another.
-    "composition.preview": SERVICE_S + RULES_S + STANDARD_S,
 }
 
 # A handler that asks others in turn: its own work and the steps it awaits, as the guard reads them from the handler (a step
@@ -103,11 +101,25 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
     "scan.output.switch": (STANDARD_S, ("catalog.series.get",) * 4 + (
         "catalog.series.update", "downloads.queue.get", "composition.get", "voices.settings.get")),
     "scan.status.get": (QUICK_S, ("settings.value.get",) * 3),
-    "torrents.db.progress.list": (QUICK_S, ("catalog.series.get",)),
+    # The monitor names the series of the old pipeline and the series whose torrent source is the page of a release.
+    "torrents.db.progress.list": (QUICK_S, ("catalog.series.get", "catalog.series.list", "sources.site.resolve")),
     "voices.settings.set": (QUICK_S, ("settings.values.set_many", "settings.values.by_prefix", "settings.values.by_prefix",
                                        "sources.players.list")),
     # The order of sources holds every player the sources know.
     "voices.settings.get": (QUICK_S, ("settings.values.by_prefix", "sources.players.list")),
+    # A preview reads the table, applies the profile to its lines and asks for the groups of the names, one after another.
+    "composition.preview": (QUICK_S, ("sources.table.get", "rules.apply", "voices.groups.resolve", "voices.settings.get")),
+    # A lever is checked against the series and the groups of the voice-overs before it is written.
+    "composition.settings.set": (QUICK_S, ("catalog.series.get", "voices.settings.get")),
+    "composition.settings.set_many": (QUICK_S, ("catalog.series.get", "voices.settings.get")),
+    # A deletion and a forgetting are written once the plan of the series is counted again.
+    "planner.delete": (QUICK_S, ("catalog.series.get", "voices.settings.get")),
+    "planner.delete.cancel": (QUICK_S, ("catalog.series.get", "voices.settings.get")),
+    "planner.failures.forget": (QUICK_S, ("catalog.series.get", "voices.settings.get") * 2),
+    # A stop of a sync: the run of the series, the work of its plan and the reads of its pages, one after another.
+    "scan.run.cancel": (QUICK_S, ("catalog.series.get", "planner.sync.cancel", "sources.table.cancel")),
+    # The order of sources lists the players of the pages of every series.
+    "voices.players.get": (QUICK_S, ("catalog.series.list", "sources.players.list")),
 }
 
 # The topics whose request has no fuse of its own (see the top).

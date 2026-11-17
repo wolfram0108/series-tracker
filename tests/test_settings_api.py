@@ -30,11 +30,6 @@ def db_path(tmp_path):
     conn.execute("PRAGMA journal_mode=WAL")  # до конкурентных подключений
     with conn:
         conn.execute(
-            "INSERT INTO trackers (id, canonical_name, display_name, "
-            "mirrors, parser_class, auth_type, ui_features) VALUES "
-            "(1, 'kinozal', 'Kinozal', '[\"kinozal.tv\"]', "
-            "'KinozalParser', 'kinozal', '{}')")
-        conn.execute(
             "INSERT INTO parser_profiles (id, name) VALUES (1, 'Занятый')")
         insert_series(conn, id=1, name="Т", name_en="T", url="http://x", source_type="torrent",
                       parser_profile_id=1)
@@ -183,13 +178,15 @@ async def test_tmdb_wrappers(system):
 async def test_trackers_list_and_mirrors(system):
     _, db, client = system
     resp = await client.get("/api/trackers")
-    assert resp.json()[0]["canonical_name"] == "kinozal"
-    resp = await client.put("/api/trackers/1", json={
+    # A database made by the migrations knows the trackers the service reads (migration 0074).
+    kinozal = next(each for each in resp.json() if each["canonical_name"] == "kinozal")
+    assert {each["canonical_name"] for each in resp.json()} == {"anilibria", "anilibria_tv", "kinozal", "astar", "rutracker"}
+    resp = await client.put(f"/api/trackers/{kinozal['id']}", json={
         "mirrors": ["kinozal.tv", "kinozal.me"]})
     assert resp.json()["success"] is True
     resp = await client.get("/api/trackers")
-    assert resp.json()[0]["mirrors"] == ["kinozal.tv", "kinozal.me"]
-    resp = await client.put("/api/trackers/1", json={})
+    assert next(each for each in resp.json() if each["id"] == kinozal["id"])["mirrors"] == ["kinozal.tv", "kinozal.me"]
+    resp = await client.put(f"/api/trackers/{kinozal['id']}", json={})
     assert resp.status_code == 400
 
 

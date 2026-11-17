@@ -77,8 +77,8 @@ class _LoopServer(uvicorn.Server):
 class UiStand(AppStand):
     """The stand with its interface on HTTP and a browser page; a restart of the process is a restart of its server."""
 
-    def __init__(self, root: str) -> None:
-        super().__init__(root)
+    def __init__(self, root: str, **options) -> None:
+        super().__init__(root, **options)
         self.server: _LoopServer | None = None
 
     async def open(self) -> Page:

@@ -14,7 +14,9 @@ Queries / commands:
       page): a release downloaded for the first time gives none, a release being updated gives its rows not obtained
   unpack.editor.get {url} → {url, profiles: {files, voices, subtitles, streams}, view} — the editor of the page: its releases,
       the items of every tab with their line, their place or folder and what put them there, the folders, what is unplaced
-  unpack.assign {url, tab, items, season?, episode?, episode_last?, folder?, excluded?} — placed by hand (a drag, «Не брать»)
+  unpack.assign {url, tab, items, season?, episode?, episode_last?, folder?, excluded?, in_order?} — placed by hand (a drag,
+      «Не брать»); `in_order`: the items in the order given take the episodes from `episode` on, one each (files dropped on
+      a season)
   unpack.unassign {url, tab, items} — back to what the rules give
   unpack.folder.set {url, kind: voice | subtitles, name, language?, subtitle_type?} / unpack.folder.delete {url, kind, name}
 Events out:
@@ -173,7 +175,8 @@ class UnpackModule(BaseModule):
     async def on_assign(self, env: Envelope) -> None:
         p = env.payload
         await self.repo.assign(p["url"], p["tab"], list(p["items"]), season=p.get("season"), episode=p.get("episode"),
-                               episode_last=p.get("episode_last"), folder=p.get("folder"), excluded=bool(p.get("excluded")))
+                               episode_last=p.get("episode_last"), folder=p.get("folder"), excluded=bool(p.get("excluded")),
+                               in_order=bool(p.get("in_order")))
         self._changed(p["url"])
 
     async def on_unassign(self, env: Envelope) -> None:

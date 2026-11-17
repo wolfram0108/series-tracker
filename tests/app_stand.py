@@ -36,6 +36,7 @@ from core.db import Database
 from alloha_model import PROFILE as ALLOHA_PROFILE, AllohaModel
 from plan_disk import Codec, Daemon, Host, _run
 from plan_world import truth_of
+from qbit_model import QbitModel, magnet_of
 from schema_db import migrated
 from sources_support import Web
 
@@ -184,6 +185,28 @@ class Title:
         return f"https://jszyapi.com/index.php/vod/detail/id/{self.number}.html"
 
 
+@dataclass
+class Tracker:
+    """A page of anilibria as its public API answers it (modules/sources/anilibria.py): the title and one torrent, a magnet
+    of a release the model of qBittorrent is seeded with."""
+
+    alias: str
+    title: str
+    infohash: str
+    episodes: str
+    quality: str = "1080p"
+    updated: str = "2026-11-01T10:00:00+00:00"
+
+    @property
+    def url(self) -> str:
+        return f"https://anilibria.top/anime/releases/release/{self.alias}"
+
+    def answer(self) -> dict:
+        return {"name": {"main": self.title, "english": self.alias}, "is_ongoing": False, "episodes_total": None,
+                "torrents": [{"magnet": magnet_of(self.infohash, self.alias), "hash": self.infohash, "updated_at": self.updated,
+                              "description": self.episodes, "quality": {"value": self.quality}, "codec": {"label": "AVC"}}]}
+
+
 HLS_KEY = bytes(range(16))
 
 
@@ -201,6 +224,7 @@ class Site:
         # A title of yummyani.me and its player Alloha (tests/alloha_model.py), the CDN of which serves an HLS of the host.
         self.alloha = AllohaModel(voices={})
         self.yummy: dict[str, tuple[int, str, list[dict]]] = {}
+        self.trackers: dict[str, Tracker] = {}  # the pages of anilibria by their alias
 
     def alloha_title(self, slug: str, number: int, name: str, voice: str, episodes: dict[int, int]) -> str:
         """A title of yummyani.me whose voice-over plays in Alloha: an episode (number → height) an unencrypted HLS on the
@@ -389,6 +413,9 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
             if request.url.host == "jszyapi.com" and path == "api.php/provide/vod":
                 title = self.titles.get(int(request.url.params.get("ids") or 0))
                 return (200, self._title_record(title)) if title is not None else (200, json.dumps({"code": 1, "list": []}))
+            if request.url.host == "anilibria.top" and path.startswith("api/v1/anime/releases/"):
+                page = self.trackers.get(path.removeprefix("api/v1/anime/releases/"))
+                return (200, json.dumps(page.answer(), ensure_ascii=False)) if page is not None else (404, "")
             if request.url.host == "fsst.online" and path.startswith("embed/"):
                 text = self._embed(int(path.split("/")[1]))
                 return (200, text) if text else (404, "")
@@ -411,15 +438,19 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
 class AppStand:
     """The application with its models (see the module)."""
 
-    def __init__(self, root: str) -> None:
+    def __init__(self, root: str, *, qbit: bool = False) -> None:
         self.root = root
-        for name in ("site", "library", "work", "cache"):
+        for name in ("site", "library", "work", "cache", "staging", "releases"):
             os.makedirs(os.path.join(root, name), exist_ok=True)
         self.codec = Codec()
         self.host = Host(os.path.join(root, "site"))
         self.site = Site(os.path.join(root, "site"), self.codec, self.host)
         self.daemon = StreamingDaemon(self.codec)
         self.daemon_http = Served(self.daemon.app)
+        # qBittorrent, for the scenarios of the torrent sources: the model on real HTTP, its files on this disk.
+        self.qbit = QbitModel() if qbit else None
+        self.qbit_http = Served(self.qbit.app) if self.qbit else None
+        self.staging = os.path.join(root, "staging")
         self.library = os.path.join(root, "library")
         self.db_path = migrated(os.path.join(root, "app.db"))
         self.profiles: dict[str, int] = {}  # the profile of each voice-over: two sources of one voice-over share it
@@ -433,7 +464,9 @@ class AppStand:
         self.db = Database(self.db_path)
         self.gateway, self.modules = assemble(self.bus, self.db, Options(
             db_path=self.db_path, auth_required=self.locked, cookie_secure=False,
-            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now))
+            torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now,
+            **({"qbit_url": self.qbit_http.url, "qbit_username": self.qbit.username, "qbit_password": self.qbit.password}
+               if self.qbit else {})))
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()
         self.module("sources")._http = self.site.web().client()
@@ -474,7 +507,24 @@ class AppStand:
 
     def close(self) -> None:
         self.daemon_http.close()
+        if self.qbit_http:
+            self.qbit_http.close()
         self.host.close()
+
+    def torrent_page(self, alias: str, title: str, episodes: dict[str, int]) -> Tracker:
+        """A page of anilibria with one release: its files (path → the truth of its picture and sound) made by ffmpeg and
+        seeded to the model of qBittorrent, which downloads them at once into the folder the application names."""
+        files = []
+        for path, truth in episodes.items():
+            made = os.path.join(self.root, "releases", alias, path)
+            os.makedirs(os.path.dirname(made), exist_ok=True)
+            self.codec.make(made, [truth])
+            with open(made, "rb") as fh:
+                files.append((f"{alias}/{path}", fh.read()))
+        _meta, infohash = self.qbit.seed(files)
+        page = Tracker(alias, title, infohash, f"1-{len(episodes)}")
+        self.site.trackers[alias] = page
+        return page
 
     # --- the user, through the API ------------------------------------------------------------------------------
 

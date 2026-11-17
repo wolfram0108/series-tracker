@@ -103,10 +103,6 @@ async def stand(tmp_path):
     db = Database(str(migrated(tmp_path / "sources.db")))
     sources, unpack = SourcesModule(bus, db, torrent_cache_dir=str(tmp_path / "cache")), Unpack(bus)
     await sources.start()
-    await db.execute("INSERT INTO trackers (id, canonical_name, display_name, mirrors, parser_class, auth_type, ui_features) "
-                     "VALUES (3, 'kinozal', 'Kinozal.me', '[\"kinozal.me\", \"kinozal.tv\"]', 'KinozalParser', 'kinozal', '{}')")
-    sources.repo._cache = None  # the trackers were read at the start, before the row of the test
-    await sources._configure_trackers()
     yield sources, unpack, bus
     await unpack.stop()
     await sources.stop()

@@ -43,6 +43,8 @@ class AssignBody(BaseModel):
     episode_last: int | None = None
     folder: str | None = None
     excluded: bool = False
+    # The items in the order given take the episodes from `episode` on, one each (files dropped on a season).
+    in_order: bool = False
 
 
 class UnassignBody(BaseModel):

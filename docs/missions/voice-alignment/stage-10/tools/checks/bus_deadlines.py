@@ -25,7 +25,10 @@ CALLEES = frozenset({"request", "_step", "_ask", "_request"})
 
 
 def named_timeout(node: ast.Call) -> ast.expr | None:
-    """The `timeout` of a request call when it is a number or a name; None when the call has none or computes it."""
+    """The `timeout` of a request call when it is a number or a name; None when the call has none or computes it. A call
+    with `headers` is a request of an HTTP client (`client.request(method, url, headers=...)`), not one over the bus."""
+    if any(keyword.arg == "headers" for keyword in node.keywords):
+        return None
     for keyword in node.keywords:
         if keyword.arg == "timeout" and isinstance(keyword.value, (ast.Constant, ast.Name, ast.Attribute)):
             return keyword.value

@@ -6,10 +6,11 @@ import StatusProperties from "./status/StatusProperties.vue"
 import StatusOutput from "./status/StatusOutput.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
 import AgentsPanel from "./settings/AgentsPanel.vue"
+import TorrentTab from "./status/torrent/TorrentTab.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
 import { fetchSources } from "../composables/sourceCalls"
-import type { SourceAddress } from "../lib/sources"
+import type { SeriesSource, SourceAddress } from "../lib/sources"
 import { useSeriesStore, type Series } from "../stores/series"
 import { t } from "../i18n"
 import LoadingMark from "./LoadingMark.vue"
@@ -32,14 +33,18 @@ const isBusy = computed(() => saving.value || syncing.value)
 const saveLabel = computed(() =>
   saving.value ? t("common.saving") : syncing.value ? t("status.syncing") : t("common.save"))
 
-type TabKey = "properties" | "composition" | "parser" | "agents"
+type TabKey = "properties" | "composition" | "torrent" | "parser" | "agents"
 const tab = ref<TabKey>("properties")
 // A tab is built when it is first shown and kept from then on: a window opened on one tab neither builds the others
 // (the output of a long series is thousands of elements) nor asks the core for what they show.
 const built = ref(new Set<TabKey>([tab.value]))
+// The tab «Торрент» stands where the series has a torrent source: the release of it and the editor of its files.
+const sources = ref<SeriesSource[]>([])
+const hasTorrent = computed(() => sources.value.some((source) => source.source_type === "torrent"))
 const tabs = computed(() => [
   { value: "properties" as TabKey, label: t("status.tab.properties"), icon: "pi-info-circle" },
   { value: "composition" as TabKey, label: t("output.tab"), icon: "pi-sitemap" },
+  ...(hasTorrent.value ? [{ value: "torrent" as TabKey, label: t("status.tab.torrent"), icon: "pi-download" }] : []),
   { value: "parser" as TabKey, label: t("rules.tab"), icon: "pi-filter" },
   { value: "agents" as TabKey, label: t("status.tab.agents"), icon: "pi-server" },
 ])
@@ -52,10 +57,15 @@ async function load() {
   if (data) series.value = data
 }
 
+async function loadSources(): Promise<SeriesSource[]> {
+  const listed = await fetchSources(props.seriesId)
+  if (listed.ok) sources.value = listed.data
+  return listed.ok ? listed.data : []
+}
+
 // The sources of the series as the core has them now: the test of the rules offers their addresses and queries to paste.
 async function sourceAddresses(): Promise<SourceAddress[]> {
-  const listed = await fetchSources(props.seriesId)
-  return listed.ok ? listed.data.map((source) => ({ url: source.url, vk: source.source_type === "vk_video" })) : []
+  return (await loadSources()).map((source) => ({ url: source.url, vk: source.source_type === "vk_video" }))
 }
 
 async function save() {
@@ -65,7 +75,7 @@ async function save() {
     const ok = await propsRef.value.save()
     if (ok) {
       emit("updated")
-      await load()
+      await Promise.all([load(), loadSources()])
     }
   } finally {
     saving.value = false
@@ -75,8 +85,9 @@ async function save() {
 watch(tab, (next) => {
   built.value = new Set([...built.value, next])
 })
+watch(hasTorrent, (has) => { if (!has && tab.value === "torrent") tab.value = "properties" })
 
-onMounted(load)
+onMounted(() => { void load(); void loadSources() })
 </script>
 
 <template>
@@ -107,6 +118,7 @@ onMounted(load)
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
       />
+      <TorrentTab v-if="built.has('torrent') && hasTorrent" v-show="tab === 'torrent'" :sources="sources" />
       <SettingsParser
         v-if="built.has('parser')"
         v-show="tab === 'parser'"

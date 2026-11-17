@@ -68,7 +68,10 @@ files} / torrents.preview.failed {torrent_id, infohash, reason} (→ SSE:
 Прогресс раздач для интерфейса — таблица torrent_progress (одна строка на infohash; таблица
 download_tasks принадлежит downloads, торрентов в ней нет): query torrents.db.progress.list и
 событие torrents.progress.changed отдают {tasks: [{id, qb_hash, series_id, series_name, status,
-progress, dlspeed, eta, error_message, created_at, updated_at}]}.
+progress, dlspeed, eta, error_message, created_at, updated_at}]}. With them stand the releases of the torrent sources the
+client works on or that failed, one task per series with the page: {kind: "release", qb_hash, url, release, title,
+series_id, series_name, status (the state of the release), progress (by the size of the wanted files), files_done,
+files_total, error_message} — the monitor of «Агенты» shows every torrent of the client.
 
 The releases of the torrent sources (stage 15, modules/torrents/releases.py; tables torrent_releases,
 torrent_release_files, torrent_release_versions), keyed by the page and the id of the release on it, never by a series:
@@ -81,6 +84,9 @@ torrent_release_files, torrent_release_versions), keyed by the page and the id o
       comes started into the same folder, the client checks the files there and downloads the rest; while a sync of a
       series with the page runs (scan.run.changed) the update waits for its end. Also once a term of the sources.
   torrents.release.watch {url, release, watched} → ReleaseView — the automatic update on or off
+  torrents.staging.get {} → {value} and torrents.staging.set {value} → {ok, value, reason?} — the folder the releases download
+      into (the setting torrents.staging_dir); a value that is no absolute path is refused (`staging_dir_not_absolute`); the
+      releases move there on settings.changed
   torrents.release.priorities {url, release, skip: [path]} (command) — the files not to download
   torrents.release.drop_files {url, release} (command) — a release no longer watched gives up its files (archived)
   Event torrents.release.changed ReleaseView — state, version or files changed; `ready` once every wanted file is there
@@ -101,7 +107,7 @@ import os
 
 from core import BaseModule, BusRequestError, storage, torrent_profile_id
 from core.contracts import RUN_CHANGED, RunChanged
-from core.contracts.torrent import STAGING_DIR_KEY
+from core.contracts.torrent import STAGING_DIR_KEY, ReleaseState
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason, relayed
@@ -111,7 +117,7 @@ from . import pipeline, selection
 from .infohash import (TorrentParseError, infohash_candidates,
                        infohash_from_magnet, torrent_file_list)
 from .qbt_client import QbtClient, QbtError
-from .releases import Releases
+from .releases import MOVING, Releases
 from .repository import ReleaseStore, TorrentsRepository
 
 # state-исключения для downloading (старый sync_torrent_statuses +
@@ -212,6 +218,8 @@ class TorrentsModule(BaseModule):
         self.handle("series.updated", self.on_series_updated)
         self.handle("torrents.releases.get", self.on_releases_get)
         self.handle("torrents.release.download", self.on_release_download)
+        self.handle("torrents.staging.get", self.on_staging_get)
+        self.handle("torrents.staging.set", self.on_staging_set)
         self.handle("torrents.release.check", self.on_release_check)
         self.handle("torrents.release.watch", self.on_release_watch)
         self.handle("torrents.release.priorities", self.on_release_priorities)
@@ -1222,6 +1230,31 @@ class TorrentsModule(BaseModule):
         tasks = await self.repo.all_torrent_progress()
         for t in tasks:
             t["series_name"] = await self._series_name(t["series_id"])
+        return tasks + await self._release_tasks()
+
+    async def _release_tasks(self) -> list[dict]:
+        """The releases the client works on or that failed, one task per series whose torrent source is the page."""
+        rows = [row for row in await self.releases.store.all()
+                if ReleaseState(row["state"]) in MOVING or row["state"] == ReleaseState.FAILED.value]
+        if not rows:
+            return []
+        series_of: dict[str, list[dict]] = {}
+        for series in await self.request("catalog.series.list", {}):
+            for source in series.get("sources") or []:
+                if source.get("source_type") == "torrent":
+                    series_of.setdefault(await self._canonical(source["url"]), []).append(series)
+        tasks = []
+        for row in rows:
+            view = await self.releases.view(row)
+            wanted = [f for f in view.files if f.priority > 0]
+            size = sum(f.size for f in wanted)
+            progress = round(100 * sum(f.size * f.progress for f in wanted) / size, 1) if size else 0.0
+            for series in series_of.get(view.url) or [{"id": None, "name": ""}]:
+                tasks.append({"kind": "release", "qb_hash": view.infohash or "", "url": view.url, "release": view.release,
+                              "title": view.title, "series_id": series["id"], "series_name": series.get("name") or "",
+                              "status": view.state.value, "progress": progress,
+                              "files_done": sum(1 for f in wanted if f.progress >= 1), "files_total": len(wanted),
+                              "error_message": view.reason})
         return tasks
 
     async def _series_name(self, series_id: int) -> str:
@@ -1358,6 +1391,17 @@ class TorrentsModule(BaseModule):
         for url in {row["url"] for row in await self.releases.store.all()} - listed:
             await self.releases.forget(url)
 
+    async def on_staging_get(self, env: Envelope) -> dict:
+        return {"value": (await self.request("settings.value.get", {"key": STAGING_DIR_KEY})).get("value") or ""}
+
+    async def on_staging_set(self, env: Envelope) -> dict:
+        """The folder of the releases, as the settings of the sources set it: an absolute path, the same for the client."""
+        value = str(env.payload.get("value") or "").strip()
+        if not os.path.isabs(value):
+            return {"ok": False, "value": value, "reason": reason("staging_dir_not_absolute")}
+        await self.request("settings.value.set", {"key": STAGING_DIR_KEY, "value": value})
+        return {"ok": True, "value": value}
+
     async def on_settings_changed(self, env: Envelope) -> None:
         if env.payload.get("key") == STAGING_DIR_KEY:
             await self.releases.relocate(env.payload.get("value") or "")
@@ -1371,6 +1415,7 @@ class TorrentsModule(BaseModule):
             try:
                 await self.releases.tick()
                 moving = await self.releases.moving()
+                await self._broadcast_progress()
             except QbtError as exc:
                 self.log.warning("раздачи источников: qBittorrent недоступен: %s", exc)
                 moving = True

@@ -57,9 +57,6 @@ def test_a_module_given_no_sites_reads_the_builtin_ones_and_each_module_has_its_
 
 async def test_the_settings_of_the_sources_are_the_mirrors_of_each_tracker_and_every_domain_read_now_announced_on_a_save(stand):
     sources, probe = stand
-    await sources.repo._db.execute(
-        "INSERT INTO trackers (id, canonical_name, display_name, mirrors, parser_class, auth_type, ui_features) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (3, "kinozal", "Kinozal.me", '["kinozal.me"]', "KinozalParser", "kinozal", "{}"))
     announced = sources.bus.subscribe("sources.settings.changed")
     await probe.request("sources.tracker.set_mirrors", {"tracker_id": 3, "mirrors": ["kinozal.me", "kinozal.new"]}, timeout=5)
     view = await probe.request("sources.settings.get", {}, timeout=5)

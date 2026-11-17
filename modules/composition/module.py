@@ -222,8 +222,7 @@ class CompositionModule(BaseModule):
         known = set(await self.repo.series_ids())
         present = {each["id"] for each in listing}
         for each in listing:
-            if each["id"] in known or any(source.get("source_type") != SourceType.TORRENT
-                                          for source in each.get("sources", [])):
+            if each["id"] in known or each.get("sources"):
                 self._schedule(each["id"])
         for series_id in known - present:
             await self._purge(series_id)
@@ -669,8 +668,7 @@ class CompositionModule(BaseModule):
                       ) -> tuple[list[SourceInput], dict[str, str | None]]:
         """What the neighbours say about the series; nothing is written here."""
         card = await self._ask("catalog.series.get", {"series_id": series_id})
-        sources = [SeriesSource.model_validate(each) for each in card.get("sources", [])
-                   if each.get("source_type") != SourceType.TORRENT]
+        sources = [SeriesSource.model_validate(each) for each in card.get("sources", [])]
         snapshot = self._snapshots.get(series_id)
         off = await self._players_off(snapshot)
         inputs = []

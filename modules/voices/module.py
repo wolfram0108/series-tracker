@@ -35,7 +35,7 @@ Events out:
 from __future__ import annotations
 
 from core import BaseModule
-from core.contracts import (GroupsResolveReply, GroupsResolveRequest, PlayersListReply, PlayersListRequest, SourceType,
+from core.contracts import (GroupsResolveReply, GroupsResolveRequest, PlayersListReply, PlayersListRequest,
                             VoiceSettingsDraft, VoiceSettingsSaved)
 from core.envelope import Envelope
 
@@ -88,8 +88,7 @@ class VoicesModule(BaseModule):
 
     async def on_players_get(self, env: Envelope) -> dict:
         series = await self.request("catalog.series.list", {})
-        urls = [source["url"] for each in series for source in each.get("sources") or []
-                if source.get("source_type") != SourceType.TORRENT and source.get("url")]
+        urls = [source["url"] for each in series for source in each.get("sources") or [] if source.get("url")]
         reply = await self.request("sources.players.list", PlayersListRequest(urls=urls).model_dump(mode="json"))
         return PlayersListReply.model_validate(reply).model_dump(mode="json")
 

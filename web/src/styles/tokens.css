@@ -88,6 +88,10 @@
   --state-moving: var(--state-checking); --state-moving-end: var(--state-checking-end); --state-moving-ink: #fff;
   --state-idle: var(--state-download); --state-idle-end: var(--state-download-end); --state-idle-ink: #fff;
   --state-viewing: var(--state-off); --state-viewing-end: var(--state-off-end); --state-viewing-ink: #fff;
+  --state-notLoaded: var(--state-planned); --state-notLoaded-end: var(--state-planned-end); --state-notLoaded-ink: var(--state-planned-ink);
+  --state-unpack: var(--state-read); --state-unpack-end: var(--state-read-end); --state-unpack-ink: #fff;
+  --state-update: var(--state-sync); --state-update-end: var(--state-sync-end); --state-update-ink: #fff;
+  --state-archived: var(--state-off); --state-archived-end: var(--state-off-end); --state-archived-ink: #fff;
 }
 
 /* The colours of the sources of a series (series_sources.color is the index): told apart from each other and from the

@@ -35,6 +35,10 @@
 [data-state="moving"] { --tone: var(--state-moving); --tone-end: var(--state-moving-end); --tone-ink: var(--state-moving-ink); }
 [data-state="idle"] { --tone: var(--state-idle); --tone-end: var(--state-idle-end); --tone-ink: var(--state-idle-ink); }
 [data-state="viewing"] { --tone: var(--state-viewing); --tone-end: var(--state-viewing-end); --tone-ink: var(--state-viewing-ink); }
+[data-state="notLoaded"] { --tone: var(--state-notLoaded); --tone-end: var(--state-notLoaded-end); --tone-ink: var(--state-notLoaded-ink); }
+[data-state="unpack"] { --tone: var(--state-unpack); --tone-end: var(--state-unpack-end); --tone-ink: var(--state-unpack-ink); }
+[data-state="update"] { --tone: var(--state-update); --tone-end: var(--state-update-end); --tone-ink: var(--state-update-ink); }
+[data-state="archived"] { --tone: var(--state-archived); --tone-end: var(--state-archived-end); --tone-ink: var(--state-archived-ink); }
 
 /* A pill of a state: a tint of its colour, with the ink of its darker end. */
 .pill[data-state] {
