@@ -56,6 +56,8 @@ export interface FileEntry {
   priority: number
   place: Place | null
   by: string | null
+  /** The place in the profile of the rule that placed it (the number the list of the rules gives it); none for the hand. */
+  rule_number?: number | null
   problem?: string | null
   conflict?: FileConflict | null
 }
@@ -65,6 +67,8 @@ export interface TrackEntry {
   kind: "audio" | "subtitles"
   folder: string | null
   by: string | null
+  /** The place in the profile of the rule that put it in its folder; none for the hand and the title in the file. */
+  rule_number?: number | null
   /** No folder or no known language yet (none, `und`): the track waits for a rule or a hand. */
   waiting: boolean
   language: string
@@ -245,6 +249,8 @@ export interface FolderView extends Folder {
   episodes: string
   /** The rule that names it, when one does; none when every item of it was placed by hand or by its title in the file. */
   rule: { rule: string; row: number | null } | null
+  /** The place in the profile of that rule. */
+  ruleNumber: number | null
   /** Made by itself of the titles the files give (no rule, no hand). */
   fromMeta: boolean
   /** The language its tracks go out with when they all have one (theirs: a rule's or the file's); the folder's own, set by
@@ -266,9 +272,10 @@ export function foldersOf(folders: readonly Folder[], entries: readonly TrackEnt
       bySeason.set(entry.place.season, list)
     }
     const episodes = [...bySeason].sort((a, b) => a[0] - b[0]).map(([season, numbers]) => `${season}: ${spansOf(numbers)}`).join(" · ")
-    const rule = mine.map((entry) => ruleOf(entry.by)).find((each) => each !== null) ?? null
+    const ruled = mine.find((entry) => ruleOf(entry.by) !== null)
+    const rule = ruled ? ruleOf(ruled.by) : null
     const languages = new Set(mine.map((entry) => entry.language.trim().toLowerCase()).filter((code) => code && code !== "und"))
-    return { ...folder, episodes, rule, held: mine.length, fromMeta: mine.length > 0 && mine.every((entry) => entry.by === FROM_META),
+    return { ...folder, episodes, rule, ruleNumber: ruled?.rule_number ?? null, held: mine.length, fromMeta: mine.length > 0 && mine.every((entry) => entry.by === FROM_META),
       trackLanguage: languages.size === 1 ? [...languages][0] : "" }
   })
 }

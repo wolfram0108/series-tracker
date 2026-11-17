@@ -30,8 +30,9 @@ describe("a rule «Таблица»", () => {
     expect(w.findAll("table.rule-table")).toHaveLength(1)
     expect(w.findAll(".template-chip").map((each) => each.text())).toEqual(["PID:2", "P:2", "G:0", "V:2", "VT:1", "R:2"])
     expect(chip(w, "G").attributes("disabled")).toBeDefined()
-    // The actions of «ТО» are numbered: a row shows its action by the number.
-    expect(w.find(".col-then .selected-value").text()).toBe(`5. ${t("rules.action.assign_voiceover")}`)
+    // The actions of «ТО» are numbered: the head shows the number of the column's action as its mark, a row shows its by number.
+    expect(w.find("th.col-then .number-mark").text()).toBe("5")
+    expect(w.find("th.col-then .table-action .selected-value").text()).toBe(t("rules.action.assign_voiceover"))
     expect(w.find(".rule-rows").text()).toBe(t("rules.table.rows", { count: 1 }))
   })
 

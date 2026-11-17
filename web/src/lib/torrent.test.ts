@@ -68,7 +68,7 @@ describe("the tracks of a release", () => {
       [1, ["a", "c"]], [2, ["b"]], [4, ["d"]]])
     const folders = [{ tab: "voices" as const, kind: "voice" as const, name: "JAM", items: 9, manual: false, language: "rus", subtitle_type: "", fonts: [] },
       { tab: "subtitles" as const, kind: "subtitles" as const, name: "Cafe", items: 1, manual: false, language: "", subtitle_type: "", fonts: ["f.ttf"] }]
-    expect(foldersOf(folders, tracks, "voice")).toEqual([{ ...folders[0], episodes: "1: 1–2, 4", rule: { rule: "Озвучка", row: 1 }, held: 3,
+    expect(foldersOf(folders, tracks, "voice")).toEqual([{ ...folders[0], episodes: "1: 1–2, 4", rule: { rule: "Озвучка", row: 1 }, ruleNumber: null, held: 3,
       fromMeta: false, trackLanguage: "rus" }])
     // A folder made of the titles of the files alone says so, and names no rule.
     const meta = [track("a", "AniLiberty", 1, "meta"), track("b", "AniLiberty", 2, "meta")]

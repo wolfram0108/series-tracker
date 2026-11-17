@@ -873,8 +873,12 @@ def test_a_table_answers_every_title_as_its_rows_written_as_ordinary_rules_do(ac
         as_rules = compile_profile(1, [each for rule in order
                                        for each in (_same_rules(rule) if rule.get("rule_table") else [rule])])
         assert not as_table.invalid_rules
+        # The number of a rule is its place in the list: a table is one place, its rows written apart are several.
+        def answer(profile, title):
+            got = process_title(profile, title)
+            return {**got, "events": [{k: v for k, v in event.items() if k != "number"} for event in got["events"]]}
         for title in TITLES:
-            assert process_title(as_table, title) == process_title(as_rules, title), title
+            assert answer(as_table, title) == answer(as_rules, title), title
 
 
 @pytest.mark.parametrize("table,error", [

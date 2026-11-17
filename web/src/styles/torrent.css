@@ -157,6 +157,8 @@
 .torrent-folder.is-drop > td { background: #f3f8ff; border-block: 1px dashed var(--color-blue); }
 .torrent-folders-table .torrent-folder-track > td { block-size: 1.625rem; background: #fbfcfd; color: var(--color-gray-600); font-size: 0.75rem; }
 .torrent-folders-place { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); }
+/* A track of a folder: its episode and what tells it, in the column of the name (cut, whole in the title). */
+.torrent-folders-table td.torrent-folders-track { padding-inline-start: 0.375rem; }
 /* A track of a folder: the stream as the left pane names it. */
 .torrent-folders-id { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text); }
 .torrent-folders-file { overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: 0.7rem; }

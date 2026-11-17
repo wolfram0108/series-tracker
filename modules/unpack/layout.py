@@ -166,6 +166,14 @@ def _rule_of(result: dict | None) -> str | None:
     return None
 
 
+def _rule_number_of(result: dict | None) -> int | None:
+    """The place in its profile of the last rule that gave the line something (the list of the rules numbers it so)."""
+    for event in reversed((result or {}).get("events") or []):
+        if event.get("rule"):
+            return event.get("number")
+    return None
+
+
 # How a track got its folder when no hand and no rule placed it: the title its file gives it.
 FROM_META = "meta"
 # A language the file does not know: the track waits for a rule that names it.
@@ -218,6 +226,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
         waiting = not folder
         # The file and its episode, and the stream (its place in the file and what it is): the window groups tracks by them.
         entry = {"item": item, "line": line, "kind": kind, "folder": folder, "by": how, "waiting": waiting,
+                 "rule_number": _rule_number_of(result) if how not in (None, "manual", FROM_META) else None,
                  "language": language, "subtitle_type": subtitle_type if kind == "subtitles" else "", "path": path,
                  "place": _place_json(where),
                  "stream": None if stream is None else {key: stream.get(key) for key in _STREAM_KEYS}}
@@ -247,6 +256,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                 "priority": f.priority,
                 "place": _place_json(where),
                 "by": "manual" if manual is not None else _rule_of(result),
+                "rule_number": None if manual is not None else _rule_number_of(result),
                 "conflict": None if (found := conflicts.get(item)) is None else {"code": found.code, "episode": found.word,
                                                                                 "by": found.by},
                 "problem": (inputs.streams.get(release.release, {}).get(f.path) or {}).get("reason")})

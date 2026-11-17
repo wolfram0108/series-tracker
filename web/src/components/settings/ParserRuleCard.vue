@@ -5,6 +5,7 @@ import StGroup from "../StGroup.vue"
 import StSelect from "../StSelect.vue"
 import { t } from "../../i18n"
 import SubtitleTypes from "../SubtitleTypes.vue"
+import NumberMark from "../NumberMark.vue"
 import ParserPatternEditor, { type PatternBlock } from "./ParserPatternEditor.vue"
 import type { TableRow } from "../../lib/ruleTable"
 import { actionLabel, actionOptions, choicesOf, conditionOptions, fieldText, folderLanguages, folderValueOf, folderValueText, isAssign,
@@ -101,6 +102,8 @@ function getAssignActionLabel(actionType: string): string {
         <button type="button" class="rule-toggle" :aria-expanded="isOpen" :aria-label="t('rules.rule.toggle')" @click.stop="emit('toggle')">
           <i class="pi rule-toggle-icon" :class="toggleIcon" aria-hidden="true" />
         </button>
+        <!-- The number of the rule in its profile: the mark «Откуда» shows for what it placed. -->
+        <NumberMark :n="index + 1" :title="t('rules.rule.number', { n: index + 1 })" />
         <input v-model="rule.name" type="text" class="rule-name-input" :placeholder="t('rules.rule.namePlaceholder')" @click.stop />
         <span
           v-if="rule.valid === false"

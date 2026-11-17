@@ -268,6 +268,8 @@ class CompiledRule:
     continue_after_match: bool
     conditions: list[CompiledCondition]
     actions: list[CompiledAction]
+    # The place of the rule in its profile, from 1, as the list of the rules numbers it; the rows of a table have their table's.
+    number: int = 0
 
 
 @dataclass(slots=True)
@@ -280,9 +282,12 @@ class CompiledProfile:
 def compile_profile(profile_id: int, raw_rules: list[dict]) -> CompiledProfile:
     """raw_rules — в формате таблиц parser_rules/parser_rule_conditions."""
     compiled, invalid = [], []
-    for rule in raw_rules:
+    for number, rule in enumerate(raw_rules, 1):
         try:
-            compiled.extend(_compile_any(rule))
+            made = _compile_any(rule)
+            for each in made:
+                each.number = number
+            compiled.extend(made)
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             invalid.append({"rule_id": rule.get("id"),
                             "name": rule.get("name"), "error": str(exc)})
@@ -628,11 +633,11 @@ def process_title(profile: CompiledProfile, title: str) -> dict[str, Any]:
         before = dict(extracted)
         outcome = _run_actions(title, rule, extracted, errors)
         if outcome == "exclude":
-            events.append({"rule": rule.name, "order": order, "action": "exclude"})
+            events.append({"rule": rule.name, "order": order, "number": rule.number, "action": "exclude"})
             return {"excluded": True, "extracted": {}, "events": events,
                     "errors": errors}
         if outcome == "data":
-            events.append({"rule": rule.name, "order": order, "action": "extract",
+            events.append({"rule": rule.name, "order": order, "number": rule.number, "action": "extract",
                            "extracted": {k: v for k, v in extracted.items()
                                          if before.get(k) != v}})
             # Фикс В: остановка — только если правило ДАЛО результат.

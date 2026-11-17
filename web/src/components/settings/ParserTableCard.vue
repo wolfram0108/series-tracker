@@ -13,6 +13,7 @@ import { actionLabel, actionOptions, choicesOf, fieldText, folderLanguages, fold
   isFolderAction, isNumberAssign, type RulePlace } from "../../lib/ruleVocabulary"
 import type { EditableRule } from "./ParserRuleCard.vue"
 import SubtitleTypes from "../SubtitleTypes.vue"
+import NumberMark from "../NumberMark.vue"
 import ParserPatternEditor from "./ParserPatternEditor.vue"
 import PatternPalette from "./PatternPalette.vue"
 import { reasonText } from "../../lib/reason"
@@ -180,6 +181,8 @@ function setRowAction(row: TableRow, value: string): void {
           <i class="pi rule-toggle-icon" :class="toggleIcon" aria-hidden="true" />
         </button>
         <i class="pi pi-table rule-kind" :title="t('rules.table.kind')" />
+        <!-- The number of the rule in its profile: the mark «Откуда» shows for what it placed. -->
+        <NumberMark :n="index + 1" :title="t('rules.rule.number', { n: index + 1 })" />
         <input v-model="rule.name" type="text" class="rule-name-input" :placeholder="t('rules.rule.namePlaceholder')" @click.stop />
         <span v-if="rule.valid === false" class="rule-invalid-badge" :title="reasonText(rule.error) || t('rules.rule.disabled.title')">
           {{ t("rules.rule.disabled.label") }}
@@ -243,7 +246,8 @@ function setRowAction(row: TableRow, value: string): void {
             <th class="col-then">
               <div class="cells">
                 <span class="table-label label-then">{{ t("rules.label.then") }}</span>
-                <StSelect class="table-action" :model-value="table.action_type" :options="ACTIONS"
+                <NumberMark :n="numberOf(table.action_type)" :title="actionLabel(table.action_type)" />
+                <StSelect class="table-action" :model-value="table.action_type" :options="ACTIONS" :display="actionLabel(table.action_type)"
                           @update:model-value="setAction($event as string)" />
                 <!-- The language of every row with none of its own. -->
                 <StSelect
@@ -279,6 +283,7 @@ function setRowAction(row: TableRow, value: string): void {
                   <!-- The action of the row by its number in the list of «ТО»; dimmed while it is the column's. -->
                   <StSelect
                     class="row-action" :class="{ 'is-own': !!row.then.action }" :model-value="actionOf(row)" :options="ACTIONS"
+                    :style="{ '--action': `var(--source-${(numberOf(actionOf(row)) - 1) % 16})` }"
                     :display="String(numberOf(actionOf(row)))" :aria-label="t('rules.table.rowAction')" :list-min-width="16"
                     @update:model-value="setRowAction(row, $event as string)"
                   />
@@ -413,12 +418,14 @@ function setRowAction(row: TableRow, value: string): void {
 /* «ТО» of a row: the number of its action, then its value. */
 .row-then { display: flex; gap: 0.375rem; align-items: center; }
 .row-then-value { flex: 1 1 auto; min-width: 0; }
+/* The number of the action of a row in its colour (the colours of the numbered lists, NumberMark): dimmed while it is the
+   column's, whole when it is the row's own. */
 .row-action {
-  flex: 0 0 auto; min-height: 2rem; padding: 0 0.375rem; border: 1px solid #ced4da; border-radius: 4px; background: #fff;
-  font-size: 0.875rem; font-weight: 600; color: var(--text-muted);
+  flex: 0 0 auto; min-height: 2rem; padding: 0 0.375rem; border: 0; border-radius: 4px; background: var(--action);
+  font-size: 0.875rem; font-weight: 700; color: #fff; opacity: 0.45;
 }
-.row-action.is-own { color: #198754; border-color: #a3cfbb; }
-.row-action :deep(.selected-value) { white-space: nowrap; padding: 0; }
+.row-action.is-own { opacity: 1; }
+.row-action :deep(.selected-value), .row-action :deep(.chevron) { white-space: nowrap; padding: 0; color: #fff; }
 .table-folder { display: flex; gap: 0.375rem; align-items: stretch; }
 .table-folder > .table-type { flex: none; align-self: center; }
 .table-folder > input.table-value { flex: 1 1 8rem; min-width: 0; }

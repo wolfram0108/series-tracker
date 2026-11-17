@@ -764,6 +764,7 @@ export const ru = {
   "rules.action.language": "Язык",
   "rules.action.defaultLanguage": "Язык строк по умолчанию",
   "rules.action.subtitleType": "Тип субтитров",
+  "rules.rule.number": "Правило {n}",
   "rules.table.rowAction": "Действие строки",
   "rules.action.value": "Значение",
   "rules.rule.namePlaceholder": "Имя правила...",

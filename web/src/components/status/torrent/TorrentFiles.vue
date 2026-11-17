@@ -8,6 +8,7 @@ import { assign, unassign } from "../../../composables/torrentCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
 import TorrentLine from "./TorrentLine.vue"
 import TorrentPanes from "./TorrentPanes.vue"
+import NumberMark from "../../NumberMark.vue"
 import type { Answer } from "../../../composables/sourceCalls"
 
 // The editor «Файлы» (the board «Файлы»): the files of the release by their folder on the left, the draft on the right —
@@ -246,7 +247,8 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
               <div v-for="file in episode.files" :key="file.item" class="torrent-file">
                 <span class="torrent-kind" :class="`is-${file.kind}`">{{ kindWord(file.kind) }}</span>
                 <span class="torrent-name" :title="file.path">{{ nameOf(file.path) }}</span>
-                <span class="torrent-how" :class="{ 'is-hand': file.by === 'manual' }">{{ howOf(file) }}</span>
+                <NumberMark v-if="file.rule_number && file.by !== 'manual'" :n="file.rule_number" :title="howOf(file)" />
+                <span v-else class="torrent-how" :class="{ 'is-hand': file.by === 'manual' }">{{ howOf(file) }}</span>
                 <button v-if="file.by === 'manual'" type="button" class="torrent-mini" :disabled="busy" @click="back([file.item])">
                   {{ t("torrent.unassign") }}</button>
               </div>
