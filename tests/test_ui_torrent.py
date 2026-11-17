@@ -106,12 +106,12 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     await expect(folder).to_be_visible()
     await expect(folder.locator(".torrent-rule")).to_contain_text("звук")
     # The folder is a row of the table; unfolded, it lists the track of each episode it holds: the episode and the stream as
-    # the left pane names it, and «авто»: a rule placed them.
+    # the left pane names it, and the rule that placed them.
     await folder.locator(".torrent-folders-chev").click()
     tracks = page.locator(".torrent-folder-track")
     await expect(tracks.locator(".torrent-folders-place")).to_have_text(["s01e01", "s01e02"])
     await expect(tracks.locator(".torrent-folders-id")).to_have_text([re.compile(r"^A:\d+$")] * 2)
-    await expect(tracks.locator(".torrent-auto")).to_have_text([text("torrent.by.auto")] * 2)
+    await expect(tracks.locator(".torrent-rule")).to_have_text([re.compile("звук")] * 2)
     await ui.shot("05-tracks-by-rule")
 
     # What is shown is what is copied: a click takes a field whole, code and all; the whole line, as the rule reads it.

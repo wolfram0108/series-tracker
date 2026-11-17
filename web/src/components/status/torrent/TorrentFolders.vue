@@ -60,10 +60,19 @@ function originOf(by: string | null): Origin {
   return rule === null ? HAND : { css: "torrent-rule",
     text: rule.row === null ? t("torrent.by.rule", { rule: rule.rule }) : t("torrent.by.row", { rule: rule.rule, row: rule.row }) }
 }
-// Where a folder's tracks come from, each way once: a folder of a file and a hand says both. An empty one was made by hand.
-const sourcesOf = (row: FolderRow): Origin[] => row.tracks.length
-  ? [...new Map(row.tracks.map((each) => originOf(each.entry.by)).map((each) => [each.text, each] as const)).values()]
-  : [HAND]
+// Where the folder itself comes from — not each of its tracks (those say it on their rows): the titles in the files, when
+// any of its tracks is named by them; else the rule that names it; else the hand (an empty folder the user made too).
+function folderOrigin(row: FolderRow): Origin {
+  const ways = row.tracks.map((each) => each.entry.by)
+  if (ways.includes(FROM_META)) return originOf(FROM_META)
+  const ruled = ways.find((by) => by !== "manual" && ruleOf(by) !== null)
+  return ruled ? originOf(ruled) : HAND
+}
+// Where a track got its folder, as its row says it: a hand, a rule, or «авто» — the title in its file.
+function trackOrigin(by: string | null): Origin {
+  if (by === FROM_META) return { css: "torrent-auto", text: t("torrent.by.auto") }
+  return originOf(by)
+}
 // What tells the track among the lines of the left pane: the stream of a container (`A:4`), the name of a file of its own.
 function idOf(track: FolderTrack): string {
   const parts = track.entry.line.split(" | ")
@@ -157,7 +166,7 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
                 </span>
               </td>
               <td><span class="torrent-folders-sources">
-                <span v-for="each in sourcesOf(row)" :key="each.text" :class="each.css" :title="each.text">{{ each.text }}</span></span></td>
+                <span :class="folderOrigin(row).css" :title="folderOrigin(row).text">{{ folderOrigin(row).text }}</span></span></td>
               <td class="torrent-folders-num" :title="episodesOf(row)">{{ episodesOf(row) }}</td>
               <td class="torrent-folders-num">{{ row.tracks.length }}</td>
               <td class="torrent-folders-act">
@@ -174,8 +183,8 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
                 <td />
                 <td class="torrent-folders-place">{{ placeOf(track) }}</td>
                 <td class="torrent-folders-id" :colspan="group.kind === 'subtitles' ? 2 : 1" :title="idOf(track)">{{ idOf(track) }}</td>
-                <td colspan="3"><span v-if="track.entry.by === 'manual'" class="torrent-hand">{{ t("torrent.by.manual") }}</span>
-                  <span v-else class="torrent-auto">{{ t("torrent.by.auto") }}</span></td>
+                <td colspan="3"><span :class="trackOrigin(track.entry.by).css" :title="trackOrigin(track.entry.by).text">
+                  {{ trackOrigin(track.entry.by).text }}</span></td>
                 <td class="torrent-folders-act">
                   <button type="button" class="torrent-bin-btn do-drop-track" :disabled="busy"
                           :title="t('torrent.folders.dropTrack')" :aria-label="t('torrent.folders.dropTrack')"

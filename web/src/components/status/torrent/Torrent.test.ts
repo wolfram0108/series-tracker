@@ -174,9 +174,8 @@ describe("the editors of the tracks", () => {
       containers: [{ item: "page/S/E01.mkv", path: "S/E01.mkv", place: { season: 1, episode: 1, last: null },
         streams: [{ index: 0, kind: "video" }, { index: 1, kind: "audio", codec: "aac" }] }] }), tab: "voices" })
     const original = w.find(".torrent-folder[data-folder='Original']")
-    // Its tracks come from the file and from a hand: the folder says both.
-    expect(original.findAll(".torrent-folders-sources > span").map((each) => each.text()))
-      .toEqual([t("torrent.folder.fromFile"), t("torrent.by.manual")])
+    // The folder says where it comes from — the titles in the files — and each track, on its row, where it got its folder.
+    expect(original.findAll(".torrent-folders-sources > span").map((each) => each.text())).toEqual([t("torrent.folder.fromFile")])
     expect(original.findAll(".torrent-folders-num").map((cell) => cell.text())).toEqual(["1–2", "2"])
     // The language of the folder is set here.
     const language = original.find("select.torrent-language")
@@ -189,6 +188,11 @@ describe("the editors of the tracks", () => {
     expect(tracks.map((each) => [each.find(".torrent-folders-place").text(), each.find(".torrent-folders-id").text(),
       each.find(".torrent-hand, .torrent-auto").text()])).toEqual([["s01e01", "A:1", t("torrent.by.auto")], ["s01e02", "A:2", t("torrent.by.manual")]])
     expect(tracks.map((each) => each.find(".torrent-folders-file").exists())).toEqual([false, false])
+    // A track a rule placed says the rule, not «авто».
+    await w.find(".torrent-folder[data-folder='JAM'] .torrent-folders-chev").trigger("click")
+    const ruled = w.findAll(".torrent-folder-track").find((each) => each.find(".torrent-folders-place").text() === "s01e01"
+      && each.find(".torrent-rule").exists())!
+    expect(ruled.find(".torrent-rule").text()).toBe(t("torrent.by.row", { rule: "Озвучка", row: 1 }))
     expect(tracks.map((each) => each.find(".do-drop-track").exists())).toEqual([true, true])
     for (const [index, item] of [[0, "page/S/E01.mkv#1"], [1, "page/S/E02.mkv#2"]] as const) {
       await tracks[index].find(".do-drop-track").trigger("click")
