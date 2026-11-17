@@ -6,8 +6,10 @@ goes before a rule's; a rule reaches every file that comes, a placement by hand 
 
 A video file placed in an episode gives a row for every sound and subtitles stream it holds; a sound or subtitles file
 placed in the same episode gives rows with that video, when one video is there (two videos of one episode leave it
-unplaced: which video it is in sync with is the user's word). The name of a track is the name of its folder (a rule's or
-the user's), else the title the file gives the stream, else none; the series' constructor names what is left.
+unplaced: which video it is in sync with is the user's word). A track lies in the folder the user put it in, else the one
+a rule names, else the one its title in the file names (folders are made of the titles by themselves); its language is the
+rule's, else its folder's, else the file's. A track with no folder or with no known language (none, `und`) waits for the
+operator: a rule settles it, and a rule overrides what the file says.
 """
 from __future__ import annotations
 
@@ -116,14 +118,24 @@ def _rule_of(result: dict | None) -> str | None:
     return None
 
 
-def _folder_of(tab: str, kind: str, result: dict | None, manual: dict | None) -> tuple[str | None, str | None]:
-    """(folder, how): the user's folder, else the rule's; `how` is `manual` or the name of the rule."""
+# How a track got its folder when no hand and no rule placed it: the title its file gives it.
+FROM_META = "meta"
+# A language the file does not know: the track waits for a rule that names it.
+UNKNOWN_LANGUAGES = {"", "und"}
+
+
+def _folder_of(kind: str, result: dict | None, manual: dict | None, stream: dict | None) -> tuple[str | None, str | None]:
+    """(folder, how): the user's folder, else the rule's, else the title of the track in its file (`how`: `manual`, the
+    name of the rule, or `meta`). A rule overrides what the file says; the hand overrides both."""
     if manual is not None:
         return (None, "manual") if manual["excluded"] else (manual["folder"], "manual")
-    if not result or result.get("excluded"):
+    if result and result.get("excluded"):
         return None, None
     key = "voice_folder" if kind == "audio" else "subtitle_folder"
-    return result.get(key), _rule_of(result) if result.get(key) else None
+    if result and result.get(key):
+        return result[key], _rule_of(result)
+    title = ((stream or {}).get("title") or "").strip()
+    return (title, FROM_META) if title else (None, None)
 
 
 def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
@@ -143,15 +155,17 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
     def track(tab: str, item: str, line: str, kind: str, stream: dict | None, path: str = "",
               where: "Place | str | None" = None) -> dict:
         result, manual = inputs.results.get(tab, {}).get(item), inputs.manual.get(tab, {}).get(item)
-        folder, how = _folder_of(tab, kind, result, manual)
+        folder, how = _folder_of(kind, result, manual, stream)
         excluded = bool(manual and manual["excluded"]) or bool(result and result.get("excluded"))
         folder_kind = "voice" if kind == "audio" else "subtitles"
         facts = folder_facts.get((folder_kind, folder), {}) if folder else {}
         language = (result or {}).get("language") or facts.get("language") or (stream or {}).get("language") or ""
         subtitle_type = (result or {}).get("subtitle_type") or facts.get("subtitle_type") or (
             "forced" if (stream or {}).get("forced") else "")
+        # A track waits for the operator while it has no folder or no known language: a rule, a hand or the file gives them.
+        waiting = not excluded and (not folder or language.strip().lower() in UNKNOWN_LANGUAGES)
         # The file and its episode, and the stream (its place in the file and what it is): the window groups tracks by them.
-        entry = {"item": item, "line": line, "kind": kind, "folder": folder, "by": how, "excluded": excluded,
+        entry = {"item": item, "line": line, "kind": kind, "folder": folder, "by": how, "excluded": excluded, "waiting": waiting,
                  "language": language, "subtitle_type": subtitle_type if kind == "subtitles" else "", "path": path,
                  "place": _place_json(where),
                  "stream": None if stream is None else {key: stream.get(key) for key in _STREAM_KEYS}}
@@ -164,7 +178,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                                                      "manual": (folder_kind, folder) in folder_facts,
                                                      "language": facts.get("language", ""),
                                                      "subtitle_type": facts.get("subtitle_type", "")})["items"] += 1
-        elif not excluded:
+        if waiting:
             view["unplaced"][tab] += 1
         return entry
 

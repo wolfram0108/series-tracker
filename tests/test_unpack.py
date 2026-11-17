@@ -76,7 +76,27 @@ def test_every_track_of_a_placed_video_and_of_a_sound_beside_it_is_a_row_with_th
     assert all(row.heights == [1080] for row in rows)
     assert all(row.text == "S01E01 | Show/Show - 01.mkv" and row.player == "torrent:page" for row in rows)
     assert {row.timeline for row in rows} == {"page/Show/Show - 01.mkv"}  # one video, one timeline, whatever file a track is in
-    assert view["unplaced"] == {"files": 0, "voices": 1, "subtitles": 1, "streams": 1}
+    # The titles the file gives make the folders by themselves; the sound file has none and waits for the operator.
+    assert view["unplaced"] == {"files": 0, "voices": 1, "subtitles": 0, "streams": 0}
+
+
+def test_the_file_names_the_folder_and_the_language_by_itself_und_waits_and_a_rule_overrides_the_file():
+    r = release(["Show/E01.mkv"])
+    video = item_of("page", "Show/E01.mkv")
+    inputs = Inputs(releases=[r], manual={}, folders=[],
+                    streams={"page": {"Show/E01.mkv": streams(("video", 0, "", ""), ("audio", 1, "rus", "AniLiberty"),
+                                                              ("audio", 2, "und", "Original"), ("audio", 3, "jpn", ""))}},
+                    results={"files": numbered({"Show/E01.mkv": (1, 1)})})
+    view, rows = compose(inputs)
+    tracks = [(e["folder"], e["by"], e["language"], e["waiting"]) for e in view["tabs"]["streams"]]
+    assert tracks == [("AniLiberty", "meta", "rus", False), ("Original", "meta", "und", True), (None, None, "jpn", True)]
+    assert [(f["name"], f["manual"]) for f in view["folders"]] == [("AniLiberty", False), ("Original", False)]
+    assert view["unplaced"]["streams"] == 2
+    assert [(row.voice.name, row.language) for row in rows] == [("AniLiberty", "rus"), ("Original", "und"), ("", "jpn")]
+    # A rule of the tab «Контейнеры» says otherwise: its folder and language go before what the file says.
+    inputs.results["streams"] = {f"{video}#2": {"voice_folder": "Оригинал", "language": "jpn", "events": [{"rule": "яп"}]}}
+    view, _rows = compose(inputs)
+    assert [(e["folder"], e["by"], e["language"], e["waiting"]) for e in view["tabs"]["streams"]][1] == ("Оригинал", "яп", "jpn", False)
 
 
 def test_a_folder_a_rule_gives_names_the_track_and_the_users_folder_goes_before_it():
