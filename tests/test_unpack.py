@@ -75,6 +75,24 @@ def test_every_placed_track_of_a_placed_video_and_of_a_file_beside_it_is_a_row_w
     assert view["unplaced"] == {"files": 0, "voices": 1, "subtitles": 0, "voice_streams": 0, "subtitle_streams": 0}
 
 
+def test_the_tabs_are_a_chain_a_file_files_left_red_goes_neither_to_voices_nor_to_subtitles():
+    """What «Файлы» placed goes on to the next tabs; a file it left without an episode is red there and goes no further. A
+    file placed in an episode no single video has passed «Файлы»: it is listed, waiting."""
+    r = release(["Show/Show - 01.mkv", "Show/Show - 01.rus.mka", "Show/Show - 01.rus.ass",
+                 "Show/Show - 02.rus.mka", "Show/Show - 02.rus.ass", "Show/Show - 03.rus.mka"])
+    inputs = Inputs(releases=[r], manual={}, folders=[],
+                    streams={"page": {"Show/Show - 01.mkv": streams(("video", 0, "", "")),
+                                      **{p: streams(("audio" if p.endswith("mka") else "subtitle", 0, "rus", "Студия"))
+                                         for p in ("Show/Show - 01.rus.mka", "Show/Show - 01.rus.ass", "Show/Show - 02.rus.mka",
+                                                   "Show/Show - 02.rus.ass", "Show/Show - 03.rus.mka")}}},
+                    results={"files": numbered({"Show/Show - 01.mkv": (1, 1), "Show/Show - 01.rus.mka": (1, 1),
+                                                "Show/Show - 01.rus.ass": (1, 1), "Show/Show - 03.rus.mka": (1, 3)})})
+    view, _rows = compose(inputs)
+    assert [e["path"] for e in view["tabs"]["voices"]] == ["Show/Show - 01.rus.mka", "Show/Show - 03.rus.mka"]
+    assert [e["path"] for e in view["tabs"]["subtitles"]] == ["Show/Show - 01.rus.ass"]
+    assert view["unplaced"]["files"] == 2
+
+
 def test_a_flag_of_the_files_container_is_no_type_of_subtitles_and_no_fact_of_the_row():
     """The source tells of subtitles their name, language and type (full, signs); how a track lies in a container (forced,
     default) is the output's (DESIGN.md 7.1.1): the flags of the release's own file make neither a type nor a field."""
@@ -362,13 +380,16 @@ async def test_a_folder_deleted_takes_the_hands_placements_in_it_and_auto_makes_
     torrents, unpack, bus, root = bus_stand
     torrents.releases = [release(["Show/Show - 01.mkv", "Show/Show - 01.rus.mka"])]
     sound = item_of("page", "Show/Show - 01.rus.mka")
+    # «Файлы» gives both files their episode: the sound goes on to «Озвучки».
+    await torrents.request("unpack.assign", {"url": URL, "tab": "files", "season": 1, "episode": 1,
+                                             "items": [item_of("page", "Show/Show - 01.mkv"), sound]})
     await torrents.request("unpack.folder.set", {"url": URL, "tab": "voices", "name": "Студия", "language": "rus"})
     await torrents.request("unpack.assign", {"url": URL, "tab": "voices", "items": [sound], "folder": "Студия"})
     await torrents.request("unpack.folder.delete", {"url": URL, "tab": "voices", "name": "Студия", "automatic": True,
                                                      "items": [sound]})
     editor = await torrents.request("unpack.editor.get", {"url": URL})
     assert editor["view"]["folders"] == [] and editor["view"]["hidden"] == [{"tab": "voices", "name": "Студия"}]
-    assert await unpack.repo.assignments(URL) == []
+    assert [each for each in await unpack.repo.assignments(URL) if each["tab"] == "voices"] == []
     await torrents.request("unpack.auto", {"url": URL, "tabs": ["voices"]})
     assert (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["hidden"] == []
     # «−» takes a track out — red; «Авто» gives it back to the automatic layout; a hand's placement clears it too.

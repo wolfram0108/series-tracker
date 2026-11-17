@@ -246,16 +246,18 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                                          track_link(release.release, video, _nth(_probed(inputs, release.release, f.path), s),
                                                     file=f.path), video, where,
                                          track_kind, entry, s, height, state, why))
-        for f in release.files:  # the sound and subtitles files no video took: listed so that they can be placed
+        # The tabs are a chain: what «Файлы» placed goes on to «Озвучки» and «Субтитры», a file it left red goes no further.
+        # A sound or subtitles file placed in an episode no single video has is listed still: it passed «Файлы».
+        for f in release.files:
             kind, item = kind_of(f.path), item_of(release.release, f.path)
-            if kind not in (FileKind.AUDIO, FileKind.SUBTITLES):
+            where = places.get(item)
+            if kind not in (FileKind.AUDIO, FileKind.SUBTITLES) or where is None:
                 continue
             tab = EditorTab.VOICES if kind == FileKind.AUDIO else EditorTab.SUBTITLES
             if any(entry["item"] == item for entry in view["tabs"][tab]):
                 continue
-            where = places.get(item)
-            track(tab, item, track_file_line(f.path, where.word if isinstance(where, Place) else ""),
-                  "audio" if kind == FileKind.AUDIO else "subtitles", None, f.path, where)
+            track(tab, item, track_file_line(f.path, where.word), "audio" if kind == FileKind.AUDIO else "subtitles", None,
+                  f.path, where)
 
     for f in inputs.folders:  # the folders the user made, even empty
         kind = "voice" if f["tab"] in (EditorTab.VOICES, EditorTab.VOICE_STREAMS) else "subtitles"
