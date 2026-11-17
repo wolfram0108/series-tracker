@@ -69,7 +69,7 @@ def test_every_placed_track_of_a_placed_video_and_of_a_file_beside_it_is_a_row_w
          track_link("page", "Show/Show - 01.mkv", 0, file="Show/Show - 01.rus.ass"))]
     assert rows[1].language == "rus" and rows[1].subtitle_type == ""
     assert all(row.heights == [1080] for row in rows)
-    assert all(row.text == "S01E01 | Show/Show - 01.mkv" and row.player == "torrent:page" for row in rows)
+    assert all(row.text == "S:1 | E:1 | Show/Show - 01.mkv" and row.player == "torrent:page" for row in rows)
     assert {row.timeline for row in rows} == {"page/Show/Show - 01.mkv"}  # one video, one timeline, whatever file a track is in
     # The titles the file gives make the folders by themselves; the sound file has none and waits for the operator.
     assert view["unplaced"] == {"files": 0, "voices": 1, "subtitles": 0, "voice_streams": 0, "subtitle_streams": 0}
@@ -151,7 +151,7 @@ def test_a_tag_of_the_video_makes_a_version_an_episode_of_its_own_and_a_variant_
     assert sorted((row.player, row.player_label, row.link) for row in rows) == [
         ("torrent:page", "Тайтл · 1-12", track_link("page", "Show/Show 21.mkv", 0, file="Show/Show 21.rus.mka")),
         ("torrent:page#DIR", "Тайтл · 1-12 · DIR", track_link("page", "Show/Show 21Dir.mkv", 0, file="Show/Show 21Dir.rus.mka"))]
-    assert {row.text for row in rows} == {"S01E21 | Show/Show 21.mkv", "S01E21 DIR | Show/Show 21Dir.mkv"}
+    assert {row.text for row in rows} == {"S:1 | E:21 | Show/Show 21.mkv", "S:1 | E:21 | TG:DIR | Show/Show 21Dir.mkv"}
     # The hand gives a version too.
     inputs.results = {"files": {}}
     inputs.manual = {"files": {item_of("page", path): {"season": 1, "episode": 21, "episode_last": None, "tag": tag}
@@ -274,8 +274,8 @@ def test_seasons_in_folders_of_their_own_place_their_files_and_a_track_of_anothe
                                                 "Show/Season 2/E01.mka": (2, 1)})})
     _view, rows = compose(inputs)
     assert [(row.text.split(" | ")[0], row.key) for row in rows] == [
-        ("S01E01", "page/Show/Season 1/E01.mkv#1"), ("S02E01", "page/Show/Season 2/E01.mkv#1"),
-        ("S02E01", "page/Show/Season 2/E01.mka#0")]
+        ("S:1", "page/Show/Season 1/E01.mkv#1"), ("S:2", "page/Show/Season 2/E01.mkv#1"),
+        ("S:2", "page/Show/Season 2/E01.mka#0")]
 
 
 def test_a_sound_of_an_episode_with_two_videos_waits_for_the_user():
@@ -296,7 +296,7 @@ def test_a_placement_by_hand_goes_before_the_rule_and_does_not_reach_other_files
                     manual={"files": {item_of("page", "Show/a.mkv"): {"season": 1, "episode": 5, "episode_last": None}}})
     view, rows = compose(inputs)
     # The file no rule and no hand placed is red: it has no row, and nothing else is left out.
-    assert [row.text for row in rows] == ["S01E02 | Show/b.mkv", "S01E05 | Show/a.mkv"]
+    assert [row.text for row in rows] == ["S:1 | E:2 | Show/b.mkv", "S:1 | E:5 | Show/a.mkv"]
     files = {entry["path"]: entry for entry in view["tabs"]["files"]}
     assert files["Show/extra.mkv"]["place"] is None and "excluded" not in files["Show/extra.mkv"]
     assert view["unplaced"]["files"] == 1
@@ -412,9 +412,9 @@ async def test_a_ready_release_is_read_its_files_wait_for_a_rule_and_one_rule_pl
     table = await torrents.request("unpack.table.get", {"url": URL})
     assert table["names"] == ["Тайтл · 1-12"]
     assert [(row["key"], row["text"], row["site_fields"]["language"]) for row in table["rows"]] == [
-        ("page/Show/Show - 01.mkv#1", "S01E01 | Show/Show - 01.mkv", "jpn"),
-        ("page/Show/Show - 01.mkv#2", "S01E01 | Show/Show - 01.mkv", "rus"),
-        ("page/Show/Show - 02.mkv#1", "S01E02 | Show/Show - 02.mkv", "jpn")]
+        ("page/Show/Show - 01.mkv#1", "S:1 | E:1 | Show/Show - 01.mkv", "jpn"),
+        ("page/Show/Show - 01.mkv#2", "S:1 | E:1 | Show/Show - 01.mkv", "rus"),
+        ("page/Show/Show - 02.mkv#1", "S:1 | E:2 | Show/Show - 02.mkv", "jpn")]
     assert all(row["heights"] == [36] for row in table["rows"])
     files = {e["path"]: e for e in (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["tabs"]["files"]}
     assert files["Show/Show - 02.mkv"]["by"] == "серия" and files["Show/readme.nfo"]["place"] is None

@@ -18,7 +18,7 @@ from app_stand import STAND_LIMIT_S, AppStand
 pytestmark = pytest.mark.asyncio
 
 VOICE = "AniLibria"
-EPISODE = [{"type": "text", "value": "E"}, {"type": "number"}]
+EPISODE = [{"type": "text", "value": "E:"}, {"type": "number"}]
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ async def stand(tmp_path):
 
 
 async def torrent_profile(stand: AppStand, subtitles: bool = False) -> int:
-    """The rule a user makes for the lines of a release (`S01E05 | <file>`): the number after «E», the voice-over named;
+    """The rule a user makes for the lines of a release (`S:1 | E:5 | <file>`): the number after «E:», the voice-over named;
     with `subtitles`, a rule before it gives the lines of subtitles (`TR:субтитры`) their number alone, keeping their name."""
     made = await stand.call("POST", "/api/parser-profiles", {"name": "серии раздачи"})
     blocks = json.dumps(EPISODE, ensure_ascii=False)
@@ -158,7 +158,7 @@ async def test_the_output_lays_the_subtitles_of_a_release_in_the_container_defau
 
 
 async def test_two_versions_of_an_episode_tagged_are_two_variants_of_the_output_either_one_a_reference(stand):
-    """«Директор» (first) gives the director's cut its number and the tag DIR, «Серия» the plain one: `S01E01 DIR` and `S01E01`
+    """«Директор» (first) gives the director's cut its number and the tag DIR, «Серия» the plain one: `S:1 | E:1 | TG:DIR` and `S:1 | E:1`
     are two episodes of the editor and two variants of the reference of the episode on the output."""
     await stand.configure([VOICE])
     await stand.call("POST", "/api/settings/torrent_staging", {"value": stand.staging})

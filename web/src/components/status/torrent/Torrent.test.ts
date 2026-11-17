@@ -42,9 +42,9 @@ const view = (overrides: Partial<EditorView> = {}): EditorView => ({
   tabs: {
     files: [file("S/E01.mkv", "video", [1, 1], "Серия · 1"), file("Bonus/OVA 2.mkv", "video", null), file("Bonus/OVA 1.mkv", "video", null),
       file("S/fonts/a.ttf", "font", null)],
-    voices: [{ item: "page/S/JAM/E01.mka", line: "D:S/JAM | E01.mka | X:mka | S:S01E01", kind: "audio", folder: "JAM", by: "Озвучка · 1", waiting: false, language: "rus",
+    voices: [{ item: "page/S/JAM/E01.mka", line: "D:S/JAM | E01.mka | X:mka | S:1 | E:1", kind: "audio", folder: "JAM", by: "Озвучка · 1", waiting: false, language: "rus",
       subtitle_type: "", path: "S/JAM/E01.mka", place: { season: 1, episode: 1, last: null, tag: "" }, stream: null },
-    { item: "page/S/Mil/E01.mka", line: "D:S/Mil | E01.mka | X:mka | S:S01E01", kind: "audio", folder: null, by: null, waiting: true, language: "rus", subtitle_type: "",
+    { item: "page/S/Mil/E01.mka", line: "D:S/Mil | E01.mka | X:mka | S:1 | E:1", kind: "audio", folder: null, by: null, waiting: true, language: "rus", subtitle_type: "",
       path: "S/Mil/E01.mka", place: { season: 1, episode: 1, last: null, tag: "" }, stream: null }],
     subtitles: [], voice_streams: [], subtitle_streams: [],
   },

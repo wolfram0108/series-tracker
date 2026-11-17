@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.contracts import RowState, RowTrack, RowVoice, TableRow
-from core.contracts.torrent import (EditorTab, FileKind, stream_tab, ReleaseState, ReleaseView, episode_word, files_line, fonts_of,
+from core.contracts.torrent import (EditorTab, FileKind, stream_tab, ReleaseState, ReleaseView, episode_fields, episode_word, files_line, fonts_of,
                                     kind_of, player_of, stream_line, track_file_line, track_link)
 from core.reasons import reason
 
@@ -50,8 +50,14 @@ class Place:
 
     @property
     def word(self) -> str:
+        """The episode as a person reads it (a conflict told): `S01E21 DIR`."""
         word = episode_word(self.season, self.episode, self.last)
         return f"{word} {self.tag}" if self.tag else word
+
+    @property
+    def fields(self) -> str:
+        """The episode in a line, as the rules read it: `S:1 | E:21 | TG:DIR`."""
+        return episode_fields(self.season, self.episode, self.last, self.tag)
 
 
 @dataclass(frozen=True)
@@ -84,7 +90,7 @@ def lines(inputs: Inputs) -> dict[str, dict[str, str]]:
             out[EditorTab.FILES][item] = files_line(f.path)
             kind = kind_of(f.path)
             where = places.get(item)
-            word = where.word if isinstance(where, Place) else ""
+            word = where.fields if isinstance(where, Place) else ""
             if kind == FileKind.AUDIO:
                 out[EditorTab.VOICES][item] = track_file_line(f.path, word)
             elif kind == FileKind.SUBTITLES:
@@ -302,7 +308,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                 for s in _probed(inputs, release.release, f.path) or [{"index": 0, "kind": "", "language": "",
                                                                          "title": "", "codec": "", "forced": False}]:
                     item = item_of(release.release, f.path)
-                    entry = track(tab, item, track_file_line(f.path, where.word), track_kind, s, f.path, where)
+                    entry = track(tab, item, track_file_line(f.path, where.fields), track_kind, s, f.path, where)
                     if release.state in SHOWN and not entry["waiting"] and s.get("kind") in TRACK_KINDS \
                             and track_kind in ROW_KINDS:
                         rows.append(_row(release, item_of(release.release, f.path, s["index"]),
@@ -319,7 +325,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
             tab = EditorTab.VOICES if kind == FileKind.AUDIO else EditorTab.SUBTITLES
             if any(entry["item"] == item for entry in view["tabs"][tab]):
                 continue
-            track(tab, item, track_file_line(f.path, where.word), "audio" if kind == FileKind.AUDIO else "subtitles", None,
+            track(tab, item, track_file_line(f.path, where.fields), "audio" if kind == FileKind.AUDIO else "subtitles", None,
                   f.path, where)
 
     for f in inputs.folders:  # the folders the user made, even empty
@@ -365,7 +371,7 @@ def _row(release: ReleaseView, key: str, link: str, video: str, where: Place, ki
     label = release.title or release.release
     return TableRow(key=key, player=player_of(release.release, where.tag),
                     player_label=f"{label} · {where.tag}" if where.tag else label,
-                    text=f"{where.word} | {video}", voice=RowVoice(name=entry["folder"] or stream.get("title") or "",
+                    text=f"{where.fields} | {video}", voice=RowVoice(name=entry["folder"] or stream.get("title") or "",
                                                                    kind=kind),
                     track=RowTrack.SUBTITLES if kind == "subtitles" else RowTrack.SOUND,
                     language=entry["language"] or "", subtitle_type=entry["subtitle_type"] or "",

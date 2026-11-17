@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from core.contracts.torrent import episode_word, files_line, kind_of, stream_line, track_file_line
+from core.contracts.torrent import episode_fields, episode_word, files_line, kind_of, stream_line, track_file_line
 from modules.rules import compile_profile, process_title
 
 
@@ -39,8 +39,11 @@ def test_the_lines_of_the_tabs_are_written_as_the_mockup_shows_them():
     assert files_line("Show/Rus Audio/JAM/Show - 05.mka") == "D:Show/Rus Audio/JAM | Show - 05.mka | K:звук | X:mka"
     assert files_line("Show - 05.mkv") == "Show - 05.mkv | K:видео | X:mkv"
     assert files_line("Show/Fonts/arial.ttf") == "D:Show/Fonts | arial.ttf | K:шрифт | X:ttf"
-    assert track_file_line("Show/sub.rus/[Shift]/05.ass", episode_word(1, 5)) == \
-        "D:Show/sub.rus/[Shift] | 05.ass | X:ass | S:S01E05"
+    assert track_file_line("Show/sub.rus/[Shift]/05.ass", episode_fields(1, 5)) == \
+        "D:Show/sub.rus/[Shift] | 05.ass | X:ass | S:1 | E:5"
+    # The episode in a line is fields with their codes, as the editor parsed it: a rule takes the number after «E:».
+    assert episode_fields(2, 1, 3) == "S:2 | E:1-3" and episode_fields(1, 21, tag="DIR") == "S:1 | E:21 | TG:DIR"
+    assert episode_fields(None, None) == ""
     assert episode_word(2, 1, 3) == "S02E01-E03" and episode_word(None, None) == ""
     assert stream_line("audio", 2, "jpn", "Оригинал", "aac") == "T:звук | A:2 | L:jpn | N:Оригинал | C:aac"
     assert stream_line("subtitle", 3) == "T:субтитры | A:3"
@@ -80,8 +83,8 @@ VOICES = compile_profile(2, [
 
 
 def test_a_rule_of_the_editor_puts_a_track_in_a_folder_with_a_language_and_a_type():
-    sound = process_title(VOICES, track_file_line("Show/Rus Audio/JAM/Show - 05.mka", "S01E05"))
-    signs = process_title(VOICES, track_file_line("Show/Subs/Signs/05.ass", "S01E05"))
+    sound = process_title(VOICES, track_file_line("Show/Rus Audio/JAM/Show - 05.mka", episode_fields(1, 5)))
+    signs = process_title(VOICES, track_file_line("Show/Subs/Signs/05.ass", episode_fields(1, 5)))
     assert sound["extracted"] == {"voice_folder": "JAM", "language": "rus"}
     assert signs["extracted"] == {"subtitle_folder": "Надписи", "subtitle_type": "signs"}
 

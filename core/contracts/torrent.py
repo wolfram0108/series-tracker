@@ -195,10 +195,19 @@ def files_line(path: str) -> str:
     return _SEP.join(part for part in parts if part and not part.endswith(":"))
 
 
+def episode_fields(season: int | None, episode: int | None, last: int | None = None, tag: str = "") -> str:
+    """The episode of a file in a line, every part with its code, as the editor parsed it: `S:1 | E:5`, `E:5-6` for a file of
+    several episodes, `TG:DIR` for a version with a tag of its video. A rule takes a number after its code."""
+    if episode is None:
+        return ""
+    number = f"{episode}-{last}" if last is not None and last != episode else str(episode)
+    return _SEP.join(part for part in (f"S:{season or 0}", f"E:{number}", f"TG:{tag}" if tag else "") if part)
+
+
 def track_file_line(path: str, place: str) -> str:
-    """A line of the tabs «Озвучки» and «Субтитры»: `D:<folder> | <name> | X:<extension> | S:<S01E05>`."""
+    """A line of the tabs «Озвучки» and «Субтитры»: `D:<folder> | <name> | X:<extension> | S:1 | E:5` (`place`: episode_fields)."""
     folder, name = _split(path)
-    parts = [f"D:{folder}" if folder else "", name, f"X:{extension_of(path)}", f"S:{place}" if place else ""]
+    parts = [f"D:{folder}" if folder else "", name, f"X:{extension_of(path)}", place]
     return _SEP.join(part for part in parts if part and not part.endswith(":"))
 
 

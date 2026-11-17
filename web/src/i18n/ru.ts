@@ -136,7 +136,7 @@ export const ru = {
   "torrent.filter.video": "Видео",
   "torrent.files.title": "Файлы раздачи",
   "torrent.files.line": "строка файла: D:каталог | имя | K:вид | X:расширение",
-  "torrent.tracks.line": "строка: D:каталог | имя | X:расширение | S:сезон · серия",
+  "torrent.tracks.line": "строка: D:каталог | имя | X:расширение | S:сезон | E:серия",
   "torrent.voices.title": "Звук чистовика",
   "torrent.subtitles.title": "Субтитры чистовика",
   "torrent.streams.hint": "одинаковые по составу схлопнуты",
