@@ -26,6 +26,7 @@ import json
 import logging
 import math
 import os
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -215,6 +216,17 @@ class Simulator:
         self.taken: dict[str, dict] = {}  # number of the snapshot → {alias, infohash, series_id}
         self._take = asyncio.Lock()
 
+    def _secret(self) -> str:
+        """The key of the sessions, made once and kept under the root: an open window stays logged in when the simulator
+        is started again (the service keeps its own in .env, ST_SECRET_KEY)."""
+        path = os.path.join(self.root, "secret")
+        if not os.path.exists(path):
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(secrets.token_hex(32))
+            os.chmod(path, 0o600)
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+
     def _migrate(self) -> None:
         """The schema of the database at the head of the migrations (a database of the last run is brought up to it)."""
         subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=ROOT, check=True, capture_output=True,
@@ -254,7 +266,7 @@ class Simulator:
         self.bus = Bus()
         self.db = Database(self.db_path)
         self.gateway, self.modules = assemble(self.bus, self.db, Options(
-            db_path=self.db_path, auth_required=True, cookie_secure=False,
+            db_path=self.db_path, secret_key=self._secret(), auth_required=True, cookie_secure=False,
             torrent_cache_dir=os.path.join(self.root, "cache"), qbit_url=f"http://127.0.0.1:{qbit_server.port}",
             qbit_username=self.qbit.username, qbit_password=self.qbit.password))
         app = Starlette(routes=[Route("/sim", self.page), Route("/sim/api/find", self.find),
