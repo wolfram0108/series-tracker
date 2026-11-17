@@ -353,6 +353,25 @@ async def test_reading_now_does_not_start_a_second_read_while_one_goes(system):
     assert len(system.site.reads) == 1
 
 
+async def test_a_page_whose_matter_changed_while_a_read_went_is_read_once_more_when_that_read_ends(system):
+    """What a page is read from changed (the tracks of a release laid out anew) while a read of it goes: that read may have
+    begun before the change, so one more read follows its end — one, however many changes came meanwhile."""
+    system.site.go.clear()
+    await system.get()
+    await entry(system.site)
+
+    for _ in range(3):
+        await system.sources.tables.read(TableGetRequest(url=PAGE), changed=True)
+    await assert_no_second_read(system.site)  # never two reads of one page at once
+
+    system.site.go.set()
+    await system.next(system.ready)
+    assert await entry(system.site) == PAGE
+    await system.next(system.ready)
+    assert len(system.site.reads) == 2
+    await assert_no_second_read(system.site)
+
+
 async def test_the_command_to_read_reads_a_page_whose_table_is_still_good_and_takes_nothing_shared(system):
     await system.warm()
 

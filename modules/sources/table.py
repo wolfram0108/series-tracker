@@ -135,6 +135,9 @@ class TableReader:
         self._log = get_logger("sources")
         self._reading: dict[str, asyncio.Task] = {}
         self._cancelled: set[str] = set()  # the pages whose read the user stopped: a verdict, unlike a stop of the process
+        # The pages whose matter changed while a read of them went (the rows to read): that read may not have it, so the page
+        # is read once more when it ends.
+        self._again: dict[str, str] = {}
         # Makes "look at the stored table, then decide to read" one step with respect to the end of a read.
         self._gate = asyncio.Lock()
 
@@ -183,20 +186,25 @@ class TableReader:
             return TableGetReply(url=key, state=TableState.READY, table=stored.table)
         return TableGetReply(url=key, state=TableState.ABSENT)
 
-    async def read(self, request: TableGetRequest) -> None:
+    async def read(self, request: TableGetRequest, *, changed: bool = False) -> None:
         """Read the page now, term or not, unless a read of it is already going. The user asked for it: the read takes
-        nothing that an earlier read left for sharing (`ReadContext.fresh`)."""
+        nothing that an earlier read left for sharing (`ReadContext.fresh`). `changed`: what the page is read from changed
+        (the tracks of a release laid out anew) — a read that goes may have begun before, so the page is read once more
+        when it ends; a second ask of the same matter makes no second read."""
         found = self._resolve(request.url)
         if found is None:
             self._publish(FAILED_TOPIC, TableFailed(url=request.url, reason=self._blocked(request.url) or reason("site_not_found"))
                           .model_dump(mode="json"))
             return
         site, key = found
-        if key not in self._reading:
-            if (why := self._blocked(key)) is not None:
-                self._publish(FAILED_TOPIC, TableFailed(url=key, reason=why).model_dump(mode="json"))
-                return
-            self._launch(site, key, fresh=True, rows=request.rows)
+        if key in self._reading:
+            if changed:
+                self._again[key] = request.rows
+            return
+        if (why := self._blocked(key)) is not None:
+            self._publish(FAILED_TOPIC, TableFailed(url=key, reason=why).model_dump(mode="json"))
+            return
+        self._launch(site, key, fresh=True, rows=request.rows)
 
     async def cancel(self, url: str) -> bool:
         """Stop the read of a page the user does not want any more: the read ends failed (`read_cancelled`), so it is
@@ -205,6 +213,7 @@ class TableReader:
         task = self._reading.get(found[1]) if found is not None else None
         if task is None:
             return False
+        self._again.pop(found[1], None)
         self._cancelled.add(found[1])
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
@@ -224,6 +233,7 @@ class TableReader:
                     and (page["url"] in was_listed or not self._fresh_at(page["read_at"]))]
         stopping = [self._reading[key] for key in gone if key in self._reading]
         for key in gone:
+            self._again.pop(key, None)
             if key in self._reading:
                 self._cancelled.add(key)
                 self._reading[key].cancel()
@@ -319,6 +329,9 @@ class TableReader:
         else:
             self._log.warning("table of %s not read: %s", key, describe(problem))
             self._publish(FAILED_TOPIC, TableFailed(url=key, reason=problem or "").model_dump(mode="json"))
+        again = self._again.pop(key, None)
+        if again is not None and key not in self._reading:
+            self._launch(site, key, fresh=True, rows=again)
 
     async def _read(self, site: Site, key: str, fresh: bool, spec: str = "all") -> ReleaseTable:
         pace = Pace()

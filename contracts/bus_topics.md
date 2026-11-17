@@ -55,7 +55,7 @@
 | `torrents.staging.changed {value}` — каталог промежуточных файлов раздач изменён (этап 15) | torrents | gateway | `torrent_staging_update` |
 | `unpack.editor.changed {url}` — редактор торрента страницы изменился (этап 15) | unpack | gateway | `torrent_editor_update` |
 | `unpack.read.progress {url, release, done, total}` — разбор версии раздачи: прочитано файлов из скольких (этап 15) | unpack | gateway | `torrent_read_update` |
-| `unpack.table.changed {url}` — дорожки страницы трекера изменились (раздача скачана, разобрана, обновлена, разложена заново): модуль sources читает её таблицу заново (этап 15) | unpack | sources | — |
+| `unpack.table.changed {url}` — дорожки страницы трекера изменились (раздача скачана, разобрана, обновлена, разложена заново): модуль sources читает её таблицу заново (этап 15); пришло во время идущего чтения — ещё одно чтение после его конца | unpack | sources | — |
 | `sources.table.ready {url, read_at}` — полная таблица сохранена; части страницы, которые чтение не получило, названы в `ReleaseTable.unread`, их строки — из прошлого чтения (Р-78) | sources | composition, scan, gateway | `sources_table_ready` |
 | `sources.table.failed {url, reason}` — чтение не удалось, действует прежняя полная таблица | sources | composition, scan, gateway | `sources_table_failed` |
 | `sources.pages.forgotten {urls}` — таблицы этих страниц удалены: их не перечисляет ни один источник (Р-101) | sources | — | — |

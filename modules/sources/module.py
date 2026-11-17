@@ -430,7 +430,7 @@ class SourcesModule(BaseModule):
     async def on_unpack_table_changed(self, env: Envelope) -> None:
         """The tracks of a tracker's page changed (a release downloaded, read, updated, laid out anew): its table is made
         again from them; the end comes as `sources.table.ready` as for any page."""
-        await self.tables.read(TableGetRequest(url=env.payload["url"]))
+        await self.tables.read(TableGetRequest(url=env.payload["url"]), changed=True)
 
     async def on_parse(self, env: Envelope) -> dict:
         url = env.payload["url"]
