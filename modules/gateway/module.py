@@ -179,6 +179,7 @@ SSE_MAP: dict[str, Outgoing] = {
     # The release of a torrent source and the editor of its page changed (stage 15): the tab «Торрент» shows them again.
     "torrents.release.changed": Outgoing("torrent_release_update"),
     "unpack.editor.changed": Outgoing("torrent_editor_update"),
+    "unpack.read.progress": Outgoing("torrent_read_update"),
     "sources.table.failed": Outgoing("sources_table_failed"),
     "composition.changed": Outgoing("composition_changed"),
     "composition.failed": Outgoing("composition_failed"),

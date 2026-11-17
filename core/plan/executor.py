@@ -45,6 +45,8 @@ class Made:
     # track of a torrent release lying in its own file) and the index of its stream there (stage 15, И-3, И-5).
     sound: str | None = None
     stream: int = 0
+    # The font files the subtitles of the step are drawn with, beside them in the release (DESIGN.md 7.1).
+    fonts: tuple[str, ...] = ()
 
     @property
     def sound_file(self) -> object:

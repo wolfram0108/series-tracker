@@ -534,7 +534,9 @@ async def test_fs_verify_of_a_video_series_answers_at_once_and_says_nothing(syst
     with caplog.at_level(logging.WARNING):
         reply = await probe.request("torrents.fs.verify", {"series_id": 2}, timeout=5)
     assert reply == {"missing": 0, "recheck_started": 0}
-    assert [record.getMessage() for record in caplog.records if record.levelno >= logging.WARNING] == []
+    # The module's own words only: a task another test left behind may be reported by asyncio meanwhile.
+    assert [record.getMessage() for record in caplog.records
+            if record.levelno >= logging.WARNING and record.name.split(".")[0] == "torrents"] == []
     assert len(qbt.calls) == calls_before
 
 

@@ -20,6 +20,8 @@ Queries / commands:
 Events out:
   unpack.table.changed {url} — the rows of the page changed (`sources` reads its table again)
   unpack.editor.changed {url} — the editor of the page changed (a window shows it again)
+  unpack.read.progress {url, release, done, total} — the files of a version read so far, while they are read; the editor
+      gives the same as `reading` of a release, for a window opened in the middle of a read
 Events in: torrents.release.changed (a release with its files: the files not to download are told to `torrents` by the
   numbers the preset gives the names of the files and the seasons and episodes the series exclude; a ready one is read),
   rules.profile.changed (a profile of the editor changed), series.updated (the episodes a series excludes changed).
@@ -43,6 +45,7 @@ FILES_PROFILE_KEY = "unpack.files_profile_id"
 FILES_PROFILE_NAME = "Торрент: файлы"
 TABLE_CHANGED_TOPIC = "unpack.table.changed"
 EDITOR_CHANGED_TOPIC = "unpack.editor.changed"
+READ_PROGRESS_TOPIC = "unpack.read.progress"
 READ = {FileKind.VIDEO, FileKind.AUDIO, FileKind.SUBTITLES}
 
 # The rules the preset of the tab «Файлы» begins with: the forms of the numbers in the names of the releases of the corpus
@@ -66,6 +69,7 @@ class UnpackModule(BaseModule):
         self.repo = UnpackRepository(db)
         self._files_profile: int | None = None
         self._skips: dict[tuple[str, str], frozenset[str]] = {}  # the files not to download told to torrents last
+        self._reading: dict[tuple[str, str], tuple[int, int]] = {}  # (url, release) → (files read, files to read)
         super().__init__(bus)
 
     def register(self) -> None:
@@ -142,6 +146,9 @@ class UnpackModule(BaseModule):
         url = env.payload["url"]
         profiles = await self._tab_profiles(url)
         view, _rows = compose(await self._inputs(url))
+        for release in view["releases"]:
+            found = self._reading.get((url, release["release"]))
+            release["reading"] = None if found is None else {"done": found[0], "total": found[1]}
         return {"url": url, "profiles": {"files": self._files_profile, **profiles}, "view": view}
 
     async def _tab_profiles(self, url: str) -> dict[str, int]:
@@ -195,16 +202,24 @@ class UnpackModule(BaseModule):
     async def _read(self, release: ReleaseView) -> None:
         """Every video, sound and subtitles file of the version, read once per version and size."""
         known = await self.repo.streams(release.url, release.release)
-        for f in release.files:
-            if kind_of(f.path) not in READ or f.priority == 0:
-                continue
-            stored = known.get(f.path)
-            if stored and stored["infohash"] == release.infohash and stored["size"] == f.size:
-                continue
-            layout, said = await layout_of(os.path.join(release.folder, f.path))
-            await self.repo.save_streams(release.url, release.release, f.path, release.infohash or "", f.size, layout,
-                                         None if layout is not None else said)
+        todo = [f for f in release.files if kind_of(f.path) in READ and f.priority != 0 and not (
+            (stored := known.get(f.path)) and stored["infohash"] == release.infohash and stored["size"] == f.size)]
+        key = (release.url, release.release)
+        try:
+            for done, f in enumerate(todo):
+                self._progress(key, done, len(todo))
+                layout, said = await layout_of(os.path.join(release.folder, f.path))
+                await self.repo.save_streams(release.url, release.release, f.path, release.infohash or "", f.size, layout,
+                                             None if layout is not None else said)
+        finally:
+            if todo:
+                self._progress(key, len(todo), len(todo))
+            self._reading.pop(key, None)
         await self.repo.drop_streams(release.url, release.release, {f.path for f in release.files})
+
+    def _progress(self, key: tuple[str, str], done: int, total: int) -> None:
+        self._reading[key] = (done, total)
+        self.publish_event(READ_PROGRESS_TOPIC, {"url": key[0], "release": key[1], "done": done, "total": total})
 
     async def _tell_skips(self, release: ReleaseView) -> None:
         """The files whose episode every series with the page excludes are not downloaded."""

@@ -130,12 +130,15 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
     """The view of the editor and the rows of the table."""
     places = _places(inputs)
     folder_facts = {(f["kind"], f["name"]): f for f in inputs.folders}
+    # `containers`: every video file placed, with what it holds (the window lays the tab «Контейнеры» out by it: files of
+    # one composition are one).
     view: dict[str, Any] = {"releases": [], "tabs": {tab.value: [] for tab in EditorTab}, "folders": [],
-                            "unplaced": {tab.value: 0 for tab in EditorTab}}
+                            "unplaced": {tab.value: 0 for tab in EditorTab}, "containers": []}
     rows: list[TableRow] = []
     named: dict[tuple[str, str], dict] = {}  # the folders the layout names: (kind, name) → facts and counts
 
-    def track(tab: str, item: str, line: str, kind: str, stream: dict | None) -> dict:
+    def track(tab: str, item: str, line: str, kind: str, stream: dict | None, path: str = "",
+              where: "Place | str | None" = None) -> dict:
         result, manual = inputs.results.get(tab, {}).get(item), inputs.manual.get(tab, {}).get(item)
         folder, how = _folder_of(tab, kind, result, manual)
         excluded = bool(manual and manual["excluded"]) or bool(result and result.get("excluded"))
@@ -144,8 +147,11 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
         language = (result or {}).get("language") or facts.get("language") or (stream or {}).get("language") or ""
         subtitle_type = (result or {}).get("subtitle_type") or facts.get("subtitle_type") or (
             "forced" if (stream or {}).get("forced") else "")
+        # The file and its episode, and the stream (its place in the file and what it is): the window groups tracks by them.
         entry = {"item": item, "line": line, "kind": kind, "folder": folder, "by": how, "excluded": excluded,
-                 "language": language, "subtitle_type": subtitle_type if kind == "subtitles" else ""}
+                 "language": language, "subtitle_type": subtitle_type if kind == "subtitles" else "", "path": path,
+                 "place": _place_json(where),
+                 "stream": None if stream is None else {key: stream.get(key) for key in _STREAM_KEYS}}
         view["tabs"][tab].append(entry)
         if folder and not excluded:
             named.setdefault((folder_kind, folder), {"kind": folder_kind, "name": folder, "items": 0,
@@ -181,13 +187,16 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
             for video in paths:
                 streams = _probed(inputs, release.release, video)
                 height = max((s["height"] or 0 for s in streams if s["kind"] == "video" and not s["picture"]), default=0)
+                view["containers"].append({"item": item_of(release.release, video), "path": video, "place": _place_json(where),
+                                           "streams": [{key: s.get(key) for key in _STREAM_KEYS} for s in streams
+                                                       if s["kind"] in ("video", *TRACK_KINDS) and not s.get("picture")]})
                 for s in streams:
                     if s["kind"] not in TRACK_KINDS:
                         continue
                     item = item_of(release.release, video, s["index"])
                     kind = TRACK_KINDS[s["kind"]]
                     entry = track(EditorTab.STREAMS, item, stream_line(s["kind"], s["index"], s["language"], s["title"],
-                                                                       s["codec"]), kind, s)
+                                                                       s["codec"]), kind, s, video, where)
                     if release.state in SHOWN and not entry["excluded"] and kind in ROW_KINDS:
                         rows.append(_row(release, item, track_link(release.release, video, _nth(streams, s)), video, where,
                                          kind, entry, s, height, state, why))
@@ -205,7 +214,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                 for s in _probed(inputs, release.release, f.path) or [{"index": 0, "kind": "", "language": "",
                                                                          "title": "", "codec": "", "forced": False}]:
                     item = item_of(release.release, f.path)
-                    entry = track(tab, item, track_file_line(f.path, where.word), track_kind, s)
+                    entry = track(tab, item, track_file_line(f.path, where.word), track_kind, s, f.path, where)
                     if release.state in SHOWN and not entry["excluded"] and s.get("kind") in TRACK_KINDS \
                             and track_kind in ROW_KINDS:
                         rows.append(_row(release, item_of(release.release, f.path, s["index"]),
@@ -221,13 +230,21 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                 continue
             where = places.get(item)
             track(tab, item, track_file_line(f.path, where.word if isinstance(where, Place) else ""),
-                  "audio" if kind == FileKind.AUDIO else "subtitles", None)
+                  "audio" if kind == FileKind.AUDIO else "subtitles", None, f.path, where)
 
     for f in inputs.folders:  # the folders the user made, even empty
         named.setdefault((f["kind"], f["name"]), {"kind": f["kind"], "name": f["name"], "items": 0, "manual": True,
                                                   "language": f["language"], "subtitle_type": f["subtitle_type"]})
     view["folders"] = sorted(named.values(), key=lambda each: (each["kind"], each["name"]))
     return view, rows
+
+
+# What the window is told of a stream of a file.
+_STREAM_KEYS = ("index", "kind", "codec", "language", "title", "channels", "height", "forced", "default")
+
+
+def _place_json(where: "Place | str | None") -> dict | None:
+    return {"season": where.season, "episode": where.episode, "last": where.last} if isinstance(where, Place) else None
 
 
 def _nth(streams: list[dict], stream: dict) -> int:

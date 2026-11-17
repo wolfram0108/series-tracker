@@ -146,7 +146,7 @@ class Library:
                 if stream is None:
                     raise FileNotFoundError(f"{way.container.name} holds no subtitles {item.row}")
             found.append(mkv.SubtitleIn(path, stream, dub_key(item.row), item.name, item.language,
-                                        item.subtitle_type == "forced"))
+                                        item.subtitle_type == "forced", taken.fonts if way.kind == "take" else ()))
         return found
 
     def video_path(self, goal: Goal, results: dict[str, Made]) -> str:

@@ -6,7 +6,9 @@ such a row is a release: `torrent:<release>`, a line of the player `torrent`; it
 """
 from __future__ import annotations
 
+import posixpath
 from enum import StrEnum
+from typing import Iterable
 from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -203,3 +205,17 @@ def stream_line(kind: str, index: int, language: str = "", title: str = "", code
 # What a rule of the editor may set besides numbers: the folder of a voice-over or of subtitles by its name, the language,
 # the type of subtitles (DESIGN.md, 4.1).
 SUBTITLE_TYPES = ("full", "signs", "forced")
+
+
+def fonts_of(paths: Iterable[str], subtitles: str) -> list[str]:
+    """The font files of a release a subtitles file is drawn with (DESIGN.md 7.1): those in its folder and below it; none
+    there — those of the nearest folder above it that has any (a folder of fonts beside the folders of subtitles), up to
+    the root of the release."""
+    fonts = sorted(path for path in paths if kind_of(path) == FileKind.FONT)
+    folder = posixpath.dirname(subtitles)
+    while True:
+        prefix = f"{folder}/" if folder else ""
+        found = [path for path in fonts if path.startswith(prefix)]
+        if found or not folder:
+            return found
+        folder = posixpath.dirname(folder)

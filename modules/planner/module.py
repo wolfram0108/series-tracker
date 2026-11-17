@@ -102,7 +102,7 @@ from core.clock import beat_while
 from core.dump import plain
 from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView, SyncScope, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
-from core.contracts.torrent import parse_link
+from core.contracts.torrent import fonts_of, parse_link
 from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
 from core.envelope import Envelope
 from core.ffprobe import END_SLACK_S, duration_of
@@ -405,8 +405,10 @@ class BusSync(SeriesSync):
             return Made(Video(row.id, row.snapshot(), row.slot, row.timeline), video_path, sound=sound, stream=stream)
         if op.kind == "download_dub":
             return Made(row, video_path, sound=sound, stream=stream)
-        if op.kind == "take_subtitles":  # the n-th subtitles of its file (DESIGN.md 7.1.1)
-            return Made(None, video_path, sound=sound, stream=stream)
+        if op.kind == "take_subtitles":  # the n-th subtitles of its file, with the fonts beside it (DESIGN.md 7.1, 7.1.1)
+            fonts = tuple(os.path.join(kept["folder"], path)
+                          for path in fonts_of((each["path"] for each in kept.get("files") or []), file))
+            return Made(None, video_path, sound=sound, stream=stream, fonts=fonts)
         return Made(None, video_path)
 
     async def _retimed(self, row_id, path: str) -> bool:

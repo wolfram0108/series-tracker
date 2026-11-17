@@ -86,6 +86,8 @@ class SubtitleIn:
     title: str = ""
     language: str = ""
     forced: bool = False
+    # The font files of the release the track is drawn with, beside it (not attachments of its own file).
+    fonts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -181,6 +183,17 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     for number, (_path, stream) in enumerate(fonts):
         cmd += [f"-metadata:s:t:{number}", f"filename={stream['filename']}",
                 f"-metadata:s:t:{number}", f"mimetype={stream['mimetype'] or 'application/x-truetype-font'}"]
+    # The font files that lie beside the subtitles, each name once and none a file's own attachment has already given.
+    names = {stream["filename"] for _path, stream in fonts}
+    beside = []
+    for path in (font for each in subtitles for font in each.fonts):
+        if os.path.basename(path) not in names:
+            names.add(os.path.basename(path))
+            beside.append(path)
+    for offset, path in enumerate(beside):
+        number = len(fonts) + offset
+        cmd += ["-attach", path, f"-metadata:s:t:{number}", f"filename={os.path.basename(path)}",
+                f"-metadata:s:t:{number}", f"mimetype={_FONT_TYPES.get(os.path.splitext(path)[1].lower(), 'application/x-truetype-font')}"]
     for number, track in enumerate(tracks):
         cmd += [f"-metadata:s:a:{number}", f"title={track.shown}",
                 *([f"-metadata:s:a:{number}", f"language={track.language}"] if track.language else []),
@@ -195,7 +208,7 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
         attached = output + "." + PROVENANCE
         with open(attached, "w", encoding="utf-8") as out:
             json.dump(provenance, out, ensure_ascii=False, sort_keys=True)
-        table = f"-metadata:s:t:{len(fonts)}"
+        table = f"-metadata:s:t:{len(fonts) + len(beside)}"
         cmd += ["-attach", attached, table, "mimetype=application/json", table, f"filename={PROVENANCE}"]
     cmd += ["-progress", "pipe:1", "-nostats", "-f", "matroska", output]
     length = expected.duration if expected is not None else 0.0
@@ -226,6 +239,9 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     if problem is None and made is not None and [each.key for each in made.subtitles] != [each.key for each in subtitles]:
         return "container_subtitles_wrong"
     return problem
+
+
+_FONT_TYPES = {".ttf": "application/x-truetype-font", ".otf": "application/vnd.ms-opentype", ".ttc": "application/x-font-ttf"}
 
 
 async def _fonts(paths: Sequence[str]) -> list[tuple[str, dict]]:

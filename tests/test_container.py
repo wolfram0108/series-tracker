@@ -198,3 +198,26 @@ def test_a_video_of_another_container_carries_its_chapters_and_no_subtitles(medi
     out = str(tmp / "plain.mkv")
     assert asyncio.run(container.build(out, video, "1:x", [AudioIn("a", video, 0, "1:x", own=True)])) is None
     assert codecs(out) == ["mpeg4", "aac"]
+
+
+def test_external_subtitles_take_the_font_files_beside_them_once_each(media):
+    """DESIGN.md 7.1: an ASS file of a release is drawn with the font files that lie beside it; they are attached to the
+    container, each name once, after the attachments of the files the subtitles come from."""
+    from core.ffprobe import layout_of
+    tmp, video, dubs, _ = media
+    ass = tmp / "ext.ass"
+    ass.write_text("[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Text\n"
+                   "Dialogue: 0,0:00:00.50,0:00:01.50,Default,Надпись\n", encoding="utf-8")
+    fonts = []
+    for name in ("Arial.ttf", "Bold.otf"):
+        (tmp / name).write_bytes(b"\x00\x01\x00\x00" + b"font" * 64)
+        fonts.append(str(tmp / name))
+    out = str(tmp / "ext.mkv")
+    chosen = [SubtitleIn(str(ass), 0, "1:ext:", "Полные", "rus", fonts=tuple(fonts)),
+              SubtitleIn(str(ass), 0, "1:ext2:", "Копия", "rus", fonts=tuple(fonts[:1]))]
+    assert asyncio.run(container.build(out, video, "1:x", [AudioIn("a", video, 0, "1:x", own=True)], provenance={"video": "x"},
+                                       subtitles=chosen)) is None
+    layout, _ = asyncio.run(layout_of(out))
+    assert sorted(s["filename"] for s in layout["streams"] if s["kind"] == "attachment") == [
+        "Arial.ttf", "Bold.otf", container.PROVENANCE]
+    assert [each.key for each in asyncio.run(container.contents(out)).subtitles] == ["1:ext:", "1:ext2:"]

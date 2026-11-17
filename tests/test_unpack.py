@@ -210,10 +210,16 @@ async def test_the_module_makes_its_preset_reads_a_ready_release_and_answers_the
     ready = release(["Show/Show - 01.mkv", "Show/Show - 02.mkv", "Show/readme.nfo"], folder=folder)
     torrents.releases = [ready]
     changed = bus.subscribe("unpack.table.changed")
+    progress = bus.subscribe("unpack.read.progress")
 
     assert unpack._files_profile is not None  # the preset is made at the start, with its rules
     unpack.publish_event(RELEASE_CHANGED_TOPIC, ready.model_dump(mode="json"))
     assert (await asyncio.wait_for(changed.queue.get(), 10)).payload == {"url": URL}
+    # The read of the version told file by file (the nfo is no file to read), and the editor holds no read any more.
+    told = []
+    while not progress.queue.empty():
+        told.append((lambda each: (each["done"], each["total"]))(progress.queue.get_nowait().payload))
+    assert told == [(0, 2), (1, 2), (2, 2)]
     table = await torrents.request("unpack.table.get", {"url": URL})
     assert table["names"] == ["Тайтл · 1-12"]
     assert [(row["key"], row["text"], row["site_fields"]["language"]) for row in table["rows"]] == [
@@ -226,6 +232,7 @@ async def test_the_module_makes_its_preset_reads_a_ready_release_and_answers_the
     files = {entry["path"]: entry for entry in editor["view"]["tabs"]["files"]}
     assert files["Show/readme.nfo"]["excluded"] and files["Show/Show - 02.mkv"]["by"] == "серия после тире"
     assert set(editor["profiles"]) == {"files", "voices", "subtitles", "streams"}
+    assert [each["reading"] for each in editor["view"]["releases"]] == [None]
 
 
 async def test_the_files_of_a_season_every_series_with_the_page_excludes_are_not_downloaded(bus_stand):
@@ -239,3 +246,30 @@ async def test_the_files_of_a_season_every_series_with_the_page_excludes_are_not
             await asyncio.sleep(0.01)
     await asyncio.wait_for(told(), 10)
     assert torrents.skips == [{"url": URL, "release": "page", "skip": ["Show/Season 2/Show - 01.mkv"]}]
+
+
+def test_the_fonts_of_subtitles_are_those_beside_them_else_of_the_nearest_folder_above_that_has_any():
+    from core.contracts.torrent import fonts_of
+    paths = ["Show/sub/Cafe/E01.ass", "Show/sub/Cafe/fonts/a.ttf", "Show/sub/Shift/E01.ass", "Show/Fonts/b.otf",
+             "Show/Fonts/c.TTF", "Show/E01.mkv"]
+    assert fonts_of(paths, "Show/sub/Cafe/E01.ass") == ["Show/sub/Cafe/fonts/a.ttf"]
+    # Nothing in its folder: the nearest folder above that has fonts gives them (`sub` has those of Cafe below it).
+    assert fonts_of(paths, "Show/sub/Shift/E01.ass") == ["Show/sub/Cafe/fonts/a.ttf"]
+    assert fonts_of(["Show/Subs/E01.ass", "Show/Fonts/b.otf"], "Show/Subs/E01.ass") == ["Show/Fonts/b.otf"]
+    assert fonts_of(["E01.ass"], "E01.ass") == []
+
+
+def test_the_editor_tells_the_file_episode_and_stream_of_every_track_and_what_every_video_holds():
+    r = release(["Show/Show - 01.mkv", "Show/Show - 01.rus.mka"])
+    inputs = Inputs(releases=[r], manual={}, folders=[],
+                    streams={"page": {"Show/Show - 01.mkv": streams(("video", 0, "", ""), ("audio", 1, "jpn", "Original")),
+                                      "Show/Show - 01.rus.mka": streams(("audio", 0, "rus", ""))}},
+                    results={"files": numbered({p.path: (1, 1) for p in r.files})})
+    view, _rows = compose(inputs)
+    stream = view["tabs"]["streams"][0]
+    assert (stream["path"], stream["place"], stream["stream"]["index"], stream["stream"]["language"]) == (
+        "Show/Show - 01.mkv", {"season": 1, "episode": 1, "last": None}, 1, "jpn")
+    voice = view["tabs"]["voices"][0]
+    assert (voice["path"], voice["place"]["episode"]) == ("Show/Show - 01.rus.mka", 1)
+    assert [(each["path"], [s["kind"] for s in each["streams"]]) for each in view["containers"]] == [
+        ("Show/Show - 01.mkv", ["video", "audio"])]
