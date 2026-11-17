@@ -9,7 +9,8 @@ import {
   canJoin, canJoinRange, cellsIn, emptyRow, fieldValues, join, joinRange, joined, rangeOf, rowOf, settle, spanOf,
   splitRange, textsOf, type Side, type TableRow,
 } from "../../lib/ruleTable"
-import { actionLabel, actionOptions, choicesOf, fieldText, isAssign, isExtract, isNumberAssign, type RulePlace } from "../../lib/ruleVocabulary"
+import { actionLabel, actionOptions, choicesOf, fieldText, folderLanguages, folderValueOf, folderValueText, isAssign, isExtract,
+  isFolderAction, isNumberAssign, type RulePlace } from "../../lib/ruleVocabulary"
 import type { EditableRule } from "./ParserRuleCard.vue"
 import ParserPatternEditor from "./ParserPatternEditor.vue"
 import PatternPalette from "./PatternPalette.vue"
@@ -258,6 +259,19 @@ function setAction(value: string): void {
                 :class="[markOf(at, 'then'), { 'is-joined': rowsOfCell(at, 'then') > 1 }]" @mousedown="select(row, 'then', $event)"
               >
                 <ParserPatternEditor v-if="extracts" :blocks="row.then.blocks" context="then" :show-palette="false" />
+                <!-- A folder with its language: two fields of one value. -->
+                <div v-else-if="assigns && isFolderAction(table.action_type)" class="table-folder">
+                  <input
+                    :value="folderValueOf(row.then.value).name" class="table-value" type="text" :placeholder="t('rules.action.folderName')"
+                    :aria-label="t('rules.action.folderName')"
+                    @input="row.then.value = folderValueText({ ...folderValueOf(row.then.value), name: fieldText($event) })"
+                  />
+                  <StSelect
+                    class="table-language" :model-value="folderValueOf(row.then.value).language || null" :options="folderLanguages()"
+                    :placeholder="t('rules.action.language')"
+                    @update:model-value="row.then.value = folderValueText({ ...folderValueOf(row.then.value), language: String($event ?? '') })"
+                  />
+                </div>
                 <StSelect
                   v-else-if="assigns && choicesOf(table.action_type)" class="table-value" :model-value="row.then.value || null"
                   :options="choicesOf(table.action_type)!" :placeholder="t('rules.action.valuePlaceholder')"
@@ -357,6 +371,13 @@ function setAction(value: string): void {
 /* The template of a cell is the plain row of its blocks: the frame is the cell's. */
 .rule-table td :deep(.pattern-constructor) { padding: 0; background: transparent; }
 .rule-table td :deep(.pattern-blocks-container) { min-height: 1.5rem; padding: 0; }
+.table-folder { display: flex; gap: 0.375rem; align-items: stretch; }
+.table-folder > input.table-value { flex: 1 1 8rem; min-width: 0; }
+.table-folder > .table-language {
+  flex: 0 0 5rem; min-width: 0; padding: 0 0.5rem; border: 1px solid #ced4da; border-radius: 4px; background: #fff; font-size: 0.875rem;
+}
+/* The language is one line: a long name is cut, the chevron keeps its place. */
+.table-folder > .table-language :deep(.selected-value) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0; }
 .table-value {
   display: block; width: 100%; box-sizing: border-box; padding: 0.35rem 0.625rem; font: inherit; font-size: 0.875rem;
   border: 1px solid #ced4da; border-radius: 4px; background: #fff;

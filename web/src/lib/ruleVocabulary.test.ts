@@ -19,3 +19,15 @@ describe("the actions «ТО» offers where the constructor stands", () => {
     expect(offered("subtitles")).toEqual(["assign_subtitle_folder", "assign_language", "assign_subtitle_type"])
   })
 })
+
+describe("the value of a folder named with its language", () => {
+  it("is the name alone without a language, both as JSON with one, and a name alone of a rule written before reads back", async () => {
+    const { folderValueOf, folderValueText } = await import("./ruleVocabulary")
+    expect(folderValueText({ name: "Студия", language: "" })).toBe("Студия")
+    const both = folderValueText({ name: "AnimeSpace Team", language: "rus" })
+    expect(JSON.parse(both)).toEqual({ name: "AnimeSpace Team", language: "rus" })
+    expect(folderValueOf(both)).toEqual({ name: "AnimeSpace Team", language: "rus" })
+    expect(folderValueOf("Студия")).toEqual({ name: "Студия", language: "" })
+    expect(folderValueOf(null)).toEqual({ name: "", language: "" })
+  })
+})

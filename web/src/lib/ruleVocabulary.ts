@@ -72,6 +72,30 @@ export function choicesOf(type: string): { value: string; label: string }[] | nu
   return null
 }
 
+/** «В каталог озвучки», «В каталог субтитров»: one «ТО» of two fields, the name of the folder and its language. The value is
+ *  `{"name", "language"}` as JSON, or the name alone when no language is given (modules/rules/engine.py folder_value). */
+export const FOLDER_ACTIONS = ["assign_voice_folder", "assign_subtitle_folder"] as const
+export const isFolderAction = (type: string): boolean => (FOLDER_ACTIONS as readonly string[]).includes(type)
+export interface FolderValue { name: string; language: string }
+export function folderValueOf(raw: unknown): FolderValue {
+  const text = String(raw ?? "").trim()
+  if (text.startsWith("{")) {
+    try {
+      const value = JSON.parse(text) as Partial<FolderValue>
+      return { name: String(value.name ?? ""), language: String(value.language ?? "") }
+    } catch {
+      return { name: text, language: "" }
+    }
+  }
+  return { name: text, language: "" }
+}
+export const folderValueText = (value: FolderValue): string =>
+  value.language ? JSON.stringify({ name: value.name, language: value.language }) : value.name
+/** The languages a folder is given, by their code as the folder keeps it (rus, eng), «—» first: the language may be said by
+ *  another rule or the file. */
+export const folderLanguages = (): { value: string; label: string }[] =>
+  [{ value: "", label: "—" }, ...LANGUAGES.map((code) => ({ value: code, label: code }))]
+
 /** A block the palette offers; `disabled` with its `reason` when the template it would go to cannot take it. */
 export interface PaletteItem { type: string; label: string; title: string; disabled?: boolean; reason?: string }
 

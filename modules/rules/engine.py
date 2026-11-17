@@ -39,6 +39,22 @@ EDITOR_ASSIGN = {"assign_voice_folder": "voice_folder", "assign_subtitle_folder"
                  # «Тег видео» of the tab «Файлы»: a version of an episode (DIR), an episode of its own with its tag.
                  "assign_video_tag": "video_tag"}
 ASSIGN_TYPES = ASSIGN_TYPES + tuple(EDITOR_ASSIGN)
+# The folder of a track is named with its language in one action («ТО» of two fields): the value is `{"name", "language"}`
+# as JSON, or the name alone (a rule written before, a folder whose language is said elsewhere).
+FOLDER_ASSIGN = ("assign_voice_folder", "assign_subtitle_folder")
+
+
+def folder_value(raw) -> tuple[str, str]:
+    """(name, language) of the value of a folder action."""
+    text = str(raw or "").strip()
+    if text.startswith("{"):
+        try:
+            value = json.loads(text)
+        except ValueError:
+            value = None
+        if isinstance(value, dict):
+            return str(value.get("name") or "").strip(), str(value.get("language") or "").strip()
+    return text, ""
 ACTION_TYPES = ("exclude",) + EXTRACT_TYPES + ASSIGN_TYPES
 BLOCK_TYPES = ("text", "number", "range", "add", "subtract", "whitespace",
                "any_text", "start_of_line", "end_of_line", "or")
@@ -531,6 +547,15 @@ def _run_actions(title: str, rule: CompiledRule,
             produced = True
         elif a_type == "assign_resolution":
             extracted["resolution"] = action.raw_value
+            produced = True
+        elif a_type in FOLDER_ASSIGN:
+            name, language = folder_value(action.raw_value)
+            if not name:
+                errors.append(reason("rule_value_bad", rule=rule.name, action=a_type, value=str(action.raw_value or "")))
+                continue
+            extracted[EDITOR_ASSIGN[a_type]] = name
+            if language:
+                extracted["language"] = language
             produced = True
         elif a_type in EDITOR_ASSIGN:
             value = str(action.raw_value or "").strip()

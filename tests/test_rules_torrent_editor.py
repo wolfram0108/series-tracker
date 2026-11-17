@@ -93,6 +93,27 @@ def test_a_type_of_subtitles_the_editor_does_not_know_or_an_empty_folder_is_an_e
     assert all('"rule_value_bad"' in error for error in got["errors"])
 
 
+def test_a_folder_is_named_with_its_language_in_one_action_a_name_alone_names_the_folder_only():
+    """«ТО» of two fields: the folder and its language, in a rule and in a row of a table; a value of a name alone (a rule
+    written before) gives the folder; a value with no name is an error."""
+    both = json.dumps({"name": "AnimeSpace Team", "language": "rus"}, ensure_ascii=False)
+    profile = compile_profile(4, [
+        rule(1, "звук", [assign("assign_voice_folder", both)], [contains(text("AnimeSpace"))]),
+        rule(2, "субтитры", [assign("assign_subtitle_folder", "Надписи")], [contains(text("Signs"))]),
+        rule(3, "пусто", [assign("assign_voice_folder", json.dumps({"name": " ", "language": "rus"}))], [contains(text("Пусто"))])])
+    assert process_title(profile, "D:Sound/[AnimeSpace Team] | 01.mka")["extracted"] == {"voice_folder": "AnimeSpace Team",
+                                                                                        "language": "rus"}
+    assert process_title(profile, "D:Subs/Signs | 01.ass")["extracted"] == {"subtitle_folder": "Надписи"}
+    empty = process_title(profile, "D:Пусто | 01.mka")
+    assert empty["extracted"] == {} and '"rule_value_bad"' in empty["errors"][0]
+    table = compile_profile(5, [{"id": 1, "name": "таблица", "priority": 1, "continue_after_match": False,
+                                 "action_pattern": "[]", "conditions": [],
+                                 "rule_table": {"action_type": "assign_voice_folder",
+                                                "rows": [{"if": [text("AnimeSpace")], "then": both}]}}])
+    assert process_title(table, "D:Sound/[AnimeSpace Team] | 01.mka")["extracted"] == {"voice_folder": "AnimeSpace Team",
+                                                                                      "language": "rus"}
+
+
 async def test_the_profiles_of_the_editor_are_not_listed_among_the_profiles_of_a_series(tmp_path):
     from core.db import Database
     from modules.rules.repository import RulesRepository

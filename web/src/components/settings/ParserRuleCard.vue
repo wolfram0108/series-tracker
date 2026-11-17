@@ -6,7 +6,8 @@ import StSelect from "../StSelect.vue"
 import { t } from "../../i18n"
 import ParserPatternEditor, { type PatternBlock } from "./ParserPatternEditor.vue"
 import type { TableRow } from "../../lib/ruleTable"
-import { actionLabel, actionOptions, choicesOf, conditionOptions, fieldText, isAssign, isExtract, isNumberAssign, type RulePlace } from "../../lib/ruleVocabulary"
+import { actionLabel, actionOptions, choicesOf, conditionOptions, fieldText, folderLanguages, folderValueOf, folderValueText, isAssign,
+  isExtract, isFolderAction, isNumberAssign, type RulePlace } from "../../lib/ruleVocabulary"
 import { reasonText } from "../../lib/reason"
 
 // Карточка одного правила профиля парсера. Шапка (имя + управление) и
@@ -217,8 +218,21 @@ function getAssignActionLabel(actionType: string): string {
             <!-- assign_*: простое значение -->
             <StGroup v-else-if="isAssign(action.action_type)">
               <div class="constructor-item item-label">{{ getAssignActionLabel(action.action_type) }}</div>
+              <!-- A folder is named with its language in one «ТО»: two fields, one value. -->
+              <template v-if="isFolderAction(action.action_type)">
+                <input
+                  :value="folderValueOf(action.action_pattern).name" type="text" class="constructor-item item-input"
+                  :placeholder="t('rules.action.folderName')" :aria-label="t('rules.action.folderName')"
+                  @input="action.action_pattern = folderValueText({ ...folderValueOf(action.action_pattern), name: fieldText($event) })"
+                />
+                <StSelect
+                  class="folder-language" :model-value="folderValueOf(action.action_pattern).language || null" :options="folderLanguages()"
+                  :placeholder="t('rules.action.language')"
+                  @update:model-value="action.action_pattern = folderValueText({ ...folderValueOf(action.action_pattern), language: String($event ?? '') })"
+                />
+              </template>
               <StSelect
-                v-if="choicesOf(action.action_type)" :model-value="action.action_pattern || null" :options="choicesOf(action.action_type)!"
+                v-else-if="choicesOf(action.action_type)" :model-value="action.action_pattern || null" :options="choicesOf(action.action_type)!"
                 :placeholder="t('rules.action.valuePlaceholder')" @update:model-value="action.action_pattern = String($event ?? '')"
               />
               <input
