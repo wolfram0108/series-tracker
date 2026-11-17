@@ -80,8 +80,9 @@ def tracker_sites() -> list[TrackerSite]:
     return [
         TrackerSite("kinozal", "kinozal.tv", _Page(re.compile(r"^/details\.php$"), "/details.php", "id")),
         TrackerSite("rutracker", "rutracker.org", _Page(re.compile(r"^/forum/viewtopic\.php$"), "/forum/viewtopic.php", "t")),
+        # A tab of the page of a release (`…/torrents`, as the site's own address bar shows it) is the same release.
         TrackerSite("anilibria", "anilibria.top",
-                    _Page(re.compile(r"^/(?:anime/releases/)?release/([^/?#]+)/?$"), "/anime/releases/release/")),
+                    _Page(re.compile(r"^/(?:anime/releases/)?release/([^/?#]+)(?:/[a-z-]+)?/?$"), "/anime/releases/release/")),
         TrackerSite("anilibria_tv", "anilibria.tv", _Page(re.compile(r"^/release/([^/?#]+\.html)$"), "/release/")),
         TrackerSite("astar", "astar.bz", _Page(re.compile(r"^/([^?#]+\.html)$"), "/")),
     ]

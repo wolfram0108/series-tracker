@@ -30,6 +30,8 @@ def site(name: str):
     ("rutracker", "https://rutracker.org/forum/viewtopic.php?t=6543210", "https://rutracker.org/forum/viewtopic.php?t=6543210"),
     ("anilibria", "https://aniliberty.top/anime/releases/release/kusuriya/", "https://anilibria.top/anime/releases/release/kusuriya"),
     ("anilibria", "https://anilibria.top/release/kusuriya", "https://anilibria.top/anime/releases/release/kusuriya"),
+    ("anilibria", "https://www.aniliberty.top/anime/releases/release/kusuriya/torrents",
+     "https://anilibria.top/anime/releases/release/kusuriya"),
     ("anilibria_tv", "https://anilibria.tv/release/kusuriya.html", "https://anilibria.tv/release/kusuriya.html"),
     ("astar", "https://v13.astar.bz/anime/1234-kusuriya.html", "https://astar.bz/anime/1234-kusuriya.html"),
 ])
