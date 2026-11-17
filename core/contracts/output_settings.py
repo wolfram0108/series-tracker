@@ -317,5 +317,5 @@ class QueuesReply(BaseModel):
     markup: QueueView = Field(default_factory=QueueView)
     markup_follows: bool = True
     # The subtitles of the level (DESIGN.md 7.1.1): every allowed variant is a track of the container, in this order; the
-    # group of a row is the name of its subtitles. A season and a compilation have none of their own: they show the series'.
+    # group of a row is the name of its subtitles. A season has its own over the series'; a compilation shows the series'.
     subtitles: QueueView = Field(default_factory=QueueView)

@@ -1,5 +1,6 @@
 """The subtitles in the composition (stage 15, DESIGN.md 7.1.1): rows of their own, apart from the rows of sound; one table on
 the series and one on an episode, in the order of core.subtitle_queue, with the variants the level leaves out marked."""
+from core.contracts.compilation import compilation_key
 from core.contracts import (SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED, SUBTITLES_ORDER, CompositionRow, EffectiveLever, Level, RowState, RowTrack,
                             SettingRecord, variant_target)
 from core.subtitle_queue import ordered
@@ -60,15 +61,18 @@ def test_the_queue_tells_how_the_track_of_each_variant_lies_in_the_container_and
         ("Полные", True, Level.SERIES, False, Level.DEFAULT), ("Надписи", False, Level.DEFAULT, True, Level.EPISODE)]
 
 
-def test_the_levers_of_the_subtitles_are_set_on_the_series_and_on_an_episode_only():
+def test_the_levers_of_the_subtitles_are_set_on_the_series_a_season_and_an_episode_not_on_a_compilation():
     value = [{"group": "Полные", "source_id": 1, "player": "torrent:1"}]
-    assert validate(SettingRecord(series_id=1, lever=SUBTITLES_ORDER, value=value)) is None
-    assert validate(SettingRecord(series_id=1, season=1, episode=2, lever=SUBTITLES_ORDER, value=value)) is None
-    assert "bad_level" in validate(SettingRecord(series_id=1, season=1, lever=SUBTITLES_ORDER, value=value))
+    member = compilation_key("Студия", 1, "torrent:1", 1, 1, 2)
+    for scope in ({}, {"season": 1}, {"season": 1, "episode": 2}):
+        assert validate(SettingRecord(series_id=1, lever=SUBTITLES_ORDER, value=value, **scope)) is None, scope
+    assert "bad_level" in validate(SettingRecord(series_id=1, season=1, compilation=member, lever=SUBTITLES_ORDER, value=value))
     for lever in (SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED):
         target = variant_target("Полные", 1, "torrent:1")
         assert validate(SettingRecord(series_id=1, lever=lever, value=lever == SUBTITLES_ALLOW, target=target)) is None
-        assert "bad_level" in validate(SettingRecord(series_id=1, season=1, lever=lever, value=False, target=target))
+        assert validate(SettingRecord(series_id=1, season=1, lever=lever, value=False, target=target)) is None
+        assert "bad_level" in validate(SettingRecord(series_id=1, season=1, compilation=member, lever=lever, value=False,
+                                                     target=target))
 
 
 def test_a_voice_over_group_renamed_like_a_name_of_subtitles_leaves_the_subtitles_as_they_were():

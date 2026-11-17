@@ -21,10 +21,11 @@ from . import levers
 # The scope of a record: (season, episode, compilation key).
 _Scope = tuple[int | None, int | None, str | None]
 _Index = dict[str, dict[str | None, dict[_Scope, Any]]]
-# The levels a lever may be set on, where it is not every level: the subtitles have one table on the series and one on an
-# episode (DESIGN.md 7.1.1).
+# The levels a lever may be set on, where it is not every level: the subtitles have a table on the series, on a season and on
+# an episode, none of a compilation of its own (DESIGN.md 7.1.1).
 _ONLY_ON = {COMPILATION_MEMBER: {Level.EPISODE}, COMPILATION_TAKE: {Level.COMPILATION},
-            **{lever: {Level.SERIES, Level.EPISODE} for lever in (SUBTITLES_ORDER, SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED)}}
+            **{lever: {Level.SERIES, Level.SEASON, Level.EPISODE}
+               for lever in (SUBTITLES_ORDER, SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED)}}
 
 
 def validate(record: SettingRecord) -> str | None:

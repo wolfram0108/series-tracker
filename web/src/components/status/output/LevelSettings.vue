@@ -80,8 +80,8 @@ const countText = (state: TrackState | "reference", count: number): string => st
         <StTab v-for="(group, index) in groups" :key="group" :active="tab === group" :label="group" @click="tab = group">
           <template #before><VoiceMark :n="index + 1" :online="online[group]" /></template>
         </StTab>
-        <!-- The subtitles have one table on the series and one on an episode (DESIGN.md 7.1.1): a season has none of its own. -->
-        <StTab v-if="level === 'series'" class="tab-subtitles" :active="tab === SUBTITLES" :label="t('output.tab.subtitles')"
+        <!-- The subtitles have a table on the series, on a season and on an episode (DESIGN.md 7.1.1); a compilation has none. -->
+        <StTab v-if="level !== 'compilation'" class="tab-subtitles" :active="tab === SUBTITLES" :label="t('output.tab.subtitles')"
                @click="tab = SUBTITLES" />
       </div>
       <div v-if="tab === 'cuts' && compilation" class="level-cuts">

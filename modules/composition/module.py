@@ -249,13 +249,13 @@ class CompositionModule(BaseModule):
         lines, levers, order, groups = await self._level_of(stored, settings.canonical(stored.records), request)
         reference, by_group = queues.build(lines, levers, order, groups, request.episode)
         markup, follows = queues.markup(lines, levers, order, request.episode)
-        # The subtitles have one table on the series and one on an episode: a season or a compilation shows the series'.
+        # The subtitles have a table on the series, on a season and on an episode, each with its own levers over those above it;
+        # a compilation has none of its own: it shows the series'.
         records = settings.canonical(stored.records)
-        own = request.episode is not None
+        season = None if request.compilation else request.season
         subtitles = queues.subtitles(
-            availability.lines_of_level(stored.subtitles, request.season if own else None, request.episode),
-            settings.effective(records, request.season, request.episode) if own else settings.effective(records, None, None),
-            _source_order(stored), request.episode)
+            availability.lines_of_level(stored.subtitles, season, request.episode),
+            settings.effective(records, season, request.episode), _source_order(stored), request.episode)
         return QueuesReply(series_id=request.series_id, season=request.season, episode=request.episode,
                            compilation=request.compilation, reference=reference, groups=by_group, markup=markup,
                            markup_follows=follows, subtitles=subtitles).model_dump(mode="json")

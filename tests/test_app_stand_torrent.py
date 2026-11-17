@@ -144,12 +144,15 @@ async def test_the_output_lays_the_subtitles_of_a_release_in_the_container_defau
     assert [(row["group"], row["language"], row["subtitle_type"], row["default"], row["forced"]) for row in queue] == [
         ("Надписи", "rus", "signs", False, False)]
     target = variant_target(queue[0]["group"], queue[0]["source_id"], queue[0]["player"])
+    # «По умолчанию» is set on the series, «Форс.» on the season: the season has a table of its own over the series'.
     await stand.call("PUT", f"/api/series/{series_id}/output/settings/batch", {"items": [
         {"lever": "subtitles.default", "target": target, "value": True},
-        {"lever": "subtitles.forced", "target": target, "value": True}]})
+        {"lever": "subtitles.forced", "target": target, "value": True, "season": 1}]})
     queue = (await stand.call("GET", f"/api/series/{series_id}/output/queues"))["subtitles"]["rows"]
+    assert [(row["default"], row["default_level"], row["forced"]) for row in queue] == [(True, "series", False)]
+    queue = (await stand.call("GET", f"/api/series/{series_id}/output/queues?season=1"))["subtitles"]["rows"]
     assert [(row["default"], row["default_level"], row["forced"], row["forced_level"]) for row in queue] == [
-        (True, "series", True, "series")]
+        (True, "series", True, "season")]
 
     view = await stand.sync(series_id)
     assert [each["episode"] for each in view["assets"]] == [[1, 1]]
