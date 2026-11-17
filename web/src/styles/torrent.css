@@ -167,10 +167,12 @@
 .torrent-rule { background: #e6f4f1; color: #00695c; border-color: #a3d9cf; }
 .torrent-hand { background: #f3ecfb; color: #5a32a3; border-color: #d8c8f0; }
 .torrent-meta-folder, .torrent-auto { border-style: dashed; border-color: #adb5bd; color: var(--text-muted); }
+/* The cross of a folder or of a track a hand put: quiet until pointed at. */
 .torrent-bin-btn {
-  display: inline-flex; align-items: center; justify-content: center; inline-size: 1.75rem; block-size: 1.5rem; padding: 0;
-  border: 1px solid #dee2e6; border-radius: 6px; background: var(--bg-white); color: #a61e2d; font-size: 0.75rem; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; inline-size: 1.5rem; block-size: 1.5rem; padding: 0;
+  border: 0; border-radius: 6px; background: none; color: var(--text-muted); font-size: 0.7rem; cursor: pointer;
 }
+.torrent-bin-btn:hover:not(:disabled) { background: #fdf3f4; color: #a61e2d; }
 .torrent-put {
   display: inline-flex; align-items: center; block-size: 1.5rem; padding: 0 0.375rem; border: 0; border-radius: 6px;
   background: var(--color-blue); color: var(--bg-white); font: inherit; font-size: 0.75rem; cursor: pointer;

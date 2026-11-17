@@ -108,6 +108,27 @@ def test_the_file_names_the_folder_and_the_language_by_itself_und_waits_and_a_ru
     assert [(e["folder"], e["by"], e["language"], e["waiting"]) for e in view["tabs"]["streams"]][1] == ("Оригинал", "яп", "jpn", False)
 
 
+def test_a_deleted_folder_of_the_automatic_layout_is_not_made_again_and_the_hands_placement_stays():
+    r = release(["Show/E01.mkv"])
+    video = item_of("page", "Show/E01.mkv")
+    inputs = Inputs(releases=[r], folders=[], hidden={("voice", "Original"), ("voice", "Студия")},
+                    streams={"page": {"Show/E01.mkv": streams(("video", 0, "", ""), ("audio", 1, "rus", "AniLiberty"),
+                                                              ("audio", 2, "jpn", "Original"), ("audio", 3, "rus", "x"))}},
+                    results={"files": numbered({"Show/E01.mkv": (1, 1)}),
+                             "streams": {f"{video}#3": {"voice_folder": "Студия", "events": [{"rule": "студия"}]}}},
+                    manual={"streams": {f"{video}#1": {"folder": "Original"}}})
+    view, rows = compose(inputs)
+    # Deleted: «Original» of the title and «Студия» of a rule are made by neither — the tracks are red; the hand's placement
+    # into «Original» stays, it is no work of the automatic layout.
+    assert [(e["item"][-2:], e["folder"], e["by"], e["waiting"]) for e in view["tabs"]["streams"]] == [
+        ("#1", "Original", "manual", False), ("#2", None, None, True), ("#3", None, None, True)]
+    assert view["hidden"] == [{"kind": "voice", "name": "Original"}, {"kind": "voice", "name": "Студия"}]
+    # «Авто»: nothing hidden, the automatic layout makes them again.
+    inputs.hidden = set()
+    view, rows = compose(inputs)
+    assert [(e["folder"], e["by"]) for e in view["tabs"]["streams"]] == [("Original", "manual"), ("Original", "meta"), ("Студия", "студия")]
+
+
 def test_a_folder_a_rule_gives_names_the_track_and_the_users_folder_goes_before_it():
     r = release(["Show/E01.mkv", "Show/Rus Audio/JAM/E01.mka", "Show/Rus Audio/Studio/E01.mka"])
     inputs = Inputs(releases=[r], folders=[{"kind": "voice", "name": "Студия", "language": "rus", "subtitle_type": ""}],
@@ -304,6 +325,24 @@ async def test_files_dropped_on_a_season_take_its_episodes_from_the_one_given_in
     editor = await torrents.request("unpack.editor.get", {"url": URL})
     assert [(e["path"], e["place"], e["by"]) for e in editor["view"]["tabs"]["files"]] == [
         (path, {"season": 0, "episode": 4 + n, "last": None}, "manual") for n, path in enumerate(ova)]
+
+
+async def test_a_folder_deleted_takes_the_hands_placements_in_it_and_auto_makes_the_automatic_ones_again(bus_stand):
+    torrents, unpack, bus, root = bus_stand
+    torrents.releases = [release(["Show/Show - 01.mkv", "Show/Show - 01.rus.mka"])]
+    sound = item_of("page", "Show/Show - 01.rus.mka")
+    await torrents.request("unpack.folder.set", {"url": URL, "kind": "voice", "name": "Студия", "language": "rus"})
+    await torrents.request("unpack.assign", {"url": URL, "tab": "voices", "items": [sound], "folder": "Студия"})
+    await torrents.request("unpack.folder.delete", {"url": URL, "kind": "voice", "name": "Студия", "items": {"voices": [sound]}})
+    editor = await torrents.request("unpack.editor.get", {"url": URL})
+    assert editor["view"]["folders"] == [] and editor["view"]["hidden"] == [{"kind": "voice", "name": "Студия"}]
+    assert await unpack.repo.assignments(URL) == []
+    await torrents.request("unpack.auto", {"url": URL, "kinds": ["voice"]})
+    assert (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["hidden"] == []
+    # A folder the user names again is his: nothing hides it.
+    await torrents.request("unpack.folder.delete", {"url": URL, "kind": "voice", "name": "Студия"})
+    await torrents.request("unpack.folder.set", {"url": URL, "kind": "voice", "name": "Студия"})
+    assert (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["hidden"] == []
 
 
 async def test_a_page_written_with_a_mirror_is_the_page_of_the_trackers_own_domain_in_the_editor(bus_stand):

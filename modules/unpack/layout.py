@@ -54,6 +54,7 @@ class Inputs:
     results: dict[str, dict[str, dict]]             # tab → item → the result of the rules for its line
     manual: dict[str, dict[str, dict]]              # tab → item → the stored placement by hand
     folders: list[dict] = field(default_factory=list)
+    hidden: set[tuple[str, str]] = field(default_factory=set)  # (kind, name): folders of the automatic layout deleted
 
 
 def lines(inputs: Inputs) -> dict[str, dict[str, str]]:
@@ -118,16 +119,19 @@ FROM_META = "meta"
 UNKNOWN_LANGUAGES = {"", "und"}
 
 
-def _folder_of(kind: str, result: dict | None, manual: dict | None, stream: dict | None) -> tuple[str | None, str | None]:
+def _folder_of(kind: str, result: dict | None, manual: dict | None, stream: dict | None,
+               hidden: set[tuple[str, str]] = frozenset()) -> tuple[str | None, str | None]:
     """(folder, how): the user's folder, else the rule's, else the title of the track in its file (`how`: `manual`, the
-    name of the rule, or `meta`). A rule overrides what the file says; the hand overrides both."""
+    name of the rule, or `meta`). A rule overrides what the file says; the hand overrides both. A folder of the automatic
+    layout the user deleted (`hidden`) is made by neither until «Авто»: the track is in no folder."""
     if manual is not None:
         return manual["folder"], "manual"
     key = "voice_folder" if kind == "audio" else "subtitle_folder"
+    folder_kind = "voice" if kind == "audio" else "subtitles"
     if result and result.get(key):
-        return result[key], _rule_of(result)
+        return (None, None) if (folder_kind, result[key]) in hidden else (result[key], _rule_of(result))
     title = ((stream or {}).get("title") or "").strip()
-    return (title, FROM_META) if title else (None, None)
+    return (title, FROM_META) if title and (folder_kind, title) not in hidden else (None, None)
 
 
 def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
@@ -137,7 +141,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
     # `containers`: every video file placed, with what it holds (the window lays the tab «Контейнеры» out by it: files of
     # one composition are one).
     view: dict[str, Any] = {"releases": [], "tabs": {tab.value: [] for tab in EditorTab}, "folders": [],
-                            "unplaced": {tab.value: 0 for tab in EditorTab}, "containers": []}
+                            "unplaced": {tab.value: 0 for tab in EditorTab}, "containers": [], "hidden": []}
     rows: list[TableRow] = []
     named: dict[tuple[str, str], dict] = {}  # the folders the layout names: (kind, name) → facts and counts
     # The fonts a folder of subtitles goes with: those its external files are drawn with (fonts_of), by the release read.
@@ -147,7 +151,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
     def track(tab: str, item: str, line: str, kind: str, stream: dict | None, path: str = "",
               where: "Place | str | None" = None) -> dict:
         result, manual = inputs.results.get(tab, {}).get(item), inputs.manual.get(tab, {}).get(item)
-        folder, how = _folder_of(kind, result, manual, stream)
+        folder, how = _folder_of(kind, result, manual, stream, inputs.hidden)
         folder_kind = "voice" if kind == "audio" else "subtitles"
         facts = folder_facts.get((folder_kind, folder), {}) if folder else {}
         language = (result or {}).get("language") or facts.get("language") or (stream or {}).get("language") or ""
@@ -254,6 +258,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
     for each in named.values():
         each["fonts"] = sorted(fonts.get(each["name"], ())) if each["kind"] == "subtitles" else []
     view["folders"] = sorted(named.values(), key=lambda each: (each["kind"], each["name"]))
+    view["hidden"] = [{"kind": kind, "name": name} for kind, name in sorted(inputs.hidden)]
     return view, rows
 
 

@@ -2,7 +2,7 @@
 import { computed, ref } from "vue"
 import { t } from "../../../i18n"
 import { byEpisode, folderOf, trackCounts, trackFits, type Editor, type TrackEntry, type TrackFilter } from "../../../lib/torrent"
-import { assign, setFolder, unassign } from "../../../composables/torrentCalls"
+import { assign, autoLayout, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
 import TorrentFolders from "./TorrentFolders.vue"
@@ -57,6 +57,9 @@ async function send(call: () => Promise<Answer<unknown>>): Promise<void> {
 }
 const toFolder = (name: string, items: string[]) => send(() => assign({ url: url.value, tab: props.tab, items, folder: name }))
 const back = () => send(() => unassign(url.value, props.tab, chosenEntries.value.filter((each) => each.by === "manual").map((each) => each.item)))
+// «Авто»: the automatic layout makes again the folders of this kind the user deleted; the hand's placements stay.
+const hiddenHere = computed(() => props.editor.view.hidden.some((each) => each.kind === kind.value))
+const toAuto = () => send(() => autoLayout(url.value, [kind.value]))
 
 const naming = ref(false)
 const name = ref("")
@@ -133,6 +136,8 @@ async function create(): Promise<void> {
         <b>{{ t(tab === "voices" ? "torrent.folders.voices" : "torrent.folders.subtitles") }}</b>
         <span class="torrent-pane-hint" :title="t(tab === 'voices' ? 'torrent.folders.voicesHint' : 'torrent.folders.subtitlesHint')">{{ t(tab === "voices" ? "torrent.folders.voicesHint" : "torrent.folders.subtitlesHint") }}</span>
         <div class="torrent-pane-tools">
+          <button type="button" class="torrent-mini do-auto" :disabled="busy || !hiddenHere" :title="t('torrent.autoHint')"
+                  @click="toAuto">{{ t("torrent.auto") }}</button>
           <button type="button" class="torrent-mini is-primary do-add-folder" @click="naming = true">
             + {{ t(tab === "voices" ? "torrent.folder.addVoice" : "torrent.folder.addSubtitles") }}</button>
         </div>

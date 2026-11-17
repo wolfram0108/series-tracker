@@ -2,7 +2,7 @@
 import { computed, ref } from "vue"
 import { t, tn, type MessageKey } from "../../../i18n"
 import { containerGroups, trackCounts, type ContainerStream, type Editor, type Folder } from "../../../lib/torrent"
-import { assign, setFolder, unassign } from "../../../composables/torrentCalls"
+import { assign, autoLayout, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
 import TorrentFolders from "./TorrentFolders.vue"
@@ -65,6 +65,9 @@ async function send(call: () => Promise<Answer<unknown>>): Promise<void> {
 const toFolder = (name: string, items: string[]) => send(() => assign({ url: url.value, tab: "streams", items, folder: name }))
 const manualChosen = computed(() => [...pick.chosen.value].filter((item) => byItem.value.get(item)?.by === "manual"))
 const back = () => send(() => unassign(url.value, "streams", manualChosen.value))
+// «Авто»: the automatic layout makes again every folder the user deleted; the hand's placements stay.
+const hiddenHere = computed(() => props.editor.view.hidden.length > 0)
+const toAuto = () => send(() => autoLayout(url.value, ["voice", "subtitles"]))
 
 const naming = ref<Folder["kind"] | null>(null)
 const name = ref("")
@@ -125,6 +128,8 @@ async function create(): Promise<void> {
       <div class="torrent-pane-head">
         <b>{{ t("torrent.folders.streams") }}</b><span class="torrent-pane-hint" :title="t('torrent.folders.streamsHint')">{{ t("torrent.folders.streamsHint") }}</span>
         <div class="torrent-pane-tools">
+          <button type="button" class="torrent-mini do-auto" :disabled="busy || !hiddenHere" :title="t('torrent.autoHint')"
+                  @click="toAuto">{{ t("torrent.auto") }}</button>
           <button type="button" class="torrent-mini is-primary" @click="naming = 'voice'">+ {{ t("torrent.folder.addVoice") }}</button>
           <button type="button" class="torrent-mini is-primary" @click="naming = 'subtitles'">+ {{ t("torrent.folder.addSubtitles") }}</button>
         </div>

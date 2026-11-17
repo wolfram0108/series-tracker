@@ -73,6 +73,14 @@ class FolderRef(BaseModel):
     url: str
     kind: Literal["voice", "subtitles"]
     name: str = Field(min_length=1)
+    # The hand's placements in the folder, by tab: they go with it.
+    items: dict[Literal["voices", "subtitles", "streams"], list[str]] = Field(default_factory=dict)
+
+
+class AutoBody(BaseModel):
+    """«Авто»: the automatic layout makes its deleted folders of these kinds again; the hand's placements stay."""
+    url: str
+    kinds: list[Literal["voice", "subtitles"]] = Field(min_length=1)
 
 
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
@@ -136,5 +144,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/torrent/editor/folder/delete", response_model=OkResponse, responses=_ERR)
     async def folder_delete(body: FolderRef):
         return await told("unpack.folder.delete", body.model_dump())
+
+    @r.post("/api/torrent/editor/auto", response_model=OkResponse, responses=_ERR)
+    async def auto(body: AutoBody):
+        return await told("unpack.auto", body.model_dump())
 
     return r

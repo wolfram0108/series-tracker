@@ -37,6 +37,7 @@ def test_the_hands_never_leaves_out_its_placements_stay_and_a_folder_forced_is_o
     db = sqlite3.connect(path)
     db.execute("DROP TABLE unpack_assignments")
     db.execute("DROP TABLE unpack_folders")
+    db.execute("DROP TABLE unpack_hidden")
     for sql in BEFORE:
         db.execute(sql)
     rows = [("u", "files", "E01.mkv", 1, 5, None, None, 0), ("u", "files", "E02.mkv", None, None, None, None, 1),
@@ -55,3 +56,4 @@ def test_the_hands_never_leaves_out_its_placements_stay_and_a_folder_forced_is_o
     assert "excluded" not in [row[1] for row in db.execute("PRAGMA table_info(unpack_assignments)")]
     assert db.execute("SELECT name, language, subtitle_type FROM unpack_folders ORDER BY name").fetchall() == [
         ("Надписи", "rus", "signs"), ("Форс", "", "")]
+    assert db.execute("SELECT count(*) FROM unpack_hidden").fetchone() == (0,)

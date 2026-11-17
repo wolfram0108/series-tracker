@@ -85,6 +85,8 @@ export interface EditorView {
   folders: Folder[]
   unplaced: Record<EditorTab, number>
   containers: ContainerFile[]
+  /** The folders of the automatic layout the user deleted: «Авто» makes them again. */
+  hidden: { kind: Folder["kind"]; name: string }[]
 }
 export interface Editor { url: string; profiles: Record<EditorTab, number | null>; view: EditorView }
 

@@ -1,7 +1,8 @@
 """The torrent editor places, it does not leave out (stage 15): an item is placed (green, a row) or not (red, no row); what
 goes out of the output is the work of the constructor of the series after it. The hand's «Не брать» leaves with its column:
 the items it held become unplaced. A folder of subtitles has a type of what it is (full, signs); how a track lies in the
-container is the output's."""
+container is the output's. A folder of the automatic layout (the titles in the files, the rules) the user deleted is kept
+in unpack_hidden until «Авто» builds the automatic layout anew."""
 from alembic import op
 
 revision = "0076"
@@ -46,7 +47,16 @@ def upgrade() -> None:
     op.execute("INSERT INTO unpack_folders_new SELECT url, kind, name, language, subtitle_type FROM unpack_folders")
     op.execute("DROP TABLE unpack_folders")
     op.execute("ALTER TABLE unpack_folders_new RENAME TO unpack_folders")
+    op.execute("""
+        CREATE TABLE unpack_hidden (
+            url TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('voice', 'subtitles')),
+            name TEXT NOT NULL CHECK (name <> ''),
+            PRIMARY KEY (url, kind, name)
+        )
+    """)
 
 
 def downgrade() -> None:
+    op.execute("DROP TABLE unpack_hidden")
     op.execute("ALTER TABLE unpack_assignments ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0")

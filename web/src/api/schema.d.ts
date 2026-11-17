@@ -1822,6 +1822,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/torrent/editor/auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Auto */
+        post: operations["auto_api_torrent_editor_auto_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/": {
         parameters: {
             query?: never;
@@ -2079,6 +2096,16 @@ export interface components {
              * @default 0
              */
             seconds: number;
+        };
+        /**
+         * AutoBody
+         * @description «Авто»: the automatic layout makes its deleted folders of these kinds again; the hand's placements stay.
+         */
+        AutoBody: {
+            /** Url */
+            url: string;
+            /** Kinds */
+            kinds: ("voice" | "subtitles")[];
         };
         /**
          * ChangedSource
@@ -2764,6 +2791,10 @@ export interface components {
             kind: "voice" | "subtitles";
             /** Name */
             name: string;
+            /** Items */
+            items?: {
+                [key: string]: string[];
+            };
         };
         /**
          * GroupQueue
@@ -9986,6 +10017,84 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["FolderRef"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    auto_api_torrent_editor_auto_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutoBody"];
             };
         };
         responses: {

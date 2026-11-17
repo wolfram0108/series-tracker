@@ -36,5 +36,12 @@ export const unassign = (url: string, tab: EditorTab, items: string[]): Promise<
 export const setFolder = (body: WithDefaults<Schemas["FolderBody"], "language" | "subtitle_type">): Promise<Answer<unknown>> =>
   call(() => api.POST("/api/torrent/editor/folder", { body: { language: "", subtitle_type: "", ...body } }), WORDS)
 
-export const deleteFolder = (url: string, kind: "voice" | "subtitles", name: string): Promise<Answer<unknown>> =>
-  call(() => api.POST("/api/torrent/editor/folder/delete", { body: { url, kind, name } }), WORDS)
+/** A folder deleted, with the hand's placements in it (tab → items); one of the automatic layout is not made again until
+ *  «Авто». */
+export const deleteFolder = (url: string, kind: "voice" | "subtitles", name: string,
+  items: Partial<Record<"voices" | "subtitles" | "streams", string[]>> = {}): Promise<Answer<unknown>> =>
+  call(() => api.POST("/api/torrent/editor/folder/delete", { body: { url, kind, name, items } }), WORDS)
+
+/** «Авто»: the automatic layout makes its deleted folders of these kinds again; the hand's placements stay. */
+export const autoLayout = (url: string, kinds: ("voice" | "subtitles")[]): Promise<Answer<unknown>> =>
+  call(() => api.POST("/api/torrent/editor/auto", { body: { url, kinds } }), WORDS)

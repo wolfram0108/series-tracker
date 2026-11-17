@@ -1,4 +1,4 @@
-"""The SQL of the module unpack: tables unpack_streams, unpack_folders, unpack_assignments and unpack_sources."""
+"""The SQL of the module unpack: tables unpack_streams, unpack_folders, unpack_assignments, unpack_hidden and unpack_sources."""
 from __future__ import annotations
 
 import json
@@ -60,11 +60,23 @@ class UnpackRepository:
         await self._db.execute("INSERT OR REPLACE INTO unpack_folders (url, kind, name, language, subtitle_type) "
                                "VALUES (?, ?, ?, ?, ?)", (url, kind, name, language, subtitle_type))
 
-    async def delete_folder(self, url: str, kind: str, name: str) -> None:
-        tabs = ("voices", "streams") if kind == "voice" else ("subtitles", "streams")
+    async def delete_folder(self, url: str, kind: str, name: str, items: dict[str, list[str]]) -> None:
+        """The folder goes: its settings, the hand's placements in it (`items`: tab → items, as the editor names them), and
+        the automatic layout does not make it again until «Авто»."""
         await self._db.execute_many(
-            [("DELETE FROM unpack_folders WHERE url=? AND kind=? AND name=?", (url, kind, name))]
-            + [("DELETE FROM unpack_assignments WHERE url=? AND tab=? AND folder=?", (url, tab, name)) for tab in tabs])
+            [("DELETE FROM unpack_folders WHERE url=? AND kind=? AND name=?", (url, kind, name)),
+             ("INSERT OR IGNORE INTO unpack_hidden (url, kind, name) VALUES (?, ?, ?)", (url, kind, name))]
+            + [("DELETE FROM unpack_assignments WHERE url=? AND tab=? AND item=? AND folder=?", (url, tab, item, name))
+               for tab, listed in items.items() for item in listed])
+
+    async def hidden(self, url: str) -> list[dict]:
+        """The folders of the automatic layout the user deleted."""
+        return await self._db.fetch_all("SELECT kind, name FROM unpack_hidden WHERE url=? ORDER BY kind, name", (url,))
+
+    async def unhide(self, url: str, kinds: list[str], name: str | None = None) -> None:
+        """«Авто»: the automatic layout makes the folders of these kinds again (one, with `name`)."""
+        await self._db.execute_many([("DELETE FROM unpack_hidden WHERE url=? AND kind=?" + (" AND name=?" if name else ""),
+                                      (url, kind, name) if name else (url, kind)) for kind in kinds])
 
     # --- the profiles of the tabs of a source -----------------------------------------------------------------------
 
@@ -80,11 +92,13 @@ class UnpackRepository:
     async def pages(self) -> list[str]:
         """Every page the module keeps something of."""
         rows = await self._db.fetch_all("SELECT url FROM unpack_sources UNION SELECT url FROM unpack_streams "
-                                        "UNION SELECT url FROM unpack_folders UNION SELECT url FROM unpack_assignments")
+                                        "UNION SELECT url FROM unpack_folders UNION SELECT url FROM unpack_assignments "
+                                        "UNION SELECT url FROM unpack_hidden")
         return sorted(row["url"] for row in rows)
 
     async def forget(self, url: str) -> None:
         await self._db.execute_many([("DELETE FROM unpack_streams WHERE url=?", (url,)),
                                      ("DELETE FROM unpack_folders WHERE url=?", (url,)),
                                      ("DELETE FROM unpack_assignments WHERE url=?", (url,)),
+                                     ("DELETE FROM unpack_hidden WHERE url=?", (url,)),
                                      ("DELETE FROM unpack_sources WHERE url=?", (url,))])

@@ -13,8 +13,9 @@ import type { TorrentPick } from "../../../composables/useTorrentPick"
 // its name is the name of the voice-over or of the subtitles in the rows of the series, its language and type of subtitles
 // are set in it, where it comes from (the titles in the files, a rule, a hand) is shown; unfolded, it lists every track
 // it holds: its episode, its stream as the left pane names it (A:n), «вручную» or «авто» (a rule, the file). A pick let go on
-// a row is placed in that folder by hand; the bin takes back what a hand did — a track put there, a folder made — and the
-// track goes where the rules and its file put it. Nothing is left out here.
+// a row is placed in that folder by hand. Any folder may be deleted: its tracks are in no folder (red) — the hand's go
+// back to the rules and the files — and one of the automatic layout is not made again until «Авто». A track a hand put
+// is taken back to the rules by its cross. Nothing is left out here.
 const props = defineProps<{
   editor: Editor
   kinds: readonly Folder["kind"][]
@@ -92,16 +93,13 @@ const url = computed(() => props.editor.url)
 const save = (row: FolderRow, change: { language?: string; subtitle_type?: "" | (typeof TYPES)[number] }) => run([() => setFolder({
   url: url.value, kind: row.kind, name: row.name, language: change.language ?? row.language,
   subtitle_type: (change.subtitle_type ?? row.subtitle_type) as "" | (typeof TYPES)[number] })])
-// The bin of a track a hand put here: it goes back to where the rules and its file put it.
+// The cross of a track a hand put here: it goes back to where the rules and its file put it.
 const dropTrack = (track: FolderTrack) => run([() => unassign(url.value, track.tab, [track.entry.item])])
-// A folder is the hand's when every track in it is (an empty one the user made too): its bin gives them back and forgets it.
-// A folder a rule or the titles in the files make has no bin: it is theirs, a rule changes it.
-const handsOnly = (row: FolderRow): boolean => row.tracks.every((each) => each.entry.by === "manual") && (row.manual || row.tracks.length > 0)
+// A folder deleted: the hand's placements in it go with it, the automatic layout does not make it again until «Авто».
 function dropFolder(row: FolderRow): Promise<void> {
-  const byTab = new Map<FolderTrack["tab"], string[]>()
-  for (const each of row.tracks) byTab.set(each.tab, [...byTab.get(each.tab) ?? [], each.entry.item])
-  return run([...[...byTab].map(([tab, items]) => () => unassign(url.value, tab, items)),
-    ...(row.manual ? [() => deleteFolder(url.value, row.kind, row.name)] : [])])
+  const items: Partial<Record<FolderTrack["tab"], string[]>> = {}
+  for (const each of row.tracks) if (each.entry.by === "manual") items[each.tab] = [...items[each.tab] ?? [], each.entry.item]
+  return run([() => deleteFolder(url.value, row.kind, row.name, items)])
 }
 const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) => emit("drop", row.kind, row.name, items)) : {}
 </script>
@@ -165,9 +163,9 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
                 <button v-if="live(row.kind)" type="button" class="torrent-put drop-folder" :disabled="busy"
                         :title="t('torrent.folder.drop', { name: row.name, n: pick.count.value })"
                         @click="emit('drop', row.kind, row.name, [...pick.chosen.value])">{{ t("torrent.folders.put", { n: pick.count.value }) }}</button>
-                <button v-else-if="!pick.count.value && handsOnly(row)" type="button" class="torrent-bin-btn do-delete-folder" :disabled="busy"
+                <button v-else-if="!pick.count.value" type="button" class="torrent-bin-btn do-delete-folder" :disabled="busy"
                         :title="t('torrent.folders.drop', { name: row.name })" :aria-label="t('torrent.folders.drop', { name: row.name })"
-                        @click="dropFolder(row)"><i class="pi pi-trash" aria-hidden="true" /></button>
+                        @click="dropFolder(row)"><i class="pi pi-times" aria-hidden="true" /></button>
               </td>
             </tr>
             <template v-if="open.has(keyOf(row))">
@@ -180,7 +178,7 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
                 <td class="torrent-folders-act">
                   <button v-if="track.entry.by === 'manual'" type="button" class="torrent-bin-btn do-drop-track" :disabled="busy"
                           :title="t('torrent.folders.dropHand')" :aria-label="t('torrent.folders.dropHand')"
-                          @click="dropTrack(track)"><i class="pi pi-trash" aria-hidden="true" /></button>
+                          @click="dropTrack(track)"><i class="pi pi-times" aria-hidden="true" /></button>
                 </td>
               </tr>
               <tr v-if="row.fonts.length" class="torrent-folder-track">

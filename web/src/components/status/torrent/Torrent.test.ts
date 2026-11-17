@@ -7,7 +7,7 @@ import PrimeVue from "primevue/config"
 // request each, and what the core changes comes back as its events — never by asking again.
 const calls = vi.hoisted(() => ({
   fetchPage: vi.fn(), fetchReleases: vi.fn(), fetchEditor: vi.fn(), downloadRelease: vi.fn(), watchRelease: vi.fn(),
-  assign: vi.fn(), unassign: vi.fn(), setFolder: vi.fn(), deleteFolder: vi.fn(),
+  assign: vi.fn(), unassign: vi.fn(), setFolder: vi.fn(), deleteFolder: vi.fn(), autoLayout: vi.fn(),
 }))
 vi.mock("../../../composables/torrentCalls", () => calls)
 const sse = vi.hoisted(() => ({ handlers: new Map<string, (data: unknown) => void>() }))
@@ -52,6 +52,7 @@ const view = (overrides: Partial<EditorView> = {}): EditorView => ({
     { kind: "voice", name: "Милирина", items: 0, manual: true, language: "rus", subtitle_type: "", fonts: [] }],
   unplaced: { files: 2, voices: 1, subtitles: 0, streams: 0 },
   containers: [],
+  hidden: [],
   ...overrides,
 })
 const editor = (overrides: Partial<EditorView> = {}): Editor => ({ url: URL, profiles: { files: 11, voices: 12, subtitles: 13, streams: 14 },
@@ -148,11 +149,11 @@ describe("the editors of the tracks", () => {
     expect(folders.map((each) => each.find(".torrent-folder-name").text())).toEqual(["JAM", "Милирина"])
     expect(folders[0].find(".torrent-rule").text()).toBe(t("torrent.by.row", { rule: "Озвучка", row: 1 }))
     expect(folders[1].find(".torrent-hand").text()).toBe(t("torrent.by.manual"))
-    // A folder a rule makes has no bin (the rule is its owner); an empty one made by hand is forgotten by its bin.
-    expect(folders.map((each) => each.find(".do-delete-folder").exists())).toEqual([false, true])
-    await folders[1].find(".do-delete-folder").trigger("click")
+    // Every folder may be deleted, that of a rule too: its tracks are then in no folder until «Авто».
+    expect(folders.map((each) => each.find(".do-delete-folder").exists())).toEqual([true, true])
+    await folders[0].find(".do-delete-folder").trigger("click")
     await flushPromises()
-    expect(calls.deleteFolder).toHaveBeenCalledWith(URL, "voice", "Милирина")
+    expect(calls.deleteFolder).toHaveBeenCalledWith(URL, "voice", "JAM", {})
     expect(calls.assign).not.toHaveBeenCalled()
     const unplaced = w.findAll(".track-row").find((row) => row.text().includes("D:S/Mil"))!
     await unplaced.find("input").setValue(true)
@@ -192,8 +193,10 @@ describe("the editors of the tracks", () => {
     await tracks[1].find(".do-drop-track").trigger("click")
     await flushPromises()
     expect(calls.unassign).toHaveBeenCalledWith(URL, "streams", ["page/S/E02.mkv#2"])
-    // The folder holds a track of the file: it is not the hand's, it has no bin.
-    expect(original.find(".do-delete-folder").exists()).toBe(false)
+    // The folder deleted takes the hand's placement in it; the automatic layout does not make it again until «Авто».
+    await original.find(".do-delete-folder").trigger("click")
+    await flushPromises()
+    expect(calls.deleteFolder).toHaveBeenCalledWith(URL, "voice", "Original", { streams: ["page/S/E02.mkv#2"] })
     expect(calls.assign).not.toHaveBeenCalled()
   })
 
@@ -210,6 +213,16 @@ describe("the editors of the tracks", () => {
     expect(w.find(".torrent-dot").exists()).toBe(false)
     expect(w.findAll(".torrent-filter").map((each) => each.text())).toEqual([`${t("torrent.filter.allTracks")} 3`,
       `${t("torrent.filter.noFolder")} 1`, `${t("torrent.filter.inFolder")} 1`, `${t("torrent.filter.video")} 1`])
+  })
+
+  it("«Авто» makes again the folders of the automatic layout the user deleted, and is idle when none is", async () => {
+    const idle = mountWith(TorrentTracks, { editor: editor(), tab: "voices" })
+    expect(idle.find(".do-auto").attributes("disabled")).toBeDefined()
+    const w = mountWith(TorrentTracks, { editor: editor({ hidden: [{ kind: "voice", name: "Original" }] }), tab: "voices" })
+    await w.find(".do-auto").trigger("click")
+    await flushPromises()
+    expect(calls.autoLayout).toHaveBeenCalledWith(URL, ["voice"])
+    expect(calls.unassign).not.toHaveBeenCalled()
   })
 
   it("show the containers of one composition as one, a track of it standing for that track of every file", async () => {
