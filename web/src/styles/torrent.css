@@ -16,7 +16,7 @@
 .torrent-filters { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.6rem 0.9rem; border-block-end: 1px solid var(--border-color); }
 .torrent-filter {
   display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0.7rem; border: 1px solid var(--border-color);
-  border-radius: var(--round); background: var(--bg-white); color: var(--color-text); font: inherit; font-size: 0.85rem; cursor: pointer;
+  border-radius: 999px; background: var(--bg-white); color: var(--color-text); font: inherit; font-size: 0.85rem; cursor: pointer;
 }
 .torrent-filter.active { border-color: var(--color-blue); background: color-mix(in srgb, var(--color-blue) 12%, var(--bg-white)); }
 .torrent-filter b { font-weight: 700; }
@@ -43,7 +43,7 @@
 .torrent-side > span { display: inline-flex; align-items: center; gap: 0.3rem; }
 .torrent-fold { border: 0; background: none; padding: 0; color: var(--text-muted); cursor: pointer; }
 .torrent-tag {
-  flex: none; padding: 0.05rem 0.5rem; border-radius: var(--round); background: var(--bg-light); border: 1px solid var(--border-color);
+  flex: none; padding: 0.05rem 0.5rem; border-radius: 999px; background: var(--bg-light); border: 1px solid var(--border-color);
   font-size: 0.75rem; color: var(--text-muted);
 }
 .torrent-note { padding: 0.4rem 0.9rem; color: var(--text-muted); font-size: 0.8rem; }
