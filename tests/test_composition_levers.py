@@ -41,12 +41,7 @@ def test_the_levers_of_the_queues_are_registered_with_their_target_shape_default
         ("reference.same", TargetKind.NONE, ValueShape.VARIANT_SETS, [], "planner", Queue.REFERENCE),
         ("markup.same", TargetKind.NONE, ValueShape.VARIANT_SETS, [], "planner", Queue.MARKUP),
         ("subtitles.order", TargetKind.NONE, ValueShape.VARIANT_ORDER, [], "planner", Queue.SUBTITLES),
-        ("subtitles.allow", TargetKind.VARIANT, ValueShape.FLAG, True, "planner", Queue.SUBTITLES),
-        ("subtitles.default", TargetKind.VARIANT, ValueShape.FLAG, False, "planner", Queue.SUBTITLES),
-        ("subtitles.forced", TargetKind.VARIANT, ValueShape.FLAG, False, "planner", Queue.SUBTITLES)]
-    # A flag of a variant is told apart by the flag of the output track it sets: none leaves the variant out.
-    assert [(spec.name, spec.flag) for spec in levers.specs() if spec.queue == Queue.SUBTITLES] == [
-        ("subtitles.order", None), ("subtitles.allow", None), ("subtitles.default", "default"), ("subtitles.forced", "forced")]
+        ("subtitles.allow", TargetKind.VARIANT, ValueShape.FLAG, True, "planner", Queue.SUBTITLES)]
     assert levers.get("voice.take") is levers.all()[2]
     assert levers.get("nothing.here") is None
 
@@ -178,7 +173,7 @@ def test_a_lever_that_is_taken_out_is_gone_and_taking_out_a_missing_one_is_harml
     assert [each.name for each in levers.all()] == [
         "reference.order", "reference.allow", "voice.take", "voice.order", "voice.allow", "compilation.member",
         "compilation.take", "markup.order", "markup.allow", "reference.same", "markup.same", "subtitles.order",
-        "subtitles.allow", "subtitles.default", "subtitles.forced"]
+        "subtitles.allow"]
 
 
 def test_a_lever_of_a_form_no_window_draws_is_refused_when_it_is_registered():

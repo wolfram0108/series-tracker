@@ -5,7 +5,7 @@ import type { SameGroups } from "../../../lib/same"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
 import {
-  allOff, episodeStatus, fileNamesOf, isOff, trackCells, type EpisodeView, type QueueName, type QueueRow, type VariantFlag,
+  allOff, episodeStatus, fileNamesOf, isOff, trackCells, type EpisodeView, type QueueName, type QueueRow, 
   type SourceMark as Mark,
 } from "../../../lib/output"
 import { spansOf } from "../../../lib/ranges"
@@ -54,8 +54,7 @@ const props = withDefaults(defineProps<{
   selected?: number[]
   /** The subtitles of the file of each episode, and those of the containers of the season (DESIGN.md 7.1.1). */
   subtitlesOf?: (episode: number) => SubtitleLine[]
-  seasonSubtitles?: { n: number; name: string; language: string; episodes: string }[]
-}>(), { subtitlesOf: () => [], seasonSubtitles: () => [], names: () => [], mode: "cards", opened: null, busy: false, compilations: () => [], cuts: () => new Map(),
+}>(), { subtitlesOf: () => [], names: () => [], mode: "cards", opened: null, busy: false, compilations: () => [], cuts: () => new Map(),
   selected: () => [], failed: () => [] })
 
 const emit = defineEmits<{
@@ -72,7 +71,7 @@ const emit = defineEmits<{
   (e: "retry-season"): void
   (e: "redo", episode: number, group: string): void
   (e: "queue-order", episode: number, queue: QueueName, group: string | null, rows: QueueRow[]): void
-  (e: "queue-allow", episode: number, queue: QueueName, row: QueueRow, allowed: boolean, flag: VariantFlag): void
+  (e: "queue-allow", episode: number, queue: QueueName, row: QueueRow, allowed: boolean): void
   (e: "queue-take", episode: number, group: string, taken: boolean): void
   (e: "queue-reset", episode: number, queue: QueueName, group: string | null): void
   (e: "queue-same", episode: number, queue: QueueName, groups: SameGroups | null): void
@@ -191,13 +190,6 @@ function step(by: number): void {
         v-if="voices.length" :voices="voices" :busy="busy" @order="emit('voice-order', $event)"
         @title="(label, title) => emit('voice-title', label, title)"
       />
-      <section v-if="seasonSubtitles.length" class="season-subtitles" :aria-label="t('output.subtitles.inContainer')">
-        <span class="season-subtitles-title">{{ t("output.subtitles.inContainer") }}</span>
-        <span v-for="each in seasonSubtitles" :key="each.n" class="subtitle-chip">
-          <span class="subtitle-chip-mark">{{ t("output.subtitles.mark", { n: each.n }) }}</span>{{ each.name }}<template v-if="each.language"> · {{ each.language }}</template>
-          <span class="subtitle-chip-episodes">{{ each.episodes }}</span>
-        </span>
-      </section>
       <div ref="grid" class="season-grid" :class="`is-${mode}`" :style="columns">
         <span ref="ruler" class="grid-ruler" aria-hidden="true" />
         <GroupOutline :grid="grid" :layout="layout + episodes.length + (opened ? 1 : 0)" :groups="outline" />
@@ -230,7 +222,7 @@ function step(by: number): void {
             @refetch="emit('refetch', item.view.episode, $event)" @retry="emit('retry', item.view.episode, $event)"
             @retry-failed="emit('retry-failed', item.view.episode)" @redo="emit('redo', item.view.episode, $event)"
             @order="(queue, group, rows) => emit('queue-order', item.view.episode, queue, group, rows)"
-            @allow="(queue, row, allowed, flag) => emit('queue-allow', item.view.episode, queue, row, allowed, flag)"
+            @allow="(queue, row, allowed) => emit('queue-allow', item.view.episode, queue, row, allowed)"
             @take="(group, taken) => emit('queue-take', item.view.episode, group, taken)"
             @reset="(queue, group) => emit('queue-reset', item.view.episode, queue, group)"
             @same="(queue, groups) => emit('queue-same', item.view.episode, queue, groups)"

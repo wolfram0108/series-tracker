@@ -8,7 +8,7 @@ from dataclasses import replace
 from typing import Any, Iterable, Mapping, Sequence
 
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME,
-                            SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED, SUBTITLES_ORDER, VOICE_ALLOW,
+                            SUBTITLES_ALLOW, SUBTITLES_ORDER, VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, CompositionReply, CompositionRow, EffectiveLever, Level, RowState,
                             SeriesSource, compilation_key,
                             parse_group_target, parse_variant_target)
@@ -83,7 +83,6 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
     markup, markup_deny = {}, {}
     same, markup_same = {}, {}
     subtitle_order, subtitle_deny = {}, {}
-    subtitle_flags: dict[str, dict] = {SUBTITLES_DEFAULT: {}, SUBTITLES_FORCED: {}}
     own_reference: set = set()
     for season, episode, levers in episodes:
         slot = (season, episode)
@@ -128,11 +127,6 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                 variant = parse_variant_target(lever.target)
                 if variant is not None:
                     subtitle_deny[slot] = subtitle_deny.get(slot, frozenset()) | {variant}
-            elif lever.lever in subtitle_flags and lever.value is True and lever.target:
-                variant = parse_variant_target(lever.target)
-                if variant is not None:
-                    flagged = subtitle_flags[lever.lever]
-                    flagged[slot] = flagged.get(slot, frozenset()) | {variant}
             elif lever.lever == COMPILATION_MEMBER and lever.value is not None:
                 member[slot] = by_key.get(lever.value) if lever.value else None
     off_compilations = frozenset(by_key[key] for key, levers in compilation_levers if key in by_key and any(
@@ -142,8 +136,7 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                    reference_deny=reference_deny, voice_order=voice_orders, voice_deny=voice_deny, voice_off=voice_off,
                    member=member, own_reference=frozenset(own_reference), titles=dict(titles or {}), languages=dict(languages or {}),
                    markup=markup, markup_deny=markup_deny, same=same, markup_same=markup_same,
-                   subtitle_order=subtitle_order, subtitle_deny=subtitle_deny,
-                   subtitle_default=subtitle_flags[SUBTITLES_DEFAULT], subtitle_forced=subtitle_flags[SUBTITLES_FORCED])
+                   subtitle_order=subtitle_order, subtitle_deny=subtitle_deny)
 
 
 def planner_inputs(layout: CompositionReply, series: Mapping[str, Any],

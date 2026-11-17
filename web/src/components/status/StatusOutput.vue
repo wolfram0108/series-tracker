@@ -7,7 +7,7 @@ import type { LoadState } from "../../composables/useLoad"
 import LoadGate from "../LoadGate.vue"
 import { t } from "../../i18n"
 import {
-  allowedIn, episodeStatus, isDeviation, isOff, trackCells, type EpisodeStatus, type EpisodeView, type QueueName, type QueueRow, type VariantFlag,
+  allowedIn, episodeStatus, isDeviation, isOff, trackCells, type EpisodeStatus, type EpisodeView, type QueueName, type QueueRow, 
   type Scope,
 } from "../../lib/output"
 import { CHANGE_ANSWER } from "../../lib/changeAnswer"
@@ -178,8 +178,8 @@ const scopeOf = (season: number | null, episode: number | null = null, compilati
   ({ ...(season === null ? {} : { season }), ...(episode === null ? {} : { episode }),
     ...(compilation === null ? {} : { compilation }) })
 const queueOrder = (scope: Scope, queue: QueueName, group: string | null, rows: QueueRow[]) => output.setOrder(scope, queue, group, rows)
-const queueAllow = (scope: Scope, queue: QueueName, row: QueueRow, allowed: boolean, flag: VariantFlag) =>
-  output.setAllowed(scope, queue, row, allowed, flag)
+const queueAllow = (scope: Scope, queue: QueueName, row: QueueRow, allowed: boolean) =>
+  output.setAllowed(scope, queue, row, allowed)
 const queueTake = (scope: Scope, group: string, taken: boolean) => output.setTaken(scope, group, taken)
 const queueReset = (scope: Scope, queue: QueueName, group: string | null) => output.resetOrder(scope, queue, group)
 const queueSame = (scope: Scope, queue: QueueName, groups: SameGroups | null) => output.setSame(scope, queue, groups)
@@ -248,7 +248,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
             @retry="(episode) => output.retryCut(season.season, episode)"
             @retry-failed="(episode) => output.retryEpisode(season.season, episode)"
             @queue-order="(episode, queue, group, rows) => queueOrder(scopeOf(season.season, episode), queue, group, rows)"
-            @queue-allow="(episode, queue, row, allowed, flag) => queueAllow(scopeOf(season.season, episode), queue, row, allowed, flag)"
+            @queue-allow="(episode, queue, row, allowed) => queueAllow(scopeOf(season.season, episode), queue, row, allowed)"
             @queue-reset="(episode, queue, group) => queueReset(scopeOf(season.season, episode), queue, group)"
             @queue-same="(episode, queue, groups) => queueSame(scopeOf(season.season, episode), queue, groups)"
           />
@@ -265,7 +265,6 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
         :failed="opened?.season === season.season ? output.failedOf(season.season, opened.episode) : []" :busy="busy"
         :selected="selectedBySeason.get(season.season) ?? NONE"
         :subtitles-of="(episode: number) => output.subtitlesOf(season.season, episode)"
-        :season-subtitles="output.seasonSubtitlesOf(season.season)"
         @open="open(season.season, $event)" @select="(episode, pick) => select(season.season, episode, pick)"
         @settings="openSettings(season.season)"
         @switch-season="output.switchTo(season.season, null, $event)"
@@ -278,7 +277,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
         @retry-season="output.retrySeason(season.season)"
         @redo="(episode, group) => output.redo(season.season, episode, group)"
         @queue-order="(episode, queue, group, rows) => queueOrder(scopeOf(season.season, episode), queue, group, rows)"
-        @queue-allow="(episode, queue, row, allowed, flag) => queueAllow(scopeOf(season.season, episode), queue, row, allowed, flag)"
+        @queue-allow="(episode, queue, row, allowed) => queueAllow(scopeOf(season.season, episode), queue, row, allowed)"
         @queue-take="(episode, group, taken) => queueTake(scopeOf(season.season, episode), group, taken)"
         @queue-reset="(episode, queue, group) => queueReset(scopeOf(season.season, episode), queue, group)"
         @queue-same="(episode, queue, groups) => queueSame(scopeOf(season.season, episode), queue, groups)"
@@ -292,7 +291,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       :queues="output.queuesOf(settingsSeason, null, settingsKey)" :busy="busy" :compilation="settingsCompilation"
       @close="settingsOf = null"
       @order="(queue, group, rows) => queueOrder(scopeOf(settingsSeason, null, settingsKey), queue, group, rows)"
-      @allow="(queue, row, allowed, flag) => queueAllow(scopeOf(settingsSeason, null, settingsKey), queue, row, allowed, flag)"
+      @allow="(queue, row, allowed) => queueAllow(scopeOf(settingsSeason, null, settingsKey), queue, row, allowed)"
       @take="(group, taken) => queueTake(scopeOf(settingsSeason, null, settingsKey), group, taken)"
       @reset="(queue, group) => queueReset(scopeOf(settingsSeason, null, settingsKey), queue, group)"
       @same="(queue, groups) => queueSame(scopeOf(settingsSeason, null, settingsKey), queue, groups)"

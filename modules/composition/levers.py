@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME,
-                            REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, SUBTITLES_ALLOW, SUBTITLES_DEFAULT,
-                            SUBTITLES_FORCED, SUBTITLES_ORDER, VOICE_ALLOW,
-                            VOICE_ORDER, VOICE_TAKE, LeverSpec, Queue, TargetKind, TrackFlag, ValueShape, parse_compilation_key,
+                            REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, SUBTITLES_ALLOW,
+                            SUBTITLES_ORDER, VOICE_ALLOW,
+                            VOICE_ORDER, VOICE_TAKE, LeverSpec, Queue, TargetKind, ValueShape, parse_compilation_key,
                             parse_group_target, parse_variant_target)
 
 
@@ -112,7 +112,6 @@ class Lever:
     consumer: str
     queue: Queue
     value_sources: Callable[[Any], frozenset[int]] = _no_sources
-    flag: TrackFlag | None = None
 
     def accepts(self, value: Any) -> bool:
         """Whether a value is one of the lever's values."""
@@ -136,7 +135,7 @@ class Lever:
 
     def spec(self) -> LeverSpec:
         return LeverSpec(name=self.name, target=self.target, shape=self.shape, default=self.default,
-                         consumer=self.consumer, queue=self.queue, flag=self.flag)
+                         consumer=self.consumer, queue=self.queue)
 
 
 _levers: dict[str, Lever] = {}
@@ -191,5 +190,3 @@ register(Lever(MARKUP_SAME, TargetKind.NONE, ValueShape.VARIANT_SETS, [], "plann
 register(Lever(SUBTITLES_ORDER, TargetKind.NONE, ValueShape.VARIANT_ORDER, [], "planner", Queue.SUBTITLES, _order_sources))
 register(Lever(SUBTITLES_ALLOW, TargetKind.VARIANT, ValueShape.FLAG, True, "planner", Queue.SUBTITLES))
 # How the track of a variant lies in the output container: the one a player shows by itself, the forced one.
-register(Lever(SUBTITLES_DEFAULT, TargetKind.VARIANT, ValueShape.FLAG, False, "planner", Queue.SUBTITLES, flag=TrackFlag.DEFAULT))
-register(Lever(SUBTITLES_FORCED, TargetKind.VARIANT, ValueShape.FLAG, False, "planner", Queue.SUBTITLES, flag=TrackFlag.FORCED))

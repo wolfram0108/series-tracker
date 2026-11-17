@@ -5,7 +5,7 @@ import ModalShell from "../../ModalShell.vue"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
 import type { CutState } from "../../../lib/compilations"
-import { trackCells, type EpisodeView, type QueueName, type QueueRow, type VariantFlag, type SourceMark as Mark, type TrackState } from "../../../lib/output"
+import { trackCells, type EpisodeView, type QueueName, type QueueRow, type SourceMark as Mark, type TrackState } from "../../../lib/output"
 import QueuePanel from "./QueuePanel.vue"
 import VoiceMark from "./VoiceMark.vue"
 import { CUT_STATES, stateWord, TRACK_STATES } from "../../../lib/states"
@@ -30,7 +30,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: "close"): void
   (e: "order", queue: QueueName, group: string | null, rows: QueueRow[]): void
-  (e: "allow", queue: QueueName, row: QueueRow, allowed: boolean, flag: VariantFlag): void
+  (e: "allow", queue: QueueName, row: QueueRow, allowed: boolean): void
   (e: "take", group: string, taken: boolean): void
   (e: "reset", queue: QueueName, group: string | null): void
   (e: "same", queue: QueueName, groups: SameGroups | null): void
@@ -127,23 +127,23 @@ const countText = (state: TrackState | "reference", count: number): string => st
       <QueuePanel
         v-else-if="tab === 'reference'" queue="reference" :level="level" :view="queues?.reference" :marks="marks" :busy="busy"
         :hint="compilation ? t('output.queue.hintRef2Level') : undefined"
-        @order="emit('order', 'reference', null, $event)" @allow="(row, allowed, flag) => emit('allow', 'reference', row, allowed, flag)"
+        @order="emit('order', 'reference', null, $event)" @allow="(row, allowed) => emit('allow', 'reference', row, allowed)"
         @reset="emit('reset', 'reference', null)" @same="emit('same', 'reference', $event)"
       />
       <QueuePanel
         v-else-if="tab === 'markup'" queue="markup" :level="level" :view="queues?.markup" :follows="queues?.markup_follows"
         :marks="marks" :busy="busy"
-        @order="emit('order', 'markup', null, $event)" @allow="(row, allowed, flag) => emit('allow', 'markup', row, allowed, flag)"
+        @order="emit('order', 'markup', null, $event)" @allow="(row, allowed) => emit('allow', 'markup', row, allowed)"
         @reset="emit('reset', 'markup', null)" @same="emit('same', 'markup', $event)"
       />
       <QueuePanel
         v-else-if="tab === SUBTITLES" queue="subtitles" :level="level" :view="queues?.subtitles" :marks="marks" :busy="busy"
-        @order="emit('order', 'subtitles', null, $event)" @allow="(row, allowed, flag) => emit('allow', 'subtitles', row, allowed, flag)"
+        @order="emit('order', 'subtitles', null, $event)" @allow="(row, allowed) => emit('allow', 'subtitles', row, allowed)"
         @reset="emit('reset', 'subtitles', null)"
       />
       <QueuePanel
         v-else queue="voice" :level="level" :view="groupQueue(tab)" :marks="marks" :busy="busy"
-        @order="emit('order', 'voice', tab, $event)" @allow="(row, allowed, flag) => emit('allow', 'voice', row, allowed, flag)"
+        @order="emit('order', 'voice', tab, $event)" @allow="(row, allowed) => emit('allow', 'voice', row, allowed)"
         @take="emit('take', tab, $event)" @reset="emit('reset', 'voice', tab)"
       />
     </div>

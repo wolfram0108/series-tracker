@@ -21,7 +21,7 @@ const emit = defineEmits<{
 }>()
 const variantOf = (line: SubtitleLine): QueueRow => ({ group: line.name, source_id: line.sourceId, player: line.player,
   player_label: line.player, episodes: "", stale: "", allowed: true, allowed_level: "default", language: line.language,
-  subtitle_type: line.subtitleType, default: false, default_level: "default", forced: false, forced_level: "default" })
+  subtitle_type: line.subtitleType, default: false, forced: false })
 const subtitleType = (line: SubtitleLine): string => line.subtitleType ? t(`output.subtitles.kind.${line.subtitleType}` as MessageKey) : ""
 
 

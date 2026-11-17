@@ -321,24 +321,3 @@ export function planSubtitles(view: PlannerView | undefined, season: number, epi
       n: null, name: each.group, language: "", subtitleType: "", sourceId: each.source_id, player: each.player, state: "unaligned" })),
   ]
 }
-
-/** The subtitles of the containers of a season, in the order the plan gives them, each with its episodes: what the head of
- *  the season says its files hold. */
-export function seasonSubtitles(view: PlannerView | undefined, season: number): { n: number; name: string; language: string; episodes: string }[] {
-  const found = new Map<string, { name: string; language: string; place: number; episodes: number[] }>()
-  for (const goal of view?.episodes ?? []) {
-    if (goal.slot[0] !== season) continue
-    ;(goal.subtitles ?? []).forEach((each, index) => {
-      const key = JSON.stringify([each.name, each.row.source_id, each.player])
-      const known = found.get(key)
-      if (known) {
-        known.place = Math.min(known.place, index)
-        known.episodes.push(goal.slot[1])
-      } else {
-        found.set(key, { name: each.name, language: each.language ?? "", place: index, episodes: [goal.slot[1]] })
-      }
-    })
-  }
-  return [...found.values()].sort((a, b) => a.place - b.place)
-    .map((each, index) => ({ n: index + 1, name: each.name, language: each.language, episodes: spansOf(each.episodes) }))
-}

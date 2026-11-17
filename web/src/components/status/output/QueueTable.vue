@@ -2,7 +2,7 @@
 import Button from "primevue/button"
 import { computed, ref, watch } from "vue"
 import { t, type MessageKey } from "../../../i18n"
-import type { QueueName, QueueRow, SourceMark as Mark, VariantFlag } from "../../../lib/output"
+import type { QueueName, QueueRow, SourceMark as Mark } from "../../../lib/output"
 import { isVariantOf, type FailedAttempt, type Held } from "../../../lib/plan"
 import { heldFirst, joined, left, rowKey, sizeOf, split, type SameGroups } from "../../../lib/same"
 import OrderList from "../../OrderList.vue"
@@ -32,7 +32,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: "order", rows: QueueRow[]): void
-  (e: "allow", row: QueueRow, allowed: boolean, flag: VariantFlag): void
+  (e: "allow", row: QueueRow, allowed: boolean): void
   (e: "same", groups: SameGroups): void
 }>()
 
@@ -67,13 +67,6 @@ const failureOf = (row: QueueRow): FailedAttempt | undefined => props.failed.fin
 const height = (row: QueueRow): string => row.height == null ? "—"
   : t(props.level ? "output.heightUpTo" : "output.height", { height: row.height })
 const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" : t(`output.level.${row.allowed_level}`)
-// How the track of a variant of subtitles lies in the container (DESIGN.md 7.1.1): the output decides it, not the source. A
-// container shows one track by itself: the default one taken from another row goes with the press.
-function setDefault(row: QueueRow, on: boolean): void {
-  if (on) for (const other of props.rows) if (other !== row && other.default) emit("allow", other, false, "default")
-  emit("allow", row, on, "default")
-}
-const flagLevel = (level: QueueRow["default_level"]): string => level === "default" ? "" : t(`output.level.${level}`)
 
 // The groups of equal variants: the rows picked for a new group, and the menu of the mark of a group.
 const TONES = 4
@@ -152,7 +145,7 @@ const onMenu = (key: string): void => {
                          row.same != null ? ['in-same', `same-tone-${toneOf(row.same)}`] : null]">
               <td class="queue-take">
                 <input type="checkbox" data-lever-free :checked="row.allowed" :disabled="busy" :aria-label="t('output.queue.take')"
-                       @change="emit('allow', row, ($event.target as HTMLInputElement).checked, 'allowed')" />
+                       @change="emit('allow', row, ($event.target as HTMLInputElement).checked)" />
               </td>
               <td class="queue-handle">
                 <button type="button" class="order-handle" :disabled="busy" :aria-label="t('output.queue.drag')" @keydown="step">
@@ -164,17 +157,15 @@ const onMenu = (key: string): void => {
                 <td class="subtitle-name">{{ row.group }}</td>
                 <td>{{ row.language || "—" }}</td>
                 <td>{{ row.subtitle_type ? t(`output.subtitles.kind.${row.subtitle_type}` as MessageKey) : "—" }}</td>
+                <!-- How the track lies in the container is the core's rule (the first full one default, the first of signs
+                     forced): shown, not set. -->
                 <td class="queue-flag">
-                  <input type="checkbox" class="subtitle-default" data-lever-free :checked="row.default" :disabled="busy || !row.allowed"
-                         :aria-label="t('output.subtitles.defaultOf', { name: row.group })"
-                         :title="flagLevel(row.default_level) || undefined"
-                         @change="setDefault(row, ($event.target as HTMLInputElement).checked)" />
+                  <i v-if="row.default" class="pi pi-check subtitle-default" role="img"
+                     :aria-label="t('output.subtitles.defaultOf', { name: row.group })" />
                 </td>
                 <td class="queue-flag">
-                  <input type="checkbox" class="subtitle-forced" data-lever-free :checked="row.forced" :disabled="busy || !row.allowed"
-                         :aria-label="t('output.subtitles.forcedOf', { name: row.group })"
-                         :title="flagLevel(row.forced_level) || undefined"
-                         @change="emit('allow', row, ($event.target as HTMLInputElement).checked, 'forced')" />
+                  <i v-if="row.forced" class="pi pi-check subtitle-forced" role="img"
+                     :aria-label="t('output.subtitles.forcedOf', { name: row.group })" />
                 </td>
               </template>
               <template v-else>

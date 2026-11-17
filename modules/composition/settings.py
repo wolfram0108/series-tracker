@@ -10,7 +10,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 
-from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED,
+from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, SUBTITLES_ALLOW,
                             SUBTITLES_ORDER, CompilationRef, EffectiveLever, EpisodeSettings, Level,
                             LevelSettings, Queue, SettingRecord, SettingsReset, ValueShape, compilation_key, group_target,
                             parse_compilation_key, parse_group_target, parse_variant_target, variant_target)
@@ -25,7 +25,7 @@ _Index = dict[str, dict[str | None, dict[_Scope, Any]]]
 # an episode, none of a compilation of its own (DESIGN.md 7.1.1).
 _ONLY_ON = {COMPILATION_MEMBER: {Level.EPISODE}, COMPILATION_TAKE: {Level.COMPILATION},
             **{lever: {Level.SERIES, Level.SEASON, Level.EPISODE}
-               for lever in (SUBTITLES_ORDER, SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED)}}
+               for lever in (SUBTITLES_ORDER, SUBTITLES_ALLOW)}}
 
 
 def validate(record: SettingRecord) -> str | None:

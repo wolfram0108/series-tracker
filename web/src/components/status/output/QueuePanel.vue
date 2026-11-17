@@ -2,7 +2,7 @@
 import { computed } from "vue"
 import type { components } from "../../../api/schema"
 import { t } from "../../../i18n"
-import type { QueueName, QueueRow, SourceMark as Mark, VariantFlag } from "../../../lib/output"
+import type { QueueName, QueueRow, SourceMark as Mark } from "../../../lib/output"
 import type { FailedAttempt, Held } from "../../../lib/plan"
 import type { SameGroups } from "../../../lib/same"
 import QueueTable from "./QueueTable.vue"
@@ -34,7 +34,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: "order", rows: QueueRow[]): void
-  (e: "allow", row: QueueRow, allowed: boolean, flag: VariantFlag): void
+  (e: "allow", row: QueueRow, allowed: boolean): void
   (e: "take", taken: boolean): void
   (e: "reset"): void
   /** The groups of equal variants the queue is to have on this level; none: they go back to the level above. */
@@ -44,7 +44,7 @@ const emit = defineEmits<{
 const own = computed(() => props.view?.order_level === props.level)
 // «Снять все» clears the box of every row the queue takes: one press of each, so they go to the core as one change.
 const taking = computed(() => (props.view?.rows ?? []).filter((row) => row.allowed))
-const clearAll = (): void => { for (const row of taking.value) emit("allow", row, false, "allowed") }
+const clearAll = (): void => { for (const row of taking.value) emit("allow", row, false) }
 // The groups of equal variants have a level of their own, as the order has: told where they come from, taken back there.
 const hasSame = computed(() => props.queue !== "voice" && props.view !== undefined && (props.view.same_level ?? "default") !== "default")
 const ownSame = computed(() => props.view?.same_level === props.level)
@@ -84,7 +84,7 @@ const hint = computed(() => props.hint ?? (props.queue === "reference" ? t("outp
     <p v-if="view && (view.rows ?? []).length === 0" class="queue-note">{{ t("output.queue.empty") }}</p>
     <QueueTable
       v-else-if="view" :rows="view.rows ?? []" :queue="queue" :marks="marks" :level="level !== 'episode'" :held="held" :taken="taken" :failed="failed" :busy="busy"
-      @order="emit('order', $event)" @allow="(row, allowed, flag) => emit('allow', row, allowed, flag)" @same="emit('same', $event)"
+      @order="emit('order', $event)" @allow="(row, allowed) => emit('allow', row, allowed)" @same="emit('same', $event)"
     />
     <p v-else class="queue-note">{{ t("common.fetching") }}</p>
   </div>

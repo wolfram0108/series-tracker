@@ -88,7 +88,7 @@ afterEach(() => {
 
 // The queues of the season the boxes tests press: the reference of two variants, the voice-over AniStar of one.
 const variant = (group: string, source_id: number, player: string, allowed = true): QueueRow => ({
-  group, source_id, player, player_label: player, episodes: "1", stale: "", allowed, allowed_level: allowed ? "default" : "season", language: "", subtitle_type: "", default: false, default_level: "default", forced: false, forced_level: "default",
+  group, source_id, player, player_label: player, episodes: "1", stale: "", allowed, allowed_level: allowed ? "default" : "season", language: "", subtitle_type: "", default: false, forced: false,
 })
 const seasonQueues = (allowed = true): Queues => ({
   series_id: 1, season: 1, episode: null, markup_follows: true,

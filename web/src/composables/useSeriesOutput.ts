@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, shallowRef, watch, type Ref } fr
 import { t } from "../i18n"
 import {
   bySeason, groupTarget, joinEpisodes, orderValue, queueLevers, resetBody, setBody, sourceMarks, variantTarget,
-  type QueueName, type QueueRow, type VariantFlag, type Reference, type Scope,
+  type QueueName, type QueueRow, type Reference, type Scope,
 } from "../lib/output"
 import { Gather } from "../lib/gather"
 import { QUEUE_PAUSE_MS, bodyOf, changeKey, coreValue, queueKey, scopeKey, withChanges, type QueueChange } from "../lib/queueChange"
@@ -17,7 +17,7 @@ import { liveEntries, liveFrom } from "../lib/live"
 import { useSeriesStore } from "../stores/series"
 import { usePlanStore } from "../stores/plan"
 import { useLayoutStore } from "../stores/layout"
-import { failedOf as failedIn, fileOf, heldFile, planCuts, planDubs, planFiles, planNames, planSubtitles, seasonSubtitles, seasonVoiceOrders, takenOf as takenIn, trackOf, type CompilationKey, type SubtitleLine, type FailedAttempt, type HeldFile, type Taken } from "../lib/plan"
+import { failedOf as failedIn, fileOf, heldFile, planCuts, planDubs, planFiles, planNames, planSubtitles, seasonVoiceOrders, takenOf as takenIn, trackOf, type CompilationKey, type SubtitleLine, type FailedAttempt, type HeldFile, type Taken } from "../lib/plan"
 import type { SameGroups } from "../lib/same"
 import {
   deleteFromPlan, fetchPlan, fetchQueues, resetFailures,
@@ -287,12 +287,11 @@ export function useSeriesOutput(seriesId: number) {
     if (change.value === base) gather.drop(key)
     else gather.put(key, change)
   }
-  // A box of a variant: taken at all, or how its track lies in the container (the subtitles: the default one, the forced one).
-  const setAllowed = (scope: Scope, queue: QueueName, row: QueueRow, value: boolean, flag: VariantFlag = "allowed"): void => {
-    const levers = leversOf(queue)
-    const lever = flag === "allowed" ? levers.allow : levers[flag]
+  // A box of a variant: taken or left out.
+  const setAllowed = (scope: Scope, queue: QueueName, row: QueueRow, value: boolean): void => {
+    const lever = leversOf(queue).allow
     if (!lever) return
-    stage({ kind: "allow", flag, scope, queue, lever, target: variantTarget(row.group, row.source_id, row.player), value,
+    stage({ kind: "allow", scope, queue, lever, target: variantTarget(row.group, row.source_id, row.player), value,
       group: row.group, source_id: row.source_id, player: row.player })
   }
   // The variants of a queue of single videos the user declared equal: the whole value of the lever, none to go back to the level above.
@@ -377,11 +376,10 @@ export function useSeriesOutput(seriesId: number) {
 
   // The subtitles of the files (DESIGN.md 7.1.1), as the plan of the series has them.
   const subtitlesOf = (season: number, episode: number): SubtitleLine[] => planSubtitles(plan.forSeries(seriesId), season, episode)
-  const seasonSubtitlesOf = (season: number) => seasonSubtitles(plan.forSeries(seriesId), season)
 
   const heldCount = computed(() => staged.value.size)
 
   return { composition, references, loading, ready, failure, busy, heldCount, answer, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
-    sync, retryFailed, retrySeason, retryEpisode, voiceOrders, order, rename, marks, loadQueues, queuesOf, heldOf, takenOf, failedOf, subtitlesOf, seasonSubtitlesOf, setOrder, setAllowed, setSame, setTaken, resetOrder,
+    sync, retryFailed, retrySeason, retryEpisode, voiceOrders, order, rename, marks, loadQueues, queuesOf, heldOf, takenOf, failedOf, subtitlesOf, setOrder, setAllowed, setSame, setTaken, resetOrder,
     retry, redo, refetch, compilations, cuts, member, takeCompilation, retryCut, labels }
 }

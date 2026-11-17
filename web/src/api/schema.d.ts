@@ -2881,7 +2881,6 @@ export interface components {
             /** Consumer */
             consumer: string;
             queue: components["schemas"]["Queue"];
-            flag?: components["schemas"]["TrackFlag"] | null;
         };
         /**
          * OkResponse
@@ -3717,15 +3716,11 @@ export interface components {
              * @default false
              */
             default: boolean;
-            /** @default default */
-            default_level: components["schemas"]["Level"];
             /**
              * Forced
              * @default false
              */
             forced: boolean;
-            /** @default default */
-            forced_level: components["schemas"]["Level"];
         };
         /**
          * QueueTask
@@ -4337,12 +4332,6 @@ export interface components {
         TmdbInfo: {
             [key: string]: unknown;
         };
-        /**
-         * TrackFlag
-         * @description A flag of a track of the output container a lever of a variant sets (a lever of no flag leaves the variant out).
-         * @enum {string}
-         */
-        TrackFlag: "default" | "forced";
         /**
          * TrackerMirrors
          * @description A tracker as the settings of the sources show it: the domain and the mirrors its pages are read on.

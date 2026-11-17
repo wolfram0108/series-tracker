@@ -11,7 +11,6 @@ import os
 import pytest
 
 from core import container
-from core.contracts import variant_target
 
 from app_stand import STAND_LIMIT_S, AppStand
 
@@ -140,24 +139,17 @@ async def test_the_output_lays_the_subtitles_of_a_release_in_the_container_defau
     assert len(items) == 1
     await stand.call("POST", "/api/torrent/editor/assign", {"url": page.url, "tab": "subtitles", "items": items, "folder": "Надписи"})
 
+    # The first track of signs is the forced one with nothing set, in the table of the series and in that of the season.
     queue = await until_subtitles(stand, series_id, "Надписи")
     assert [(row["group"], row["language"], row["subtitle_type"], row["default"], row["forced"]) for row in queue] == [
-        ("Надписи", "rus", "signs", False, False)]
-    target = variant_target(queue[0]["group"], queue[0]["source_id"], queue[0]["player"])
-    # «По умолчанию» is set on the series, «Форс.» on the season: the season has a table of its own over the series'.
-    await stand.call("PUT", f"/api/series/{series_id}/output/settings/batch", {"items": [
-        {"lever": "subtitles.default", "target": target, "value": True},
-        {"lever": "subtitles.forced", "target": target, "value": True, "season": 1}]})
-    queue = (await stand.call("GET", f"/api/series/{series_id}/output/queues"))["subtitles"]["rows"]
-    assert [(row["default"], row["default_level"], row["forced"]) for row in queue] == [(True, "series", False)]
+        ("Надписи", "rus", "signs", False, True)]
     queue = (await stand.call("GET", f"/api/series/{series_id}/output/queues?season=1"))["subtitles"]["rows"]
-    assert [(row["default"], row["default_level"], row["forced"], row["forced_level"]) for row in queue] == [
-        (True, "series", True, "season")]
+    assert [(row["default"], row["forced"]) for row in queue] == [(False, True)]
 
     view = await stand.sync(series_id)
     assert [each["episode"] for each in view["assets"]] == [[1, 1]]
     held = await container.contents(os.path.join(stand.library, view["assets"][0]["name"]))
-    assert [(each.title, each.language, each.default, each.forced) for each in held.subtitles] == [("Надписи", "rus", True, True)]
+    assert [(each.title, each.language, each.default, each.forced) for each in held.subtitles] == [("Надписи", "rus", False, True)]
 
 
 async def test_two_versions_of_an_episode_tagged_are_two_variants_of_the_output_either_one_a_reference(stand):

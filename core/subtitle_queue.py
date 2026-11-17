@@ -1,4 +1,5 @@
-"""The order of the subtitles of a container (stage 15, DESIGN.md 7.1.1): one rule for the window and the planner.
+"""The order of the subtitles of a container and how their tracks lie in it (stage 15, DESIGN.md 7.1.1): one rule for the
+window and the planner.
 
 A variant of subtitles is (name, source id, player). Every variant the level has is a track of the container unless the
 user left it out; the user's order (`subtitles.order`) puts the variants he named first, in his order, and the rest follow
@@ -34,3 +35,12 @@ def named_of(value: object) -> list[Variant]:
                 and not isinstance(each.get("source_id"), bool) and isinstance(each.get("player"), str)):
             found.append((each["group"], each["source_id"], each["player"]))
     return found
+
+
+def flags(types: Sequence[str]) -> list[tuple[bool, bool]]:
+    """How the tracks of a container lie in it, (default, forced) for each, from their types in the order of the container:
+    the first full track is the default one and the first track of signs the forced one. It is the standard way of a player,
+    so the user sets nothing."""
+    default = next((at for at, kind in enumerate(types) if kind == "full"), None)
+    forced = next((at for at, kind in enumerate(types) if kind == "signs"), None)
+    return [(at == default, at == forced) for at in range(len(types))]

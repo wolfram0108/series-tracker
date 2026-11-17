@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Callable, Iterable
 
-from core.subtitle_queue import ordered as subtitles_ordered
+from core.subtitle_queue import flags as subtitle_flags, ordered as subtitles_ordered
 from core.variant_queue import NO_SAME, VARIANT_RANKING, VOICE_RANKING, Line, standing
 from core.variant_queue import Candidate as Ranked
 from core.variant_queue import Order, by_resolution
@@ -490,17 +490,15 @@ def _subtitles(slot: Slot, inputs: Inputs, by_slot: "Index", video: VideoWay, id
                                     "take", row=row))
         elif any(row.variant == variant for row in rows):
             unaligned.append(variant)
-    return _flagged(ways, choices.subtitle_default.get(episode, frozenset()),
-                    choices.subtitle_forced.get(episode, frozenset())), tuple(unaligned)
+    return _flagged(ways), tuple(unaligned)
 
 
-def _flagged(ways: list[SubtitleWay], default: frozenset, forced: frozenset) -> tuple[SubtitleWay, ...]:
-    """The tracks of a goal as the output's levers lay them in the container: forced as the user said, and the first one in
-    the order of the container the user made the default one as default (a container shows one by itself). A file whose
-    tracks lie otherwise is built again from what it holds."""
-    first = next((way.subtitle.variant for way in ways if way.subtitle.variant in default), None)
-    return tuple(replace(way, subtitle=replace(way.subtitle, default=way.subtitle.variant == first,
-                                                forced=way.subtitle.variant in forced)) for way in ways)
+def _flagged(ways: list[SubtitleWay]) -> tuple[SubtitleWay, ...]:
+    """The tracks of a goal as they lie in the container (core.subtitle_queue.flags): the first full one default, the first
+    of signs forced. A file whose tracks lie otherwise is built again from what it holds."""
+    laid = subtitle_flags([way.subtitle.subtitle_type for way in ways])
+    return tuple(replace(way, subtitle=replace(way.subtitle, default=default, forced=forced))
+                 for way, (default, forced) in zip(ways, laid))
 
 
 def timeline_shot(container: Container) -> Snapshot | None:

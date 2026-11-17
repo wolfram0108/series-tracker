@@ -62,7 +62,8 @@ def test_subtitles_of_another_timeline_wait_for_their_alignment_and_are_told():
 
 
 def test_what_the_file_holds_on_the_timeline_stays_and_a_file_that_is_the_goal_is_not_built_again():
-    items = tuple(Subtitle(row.id, row.label, row.player, row.timeline, row.language, row.subtitle_type) for row in ROWS[1:])
+    items = tuple(Subtitle(row.id, row.label, row.player, row.timeline, row.language, row.subtitle_type,
+                           default=row.subtitle_type == "full", forced=row.subtitle_type == "signs") for row in ROWS[1:])
     file = held("s01e01.mkv", items)
     goal = goal_of(containers=(file,))
     assert goal.video.kind == "asset"
@@ -101,24 +102,28 @@ def test_a_file_whose_subtitles_the_goal_does_not_carry_is_hidden_unless_the_use
     assert made.groups[0].remove == ("s01e01 old.mkv",)
 
 
-def test_the_output_lays_the_tracks_default_and_forced_as_its_levers_say_and_the_type_of_the_row_sets_neither():
-    """How a track lies in the container is the output's word (`subtitles.default`, `subtitles.forced`): the type the source
-    gives (full, signs) is no flag. A container shows one track by itself: the first in its order the user made default."""
-    variant = lambda name: (name, 1, "torrent:page")  # noqa: E731
+def test_the_first_full_track_is_the_default_one_and_the_first_of_signs_the_forced_one_with_nothing_set():
+    """How a track lies in the container is the standard of a player, not a setting: the first full track taken is the
+    default one, the first track of signs the forced one, whatever order the user gave."""
     flags = lambda goal: [(way.subtitle.name, way.subtitle.default, way.subtitle.forced) for way in goal.subtitles]  # noqa: E731
-    assert flags(goal_of()) == [("Полные", False, False), ("Надписи", False, False)]
-    both = frozenset({variant("Полные"), variant("Надписи")})
-    goal = goal_of(subtitle_default={(1, 1): both}, subtitle_forced={(1, 1): frozenset({variant("Надписи")})})
-    assert flags(goal) == [("Полные", True, False), ("Надписи", False, True)]
+    assert flags(goal_of()) == [("Полные", True, False), ("Надписи", False, True)]
+    rows = ROWS + (subtitles("Полные 2", 2, 3), subtitles("Надписи 2", 3, 4, kind="signs"), subtitles("Без типа", 4, 5, kind=""))
+    order = {(1, 1): (("Надписи 2", 1, "torrent:page"), ("Полные 2", 1, "torrent:page"))}
+    assert flags(goal_of(rows, subtitle_order=order)) == [("Надписи 2", False, True), ("Полные 2", True, False),
+                                                           ("Полные", False, False), ("Надписи", False, False),
+                                                           ("Без типа", False, False)]
+    # A variant left out lays nothing: the next one of its type takes its place.
+    deny = {(1, 1): frozenset({("Полные", 1, "torrent:page")})}
+    assert flags(goal_of(rows, subtitle_deny=deny)) == [("Надписи", False, True), ("Полные 2", True, False),
+                                                         ("Надписи 2", False, False), ("Без типа", False, False)]
     # A file whose tracks lie otherwise is built again from what it holds; one that lies so stays.
     items = tuple(Subtitle(row.id, row.label, row.player, row.timeline, row.language, row.subtitle_type) for row in ROWS[1:])
-    file = held("s01e01.mkv", items)
-    forced = {(1, 1): frozenset({variant("Надписи")})}
-    made = plan(Inputs(ROWS, (file,), Choices(groups={1: ("Оригинал",)}, sources=(1, 2), subtitle_forced=forced)))
+    made = plan(Inputs(ROWS, (held("s01e01.mkv", items),), Choices(groups={1: ("Оригинал",)}, sources=(1, 2))))
     assert [op.kind for op in made.ops] == ["build"]
-    assert [(way.kind, way.subtitle.forced) for way in made.goal((1, 1)).subtitles] == [("reuse", False), ("reuse", True)]
-    lying = held("s01e01.mkv", (items[0], replace(items[1], forced=True)))
-    assert not plan(Inputs(ROWS, (lying,), Choices(groups={1: ("Оригинал",)}, sources=(1, 2), subtitle_forced=forced))).ops
+    assert [(way.kind, way.subtitle.default, way.subtitle.forced) for way in made.goal((1, 1)).subtitles] == [
+        ("reuse", True, False), ("reuse", False, True)]
+    lying = held("s01e01.mkv", (replace(items[0], default=True), replace(items[1], forced=True)))
+    assert not plan(Inputs(ROWS, (lying,), Choices(groups={1: ("Оригинал",)}, sources=(1, 2)))).ops
 
 
 def test_the_table_of_the_asset_keeps_the_subtitles_of_a_container():

@@ -1,7 +1,7 @@
 """The subtitles in the composition (stage 15, DESIGN.md 7.1.1): rows of their own, apart from the rows of sound; one table on
 the series and one on an episode, in the order of core.subtitle_queue, with the variants the level leaves out marked."""
 from core.contracts.compilation import compilation_key
-from core.contracts import (SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED, SUBTITLES_ORDER, CompositionRow, EffectiveLever, Level, RowState, RowTrack,
+from core.contracts import (SUBTITLES_ALLOW, SUBTITLES_ORDER, CompositionRow, EffectiveLever, Level, RowState, RowTrack,
                             SettingRecord, variant_target)
 from core.subtitle_queue import ordered
 from modules.composition import queues
@@ -50,15 +50,17 @@ def test_the_queue_of_the_level_lists_every_variant_with_its_language_type_and_e
     assert [(row.group, row.episodes) for row in episode.rows] == [("Полные", "2")]
 
 
-def test_the_queue_tells_how_the_track_of_each_variant_lies_in_the_container_and_from_what_level():
-    lines = [subtitles("Полные", 1), subtitles("Надписи", 1, kind="signs")]
-    levers = [EffectiveLever(lever=SUBTITLES_DEFAULT, target=variant_target("Полные", 1, "torrent:1"), value=True,
-                             level=Level.SERIES),
-              EffectiveLever(lever=SUBTITLES_FORCED, target=variant_target("Надписи", 1, "torrent:1"), value=True,
-                             level=Level.EPISODE)]
-    shown = queues.subtitles(lines, levers, {1: 0})
-    assert [(row.group, row.default, row.default_level, row.forced, row.forced_level) for row in shown.rows] == [
-        ("Полные", True, Level.SERIES, False, Level.DEFAULT), ("Надписи", False, Level.DEFAULT, True, Level.EPISODE)]
+def test_the_queue_tells_how_the_track_of_each_variant_lies_in_the_container_by_the_rule_of_the_planner():
+    lines = [subtitles("Надписи", 1, kind="signs"), subtitles("Полные", 1), subtitles("Надписи 2", 1, kind="signs"),
+             subtitles("Полные 2", 1)]
+    flags = lambda shown: [(row.group, row.default, row.forced) for row in shown.rows]  # noqa: E731
+    assert flags(queues.subtitles(lines, [], {1: 0})) == [
+        ("Надписи", False, True), ("Полные", True, False), ("Надписи 2", False, False), ("Полные 2", False, False)]
+    # A variant the level leaves out lays nothing: the next of its type is the one.
+    deny = [EffectiveLever(lever=SUBTITLES_ALLOW, target=variant_target("Полные", 1, "torrent:1"), value=False,
+                           level=Level.SEASON)]
+    assert flags(queues.subtitles(lines, deny, {1: 0})) == [
+        ("Надписи", False, True), ("Полные", False, False), ("Надписи 2", False, False), ("Полные 2", True, False)]
 
 
 def test_the_levers_of_the_subtitles_are_set_on_the_series_a_season_and_an_episode_not_on_a_compilation():
@@ -67,12 +69,13 @@ def test_the_levers_of_the_subtitles_are_set_on_the_series_a_season_and_an_episo
     for scope in ({}, {"season": 1}, {"season": 1, "episode": 2}):
         assert validate(SettingRecord(series_id=1, lever=SUBTITLES_ORDER, value=value, **scope)) is None, scope
     assert "bad_level" in validate(SettingRecord(series_id=1, season=1, compilation=member, lever=SUBTITLES_ORDER, value=value))
-    for lever in (SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED):
-        target = variant_target("Полные", 1, "torrent:1")
-        assert validate(SettingRecord(series_id=1, lever=lever, value=lever == SUBTITLES_ALLOW, target=target)) is None
-        assert validate(SettingRecord(series_id=1, season=1, lever=lever, value=False, target=target)) is None
-        assert "bad_level" in validate(SettingRecord(series_id=1, season=1, compilation=member, lever=lever, value=False,
-                                                     target=target))
+    target = variant_target("Полные", 1, "torrent:1")
+    assert validate(SettingRecord(series_id=1, lever=SUBTITLES_ALLOW, value=True, target=target)) is None
+    assert validate(SettingRecord(series_id=1, season=1, lever=SUBTITLES_ALLOW, value=False, target=target)) is None
+    assert "bad_level" in validate(SettingRecord(series_id=1, season=1, compilation=member, lever=SUBTITLES_ALLOW, value=False,
+                                                 target=target))
+    # How a track lies in the container is no lever: the rule of the planner lays it.
+    assert validate(SettingRecord(series_id=1, lever="subtitles.default", value=True, target=target)) is not None
 
 
 def test_a_voice_over_group_renamed_like_a_name_of_subtitles_leaves_the_subtitles_as_they_were():
