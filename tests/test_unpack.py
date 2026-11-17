@@ -170,21 +170,36 @@ class Torrents(BaseModule):
         super().__init__(bus)
         self.releases: list[ReleaseView] = []
         self.skips: list[dict] = []
+        self.listed = True  # a series lists the page as its torrent source
+        self.told = asyncio.Event()  # a command of priorities came
 
     def register(self) -> None:
         self.handle("torrents.releases.get", self.on_releases)
         self.handle("torrents.release.priorities", self.on_priorities)
+        self.handle("catalog.sources.by_profile", self.on_by_profile)
         for topic in ("catalog.series.list", "sources.site.resolve"):
             self.handle(topic, getattr(self, "on_" + topic.split(".")[-1]))
+
+    async def on_by_profile(self, env):
+        return []
 
     async def on_releases(self, env):
         return {"releases": [r.model_dump(mode="json") for r in self.releases]}
 
     async def on_priorities(self, env):
         self.skips.append(env.payload)
+        self.told.set()
+
+    async def next_skip(self) -> dict:
+        """The next command of priorities: a command goes over the bus after the request that caused it is answered."""
+        count = len(self.skips)
+        while len(self.skips) == count:
+            self.told.clear()
+            await asyncio.wait_for(self.told.wait(), 10)
+        return self.skips[-1]
 
     async def on_list(self, env):
-        return [{"id": 1, "sources": [{"url": URL, "source_type": "torrent"}], "ignored_seasons": "[2]",
+        return [{"id": 1, "sources": [{"url": URL, "source_type": "torrent"}] if self.listed else [], "ignored_seasons": "[2]",
                  "ignored_episodes": "{}"}]
 
     async def on_resolve(self, env):
@@ -204,7 +219,14 @@ async def bus_stand(tmp_path):
         await module.stop()
 
 
-async def test_the_module_makes_its_preset_reads_a_ready_release_and_answers_the_table_of_the_page(bus_stand):
+async def _rule(torrents, profile_id: int, name: str, blocks: list[dict]) -> None:
+    """A rule the owner writes in a tab of the editor: the number after the blocks is the episode."""
+    action = [{"action_type": "extract_single", "action_pattern": json.dumps(blocks, ensure_ascii=False)}]
+    await torrents.request("rules.rules.add", {"profile_id": profile_id, "data": {
+        "name": name, "continue_after_match": True, "action_pattern": json.dumps(action, ensure_ascii=False), "conditions": []}})
+
+
+async def test_a_ready_release_is_read_its_files_wait_for_a_rule_and_one_rule_places_every_episode(bus_stand):
     torrents, unpack, bus, root = bus_stand
     folder = str(root / "staging" / "kinozal-1")
     _file(f"{folder}/Show/Show - 01.mkv", video=True, audios=["jpn", "rus"])
@@ -214,7 +236,6 @@ async def test_the_module_makes_its_preset_reads_a_ready_release_and_answers_the
     changed = bus.subscribe("unpack.table.changed")
     progress = bus.subscribe("unpack.read.progress")
 
-    assert unpack._files_profile is not None  # the preset is made at the start, with its rules
     unpack.publish_event(RELEASE_CHANGED_TOPIC, ready.model_dump(mode="json"))
     assert (await asyncio.wait_for(changed.queue.get(), 10)).payload == {"url": URL}
     # The read of the version told file by file (the nfo is no file to read), and the editor holds no read any more.
@@ -222,6 +243,19 @@ async def test_the_module_makes_its_preset_reads_a_ready_release_and_answers_the
     while not progress.queue.empty():
         told.append((lambda each: (each["done"], each["total"]))(progress.queue.get_nowait().payload))
     assert told == [(0, 2), (1, 2), (2, 2)]
+
+    # No rule is the source's yet: every tab has its own empty profile, no file has an episode, the page has no rows.
+    editor = await torrents.request("unpack.editor.get", {"url": URL})
+    profiles = editor["profiles"]
+    assert set(profiles) == {"files", "voices", "subtitles", "streams"} and len(set(profiles.values())) == 4
+    for each in profiles.values():
+        assert not await torrents.request("rules.rules.list", {"profile_id": each})
+    assert [(e["place"], e["by"]) for e in editor["view"]["tabs"]["files"]] == [(None, None)] * 3
+    assert (await torrents.request("unpack.table.get", {"url": URL}))["rows"] == []
+    assert [each["reading"] for each in editor["view"]["releases"]] == [None]
+
+    await _rule(torrents, profiles["files"], "серия", [{"type": "text", "value": " - "}, {"type": "number"}])
+    await asyncio.wait_for(changed.queue.get(), 10)
     table = await torrents.request("unpack.table.get", {"url": URL})
     assert table["names"] == ["Тайтл · 1-12"]
     assert [(row["key"], row["text"], row["site_fields"]["language"]) for row in table["rows"]] == [
@@ -229,12 +263,20 @@ async def test_the_module_makes_its_preset_reads_a_ready_release_and_answers_the
         ("page/Show/Show - 01.mkv#2", "S01E01 | Show/Show - 01.mkv", "rus"),
         ("page/Show/Show - 02.mkv#1", "S01E02 | Show/Show - 02.mkv", "jpn")]
     assert all(row["heights"] == [36] for row in table["rows"])
+    files = {e["path"]: e for e in (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["tabs"]["files"]}
+    assert files["Show/Show - 02.mkv"]["by"] == "серия" and files["Show/readme.nfo"]["place"] is None
 
-    editor = await torrents.request("unpack.editor.get", {"url": URL})
-    files = {entry["path"]: entry for entry in editor["view"]["tabs"]["files"]}
-    assert files["Show/readme.nfo"]["excluded"] and files["Show/Show - 02.mkv"]["by"] == "серия после тире"
-    assert set(editor["profiles"]) == {"files", "voices", "subtitles", "streams"}
-    assert [each["reading"] for each in editor["view"]["releases"]] == [None]
+
+async def test_a_page_no_source_lists_is_forgotten_with_the_profiles_of_its_tabs(bus_stand):
+    torrents, unpack, bus, root = bus_stand
+    torrents.releases = [release(["Show/Show - 01.mkv"])]
+    profiles = (await torrents.request("unpack.editor.get", {"url": URL}))["profiles"]
+    await torrents.request("unpack.folder.set", {"url": URL, "kind": "voice", "name": "Студия"})
+    torrents.listed = False
+    await unpack.on_source_changed(Envelope(topic="series.source.removed", kind="event", payload={"series_id": 1, "source_id": 1}))
+    assert await unpack.repo.pages() == []
+    left = {p["id"] for p in await torrents.request("rules.profiles.list", {"kind": "torrent"})}
+    assert not left & set(profiles.values())
 
 
 async def test_files_dropped_on_a_season_take_its_episodes_from_the_one_given_in_the_order_sent(bus_stand):
@@ -274,17 +316,19 @@ async def test_the_progress_of_a_download_changes_neither_the_table_nor_the_edit
     assert told == ["unpack.table.changed", "unpack.editor.changed"]  # the first news only
 
 
-async def test_the_files_of_a_season_every_series_with_the_page_excludes_are_not_downloaded(bus_stand):
+async def test_only_the_files_the_editor_leaves_out_are_not_downloaded(bus_stand):
     torrents, unpack, bus, root = bus_stand
     downloading = release(["Show/Season 1/Show - 01.mkv", "Show/Season 2/Show - 01.mkv"], state=ReleaseState.DOWNLOADING)
     torrents.releases = [downloading]
-    unpack.publish_event(RELEASE_CHANGED_TOPIC, downloading.model_dump(mode="json"))
-
-    async def told():
-        while not torrents.skips:
-            await asyncio.sleep(0.01)
-    await asyncio.wait_for(told(), 10)
-    assert torrents.skips == [{"url": URL, "release": "page", "skip": ["Show/Season 2/Show - 01.mkv"]}]
+    # The series excludes season 2 (its memory of disabled episodes): that is no business of the download.
+    first = asyncio.ensure_future(torrents.next_skip())
+    await unpack.on_release_changed(Envelope(topic=RELEASE_CHANGED_TOPIC, kind="event", payload=downloading.model_dump(mode="json")))
+    assert await first == {"url": URL, "release": "page", "skip": []}
+    # «Не брать» in the tab «Файлы»: that file is not downloaded.
+    second = asyncio.ensure_future(torrents.next_skip())
+    await torrents.request("unpack.assign", {"url": URL, "tab": "files", "items": [item_of("page", "Show/Season 2/Show - 01.mkv")],
+                                             "excluded": True})
+    assert await second == {"url": URL, "release": "page", "skip": ["Show/Season 2/Show - 01.mkv"]}
 
 
 def test_the_fonts_of_subtitles_are_those_beside_them_else_of_the_nearest_folder_above_that_has_any():

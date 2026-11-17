@@ -64,6 +64,11 @@ async def test_a_release_added_as_a_source_is_downloaded_read_and_synced_into_th
     assert [each["episodes"] for each in listed["releases"]] == ["1-2"]
     release = listed["releases"][0]["release"]
     await stand.call("POST", "/api/torrent/download", {"url": page.url, "release": release})
+    # No rule is the source's yet: the owner writes one in the tab «Файлы», and every episode is placed by it.
+    profiles = (await stand.call("POST", "/api/torrent/editor", {"url": page.url}))["profiles"]
+    action = [{"action_type": "extract_single", "action_pattern": json.dumps([{"type": "text", "value": " - "}, {"type": "number"}])}]
+    await stand.call("POST", f"/api/parser-profiles/{profiles['files']}/rules", {
+        "name": "серия", "action_pattern": json.dumps(action), "continue_after_match": False, "conditions": []})
     await until_table(stand, page.url, 2)
     kept = (await stand.call("POST", "/api/torrent/releases", {"url": page.url}))["releases"]
     assert [(each["state"], os.path.dirname(each["folder"])) for each in kept] == [("ready", stand.staging)]

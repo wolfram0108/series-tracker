@@ -73,9 +73,17 @@ class UnpackRepository:
     async def profiles(self, url: str) -> dict | None:
         return await self._db.fetch_one("SELECT * FROM unpack_sources WHERE url=?", (url,))
 
-    async def save_profiles(self, url: str, voices: int, subtitles: int, streams: int) -> None:
-        await self._db.execute("INSERT OR REPLACE INTO unpack_sources (url, voices_profile_id, subtitles_profile_id, "
-                               "streams_profile_id) VALUES (?, ?, ?, ?)", (url, voices, subtitles, streams))
+    async def save_profiles(self, url: str, profiles: dict[str, int]) -> None:
+        """`profiles`: tab → profile id, for the four tabs of the editor."""
+        await self._db.execute("INSERT OR REPLACE INTO unpack_sources (url, files_profile_id, voices_profile_id, "
+                               "subtitles_profile_id, streams_profile_id) VALUES (?, ?, ?, ?, ?)",
+                               (url, profiles["files"], profiles["voices"], profiles["subtitles"], profiles["streams"]))
+
+    async def pages(self) -> list[str]:
+        """Every page the module keeps something of."""
+        rows = await self._db.fetch_all("SELECT url FROM unpack_sources UNION SELECT url FROM unpack_streams "
+                                        "UNION SELECT url FROM unpack_folders UNION SELECT url FROM unpack_assignments")
+        return sorted(row["url"] for row in rows)
 
     async def forget(self, url: str) -> None:
         await self._db.execute_many([("DELETE FROM unpack_streams WHERE url=?", (url,)),

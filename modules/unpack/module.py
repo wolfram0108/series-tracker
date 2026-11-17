@@ -5,9 +5,10 @@ unpack_assignments, unpack_sources (modules/unpack/repository.py).
 A release `torrents` downloaded is read here: every video, sound and subtitles file by ffprobe once per version and size
 (the video of a source is never compared by content); the files are laid out by the rules of the four tabs of the editor
 and by what the user placed by hand (modules/unpack/layout.py), and every sound and subtitles track of a placed video is a
-row of the table of the page, as a row of a site. The rules of the tab «Файлы» are one profile for every source (the preset
-of the torrent editor, setting `unpack.files_profile_id`); the tabs «Озвучки», «Субтитры», «Контейнеры» have profiles of
-each source, made when its editor is first opened. Both are profiles of the kind `torrent` (rules).
+row of the table of the page, as a row of a site. Every tab of the editor of a source («Файлы», «Озвучки», «Субтитры»,
+«Контейнеры») has its own profile of rules (the kind `torrent`), empty until the owner writes rules in it, made when the
+editor is first opened; nothing is placed by rules no one wrote. A page no torrent source lists any more is forgotten with
+its profiles.
 
 Queries / commands (a page is named by any mirror of its tracker; the module keeps it, and answers it, in its one spelling):
   unpack.table.get {url} → TableDraft {names, title, rows} — the rows of the page (`sources` asks it as the read of a tracker's
@@ -24,14 +25,13 @@ Events out:
   unpack.editor.changed {url} — the editor of the page changed (a window shows it again)
   unpack.read.progress {url, release, done, total} — the files of a version read so far, while they are read; the editor
       gives the same as `reading` of a release, for a window opened in the middle of a read
-Events in: torrents.release.changed (a release with its files: the files not to download are told to `torrents` by the
-  numbers the preset gives the names of the files and the seasons and episodes the series exclude; a ready one is read;
-  a news that changes only how far the files are downloaded is passed by),
-  rules.profile.changed (a profile of the editor changed), series.updated (the episodes a series excludes changed).
+Events in: torrents.release.changed (a release with its files: the files the editor leaves out of the tab «Файлы» — by a
+  rule or «Не брать» — are told to `torrents` not to download, and nothing else; a ready one is read; a news that changes
+  only how far the files are downloaded is passed by), rules.profile.changed (a profile of the editor changed),
+  series.source.added / updated / removed and series.deleted (a page no source lists any more is forgotten).
 """
 from __future__ import annotations
 
-import json
 import os
 
 from core import BaseModule
@@ -39,38 +39,24 @@ from core.contracts.torrent import (RELEASE_CHANGED_TOPIC, EditorTab, FileKind, 
 from core.db import Database
 from core.envelope import Envelope
 from core.ffprobe import layout_of
-from core.ignored import parse_memory
 
-from .layout import Inputs, Place, _places, compose, item_of, lines
+from .layout import EXCLUDED, Inputs, _places, compose, item_of, lines
 from .repository import UnpackRepository
 
-FILES_PROFILE_KEY = "unpack.files_profile_id"
-FILES_PROFILE_NAME = "Торрент: файлы"
 TABLE_CHANGED_TOPIC = "unpack.table.changed"
 EDITOR_CHANGED_TOPIC = "unpack.editor.changed"
 READ_PROGRESS_TOPIC = "unpack.read.progress"
 READ = {FileKind.VIDEO, FileKind.AUDIO, FileKind.SUBTITLES}
-
-# The rules the preset of the tab «Файлы» begins with: the forms of the numbers in the names of the releases of the corpus
-# (DESIGN.md); the owner changes them in the editor like any rules.
-_NUMBER, _TEXT = {"type": "number"}, (lambda value: {"type": "text", "value": value})
-PRESET_RULES = [
-    {"name": "не дорожка и не видео", "actions": [{"action_type": "exclude", "action_pattern": "[]"}],
-     "conditions": [[_TEXT("K:другое")], [_TEXT("K:шрифт")]]},
-    {"name": "сезон каталогом", "actions": [("extract_season", [_TEXT("Season "), _NUMBER])], "conditions": []},
-    {"name": "S01E05", "actions": [("extract_season", [_TEXT("S"), _NUMBER, _TEXT("E")]),
-                                   ("extract_single", [_TEXT("E"), _NUMBER])], "conditions": []},
-    {"name": "серия после тире", "actions": [("extract_single", [_TEXT(" - "), _NUMBER])], "conditions": []},
-    {"name": "серия в скобках", "actions": [("extract_single", [_TEXT("["), _NUMBER, _TEXT("]")])], "conditions": []},
-]
-
+# The profile of each tab of the editor in the table unpack_sources, and the word its name is made with.
+PROFILE_COLUMNS = {"files": "files_profile_id", "voices": "voices_profile_id", "subtitles": "subtitles_profile_id",
+                   "streams": "streams_profile_id"}
+TAB_WORDS = {"files": "файлы", "voices": "озвучки", "subtitles": "субтитры", "streams": "контейнеры"}
 
 class UnpackModule(BaseModule):
     name = "unpack"
 
     def __init__(self, bus, db: Database) -> None:
         self.repo = UnpackRepository(db)
-        self._files_profile: int | None = None
         self._skips: dict[tuple[str, str], frozenset[str]] = {}  # the files not to download told to torrents last
         self._reading: dict[tuple[str, str], tuple[int, int]] = {}  # (url, release) → (files read, files to read)
         # What the module last took of each release: a news that changes only how far its files are is none of its business.
@@ -86,30 +72,30 @@ class UnpackModule(BaseModule):
         self.handle("unpack.folder.delete", self.on_folder_delete)
         self.handle(RELEASE_CHANGED_TOPIC, self.on_release_changed)
         self.handle("rules.profile.changed", self.on_profile_changed)
-        self.handle("series.updated", self.on_series_updated)
+        for topic in ("series.source.added", "series.source.updated", "series.source.removed", "series.deleted"):
+            self.handle(topic, self.on_source_changed)
 
     async def on_start(self) -> None:
         try:
-            self._files_profile = await self._preset()
-        except Exception:  # noqa: BLE001 - without the preset the files are placed only by hand until the next start
-            self.log.exception("the preset of the torrent editor was not made")
+            await self._forget_unlisted()
+        except Exception:  # noqa: BLE001 - what no source lists any more is forgotten at the next change of the sources
+            self.log.exception("the pages no source lists were not forgotten")
 
-    async def _preset(self) -> int:
-        stored = (await self.request("settings.value.get", {"key": FILES_PROFILE_KEY})).get("value")
-        profiles = {p["id"] for p in await self.request("rules.profiles.list", {"kind": "torrent"})}
-        if stored and int(stored) in profiles:
-            return int(stored)
-        made = (await self.request("rules.profiles.create", {"name": FILES_PROFILE_NAME, "kind": "torrent"}))["id"]
-        for rule in PRESET_RULES:
-            actions = [a if isinstance(a, dict) else {"action_type": a[0], "action_pattern": json.dumps(a[1], ensure_ascii=False)}
-                       for a in rule["actions"]]
-            conditions = [{"condition_type": "contains", "logical_operator": "OR" if i < len(rule["conditions"]) - 1 else "AND",
-                           "pattern": json.dumps(blocks, ensure_ascii=False)} for i, blocks in enumerate(rule["conditions"])]
-            await self.request("rules.rules.add", {"profile_id": made, "data": {
-                "name": rule["name"], "continue_after_match": True, "action_pattern": json.dumps(actions, ensure_ascii=False),
-                "conditions": conditions}})
-        await self.request("settings.value.set", {"key": FILES_PROFILE_KEY, "value": str(made)})
-        return made
+    async def _forget_unlisted(self) -> None:
+        """A page no torrent source of any series lists any more: what the module kept of it goes, its profiles too."""
+        listed = set(await self._pages())
+        for url in await self.repo.pages():
+            if url in listed:
+                continue
+            stored = await self.repo.profiles(url) or {}
+            await self.repo.forget(url)
+            for column in PROFILE_COLUMNS.values():
+                if stored.get(column):
+                    await self.request("rules.profiles.delete", {"profile_id": stored[column]})
+            self.log.info("страница %s больше не источник: её разбор и профили вкладок забыты", url)
+
+    async def on_source_changed(self, env: Envelope) -> None:
+        await self._forget_unlisted()
 
     # --- the layout ---------------------------------------------------------------------------------------------------
 
@@ -133,11 +119,10 @@ class UnpackModule(BaseModule):
         inputs = Inputs(releases=releases, streams=streams, results={}, manual=manual, folders=await self.repo.folders(url))
         profiles = await self.repo.profiles(url) or {}
         keyed = lines(inputs)
-        inputs.results[EditorTab.FILES] = await self._apply(self._files_profile, keyed[EditorTab.FILES])
+        inputs.results[EditorTab.FILES] = await self._apply(profiles.get(PROFILE_COLUMNS["files"]), keyed[EditorTab.FILES])
         keyed = lines(inputs)  # the tabs of tracks read the places the files got
-        for tab, column in ((EditorTab.VOICES, "voices_profile_id"), (EditorTab.SUBTITLES, "subtitles_profile_id"),
-                            (EditorTab.STREAMS, "streams_profile_id")):
-            inputs.results[tab] = await self._apply(profiles.get(column), keyed[tab])
+        for tab in (EditorTab.VOICES, EditorTab.SUBTITLES, EditorTab.STREAMS):
+            inputs.results[tab] = await self._apply(profiles.get(PROFILE_COLUMNS[tab.value]), keyed[tab])
         return inputs
 
     async def _page(self, url: str) -> str:
@@ -160,20 +145,19 @@ class UnpackModule(BaseModule):
         for release in view["releases"]:
             found = self._reading.get((url, release["release"]))
             release["reading"] = None if found is None else {"done": found[0], "total": found[1]}
-        return {"url": url, "profiles": {"files": self._files_profile, **profiles}, "view": view}
+        return {"url": url, "profiles": profiles, "view": view}
 
     async def _tab_profiles(self, url: str) -> dict[str, int]:
-        """The profiles of the tabs of the tracks of the source, made when its editor is first opened."""
-        stored = await self.repo.profiles(url)
-        if stored is None:
-            made = {}
-            for tab, word in (("voices", "озвучки"), ("subtitles", "субтитры"), ("streams", "контейнеры")):
-                made[tab] = (await self.request("rules.profiles.create",
-                                                {"name": f"Торрент: {url} · {word}", "kind": "torrent"}))["id"]
-            await self.repo.save_profiles(url, made["voices"], made["subtitles"], made["streams"])
-            return made
-        return {"voices": stored["voices_profile_id"], "subtitles": stored["subtitles_profile_id"],
-                "streams": stored["streams_profile_id"]}
+        """The profiles of the four tabs of the source, each its own and empty until the owner writes rules in it; made when
+        its editor is first opened (a tab missing from an older page gets its profile then)."""
+        stored = await self.repo.profiles(url) or {}
+        made = {}
+        for tab, column in PROFILE_COLUMNS.items():
+            made[tab] = stored.get(column) or (await self.request("rules.profiles.create", {
+                "name": f"Торрент: {url} · {TAB_WORDS[tab]}", "kind": "torrent"}))["id"]
+        if any(stored.get(column) != made[tab] for tab, column in PROFILE_COLUMNS.items()):
+            await self.repo.save_profiles(url, made)
+        return made
 
     def _changed(self, url: str) -> None:
         self.publish_event(TABLE_CHANGED_TOPIC, {"url": url})
@@ -186,11 +170,15 @@ class UnpackModule(BaseModule):
         await self.repo.assign(url, p["tab"], list(p["items"]), season=p.get("season"), episode=p.get("episode"),
                                episode_last=p.get("episode_last"), folder=p.get("folder"), excluded=bool(p.get("excluded")),
                                in_order=bool(p.get("in_order")))
+        if p["tab"] == EditorTab.FILES:
+            await self._retell(url)
         self._changed(url)
 
     async def on_unassign(self, env: Envelope) -> None:
         url = await self._page(env.payload["url"])
         await self.repo.unassign(url, env.payload["tab"], list(env.payload["items"]))
+        if env.payload["tab"] == EditorTab.FILES:
+            await self._retell(url)
         self._changed(url)
 
     async def on_folder_set(self, env: Envelope) -> None:
@@ -241,53 +229,28 @@ class UnpackModule(BaseModule):
         self.publish_event(READ_PROGRESS_TOPIC, {"url": key[0], "release": key[1], "done": done, "total": total})
 
     async def _tell_skips(self, release: ReleaseView) -> None:
-        """The files whose episode every series with the page excludes are not downloaded."""
-        inputs = await self._inputs(release.url, [release])
-        memory = await self._excluded_of(release.url)
-        if memory is None:
-            return
-        places = _places(inputs)
-        skip = frozenset(f.path for f in release.files
-                         if _skipped(places.get(item_of(release.release, f.path)), memory))
+        """The files the editor leaves out (a rule of the tab «Файлы» or «Не брать») are not downloaded; nothing else holds a
+        file back, so what the window shows of a file is all there is to it."""
+        places = _places(await self._inputs(release.url, [release]))
+        skip = frozenset(f.path for f in release.files if places.get(item_of(release.release, f.path)) == EXCLUDED)
         if self._skips.get((release.url, release.release)) == skip:
             return
         self._skips[(release.url, release.release)] = skip
         self.send_command("torrents.release.priorities", {"url": release.url, "release": release.release,
                                                           "skip": sorted(skip)})
 
-    async def _excluded_of(self, url: str) -> list[dict[int, set[int]]] | None:
-        """What every series with the page excludes ({season: {episodes}}, a whole season as all its episodes asked);
-        None when the series could not be asked."""
-        try:
-            series = await self.request("catalog.series.list", {})
-        except Exception:  # noqa: BLE001 - with no list nothing is held back: every file is downloaded
-            self.log.exception("the series of %s were not asked; nothing is held back", url)
-            return None
-        memories = []
-        for one in series:
-            pages = set()
-            for source in one.get("sources") or []:
-                resolved = await self.request("sources.site.resolve", {"url": source["url"]})
-                pages.add(resolved.get("canonical_url") or source["url"])
-            if url not in pages:
-                continue
-            seasons = one.get("ignored_seasons") or []
-            seasons = json.loads(seasons) if isinstance(seasons, str) else seasons
-            episodes = one.get("ignored_episodes") or {}
-            memory = parse_memory(json.loads(episodes) if isinstance(episodes, str) else episodes)
-            memories.append({"seasons": {int(s) for s in seasons}, "episodes": memory})
-        return memories
+    async def _retell(self, url: str) -> None:
+        """What the editor leaves out changed: the releases of the page being downloaded or kept hear of it."""
+        for release in await self._releases(url):
+            if release.files and release.state != ReleaseState.ARCHIVED:
+                await self._tell_skips(release)
 
     async def on_profile_changed(self, env: Envelope) -> None:
         profile_id = env.payload.get("profile_id")
-        if profile_id == self._files_profile:
-            for url in await self._pages():
-                self._changed(url)
-            return
         for url in await self._pages():
             stored = await self.repo.profiles(url) or {}
-            if profile_id in (stored.get("voices_profile_id"), stored.get("subtitles_profile_id"),
-                              stored.get("streams_profile_id")):
+            if profile_id in {stored.get(column) for column in PROFILE_COLUMNS.values()}:
+                await self._retell(url)
                 self._changed(url)
 
     async def _pages(self) -> list[str]:
@@ -299,23 +262,3 @@ class UnpackModule(BaseModule):
                     resolved = await self.request("sources.site.resolve", {"url": source["url"]})
                     pages.add(resolved.get("canonical_url") or source["url"])
         return sorted(pages)
-
-    async def on_series_updated(self, env: Envelope) -> None:
-        if not {"ignored_seasons", "ignored_episodes"} & set(env.payload or {}):
-            return
-        for url in await self._pages():
-            for release in await self._releases(url):
-                if release.files and release.state != ReleaseState.ARCHIVED:
-                    await self._tell_skips(release)
-
-
-def _skipped(where, memories: list[dict]) -> bool:
-    """A file is not downloaded when it is placed and every series with the page excludes all its episodes."""
-    if not memories or not isinstance(where, Place):
-        return False
-    episodes = set(range(where.episode, (where.last or where.episode) + 1))
-
-    def excluded(memory: dict) -> bool:
-        return where.season in memory["seasons"] or episodes <= memory["episodes"].get(where.season, set())
-    return all(excluded(memory) for memory in memories)
-
