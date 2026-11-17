@@ -228,7 +228,6 @@ export const ru = {
   "torrent.folders.subtitleTracks.few": "{count} дорожки субтитров",
   "torrent.folders.subtitleTracks.many": "{count} дорожек субтитров",
   "torrent.folder.fromFile": "файл",
-  "torrent.folder.more": "ещё {n}",
   "torrent.type.short.full": "П",
   "torrent.type.short.signs": "Н",
   "torrent.folders.none": "Каталогов нет: их называют правила вкладки или создаёт оператор",

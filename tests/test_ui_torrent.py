@@ -105,9 +105,14 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     folder = page.locator(".torrent-folder[data-folder='Студия']")
     await expect(folder).to_be_visible()
     await expect(folder.locator(".torrent-rule")).to_contain_text("звук")
-    # The folder is a row of the table; unfolded, it lists the track of each episode it holds, named as «Контейнеры» names it.
+    # The folder is a row of the table; unfolded, it lists the track of each episode it holds, written as the left pane
+    # writes it (its raw line, its file) with the rule that put it there.
     await folder.locator(".torrent-folders-chev").click()
-    await expect(page.locator(".torrent-folder-track .torrent-folders-place")).to_have_text(["s01e01 · a0", "s01e02 · a0"])
+    tracks = page.locator(".torrent-folder-track")
+    await expect(tracks.locator(".torrent-folders-place")).to_have_text(["s01e01", "s01e02"])
+    await expect(tracks.locator(".torrent-folders-file")).to_have_text(["Show - 01.mkv", "Show - 02.mkv"])
+    await expect(tracks.locator(".torrent-line")).to_have_text([re.compile(r"^T:звук \| A:\d+ \| C:aac$")] * 2)
+    await expect(tracks.locator(".torrent-rule")).to_have_text([re.compile("звук")] * 2)
     await ui.shot("05-tracks-by-rule")
 
     # What is shown is what is copied: a click takes a field whole, code and all; the whole line, as the rule reads it.
@@ -132,6 +137,28 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     assert [await each.bounding_box() for each in await heads.all()] == columns
     await page.locator(".torrent-pick-note button").click()
     await expect(page.locator(".torrent-folder .drop-folder")).to_have_count(0)
+
+    # A sound put by hand in a folder the user made: the folder says it comes from a hand, and the track, unfolded, is given
+    # back to the rules there — it goes back to the folder of the rule.
+    await page.locator(".torrent-pane-tools button", has_text=text("torrent.folder.addVoice")).click()
+    await page.locator(".torrent-new input").fill("Рука")
+    await page.locator(".torrent-new button[type=submit]").click()
+    hand = page.locator(".torrent-folder[data-folder='Рука']")
+    await expect(hand.locator(".torrent-hand")).to_have_text(text("torrent.by.manual"))
+    await row.locator("input[type=checkbox]").check()
+    await hand.locator(".drop-folder").click()
+    await expect(hand.locator(".torrent-folders-num").last).to_have_text("2", timeout=LONG_S)
+    await expect(page.locator(".torrent-folder[data-folder='Студия']")).to_have_count(0)
+    await hand.locator(".torrent-folders-chev").click()
+    back = page.locator(".do-give-back")
+    await expect(back).to_have_count(2)
+    await ui.shot("07-by-hand")
+    for left in (1, 0):
+        await back.first.click()
+        await expect(back).to_have_count(left, timeout=LONG_S)
+    await expect(page.locator(".torrent-folder[data-folder='Студия'] .torrent-folders-num").last).to_have_text("2", timeout=LONG_S)
+    await hand.locator(".do-delete-folder").click()
+    await expect(hand).to_have_count(0, timeout=LONG_S)
 
     # Nothing jitters: the switch of the tabs, the heads of the panes and the panes keep their place and size whatever tab
     # or filter is chosen; the names of the files are text the user selects and copies.

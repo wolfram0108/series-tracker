@@ -3,16 +3,19 @@ import { computed, ref } from "vue"
 import { hasMessage, t } from "../../../i18n"
 import { LANGUAGES } from "../../../lib/languages"
 import { SUBTITLE_TYPES } from "../../../lib/ruleVocabulary"
-import { episodeFolder, folderRows, nameOf, streamLabels, type Editor, type Folder, type FolderRow, type FolderTrack } from "../../../lib/torrent"
+import { FROM_META, episodeFolder, folderRows, nameOf, ruleOf, type Editor, type Folder, type FolderRow, type FolderTrack } from "../../../lib/torrent"
 import { spansOf } from "../../../lib/ranges"
-import { assign, deleteFolder, setFolder } from "../../../composables/torrentCalls"
+import { assign, deleteFolder, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import type { TorrentPick } from "../../../composables/useTorrentPick"
+import TorrentLine from "./TorrentLine.vue"
 
 // The folders of the tracks as one table per kind (the boards «Озвучки», «Субтитры», «Контейнеры»): a row is a folder —
 // its name is the name of the voice-over or of the subtitles in the rows of the series, its language and type of subtitles
 // are set in it, where it comes from (the titles in the files, a rule, a hand) is shown; unfolded, it lists every track
-// it holds. A pick let go on a row is placed in that folder by hand; «Не брать» leaves every track of a folder out.
+// it holds, each written as the left pane writes it (its raw line and its file) with where it comes from; a track put
+// there by hand is given back to the rules there. A pick let go on a row is placed in that folder by hand; «Не брать»
+// leaves every track of a folder out.
 const props = defineProps<{
   editor: Editor
   kinds: readonly Folder["kind"][]
@@ -23,24 +26,19 @@ const props = defineProps<{
 const emit = defineEmits<{ drop: [Folder["kind"], string, string[]]; failure: [string] }>()
 
 const TYPES = SUBTITLE_TYPES
-const SHOWN = 6
 const groups = computed(() => props.kinds.map((kind) => ({ kind, rows: folderRows(props.editor.view, kind) })))
-const labels = computed(() => streamLabels(props.editor.view.containers))
 const languages = computed(() => [...new Set([...props.editor.view.tabs.voices, ...props.editor.view.tabs.subtitles,
   ...props.editor.view.tabs.streams].map((entry) => entry.language.trim().toLowerCase()).filter((code) => code && code !== "und"))].sort())
 const live = (kind: Folder["kind"]): boolean => props.pick.count.value > 0 && props.fits(kind)
 
 const keyOf = (row: FolderRow): string => `${row.kind}:${row.name}`
 const open = ref(new Set<string>())
-const all = ref(new Set<string>())
 function flipped(set: Set<string>, key: string): Set<string> {
   const next = new Set(set)
   if (!next.delete(key)) next.add(key)
   return next
 }
 const unfold = (row: FolderRow): void => { open.value = flipped(open.value, keyOf(row)) }
-const showAll = (row: FolderRow): void => { all.value = flipped(all.value, keyOf(row)) }
-const shownTracks = (row: FolderRow): FolderTrack[] => all.value.has(keyOf(row)) ? row.tracks : row.tracks.slice(0, SHOWN)
 
 // What its tracks go out with: its own language set by hand, else the one its tracks carry (a rule's or the file's).
 const languageOf = (row: FolderRow): string | null => row.language || (row.noLanguage ? "" : row.trackLanguage) || null
@@ -52,16 +50,24 @@ const episodesOf = (row: FolderRow): string => {
   if (!places.length) return "—"
   return new Set(places.map((place) => place.season)).size === 1 ? spansOf(places.map((place) => place.episode)) : row.episodes
 }
-const sourceOf = (row: FolderRow): { css: string; text: string } => row.rule
-  ? { css: "torrent-rule", text: row.rule.row === null ? t("torrent.by.rule", { rule: row.rule.rule }) : t("torrent.by.row", { rule: row.rule.rule, row: row.rule.row }) }
-  : row.fromMeta ? { css: "torrent-meta-folder", text: t("torrent.folder.fromFile") } : { css: "torrent-hand", text: t("torrent.by.manual") }
+// Where a track got its folder: a hand, the title in its file, or a rule (with its row).
+type Origin = { css: string; text: string }
+const HAND: Origin = { css: "torrent-hand", text: t("torrent.by.manual") }
+function originOf(by: string | null): Origin {
+  if (by === "manual") return HAND
+  if (by === FROM_META) return { css: "torrent-meta-folder", text: t("torrent.folder.fromFile") }
+  const rule = ruleOf(by)
+  return rule === null ? HAND : { css: "torrent-rule",
+    text: rule.row === null ? t("torrent.by.rule", { rule: rule.rule }) : t("torrent.by.row", { rule: rule.rule, row: rule.row }) }
+}
+// Where a folder's tracks come from, each way once: a folder of a file and a hand says both. An empty one was made by hand.
+const sourcesOf = (row: FolderRow): Origin[] => row.tracks.length
+  ? [...new Map(row.tracks.map((each) => originOf(each.entry.by)).map((each) => [each.text, each] as const)).values()]
+  : [HAND]
 const placeOf = (track: FolderTrack): string => {
   const place = track.entry.place
-  const episode = place ? episodeFolder(place.season, place.episode, place.last) : t("torrent.tracks.noEpisode")
-  const label = labels.value.get(track.entry.item)
-  return label ? `${episode} · ${label}` : episode
+  return place ? episodeFolder(place.season, place.episode, place.last) : t("torrent.tracks.noEpisode")
 }
-const unknown = (language: string): boolean => ["", "und"].includes(language.trim().toLowerCase())
 
 const busy = ref(false)
 async function run(calls: (() => Promise<Answer<unknown>>)[]): Promise<void> {
@@ -83,6 +89,8 @@ const save = (row: FolderRow, change: { language?: string; subtitle_type?: "" | 
   url: url.value, kind: row.kind, name: row.name, language: change.language ?? row.language,
   subtitle_type: (change.subtitle_type ?? row.subtitle_type) as "" | (typeof TYPES)[number] })])
 const remove = (row: FolderRow) => run([() => deleteFolder(url.value, row.kind, row.name)])
+// A track put in the folder by hand goes back to what the rules and its file say.
+const giveBack = (track: FolderTrack) => run([() => unassign(url.value, track.tab, [track.entry.item])])
 // «Не брать»: every track of the folder left out, in each tab it is placed in (as «Не брать» of a track on the left).
 function skip(row: FolderRow): Promise<void> {
   const byTab = new Map<FolderTrack["tab"], string[]>()
@@ -143,7 +151,8 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
                           @click="save(row, { subtitle_type: row.subtitle_type === each ? '' : each })">{{ t(`torrent.type.short.${each}`) }}</button>
                 </span>
               </td>
-              <td><span :class="sourceOf(row).css" :title="sourceOf(row).text">{{ sourceOf(row).text }}</span></td>
+              <td><span class="torrent-folders-sources">
+                <span v-for="each in sourcesOf(row)" :key="each.text" :class="each.css" :title="each.text">{{ each.text }}</span></span></td>
               <td class="torrent-folders-num" :title="episodesOf(row)">{{ episodesOf(row) }}</td>
               <td class="torrent-folders-num">{{ row.tracks.length }}</td>
               <td class="torrent-folders-act">
@@ -160,23 +169,24 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
               </td>
             </tr>
             <template v-if="open.has(keyOf(row))">
-              <tr v-for="track in shownTracks(row)" :key="track.entry.item" class="torrent-folder-track">
+              <tr v-for="track in row.tracks" :key="track.entry.item" class="torrent-folder-track">
                 <td />
-                <td class="torrent-folders-place" colspan="2">{{ placeOf(track) }}</td>
-                <td class="torrent-folders-file" :colspan="group.kind === 'subtitles' ? 4 : 3" :title="track.entry.path">{{ nameOf(track.entry.path) }}</td>
-                <td :class="{ 'is-bad': unknown(track.entry.language) }">{{ track.entry.language || "—" }}</td>
-              </tr>
-              <tr v-if="row.tracks.length > SHOWN" class="torrent-folder-track">
-                <td />
-                <td :colspan="group.kind === 'subtitles' ? 7 : 6">
-                  <button type="button" class="torrent-mini" @click="showAll(row)">
-                    {{ all.has(keyOf(row)) ? t("common.hide") : t("torrent.folder.more", { n: row.tracks.length - SHOWN }) }}</button>
+                <td class="torrent-folders-place">{{ placeOf(track) }}</td>
+                <td :colspan="group.kind === 'subtitles' ? 3 : 2">
+                  <span class="torrent-folders-trackline"><TorrentLine :line="track.entry.line" />
+                    <span class="torrent-folders-file" :title="track.entry.path">{{ nameOf(track.entry.path) }}</span></span>
+                </td>
+                <td colspan="2"><span :class="originOf(track.entry.by).css" :title="originOf(track.entry.by).text">{{ originOf(track.entry.by).text }}</span></td>
+                <td class="torrent-folders-act">
+                  <button v-if="track.entry.by === 'manual'" type="button" class="torrent-skip do-give-back" :disabled="busy"
+                          :title="t('torrent.unassign')" :aria-label="t('torrent.unassign')" @click="giveBack(track)">
+                    <i class="pi pi-undo" aria-hidden="true" /></button>
                 </td>
               </tr>
               <tr v-if="row.fonts.length" class="torrent-folder-track">
                 <td />
-                <td class="torrent-folders-place" colspan="2">{{ t("torrent.folder.fonts", { n: row.fonts.length }) }}</td>
-                <td class="torrent-folders-file" :colspan="group.kind === 'subtitles' ? 5 : 4" :title="row.fonts.join('\n')">
+                <td class="torrent-folders-place">{{ t("torrent.folder.fonts", { n: row.fonts.length }) }}</td>
+                <td class="torrent-folders-file" :colspan="group.kind === 'subtitles' ? 6 : 5" :title="row.fonts.join('\n')">
                   {{ row.fonts.map(nameOf).join(", ") }}</td>
               </tr>
             </template>

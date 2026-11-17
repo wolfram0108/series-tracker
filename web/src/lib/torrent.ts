@@ -280,20 +280,6 @@ export function folderRows(view: EditorView, kind: Folder["kind"]): FolderRow[] 
   })
 }
 
-/** The letter and number of each track of the containers by its item (`a1`, `s0`), as «Контейнеры» names it. */
-export function streamLabels(files: readonly ContainerFile[]): Map<string, string> {
-  const labels = new Map<string, string>()
-  for (const file of files) {
-    const nth: Record<string, number> = {}
-    for (const facts of file.streams) {
-      const n = nth[facts.kind] ?? 0
-      nth[facts.kind] = n + 1
-      labels.set(`${file.item}#${facts.index}`, streamLabel(facts, n))
-    }
-  }
-  return labels
-}
-
 // --- the tab «Контейнеры» -------------------------------------------------------------------------------------------
 
 export interface ContainerStream {

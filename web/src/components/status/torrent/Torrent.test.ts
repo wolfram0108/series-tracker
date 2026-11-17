@@ -160,25 +160,37 @@ describe("the editors of the tracks", () => {
     const inner = { item: "page/S/E01.mkv#1", line: "T:звук | A:1 | N:Original | C:aac", kind: "audio" as const, folder: "Original", by: "meta",
       excluded: false, waiting: true, language: "und", subtitle_type: "", path: "S/E01.mkv", place: { season: 1, episode: 1, last: null },
       stream: { index: 1, kind: "audio", codec: "aac", title: "Original" } }
-    const w = mountWith(TorrentTracks, { editor: editor({ tabs: { ...view().tabs, streams: [inner] },
-      folders: [...view().folders, { kind: "voice", name: "Original", items: 1, manual: false, language: "", subtitle_type: "", fonts: [] }],
+    // A track of another episode whose file names it otherwise, put in the folder by hand.
+    const handed = { ...inner, item: "page/S/E02.mkv#2", line: "T:звук | A:2 | L:rus | N:Studio | C:aac", by: "manual", waiting: false,
+      language: "rus", path: "S/E02.mkv", place: { season: 1, episode: 2, last: null } }
+    const w = mountWith(TorrentTracks, { editor: editor({ tabs: { ...view().tabs, streams: [inner, handed] },
+      folders: [...view().folders, { kind: "voice", name: "Original", items: 2, manual: false, language: "", subtitle_type: "", fonts: [] }],
       containers: [{ item: "page/S/E01.mkv", path: "S/E01.mkv", place: { season: 1, episode: 1, last: null },
         streams: [{ index: 0, kind: "video" }, { index: 1, kind: "audio", codec: "aac" }] }] }), tab: "voices" })
     const original = w.find(".torrent-folder[data-folder='Original']")
-    expect(original.find(".torrent-meta-folder").text()).toBe(t("torrent.folder.fromFile"))
-    expect(original.findAll(".torrent-folders-num").map((cell) => cell.text())).toEqual(["1", "1"])
+    // Its tracks come from the file and from a hand: the folder says both.
+    expect(original.findAll(".torrent-folders-sources > span").map((each) => each.text()))
+      .toEqual([t("torrent.folder.fromFile"), t("torrent.by.manual")])
+    expect(original.findAll(".torrent-folders-num").map((cell) => cell.text())).toEqual(["1–2", "2"])
     // Its track has no language in the file: the folder says how many, and its language set here names them.
     const language = original.find("select.torrent-language")
     expect(language.find("option:checked").text()).toBe(t("torrent.folders.noLanguage", { n: 1 }))
     await language.setValue("jpn")
     expect(calls.setFolder).toHaveBeenCalledWith({ url: URL, kind: "voice", name: "Original", language: "jpn", subtitle_type: "" })
     await original.find(".torrent-folders-chev").trigger("click")
-    const track = w.find(".torrent-folder-track")
-    expect(track.find(".torrent-folders-place").text()).toBe("s01e01 · a0")
-    expect(track.find(".torrent-folders-file").text()).toBe("E01.mkv")
+    // Unfolded, every track is written as the left pane writes it — its raw line, its file — with where it comes from; the
+    // one a hand put there is given back to the rules there.
+    const tracks = w.findAll(".torrent-folder-track")
+    expect(tracks.map((each) => [each.find(".torrent-folders-place").text(), each.find(".torrent-line").attributes("title"),
+      each.find(".torrent-folders-file").text(), each.find(".torrent-meta-folder, .torrent-hand").text()])).toEqual([
+      ["s01e01", inner.line, "E01.mkv", t("torrent.folder.fromFile")], ["s01e02", handed.line, "E02.mkv", t("torrent.by.manual")]])
+    expect(tracks[0].find(".do-give-back").exists()).toBe(false)
+    await tracks[1].find(".do-give-back").trigger("click")
+    await flushPromises()
+    expect(calls.unassign).toHaveBeenCalledWith(URL, "streams", ["page/S/E02.mkv#2"])
     await original.find(".do-skip-folder").trigger("click")
     await flushPromises()
-    expect(calls.assign).toHaveBeenCalledWith({ url: URL, tab: "streams", items: ["page/S/E01.mkv#1"], excluded: true })
+    expect(calls.assign).toHaveBeenCalledWith({ url: URL, tab: "streams", items: ["page/S/E01.mkv#1", "page/S/E02.mkv#2"], excluded: true })
     await w.find(".torrent-folder[data-folder='JAM'] .do-skip-folder").trigger("click")
     await flushPromises()
     expect(calls.assign).toHaveBeenCalledWith({ url: URL, tab: "voices", items: ["page/S/JAM/E01.mka"], excluded: true })

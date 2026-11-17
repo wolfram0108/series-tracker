@@ -105,7 +105,7 @@ async function create(): Promise<void> {
             <template v-if="stream.items.length">
               <span class="torrent-grip" draggable="true" :title="t('torrent.drag')" aria-hidden="true"
                   @dragstart="pick.dragStart($event, stream.items)" @dragend="pick.dragEnd"><i class="pi pi-ellipsis-v" /></span>
-              <input type="checkbox" :checked="pick.allOf(stream.items)" :aria-label="stream.label" @change="pick.toggleAll(stream.items)">
+              <input type="checkbox" :checked="pick.allOf(stream.items)" :aria-label="stream.facts.line ?? stream.label" @change="pick.toggleAll(stream.items)">
             </template>
             <i class="torrent-dot" :class="dotOf(stream)" aria-hidden="true" />
             <TorrentLine :line="stream.facts.line ?? stream.label" />

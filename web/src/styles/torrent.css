@@ -143,7 +143,13 @@
 .torrent-folder.is-open > td { background: #f8fbff; }
 .torrent-folder.is-drop > td { background: #f3f8ff; border-block: 1px dashed var(--color-blue); }
 .torrent-folders-table .torrent-folder-track > td { block-size: 1.625rem; background: #fbfcfd; color: var(--color-gray-600); font-size: 0.75rem; }
-.torrent-folders-place { padding-inline-start: 2.125rem; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); }
+.torrent-folders-place { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); }
+/* A track of a folder as the left pane writes it: its raw line, its file under it. */
+.torrent-folders-trackline { display: flex; flex-direction: column; min-inline-size: 0; padding-block: 0.25rem; }
+.torrent-folders-trackline .torrent-line { display: block; }
+.torrent-folders-file { overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: 0.7rem; }
+/* Where a folder's tracks come from, each way once: one under the other when they are several. */
+.torrent-folders-sources { display: flex; flex-direction: column; align-items: flex-start; gap: 0.125rem; padding-block: 0.25rem; }
 .torrent-folders-table .is-bad { color: #a61e2d; }
 /* The language as a chip «rus ▾»: the select of the browser without its own arrow, the chevron drawn over it. */
 .torrent-language-box { position: relative; display: block; }
