@@ -16,8 +16,8 @@ from dataclasses import asdict, replace
 from core import container as mkv
 
 from .executor import Made, video_of
-from .planner import Goal, Group, Plan, video_op
-from .tables import Container, RowId, Snapshot, Track, Video
+from .planner import Goal, Group, Plan, subtitles_op, video_op
+from .tables import Container, RowId, Snapshot, Subtitle, Track, Video
 
 JOURNAL = ".plan-journal.json"
 STAGING = ".plan-staging"
@@ -38,7 +38,9 @@ def container_json(container: Container) -> dict:
                     **({"file": track.file} if track.file else {})}
                    for track in container.tracks], **({"own_at": container.own_at} if container.own_at else {}),
         **({"titles": dict(container.titles)} if container.titles else {}),
-        **({"languages": dict(container.languages)} if container.languages else {})}
+        **({"languages": dict(container.languages)} if container.languages else {}),
+        **({"subtitles": [{**asdict(each), "row": asdict(each.row), "timeline": asdict(each.timeline)}
+                          for each in container.subtitles]} if container.subtitles else {})}
 
 
 def container_of(data: dict) -> Container:
@@ -50,7 +52,9 @@ def container_of(data: dict) -> Container:
                                  RowId(**track["aligned_to"]), track.get("tag", ""), track.get("file", ""))
                            for track in data["tracks"]),
                      data["off"], data.get("own_at", 0), tuple(sorted((data.get("titles") or {}).items())),
-                     tuple(sorted((data.get("languages") or {}).items())))
+                     tuple(sorted((data.get("languages") or {}).items())),
+                     tuple(Subtitle(**{**each, "row": RowId(**each["row"]), "timeline": RowId(**each["timeline"])})
+                           for each in data.get("subtitles") or ()))
 
 
 def label_of(slot) -> str:
@@ -125,6 +129,26 @@ class Library:
                 return track.index
         raise FileNotFoundError(f"{container.name} holds no track {dub} (own={own})")
 
+    async def subtitles_of(self, goal: Goal, results: dict[str, Made]) -> list[mkv.SubtitleIn]:
+        """The subtitles of a goal in its order (DESIGN.md 7.1.1): taken from the file of their row, or from the container
+        that holds them, found there by their key."""
+        found = []
+        for way in goal.subtitles:
+            item = way.subtitle
+            if way.kind == "take":
+                taken = results[subtitles_op(way.row)]
+                path, stream = taken.sound_file, taken.stream
+            else:
+                path = self.path(way.container.name)
+                held = await mkv.contents(path)
+                stream = next((each.index for each in (held.subtitles if held is not None else ())
+                               if each.key == dub_key(item.row)), None)
+                if stream is None:
+                    raise FileNotFoundError(f"{way.container.name} holds no subtitles {item.row}")
+            found.append(mkv.SubtitleIn(path, stream, dub_key(item.row), item.name, item.language,
+                                        item.subtitle_type == "forced"))
+        return found
+
     def video_path(self, goal: Goal, results: dict[str, Made]) -> str:
         if goal.video.kind == "asset":
             return self.path(goal.video.container.name)
@@ -169,11 +193,12 @@ class Library:
                                           language=languages.get(label, "")))
             tracks.insert(goal.own_at, sound)  # the own sound of the video in the place the order of the season gives it
             built = Container(goal.name, replace(video, episode=slot), tuple(made_tracks), goal.off, goal.own_at,
-                              goal.titles, goal.languages)
+                              goal.titles, goal.languages, tuple(way.subtitle for way in goal.subtitles))
             staging = self.staging(goal.name)
             os.makedirs(os.path.dirname(staging), exist_ok=True)
             report = report_for(goal) if report_for is not None else None
             problem = await mkv.build(staging, video_path, identity, tracks, provenance=container_json(built),
+                                      subtitles=await self.subtitles_of(goal, results),
                                       **({"report": report} if report is not None else {}))
             if problem is not None:
                 raise BuildFailed(goal.name, problem)
@@ -236,7 +261,9 @@ class Library:
                                       title=each.title if each.title != each.label else "",
                                       language=each.language if each.language != mkv.UNSTATED else "")
                           for each in held.audio]
-                problem = await mkv.build(again, path, held.video, tracks, provenance=table[step[1]])
+                subtitles = [mkv.SubtitleIn(path, each.index, each.key, each.title, each.language, each.forced)
+                             for each in held.subtitles]
+                problem = await mkv.build(again, path, held.video, tracks, provenance=table[step[1]], subtitles=subtitles)
                 if problem is not None:
                     raise BuildFailed(step[1], problem)
                 os.replace(again, path)

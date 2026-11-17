@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Sequence
 
-from core.contracts import (MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, VOICE_ALLOW,
+from core.contracts import (MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME,
+                            SUBTITLES_ALLOW, SUBTITLES_ORDER, VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, GroupQueue, Level, QueueRow, QueueView,
                             RowState, group_target, variant_target)
+from core.subtitle_queue import named_of, ordered
 from core.variant_queue import VOICE_RANKING, Candidate, Order, Same, ranked, ranked_singles
 
 from .project import spans
@@ -99,6 +101,30 @@ def build(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever], ord
         queues.append(GroupQueue(group=group, rows=[level.row_of(each, VOICE_ALLOW) for each in group_queue],
                                  order_level=order_level, take=take is not False, take_level=take_level))
     return reference, queues
+
+
+def subtitles(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever], sources: dict[int, int],
+              episode: int | None = None) -> QueueView:
+    """The subtitles of a level in the order of the container (core.subtitle_queue): every variant the lines have, the ones
+    the level leaves out marked. `lines` are the rows of subtitles of the level in the order of the layout, `sources` the
+    place of every source of the series."""
+    level = _Level(lines, levers, episode)
+    named, order_level = level.value(SUBTITLES_ORDER, None, [])
+    found = [(key, sources.get(key[1], len(sources)), min(position for position, _ in items))
+             for key, items in level.by_variant.items()]
+    rows = []
+    for key in ordered(found, named_of(named)):
+        items = [row for _, row in level.by_variant[key]]
+        allowed, allowed_level = level.value(SUBTITLES_ALLOW, variant_target(*key), True)
+        current = {number for row in items if not row.stale for number in _episodes(row, episode)}
+        stale = {number for row in items if row.stale for number in _episodes(row, episode)} - current
+        first = items[0]
+        rows.append(QueueRow(group=key[0], source_id=key[1], player=key[2],
+                             player_label=next((row.player_label for row in items if row.player_label), key[2]),
+                             episodes=spans(number for row in items for number in _episodes(row, episode)),
+                             stale=spans(stale), allowed=allowed is not False, allowed_level=allowed_level,
+                             language=first.language, subtitle_type=first.subtitle_type))
+    return QueueView(rows=rows, order_level=order_level)
 
 
 def same_groups(rows: Iterable[QueueRow]) -> list[list[dict]]:

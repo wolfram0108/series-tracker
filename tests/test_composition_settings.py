@@ -36,7 +36,8 @@ COMPILATION_DEFAULTS = [EffectiveLever(lever="compilation.member", target=None, 
                         EffectiveLever(lever="compilation.take", target=None, value=True, level=Level.DEFAULT),
                         EffectiveLever(lever="markup.order", target=None, value=[], level=Level.DEFAULT),
                         EffectiveLever(lever="reference.same", target=None, value=[], level=Level.DEFAULT),
-                        EffectiveLever(lever="markup.same", target=None, value=[], level=Level.DEFAULT)]
+                        EffectiveLever(lever="markup.same", target=None, value=[], level=Level.DEFAULT),
+                        EffectiveLever(lever="subtitles.order", target=None, value=[], level=Level.DEFAULT)]
 
 
 def touched_by(before, after, episodes):
@@ -90,10 +91,10 @@ def test_a_lever_with_targets_lists_the_targets_that_have_a_record_on_the_chain_
     records = [rec(ALLOW, False, target=VK), rec(ALLOW, False, season=1, target=KODIK),
                rec(ALLOW, True, season=2, episode=3, target=KODIK), rec(TAKE, False, season=2, target=GROUP)]
     first = levers_of(records, 1, 3)
-    assert {key for key in first if key[0] not in (CHOICE, "reference.same")} == {(ALLOW, VK), (ALLOW, KODIK)}
+    assert {key for key in first if key[0] not in (CHOICE, "reference.same", "subtitles.order")} == {(ALLOW, VK), (ALLOW, KODIK)}
     assert first[(ALLOW, VK)] == (False, Level.SERIES) and first[(ALLOW, KODIK)] == (False, Level.SEASON)
     second = levers_of(records, 2, 3)
-    assert {key for key in second if key[0] not in (CHOICE, "reference.same")} == {(ALLOW, VK), (ALLOW, KODIK), (TAKE, GROUP)}
+    assert {key for key in second if key[0] not in (CHOICE, "reference.same", "subtitles.order")} == {(ALLOW, VK), (ALLOW, KODIK), (TAKE, GROUP)}
     assert second[(ALLOW, KODIK)] == (True, Level.EPISODE) and second[(TAKE, GROUP)] == (False, Level.SEASON)
 
 
@@ -450,7 +451,7 @@ def test_the_headers_show_the_series_and_each_season_by_the_value_of_the_level_i
     shown = levels(records, [2, 1, 1])
     assert [each.season for each in shown] == [None, 1, 2]
     by_level = {each.season: {(x.lever, x.target): (x.value, x.level) for x in each.levers
-                              if not x.lever.startswith(("compilation.", "markup.", "reference.same"))} for each in shown}
+                              if not x.lever.startswith(("compilation.", "markup.", "reference.same", "subtitles."))} for each in shown}
     assert by_level[None] == {(CHOICE, None): ([], Level.DEFAULT), (TAKE, GROUP): (False, Level.SERIES)}
     assert by_level[1] == {(CHOICE, None): ([], Level.DEFAULT), (TAKE, GROUP): (True, Level.SEASON)}
     assert by_level[2] == {(CHOICE, None): (CHOICE_KODIK, Level.SEASON), (TAKE, GROUP): (False, Level.SERIES)}

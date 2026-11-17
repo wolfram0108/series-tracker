@@ -405,6 +405,8 @@ class BusSync(SeriesSync):
             return Made(Video(row.id, row.snapshot(), row.slot, row.timeline), video_path, sound=sound, stream=stream)
         if op.kind == "download_dub":
             return Made(row, video_path, sound=sound, stream=stream)
+        if op.kind == "take_subtitles":  # the n-th subtitles of its file (DESIGN.md 7.1.1)
+            return Made(None, video_path, sound=sound, stream=stream)
         return Made(None, video_path)
 
     async def _retimed(self, row_id, path: str) -> bool:

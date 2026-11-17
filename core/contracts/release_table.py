@@ -25,6 +25,15 @@ class RowState(StrEnum):
     NOT_OBTAINED = "not_obtained"
 
 
+class RowTrack(StrEnum):
+    """What a row carries: a video with its sound, or a sound track (every row of a site), or a subtitles track of a torrent
+    release (stage 15, DESIGN.md 7.1.1). The kind of the voice-over a player names is no such mark: a «subtitles»
+    translation of Kodik is a video with its sound."""
+
+    SOUND = "sound"
+    SUBTITLES = "subtitles"
+
+
 class RowVoice(BaseModel):
     """The voice-over as the player or the site words it; `kind` is the type the player names (voice, subtitles, ...)."""
 
@@ -57,6 +66,11 @@ class TableRow(BaseModel):
     # The key of the video of the row as a timeline: rows of one source with one timeline show one video in step with each
     # other (the tracks of one file of a torrent release). Empty: the row itself, as a row of a site is one video.
     timeline: str = ""
+    track: RowTrack = RowTrack.SOUND
+    # The language of the track (ISO 639-2) and the type of subtitles (`full`, `signs`, `forced`), as the torrent editor
+    # gives them; empty for a row of a site. The container is written with them.
+    language: str = ""
+    subtitle_type: Literal["", "full", "signs", "forced"] = ""
     # The site's own numbers and marks, for a human and for debugging; no decision reads them.
     site_fields: dict[str, Any] = Field(default_factory=dict)
     # The part of the page the row was read from (the catalog of a player, the page of an episode); empty for the rows the
@@ -133,6 +147,8 @@ LINE_FIELDS: tuple[tuple[str, Any], ...] = (
     ("G", lambda table, row: row.group),
     ("V", lambda table, row: row.voice.name),
     ("VT", lambda table, row: row.voice.kind),
+    # A subtitles track says so; a row of sound has no value here, so its line stays as it was before subtitles came.
+    ("TR", lambda table, row: "субтитры" if row.track == RowTrack.SUBTITLES else ""),
     ("R", _resolution_of),
 )
 

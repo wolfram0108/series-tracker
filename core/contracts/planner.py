@@ -48,6 +48,18 @@ class PlanVariant(BaseModel):
     player: str
 
 
+class PlanSubtitle(BaseModel):
+    """A subtitles track (DESIGN.md 7.1.1): its row, its name, the player of its row, its language and its type; in a goal
+    also how it is obtained — `take` (from the file of its row) or `reuse` (from the file that holds it)."""
+
+    row: PlanRowRef
+    name: str
+    player: str
+    language: str = ""
+    subtitle_type: str = ""
+    kind: Literal["take", "reuse"] | None = None
+
+
 class PlanAsset(BaseModel):
     """A file of the library: one video and the tracks aligned to it; `off` is hidden from the media server (`.off`)."""
 
@@ -58,6 +70,7 @@ class PlanAsset(BaseModel):
     tracks: list[PlanAssetTrack] = Field(default_factory=list)
     # The variant of the queue of the markup reference whose timeline the video lies on (its own for a video that is no cut).
     timeline: PlanVariant | None = None
+    subtitles: list[PlanSubtitle] = Field(default_factory=list)
 
 
 class PlanGoalVideo(PlanSnapshot):
@@ -94,6 +107,10 @@ class PlanEpisode(BaseModel):
     markup: str | None = None
     # The variant of the queue of the markup reference the plan takes for the episode: none while the episode follows its reference.
     markup_variant: PlanVariant | None = None
+    # The subtitles of the file in its order, and the variants it takes that are on no timeline of its video: they wait for
+    # the alignment of subtitles to another reference (stage 15, step 10); the group of such a variant is its name.
+    subtitles: list[PlanSubtitle] = Field(default_factory=list)
+    unaligned: list[PlanVariant] = Field(default_factory=list)
 
 
 class PlanFailure(BaseModel):

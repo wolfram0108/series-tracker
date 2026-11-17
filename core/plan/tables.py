@@ -75,6 +75,11 @@ class OnlineRow:
     # The key of the row's video as a timeline (TableRow.timeline, DESIGN.md stage 15, 7.0): rows of one source with one
     # timeline are one video in step with each other; empty is the row itself.
     timeline_key: str = ""
+    # What the row carries (TableRow.track): `subtitles` is a subtitles track (DESIGN.md 7.1.1), never a voice-over or a
+    # video; with its language and its type.
+    track: str = "sound"
+    language: str = ""
+    subtitle_type: str = ""
 
     @property
     def timeline(self) -> RowId:
@@ -148,6 +153,24 @@ class Track:
 
 
 @dataclass(frozen=True)
+class Subtitle:
+    """A subtitles track in a container (DESIGN.md 7.1.1): the row it came from, its name, the player of that row, the
+    timeline it is in step with, its language and its type (`full`, `signs`, `forced`)."""
+
+    row: RowId
+    name: str
+    player: str
+    timeline: RowId
+    language: str = ""
+    subtitle_type: str = ""
+
+    @property
+    def variant(self) -> tuple[str, int, str]:
+        """(name, source, player): what the levers of the subtitles name."""
+        return self.name, self.row.source_id, self.player
+
+
+@dataclass(frozen=True)
 class Container:
     """A file of the library: one video and its tracks, under a name; `off` hides it from the media server. `own_at` is the
     place of the video's own sound among the sounds of the file (0: first, the default one). `titles` are the user's
@@ -162,6 +185,8 @@ class Container:
     own_at: int = 0
     titles: tuple[tuple[str, str], ...] = ()
     languages: tuple[tuple[str, str], ...] = ()
+    # Its subtitles tracks, in the order of the file (DESIGN.md 7.1.1).
+    subtitles: tuple[Subtitle, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -205,6 +230,10 @@ class Choices:
     # is one place in its queue, so the video its file holds stays while it is as good as the queue's first.
     same: Mapping[Slot, Same] = field(default_factory=dict)
     markup_same: Mapping[Slot, Same] = field(default_factory=dict)
+    # The subtitles of every episode (DESIGN.md 7.1.1): the variants (name, source id, player) the user put first, in his
+    # order, and those he left out.
+    subtitle_order: Mapping[Slot, tuple[tuple[str, int, str], ...]] = field(default_factory=dict)
+    subtitle_deny: Mapping[Slot, frozenset[tuple[str, int, str]]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -218,3 +247,11 @@ class Inputs:
     containers: tuple[Container, ...]
     choices: Choices
     failed: frozenset[tuple] = frozenset()
+    # The rows of subtitles (DESIGN.md 7.1.1). Rows of subtitles given among `online` are moved here: whatever reads
+    # `online` reads rows of sound only, and no row of subtitles is ever taken for a voice-over or a video.
+    subtitles: tuple[OnlineRow, ...] = ()
+
+    def __post_init__(self) -> None:
+        if any(row.track == "subtitles" for row in self.online):
+            object.__setattr__(self, "subtitles", self.subtitles + tuple(row for row in self.online if row.track == "subtitles"))
+            object.__setattr__(self, "online", tuple(row for row in self.online if row.track != "subtitles"))

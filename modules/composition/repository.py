@@ -10,12 +10,13 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 
-from core.contracts import CompositionRow, SettingRecord, SourceSummary
+from core.contracts import CompositionRow, RowTrack, SettingRecord, SourceSummary
 from core.db import Database
 
 _ROW_COLUMNS = ("series_id", "source_id", "row_key", "seq", "excluded", "exclusion", "season", "episode_start",
                 "episode_end", "part", "voice_group", "voice_label", "voice_name", "voice_unknown", "player",
-                "player_label", "grp", "text", "heights", "state", "published", "link", "video", "stale", "timeline")
+                "player_label", "grp", "text", "heights", "state", "published", "link", "video", "stale", "timeline", "track",
+                "language", "subtitle_type")
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,8 @@ class Stored:
 
     rev: int = 0
     rows: list[CompositionRow] = field(default_factory=list)
+    # The rows of subtitles, apart from the rows of sound (DESIGN.md 7.1.1); one table keeps both.
+    subtitles: list[CompositionRow] = field(default_factory=list)
     sources: list[StoredSource] = field(default_factory=list)
     numbering: dict[str, int] = field(default_factory=dict)
     records: list[SettingRecord] = field(default_factory=list)
@@ -66,11 +69,16 @@ class CompositionRepository:
     # --- writes ---------------------------------------------------------------------------
 
     async def write(self, series_id: int, *, rows: list[CompositionRow] | None = None,
+                    subtitles: list[CompositionRow] | None = None,
                     sources: list[StoredSource] | None = None, numbering: dict[str, int] | None = None,
                     records: list[SettingRecord] | None = None, rev: int | None = None,
                     orders: dict[int, list[str]] | None = None, titles: dict[str, str] | None = None) -> None:
         """Replaces the parts given, in one transaction; a part left out stays as it is."""
-        await self._db.transaction(lambda conn: _write(conn, series_id, rows, sources, numbering, records, rev, orders,
+        # The rows of sound and of subtitles are one table: written together (the caller gives both or neither).
+        if (rows is None) != (subtitles is None):
+            raise ValueError("the rows of sound and of subtitles are written together")
+        both = None if rows is None else [*rows, *subtitles]
+        await self._db.transaction(lambda conn: _write(conn, series_id, both, sources, numbering, records, rev, orders,
                                                        titles))
 
     async def purge(self, series_id: int) -> list[int]:
@@ -94,7 +102,8 @@ def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
         orders={row["season"]: json.loads(row["labels"]) for row in orders},
         titles={row["label"]: row["title"] for row in titles},
         rev=state["rev"] if state is not None else 0,
-        rows=[_row_of(row) for row in rows],
+        rows=[each for each in (_row_of(row) for row in rows) if each.track == RowTrack.SOUND],
+        subtitles=[each for each in (_row_of(row) for row in rows) if each.track == RowTrack.SUBTITLES],
         sources=[StoredSource(row["source_id"], row["position"], row["table_url"],
                               SourceSummary.model_validate_json(row["summary"])) for row in sources],
         numbering={row["name_key"]: row["number"] for row in numbering},

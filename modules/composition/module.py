@@ -250,9 +250,16 @@ class CompositionModule(BaseModule):
         lines, levers, order, groups = await self._level_of(stored, settings.canonical(stored.records), request)
         reference, by_group = queues.build(lines, levers, order, groups, request.episode)
         markup, follows = queues.markup(lines, levers, order, request.episode)
+        # The subtitles have one table on the series and one on an episode: a season or a compilation shows the series'.
+        records = settings.canonical(stored.records)
+        own = request.episode is not None
+        subtitles = queues.subtitles(
+            availability.lines_of_level(stored.subtitles, request.season if own else None, request.episode),
+            settings.effective(records, request.season, request.episode) if own else settings.effective(records, None, None),
+            _source_order(stored), request.episode)
         return QueuesReply(series_id=request.series_id, season=request.season, episode=request.episode,
                            compilation=request.compilation, reference=reference, groups=by_group, markup=markup,
-                           markup_follows=follows).model_dump(mode="json")
+                           markup_follows=follows, subtitles=subtitles).model_dump(mode="json")
 
     async def _level_of(self, stored, records, scope) -> tuple[list, list, Order, list[str]]:
         """The lines of a level, its levers as it inherits them, the order of players and sources and the groups of its
@@ -737,6 +744,7 @@ class CompositionModule(BaseModule):
             rev = stored.rev + 1 if publish else None
             parts = dict(
                 rows=result.rows if derived.rows_changed else None,
+                subtitles=result.subtitles if derived.rows_changed else None,
                 sources=sources if sources != stored.sources else None,
                 numbering=result.unknown_voices if result.unknown_voices != stored.numbering else None,
                 records=derived.records if derived.records_changed else None, rev=rev,
@@ -809,6 +817,7 @@ def layout_reply(request: CompositionGetRequest, stored) -> dict:
     reply = CompositionReply(
         series_id=request.series_id, rev=stored.rev,
         rows=[row for row in stored.rows if request.include_excluded or not row.excluded],
+        subtitles=[row for row in stored.subtitles if request.include_excluded or not row.excluded],
         sources=[each.summary for each in stored.sources],
         levels=settings.levels(records, {season for season, _ in episodes},
                                [(view.season, view.ref.key) for view in outcome.views]),
@@ -883,7 +892,7 @@ def _derive(series_id: int, inputs: list[SourceInput], groups: dict[str, str | N
     moved = settings.affected(_settings_of(stored.rows, before, layout, order),
                               _settings_of(result.rows, records, layout, order))
     headers_changed = _headers(stored.rows, before, layout, order) != _headers(result.rows, records, layout, order)
-    rows_changed = result.rows != stored.rows
+    rows_changed = result.rows != stored.rows or result.subtitles != stored.subtitles
     # The time of a reading is stored with the summary but is no change of it: a page read again is no news.
     shown = [summary.model_copy(update={"read_at": None}) for summary in result.sources]
     summaries_changed = shown != [each.summary.model_copy(update={"read_at": None}) for each in stored.sources]

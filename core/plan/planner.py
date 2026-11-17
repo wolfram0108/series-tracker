@@ -28,11 +28,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
+from core.subtitle_queue import ordered as subtitles_ordered
 from core.variant_queue import NO_SAME, VARIANT_RANKING, VOICE_RANKING, Line, standing
 from core.variant_queue import Candidate as Ranked
 from core.variant_queue import Order, by_resolution
 
-from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Snapshot, Track, Video, episode_of
+from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Snapshot, Subtitle, Track, Video, episode_of
 
 RULE = object()  # no word of the user on the compilation of an episode: the rule decides
 
@@ -83,6 +84,17 @@ class TrackWay:
 
 
 @dataclass(frozen=True)
+class SubtitleWay:
+    """How a subtitles track of the goal is obtained (DESIGN.md 7.1.1): `take` — from the file of its row, which is on the
+    video's timeline; `reuse` — from the file `container`, which holds it on that timeline."""
+
+    subtitle: Subtitle
+    kind: str
+    row: OnlineRow | None = None
+    container: Container | None = None
+
+
+@dataclass(frozen=True)
 class Markup:
     """The markup reference of an episode (stage 14): the single video whose timeline the episode's video lies on. `row`
     is its row as the layout has it now; none for a timeline only a file of the library is on (the source forgot it)."""
@@ -113,6 +125,11 @@ class Goal:
     markup: Markup | None = None
     # The languages of the sounds of the file (voice-over group, ISO 639-2), as the container is to bear them.
     languages: tuple[tuple[str, str], ...] = ()
+    # The subtitles of the file in its order (DESIGN.md 7.1.1).
+    subtitles: tuple[SubtitleWay, ...] = ()
+    # The variants of subtitles the episode takes that are on no timeline of its video: they wait for the alignment of
+    # subtitles to another reference (stage 15, step 10), the window says so.
+    unaligned: tuple[tuple[str, int, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -242,6 +259,9 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
     for row in singles:
         by_slot.rows.setdefault(row.slot, []).append(row)
     by_slot.compilations = [row for row in inputs.online if row.compilation]
+    for row in inputs.subtitles:
+        if not row.compilation:
+            by_slot.subtitles.setdefault(row.slot, []).append(row)
     # Of several files of one video the best one stands for it: one not deleted, the highest, then a file of an episode
     # before one nothing carries any more, then one not switched off.
     by_slot.deleted = deleted_videos
@@ -265,7 +285,8 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
                                                       group_rank, own_place)) is not None]
     ops = _ops(goals, containers)
     groups = _groups(goals, ops, containers, deleted_videos, video_slot, track_slot,
-                     lambda track, slot: switched_off(choices, track, slot), deleted_tracks)
+                     lambda track, slot: switched_off(choices, track, slot), deleted_tracks,
+                     lambda variant, slot: variant in choices.subtitle_deny.get(episode_of(slot), frozenset()))
     return Plan(tuple(goals), tuple(ops), tuple(groups))
 
 
@@ -279,6 +300,7 @@ class Index:
         self.tracks: dict[Slot, list[tuple[Container, Track, bool, bool]]] = {}
         self.compilations: list[OnlineRow] = []
         self.deleted: set[str] = set()  # the files of the videos the user deleted
+        self.subtitles: dict[Slot, list[OnlineRow]] = {}  # the rows of subtitles of every episode (DESIGN.md 7.1.1)
 
 
 def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, own_place) -> Goal | None:
@@ -423,8 +445,52 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
     if idle and video.container is not None:
         titles, languages = video.container.titles, video.container.languages
     own_at = len(tracks) if own == last else own_place(slot[0], own, (way.voice for way in tracks if way.voice != last))
+    subtitles, unaligned = _subtitles(slot, inputs, by_slot, video, idle)
     return Goal(slot, video, tuple(tracks), namer(slot, video, off), off, frozenset(taken_off), own_at, titles, markup,
-                languages)
+                languages, subtitles, unaligned)
+
+
+def _subtitles(slot: Slot, inputs: Inputs, by_slot: "Index", video: VideoWay, idle: bool
+               ) -> tuple[tuple[SubtitleWay, ...], tuple[tuple[str, int, str], ...]]:
+    """The subtitles of a goal in the order of the container (core.subtitle_queue), and the variants it takes that are on
+    no timeline of its video. A track is in step only on the video's own timeline: one held there by a file of the episode
+    stays (its row may be gone, the release archived), one of a row on it is taken from the row's file; another timeline
+    waits for the alignment of subtitles (stage 15, step 10). An idle file keeps what it holds."""
+    if idle:
+        held = video.container.subtitles if video.container is not None else ()
+        return tuple(SubtitleWay(each, "reuse", container=video.container) for each in held), ()
+    choices = inputs.choices
+    episode = episode_of(slot)
+    rows = by_slot.subtitles.get(slot, [])
+    places = {source_id: place for place, source_id in enumerate(choices.sources)}
+    # What the files of the episode on this timeline hold, the file of the video first.
+    files = sorted((each for each in by_slot.files.get(slot, []) if each.video.timeline == video.timeline),
+                   key=lambda each: (each is not video.container, each.name))
+    held: dict[tuple[str, int, str], tuple[Container, Subtitle]] = {}
+    for container in files:
+        for each in container.subtitles:
+            if each.timeline == video.timeline:
+                held.setdefault(each.variant, (container, each))
+    last = len(rows) + 1
+    found = [(row.variant, places.get(row.source_id, len(places)), row.position) for row in rows]
+    found += [(variant, places.get(variant[1], len(places)), last) for variant in held]
+    denied = choices.subtitle_deny.get(episode, frozenset())
+    ways, unaligned = [], []
+    for variant in subtitles_ordered(found, choices.subtitle_order.get(episode, ())):
+        if variant in denied:
+            continue
+        in_step = sorted((row for row in rows if row.variant == variant and row.timeline == video.timeline and row.playable
+                          and ("download", row.id) not in inputs.failed), key=lambda row: (row.position, repr(row.id)))
+        kept = held.get(variant)
+        if kept is not None and (not in_step or kept[1].row == in_step[0].id):
+            ways.append(SubtitleWay(kept[1], "reuse", container=kept[0]))
+        elif in_step:
+            row = in_step[0]
+            ways.append(SubtitleWay(Subtitle(row.id, row.label, row.player, row.timeline, row.language, row.subtitle_type),
+                                    "take", row=row))
+        elif any(row.variant == variant for row in rows):
+            unaligned.append(variant)
+    return tuple(ways), tuple(unaligned)
 
 
 def timeline_shot(container: Container) -> Snapshot | None:
@@ -545,6 +611,10 @@ def _satisfied_by(goal: Goal) -> Container | None:
         return None
     if tuple(track.dub for track in container.tracks) != tuple(way.dub for way in goal.tracks):
         return None
+    if any(way.kind != "reuse" or way.container is not container for way in goal.subtitles):
+        return None
+    if container.subtitles != tuple(way.subtitle for way in goal.subtitles):
+        return None
     held = (container.own_at, container.titles, container.languages)
     return container if held == (goal.own_at, goal.titles, goal.languages) else None
 
@@ -587,8 +657,18 @@ def _ops(goals: Iterable[Goal], containers) -> list[Op]:
             align = f"align:{slot}:{way.voice}"
             ops[align] = Op(align, "align", slot, tuple(needs), (goal, way), batch=f"align:{slot}")
             mine.append(align)
+        for way in goal.subtitles:
+            if way.kind == "take":
+                key = subtitles_op(way.row)
+                ops.setdefault(key, Op(key, "take_subtitles", slot, (), way.row))
+                mine.append(key)
         ops[f"build:{slot}"] = Op(f"build:{slot}", "build", slot, tuple(dict.fromkeys(mine)), goal)
     return list(ops.values())
+
+
+def subtitles_op(row: OnlineRow) -> str:
+    """The step that takes a row of subtitles from its file: named by the row, once a sync."""
+    return f"subs:{row.id}"
 
 
 def video_op(goal: Goal) -> str:
@@ -604,7 +684,8 @@ def _fetch(ops: dict[str, Op], row: OnlineRow, slot: Slot) -> str:
     return key
 
 
-def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, taken_off, deleted_tracks) -> list[Group]:
+def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, taken_off, deleted_tracks,
+            subtitles_off=lambda variant, slot: False) -> list[Group]:
     parent: dict[str, str] = {}
     slot_of: dict[str, Slot] = {}
 
@@ -638,6 +719,9 @@ def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, take
         for way in goal.tracks:
             if way.container is not None:
                 join(here, f"file:{way.container.name}")
+        for way in goal.subtitles:
+            if way.container is not None:
+                join(here, f"file:{way.container.name}")
     for container in containers:
         here = f"file:{container.name}"
         join(here, at(video_slot(container.video)))
@@ -651,6 +735,8 @@ def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, take
     kept_names = {container.name for container in kept.values()}
     used_tracks = {(way.container.name, way.dub, way.own) for goal in goals for way in goal.tracks if way.container is not None}
     used_videos = {goal.video.container.name for goal in goals if goal.video.container is not None}
+    used_subtitles = {(way.container.name, way.subtitle.row) for goal in goals for way in goal.subtitles
+                      if way.container is not None}
     remove, hide = set(), set()
     for container in containers:
         if container.name in kept_names:
@@ -673,7 +759,12 @@ def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, take
             deleted = not is_own and (container.name, track.dub) in deleted_tracks
             if not (used or replaced or deleted or taken_off(track, here)):
                 tracks_ok = False
-        if video_ok and tracks_ok:
+        # Subtitles go with nothing in their place only by the user (left out); else the goal of the episode has the variant.
+        goal = by_slot.get(video_slot(container.video))
+        subtitles_ok = all((container.name, each.row) in used_subtitles or subtitles_off(each.variant, video_slot(container.video))
+                           or (goal is not None and each.variant in {way.subtitle.variant for way in goal.subtitles})
+                           for each in container.subtitles)
+        if video_ok and tracks_ok and subtitles_ok:
             remove.add(container.name)
         elif HIDDEN not in container.name:
             hide.add(container.name)

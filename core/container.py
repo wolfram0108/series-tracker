@@ -10,6 +10,9 @@ language of its voice-over as the user gave it to the group (none given: Matrosk
 `ST_PUBLICATION`, the number of the publication that built it: two containers of the same video and tracks (another
 resolution) are told apart by it, so a publication cut short knows whether its file is the one under the name. Whether a
 build is done is told by reading the result back (`contents`), never by the code ffmpeg returned.
+
+Subtitles (stage 15, DESIGN.md 7.1.1) are the tracks the plan chose, in its order, each with `ST_SUB` (the key of the row
+it came from), its name as title, its language and the flag «forced»; the fonts of the files they come from go with them.
 """
 from __future__ import annotations
 
@@ -73,6 +76,30 @@ class AudioIn:
 
 
 @dataclass(frozen=True)
+class SubtitleIn:
+    """A subtitles track to put into a container: the `stream`-th subtitles stream of `path`, its key (`ST_SUB`), its name,
+    its language and whether it is forced."""
+
+    path: str
+    stream: int
+    key: str
+    title: str = ""
+    language: str = ""
+    forced: bool = False
+
+
+@dataclass(frozen=True)
+class SubtitleOut:
+    """A subtitles track a container holds, as its tags say; `index` is its place among the subtitles of the file."""
+
+    index: int
+    key: str
+    title: str = ""
+    language: str = ""
+    forced: bool = False
+
+
+@dataclass(frozen=True)
 class AudioOut:
     """An audio track a container holds, as its tags say."""
 
@@ -95,6 +122,7 @@ class Contents:
     publication: str = ""
     # The height of the film as the file holds it (0 when unknown): what is named after the video is named by this.
     height: int = 0
+    subtitles: list[SubtitleOut] = field(default_factory=list)
 
     @property
     def labels(self) -> list[str]:
@@ -115,7 +143,8 @@ PROVENANCE = "provenance.json"  # the attachment that says where what the contai
 
 
 async def build(output: str, video: str, video_identity: str, tracks: Sequence[AudioIn], *, publication: str = "",
-                timeout: float = BUILD_TIMEOUT_S, provenance: dict | None = None, report: Report = _silent) -> str | None:
+                timeout: float = BUILD_TIMEOUT_S, provenance: dict | None = None, report: Report = _silent,
+                subtitles: Sequence[SubtitleIn] = ()) -> str | None:
     """Write the container at `output` (an .mkv the caller puts in place); None when it was built and reads back as asked,
     else the reason. The video is the film of `video` (core.ffprobe.film_stream); a track of the same file is taken
     from it."""
@@ -126,7 +155,8 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     if film is None:
         return "no_video"  # the file has no film to build of (no video stream, or only a picture it carries)
     expected = await contents(video)
-    sources = [video] + [path for path in dict.fromkeys(track.path for track in tracks) if path != video]
+    sources = [video] + [path for path in dict.fromkeys([*(track.path for track in tracks),
+                                                          *(each.path for each in subtitles)]) if path != video]
     index_of = {path: number for number, path in enumerate(sources)}
     cmd = [executable, "-y", "-hide_banner", "-loglevel", "error"]
     for path in sources:
@@ -134,20 +164,21 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     cmd += ["-map", f"0:{film['index']}"]
     for track in tracks:
         cmd += ["-map", f"{index_of[track.path]}:a:{track.stream}"]
-    # What the file of the video carries besides its picture goes with it (stage 15, DESIGN.md 7.1, 7.2): its chapters, and
-    # from a Matroska file its subtitles and the fonts they are drawn with (another container's subtitles may not be copied
-    # into Matroska as they are). The table of a container built here is no font: it is written anew below.
-    subtitles, fonts = await _carried(video)
-    for stream in subtitles + fonts:
-        cmd += ["-map", f"0:{stream['index']}"]
+    for each in subtitles:
+        cmd += ["-map", f"{index_of[each.path]}:s:{each.stream}"]
+    # The fonts the chosen subtitles are drawn with: the attachments of the Matroska files they come from (DESIGN.md 7.1);
+    # the chapters are the video's. The table of a container built here is no font: it is written anew below.
+    fonts = await _fonts([each.path for each in subtitles])
+    for path, stream in fonts:
+        cmd += ["-map", f"{index_of[path]}:{stream['index']}"]
     cmd += ["-map_metadata", "-1", "-map_chapters", "0", "-c", "copy", "-max_interleave_delta", "0",
             "-metadata", f"ST_VIDEO={video_identity}", "-metadata", f"ST_PUBLICATION={publication}"]
-    for number, stream in enumerate(subtitles):
-        cmd += [*([f"-metadata:s:s:{number}", f"language={stream['language']}"] if stream["language"] else []),
-                *([f"-metadata:s:s:{number}", f"title={stream['title']}"] if stream["title"] else []),
-                f"-disposition:s:{number}", "+".join(flag for flag, on in (("default", stream["default"]),
-                                                                           ("forced", stream["forced"])) if on) or "0"]
-    for number, stream in enumerate(fonts):
+    for number, each in enumerate(subtitles):
+        cmd += [*([f"-metadata:s:s:{number}", f"language={each.language}"] if each.language else []),
+                *([f"-metadata:s:s:{number}", f"title={each.title}"] if each.title else []),
+                f"-metadata:s:s:{number}", f"ST_SUB={each.key}",
+                f"-disposition:s:{number}", "forced" if each.forced else "0"]
+    for number, (_path, stream) in enumerate(fonts):
         cmd += [f"-metadata:s:t:{number}", f"filename={stream['filename']}",
                 f"-metadata:s:t:{number}", f"mimetype={stream['mimetype'] or 'application/x-truetype-font'}"]
     for number, track in enumerate(tracks):
@@ -191,19 +222,26 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     made = await contents(output)
     if made is not None and made.publication != publication:
         return "container_publication_wrong"
-    return problem_of(made, video_identity, signature_of(tracks), expected.duration if expected is not None else None)
+    problem = problem_of(made, video_identity, signature_of(tracks), expected.duration if expected is not None else None)
+    if problem is None and made is not None and [each.key for each in made.subtitles] != [each.key for each in subtitles]:
+        return "container_subtitles_wrong"
+    return problem
 
 
-async def _carried(video: str) -> tuple[list[dict], list[dict]]:
-    """The subtitles and the font attachments of a Matroska file of the video (core.ffprobe.layout_of); none of another."""
-    if os.path.splitext(video)[1].lower() not in (".mkv", ".mka", ".mks"):
-        return [], []
-    layout, _said = await layout_of(video, timeout=READ_TIMEOUT_S)
-    streams = (layout or {}).get("streams") or []
-    subtitles = [each for each in streams if each["kind"] == "subtitle"]
-    fonts = [each for each in streams if each["kind"] == "attachment" and each["filename"]
-             and each["filename"] != PROVENANCE]
-    return subtitles, fonts
+async def _fonts(paths: Sequence[str]) -> list[tuple[str, dict]]:
+    """The font attachments of the Matroska files among `paths` (core.ffprobe.layout_of), each name once: a font two files
+    carry is the same font."""
+    found, names = [], set()
+    for path in dict.fromkeys(paths):
+        if os.path.splitext(path)[1].lower() not in (".mkv", ".mka", ".mks"):
+            continue
+        layout, _said = await layout_of(path, timeout=READ_TIMEOUT_S)
+        for each in (layout or {}).get("streams") or []:
+            if (each["kind"] == "attachment" and each["filename"] and each["filename"] != PROVENANCE
+                    and each["filename"] not in names):
+                names.add(each["filename"])
+                found.append((path, each))
+    return found
 
 
 def progress_of(fields: dict[str, str], length: float) -> dict:
@@ -292,13 +330,20 @@ async def contents(path: str, *, timeout: float = READ_TIMEOUT_S) -> Contents | 
                               default=bool((stream.get("disposition") or {}).get("default")),
                               language=own.get("language") or UNSTATED, own=own.get("st_own") == "1",
                               key=own.get("st_dub", "")))
+    subtitles = []
+    for number, stream in enumerate(each for each in streams if each.get("codec_type") == "subtitle"):
+        own = _tags(stream)
+        subtitles.append(SubtitleOut(index=number, key=own.get("st_sub", ""), title=own.get("title", ""),
+                                     language=own.get("language", ""),
+                                     forced=bool((stream.get("disposition") or {}).get("forced"))))
     try:
         duration = float(info.get("format", {}).get("duration") or 0.0)
     except ValueError:
         duration = 0.0
     film = film_stream(streams)
     return Contents(video=tags.get("st_video", ""), duration=duration, has_video=film is not None, audio=audio,
-                    publication=tags.get("st_publication", ""), height=int((film or {}).get("height") or 0))
+                    publication=tags.get("st_publication", ""), height=int((film or {}).get("height") or 0),
+                    subtitles=subtitles)
 
 
 def _tags(holder: dict) -> dict[str, str]:

@@ -22,7 +22,7 @@ from . import hosts
 _LAST_TABLE = (
     'SELECT t.site, t.names, t.title, t.site_voice, t.channel, t.read_at, t.complete, t.unread, t.state AS read_state, t.reason AS read_reason, r.seq, r."key" AS row_key, r.player, r.player_label,'
     " r.grp, r.text, r.voice_name, r.voice_kind, r.heights, r.state AS row_state, r.reason AS row_reason,"
-    " r.duration_s, r.published, r.link, r.video, r.site_fields, r.part, r.timeline"
+    " r.duration_s, r.published, r.link, r.video, r.site_fields, r.part, r.timeline, r.track, r.language, r.subtitle_type"
     " FROM release_tables t LEFT JOIN release_rows r ON r.url = t.url WHERE t.url = ? ORDER BY r.seq")
 
 _SAVE_HEAD = (
@@ -35,8 +35,8 @@ _SAVE_HEAD = (
 
 _SAVE_ROW = (
     'INSERT INTO release_rows (url, seq, "key", player, player_label, grp, text, voice_name, voice_kind, heights,'
-    " state, reason, duration_s, published, link, video, site_fields, part, timeline)"
-    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    " state, reason, duration_s, published, link, video, site_fields, part, timeline, track, language,"
+    " subtitle_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 
 @dataclass(frozen=True)
@@ -56,7 +56,8 @@ def _row_of(record: dict) -> TableRow:
         text=record["text"], voice=RowVoice(name=record["voice_name"], kind=record["voice_kind"]),
         heights=json.loads(record["heights"]), state=RowState(record["row_state"]), reason=record["row_reason"],
         duration_s=record["duration_s"], published=record["published"], link=record["link"], video=record["video"],
-        site_fields=json.loads(record["site_fields"]), part=record["part"], timeline=record["timeline"])
+        site_fields=json.loads(record["site_fields"]), part=record["part"], timeline=record["timeline"],
+        track=record["track"], language=record["language"], subtitle_type=record["subtitle_type"])
 
 
 def _stored(conn, url: str) -> Stored:
@@ -126,7 +127,8 @@ class SourcesRepository:
             statements.append((_SAVE_ROW, (
                 table.url, seq, row.key, row.player, row.player_label, row.group, row.text, row.voice.name,
                 row.voice.kind, json.dumps(row.heights), row.state.value, row.reason, row.duration_s, row.published,
-                row.link, row.video, json.dumps(row.site_fields, ensure_ascii=False), row.part, row.timeline)))
+                row.link, row.video, json.dumps(row.site_fields, ensure_ascii=False), row.part, row.timeline, row.track.value,
+                row.language, row.subtitle_type)))
         await self._db.execute_many(statements)
 
     async def pages(self) -> list[dict]:

@@ -9,7 +9,7 @@ import subprocess
 import pytest
 
 from core import container
-from core.container import AudioIn
+from core.container import AudioIn, SubtitleIn
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not installed")
 
@@ -153,28 +153,44 @@ def _torrent_video(tmp) -> str:
                 "-metadata:s:t", "filename=Kurinto.ttf")
 
 
-def test_the_chapters_subtitles_and_fonts_of_a_matroska_video_go_with_it_and_the_table_is_one(media):
+def test_the_chosen_subtitles_go_in_their_order_with_the_fonts_of_their_file_and_the_chapters_of_the_video(media):
+    """DESIGN.md 7.1.1: the subtitles are the tracks the plan chose, in its order (here the second of the file first), each
+    with its key, its name, its language and the flag «forced»; the fonts of the file they come from go with them, the
+    chapters are the video's; what the plan did not choose stays out."""
     from core.ffprobe import layout_of
     tmp, _video, dubs, _ = media
     video = _torrent_video(tmp)
     out = str(tmp / "built.mkv")
     tracks = [AudioIn("Оригинал", video, 0, "1:E01", own=True), AudioIn("ruchime", dubs["ruchime"], 0, "1:E01")]
-    assert asyncio.run(container.build(out, video, "1:E01", tracks, provenance={"video": "E01"})) is None
+    chosen = [SubtitleIn(video, 1, "1:full:", "Full", "eng"), SubtitleIn(video, 0, "1:signs:", "Надписи", "rus", forced=True)]
+    assert asyncio.run(container.build(out, video, "1:E01", tracks, provenance={"video": "E01"}, subtitles=chosen)) is None
 
     layout, _ = asyncio.run(layout_of(out))
     subtitles = [s for s in layout["streams"] if s["kind"] == "subtitle"]
     attached = [s["filename"] for s in layout["streams"] if s["kind"] == "attachment"]
     assert [(s["codec"], s["language"], s["title"], s["forced"]) for s in subtitles] == [
-        ("ass", "rus", "Надписи", True), ("ass", "eng", "", False)]
+        ("ass", "eng", "Full", False), ("ass", "rus", "Надписи", True)]
+    assert [(each.key, each.title) for each in asyncio.run(container.contents(out)).subtitles] == [
+        ("1:full:", "Full"), ("1:signs:", "Надписи")]
     assert sorted(attached) == ["Kurinto.ttf", container.PROVENANCE]
     assert layout["chapters"] == 2
 
-    again = str(tmp / "again.mkv")  # a container rebuilt from itself keeps them, and the table of the build is still one
+    none = str(tmp / "none.mkv")  # no subtitles chosen: none of the file's go, nor their fonts; the chapters stay
+    assert asyncio.run(container.build(none, video, "1:E01", tracks[:1], provenance={"video": "E01"})) is None
+    layout, _ = asyncio.run(layout_of(none))
+    assert [s["kind"] for s in layout["streams"] if s["kind"] in ("subtitle", "attachment")] == ["attachment"]
+    assert layout["chapters"] == 2
+
+    again = str(tmp / "again.mkv")  # a container rebuilt from itself takes its subtitles by their keys, the table is one
+    held = asyncio.run(container.contents(out)).subtitles
     assert asyncio.run(container.build(again, out, "1:E01", [AudioIn("Оригинал", out, 0, "1:E01", own=True)],
-                                       provenance={"video": "E01"})) is None
+                                       provenance={"video": "E01"},
+                                       subtitles=[SubtitleIn(out, each.index, each.key, each.title, each.language, each.forced)
+                                                  for each in held])) is None
     layout, _ = asyncio.run(layout_of(again))
     assert sorted(s["filename"] for s in layout["streams"] if s["kind"] == "attachment") == ["Kurinto.ttf", container.PROVENANCE]
-    assert len([s for s in layout["streams"] if s["kind"] == "subtitle"]) == 2 and layout["chapters"] == 2
+    assert [each.key for each in asyncio.run(container.contents(again)).subtitles] == ["1:full:", "1:signs:"]
+    assert layout["chapters"] == 2
 
 
 def test_a_video_of_another_container_carries_its_chapters_and_no_subtitles(media):

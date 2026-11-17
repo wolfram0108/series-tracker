@@ -10,8 +10,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 
-from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, CompilationRef, EffectiveLever, EpisodeSettings, Level,
-                            LevelSettings, SettingRecord, SettingsReset, ValueShape, compilation_key, group_target,
+from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, SUBTITLES_ALLOW, SUBTITLES_ORDER, CompilationRef, EffectiveLever, EpisodeSettings, Level,
+                            LevelSettings, Queue, SettingRecord, SettingsReset, ValueShape, compilation_key, group_target,
                             parse_compilation_key, parse_group_target, parse_variant_target, variant_target)
 from core.reasons import reason
 
@@ -20,8 +20,10 @@ from . import levers
 # The scope of a record: (season, episode, compilation key).
 _Scope = tuple[int | None, int | None, str | None]
 _Index = dict[str, dict[str | None, dict[_Scope, Any]]]
-# The level a lever may be set on, where it is not every level.
-_ONLY_ON = {COMPILATION_MEMBER: Level.EPISODE, COMPILATION_TAKE: Level.COMPILATION}
+# The levels a lever may be set on, where it is not every level: the subtitles have one table on the series and one on an
+# episode (DESIGN.md 7.1.1).
+_ONLY_ON = {COMPILATION_MEMBER: {Level.EPISODE}, COMPILATION_TAKE: {Level.COMPILATION},
+            SUBTITLES_ORDER: {Level.SERIES, Level.EPISODE}, SUBTITLES_ALLOW: {Level.SERIES, Level.EPISODE}}
 
 
 def validate(record: SettingRecord) -> str | None:
@@ -38,7 +40,7 @@ def validate(record: SettingRecord) -> str | None:
     if record.compilation is not None and parse_compilation_key(record.compilation)[3] != record.season:
         return reason("bad_target", lever=record.lever)
     only = _ONLY_ON.get(record.lever)
-    if only is not None and record.level != only:
+    if only is not None and record.level not in only:
         return reason("bad_level", lever=record.lever)
     return None
 
@@ -148,6 +150,8 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
 
     def moved(record: SettingRecord) -> SettingRecord | None:
         lever = levers.get(record.lever)
+        if lever is not None and lever.queue == Queue.SUBTITLES:
+            return record  # the group of a variant of subtitles is the name of the subtitles, no voice-over group
         target, value = record.target, record.value
         compilation = renamed_key(record.compilation)
         if lever is not None and lever.shape == ValueShape.COMPILATION:

@@ -37,6 +37,10 @@ MARKUP_ALLOW = "markup.allow"
 # markup reference), so that what the file holds stays while it is as good as the queue's first.
 REFERENCE_SAME = "reference.same"
 MARKUP_SAME = "markup.same"
+# Stage 15 (DESIGN.md 7.1.1): the order of the subtitles of the container (the first variant is its first subtitles track)
+# and the flag of a variant that leaves it out; set on the series and on an episode only.
+SUBTITLES_ORDER = "subtitles.order"
+SUBTITLES_ALLOW = "subtitles.allow"
 
 
 class Level(StrEnum):
@@ -74,6 +78,7 @@ class Queue(StrEnum):
     VOICE = "voice"
     COMPILATION = "compilation"
     MARKUP = "markup"
+    SUBTITLES = "subtitles"
 
 
 # The forms a window knows how to draw. A lever of another form is refused when it is registered, so that no registered
@@ -257,6 +262,9 @@ class QueueRow(BaseModel):
     # The number of the group of equal variants the row stands in (1, 2… in the order the groups first appear in the queue);
     # none for a variant that equals no other one the level lists.
     same: int | None = None
+    # A variant of subtitles: the language of its tracks and their type (`full`, `signs`, `forced`), as its rows say.
+    language: str = ""
+    subtitle_type: str = ""
 
 
 class QueueView(BaseModel):
@@ -290,3 +298,6 @@ class QueuesReply(BaseModel):
     # level of the chain has an order of its own, and the timeline is the video the reference takes.
     markup: QueueView = Field(default_factory=QueueView)
     markup_follows: bool = True
+    # The subtitles of the level (DESIGN.md 7.1.1): every allowed variant is a track of the container, in this order; the
+    # group of a row is the name of its subtitles. A season and a compilation have none of their own: they show the series'.
+    subtitles: QueueView = Field(default_factory=QueueView)

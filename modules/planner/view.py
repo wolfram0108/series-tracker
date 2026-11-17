@@ -18,6 +18,11 @@ def _variant(variant: tuple[str, int, str] | None) -> dict | None:
     return None if variant is None else {"group": variant[0], "source_id": variant[1], "player": variant[2]}
 
 
+def _subtitle(item, kind: str | None = None) -> dict:
+    return {"row": _row(item.row), "name": item.name, "player": item.player, "language": item.language,
+            "subtitle_type": item.subtitle_type, "kind": kind}
+
+
 def _slots(row: OnlineRow) -> list[list[int]]:
     if row.part is not None:
         return [[row.season, row.start, row.part]]
@@ -66,7 +71,8 @@ def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: boo
                       "online": None if online is None else video.id in online},
             "tracks": [{"row": _row(track.dub), **asdict(track.snapshot),
                         "online": None if online is None else track.dub in online} for track in container.tracks],
-            "timeline": _variant(timeline_variant(container))})
+            "timeline": _variant(timeline_variant(container)),
+            "subtitles": [_subtitle(each) for each in container.subtitles]})
     episodes = []
     if made is not None:
         for goal in made.goals:
@@ -79,7 +85,9 @@ def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: boo
                 "tracks": [{"voice": way.voice, "kind": way.kind, "row": _row(way.dub), **asdict(way.snapshot),
                             "own": way.own} for way in goal.tracks],
                 "markup": voice_of(goal.markup.group, goal.markup.id) if goal.markup is not None else None,
-                "markup_variant": _variant(goal.markup.variant) if goal.markup is not None else None})
+                "markup_variant": _variant(goal.markup.variant) if goal.markup is not None else None,
+                "subtitles": [_subtitle(way.subtitle, way.kind) for way in goal.subtitles],
+                "unaligned": [_variant(each) for each in goal.unaligned]})
     failures = [{key: value for key, value in each.items() if key != "key"} for each in placed(sync.failed, rows)]
     for failure in failures:
         failure["covered"] = covered(failure, assets)

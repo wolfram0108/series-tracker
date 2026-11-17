@@ -655,6 +655,15 @@
      "title": "RowState",
      "type": "string"
     },
+    "RowTrack": {
+     "description": "What a row carries: a video with its sound, or a sound track (every row of a site), or a subtitles track of a torrent\nrelease (stage 15, DESIGN.md 7.1.1). The kind of the voice-over a player names is no such mark: a «subtitles»\ntranslation of Kodik is a video with its sound.",
+     "enum": [
+      "sound",
+      "subtitles"
+     ],
+     "title": "RowTrack",
+     "type": "string"
+    },
     "RowVoice": {
      "description": "The voice-over as the player or the site words it; `kind` is the type the player names (voice, subtitles, ...).",
      "properties": {
@@ -702,6 +711,11 @@
       },
       "key": {
        "title": "Key",
+       "type": "string"
+      },
+      "language": {
+       "default": "",
+       "title": "Language",
        "type": "string"
       },
       "link": {
@@ -755,6 +769,17 @@
       "state": {
        "$ref": "#/$defs/RowState"
       },
+      "subtitle_type": {
+       "default": "",
+       "enum": [
+        "",
+        "full",
+        "signs",
+        "forced"
+       ],
+       "title": "Subtitle Type",
+       "type": "string"
+      },
       "text": {
        "default": "",
        "title": "Text",
@@ -764,6 +789,10 @@
        "default": "",
        "title": "Timeline",
        "type": "string"
+      },
+      "track": {
+       "$ref": "#/$defs/RowTrack",
+       "default": "sound"
       },
       "video": {
        "default": "",
@@ -870,6 +899,15 @@
      "title": "RowState",
      "type": "string"
     },
+    "RowTrack": {
+     "description": "What a row carries: a video with its sound, or a sound track (every row of a site), or a subtitles track of a torrent\nrelease (stage 15, DESIGN.md 7.1.1). The kind of the voice-over a player names is no such mark: a «subtitles»\ntranslation of Kodik is a video with its sound.",
+     "enum": [
+      "sound",
+      "subtitles"
+     ],
+     "title": "RowTrack",
+     "type": "string"
+    },
     "RowVoice": {
      "description": "The voice-over as the player or the site words it; `kind` is the type the player names (voice, subtitles, ...).",
      "properties": {
@@ -917,6 +955,11 @@
     },
     "key": {
      "title": "Key",
+     "type": "string"
+    },
+    "language": {
+     "default": "",
+     "title": "Language",
      "type": "string"
     },
     "link": {
@@ -970,6 +1013,17 @@
     "state": {
      "$ref": "#/$defs/RowState"
     },
+    "subtitle_type": {
+     "default": "",
+     "enum": [
+      "",
+      "full",
+      "signs",
+      "forced"
+     ],
+     "title": "Subtitle Type",
+     "type": "string"
+    },
     "text": {
      "default": "",
      "title": "Text",
@@ -979,6 +1033,10 @@
      "default": "",
      "title": "Timeline",
      "type": "string"
+    },
+    "track": {
+     "$ref": "#/$defs/RowTrack",
+     "default": "sound"
     },
     "video": {
      "default": "",

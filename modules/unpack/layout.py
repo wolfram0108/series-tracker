@@ -14,16 +14,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.contracts import RowState, RowVoice, TableRow
+from core.contracts import RowState, RowTrack, RowVoice, TableRow
 from core.contracts.torrent import (EditorTab, FileKind, ReleaseState, ReleaseView, episode_word, files_line, kind_of,
                                     player_of, stream_line, track_file_line, track_link)
 from core.reasons import reason
 
 KEYS_SEP = "/"
 TRACK_KINDS = {"audio": "audio", "subtitle": "subtitles"}
-# The kinds of tracks that are rows of the table: the sound. Subtitles are laid out in the editor; they join the output by
-# their own order (DESIGN.md, 7.1, step 8), not as voice-overs.
-ROW_KINDS = {"audio"}
+# The kinds of tracks that are rows of the table: the sound, and the subtitles, which join the output by their own order
+# (DESIGN.md 7.1.1), never as voice-overs.
+ROW_KINDS = {"audio", "subtitles"}
 # The states of a release whose files the table names; a first download is no part of the series yet.
 SHOWN = {ReleaseState.READY, ReleaseState.UPDATING, ReleaseState.FAILED, ReleaseState.ARCHIVED}
 
@@ -251,6 +251,8 @@ def _row(release: ReleaseView, key: str, link: str, video: str, where: Place, ki
     return TableRow(key=key, player=player_of(release.release), player_label=release.title or release.release,
                     text=f"{where.word} | {video}", voice=RowVoice(name=entry["folder"] or stream.get("title") or "",
                                                                    kind=kind),
+                    track=RowTrack.SUBTITLES if kind == "subtitles" else RowTrack.SOUND,
+                    language=entry["language"] or "", subtitle_type=entry["subtitle_type"] or "",
                     heights=[height] if height else [], state=state, reason=why, link=link,
                     # Every track of the file is on the file's own timeline: in step with its video (DESIGN.md, 7.0).
                     timeline=item_of(release.release, video),

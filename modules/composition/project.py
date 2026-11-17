@@ -6,11 +6,11 @@ comes from the constructor's answer to the line of that row; this module never c
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Iterator, Mapping, Sequence
 
 from core.contracts.composition import LEFT_BEFORE_RULES
-from core.contracts import (CompositionRow, Exclusion, PlayerSummary, SeasonVoiceOrder, VoiceSpan, ReleaseTable, RowState, RuleLine, RuleResult,
+from core.contracts import (CompositionRow, Exclusion, PlayerSummary, SeasonVoiceOrder, VoiceSpan, ReleaseTable, RowState, RowTrack, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, line_of, place_of)
 from core.voice_names import fold_name
 
@@ -46,6 +46,8 @@ class Projection:
     rows: list[CompositionRow]
     sources: list[SourceSummary]
     unknown_voices: dict[str, int]
+    # The rows of subtitles (DESIGN.md 7.1.1): kept apart, so that no consumer of the rows of sound takes them for a voice-over.
+    subtitles: list[CompositionRow] = field(default_factory=list)
 
 
 def left_out(source: SeriesSource, table: ReleaseTable, everywhere: Iterable[str] = ()) -> dict[str, Exclusion]:
@@ -90,7 +92,7 @@ def voice_names(inputs: Sequence[SourceInput]) -> list[str]:
     names: dict[str, None] = {}
     for item in _ordered(inputs):
         names.update((voice_name_of(row, result), None) for row, result in _answered_rows(item)
-                     if voice_name_of(row, result).strip())
+                     if voice_name_of(row, result).strip() and row.track == RowTrack.SOUND)
     return list(names)
 
 
@@ -109,7 +111,15 @@ def project(inputs: Sequence[SourceInput], groups: Mapping[str, str | None],
             rows.append(_row_of(item.source, row, result, voice_name_of(row, result), groups, numbering)
                         .model_copy(update={"stale": not given(row)}))
         rows.extend(each.model_copy(update={"stale": not given(row)}) for each, row in _left_by_source(item))
-    return Projection(rows, summaries, numbering)
+    sound, subtitles = split_rows(rows)
+    return Projection(sound, summaries, numbering, subtitles)
+
+
+def split_rows(rows: Iterable[CompositionRow]) -> tuple[list[CompositionRow], list[CompositionRow]]:
+    """The rows of sound and the rows of subtitles, each in the order of the layout."""
+    rows = list(rows)
+    return ([row for row in rows if row.track == RowTrack.SOUND],
+            [row for row in rows if row.track == RowTrack.SUBTITLES])
 
 
 def group_renames(before: Sequence[CompositionRow], after: Sequence[CompositionRow]) -> dict[str, str]:
@@ -195,17 +205,24 @@ def _left_by_source(item: SourceInput) -> Iterator[tuple[CompositionRow, TableRo
                 series_id=item.source.series_id, source_id=item.source.id, row_key=row.key, excluded=True,
                 exclusion=out[row.key], player=row.player, player_label=row.player_label,
                 group=row.group, text=row.text, heights=list(row.heights), state=row.state, published=row.published,
-                link=row.link, video=row.video, timeline=row.timeline), row
+                link=row.link, video=row.video, timeline=row.timeline, track=row.track, language=row.language,
+                subtitle_type=row.subtitle_type), row
 
 
 def _row_of(source: SeriesSource, row: TableRow, result: RuleResult, name: str, groups: Mapping[str, str | None],
             numbering: dict[str, int]) -> CompositionRow:
-    group, label, number = _voice_of(name, groups, numbering, row.voice.name)
+    if row.track == RowTrack.SUBTITLES:
+        # Subtitles are no voice-over: no group takes them and no unknown number counts them; their name is the tag of the
+        # constructor, else the folder of the editor the row came with.
+        group, label, number = None, name or row.voice.name, None
+    else:
+        group, label, number = _voice_of(name, groups, numbering, row.voice.name)
     return CompositionRow(
         series_id=source.series_id, source_id=source.id, row_key=row.key, **_numbers_of(result),
         voice_group=group, voice_label=label, voice_name=name, voice_unknown=number, player=row.player,
         player_label=row.player_label, group=row.group, text=row.text, heights=list(row.heights), state=row.state,
-        published=row.published, link=row.link, video=row.video, timeline=row.timeline)
+        published=row.published, link=row.link, video=row.video, timeline=row.timeline, track=row.track,
+        language=row.language, subtitle_type=row.subtitle_type)
 
 
 def _numbers_of(result: RuleResult) -> dict:

@@ -8,11 +8,12 @@ from dataclasses import replace
 from typing import Any, Iterable, Mapping, Sequence
 
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME,
-                            VOICE_ALLOW,
+                            SUBTITLES_ALLOW, SUBTITLES_ORDER, VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, CompositionReply, CompositionRow, EffectiveLever, Level, RowState,
                             SeriesSource, compilation_key,
                             parse_group_target, parse_variant_target)
 from core.ignored import parse_memory
+from core.subtitle_queue import named_of
 from core.variant_queue import Same
 from core.voice_names import Groups
 
@@ -21,16 +22,18 @@ from .tables import Choices, Container, OnlineRow, RowId
 
 def online_of(rows: Sequence[CompositionRow], places: Mapping[int, str] | None = None) -> tuple[OnlineRow, ...]:
     """The rows of the output (`CompositionRow.in_output`: the rules gave them an episode or a range, the voice-over groups
-    took them). The place of a row is its place in the layout, every row counted, as the service's rule breaks a tie."""
+    took them; a row of subtitles needs no group). The place of a row is its place in the layout, every row counted, as the
+    service's rule breaks a tie."""
     places = places or {}
     online = []
     for position, row in enumerate(rows):
         if not row.in_output:
             continue
         online.append(OnlineRow(RowId(row.source_id, row.row_key, row.video or ""), row.season, row.episode_start,
-                                row.episode_end or row.episode_start, row.player, row.voice_group, max(row.heights or [0]),
-                                places.get(row.source_id, ""), row.link, row.voice_label, position, row.part,
-                                row.state == RowState.PLAYABLE, not row.stale, row.player_label, row.timeline))
+                                row.episode_end or row.episode_start, row.player, row.voice_group or "",
+                                max(row.heights or [0]), places.get(row.source_id, ""), row.link, row.voice_label, position,
+                                row.part, row.state == RowState.PLAYABLE, not row.stale, row.player_label, row.timeline,
+                                row.track.value, row.language, row.subtitle_type))
     return tuple(online)
 
 
@@ -48,7 +51,9 @@ def assets_against(containers: Iterable[Container], online: Iterable[OnlineRow])
     return tuple(replace(each, video=replace(each.video, id=same(each.video.id), timeline=same(each.video.timeline),
                                              cut_of=same(each.video.cut_of)),
                          tracks=tuple(replace(track, dub=same(track.dub), aligned_to=same(track.aligned_to))
-                                      for track in each.tracks)) for each in containers)
+                                      for track in each.tracks),
+                         subtitles=tuple(replace(item, row=same(item.row), timeline=same(item.timeline))
+                                         for item in each.subtitles)) for each in containers)
 
 
 def compilations_of(rows: Iterable[CompositionRow], online: Iterable[OnlineRow]) -> dict[str, RowId]:
@@ -77,6 +82,7 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
     reference, reference_deny, voice_orders, voice_deny, voice_off, member = {}, {}, {}, {}, {}, {}
     markup, markup_deny = {}, {}
     same, markup_same = {}, {}
+    subtitle_order, subtitle_deny = {}, {}
     own_reference: set = set()
     for season, episode, levers in episodes:
         slot = (season, episode)
@@ -115,6 +121,12 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                 group = parse_group_target(lever.target)
                 if group is not None:
                     voice_off[slot] = voice_off.get(slot, frozenset()) | {group}
+            elif lever.lever == SUBTITLES_ORDER and isinstance(lever.value, list):
+                subtitle_order[slot] = tuple(named_of(lever.value))
+            elif lever.lever == SUBTITLES_ALLOW and lever.value is False and lever.target:
+                variant = parse_variant_target(lever.target)
+                if variant is not None:
+                    subtitle_deny[slot] = subtitle_deny.get(slot, frozenset()) | {variant}
             elif lever.lever == COMPILATION_MEMBER and lever.value is not None:
                 member[slot] = by_key.get(lever.value) if lever.value else None
     off_compilations = frozenset(by_key[key] for key, levers in compilation_levers if key in by_key and any(
@@ -123,7 +135,8 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                    off_episodes=frozenset(off_episodes), off_compilations=off_compilations, reference=reference,
                    reference_deny=reference_deny, voice_order=voice_orders, voice_deny=voice_deny, voice_off=voice_off,
                    member=member, own_reference=frozenset(own_reference), titles=dict(titles or {}), languages=dict(languages or {}),
-                   markup=markup, markup_deny=markup_deny, same=same, markup_same=markup_same)
+                   markup=markup, markup_deny=markup_deny, same=same, markup_same=markup_same,
+                   subtitle_order=subtitle_order, subtitle_deny=subtitle_deny)
 
 
 def planner_inputs(layout: CompositionReply, series: Mapping[str, Any],
@@ -132,7 +145,8 @@ def planner_inputs(layout: CompositionReply, series: Mapping[str, Any],
     `series` the card of the catalog, `voices` the view of the settings of the voice-overs (`voices.settings.get`). The
     module of the planner and the tools on a real series read the series by this one function."""
     places = {each.source_id: " / ".join(each.place) for each in layout.sources}
-    online = online_of(layout.rows, places)
+    # The rows of subtitles ride among the rows (`Inputs` sets them apart): every reader of the pair takes them as they are.
+    online = online_of([*layout.rows, *layout.subtitles], places)
     try:
         ignored_seasons = {int(each) for each in json.loads(series.get("ignored_seasons") or "[]")}
     except (json.JSONDecodeError, TypeError, ValueError):

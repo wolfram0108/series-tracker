@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from .compilation import CompilationView
 from .output_settings import EpisodeSettings, LeverSpec, LevelSettings
-from .release_table import RowState, TableState
+from .release_table import RowState, RowTrack, TableState
 from .rules import RuleResult
 
 
@@ -63,6 +64,11 @@ class CompositionRow(BaseModel):
     video: str = ""
     # The key of the video of the row as a timeline (TableRow.timeline); empty: the row itself.
     timeline: str = ""
+    # What the row carries (TableRow.track): a row of subtitles is no voice-over and no variant of the reference.
+    track: RowTrack = RowTrack.SOUND
+    # The language of the track and the type of subtitles (TableRow.language, .subtitle_type).
+    language: str = ""
+    subtitle_type: Literal["", "full", "signs", "forced"] = ""
     # The source did not give this episode of this player in its last read (a part of the page that did not answer, or a
     # read that failed): the row stands from an earlier read, and every window shows it as not current.
     stale: bool = False
@@ -78,9 +84,9 @@ class CompositionRow(BaseModel):
         """The row is a row of the output (the window «Выход», its plan and the planner): the rules gave it its numbers and
         the voice-over groups took it. The one way into the output: table, rules, groups (ЭТАП_10:107); a row of an
         unknown voice-over is in none of it — no reference, no markup reference, no voice-over — until its group takes
-        it."""
+        it. A row of subtitles needs no group: it is no voice-over (DESIGN.md 7.1.1)."""
         return (not self.excluded and self.season is not None and self.episode_start is not None
-                and self.voice_group is not None)
+                and (self.voice_group is not None or self.track == RowTrack.SUBTITLES))
 
     @property
     def is_compilation(self) -> bool:
@@ -204,6 +210,8 @@ class CompositionReply(BaseModel):
     series_id: int
     rev: int
     rows: list[CompositionRow] = Field(default_factory=list)
+    # The rows of subtitles (DESIGN.md 7.1.1), apart from the rows of sound: no voice-over, no variant of the reference.
+    subtitles: list[CompositionRow] = Field(default_factory=list)
     sources: list[SourceSummary] = Field(default_factory=list)
     levels: list[LevelSettings] = Field(default_factory=list)
     settings: list[EpisodeSettings] = Field(default_factory=list)

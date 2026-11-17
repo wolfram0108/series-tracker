@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME,
-                            REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, VOICE_ALLOW,
+                            REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, SUBTITLES_ALLOW, SUBTITLES_ORDER, VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, LeverSpec, Queue, TargetKind, ValueShape, parse_compilation_key,
                             parse_group_target, parse_variant_target)
 
@@ -184,3 +184,7 @@ register(Lever(MARKUP_ALLOW, TargetKind.VARIANT, ValueShape.FLAG, True, "planner
 # the queue's first.
 register(Lever(REFERENCE_SAME, TargetKind.NONE, ValueShape.VARIANT_SETS, [], "planner", Queue.REFERENCE, _sets_sources))
 register(Lever(MARKUP_SAME, TargetKind.NONE, ValueShape.VARIANT_SETS, [], "planner", Queue.MARKUP, _sets_sources))
+# Stage 15 (DESIGN.md 7.1.1): the subtitles of the container — every allowed variant in this order; a variant is named by
+# the name of its subtitles in place of a voice-over group.
+register(Lever(SUBTITLES_ORDER, TargetKind.NONE, ValueShape.VARIANT_ORDER, [], "planner", Queue.SUBTITLES, _order_sources))
+register(Lever(SUBTITLES_ALLOW, TargetKind.VARIANT, ValueShape.FLAG, True, "planner", Queue.SUBTITLES))

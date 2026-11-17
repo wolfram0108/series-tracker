@@ -18,7 +18,8 @@ from ..reasons import reason
 from .planner import Goal, Group, Op, Plan, plan, restricted, video_op
 from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
 
-DOWNLOADS = ("download_video", "download_dub", "download_picture")
+# The steps that obtain a row; the take of a row of subtitles from its file is one of them (DESIGN.md 7.1.1).
+DOWNLOADS = ("download_video", "download_dub", "download_picture", "take_subtitles")
 
 
 class Passing(Exception):
@@ -187,7 +188,8 @@ def table_after(containers: dict[str, Container], made: Plan, group: Group, resu
                 tracks.append(Track(way.dub, way.snapshot, slot, video.timeline))
             else:
                 tracks.append(results[f"align:{slot}:{way.voice}"].value)
-        built[goal.name] = Container(goal.name, video, tuple(tracks), goal.off, goal.own_at, goal.titles, goal.languages)
+        built[goal.name] = Container(goal.name, video, tuple(tracks), goal.off, goal.own_at, goal.titles, goal.languages,
+                                     tuple(way.subtitle for way in goal.subtitles))
     renamed: dict[str, Container] = {}
     for slot, name in group.kept:
         goal = made.goal(slot)

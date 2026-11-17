@@ -483,7 +483,7 @@ def rich_standard(url: str = PAGE) -> ReleaseTable:
 
 
 def levers_by_episode(reply: CompositionReply) -> dict:
-    return {(e.season, e.episode): {x.lever: x for x in e.levers if not x.lever.startswith(("compilation.", "markup.", "reference.same"))}
+    return {(e.season, e.episode): {x.lever: x for x in e.levers if not x.lever.startswith(("compilation.", "markup.", "reference.same", "subtitles."))}
             for e in reply.settings}
 
 
