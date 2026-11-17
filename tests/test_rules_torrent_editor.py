@@ -112,6 +112,15 @@ def test_a_folder_is_named_with_its_language_in_one_action_a_name_alone_names_th
                                                 "rows": [{"if": [text("AnimeSpace")], "then": both}]}}])
     assert process_title(table, "D:Sound/[AnimeSpace Team] | 01.mka")["extracted"] == {"voice_folder": "AnimeSpace Team",
                                                                                       "language": "rus"}
+    # The language of the table is every row's with none of its own; a row's own stays.
+    defaulted = compile_profile(6, [{"id": 1, "name": "таблица", "priority": 1, "continue_after_match": False,
+                                     "action_pattern": "[]", "conditions": [],
+                                     "rule_table": {"action_type": "assign_voice_folder", "language": "jpn",
+                                                    "rows": [{"if": [text("Original")], "then": "Original"},
+                                                             {"if": [text("AnimeSpace")], "then": both}]}}])
+    assert process_title(defaulted, "D:Sound/Original | 01.mka")["extracted"] == {"voice_folder": "Original", "language": "jpn"}
+    assert process_title(defaulted, "D:Sound/[AnimeSpace Team] | 01.mka")["extracted"] == {"voice_folder": "AnimeSpace Team",
+                                                                                          "language": "rus"}
 
 
 async def test_the_profiles_of_the_editor_are_not_listed_among_the_profiles_of_a_series(tmp_path):

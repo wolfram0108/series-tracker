@@ -36,7 +36,7 @@ export interface EditableRule {
   conditions: Condition[]
   actions: Action[]
   /** A rule «Таблица»: the action of its column and its rows (ParserTableCard); none for an ordinary rule. */
-  table?: { action_type: string; rows: TableRow[] } | null
+  table?: { action_type: string; rows: TableRow[]; language?: string } | null
 }
 
 const props = defineProps<{

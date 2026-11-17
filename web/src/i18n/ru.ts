@@ -762,6 +762,7 @@ export const ru = {
   "rules.action.assign_video_tag": "Тег видео",
   "rules.action.folderName": "Имя каталога",
   "rules.action.language": "Язык",
+  "rules.action.defaultLanguage": "Язык строк по умолчанию",
   "rules.action.value": "Значение",
   "rules.rule.namePlaceholder": "Имя правила...",
   "rules.rule.toggle": "Развернуть или свернуть правило",

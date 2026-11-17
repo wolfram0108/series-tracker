@@ -10,7 +10,7 @@ import { useConfirm } from "../../composables/useConfirm"
 import { api } from "../../api/client"
 import { t } from "../../i18n"
 import { useBusyBar } from "../../composables/useWindowBusy"
-import { isExtract, type RulePlace } from "../../lib/ruleVocabulary"
+import { isExtract, isFolderAction, type RulePlace } from "../../lib/ruleVocabulary"
 import LoadingMark from "../LoadingMark.vue"
 
 // The rules of one profile of the constructor: the cards of the rules in their order. A rule or a table is added from the
@@ -91,7 +91,8 @@ async function loadRules(): Promise<void> {
         action_pattern: String(a.action_pattern ?? ""),
         _action_blocks: parsePatternJson(a.action_pattern),
       })),
-      table: rule.rule_table ? { action_type: rule.rule_table.action_type, rows: rowsOf(rule.rule_table) } : null,
+      table: rule.rule_table ? { action_type: rule.rule_table.action_type, rows: rowsOf(rule.rule_table),
+                                 language: rule.rule_table.language ?? "" } : null,
     }
   })
 }
@@ -123,9 +124,9 @@ function addRule(): void {
 
 function prepareRuleForSave(rule: EditableRule): Record<string, unknown> {
   if (rule.table) {
-    const { action_type: actionType, rows } = rule.table
+    const { action_type: actionType, rows, language } = rule.table
     return { name: rule.name, continue_after_match: !!rule.continue_after_match, action_pattern: "[]", conditions: [],
-             rule_table: storedOf(actionType, rows, isExtract(actionType)) }
+             rule_table: storedOf(actionType, rows, isExtract(actionType), isFolderAction(actionType) ? language : "") }
   }
   const conditions = rule.conditions.map((c) => ({
     condition_type: c.condition_type,

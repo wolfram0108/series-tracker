@@ -310,6 +310,8 @@ def table_rules(rule: dict) -> list[dict]:
     rows = table.get("rows")
     if not isinstance(rows, list) or not rows:
         raise ValueError(reason("table_empty"))
+    # A table of folders may name a language for all its rows: a row with no language of its own takes it.
+    language = str(table.get("language") or "").strip() if a_type in FOLDER_ASSIGN else ""
     expanded = []
     for number, row in enumerate(rows, 1):
         blocks = row.get("if") if isinstance(row, dict) else None
@@ -322,6 +324,9 @@ def table_rules(rule: dict) -> list[dict]:
             pattern = str(then if then is not None else "").strip()
             if not pattern:
                 raise ValueError(reason("table_row_then_empty", number=number))
+            name, own = folder_value(pattern) if language else ("", "")
+            if language and not own:
+                pattern = json.dumps({"name": name, "language": language}, ensure_ascii=False)
         else:
             if not then:
                 raise ValueError(reason("table_row_template_empty", number=number))

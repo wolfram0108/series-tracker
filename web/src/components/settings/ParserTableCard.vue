@@ -214,7 +214,7 @@ function setAction(value: string): void {
       </div>
 
       <div class="table-scroll">
-      <table class="rule-table">
+      <table class="rule-table" :class="{ 'is-folders': isFolderAction(table.action_type) }">
         <thead>
           <tr>
             <th class="col-handle" />
@@ -234,6 +234,12 @@ function setAction(value: string): void {
                 <span class="table-label label-then">{{ t("rules.label.then") }}</span>
                 <StSelect class="table-action" :model-value="table.action_type" :options="ACTIONS"
                           @update:model-value="setAction($event as string)" />
+                <!-- The language of every row with none of its own. -->
+                <StSelect
+                  v-if="isFolderAction(table.action_type)" class="table-language table-default-language"
+                  :model-value="table.language || null" :options="folderLanguages()" :placeholder="t('rules.action.language')"
+                  :aria-label="t('rules.action.defaultLanguage')" @update:model-value="table.language = String($event ?? '')"
+                />
               </div>
             </th>
             <th class="col-remove" />
@@ -268,7 +274,7 @@ function setAction(value: string): void {
                   />
                   <StSelect
                     class="table-language" :model-value="folderValueOf(row.then.value).language || null" :options="folderLanguages()"
-                    :placeholder="t('rules.action.language')"
+                    :placeholder="table.language || t('rules.action.language')" :class="{ 'is-default': !folderValueOf(row.then.value).language && table.language }"
                     @update:model-value="row.then.value = folderValueText({ ...folderValueOf(row.then.value), language: String($event ?? '') })"
                   />
                 </div>
@@ -330,6 +336,8 @@ function setAction(value: string): void {
 .rule-table th.col-handle, .rule-table th.col-remove { width: 2.25rem; }
 .rule-table .col-handle, .rule-table .col-remove { padding-left: 0; padding-right: 0; }
 .rule-table th.col-then { width: 34%; }
+/* A table of folders holds two fields in «ТО» (the name and the language) and a language in its head: the column is wider. */
+.rule-table.is-folders th.col-then { width: 44%; }
 .col-handle, .col-remove { text-align: center !important; color: #adb5bd; }
 .row-handle { cursor: grab; }
 /* The dots are drawn in the middle of their own box, and the box stands in the middle of the cell. */
@@ -348,6 +356,9 @@ function setAction(value: string): void {
 .template-count { margin-left: 0.25rem; color: var(--text-muted); }
 .template-chip:disabled .template-count { color: #ced4da; }
 .table-action { flex: 1 1 10rem; min-width: 0; border: 1px solid #ced4da; border-radius: 4px; background: #fff; }
+/* The action and the language of the head are one line each and one height. */
+.table-action, .table-default-language { min-height: 2rem; }
+.table-action :deep(.selected-value) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .rule-table tr.is-fresh td { background: #f1f7ff; }
 .rule-table td.is-selected { box-shadow: inset 0 0 0 2px #0d6efd; }
@@ -376,6 +387,10 @@ function setAction(value: string): void {
 .table-folder > .table-language {
   flex: 0 0 5rem; min-width: 0; padding: 0 0.5rem; border: 1px solid #ced4da; border-radius: 4px; background: #fff; font-size: 0.875rem;
 }
+.table-default-language { flex: 0 0 5rem; padding: 0 0.5rem; border: 1px solid #ced4da; border-radius: 4px; background: #fff; font-size: 0.875rem; }
+.table-default-language :deep(.selected-value) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0; }
+/* A row with no language of its own shows the table's, dimmed: it is the default, not the row's. */
+.table-folder > .table-language.is-default :deep(.selected-value) { color: var(--text-muted); }
 /* The language is one line: a long name is cut, the chevron keeps its place. */
 .table-folder > .table-language :deep(.selected-value) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0; }
 .table-value {

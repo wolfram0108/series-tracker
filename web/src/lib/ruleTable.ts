@@ -22,6 +22,8 @@ type StoredBlocks = Omit<PatternBlock, "id">[]
  *  with both its cells whole; `if_joined` / `then_joined` say the cell is the one of the row above (for the editor). */
 export interface StoredTable {
   action_type: string
+  /** A table of folders: the language of every row that names none of its own. */
+  language?: string
   rows: { if: StoredBlocks; then: string | number | StoredBlocks | null; if_joined?: boolean; then_joined?: boolean }[]
 }
 
@@ -167,9 +169,10 @@ export function rowsOf(table: StoredTable): TableRow[] {
 }
 
 /** The table as the core takes it: what «ТО» holds follows the action of the column. */
-export function storedOf(actionType: string, rows: TableRow[], extract: boolean): StoredTable {
+export function storedOf(actionType: string, rows: TableRow[], extract: boolean, language = ""): StoredTable {
   return {
     action_type: actionType,
+    ...(language && { language }),
     rows: rows.map((row, at) => ({
       if: withoutIds(row.if.blocks),
       then: actionType === "exclude" ? null : extract ? withoutIds(row.then.blocks) : row.then.value.trim(),
