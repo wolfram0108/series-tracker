@@ -1,19 +1,18 @@
 """A torrent source in the browser, the whole application on the stand (tests/ui_stand.py) with the model of qBittorrent and a
-page of anilibria (tests/app_stand.py, Tracker): the user sets the folder of the releases in the settings of the sources,
-makes the rule of the lines of a release in the constructor, adds the series with the page as its source, downloads the
-release on the tab «Торрент» of the window of the series and sees it read and laid in seasons and episodes, then syncs the
-series in «Выход». What the user sees comes by the events of the service; the library is checked on disk."""
+page of anilibria (tests/app_stand.py, Tracker), as the owner checks it: the series is there; the user adds the page as its
+source in the window of the series and sees the tab «Торрент» come in that window; downloads the release and follows it in
+«Агенты»; sees on the tab the files of the release, all of them without an episode since the source has no rule; writes one
+rule in the tab «Файлы» and sees every episode placed. Everything the user sees comes by the events of the service."""
 from __future__ import annotations
 
 import pytest
 from playwright.async_api import expect
 
-from ui_stand import SERIES, SERIES_EN, UiStand, state, text
+from ui_stand import SERIES, UiStand, state, text
 
 pytestmark = [pytest.mark.ui, pytest.mark.asyncio]
 
-VOICE = "AniLibria"
-EPISODE = [{"type": "text", "value": "E"}, {"type": "number"}]
+EPISODE = [{"type": "text", "value": "-"}, {"type": "whitespace"}, {"type": "number"}]
 LONG_S = 60_000  # the download, the read of the files by ffprobe and the read of the table: events of the service, not a pause
 
 
@@ -28,10 +27,11 @@ async def ui(tmp_path):
     made.close()
 
 
-async def test_a_release_is_added_downloaded_read_and_synced_through_the_screens(ui):
+async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_placed_by_one_rule(ui):
     page = ui.page
-    await ui.first_run()
-    await ui.set_up([VOICE])
+    ui.site.release("ref", "AniStar")
+    ui.site.episode("ref", 1, height=720)
+    await ui.make_series(["ref"])
 
     await ui.settings(text("settings.tab.sources"))
     field = page.get_by_label(text("settings.sources.staging.label"))
@@ -41,42 +41,48 @@ async def test_a_release_is_added_downloaded_read_and_synced_through_the_screens
     assert (await saved.value).ok
     await ui.close_settings()
 
-    await ui.profile("серии раздачи", [{"name": "серия", "if": EPISODE,
-                                         "then": [("extract_single", EPISODE), ("assign_voiceover", VOICE)]}])
-    tracker = ui.torrent_page("show", "Сериал", {"Show - 01.mkv": 1, "Show - 02.mkv": 2})
-    series_id = await ui.add_series(SERIES, SERIES_EN, [(tracker.url, "серии раздачи")])
-    await ui.shot("01-added")
-
+    tracker = ui.torrent_page("show", "Сериал", {"Show - 01.mkv": 1, "Show - 02.mkv": 2}, hold=True)
+    # The series is open; the source is added in its properties, and the tab «Торрент» comes in this very window.
     await page.locator(".series-card", has_text=SERIES).first.locator("[title='Статус']").click()
-    await ui.tab(text("status.tab.torrent"))
+    torrent_tab = page.locator(f".st-tab[title='{text('status.tab.torrent')}']")
+    await expect(torrent_tab).to_have_count(0)
+    await ui.tab("Свойства")
+    cards = page.locator(".source-card")
+    await expect(cards).to_have_count(1)
+    await page.get_by_label(text("sources.add.label")).fill(tracker.url)
+    await page.locator(".source-add button.btn-add", has_text=text("sources.add.button")).click()
+    await expect(cards).to_have_count(2)
+    await expect(torrent_tab).to_be_visible()
+    await ui.shot("01-tab-came")
+
+    await torrent_tab.click()
     head = page.locator(".torrent-head")
     await expect(head.locator(".torrent-state")).to_have_text(state("notLoaded"))
-    await ui.shot("02-not-loaded")
     await head.locator(".do-download").click()
+    await expect(head.locator(".torrent-state")).to_have_text(state("download"), timeout=LONG_S)
+
+    # «Агенты»: the release downloads, a card of this series in the monitor of qBittorrent.
+    await ui.tab(text("status.tab.agents"))
+    card = page.locator(".work-card[data-kind='monitor']")
+    await expect(card).to_have_count(1, timeout=LONG_S)
+    await expect(card).to_have_attribute("data-state", "download")
+    await ui.shot("02-agents-download")
+    ui.qbit.deliver(tracker.infohash)
+    await expect(card).to_have_count(0, timeout=LONG_S)
+
+    # The tab: the release is downloaded and read; its files have no episode, since the source has no rule yet.
+    await torrent_tab.click()
     await expect(head.locator(".torrent-state")).to_have_text(state("done"), timeout=LONG_S)
-    await ui.shot("03-ready")
+    files = page.locator(".torrent-files .file-row")
+    await expect(files).to_have_count(2)
+    await expect(page.locator(".torrent-files .file-row.is-unplaced")).to_have_count(2)
+    await expect(page.locator(".torrent-files .torrent-season")).to_have_count(0)
+    await ui.shot("03-no-rule")
 
-    # The preset of the torrents laid both files in season 1, episodes 1 and 2: the draft says so. The sound inside each
-    # video lies in no folder of a voice-over: the two tracks wait for the operator on «Контейнеры» (the rule names them).
-    await expect(head.locator(".torrent-switch .st-tab")).to_have_count(4)
-    draft = page.locator(".torrent-files .torrent-season")
-    await expect(draft).to_have_count(1)
-    await expect(draft.locator(".episode-row")).to_have_count(2)
-    await expect(head.locator(".torrent-waiting")).to_have_text(text("torrent.progress.waiting", n=2))
-    await head.locator(".torrent-switch .tab-streams").click()
-    await expect(page.locator(".torrent-streams .stream-row.is-unplaced")).to_have_count(1)  # one container: a0 of both files
-    await ui.shot("04-containers")
-    # At the width of a phone the tab keeps to the window: its panes stack, nothing runs off to the side.
-    await page.set_viewport_size({"width": 390, "height": 900})
-    await ui.shot("04b-narrow")
-    tab = page.locator(".torrent-tab")
-    assert await tab.evaluate("each => each.scrollWidth <= each.clientWidth"), "the tab runs off the window"
-    await page.set_viewport_size({"width": 1440, "height": 1000})
-
-    await ui.tab(text("output.tab"))
-    await expect(page.locator(".episode-card")).to_have_count(2, timeout=LONG_S)
-    await ui.press_sync(series_id)
-    await expect(page.locator(".episode-card[data-state='done']")).to_have_count(2)
-    await ui.shot("05-synced")
-    view = await ui.check(series_id)
-    assert sorted(each["episode"] for each in view["assets"]) == [[1, 1], [1, 2]]
+    # One rule in the tab «Файлы» places every episode.
+    await ui._rule({"name": "серия", "if": EPISODE, "then": [("extract_single", EPISODE)]})
+    await expect(page.locator(".torrent-files .file-row.is-unplaced")).to_have_count(0, timeout=LONG_S)
+    season = page.locator(".torrent-files .torrent-season")
+    await expect(season).to_have_count(1)
+    await expect(season.locator(".torrent-episode-name")).to_have_text(["s01e01", "s01e02"])
+    await ui.shot("04-one-rule")

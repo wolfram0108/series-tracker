@@ -159,6 +159,13 @@ export function byFolder<T extends { path: string }>(entries: readonly T[]): { f
   return [...groups].map(([folder, list]) => ({ folder, entries: list }))
 }
 
+/** The folder of an episode in the draft, as the files of the library name it: `s01e05`, `s01e05-e06` for several. */
+export function episodeFolder(season: number, episode: number, last: number | null = null): string {
+  const two = (n: number): string => String(n).padStart(2, "0")
+  const word = `s${two(season)}e${two(episode)}`
+  return last !== null && last !== episode ? `${word}-e${two(last)}` : word
+}
+
 export interface DraftEpisode { episode: number; last: number | null; files: FileEntry[]; kinds: Partial<Record<FileKind, number>> }
 export interface DraftSeason { season: number; episodes: DraftEpisode[]; manual: boolean }
 

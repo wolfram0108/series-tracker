@@ -137,7 +137,7 @@ const profileId = computed(() => editor.value?.profiles[tab.value] ?? null)
             <RulesEditor v-if="profileId !== null" :key="profileId" :profile-id="profileId" :lines="lines" :codes="codes" />
           </div>
         </section>
-        <TorrentFiles v-if="tab === 'files'" :editor="editor" @failure="failure = $event" />
+        <TorrentFiles v-if="tab === 'files'" :editor="editor" :release="release" @failure="failure = $event" />
         <TorrentTracks v-else-if="tab === 'voices' || tab === 'subtitles'" :key="tab" :editor="editor" :tab="tab" @failure="failure = $event" />
         <TorrentStreams v-else :editor="editor" @failure="failure = $event" />
       </template>

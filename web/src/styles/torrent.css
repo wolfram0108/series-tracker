@@ -86,13 +86,10 @@
   display: flex; align-items: center; gap: 0.625rem; min-block-size: 2rem; padding: 0 0.875rem; border-block-start: 1px solid #f1f3f5;
   font-size: 0.8125rem;
 }
-.torrent-episode .torrent-name { color: #495057; }
-.torrent-en {
-  flex: none; inline-size: 1.875rem; border: 0; background: none; padding: 0; text-align: end; color: inherit; cursor: pointer;
-  font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700;
-}
-.torrent-en:disabled { cursor: default; }
-.torrent-file { display: flex; align-items: center; gap: 0.5rem; min-block-size: 1.625rem; padding: 0 0.875rem 0 3.875rem; font-size: 0.78rem; color: #495057; }
+.torrent-episode .torrent-episode-name { flex: 0 1 auto; font-family: var(--font-mono); font-size: 0.8125rem; font-weight: 700; color: var(--color-text); }
+.torrent-episode .torrent-kind:first-of-type { margin-inline-start: auto; }
+.torrent-folder-icon { flex: none; color: #636b73; font-size: 0.85rem; }
+.torrent-file { display: flex; align-items: center; gap: 0.5rem; min-block-size: 1.625rem; padding: 0 0.875rem 0 3.25rem; font-size: 0.78rem; color: #495057; }
 .torrent-how { flex: none; font-size: 0.72rem; color: var(--text-muted); }
 .torrent-how.is-hand { color: #6f42c1; }
 

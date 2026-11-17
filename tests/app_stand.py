@@ -511,9 +511,10 @@ class AppStand:
             self.qbit_http.close()
         self.host.close()
 
-    def torrent_page(self, alias: str, title: str, episodes: dict[str, int]) -> Tracker:
+    def torrent_page(self, alias: str, title: str, episodes: dict[str, int], *, hold: bool = False) -> Tracker:
         """A page of anilibria with one release: its files (path → the truth of its picture and sound) made by ffmpeg and
-        seeded to the model of qBittorrent, which downloads them at once into the folder the application names."""
+        seeded to the model of qBittorrent, which downloads them into the folder the application names — at once, or when
+        the scenario says so (`hold`, then `self.qbit.deliver(page.infohash)`)."""
         files = []
         for path, truth in episodes.items():
             made = os.path.join(self.root, "releases", alias, path)
@@ -521,7 +522,7 @@ class AppStand:
             self.codec.make(made, [truth])
             with open(made, "rb") as fh:
                 files.append((f"{alias}/{path}", fh.read()))
-        _meta, infohash = self.qbit.seed(files)
+        _meta, infohash = self.qbit.seed(files, hold=hold)
         page = Tracker(alias, title, infohash, f"1-{len(episodes)}")
         self.site.trackers[alias] = page
         return page

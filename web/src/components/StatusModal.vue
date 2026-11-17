@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue"
+import { ref, computed, onMounted, onUnmounted, watch } from "vue"
 import Button from "primevue/button"
 import ModalShell from "./ModalShell.vue"
 import StatusProperties from "./status/StatusProperties.vue"
@@ -10,6 +10,7 @@ import TorrentTab from "./status/torrent/TorrentTab.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
 import { fetchSources } from "../composables/sourceCalls"
+import { useSSE } from "../composables/useSSE"
 import type { SeriesSource, SourceAddress } from "../lib/sources"
 import { useSeriesStore, type Series } from "../stores/series"
 import { t } from "../i18n"
@@ -87,7 +88,12 @@ watch(tab, (next) => {
 })
 watch(hasTorrent, (has) => { if (!has && tab.value === "torrent") tab.value = "properties" })
 
+// A source added, changed or taken away (in this window or another) is told by the service: the tabs follow at once.
+const offSources = useSSE().on("series_sources_changed", (data) => {
+  if ((data as { series_id: number }).series_id === props.seriesId) void loadSources()
+})
 onMounted(() => { void load(); void loadSources() })
+onUnmounted(offSources)
 </script>
 
 <template>

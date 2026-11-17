@@ -2,8 +2,8 @@
 import { computed, ref } from "vue"
 import { t, tn, type MessageKey } from "../../../i18n"
 import { spansOf } from "../../../lib/ranges"
-import { byFolder, draftOf, fileCounts, fileFilterOf, nameOf, ruleOf, type DraftEpisode, type Editor, type FileEntry,
-  type FileFilter, type FileKind } from "../../../lib/torrent"
+import { byFolder, draftOf, episodeFolder, fileCounts, fileFilterOf, nameOf, ruleOf, type DraftEpisode, type Editor, type FileEntry,
+  type FileFilter, type FileKind, type ReleaseView } from "../../../lib/torrent"
 import { assign, unassign } from "../../../composables/torrentCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
 import type { Answer } from "../../../composables/sourceCalls"
@@ -11,7 +11,7 @@ import type { Answer } from "../../../composables/sourceCalls"
 // The editor «Файлы» (the board «Файлы»): the files of the release by their folder on the left, the draft on the right —
 // seasons, their episodes and the files laid in each by the preset of the torrents or by hand. A pick is let go on a
 // season (its files take the episodes after its last one in the order of their names), on an episode, or on «Не брать».
-const props = defineProps<{ editor: Editor }>()
+const props = defineProps<{ editor: Editor; release?: ReleaseView }>()
 const emit = defineEmits<{ failure: [string] }>()
 
 const FILTERS: readonly FileFilter[] = ["all", "unplaced", "placed", "excluded", "notInvolved"]
@@ -36,6 +36,15 @@ function fold(folder: string): void {
   folded.value = next
 }
 
+// What the client does with each file, as the release tells it: not downloaded (left out in this editor), how far it is.
+const fetched = computed(() => new Map((props.release?.files ?? []).map((file) => [file.path, file] as const)))
+function loadOf(entry: FileEntry): string {
+  const file = fetched.value.get(entry.path)
+  if (!file) return ""
+  if (file.priority === 0) return t("torrent.file.skipped")
+  return file.progress < 1 ? t("torrent.file.progress", { share: Math.floor(file.progress * 100) }) : ""
+}
+
 const pick = useTorrentPick()
 const chosenEntries = computed(() => entries.value.filter((entry) => pick.has(entry.item)))
 const folderLabel = (folder: string): string => folder || t("torrent.root")
@@ -56,16 +65,13 @@ const seasons = computed(() => {
     return { ...season, episodes, next: Math.max(0, ...season.episodes.map((each) => each.last ?? each.episode)) + 1 }
   })
 })
-const opened = ref(new Set<string>())
+// An episode is a folder of the draft, named by its place (s01e01), with the files laid in it shown under it.
+const foldedEpisodes = ref(new Set<string>())
 const episodeKey = (season: number, episode: DraftEpisode): string => `${season}:${episode.episode}:${episode.last ?? ""}`
-function openEpisode(key: string): void {
-  const next = new Set(opened.value)
+function foldEpisode(key: string): void {
+  const next = new Set(foldedEpisodes.value)
   if (!next.delete(key)) next.add(key)
-  opened.value = next
-}
-const episodeTitle = (episode: DraftEpisode): string => {
-  const video = episode.files.find((file) => file.kind === "video") ?? episode.files[0]
-  return video ? nameOf(video.path).replace(/\.[^.]+$/, "") : t("torrent.draft.empty")
+  foldedEpisodes.value = next
 }
 const KINDS: readonly FileKind[] = ["video", "audio", "subtitles", "font", "other"]
 const kindWord = (kind: FileKind): string => t(`torrent.kind.${kind}` as MessageKey)
@@ -156,6 +162,7 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
               <input type="checkbox" :checked="pick.has(entry.item)" @change="pick.toggle(entry.item)">
               <i class="torrent-dot" :class="`is-${fileFilterOf(entry)}`" aria-hidden="true" />
               <span class="torrent-name" :title="entry.path">{{ nameOf(entry.path) }}</span>
+              <span v-if="loadOf(entry)" class="torrent-how file-load">{{ loadOf(entry) }}</span>
               <span class="torrent-kind" :class="`is-${entry.kind}`">{{ kindWord(entry.kind) }}</span>
             </label>
           </template>
@@ -208,11 +215,13 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
           </div>
           <template v-for="episode in season.episodes" :key="episodeKey(season.season, episode)">
             <div class="torrent-episode episode-row" v-bind="pick.target(toEpisode(season.season, episode))">
-              <button type="button" class="torrent-en" :aria-expanded="opened.has(episodeKey(season.season, episode))"
-                      :disabled="!episode.files.length" @click="openEpisode(episodeKey(season.season, episode))">
-                {{ episode.last ? `${episode.episode}–${episode.last}` : episode.episode }}
+              <button type="button" class="torrent-fold" :aria-expanded="!foldedEpisodes.has(episodeKey(season.season, episode))"
+                      :disabled="!episode.files.length" @click="foldEpisode(episodeKey(season.season, episode))">
+                <i class="pi" :class="foldedEpisodes.has(episodeKey(season.season, episode)) ? 'pi-chevron-right' : 'pi-chevron-down'" aria-hidden="true" />
               </button>
-              <span class="torrent-name">{{ episodeTitle(episode) }}</span>
+              <i class="pi pi-folder torrent-folder-icon" aria-hidden="true" />
+              <span class="torrent-name torrent-episode-name">{{ episodeFolder(season.season, episode.episode, episode.last) }}</span>
+              <span v-if="!episode.files.length" class="torrent-how">{{ t("torrent.draft.empty") }}</span>
               <template v-for="kind in KINDS" :key="kind">
                 <span v-if="episode.kinds[kind]" class="torrent-kind" :class="`is-${kind}`">{{ kindWord(kind) }} {{ episode.kinds[kind] }}</span>
               </template>
@@ -220,10 +229,10 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
                       :aria-label="t('torrent.draft.dropEpisode', { episode: episode.episode, n: pick.count.value })"
                       @click="by(toEpisode(season.season, episode))()"><i class="pi pi-arrow-down" aria-hidden="true" /></button>
             </div>
-            <template v-if="opened.has(episodeKey(season.season, episode))">
+            <template v-if="!foldedEpisodes.has(episodeKey(season.season, episode))">
               <div v-for="file in episode.files" :key="file.item" class="torrent-file">
                 <span class="torrent-kind" :class="`is-${file.kind}`">{{ kindWord(file.kind) }}</span>
-                <span class="torrent-name" :title="file.path">{{ file.path }}</span>
+                <span class="torrent-name" :title="file.path">{{ nameOf(file.path) }}</span>
                 <span class="torrent-how" :class="{ 'is-hand': file.by === 'manual' }">{{ howOf(file) }}</span>
                 <button v-if="file.by === 'manual'" type="button" class="torrent-mini" :disabled="busy" @click="back([file.item])">
                   {{ t("torrent.unassign") }}</button>

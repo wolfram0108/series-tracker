@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { byEpisode, containerGroups, draftOf, fileCounts, foldersOf, ruleOf, sourceState, streamLabel, type ContainerFile,
+import { byEpisode, containerGroups, draftOf, episodeFolder, fileCounts, foldersOf, ruleOf, sourceState, streamLabel, type ContainerFile,
   type FileEntry, type ReleaseView, type TrackEntry } from "./torrent"
 import { RELEASE_STATES } from "./states"
 
@@ -34,6 +34,10 @@ describe("the files of a release", () => {
     expect(fileCounts(files)).toEqual({ all: 7, unplaced: 1, placed: 4, excluded: 1, notInvolved: 1 })
     expect(draftOf(files).map((season) => [season.season, season.manual, season.episodes.map((each) => [each.episode, each.kinds])])).toEqual([
       [0, true, [[1, { video: 1 }]]], [1, false, [[1, { video: 1, audio: 1 }], [2, { video: 1 }]]]])
+  })
+
+  it("lie in the folders of their episodes, named as the files of the library are", () => {
+    expect([episodeFolder(1, 5), episodeFolder(0, 12, 13), episodeFolder(2, 3, 3)]).toEqual(["s01e05", "s00e12-e13", "s02e03"])
   })
 
   it("name the rule that placed them, a row of a table by its number", () => {

@@ -190,6 +190,7 @@ SSE_MAP: dict[str, Outgoing] = {
     "planner.series.changed": Outgoing("plan_update"),
     "voices.settings.changed": Outgoing("voice_settings_update"),
     "sources.settings.changed": Outgoing("sources_settings_update"),
+    "torrents.staging.changed": Outgoing("torrent_staging_update"),
     "conform.settings.changed": Outgoing("conform_settings_update"),
     "sources.provider.changed": Outgoing("provider_update"),
     "library.relocation.started": Outgoing("relocation_started"),

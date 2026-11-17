@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import SheetField from "../SheetField.vue"
 import SheetRow from "../SheetRow.vue"
 import StInput from "../StInput.vue"
@@ -109,7 +109,14 @@ async function commitStaging(): Promise<void> {
   staging.value = stagingHeld.value
 }
 
+// The folder another window set comes by the event of the core: the field shows what the core holds.
+const offStaging = useSSE().on("torrent_staging_update", (data) => {
+  const value = (data as { value: string }).value
+  stagingHeld.value = value
+  staging.value = value
+})
 onMounted(() => { void gate.run(); void loadStaging() })
+onUnmounted(offStaging)
 </script>
 
 <template>

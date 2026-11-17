@@ -86,7 +86,7 @@ torrent_release_files, torrent_release_versions), keyed by the page and the id o
   torrents.release.watch {url, release, watched} → ReleaseView — the automatic update on or off
   torrents.staging.get {} → {value} and torrents.staging.set {value} → {ok, value, reason?} — the folder the releases download
       into (the setting torrents.staging_dir); a value that is no absolute path is refused (`staging_dir_not_absolute`); the
-      releases move there on settings.changed
+      releases move there on settings.changed; event torrents.staging.changed {value} tells every window the folder held now
   torrents.release.priorities {url, release, skip: [path]} (command) — the files not to download
   torrents.release.drop_files {url, release} (command) — a release no longer watched gives up its files (archived)
   Event torrents.release.changed ReleaseView — state, version or files changed; `ready` once every wanted file is there
@@ -1404,6 +1404,8 @@ class TorrentsModule(BaseModule):
 
     async def on_settings_changed(self, env: Envelope) -> None:
         if env.payload.get("key") == STAGING_DIR_KEY:
+            # Every open window of the settings shows the folder the core holds now, whichever window set it.
+            self.publish_event("torrents.staging.changed", {"value": env.payload.get("value") or ""})
             await self.releases.relocate(env.payload.get("value") or "")
 
     async def _release_loop(self) -> None:
