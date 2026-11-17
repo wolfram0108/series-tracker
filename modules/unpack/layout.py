@@ -208,7 +208,11 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                 streams = _probed(inputs, release.release, video)
                 height = max((s["height"] or 0 for s in streams if s["kind"] == "video" and not s["picture"]), default=0)
                 view["containers"].append({"item": item_of(release.release, video), "path": video, "place": _place_json(where),
-                                           "streams": [{key: s.get(key) for key in _STREAM_KEYS} for s in streams
+                                           "streams": [{**{key: s.get(key) for key in _STREAM_KEYS},
+                                                        # the line of the stream as the rules of «Контейнеры» read it
+                                                        "line": stream_line(s["kind"], s["index"], s["language"], s["title"],
+                                                                            s["codec"])}
+                                                       for s in streams
                                                        if s["kind"] in ("video", *TRACK_KINDS) and not s.get("picture")]})
                 for s in streams:
                     if s["kind"] not in TRACK_KINDS:

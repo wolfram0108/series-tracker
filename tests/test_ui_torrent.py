@@ -96,7 +96,9 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     await page.locator(".torrent-switch .tab-streams").click()
     sounds = page.locator(".torrent-streams .stream-row.is-unplaced")
     await expect(sounds).to_have_count(1)  # one container: the sound of both files
-    await expect(sounds.first).to_contain_text(text("torrent.track.noLanguage"))
+    # The row is the raw line of the stream, as the rule reads it: the kind, the number, the codec; no language in the file.
+    line = sounds.first.locator(".torrent-line")
+    await expect(line).to_have_text(re.compile(r"^T:звук \| A:\d+ \| C:aac$"))
     await ui._rule({"name": "звук", "if": [{"type": "text", "value": "T:звук"}],
                     "then": [("assign_voice_folder", "Студия"), ("assign_language", "rus")]})
     await expect(page.locator(".torrent-streams .stream-row.is-unplaced")).to_have_count(0, timeout=LONG_S)
@@ -124,6 +126,6 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
             await expect(filters.nth(index)).to_have_class(re.compile(r"\bactive\b"))
             assert await boxes() == first, (tab, index)
     await page.locator(".torrent-filters .torrent-filter").first.click()  # «Все»: the files are listed again
-    name = page.locator(".torrent-files .file-row .torrent-name").first
+    name = page.locator(".torrent-files .file-row .torrent-line-field.is-name").first
     await name.dblclick()
     assert (await page.evaluate("getSelection().toString()")).strip()

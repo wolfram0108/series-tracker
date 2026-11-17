@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { t, tn, type MessageKey } from "../../../i18n"
-import { containerGroups, foldersOf, trackCounts, type ContainerStream, type Editor, type Folder, type StreamFacts } from "../../../lib/torrent"
+import { containerGroups, foldersOf, trackCounts, type ContainerStream, type Editor, type Folder } from "../../../lib/torrent"
 import { assign, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
 import TorrentFolder from "./TorrentFolder.vue"
+import TorrentLine from "./TorrentLine.vue"
 
 // The editor «Контейнеры» (its board): the tracks inside the video files, files of one composition and one season shown
 // as one container; a track of it picked is the track of every file of the container. The folders are those of
@@ -26,18 +27,12 @@ const counts = computed(() => {
   return { all: entries.value.length + video, unplaced: tracks.unplaced, placed: tracks.placed, video }
 })
 const fits = (stream: ContainerStream): boolean => filter.value === "all" || (filter.value === "video" ? stream.facts.kind === "video"
-  : stream.facts.kind !== "video" && (filter.value === "placed" ? !!stream.folder : stream.unplaced))
+  : stream.facts.kind !== "video" && (filter.value === "placed" ? !stream.unplaced : stream.unplaced))
 const groups = computed(() => containerGroups(props.editor.view.containers, entries.value)
   .map((group) => ({ ...group, shown: group.streams.filter(fits) })).filter((group) => group.shown.length))
 const groupTitle = (group: (typeof groups.value)[number]): string => group.season === null
   ? t("torrent.streams.groupNoSeason", { files: tn("torrent.files", group.files) }) : t("torrent.streams.group", { season: group.season, episodes: group.episodes })
 
-const CHANNELS: Record<number, string> = { 1: "1.0", 2: "2.0", 6: "5.1", 8: "7.1" }
-function factsOf(facts: StreamFacts): string {
-  const shape = facts.kind === "video" ? (facts.height ? `${facts.height}p` : "")
-    : facts.channels ? CHANNELS[facts.channels] ?? String(facts.channels) : ""
-  return [facts.codec, shape].filter(Boolean).join(" ")
-}
 const dotOf = (stream: ContainerStream): string => stream.facts.kind === "video" ? "is-notInvolved" : stream.unplaced ? "is-unplaced" : "is-placed"
 
 const pick = useTorrentPick()
@@ -115,16 +110,7 @@ async function create(): Promise<void> {
               <input type="checkbox" :checked="pick.allOf(stream.items)" :aria-label="stream.label" @change="pick.toggleAll(stream.items)">
             </template>
             <i class="torrent-dot" :class="dotOf(stream)" aria-hidden="true" />
-            <span class="torrent-stream-facts">{{ stream.label }}<template v-if="factsOf(stream.facts)"> · {{ factsOf(stream.facts) }}</template></span>
-            <span v-if="stream.facts.kind === 'video'" class="torrent-name torrent-pane-hint">{{ t("torrent.streams.video") }}</span>
-            <span v-else class="torrent-name">
-              <template v-if="stream.facts.title">«{{ stream.facts.title }}» <span class="torrent-meta">{{ t("torrent.meta") }}</span></template>
-              <template v-else>{{ t("torrent.streams.noTitle") }}</template>
-              <template v-if="stream.facts.language && stream.facts.language !== 'und'"> · {{ stream.facts.language }} <span class="torrent-meta">{{ t("torrent.meta") }}</span></template>
-            </span>
-            <span v-if="stream.noLanguage" class="torrent-tg is-problem">
-              {{ t("torrent.track.noLanguage") }}</span>
-            <span v-if="stream.facts.kind !== 'video'" class="torrent-tg">{{ stream.folder ?? "—" }}</span>
+            <TorrentLine :line="stream.facts.line ?? stream.label" />
           </div>
         </template>
         <p v-if="!groups.length" class="torrent-note">{{ t("torrent.empty") }}</p>

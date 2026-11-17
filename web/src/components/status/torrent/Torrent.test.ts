@@ -29,17 +29,22 @@ const ok = <T>(data: T) => ({ ok: true as const, data })
 const source = { id: 3, series_id: 1, position: 2, url: URL, source_type: "torrent", color: 2 } as unknown as SeriesSource
 const kept = (state: ReleaseView["state"], progress = 1): ReleaseView => ({ url: URL, release: "page", title: "Сериал / WEB-DL", state,
   watched: true, pending: false, files: [{ path: "S/E01.mkv", size: 1, progress, priority: 1 }, { path: "S/E02.mkv", size: 1, progress: 1, priority: 1 }] })
+// The line of a file as the core makes it (core/contracts/torrent.py files_line).
+const fileLine = (path: string, kind: string) => {
+  const at = path.lastIndexOf("/")
+  return `D:${path.slice(0, at)} | ${path.slice(at + 1)} | K:${{ video: "видео", audio: "звук", subtitles: "субтитры", font: "шрифт" }[kind]} | X:${path.split(".").pop()}`
+}
 const file = (path: string, kind: "video" | "audio" | "subtitles" | "font", place: [number, number] | null, by: string | null = null) => ({
-  item: `page/${path}`, path, line: path, kind, size: 1, priority: 1, excluded: false,
+  item: `page/${path}`, path, line: fileLine(path, kind), kind, size: 1, priority: 1, excluded: false,
   place: place && { season: place[0], episode: place[1], last: null }, by })
 const view = (overrides: Partial<EditorView> = {}): EditorView => ({
   releases: [{ release: "page", title: "", state: "ready", pending: false, reading: null }],
   tabs: {
     files: [file("S/E01.mkv", "video", [1, 1], "Серия · 1"), file("Bonus/OVA 2.mkv", "video", null), file("Bonus/OVA 1.mkv", "video", null),
       file("S/fonts/a.ttf", "font", null)],
-    voices: [{ item: "page/S/JAM/E01.mka", line: "", kind: "audio", folder: "JAM", by: "Озвучка · 1", excluded: false, waiting: false, language: "rus",
+    voices: [{ item: "page/S/JAM/E01.mka", line: "D:S/JAM | E01.mka | X:mka | S:S01E01", kind: "audio", folder: "JAM", by: "Озвучка · 1", excluded: false, waiting: false, language: "rus",
       subtitle_type: "", path: "S/JAM/E01.mka", place: { season: 1, episode: 1, last: null }, stream: null },
-    { item: "page/S/Mil/E01.mka", line: "", kind: "audio", folder: null, by: null, excluded: false, waiting: true, language: "rus", subtitle_type: "",
+    { item: "page/S/Mil/E01.mka", line: "D:S/Mil | E01.mka | X:mka | S:S01E01", kind: "audio", folder: null, by: null, excluded: false, waiting: true, language: "rus", subtitle_type: "",
       path: "S/Mil/E01.mka", place: { season: 1, episode: 1, last: null }, stream: null }],
     subtitles: [], streams: [],
   },
@@ -116,7 +121,7 @@ describe("the head of the tab", () => {
 describe("the editor «Файлы»", () => {
   it("lays the files picked on a season in the episodes after its last one, in the order of their names", async () => {
     const w = mountWith(TorrentFiles, { editor: editor() })
-    const bonus = w.findAll(".torrent-row.is-group").find((row) => row.text().startsWith("Bonus"))!
+    const bonus = w.findAll(".torrent-row.is-group").find((row) => row.text().startsWith("D:Bonus"))!
     await bonus.find("input[type=checkbox]").setValue(true)
     expect(w.find(".torrent-pick").text()).toContain(t("torrent.select.count", { n: 2 }))
     const season = w.find(".drop-season")
@@ -142,15 +147,15 @@ describe("the editors of the tracks", () => {
     expect(folders.map((each) => each.find(".torrent-folder-name").text())).toEqual(["JAM", "Милирина"])
     expect(folders[0].text()).toContain(t("torrent.by.row", { rule: "Озвучка", row: 1 }))
     expect(folders[1].text()).toContain(t("torrent.folder.manualEmpty"))
-    const unplaced = w.findAll(".track-row").find((row) => row.text().includes("Mil"))!
+    const unplaced = w.findAll(".track-row").find((row) => row.text().includes("D:S/Mil"))!
     await unplaced.find("input").setValue(true)
     await w.findAll(".drop-folder").at(-1)!.trigger("click")
     expect(calls.assign).toHaveBeenCalledWith({ url: URL, tab: "voices", items: ["page/S/Mil/E01.mka"], folder: "Милирина" })
   })
 
   it("show the containers of one composition as one, a track of it standing for that track of every file", async () => {
-    const streams = () => [{ index: 0, kind: "video", codec: "h264", height: 1080 },
-      { index: 1, kind: "audio", codec: "ac3", channels: 2, language: "rus", title: "" }]
+    const streams = () => [{ index: 0, kind: "video", codec: "h264", height: 1080, line: "T:видео | A:0 | C:h264" },
+      { index: 1, kind: "audio", codec: "ac3", channels: 2, language: "rus", title: "", line: "T:звук | A:1 | L:rus | C:ac3" }]
     const track = (n: number) => ({ item: `page/S/E0${n}.mkv#1`, line: "", kind: "audio" as const, folder: null, by: null, excluded: false, waiting: true,
       language: "rus", subtitle_type: "", path: `S/E0${n}.mkv`, place: { season: 0, episode: n, last: null }, stream: streams()[1] })
     const w = mountWith(TorrentStreams, { editor: editor({
@@ -159,7 +164,8 @@ describe("the editors of the tracks", () => {
     }) })
     expect(w.find(".torrent-row.is-group").text()).toContain(t("torrent.streams.group", { season: 0, episodes: "1–2" }))
     const rows = w.findAll(".stream-row")
-    expect(rows.map((row) => row.find(".torrent-stream-facts").text())).toEqual(["v0 · h264 1080p", "a0 · ac3 2.0"])
+    // Each track shows its raw line, as the rules of the tab read it, and nothing of where it went.
+    expect(rows.map((row) => row.find(".torrent-line").text())).toEqual(["T:видео | A:0 | C:h264", "T:звук | A:1 | L:rus | C:ac3"])
     await rows[1].find("input").setValue(true)
     expect(w.find(".torrent-pick").text()).toContain(t("torrent.select.count", { n: 2 }))
     await w.findAll(".drop-folder").at(-1)!.trigger("click")

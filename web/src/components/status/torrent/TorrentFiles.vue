@@ -6,6 +6,7 @@ import { byFolder, draftOf, episodeFolder, fileCounts, fileFilterOf, nameOf, rul
   type FileFilter, type FileKind, type ReleaseView } from "../../../lib/torrent"
 import { assign, unassign } from "../../../composables/torrentCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
+import TorrentLine from "./TorrentLine.vue"
 import type { Answer } from "../../../composables/sourceCalls"
 
 // The editor «Файлы» (the board «Файлы»): the files of the release by their folder on the left, the draft on the right —
@@ -146,7 +147,8 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
             <button type="button" class="torrent-fold" :aria-expanded="!folded.has(group.folder)" @click="fold(group.folder)">
               <i class="pi" :class="folded.has(group.folder) ? 'pi-chevron-right' : 'pi-chevron-down'" aria-hidden="true" />
             </button>
-            <span class="torrent-name">{{ folderLabel(group.folder) }}</span>
+            <TorrentLine v-if="group.folder" :line="`D:${group.folder}`" />
+            <span v-else class="torrent-name">{{ t("torrent.root") }}</span>
             <span class="torrent-side">
               <template v-for="kind in (['unplaced', 'placed', 'excluded', 'notInvolved'] as const)" :key="kind">
                 <span v-if="group.kinds[kind]"><i class="torrent-dot" :class="`is-${kind}`" aria-hidden="true" />{{ group.kinds[kind] }}
@@ -163,9 +165,8 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
                   @dragstart="pick.dragStart($event, [entry.item])" @dragend="pick.dragEnd"><i class="pi pi-ellipsis-v" /></span>
               <input type="checkbox" :checked="pick.has(entry.item)" :aria-label="nameOf(entry.path)" @change="pick.toggle(entry.item)">
               <i class="torrent-dot" :class="`is-${fileFilterOf(entry)}`" aria-hidden="true" />
-              <span class="torrent-name" :title="entry.path">{{ nameOf(entry.path) }}</span>
+              <TorrentLine :line="entry.line" :skip="['D']" />
               <span v-if="loadOf(entry)" class="torrent-how file-load">{{ loadOf(entry) }}</span>
-              <span class="torrent-kind" :class="`is-${entry.kind}`">{{ kindWord(entry.kind) }}</span>
             </div>
           </template>
         </template>

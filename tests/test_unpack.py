@@ -393,3 +393,6 @@ def test_the_editor_tells_the_file_episode_and_stream_of_every_track_and_what_ev
     assert (voice["path"], voice["place"]["episode"]) == ("Show/Show - 01.rus.mka", 1)
     assert [(each["path"], [s["kind"] for s in each["streams"]]) for each in view["containers"]] == [
         ("Show/Show - 01.mkv", ["video", "audio"])]
+    # Every stream of a container carries its line as the rules read it, the video's too: the window shows it as it is.
+    assert [s["line"] for s in view["containers"][0]["streams"]] == ["T:видео | A:0 | C:h264",
+                                                                     "T:звук | A:1 | L:jpn | N:Original | C:aac"]

@@ -37,6 +37,8 @@ export interface StreamFacts {
   height?: number | null
   forced?: boolean | null
   default?: boolean | null
+  /** The line of the stream as the rules of «Контейнеры» read it (a stream of a container only). */
+  line?: string
 }
 export type FileKind = "video" | "audio" | "subtitles" | "font" | "other"
 export interface FileEntry {

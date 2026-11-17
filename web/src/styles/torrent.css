@@ -149,4 +149,12 @@
 .torrent-new { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.5rem 0.875rem; border-block-end: 1px solid #e9ecef; }
 
 /* A track inside a container: its letter and number with what the file says of it, its name, the folder it lies in. */
+/* The raw line of an item, field by field (TorrentLine): the code of a field dimmed, the text selectable as it is. */
+.torrent-line {
+  flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text;
+  font-family: var(--font-mono); font-size: 0.78rem; color: var(--color-text);
+}
+.torrent-line-code { color: var(--text-muted); }
+.torrent-line-sep { color: var(--border-color); }
+.torrent-row.is-unplaced .torrent-line-field.is-name { color: #a61e2d; }
 .torrent-stream-facts { flex: none; inline-size: 9.5rem; font-family: var(--font-mono); font-size: 0.75rem; color: #495057; }

@@ -6,6 +6,7 @@ import { assign, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
 import TorrentFolder from "./TorrentFolder.vue"
+import TorrentLine from "./TorrentLine.vue"
 
 // The editors «Озвучки» and «Субтитры» (their boards): the external sound or subtitles files of the release by the episode
 // of their video on the left, the folders on the right — the name of a folder is the name of the voice-over or of the
@@ -25,9 +26,7 @@ const counts = computed(() => ({ ...trackCounts(entries.value), fonts: fonts.val
 const groups = computed(() => filter.value === "fonts" ? []
   : byEpisode(entries.value.filter((entry) => trackFits(entry, filter.value as TrackFilter))))
 const dotOf = (entry: TrackEntry): string => entry.excluded ? "is-excluded" : entry.waiting ? "is-unplaced" : "is-placed"
-// The language a track goes out with; one its file does not know (none, `und`) is said so: a rule names it.
-const languageOf = (entry: TrackEntry): string => UNKNOWN.has(entry.language.trim().toLowerCase()) ? t("torrent.track.noLanguage") : entry.language
-const UNKNOWN = new Set(["", "und"])
+
 const groupTitle = (group: (typeof groups.value)[number]): string => group.place
   ? t("torrent.tracks.group", { season: group.place.season, episode: group.place.last ? `${group.place.episode}–${group.place.last}` : group.place.episode })
   : t("torrent.tracks.noEpisode")
@@ -105,9 +104,7 @@ async function create(): Promise<void> {
                   @dragstart="pick.dragStart($event, [entry.item])" @dragend="pick.dragEnd"><i class="pi pi-ellipsis-v" /></span>
             <input type="checkbox" :checked="pick.has(entry.item)" :aria-label="entry.path" @change="pick.toggle(entry.item)">
             <i class="torrent-dot" :class="dotOf(entry)" aria-hidden="true" />
-            <span class="torrent-name" :title="entry.path">{{ entry.path }}</span>
-            <span class="torrent-tg" :class="{ 'is-problem': UNKNOWN.has(entry.language.trim().toLowerCase()) }">{{ languageOf(entry) }}</span>
-            <span v-if="entry.folder" class="torrent-tg">{{ entry.folder }}</span>
+            <TorrentLine :line="entry.line" />
           </div>
         </template>
         <template v-if="filter === 'fonts' || (filter === 'all' && tab === 'subtitles' && fonts.length)">
