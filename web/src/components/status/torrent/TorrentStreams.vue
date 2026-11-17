@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { t, tn, type MessageKey } from "../../../i18n"
-import { containerGroups, trackCounts, type ContainerStream, type Editor, type Folder, type StreamTab, tabsOfKind } from "../../../lib/torrent"
+import { containerGroups, trackCounts, type ContainerStream, type Editor, type Folder, type StreamTab } from "../../../lib/torrent"
 import { assign, autoLayout, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
@@ -41,7 +41,6 @@ const groupTitle = (group: (typeof groups.value)[number]): string => group.seaso
 const stateOf = (stream: ContainerStream): string => stream.facts.kind === "video" ? "is-notInvolved" : stream.unplaced ? "is-unplaced" : "is-placed"
 
 const pick = useTorrentPick()
-const kinds = computed(() => [kind.value])
 
 const url = computed(() => props.editor.url)
 const busy = ref(false)
@@ -58,10 +57,10 @@ async function send(call: () => Promise<Answer<unknown>>): Promise<void> {
 const toFolder = (name: string, items: string[]) => send(() => assign({ url: url.value, tab: props.tab, items, folder: name }))
 const manualChosen = computed(() => [...pick.chosen.value].filter((item) => byItem.value.get(item)?.by === "manual"))
 const back = () => send(() => unassign(url.value, props.tab, manualChosen.value))
-// «Авто»: the automatic layout makes again the folders of this kind the user deleted; the hand's placements stay.
-const hiddenHere = computed(() => props.editor.view.hidden.some((each) => each.kind === kind.value)
-  || props.editor.view.removed.some((each) => tabsOfKind(kind.value).includes(each.tab)))
-const toAuto = () => send(() => autoLayout(url.value, [kind.value]))
+// «Авто»: the automatic layout makes again what the user took from this tab; the hand's placements stay.
+const hiddenHere = computed(() => props.editor.view.hidden.some((each) => each.tab === props.tab)
+  || props.editor.view.removed.some((each) => each.tab === props.tab))
+const toAuto = () => send(() => autoLayout(url.value, [props.tab]))
 
 const naming = ref(false)
 const name = ref("")
@@ -70,7 +69,7 @@ async function create(): Promise<void> {
   if (!value) return
   busy.value = true
   try {
-    const answer = await setFolder({ url: url.value, kind: kind.value, name: value })
+    const answer = await setFolder({ url: url.value, tab: props.tab, name: value })
     if (answer.ok) {
       naming.value = false
       name.value = ""
@@ -136,9 +135,9 @@ async function create(): Promise<void> {
         <button type="button" class="torrent-mini" @click="naming = false">{{ t("common.cancel") }}</button>
       </form>
       <div class="torrent-pane-body">
-        <TorrentFolders :editor="editor" :kinds="kinds" :pick="pick" :fits="() => true"
+        <TorrentFolders :editor="editor" :tab="tab" :pick="pick" :fits="() => true"
                         @drop="(_, name, items) => toFolder(name, items)" @failure="emit('failure', $event)" />
-        <p v-if="!editor.view.folders.some((each) => each.kind === kind)" class="torrent-note">{{ t("torrent.folders.none") }}</p>
+        <p v-if="!editor.view.folders.some((each) => each.tab === tab)" class="torrent-note">{{ t("torrent.folders.none") }}</p>
       </div>
     </section>
   </div>

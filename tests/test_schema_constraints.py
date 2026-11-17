@@ -100,14 +100,15 @@ def test_a_track_taken_out_of_its_folder_is_one_per_tab_of_tracks(conn):
             conn.execute(f"INSERT INTO unpack_removed (url, tab, item) VALUES {bad}")
 
 
-def test_a_folder_of_the_editor_is_one_by_its_name_and_of_a_known_type(conn):
-    conn.execute("INSERT INTO unpack_folders (url, kind, name, subtitle_type) VALUES ('u', 'subtitles', 'Надписи', 'signs')")
-    conn.execute("INSERT INTO unpack_folders (url, kind, name) VALUES ('u', 'voice', 'Надписи')")
-    for bad in ("('u', 'subtitles', 'Надписи', '')", "('u', 'voice', '', '')", "('u', 'subtitles', 'x', 'other')",
-                "('u', 'subtitles', 'y', 'forced')",
-                "('u', 'video', 'x', '')"):
+def test_a_folder_of_the_editor_is_one_by_its_name_in_its_tab_and_of_a_known_type(conn):
+    conn.execute("INSERT INTO unpack_folders (url, tab, name, subtitle_type) VALUES ('u', 'subtitles', 'Надписи', 'signs')")
+    # One name in two tabs of a kind: two folders, two sets.
+    conn.execute("INSERT INTO unpack_folders (url, tab, name) VALUES ('u', 'subtitle_streams', 'Надписи')")
+    conn.execute("INSERT INTO unpack_folders (url, tab, name) VALUES ('u', 'voices', 'Надписи')")
+    for bad in ("('u', 'subtitles', 'Надписи', '')", "('u', 'voices', '', '')", "('u', 'subtitles', 'x', 'other')",
+                "('u', 'subtitles', 'y', 'forced')", "('u', 'files', 'x', '')", "('u', 'voice', 'x', '')"):
         with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(f"INSERT INTO unpack_folders (url, kind, name, subtitle_type) VALUES {bad}")
+            conn.execute(f"INSERT INTO unpack_folders (url, tab, name, subtitle_type) VALUES {bad}")
 
 
 def test_a_profile_is_of_a_series_unless_said_to_be_of_the_torrent_editor(conn):

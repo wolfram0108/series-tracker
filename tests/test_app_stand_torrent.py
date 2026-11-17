@@ -134,7 +134,7 @@ async def test_the_output_lays_the_subtitles_of_a_release_in_the_container_defau
     await sound_rule(stand, profiles["voice_streams"])
     await until_table(stand, page.url, 1)
     # The file of subtitles has no name in it: the operator makes the folder, its language and its type, and puts it there.
-    await stand.call("POST", "/api/torrent/editor/folder", {"url": page.url, "kind": "subtitles", "name": "Надписи",
+    await stand.call("POST", "/api/torrent/editor/folder", {"url": page.url, "tab": "subtitles", "name": "Надписи",
                                                             "language": "rus", "subtitle_type": "signs"})
     items = [each["item"] for each in (await stand.call("POST", "/api/torrent/editor", {"url": page.url}))["view"]["tabs"]["subtitles"]]
     assert len(items) == 1

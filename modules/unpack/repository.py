@@ -65,34 +65,33 @@ class UnpackRepository:
                                      for item in items])
 
     async def folders(self, url: str) -> list[dict]:
-        return await self._db.fetch_all("SELECT kind, name, language, subtitle_type FROM unpack_folders WHERE url=? "
-                                        "ORDER BY kind, name", (url,))
+        return await self._db.fetch_all("SELECT tab, name, language, subtitle_type FROM unpack_folders WHERE url=? "
+                                        "ORDER BY tab, name", (url,))
 
-    async def set_folder(self, url: str, kind: str, name: str, language: str, subtitle_type: str) -> None:
-        await self._db.execute("INSERT OR REPLACE INTO unpack_folders (url, kind, name, language, subtitle_type) "
-                               "VALUES (?, ?, ?, ?, ?)", (url, kind, name, language, subtitle_type))
+    async def set_folder(self, url: str, tab: str, name: str, language: str, subtitle_type: str) -> None:
+        await self._db.execute("INSERT OR REPLACE INTO unpack_folders (url, tab, name, language, subtitle_type) "
+                               "VALUES (?, ?, ?, ?, ?)", (url, tab, name, language, subtitle_type))
 
-    async def delete_folder(self, url: str, kind: str, name: str, items: dict[str, list[str]], automatic: bool) -> None:
-        """The folder goes: its settings, the hand's placements in it (`items`: tab → items, as the editor names them), and
-        one of the automatic layout (`automatic`) is not made by it again until «Авто»."""
+    async def delete_folder(self, url: str, tab: str, name: str, items: list[str], automatic: bool) -> None:
+        """The folder of a tab goes: its settings, the hand's placements in it (`items`), and one of the automatic layout
+        (`automatic`) is not made by it again until «Авто»."""
         await self._db.execute_many(
-            [("DELETE FROM unpack_folders WHERE url=? AND kind=? AND name=?", (url, kind, name))]
-            + ([("INSERT OR IGNORE INTO unpack_hidden (url, kind, name) VALUES (?, ?, ?)", (url, kind, name))] if automatic else [])
+            [("DELETE FROM unpack_folders WHERE url=? AND tab=? AND name=?", (url, tab, name))]
+            + ([("INSERT OR IGNORE INTO unpack_hidden (url, tab, name) VALUES (?, ?, ?)", (url, tab, name))] if automatic else [])
             + [("DELETE FROM unpack_assignments WHERE url=? AND tab=? AND item=? AND folder=?", (url, tab, item, name))
-               for tab, listed in items.items() for item in listed])
+               for item in items])
 
     async def hidden(self, url: str) -> list[dict]:
-        """The folders of the automatic layout the user deleted."""
-        return await self._db.fetch_all("SELECT kind, name FROM unpack_hidden WHERE url=? ORDER BY kind, name", (url,))
+        """The folders of the automatic layout the user deleted, by tab."""
+        return await self._db.fetch_all("SELECT tab, name FROM unpack_hidden WHERE url=? ORDER BY tab, name", (url,))
 
-    async def unhide(self, url: str, kinds: list[str], name: str | None = None) -> None:
-        """«Авто»: the automatic layout makes the folders of these kinds again (one, with `name`), and with all of a kind
-        places again the tracks of its tabs the user took out of their folders."""
-        tabs = {"voice": ("voices", "voice_streams"), "subtitles": ("subtitles", "subtitle_streams")}
-        await self._db.execute_many([("DELETE FROM unpack_hidden WHERE url=? AND kind=?" + (" AND name=?" if name else ""),
-                                      (url, kind, name) if name else (url, kind)) for kind in kinds]
+    async def unhide(self, url: str, tabs: list[str], name: str | None = None) -> None:
+        """«Авто»: the automatic layout makes the folders of these tabs again (one, with `name`), and with all of a tab places
+        again its tracks the user took out of their folders."""
+        await self._db.execute_many([("DELETE FROM unpack_hidden WHERE url=? AND tab=?" + (" AND name=?" if name else ""),
+                                      (url, tab, name) if name else (url, tab)) for tab in tabs]
                                     + ([] if name else [("DELETE FROM unpack_removed WHERE url=? AND tab=?", (url, tab))
-                                                        for kind in kinds for tab in tabs[kind]]))
+                                                        for tab in tabs]))
 
     # --- the profiles of the tabs of a source -----------------------------------------------------------------------
 

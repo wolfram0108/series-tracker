@@ -58,8 +58,8 @@ describe("the tracks of a release", () => {
     const tracks = [track("b", "JAM", 2, "Озвучка · 1"), track("a", "JAM", 1, "Озвучка · 1"), track("c", null, 1), track("d", "JAM", 4)]
     expect(byEpisode(tracks).map((group) => [group.place?.episode, group.entries.map((each) => each.item)])).toEqual([
       [1, ["a", "c"]], [2, ["b"]], [4, ["d"]]])
-    const folders = [{ kind: "voice" as const, name: "JAM", items: 9, manual: false, language: "rus", subtitle_type: "", fonts: [] },
-      { kind: "subtitles" as const, name: "Cafe", items: 1, manual: false, language: "", subtitle_type: "", fonts: ["f.ttf"] }]
+    const folders = [{ tab: "voices" as const, kind: "voice" as const, name: "JAM", items: 9, manual: false, language: "rus", subtitle_type: "", fonts: [] },
+      { tab: "subtitles" as const, kind: "subtitles" as const, name: "Cafe", items: 1, manual: false, language: "", subtitle_type: "", fonts: ["f.ttf"] }]
     expect(foldersOf(folders, tracks, "voice")).toEqual([{ ...folders[0], episodes: "1: 1–2, 4", rule: { rule: "Озвучка", row: 1 }, held: 3,
       fromMeta: false, trackLanguage: "rus" }])
     // A folder made of the titles of the files alone says so, and names no rule.

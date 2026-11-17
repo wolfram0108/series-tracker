@@ -8,7 +8,6 @@ export type EditorTab = "files" | "voices" | "subtitles" | "voice_streams" | "su
 export const EDITOR_TABS: readonly EditorTab[] = ["files", "voices", "subtitles", "voice_streams", "subtitle_streams"]
 /** The tabs of the tracks inside the video files: the sound («Озв. конт.») and the subtitles («Суб. конт.»). */
 export type StreamTab = "voice_streams" | "subtitle_streams"
-export const streamTabOf = (kind: "voice" | "subtitles"): StreamTab => kind === "voice" ? "voice_streams" : "subtitle_streams"
 
 export interface ReleaseFile { path: string; size: number; progress: number; priority: number }
 /** A release the core keeps for a page (torrents.releases.get). */
@@ -69,7 +68,11 @@ export interface TrackEntry {
   place: Place | null
   stream: StreamFacts | null
 }
+/** A tab of tracks: a folder belongs to one («Озвучки», «Субтитры», «Озв. конт.», «Суб. конт.» are four sets). */
+export type TrackTab = "voices" | "subtitles" | StreamTab
+export const kindOfTab = (tab: TrackTab): "voice" | "subtitles" => tab === "voices" || tab === "voice_streams" ? "voice" : "subtitles"
 export interface Folder {
+  tab: TrackTab
   kind: "voice" | "subtitles"
   name: string
   items: number
@@ -89,12 +92,10 @@ export interface EditorView {
   unplaced: Record<EditorTab, number>
   containers: ContainerFile[]
   /** The folders of the automatic layout the user deleted: «Авто» makes them again. */
-  hidden: { kind: Folder["kind"]; name: string }[]
+  hidden: { tab: TrackTab; name: string }[]
   /** The tracks the user took out of their folders («−»): red until a hand or «Авто». */
   removed: { tab: EditorTab; item: string }[]
 }
-/** The tabs of the tracks of a kind of folder: «Авто» of that kind gives them back to the automatic layout. */
-export const tabsOfKind = (kind: Folder["kind"]): EditorTab[] => kind === "voice" ? ["voices", "voice_streams"] : ["subtitles", "subtitle_streams"]
 export interface Editor { url: string; profiles: Record<EditorTab, number | null>; view: EditorView }
 
 // --- the state of a source, as the head of the tab shows it ---------------------------------------------------------
@@ -261,21 +262,18 @@ export function foldersOf(folders: readonly Folder[], entries: readonly TrackEnt
 }
 
 /** A track a folder holds, with the tab it is placed in (the folders are shared by «Озвучки», «Субтитры», «Контейнеры»). */
-export interface FolderTrack { tab: "voices" | "subtitles" | StreamTab; entry: TrackEntry }
+export interface FolderTrack { tab: TrackTab; entry: TrackEntry }
 export interface FolderRow extends FolderView {
   /** Every track it holds, of the files and of the containers alike. */
   tracks: FolderTrack[]
 }
 
-/** The folders of a kind with every track of the release they hold: the external files of their tab and the tracks of the
- *  containers, in the order of the episodes. */
-export function folderRows(view: EditorView, kind: Folder["kind"]): FolderRow[] {
-  const tab = kind === "voice" ? "voices" as const : "subtitles" as const
-  const tracks: FolderTrack[] = [...view.tabs[tab].map((entry) => ({ tab, entry })),
-    ...view.tabs[streamTabOf(kind)].map((entry) => ({ tab: streamTabOf(kind), entry }))]
+/** The folders of a tab with every track of it they hold, in the order of the episodes. */
+export function folderRows(view: EditorView, tab: TrackTab): FolderRow[] {
+  const tracks: FolderTrack[] = view.tabs[tab].map((entry) => ({ tab, entry }))
   const order = (a: FolderTrack, b: FolderTrack): number => !a.entry.place ? 1 : !b.entry.place ? -1
     : a.entry.place.season - b.entry.place.season || a.entry.place.episode - b.entry.place.episode || a.entry.item.localeCompare(b.entry.item)
-  return foldersOf(view.folders, tracks.map((each) => each.entry), kind).map((folder) => {
+  return foldersOf(view.folders.filter((folder) => folder.tab === tab), tracks.map((each) => each.entry), kindOfTab(tab)).map((folder) => {
     const mine = tracks.filter((each) => each.entry.folder === folder.name).sort(order)
     return { ...folder, tracks: mine }
   })

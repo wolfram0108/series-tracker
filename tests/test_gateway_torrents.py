@@ -19,13 +19,13 @@ async def test_every_point_asks_its_owner_with_the_body_as_it_came(tmp_path):
                             ("watch", {"url": URL, "release": "page", "watched": False}), ("editor", {"url": URL}),
                             ("editor/assign", {"url": URL, "tab": "files", "items": ["page/E01.mkv"], "season": 1, "episode": 3}),
                             ("editor/unassign", {"url": URL, "tab": "files", "items": ["page/E01.mkv"]}),
-                            ("editor/folder", {"url": URL, "kind": "voice", "name": "JAM", "language": "rus"}),
-                            ("editor/folder/delete", {"url": URL, "kind": "voice", "name": "JAM"})):
+                            ("editor/folder", {"url": URL, "tab": "voices", "name": "JAM", "language": "rus"}),
+                            ("editor/folder/delete", {"url": URL, "tab": "voices", "name": "JAM"})):
             assert (await client.post(f"/api/torrent/{point}", json=body)).status_code == 200, point
     assert owners.asked("torrents.release.download") == [{"url": URL, "release": "page"}]
     assert owners.asked("unpack.assign") == [{"url": URL, "tab": "files", "items": ["page/E01.mkv"], "season": 1, "episode": 3,
                                               "episode_last": None, "folder": None, "in_order": False}]
-    assert owners.asked("unpack.folder.set") == [{"url": URL, "kind": "voice", "name": "JAM", "language": "rus",
+    assert owners.asked("unpack.folder.set") == [{"url": URL, "tab": "voices", "name": "JAM", "language": "rus",
                                                   "subtitle_type": ""}]
 
 

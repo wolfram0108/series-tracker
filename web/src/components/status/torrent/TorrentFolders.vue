@@ -3,7 +3,8 @@ import { computed, ref } from "vue"
 import { hasMessage, t } from "../../../i18n"
 import { LANGUAGES } from "../../../lib/languages"
 import { SUBTITLE_TYPES } from "../../../lib/ruleVocabulary"
-import { FROM_META, episodeFolder, folderRows, nameOf, ruleOf, type Editor, type Folder, type FolderRow, type FolderTrack } from "../../../lib/torrent"
+import { FROM_META, episodeFolder, folderRows, kindOfTab, nameOf, ruleOf, type Editor, type Folder, type FolderRow, type FolderTrack,
+  type TrackTab } from "../../../lib/torrent"
 import { spansOf } from "../../../lib/ranges"
 import { deleteFolder, removeFromFolder, setFolder } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
@@ -18,7 +19,8 @@ import type { TorrentPick } from "../../../composables/useTorrentPick"
 // is taken out of it by its «−» — red. Nothing is left out here.
 const props = defineProps<{
   editor: Editor
-  kinds: readonly Folder["kind"][]
+  /** The tab the folders are of: each tab of tracks has its own set. */
+  tab: TrackTab
   pick: TorrentPick
   /** The pick fits a folder of the kind (a sound in a folder of a voice-over, subtitles in one of subtitles). */
   fits: (kind: Folder["kind"]) => boolean
@@ -26,12 +28,12 @@ const props = defineProps<{
 const emit = defineEmits<{ drop: [Folder["kind"], string, string[]]; failure: [string] }>()
 
 const TYPES = SUBTITLE_TYPES
-const groups = computed(() => props.kinds.map((kind) => ({ kind, rows: folderRows(props.editor.view, kind) })))
+const groups = computed(() => [{ kind: kindOfTab(props.tab), rows: folderRows(props.editor.view, props.tab) }])
 const languages = computed(() => [...new Set([...props.editor.view.tabs.voices, ...props.editor.view.tabs.subtitles,
   ...props.editor.view.tabs.voice_streams, ...props.editor.view.tabs.subtitle_streams].map((entry) => entry.language.trim().toLowerCase()).filter((code) => code && code !== "und"))].sort())
 const live = (kind: Folder["kind"]): boolean => props.pick.count.value > 0 && props.fits(kind)
 
-const keyOf = (row: FolderRow): string => `${row.kind}:${row.name}`
+const keyOf = (row: FolderRow): string => `${row.tab}:${row.name}`
 const open = ref(new Set<string>())
 function flipped(set: Set<string>, key: string): Set<string> {
   const next = new Set(set)
@@ -100,16 +102,15 @@ async function run(calls: (() => Promise<Answer<unknown>>)[]): Promise<void> {
 }
 const url = computed(() => props.editor.url)
 const save = (row: FolderRow, change: { language?: string; subtitle_type?: "" | (typeof TYPES)[number] }) => run([() => setFolder({
-  url: url.value, kind: row.kind, name: row.name, language: change.language ?? row.language,
+  url: url.value, tab: row.tab, name: row.name, language: change.language ?? row.language,
   subtitle_type: (change.subtitle_type ?? row.subtitle_type) as "" | (typeof TYPES)[number] })])
 // «−» of a track: out of the folder, red, whoever put it there; «Авто» gives the automatic layout back.
 const dropTrack = (track: FolderTrack) => run([() => removeFromFolder(url.value, track.tab, [track.entry.item])])
 // A folder deleted: the hand's placements in it go with it, the automatic layout does not make it again until «Авто».
 function dropFolder(row: FolderRow): Promise<void> {
-  const items: Partial<Record<FolderTrack["tab"], string[]>> = {}
-  for (const each of row.tracks) if (each.entry.by === "manual") items[each.tab] = [...items[each.tab] ?? [], each.entry.item]
+  const items = row.tracks.filter((each) => each.entry.by === "manual").map((each) => each.entry.item)
   const automatic = row.tracks.some((each) => each.entry.by !== "manual")
-  return run([() => deleteFolder(url.value, row.kind, row.name, items, automatic)])
+  return run([() => deleteFolder(url.value, row.tab, row.name, items, automatic)])
 }
 const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) => emit("drop", row.kind, row.name, items)) : {}
 </script>

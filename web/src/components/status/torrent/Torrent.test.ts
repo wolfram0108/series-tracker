@@ -48,8 +48,10 @@ const view = (overrides: Partial<EditorView> = {}): EditorView => ({
       path: "S/Mil/E01.mka", place: { season: 1, episode: 1, last: null }, stream: null }],
     subtitles: [], voice_streams: [], subtitle_streams: [],
   },
-  folders: [{ kind: "voice", name: "JAM", items: 1, manual: false, language: "rus", subtitle_type: "", fonts: [] },
-    { kind: "voice", name: "Милирина", items: 0, manual: true, language: "rus", subtitle_type: "", fonts: [] }],
+  folders: [{ tab: "voices", kind: "voice", name: "JAM", items: 1, manual: false, language: "rus", subtitle_type: "", fonts: [] },
+    { tab: "voices", kind: "voice", name: "Милирина", items: 0, manual: true, language: "rus", subtitle_type: "", fonts: [] },
+    // A folder of «Озв. конт.»: another set, never shown on «Озвучки».
+    { tab: "voice_streams", kind: "voice", name: "Чужой", items: 0, manual: true, language: "", subtitle_type: "", fonts: [] }],
   unplaced: { files: 2, voices: 1, subtitles: 0, voice_streams: 0, subtitle_streams: 0 },
   containers: [],
   hidden: [],
@@ -148,13 +150,15 @@ describe("the editors of the tracks", () => {
     const w = mountWith(TorrentTracks, { editor: editor(), tab: "voices" })
     const folders = w.findAll(".torrent-folder")
     expect(folders.map((each) => each.find(".torrent-folder-name").text())).toEqual(["JAM", "Милирина"])
+    await folders[0].find(".torrent-folders-chev").trigger("click")
+    expect(w.find(".torrent-folder-track .torrent-rule").text()).toBe(t("torrent.by.row", { rule: "Озвучка", row: 1 }))
     expect(folders[0].find(".torrent-rule").text()).toBe(t("torrent.by.row", { rule: "Озвучка", row: 1 }))
     expect(folders[1].find(".torrent-hand").text()).toBe(t("torrent.by.manual"))
     // Every folder may be deleted, that of a rule too: its tracks are then in no folder until «Авто».
     expect(folders.map((each) => each.find(".do-delete-folder").exists())).toEqual([true, true])
     await folders[0].find(".do-delete-folder").trigger("click")
     await flushPromises()
-    expect(calls.deleteFolder).toHaveBeenCalledWith(URL, "voice", "JAM", {}, true)
+    expect(calls.deleteFolder).toHaveBeenCalledWith(URL, "voices", "JAM", [], true)
     expect(calls.assign).not.toHaveBeenCalled()
     const unplaced = w.findAll(".track-row").find((row) => row.text().includes("D:S/Mil"))!
     await unplaced.find("input").setValue(true)
@@ -169,10 +173,12 @@ describe("the editors of the tracks", () => {
     // A track of another episode whose file names it otherwise, put in the folder by hand.
     const handed = { ...inner, item: "page/S/E02.mkv#2", line: "T:звук | A:2 | L:rus | N:Studio | C:aac", by: "manual", waiting: false,
       language: "rus", path: "S/E02.mkv", place: { season: 1, episode: 2, last: null } }
-    const w = mountWith(TorrentTracks, { editor: editor({ tabs: { ...view().tabs, voice_streams: [inner, handed] },
-      folders: [...view().folders, { kind: "voice", name: "Original", items: 2, manual: false, language: "", subtitle_type: "", fonts: [] }],
+    const w = mountWith(TorrentStreams, { editor: editor({ tabs: { ...view().tabs, voice_streams: [inner, handed] },
+      folders: [...view().folders, { tab: "voice_streams", kind: "voice", name: "Original", items: 2, manual: false, language: "", subtitle_type: "", fonts: [] }],
       containers: [{ item: "page/S/E01.mkv", path: "S/E01.mkv", place: { season: 1, episode: 1, last: null },
-        streams: [{ index: 0, kind: "video" }, { index: 1, kind: "audio", codec: "aac" }] }] }), tab: "voices" })
+        streams: [{ index: 0, kind: "video" }, { index: 1, kind: "audio", codec: "aac" }] }] }), tab: "voice_streams" })
+    // Only the folders of «Озв. конт.»: those of «Озвучки» are another set.
+    expect(w.findAll(".torrent-folder").map((each) => each.attributes("data-folder"))).toEqual(["Чужой", "Original"])
     const original = w.find(".torrent-folder[data-folder='Original']")
     // The folder says where it comes from — the titles in the files — and each track, on its row, where it got its folder.
     expect(original.findAll(".torrent-folders-sources > span").map((each) => each.text())).toEqual([t("torrent.folder.fromFile")])
@@ -180,7 +186,7 @@ describe("the editors of the tracks", () => {
     // The language of the folder is set here.
     const language = original.find("select.torrent-language")
     await language.setValue("jpn")
-    expect(calls.setFolder).toHaveBeenCalledWith({ url: URL, kind: "voice", name: "Original", language: "jpn", subtitle_type: "" })
+    expect(calls.setFolder).toHaveBeenCalledWith({ url: URL, tab: "voice_streams", name: "Original", language: "jpn", subtitle_type: "" })
     await original.find(".torrent-folders-chev").trigger("click")
     // Unfolded, a track is its episode, its stream as the left pane names it, and «вручную» or «авто»; every track has its
     // «−», which takes it out of the folder — red — whoever put it there.
@@ -188,11 +194,6 @@ describe("the editors of the tracks", () => {
     expect(tracks.map((each) => [each.find(".torrent-folders-place").text(), each.find(".torrent-folders-id").text(),
       each.find(".torrent-hand, .torrent-auto").text()])).toEqual([["s01e01", "A:1", t("torrent.by.auto")], ["s01e02", "A:2", t("torrent.by.manual")]])
     expect(tracks.map((each) => each.find(".torrent-folders-file").exists())).toEqual([false, false])
-    // A track a rule placed says the rule, not «авто».
-    await w.find(".torrent-folder[data-folder='JAM'] .torrent-folders-chev").trigger("click")
-    const ruled = w.findAll(".torrent-folder-track").find((each) => each.find(".torrent-folders-place").text() === "s01e01"
-      && each.find(".torrent-rule").exists())!
-    expect(ruled.find(".torrent-rule").text()).toBe(t("torrent.by.row", { rule: "Озвучка", row: 1 }))
     expect(tracks.map((each) => each.find(".do-drop-track").exists())).toEqual([true, true])
     for (const [index, item] of [[0, "page/S/E01.mkv#1"], [1, "page/S/E02.mkv#2"]] as const) {
       await tracks[index].find(".do-drop-track").trigger("click")
@@ -203,7 +204,7 @@ describe("the editors of the tracks", () => {
     // The folder deleted takes the hand's placement in it; the automatic layout does not make it again until «Авто».
     await original.find(".do-delete-folder").trigger("click")
     await flushPromises()
-    expect(calls.deleteFolder).toHaveBeenCalledWith(URL, "voice", "Original", { voice_streams: ["page/S/E02.mkv#2"] }, true)
+    expect(calls.deleteFolder).toHaveBeenCalledWith(URL, "voice_streams", "Original", ["page/S/E02.mkv#2"], true)
     expect(calls.assign).not.toHaveBeenCalled()
   })
 
@@ -225,10 +226,13 @@ describe("the editors of the tracks", () => {
   it("«Авто» makes again the folders of the automatic layout the user deleted, and is idle when none is", async () => {
     const idle = mountWith(TorrentTracks, { editor: editor(), tab: "voices" })
     expect(idle.find(".do-auto").attributes("disabled")).toBeDefined()
-    const w = mountWith(TorrentTracks, { editor: editor({ hidden: [{ kind: "voice", name: "Original" }] }), tab: "voices" })
+    // What the user took from «Озв. конт.» is no business of «Озвучки».
+    const other = mountWith(TorrentTracks, { editor: editor({ hidden: [{ tab: "voice_streams", name: "Original" }] }), tab: "voices" })
+    expect(other.find(".do-auto").attributes("disabled")).toBeDefined()
+    const w = mountWith(TorrentTracks, { editor: editor({ hidden: [{ tab: "voices", name: "Original" }] }), tab: "voices" })
     await w.find(".do-auto").trigger("click")
     await flushPromises()
-    expect(calls.autoLayout).toHaveBeenCalledWith(URL, ["voice"])
+    expect(calls.autoLayout).toHaveBeenCalledWith(URL, ["voices"])
     expect(calls.unassign).not.toHaveBeenCalled()
   })
 
@@ -248,6 +252,6 @@ describe("the editors of the tracks", () => {
     await rows[1].find("input").setValue(true)
     expect(w.find(".torrent-pick").text()).toContain(t("torrent.select.count", { n: 2 }))
     await w.findAll(".drop-folder").at(-1)!.trigger("click")
-    expect(calls.assign).toHaveBeenCalledWith({ url: URL, tab: "voice_streams", items: ["page/S/E01.mkv#1", "page/S/E02.mkv#1"], folder: "Милирина" })
+    expect(calls.assign).toHaveBeenCalledWith({ url: URL, tab: "voice_streams", items: ["page/S/E01.mkv#1", "page/S/E02.mkv#1"], folder: "Чужой" })
   })
 })

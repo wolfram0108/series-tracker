@@ -54,7 +54,7 @@ class Inputs:
     results: dict[str, dict[str, dict]]             # tab → item → the result of the rules for its line
     manual: dict[str, dict[str, dict]]              # tab → item → the stored placement by hand
     folders: list[dict] = field(default_factory=list)
-    hidden: set[tuple[str, str]] = field(default_factory=set)  # (kind, name): folders of the automatic layout deleted
+    hidden: set[tuple[str, str]] = field(default_factory=set)  # (tab, name): folders of the automatic layout deleted
     removed: set[tuple[str, str]] = field(default_factory=set)  # (tab, item): tracks the user took out of their folders
 
 
@@ -120,7 +120,7 @@ FROM_META = "meta"
 UNKNOWN_LANGUAGES = {"", "und"}
 
 
-def _folder_of(kind: str, result: dict | None, manual: dict | None, stream: dict | None,
+def _folder_of(tab: str, kind: str, result: dict | None, manual: dict | None, stream: dict | None,
                hidden: set[tuple[str, str]] = frozenset()) -> tuple[str | None, str | None]:
     """(folder, how): the user's folder, else the rule's, else the title of the track in its file (`how`: `manual`, the
     name of the rule, or `meta`). A rule overrides what the file says; the hand overrides both. A folder of the automatic
@@ -128,23 +128,22 @@ def _folder_of(kind: str, result: dict | None, manual: dict | None, stream: dict
     if manual is not None:
         return manual["folder"], "manual"
     key = "voice_folder" if kind == "audio" else "subtitle_folder"
-    folder_kind = "voice" if kind == "audio" else "subtitles"
     if result and result.get(key):
-        return (None, None) if (folder_kind, result[key]) in hidden else (result[key], _rule_of(result))
+        return (None, None) if (tab, result[key]) in hidden else (result[key], _rule_of(result))
     title = ((stream or {}).get("title") or "").strip()
-    return (title, FROM_META) if title and (folder_kind, title) not in hidden else (None, None)
+    return (title, FROM_META) if title and (tab, title) not in hidden else (None, None)
 
 
 def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
     """The view of the editor and the rows of the table."""
     places = _places(inputs)
-    folder_facts = {(f["kind"], f["name"]): f for f in inputs.folders}
+    folder_facts = {(f["tab"], f["name"]): f for f in inputs.folders}
     # `containers`: every video file placed, with what it holds (the window lays the tabs «Озв. конт.» and «Суб. конт.» out by it: files of
     # one composition are one).
     view: dict[str, Any] = {"releases": [], "tabs": {tab.value: [] for tab in EditorTab}, "folders": [],
                             "unplaced": {tab.value: 0 for tab in EditorTab}, "containers": [], "hidden": [], "removed": []}
     rows: list[TableRow] = []
-    named: dict[tuple[str, str], dict] = {}  # the folders the layout names: (kind, name) → facts and counts
+    named: dict[tuple[str, str], dict] = {}  # the folders the layout names: (tab, name) → facts and counts
     # The fonts a folder of subtitles goes with: those its external files are drawn with (fonts_of), by the release read.
     fonts: dict[str, set[str]] = {}
     paths_of: dict[str, list[str]] = {r.release: [f.path for f in r.files] for r in inputs.releases}
@@ -152,11 +151,11 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
     def track(tab: str, item: str, line: str, kind: str, stream: dict | None, path: str = "",
               where: "Place | str | None" = None) -> dict:
         result, manual = inputs.results.get(tab, {}).get(item), inputs.manual.get(tab, {}).get(item)
-        folder, how = _folder_of(kind, result, manual, stream, inputs.hidden)
+        folder, how = _folder_of(tab, kind, result, manual, stream, inputs.hidden)
         if manual is None and (tab, item) in inputs.removed:
             folder, how = None, None  # taken out of its folder by the user («−»): red until a hand or «Авто»
         folder_kind = "voice" if kind == "audio" else "subtitles"
-        facts = folder_facts.get((folder_kind, folder), {}) if folder else {}
+        facts = folder_facts.get((tab, folder), {}) if folder else {}
         language = (result or {}).get("language") or facts.get("language") or (stream or {}).get("language") or ""
         # The type is what a rule or the folder names; a flag of the file's container is no type (DESIGN.md 7.1.1).
         subtitle_type = (result or {}).get("subtitle_type") or facts.get("subtitle_type") or ""
@@ -175,8 +174,8 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
             owner = next(each for each in paths_of if item.startswith(f"{each}{KEYS_SEP}"))
             fonts.setdefault(folder, set()).update(fonts_of(paths_of[owner], path))
         if folder:
-            named.setdefault((folder_kind, folder), {"kind": folder_kind, "name": folder, "items": 0,
-                                                     "manual": (folder_kind, folder) in folder_facts,
+            named.setdefault((tab, folder), {"tab": str(tab), "kind": folder_kind, "name": folder, "items": 0,
+                                             "manual": (tab, folder) in folder_facts,
                                                      "language": facts.get("language", ""),
                                                      "subtitle_type": facts.get("subtitle_type", "")})["items"] += 1
         if waiting:
@@ -259,12 +258,13 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                   "audio" if kind == FileKind.AUDIO else "subtitles", None, f.path, where)
 
     for f in inputs.folders:  # the folders the user made, even empty
-        named.setdefault((f["kind"], f["name"]), {"kind": f["kind"], "name": f["name"], "items": 0, "manual": True,
+        kind = "voice" if f["tab"] in (EditorTab.VOICES, EditorTab.VOICE_STREAMS) else "subtitles"
+        named.setdefault((f["tab"], f["name"]), {"tab": f["tab"], "kind": kind, "name": f["name"], "items": 0, "manual": True,
                                                   "language": f["language"], "subtitle_type": f["subtitle_type"]})
     for each in named.values():
-        each["fonts"] = sorted(fonts.get(each["name"], ())) if each["kind"] == "subtitles" else []
-    view["folders"] = sorted(named.values(), key=lambda each: (each["kind"], each["name"]))
-    view["hidden"] = [{"kind": kind, "name": name} for kind, name in sorted(inputs.hidden)]
+        each["fonts"] = sorted(fonts.get(each["name"], ())) if each["tab"] == EditorTab.SUBTITLES else []
+    view["folders"] = sorted(named.values(), key=lambda each: (each["tab"], each["name"]))
+    view["hidden"] = [{"tab": tab, "name": name} for tab, name in sorted(inputs.hidden)]
     view["removed"] = [{"tab": tab, "item": item} for tab, item in sorted(inputs.removed)]
     return view, rows
 

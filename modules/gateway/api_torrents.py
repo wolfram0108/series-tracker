@@ -63,7 +63,7 @@ class UnassignBody(BaseModel):
 
 class FolderBody(BaseModel):
     url: str
-    kind: Literal["voice", "subtitles"]
+    tab: Literal["voices", "subtitles", "voice_streams", "subtitle_streams"]
     name: str = Field(min_length=1)
     language: str = ""
     subtitle_type: SubtitleType = ""
@@ -71,13 +71,13 @@ class FolderBody(BaseModel):
 
 class FolderRef(BaseModel):
     url: str
-    kind: Literal["voice", "subtitles"]
+    tab: Literal["voices", "subtitles", "voice_streams", "subtitle_streams"]
     name: str = Field(min_length=1)
     # The folder holds tracks the automatic layout put there (the titles in the files, the rules): it is not made again
     # until «Авто». A folder only the hand filled or made goes and is not hidden.
     automatic: bool = False
-    # The hand's placements in the folder, by tab: they go with it.
-    items: dict[Literal["voices", "subtitles", "voice_streams", "subtitle_streams"], list[str]] = Field(default_factory=dict)
+    # The hand's placements in the folder: they go with it.
+    items: list[str] = Field(default_factory=list)
 
 
 class RemoveBody(BaseModel):
@@ -88,9 +88,10 @@ class RemoveBody(BaseModel):
 
 
 class AutoBody(BaseModel):
-    """«Авто»: the automatic layout makes its deleted folders of these kinds again; the hand's placements stay."""
+    """«Авто»: the automatic layout makes its deleted folders of these tabs again and places again the tracks taken out of
+    folders; the hand's placements stay."""
     url: str
-    kinds: list[Literal["voice", "subtitles"]] = Field(min_length=1)
+    tabs: list[Literal["voices", "subtitles", "voice_streams", "subtitle_streams"]] = Field(min_length=1)
 
 
 def build_router(gw) -> APIRouter:  # gw: GatewayModule

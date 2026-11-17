@@ -21,13 +21,14 @@ Queries / commands (a page is named by any mirror of its tracker; the module kee
       in a season and an episode, a track in a folder; `in_order`: the items in the order given take the episodes from
       `episode` on, one each (files dropped on a season)
   unpack.unassign {url, tab, items} — back to what the rules give
-  unpack.folder.set {url, kind: voice | subtitles, name, language?, subtitle_type?} / unpack.folder.delete {url, kind, name,
-      automatic?, items?: {tab: [item]}} — a folder deleted takes the hand's placements in it (`items`) and, holding tracks
-      of the automatic layout (`automatic`: the titles in the files, the rules), is not made by it again until «Авто»
+  unpack.folder.set {url, tab, name, language?, subtitle_type?} / unpack.folder.delete {url, tab, name, automatic?, items?}
+      — a folder belongs to its tab of tracks («Озвучки», «Субтитры», «Озв. конт.», «Суб. конт.» are four sets); one deleted
+      takes the hand's placements in it (`items`) and, holding tracks of the automatic layout (`automatic`: the titles in the
+      files, the rules), is not made by it again until «Авто»
   unpack.remove {url, tab, items} — «−»: the tracks are taken out of their folders, red, whatever the files and the rules
       say (a hand's placement goes too), until placed by hand or «Авто»
-  unpack.auto {url, kinds: [voice | subtitles]} — «Авто»: the automatic layout makes its deleted folders of these kinds
-      again and places again the tracks taken out of folders; the hand's placements stay
+  unpack.auto {url, tabs} — «Авто»: the automatic layout makes its deleted folders of these tabs again and places again the
+      tracks taken out of folders; the hand's placements stay
 Events out:
   unpack.table.changed {url} — the rows of the page changed (`sources` reads its table again)
   unpack.editor.changed {url} — the editor of the page changed (a window shows it again)
@@ -126,7 +127,7 @@ class UnpackModule(BaseModule):
             manual[row["tab"]][row["item"]] = row
         streams = {r.release: await self.repo.streams(url, r.release) for r in releases}
         inputs = Inputs(releases=releases, streams=streams, results={}, manual=manual, folders=await self.repo.folders(url),
-                        hidden={(row["kind"], row["name"]) for row in await self.repo.hidden(url)},
+                        hidden={(row["tab"], row["name"]) for row in await self.repo.hidden(url)},
                         removed={(row["tab"], row["item"]) for row in await self.repo.removed(url)})
         profiles = await self.repo.profiles(url) or {}
         keyed = lines(inputs)
@@ -189,13 +190,13 @@ class UnpackModule(BaseModule):
 
     async def on_folder_set(self, env: Envelope) -> None:
         p, url = env.payload, await self._page(env.payload["url"])
-        await self.repo.set_folder(url, p["kind"], p["name"], p.get("language") or "", p.get("subtitle_type") or "")
-        await self.repo.unhide(url, [p["kind"]], p["name"])  # a folder the user names is his, whatever the layout did before
+        await self.repo.set_folder(url, p["tab"], p["name"], p.get("language") or "", p.get("subtitle_type") or "")
+        await self.repo.unhide(url, [p["tab"]], p["name"])  # a folder the user names is his, whatever the layout did before
         self._changed(url)
 
     async def on_folder_delete(self, env: Envelope) -> None:
         url = await self._page(env.payload["url"])
-        await self.repo.delete_folder(url, env.payload["kind"], env.payload["name"], env.payload.get("items") or {},
+        await self.repo.delete_folder(url, env.payload["tab"], env.payload["name"], list(env.payload.get("items") or []),
                                       bool(env.payload.get("automatic")))
         self._changed(url)
 
@@ -206,7 +207,7 @@ class UnpackModule(BaseModule):
 
     async def on_auto(self, env: Envelope) -> None:
         url = await self._page(env.payload["url"])
-        await self.repo.unhide(url, list(env.payload.get("kinds") or ["voice", "subtitles"]))
+        await self.repo.unhide(url, list(env.payload["tabs"]))
         self._changed(url)
 
     # --- what torrents and rules tell ------------------------------------------------------------------------------

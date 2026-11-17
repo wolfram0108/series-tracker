@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { t } from "../../../i18n"
-import { byEpisode, folderOf, trackCounts, trackFits, type Editor, type TrackEntry, type TrackFilter, tabsOfKind } from "../../../lib/torrent"
+import { byEpisode, folderOf, trackCounts, trackFits, type Editor, type TrackEntry, type TrackFilter } from "../../../lib/torrent"
 import { assign, autoLayout, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
@@ -15,7 +15,6 @@ const props = defineProps<{ editor: Editor; tab: "voices" | "subtitles" }>()
 const emit = defineEmits<{ failure: [string] }>()
 
 type Shown = TrackFilter | "fonts"
-const kind = computed(() => props.tab === "voices" ? "voice" as const : "subtitles" as const)
 const FILTERS = computed<Shown[]>(() => props.tab === "subtitles" ? ["all", "unplaced", "placed", "fonts"] : ["all", "unplaced", "placed"])
 const filterWord = (each: Shown): string => t(({ all: "torrent.filter.all", fonts: "torrent.filter.fonts",
   unplaced: props.tab === "voices" ? "torrent.filter.noVoice" : "torrent.filter.noFolder", placed: "torrent.filter.inFolder" } as const)[each])
@@ -40,8 +39,7 @@ const chosenEntries = computed(() => entries.value.filter((entry) => pick.has(en
 const pickedFolder = computed(() => chosenEntries.value.length ? folderOf(chosenEntries.value[0].path) : null)
 const chooseFolder = (): void => pick.choose(entries.value.filter((entry) => folderOf(entry.path) === pickedFolder.value).map((entry) => entry.item))
 
-const kinds = computed(() => [kind.value])
-const anyFolder = computed(() => props.editor.view.folders.some((folder) => folder.kind === kind.value))
+const anyFolder = computed(() => props.editor.view.folders.some((folder) => folder.tab === props.tab))
 
 const url = computed(() => props.editor.url)
 const busy = ref(false)
@@ -57,10 +55,10 @@ async function send(call: () => Promise<Answer<unknown>>): Promise<void> {
 }
 const toFolder = (name: string, items: string[]) => send(() => assign({ url: url.value, tab: props.tab, items, folder: name }))
 const back = () => send(() => unassign(url.value, props.tab, chosenEntries.value.filter((each) => each.by === "manual").map((each) => each.item)))
-// «Авто»: the automatic layout makes again the folders of this kind the user deleted; the hand's placements stay.
-const hiddenHere = computed(() => props.editor.view.hidden.some((each) => each.kind === kind.value)
-  || props.editor.view.removed.some((each) => tabsOfKind(kind.value).includes(each.tab)))
-const toAuto = () => send(() => autoLayout(url.value, [kind.value]))
+// «Авто»: the automatic layout makes again what the user took from this tab; the hand's placements stay.
+const hiddenHere = computed(() => props.editor.view.hidden.some((each) => each.tab === props.tab)
+  || props.editor.view.removed.some((each) => each.tab === props.tab))
+const toAuto = () => send(() => autoLayout(url.value, [props.tab]))
 
 const naming = ref(false)
 const name = ref("")
@@ -69,7 +67,7 @@ async function create(): Promise<void> {
   if (!value) return
   busy.value = true
   try {
-    const answer = await setFolder({ url: url.value, kind: kind.value, name: value })
+    const answer = await setFolder({ url: url.value, tab: props.tab, name: value })
     if (answer.ok) {
       naming.value = false
       name.value = ""
@@ -149,7 +147,7 @@ async function create(): Promise<void> {
         <button type="button" class="torrent-mini" @click="naming = false">{{ t("common.cancel") }}</button>
       </form>
       <div class="torrent-pane-body">
-        <TorrentFolders :editor="editor" :kinds="kinds" :pick="pick" :fits="() => true"
+        <TorrentFolders :editor="editor" :tab="tab" :pick="pick" :fits="() => true"
                         @drop="(_, name, items) => toFolder(name, items)" @failure="emit('failure', $event)" />
         <p v-if="!anyFolder" class="torrent-note">{{ t("torrent.folders.none") }}</p>
       </div>

@@ -2,7 +2,7 @@
 // changes comes back as events (torrent_release_update, torrent_editor_update, torrent_read_update).
 import { api } from "../api/client"
 import type { components } from "../api/schema"
-import type { Editor, EditorTab, PageReleases, ReleaseView } from "../lib/torrent"
+import type { Editor, EditorTab, PageReleases, ReleaseView, TrackTab } from "../lib/torrent"
 import { call, type Answer, type CallWords } from "./sourceCalls"
 
 const WORDS: CallWords = { refused: "torrent.error.refused", network: "torrent.error.network" }
@@ -36,18 +36,16 @@ export const unassign = (url: string, tab: EditorTab, items: string[]): Promise<
 export const setFolder = (body: WithDefaults<Schemas["FolderBody"], "language" | "subtitle_type">): Promise<Answer<unknown>> =>
   call(() => api.POST("/api/torrent/editor/folder", { body: { language: "", subtitle_type: "", ...body } }), WORDS)
 
-/** A folder deleted, with the hand's placements in it (tab → items); one of the automatic layout is not made again until
- *  «Авто». */
-export const deleteFolder = (url: string, kind: "voice" | "subtitles", name: string,
-  items: Partial<Record<"voices" | "subtitles" | "voice_streams" | "subtitle_streams", string[]>> = {}, automatic = false): Promise<Answer<unknown>> =>
-  call(() => api.POST("/api/torrent/editor/folder/delete", { body: { url, kind, name, items, automatic } }), WORDS)
+/** A folder of a tab deleted, with the hand's placements in it; one of the automatic layout is not made again until «Авто». */
+export const deleteFolder = (url: string, tab: TrackTab, name: string, items: string[] = [], automatic = false): Promise<Answer<unknown>> =>
+  call(() => api.POST("/api/torrent/editor/folder/delete", { body: { url, tab, name, items, automatic } }), WORDS)
 
 /** «−»: tracks taken out of their folders — red — until placed by hand or «Авто». */
 export const removeFromFolder = (url: string, tab: "voices" | "subtitles" | "voice_streams" | "subtitle_streams",
   items: string[]): Promise<Answer<unknown>> =>
   call(() => api.POST("/api/torrent/editor/remove", { body: { url, tab, items } }), WORDS)
 
-/** «Авто»: the automatic layout makes its deleted folders of these kinds again and places again the tracks taken out of
+/** «Авто»: the automatic layout makes its deleted folders of these tabs again and places again the tracks taken out of
  *  folders; the hand's placements stay. */
-export const autoLayout = (url: string, kinds: ("voice" | "subtitles")[]): Promise<Answer<unknown>> =>
-  call(() => api.POST("/api/torrent/editor/auto", { body: { url, kinds } }), WORDS)
+export const autoLayout = (url: string, tabs: TrackTab[]): Promise<Answer<unknown>> =>
+  call(() => api.POST("/api/torrent/editor/auto", { body: { url, tabs } }), WORDS)

@@ -2116,13 +2116,14 @@ export interface components {
         };
         /**
          * AutoBody
-         * @description «Авто»: the automatic layout makes its deleted folders of these kinds again; the hand's placements stay.
+         * @description «Авто»: the automatic layout makes its deleted folders of these tabs again and places again the tracks taken out of
+         *     folders; the hand's placements stay.
          */
         AutoBody: {
             /** Url */
             url: string;
-            /** Kinds */
-            kinds: ("voice" | "subtitles")[];
+            /** Tabs */
+            tabs: ("voices" | "subtitles" | "voice_streams" | "subtitle_streams")[];
         };
         /**
          * ChangedSource
@@ -2779,10 +2780,10 @@ export interface components {
             /** Url */
             url: string;
             /**
-             * Kind
+             * Tab
              * @enum {string}
              */
-            kind: "voice" | "subtitles";
+            tab: "voices" | "subtitles" | "voice_streams" | "subtitle_streams";
             /** Name */
             name: string;
             /**
@@ -2802,10 +2803,10 @@ export interface components {
             /** Url */
             url: string;
             /**
-             * Kind
+             * Tab
              * @enum {string}
              */
-            kind: "voice" | "subtitles";
+            tab: "voices" | "subtitles" | "voice_streams" | "subtitle_streams";
             /** Name */
             name: string;
             /**
@@ -2814,9 +2815,7 @@ export interface components {
              */
             automatic: boolean;
             /** Items */
-            items?: {
-                [key: string]: string[];
-            };
+            items?: string[];
         };
         /**
          * GroupQueue
