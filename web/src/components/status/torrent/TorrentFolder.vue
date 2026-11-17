@@ -64,7 +64,7 @@ const live = computed(() => props.pick.count.value > 0 && props.fits)
   <div class="torrent-folder" :data-folder="folder.name" v-bind="live ? target : {}">
     <div class="torrent-folder-head">
       <span class="torrent-folder-name">{{ folder.name }}</span>
-      <span v-if="showKind" class="torrent-tag">{{ t(folder.kind === "voice" ? "torrent.folder.kind.voice" : "torrent.folder.kind.subtitles") }}</span>
+      <span v-if="showKind" class="torrent-kd">{{ t(folder.kind === "voice" ? "torrent.folder.kind.voice" : "torrent.folder.kind.subtitles") }}</span>
       <Select :model-value="folder.language || null" :options="options" editable :disabled="busy" class="torrent-language"
               :aria-label="t('torrent.folder.language')" :placeholder="t('torrent.folder.language')"
               @update:model-value="(value: string | null) => save({ language: value ?? '' })" />
@@ -73,8 +73,8 @@ const live = computed(() => props.pick.count.value > 0 && props.fits)
                 :aria-pressed="folder.subtitle_type === each" :disabled="busy"
                 @click="save({ subtitle_type: folder.subtitle_type === each ? '' : each })">{{ t(`torrent.type.${each}`) }}</button>
       </div>
-      <span v-if="ruleText" class="pill pill-primary">{{ ruleText }}</span>
-      <span v-else-if="folder.manual" class="pill pill-secondary">
+      <span v-if="ruleText" class="torrent-rule">{{ ruleText }}</span>
+      <span v-else-if="folder.manual" class="torrent-hand">
         {{ t(folder.items ? "torrent.folder.manual" : "torrent.folder.manualEmpty") }}</span>
       <div class="torrent-folder-tools">
         <button v-if="folder.manual && !folder.rule" type="button" class="torrent-mini do-delete-folder" :disabled="busy" @click="remove">

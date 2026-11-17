@@ -91,8 +91,9 @@ export interface Editor { url: string; profiles: Record<EditorTab, number | null
 export type SourceStage = "notLoaded" | "download" | "read" | "ready" | "update" | "failed" | "archived"
 export interface SourceState {
   stage: SourceStage
-  /** Files downloaded or read of how many (a download, an update, a read). */
-  progress: { done: number; total: number } | null
+  /** Files downloaded or read of how many (a download, an update, a read), and the share done: of the bytes of the wanted
+   *  files for a download, of the files for a read. */
+  progress: { done: number; total: number; share: number } | null
   /** Items no rule and no hand placed yet (a ready release). */
   waiting: number
   reason: string | null
@@ -102,12 +103,17 @@ export interface SourceState {
 export function sourceState(kept: ReleaseView | undefined, reading: { done: number; total: number } | null, waiting: number): SourceState {
   if (!kept) return { stage: "notLoaded", progress: null, waiting: 0, reason: null }
   const wanted = kept.files.filter((file) => file.priority > 0)
-  const fetched = { done: wanted.filter((file) => file.progress >= 1).length, total: wanted.length }
+  const bytes = wanted.reduce((sum, file) => sum + file.size, 0)
+  const got = wanted.reduce((sum, file) => sum + file.size * file.progress, 0)
+  const fetched = { done: wanted.filter((file) => file.progress >= 1).length, total: wanted.length,
+    share: bytes ? Math.floor((got / bytes) * 100) : 0 }
   if (kept.state === "metadata" || kept.state === "downloading") return { stage: "download", progress: fetched, waiting: 0, reason: null }
   if (kept.state === "updating") return { stage: "update", progress: fetched, waiting: 0, reason: null }
   if (kept.state === "failed") return { stage: "failed", progress: null, waiting: 0, reason: kept.reason ?? null }
   if (kept.state === "archived") return { stage: "archived", progress: null, waiting: 0, reason: null }
-  if (reading && reading.done < reading.total) return { stage: "read", progress: reading, waiting: 0, reason: null }
+  if (reading && reading.done < reading.total) {
+    return { stage: "read", progress: { ...reading, share: Math.floor((reading.done / reading.total) * 100) }, waiting: 0, reason: null }
+  }
   return { stage: "ready", progress: null, waiting, reason: null }
 }
 

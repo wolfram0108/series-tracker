@@ -9,9 +9,10 @@ const kept = (state: ReleaseView["state"], done: number): ReleaseView => ({ url:
 describe("the state of a torrent source", () => {
   it("counts the files wanted of a download and an update, and the read of the files after it", () => {
     expect(sourceState(undefined, null, 0).stage).toBe("notLoaded")
-    expect(sourceState(kept("downloading", 1), null, 0)).toMatchObject({ stage: "download", progress: { done: 1, total: 2 } })
-    expect(sourceState(kept("updating", 2), null, 0)).toMatchObject({ stage: "update", progress: { done: 2, total: 2 } })
-    expect(sourceState(kept("ready", 2), { done: 1, total: 4 }, 3)).toMatchObject({ stage: "read", progress: { done: 1, total: 4 } })
+    // A file half downloaded is half its bytes, whether or not another is whole: the bar moves with the bytes.
+    expect(sourceState(kept("downloading", 1), null, 0)).toMatchObject({ stage: "download", progress: { done: 1, total: 2, share: 75 } })
+    expect(sourceState(kept("updating", 2), null, 0)).toMatchObject({ stage: "update", progress: { done: 2, total: 2, share: 100 } })
+    expect(sourceState(kept("ready", 2), { done: 1, total: 4 }, 3)).toMatchObject({ stage: "read", progress: { done: 1, total: 4, share: 25 } })
     expect(sourceState(kept("ready", 2), { done: 4, total: 4 }, 3)).toMatchObject({ stage: "ready", waiting: 3 })
     expect(sourceState({ ...kept("failed", 0), reason: "нет места" }, null, 0)).toMatchObject({ stage: "failed", reason: "нет места" })
   })

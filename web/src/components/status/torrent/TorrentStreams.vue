@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
-import { t, type MessageKey } from "../../../i18n"
+import { t, tn, type MessageKey } from "../../../i18n"
 import { containerGroups, foldersOf, trackCounts, type ContainerStream, type Editor, type Folder, type StreamFacts } from "../../../lib/torrent"
 import { assign, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
@@ -30,7 +30,7 @@ const fits = (stream: ContainerStream): boolean => filter.value === "all" || (fi
 const groups = computed(() => containerGroups(props.editor.view.containers, entries.value)
   .map((group) => ({ ...group, shown: group.streams.filter(fits) })).filter((group) => group.shown.length))
 const groupTitle = (group: (typeof groups.value)[number]): string => group.season === null
-  ? t("torrent.streams.groupNoSeason", { files: group.files }) : t("torrent.streams.group", { season: group.season, episodes: group.episodes })
+  ? t("torrent.streams.groupNoSeason", { files: tn("torrent.files", group.files) }) : t("torrent.streams.group", { season: group.season, episodes: group.episodes })
 
 const CHANNELS: Record<number, string> = { 1: "1.0", 2: "2.0", 6: "5.1", 8: "7.1" }
 function factsOf(facts: StreamFacts): string {
@@ -105,7 +105,7 @@ async function create(): Promise<void> {
         <template v-for="group in groups" :key="group.key">
           <div class="torrent-row is-group">
             <span class="torrent-name">{{ groupTitle(group) }}</span>
-            <span class="torrent-side">{{ t("torrent.streams.files", { files: group.files }) }}</span>
+            <span class="torrent-side">{{ t("torrent.streams.files", { files: tn("torrent.files", group.files) }) }}</span>
           </div>
           <component :is="stream.items.length ? 'label' : 'div'" v-for="stream in group.shown" :key="`${group.key}:${stream.label}`"
                      class="torrent-row is-nested stream-row"
@@ -114,14 +114,14 @@ async function create(): Promise<void> {
                      @dragstart="stream.items.length && pick.dragStart($event, stream.items)" @dragend="pick.dragEnd">
             <input v-if="stream.items.length" type="checkbox" :checked="pick.allOf(stream.items)" @change="pick.toggleAll(stream.items)">
             <i class="torrent-dot" :class="dotOf(stream)" aria-hidden="true" />
-            <span class="torrent-kind">{{ stream.label }}<template v-if="factsOf(stream.facts)"> · {{ factsOf(stream.facts) }}</template></span>
+            <span class="torrent-stream-facts">{{ stream.label }}<template v-if="factsOf(stream.facts)"> · {{ factsOf(stream.facts) }}</template></span>
             <span v-if="stream.facts.kind === 'video'" class="torrent-name torrent-pane-hint">{{ t("torrent.streams.video") }}</span>
             <span v-else class="torrent-name">
-              <template v-if="stream.facts.title">«{{ stream.facts.title }}» <span class="torrent-tag">{{ t("torrent.meta") }}</span></template>
+              <template v-if="stream.facts.title">«{{ stream.facts.title }}» <span class="torrent-meta">{{ t("torrent.meta") }}</span></template>
               <template v-else>{{ t("torrent.streams.noTitle") }}</template>
-              <template v-if="stream.facts.language"> · {{ stream.facts.language }} <span class="torrent-tag">{{ t("torrent.meta") }}</span></template>
+              <template v-if="stream.facts.language"> · {{ stream.facts.language }} <span class="torrent-meta">{{ t("torrent.meta") }}</span></template>
             </span>
-            <span v-if="stream.facts.kind !== 'video'" class="torrent-tag">{{ stream.folder ?? "—" }}</span>
+            <span v-if="stream.facts.kind !== 'video'" class="torrent-tg">{{ stream.folder ?? "—" }}</span>
           </component>
         </template>
         <p v-if="!groups.length" class="torrent-note">{{ t("torrent.empty") }}</p>

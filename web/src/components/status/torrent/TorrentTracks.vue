@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
-import { t } from "../../../i18n"
+import { t, tn } from "../../../i18n"
 import { byEpisode, folderOf, foldersOf, trackCounts, trackFits, type Editor, type TrackEntry, type TrackFilter } from "../../../lib/torrent"
 import { assign, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
@@ -39,7 +39,7 @@ const chooseFolder = (): void => pick.choose(entries.value.filter((entry) => fol
 
 const folders = computed(() => foldersOf(props.editor.view.folders, entries.value, kind.value))
 const languages = computed(() => [...new Set(entries.value.map((entry) => entry.language).filter(Boolean))])
-const holds = (items: number): string => t("torrent.folder.files", { n: items })
+const holds = (items: number): string => tn("torrent.files", items)
 
 const url = computed(() => props.editor.url)
 const busy = ref(false)
@@ -97,12 +97,12 @@ async function create(): Promise<void> {
             <span class="torrent-name">{{ groupTitle(group) }}</span><span class="torrent-side">{{ groupSide(group) }}</span>
           </div>
           <label v-for="entry in group.entries" :key="entry.item" class="torrent-row is-nested track-row"
-                 :class="{ 'is-chosen': pick.has(entry.item), 'is-unplaced': dotOf(entry) === 'is-unplaced' }"
+                 :class="{ 'is-chosen': pick.has(entry.item), 'is-unplaced': dotOf(entry) === 'is-unplaced', 'is-excluded': entry.excluded }"
                  draggable="true" @dragstart="pick.dragStart($event, [entry.item])" @dragend="pick.dragEnd">
             <input type="checkbox" :checked="pick.has(entry.item)" @change="pick.toggle(entry.item)">
             <i class="torrent-dot" :class="dotOf(entry)" aria-hidden="true" />
             <span class="torrent-name" :title="entry.path">{{ entry.path }}</span>
-            <span v-if="entry.folder" class="torrent-tag">{{ entry.folder }}</span>
+            <span v-if="entry.folder" class="torrent-tg">{{ entry.folder }}</span>
           </label>
         </template>
         <template v-if="filter === 'fonts' || (filter === 'all' && tab === 'subtitles' && fonts.length)">

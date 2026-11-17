@@ -16,7 +16,7 @@ vi.mock("../../../composables/useSSE", () => ({
 }))
 vi.mock("../../../composables/useWindowBusy", () => ({ useBusyBar: () => undefined }))
 
-import { t } from "../../../i18n"
+import { t, tn } from "../../../i18n"
 import type { Editor, EditorView, ReleaseView } from "../../../lib/torrent"
 import type { SeriesSource } from "../../../lib/sources"
 import TorrentTab from "./TorrentTab.vue"
@@ -84,7 +84,7 @@ describe("the head of the tab", () => {
     const w = mountWith(TorrentTab, { sources: [source] })
     await flushPromises()
     expect(w.find(".torrent-state").text()).toBe("Загрузка")
-    expect(w.find(".torrent-progress").text()).toBe(t("torrent.progress.files", { done: 1, total: 2 }))
+    expect(w.find(".torrent-progress").text()).toBe(t("torrent.progress.files", { done: 1, total: 2, share: 75 }))
     expect(calls.fetchPage).not.toHaveBeenCalled()
 
     sse.handlers.get("torrent_release_update")!(kept("ready"))
@@ -120,7 +120,7 @@ describe("the editor «Файлы»", () => {
     await bonus.find("input[type=checkbox]").setValue(true)
     expect(w.find(".torrent-pick").text()).toContain(t("torrent.select.count", { n: 2 }))
     const season = w.find(".drop-season")
-    expect(season.text()).toBe(t("torrent.draft.dropSeason", { season: 1, n: 2, from: 2 }))
+    expect(season.text()).toBe(t("torrent.draft.dropSeason", { season: 1, files: tn("torrent.files", 2), from: 2 }))
     await season.trigger("click")
     expect(calls.assign).toHaveBeenCalledWith({ url: URL, tab: "files", items: ["page/Bonus/OVA 1.mkv", "page/Bonus/OVA 2.mkv"],
       season: 1, episode: 2, in_order: true })
@@ -159,7 +159,7 @@ describe("the editors of the tracks", () => {
     }) })
     expect(w.find(".torrent-row.is-group").text()).toContain(t("torrent.streams.group", { season: 0, episodes: "1–2" }))
     const rows = w.findAll(".stream-row")
-    expect(rows.map((row) => row.find(".torrent-kind").text())).toEqual(["v0 · h264 1080p", "a0 · ac3 2.0"])
+    expect(rows.map((row) => row.find(".torrent-stream-facts").text())).toEqual(["v0 · h264 1080p", "a0 · ac3 2.0"])
     await rows[1].find("input").setValue(true)
     expect(w.find(".torrent-pick").text()).toContain(t("torrent.select.count", { n: 2 }))
     await w.findAll(".drop-folder").at(-1)!.trigger("click")

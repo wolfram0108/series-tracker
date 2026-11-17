@@ -146,14 +146,14 @@ const profileId = computed(() => editor.value?.profiles[tab.value] ?? null)
 </template>
 
 <style scoped>
-.torrent-tab { display: flex; flex-direction: column; gap: 0.75rem; }
+/* The tab fills the body of the window: the rules above, the two panes under them take the rest and scroll inside. */
+.torrent-tab { display: flex; flex-direction: column; gap: 0.875rem; min-block-size: 100%; }
 .torrent-hint { margin: 0; color: var(--text-muted); }
 .torrent-failure { margin: 0; }
-.torrent-rules { border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow: hidden; }
+.torrent-rules { flex: none; border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow: hidden; }
 .torrent-rules-head {
-  display: flex; inline-size: 100%; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.6rem 1rem;
-  border: 0; background: color-mix(in srgb, var(--color-blue) 18%, var(--bg-white));
-  color: var(--color-blue); font: inherit; cursor: pointer; text-align: start;
+  display: flex; inline-size: 100%; align-items: center; justify-content: space-between; gap: 0.625rem; padding: 0.75rem 1.125rem;
+  border: 0; background: #cfe2ff; color: #0b5cd4; font: inherit; font-size: 0.94rem; cursor: pointer; text-align: start;
 }
-.torrent-rules-body { padding: 0.75rem 1rem; }
+.torrent-rules-body { padding: 0.875rem 1.125rem; }
 </style>

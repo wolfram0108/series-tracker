@@ -44,7 +44,7 @@ const progress = computed(() => {
   const shown = props.state.progress
   if (!shown || !shown.total) return null
   const key: MessageKey = props.state.stage === "read" ? "torrent.progress.read" : "torrent.progress.files"
-  return { share: Math.round((shown.done / shown.total) * 100), text: t(key, shown) }
+  return { share: shown.share, text: t(key, shown) }
 })
 
 // A release not loaded yet is chosen among those the page lists; one of them is chosen by itself.
@@ -82,6 +82,8 @@ async function setWatched(watched: boolean): Promise<void> {
 </script>
 
 <template>
+  <!-- The line of the source (the boards «Файлы» and «Состояния»): what it is and how it stands, then its controls and the
+       switch of the editors at its end. -->
   <div class="torrent-head">
     <SourceMark :mark="mark" />
     <b class="torrent-site">{{ page?.site || siteOf(source.url) }}</b>
@@ -92,7 +94,7 @@ async function setWatched(watched: boolean): Promise<void> {
         <span :style="{ inlineSize: `${progress.share}%` }" />
       </span>{{ progress.text }}
     </span>
-    <span v-if="state.stage === 'ready' && state.waiting" class="pill torrent-waiting" data-state="absent">
+    <span v-if="state.stage === 'ready' && state.waiting" class="torrent-waiting">
       {{ t("torrent.progress.waiting", { n: state.waiting }) }}
     </span>
     <span v-if="state.stage === 'update'" class="torrent-muted">{{ t("torrent.unavailable") }}</span>
@@ -112,34 +114,36 @@ async function setWatched(watched: boolean): Promise<void> {
         <Button :label="t('torrent.download')" icon="pi pi-download" :disabled="!chosen || busy" :loading="busy"
                 class="do-download" @click="download" />
       </template>
-    </div>
-
-    <div v-if="editor && state.stage !== 'notLoaded'" class="st-tabs st-tabs-wrap torrent-switch" role="tablist">
-      <button v-for="each in EDITOR_TABS" :key="each" type="button" role="tab" class="st-tab" :class="[`tab-${each}`, { active: tab === each }]"
-              :aria-selected="tab === each" @click="emit('tab', each)">
-        {{ t(`torrent.tab.${each}` as MessageKey) }}<span v-if="counts[each]" class="torrent-count">{{ counts[each] }}</span>
-      </button>
+      <div v-if="editor && state.stage !== 'notLoaded'" class="st-tabs st-tabs-wrap torrent-switch" role="tablist">
+        <button v-for="each in EDITOR_TABS" :key="each" type="button" role="tab" class="st-tab" :class="[`tab-${each}`, { active: tab === each }]"
+                :aria-selected="tab === each" @click="emit('tab', each)">
+          {{ t(`torrent.tab.${each}` as MessageKey) }}<span v-if="counts[each]" class="torrent-count">{{ counts[each] }}</span>
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.torrent-head {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; padding: 0.6rem 0.9rem;
-  border: var(--border-width) solid var(--border-color); border-radius: var(--border-radius); background: var(--bg-light);
-}
-.torrent-title { flex: 1 1 12rem; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
-.torrent-state i { font-size: 0.8rem; }
-.torrent-progress { display: inline-flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; color: var(--text-muted); white-space: nowrap; }
-.torrent-bar { display: block; inline-size: 8.75rem; block-size: 0.5rem; border-radius: 999px; background: var(--bg-gray, #e9ecef); overflow: hidden; }
+.torrent-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.65rem; }
+.torrent-site { font-size: 0.95rem; }
+.torrent-title { flex: 1 1 8rem; min-inline-size: 6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.torrent-state { font-size: 0.75rem; font-weight: 600; }
+.torrent-state i { font-size: 0.75rem; }
+.torrent-progress { display: inline-flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
+.torrent-bar { display: block; inline-size: 8.75rem; block-size: 0.5rem; border-radius: 999px; background: var(--border-color); overflow: hidden; }
 .torrent-bar span { display: block; block-size: 100%; border-radius: 999px; background: var(--tone-end); }
-.torrent-muted { color: var(--text-muted); font-size: 0.9rem; }
+.torrent-waiting {
+  display: inline-flex; align-items: center; padding: 0.1rem 0.6rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+  background: color-mix(in srgb, var(--state-absent) 30%, var(--bg-white)); color: var(--state-absent-ink);
+  border: 1px solid var(--state-absent-end); white-space: nowrap;
+}
+.torrent-muted { color: var(--text-muted); font-size: 0.85rem; }
 .torrent-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-inline-start: auto; }
-.torrent-watch { display: inline-flex; align-items: center; gap: 0.6rem; color: var(--text-muted); font-size: 0.9rem; }
+.torrent-watch { display: inline-flex; align-items: center; gap: 0.6rem; color: var(--text-muted); font-size: 0.875rem; }
 .torrent-release { min-inline-size: 14rem; max-inline-size: 28rem; }
-.torrent-switch { flex-basis: 100%; }
 .torrent-count {
-  display: inline-flex; align-items: center; justify-content: center; min-inline-size: 1.25rem; padding: 0 0.35rem; margin-inline-start: 0.4rem;
-  border-radius: 999px; background: var(--state-absent); color: var(--state-absent-ink); font-size: 0.75rem; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; min-inline-size: 1.25rem; block-size: 1.125rem; padding: 0 0.375rem;
+  margin-inline-start: 0.4rem; border-radius: 999px; background: var(--state-failed); color: var(--bg-white); font-size: 0.7rem; font-weight: 700;
 }
 </style>

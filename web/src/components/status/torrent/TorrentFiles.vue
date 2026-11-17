@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
-import { t, type MessageKey } from "../../../i18n"
+import { t, tn, type MessageKey } from "../../../i18n"
 import { spansOf } from "../../../lib/ranges"
 import { byFolder, draftOf, fileCounts, fileFilterOf, nameOf, ruleOf, type DraftEpisode, type Editor, type FileEntry,
   type FileFilter, type FileKind } from "../../../lib/torrent"
@@ -15,9 +15,11 @@ const props = defineProps<{ editor: Editor }>()
 const emit = defineEmits<{ failure: [string] }>()
 
 const FILTERS: readonly FileFilter[] = ["all", "unplaced", "placed", "excluded", "notInvolved"]
-const filter = ref<FileFilter>("unplaced")
 const entries = computed(() => props.editor.view.tabs.files)
 const counts = computed(() => fileCounts(entries.value))
+// Until the user picks a filter the list shows what waits for a place, or every file when nothing does.
+const chosenFilter = ref<FileFilter | null>(null)
+const filter = computed<FileFilter>(() => chosenFilter.value ?? (counts.value.unplaced ? "unplaced" : "all"))
 const fits = (entry: FileEntry): boolean => filter.value === "all" || fileFilterOf(entry) === filter.value
 const folders = computed(() => byFolder(entries.value).map((group) => {
   const shown = group.entries.filter(fits)
@@ -121,7 +123,7 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
       <div class="torrent-pane-head"><b>{{ t("torrent.files.title") }}</b><span class="torrent-pane-hint">{{ t("torrent.files.line") }}</span></div>
       <div class="torrent-filters" role="group">
         <button v-for="each in FILTERS" :key="each" type="button" class="torrent-filter" :class="{ active: filter === each }"
-                :aria-pressed="filter === each" @click="filter = each">
+                :aria-pressed="filter === each" @click="chosenFilter = each">
           <i v-if="each !== 'all'" class="torrent-dot" :class="`is-${each}`" aria-hidden="true" />{{ t(`torrent.filter.${each}` as MessageKey) }}
           <b>{{ counts[each] }}</b>
         </button>
@@ -148,7 +150,8 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
           </div>
           <template v-if="!folded.has(group.folder)">
             <label v-for="entry in group.shown" :key="entry.item" class="torrent-row is-nested file-row"
-                   :class="{ 'is-chosen': pick.has(entry.item), 'is-unplaced': fileFilterOf(entry) === 'unplaced' }"
+                   :class="{ 'is-chosen': pick.has(entry.item), 'is-unplaced': fileFilterOf(entry) === 'unplaced',
+                             'is-excluded': entry.excluded }"
                    draggable="true" @dragstart="pick.dragStart($event, [entry.item])" @dragend="pick.dragEnd">
               <input type="checkbox" :checked="pick.has(entry.item)" @change="pick.toggle(entry.item)">
               <i class="torrent-dot" :class="`is-${fileFilterOf(entry)}`" aria-hidden="true" />
@@ -189,7 +192,7 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
       </form>
       <div class="torrent-pane-body">
         <div v-for="season in seasons" :key="season.season" class="torrent-season">
-          <div class="torrent-row is-group">
+          <div class="torrent-season-head">
             <b>{{ t("torrent.draft.season", { n: season.season }) }}</b>
             <span class="torrent-pane-hint">
               <template v-if="season.episodes.some((each) => each.files.length)">
@@ -198,17 +201,16 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
               </template>
               <template v-else>{{ t("torrent.draft.manualEmpty") }}</template>
             </span>
-            <span class="torrent-side">
+            <span class="torrent-pane-tools">
               <button type="button" class="torrent-mini" @click="startAdding(season.season)">+ {{ t("torrent.draft.addEpisode") }}</button>
               <button v-if="!season.laid" type="button" class="torrent-mini" @click="dropSeason(season.season)">{{ t("common.delete") }}</button>
             </span>
           </div>
           <template v-for="episode in season.episodes" :key="episodeKey(season.season, episode)">
-            <div class="torrent-row is-nested episode-row"
-                 v-bind="pick.target(toEpisode(season.season, episode))">
-              <button type="button" class="torrent-fold" :aria-expanded="opened.has(episodeKey(season.season, episode))"
+            <div class="torrent-episode episode-row" v-bind="pick.target(toEpisode(season.season, episode))">
+              <button type="button" class="torrent-en" :aria-expanded="opened.has(episodeKey(season.season, episode))"
                       :disabled="!episode.files.length" @click="openEpisode(episodeKey(season.season, episode))">
-                <b>{{ episode.last ? `${episode.episode}–${episode.last}` : episode.episode }}</b>
+                {{ episode.last ? `${episode.episode}–${episode.last}` : episode.episode }}
               </button>
               <span class="torrent-name">{{ episodeTitle(episode) }}</span>
               <template v-for="kind in KINDS" :key="kind">
@@ -219,27 +221,27 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
                       @click="by(toEpisode(season.season, episode))()"><i class="pi pi-arrow-down" aria-hidden="true" /></button>
             </div>
             <template v-if="opened.has(episodeKey(season.season, episode))">
-              <div v-for="file in episode.files" :key="file.item" class="torrent-row is-nested">
+              <div v-for="file in episode.files" :key="file.item" class="torrent-file">
                 <span class="torrent-kind" :class="`is-${file.kind}`">{{ kindWord(file.kind) }}</span>
                 <span class="torrent-name" :title="file.path">{{ file.path }}</span>
-                <span class="torrent-side">{{ howOf(file) }}</span>
+                <span class="torrent-how" :class="{ 'is-hand': file.by === 'manual' }">{{ howOf(file) }}</span>
                 <button v-if="file.by === 'manual'" type="button" class="torrent-mini" :disabled="busy" @click="back([file.item])">
                   {{ t("torrent.unassign") }}</button>
               </div>
             </template>
           </template>
-          <button type="button" class="torrent-drop drop-season" :class="{ 'is-live': pick.dragging.value }" :disabled="!pick.count.value || busy"
+          <button v-if="pick.count.value" type="button" class="torrent-drop drop-season" :disabled="busy"
                   v-bind="pick.target(toSeason(season.season, season.next))" @click="by(toSeason(season.season, season.next))()">
             <i class="pi pi-arrow-down" aria-hidden="true" />
-            <span>{{ t("torrent.draft.dropSeason", { season: season.season, n: pick.count.value, from: season.next }) }}</span>
+            <span>{{ t("torrent.draft.dropSeason", { season: season.season, files: tn("torrent.files", pick.count.value), from: season.next }) }}</span>
           </button>
         </div>
-        <button type="button" class="torrent-drop is-bin drop-bin" :class="{ 'is-live': pick.dragging.value }" :disabled="!pick.count.value || busy"
-                v-bind="pick.target(toBin)" @click="by(toBin)()">
-          <i class="pi pi-trash" aria-hidden="true" />
-          <span>{{ pick.count.value ? t("torrent.skip.drop", { n: pick.count.value }) : t("torrent.skip") }}</span>
-        </button>
       </div>
+      <button type="button" class="torrent-bin drop-bin" :class="{ 'is-live': pick.count.value > 0 }" :disabled="!pick.count.value || busy"
+              v-bind="pick.target(toBin)" @click="by(toBin)()">
+        <i class="pi pi-trash" aria-hidden="true" />
+        <span>{{ pick.count.value ? t("torrent.skip.drop", { n: pick.count.value }) : t("torrent.skip") }}</span>
+      </button>
     </section>
   </div>
 </template>
