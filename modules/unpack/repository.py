@@ -1,4 +1,5 @@
-"""The SQL of the module unpack: tables unpack_streams, unpack_folders, unpack_assignments, unpack_hidden and unpack_sources."""
+"""The SQL of the module unpack: tables unpack_streams, unpack_folders, unpack_assignments, unpack_hidden, unpack_removed and
+unpack_sources."""
 from __future__ import annotations
 
 import json
@@ -46,7 +47,18 @@ class UnpackRepository:
              "VALUES (?, ?, ?, ?, ?, ?, ?)",
              (url, tab, item, season, episode + number if in_order and episode is not None else episode,
               None if in_order else episode_last, folder))
-            for number, item in enumerate(items)])
+            for number, item in enumerate(items)]
+            # A track placed by hand is no longer one the user took out of its folder.
+            + [("DELETE FROM unpack_removed WHERE url=? AND tab=? AND item=?", (url, tab, item)) for item in items])
+
+    async def remove(self, url: str, tab: str, items: list[str]) -> None:
+        """«−»: the tracks are in no folder — red — whatever the files and the rules say; a hand's placement goes too."""
+        await self._db.execute_many(
+            [("DELETE FROM unpack_assignments WHERE url=? AND tab=? AND item=?", (url, tab, item)) for item in items]
+            + [("INSERT OR IGNORE INTO unpack_removed (url, tab, item) VALUES (?, ?, ?)", (url, tab, item)) for item in items])
+
+    async def removed(self, url: str) -> list[dict]:
+        return await self._db.fetch_all("SELECT tab, item FROM unpack_removed WHERE url=?", (url,))
 
     async def unassign(self, url: str, tab: str, items: list[str]) -> None:
         await self._db.execute_many([("DELETE FROM unpack_assignments WHERE url=? AND tab=? AND item=?", (url, tab, item))
@@ -74,9 +86,13 @@ class UnpackRepository:
         return await self._db.fetch_all("SELECT kind, name FROM unpack_hidden WHERE url=? ORDER BY kind, name", (url,))
 
     async def unhide(self, url: str, kinds: list[str], name: str | None = None) -> None:
-        """«Авто»: the automatic layout makes the folders of these kinds again (one, with `name`)."""
+        """«Авто»: the automatic layout makes the folders of these kinds again (one, with `name`), and with all of a kind
+        places again the tracks of its tabs the user took out of their folders."""
+        tabs = {"voice": ("voices", "voice_streams"), "subtitles": ("subtitles", "subtitle_streams")}
         await self._db.execute_many([("DELETE FROM unpack_hidden WHERE url=? AND kind=?" + (" AND name=?" if name else ""),
-                                      (url, kind, name) if name else (url, kind)) for kind in kinds])
+                                      (url, kind, name) if name else (url, kind)) for kind in kinds]
+                                    + ([] if name else [("DELETE FROM unpack_removed WHERE url=? AND tab=?", (url, tab))
+                                                        for kind in kinds for tab in tabs[kind]]))
 
     # --- the profiles of the tabs of a source -----------------------------------------------------------------------
 
@@ -94,7 +110,7 @@ class UnpackRepository:
         """Every page the module keeps something of."""
         rows = await self._db.fetch_all("SELECT url FROM unpack_sources UNION SELECT url FROM unpack_streams "
                                         "UNION SELECT url FROM unpack_folders UNION SELECT url FROM unpack_assignments "
-                                        "UNION SELECT url FROM unpack_hidden")
+                                        "UNION SELECT url FROM unpack_hidden UNION SELECT url FROM unpack_removed")
         return sorted(row["url"] for row in rows)
 
     async def forget(self, url: str) -> None:
@@ -102,4 +118,5 @@ class UnpackRepository:
                                      ("DELETE FROM unpack_folders WHERE url=?", (url,)),
                                      ("DELETE FROM unpack_assignments WHERE url=?", (url,)),
                                      ("DELETE FROM unpack_hidden WHERE url=?", (url,)),
+                                     ("DELETE FROM unpack_removed WHERE url=?", (url,)),
                                      ("DELETE FROM unpack_sources WHERE url=?", (url,))])

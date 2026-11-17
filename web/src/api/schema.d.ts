@@ -1822,6 +1822,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/torrent/editor/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove */
+        post: operations["remove_api_torrent_editor_remove_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/torrent/editor/auto": {
         parameters: {
             query?: never;
@@ -3850,6 +3867,21 @@ export interface components {
             url: string;
             /** Release */
             release: string;
+        };
+        /**
+         * RemoveBody
+         * @description «−»: tracks taken out of their folders — red — until placed by hand or «Авто».
+         */
+        RemoveBody: {
+            /** Url */
+            url: string;
+            /**
+             * Tab
+             * @enum {string}
+             */
+            tab: "voices" | "subtitles" | "voice_streams" | "subtitle_streams";
+            /** Items */
+            items: string[];
         };
         /**
          * RowState
@@ -10022,6 +10054,84 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["FolderRef"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_api_torrent_editor_remove_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveBody"];
             };
         };
         responses: {

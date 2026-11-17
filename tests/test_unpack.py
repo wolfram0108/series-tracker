@@ -130,6 +130,21 @@ def test_a_deleted_folder_of_the_automatic_layout_is_not_made_again_and_the_hand
     assert [(e["folder"], e["by"]) for e in view["tabs"]["voice_streams"]] == [("Original", "manual"), ("Original", "meta"), ("Студия", "студия")]
 
 
+def test_a_track_taken_out_of_its_folder_is_red_whatever_the_file_says_until_a_hand_places_it():
+    r = release(["Show/E01.mkv"])
+    video = item_of("page", "Show/E01.mkv")
+    inputs = Inputs(releases=[r], folders=[], removed={("voice_streams", f"{video}#1"), ("voice_streams", f"{video}#2")},
+                    streams={"page": {"Show/E01.mkv": streams(("video", 0, "", ""), ("audio", 1, "rus", "AniLiberty"),
+                                                              ("audio", 2, "jpn", "Original"))}},
+                    results={"files": numbered({"Show/E01.mkv": (1, 1)})},
+                    manual={"voice_streams": {f"{video}#2": {"folder": "Студия"}}})
+    view, rows = compose(inputs)
+    # «−» on AniLiberty: in no folder, red, no row; the hand's later placement of #2 goes before its removal.
+    assert [(e["folder"], e["by"], e["waiting"]) for e in view["tabs"]["voice_streams"]] == [(None, None, True), ("Студия", "manual", False)]
+    assert [row.voice.name for row in rows] == ["Студия"]
+    assert view["removed"] == [{"tab": "voice_streams", "item": f"{video}#1"}, {"tab": "voice_streams", "item": f"{video}#2"}]
+
+
 def test_a_folder_a_rule_gives_names_the_track_and_the_users_folder_goes_before_it():
     r = release(["Show/E01.mkv", "Show/Rus Audio/JAM/E01.mka", "Show/Rus Audio/Studio/E01.mka"])
     inputs = Inputs(releases=[r], folders=[{"kind": "voice", "name": "Студия", "language": "rus", "subtitle_type": ""}],
@@ -342,6 +357,16 @@ async def test_a_folder_deleted_takes_the_hands_placements_in_it_and_auto_makes_
     assert await unpack.repo.assignments(URL) == []
     await torrents.request("unpack.auto", {"url": URL, "kinds": ["voice"]})
     assert (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["hidden"] == []
+    # «−» takes a track out — red; «Авто» gives it back to the automatic layout; a hand's placement clears it too.
+    await torrents.request("unpack.remove", {"url": URL, "tab": "voices", "items": [sound]})
+    assert [(e["folder"], e["waiting"]) for e in (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["tabs"]["voices"]] == [
+        (None, True)]
+    await torrents.request("unpack.auto", {"url": URL, "kinds": ["voice"]})
+    assert (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["removed"] == []
+    await torrents.request("unpack.remove", {"url": URL, "tab": "voices", "items": [sound]})
+    await torrents.request("unpack.assign", {"url": URL, "tab": "voices", "items": [sound], "folder": "Студия"})
+    assert (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["removed"] == []
+    await torrents.request("unpack.unassign", {"url": URL, "tab": "voices", "items": [sound]})
     # A folder only the hand made is not hidden when deleted; one the user names again is his: nothing hides it.
     await torrents.request("unpack.folder.delete", {"url": URL, "kind": "voice", "name": "Студия"})
     assert (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["hidden"] == []

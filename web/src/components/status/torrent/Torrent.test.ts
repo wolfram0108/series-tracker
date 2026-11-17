@@ -7,7 +7,7 @@ import PrimeVue from "primevue/config"
 // request each, and what the core changes comes back as its events — never by asking again.
 const calls = vi.hoisted(() => ({
   fetchPage: vi.fn(), fetchReleases: vi.fn(), fetchEditor: vi.fn(), downloadRelease: vi.fn(), watchRelease: vi.fn(),
-  assign: vi.fn(), unassign: vi.fn(), setFolder: vi.fn(), deleteFolder: vi.fn(), autoLayout: vi.fn(),
+  assign: vi.fn(), unassign: vi.fn(), setFolder: vi.fn(), deleteFolder: vi.fn(), autoLayout: vi.fn(), removeFromFolder: vi.fn(),
 }))
 vi.mock("../../../composables/torrentCalls", () => calls)
 const sse = vi.hoisted(() => ({ handlers: new Map<string, (data: unknown) => void>() }))
@@ -53,6 +53,7 @@ const view = (overrides: Partial<EditorView> = {}): EditorView => ({
   unplaced: { files: 2, voices: 1, subtitles: 0, voice_streams: 0, subtitle_streams: 0 },
   containers: [],
   hidden: [],
+  removed: [],
   ...overrides,
 })
 const editor = (overrides: Partial<EditorView> = {}): Editor => ({ url: URL, profiles: { files: 11, voices: 12, subtitles: 13, voice_streams: 14, subtitle_streams: 15 },
@@ -182,16 +183,19 @@ describe("the editors of the tracks", () => {
     await language.setValue("jpn")
     expect(calls.setFolder).toHaveBeenCalledWith({ url: URL, kind: "voice", name: "Original", language: "jpn", subtitle_type: "" })
     await original.find(".torrent-folders-chev").trigger("click")
-    // Unfolded, a track is its episode, its stream as the left pane names it, and «вручную» or «авто»; only a hand's track
-    // has a bin, which gives it back to the rules and its file. Nothing is left out here.
+    // Unfolded, a track is its episode, its stream as the left pane names it, and «вручную» or «авто»; every track has its
+    // «−», which takes it out of the folder — red — whoever put it there.
     const tracks = w.findAll(".torrent-folder-track")
     expect(tracks.map((each) => [each.find(".torrent-folders-place").text(), each.find(".torrent-folders-id").text(),
       each.find(".torrent-hand, .torrent-auto").text()])).toEqual([["s01e01", "A:1", t("torrent.by.auto")], ["s01e02", "A:2", t("torrent.by.manual")]])
     expect(tracks.map((each) => each.find(".torrent-folders-file").exists())).toEqual([false, false])
-    expect(tracks.map((each) => each.find(".do-drop-track").exists())).toEqual([false, true])
-    await tracks[1].find(".do-drop-track").trigger("click")
-    await flushPromises()
-    expect(calls.unassign).toHaveBeenCalledWith(URL, "voice_streams", ["page/S/E02.mkv#2"])
+    expect(tracks.map((each) => each.find(".do-drop-track").exists())).toEqual([true, true])
+    for (const [index, item] of [[0, "page/S/E01.mkv#1"], [1, "page/S/E02.mkv#2"]] as const) {
+      await tracks[index].find(".do-drop-track").trigger("click")
+      await flushPromises()
+      expect(calls.removeFromFolder).toHaveBeenCalledWith(URL, "voice_streams", [item])
+    }
+    expect(calls.unassign).not.toHaveBeenCalled()
     // The folder deleted takes the hand's placement in it; the automatic layout does not make it again until «Авто».
     await original.find(".do-delete-folder").trigger("click")
     await flushPromises()

@@ -93,6 +93,13 @@ def test_a_manual_place_is_an_episode_of_a_season_for_a_file_and_a_folder_for_a_
     assert "excluded" not in columns
 
 
+def test_a_track_taken_out_of_its_folder_is_one_per_tab_of_tracks(conn):
+    conn.execute("INSERT INTO unpack_removed (url, tab, item) VALUES ('u', 'voice_streams', 'r/E01.mkv#1')")
+    for bad in ("('u', 'files', 'r/E01.mkv')", "('u', 'voice_streams', 'r/E01.mkv#1')"):
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(f"INSERT INTO unpack_removed (url, tab, item) VALUES {bad}")
+
+
 def test_a_folder_of_the_editor_is_one_by_its_name_and_of_a_known_type(conn):
     conn.execute("INSERT INTO unpack_folders (url, kind, name, subtitle_type) VALUES ('u', 'subtitles', 'Надписи', 'signs')")
     conn.execute("INSERT INTO unpack_folders (url, kind, name) VALUES ('u', 'voice', 'Надписи')")

@@ -151,13 +151,17 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     back = page.locator(".torrent-folder-track .torrent-hand")
     await expect(back).to_have_count(2)
     await ui.shot("07-by-hand")
+    # «−» takes a track out of the folder — red, the hand's placement gone; «Вернуть правилам» on the left is not needed.
     for left in (1, 0):
         await page.locator(".torrent-folder-track", has=page.locator(".torrent-hand")).first.locator(".do-drop-track").click()
         await expect(back).to_have_count(left, timeout=LONG_S)
-    await expect(page.locator(".torrent-folder[data-folder='Студия'] .torrent-folders-num").last).to_have_text("2", timeout=LONG_S)
+    await expect(page.locator(".torrent-streams .stream-row.is-unplaced")).to_have_count(1, timeout=LONG_S)
     await hand.locator(".do-delete-folder").click()
     await expect(hand).to_have_count(0, timeout=LONG_S)
-    # A folder of the user's is no work of the automatic layout: «Авто» has nothing to make again.
+    # «Авто» gives the sound back to the automatic layout: the rule puts it into «Студия» again.
+    await page.locator(".do-auto").click()
+    await expect(page.locator(".torrent-folder[data-folder='Студия'] .torrent-folders-num").last).to_have_text("2", timeout=LONG_S)
+    # Nothing of the automatic layout is taken away now: «Авто» has nothing to make again.
     await expect(page.locator(".do-auto")).to_be_disabled()
     # A folder of a rule deleted: its tracks are red; «Авто» makes it again.
     await page.locator(".torrent-folder[data-folder='Студия'] .do-delete-folder").click()

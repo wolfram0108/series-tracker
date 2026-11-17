@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { t } from "../../../i18n"
-import { byEpisode, folderOf, trackCounts, trackFits, type Editor, type TrackEntry, type TrackFilter } from "../../../lib/torrent"
+import { byEpisode, folderOf, trackCounts, trackFits, type Editor, type TrackEntry, type TrackFilter, tabsOfKind } from "../../../lib/torrent"
 import { assign, autoLayout, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
@@ -58,7 +58,8 @@ async function send(call: () => Promise<Answer<unknown>>): Promise<void> {
 const toFolder = (name: string, items: string[]) => send(() => assign({ url: url.value, tab: props.tab, items, folder: name }))
 const back = () => send(() => unassign(url.value, props.tab, chosenEntries.value.filter((each) => each.by === "manual").map((each) => each.item)))
 // «Авто»: the automatic layout makes again the folders of this kind the user deleted; the hand's placements stay.
-const hiddenHere = computed(() => props.editor.view.hidden.some((each) => each.kind === kind.value))
+const hiddenHere = computed(() => props.editor.view.hidden.some((each) => each.kind === kind.value)
+  || props.editor.view.removed.some((each) => tabsOfKind(kind.value).includes(each.tab)))
 const toAuto = () => send(() => autoLayout(url.value, [kind.value]))
 
 const naming = ref(false)

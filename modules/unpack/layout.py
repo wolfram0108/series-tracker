@@ -55,6 +55,7 @@ class Inputs:
     manual: dict[str, dict[str, dict]]              # tab → item → the stored placement by hand
     folders: list[dict] = field(default_factory=list)
     hidden: set[tuple[str, str]] = field(default_factory=set)  # (kind, name): folders of the automatic layout deleted
+    removed: set[tuple[str, str]] = field(default_factory=set)  # (tab, item): tracks the user took out of their folders
 
 
 def lines(inputs: Inputs) -> dict[str, dict[str, str]]:
@@ -141,7 +142,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
     # `containers`: every video file placed, with what it holds (the window lays the tabs «Озв. конт.» and «Суб. конт.» out by it: files of
     # one composition are one).
     view: dict[str, Any] = {"releases": [], "tabs": {tab.value: [] for tab in EditorTab}, "folders": [],
-                            "unplaced": {tab.value: 0 for tab in EditorTab}, "containers": [], "hidden": []}
+                            "unplaced": {tab.value: 0 for tab in EditorTab}, "containers": [], "hidden": [], "removed": []}
     rows: list[TableRow] = []
     named: dict[tuple[str, str], dict] = {}  # the folders the layout names: (kind, name) → facts and counts
     # The fonts a folder of subtitles goes with: those its external files are drawn with (fonts_of), by the release read.
@@ -152,6 +153,8 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
               where: "Place | str | None" = None) -> dict:
         result, manual = inputs.results.get(tab, {}).get(item), inputs.manual.get(tab, {}).get(item)
         folder, how = _folder_of(kind, result, manual, stream, inputs.hidden)
+        if manual is None and (tab, item) in inputs.removed:
+            folder, how = None, None  # taken out of its folder by the user («−»): red until a hand or «Авто»
         folder_kind = "voice" if kind == "audio" else "subtitles"
         facts = folder_facts.get((folder_kind, folder), {}) if folder else {}
         language = (result or {}).get("language") or facts.get("language") or (stream or {}).get("language") or ""
@@ -262,6 +265,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
         each["fonts"] = sorted(fonts.get(each["name"], ())) if each["kind"] == "subtitles" else []
     view["folders"] = sorted(named.values(), key=lambda each: (each["kind"], each["name"]))
     view["hidden"] = [{"kind": kind, "name": name} for kind, name in sorted(inputs.hidden)]
+    view["removed"] = [{"tab": tab, "item": item} for tab, item in sorted(inputs.removed)]
     return view, rows
 
 

@@ -42,6 +42,12 @@ export const deleteFolder = (url: string, kind: "voice" | "subtitles", name: str
   items: Partial<Record<"voices" | "subtitles" | "voice_streams" | "subtitle_streams", string[]>> = {}, automatic = false): Promise<Answer<unknown>> =>
   call(() => api.POST("/api/torrent/editor/folder/delete", { body: { url, kind, name, items, automatic } }), WORDS)
 
-/** «Авто»: the automatic layout makes its deleted folders of these kinds again; the hand's placements stay. */
+/** «−»: tracks taken out of their folders — red — until placed by hand or «Авто». */
+export const removeFromFolder = (url: string, tab: "voices" | "subtitles" | "voice_streams" | "subtitle_streams",
+  items: string[]): Promise<Answer<unknown>> =>
+  call(() => api.POST("/api/torrent/editor/remove", { body: { url, tab, items } }), WORDS)
+
+/** «Авто»: the automatic layout makes its deleted folders of these kinds again and places again the tracks taken out of
+ *  folders; the hand's placements stay. */
 export const autoLayout = (url: string, kinds: ("voice" | "subtitles")[]): Promise<Answer<unknown>> =>
   call(() => api.POST("/api/torrent/editor/auto", { body: { url, kinds } }), WORDS)

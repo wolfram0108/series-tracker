@@ -90,7 +90,11 @@ export interface EditorView {
   containers: ContainerFile[]
   /** The folders of the automatic layout the user deleted: «Авто» makes them again. */
   hidden: { kind: Folder["kind"]; name: string }[]
+  /** The tracks the user took out of their folders («−»): red until a hand or «Авто». */
+  removed: { tab: EditorTab; item: string }[]
 }
+/** The tabs of the tracks of a kind of folder: «Авто» of that kind gives them back to the automatic layout. */
+export const tabsOfKind = (kind: Folder["kind"]): EditorTab[] => kind === "voice" ? ["voices", "voice_streams"] : ["subtitles", "subtitle_streams"]
 export interface Editor { url: string; profiles: Record<EditorTab, number | null>; view: EditorView }
 
 // --- the state of a source, as the head of the tab shows it ---------------------------------------------------------

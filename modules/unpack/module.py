@@ -24,8 +24,10 @@ Queries / commands (a page is named by any mirror of its tracker; the module kee
   unpack.folder.set {url, kind: voice | subtitles, name, language?, subtitle_type?} / unpack.folder.delete {url, kind, name,
       automatic?, items?: {tab: [item]}} — a folder deleted takes the hand's placements in it (`items`) and, holding tracks
       of the automatic layout (`automatic`: the titles in the files, the rules), is not made by it again until «Авто»
+  unpack.remove {url, tab, items} — «−»: the tracks are taken out of their folders, red, whatever the files and the rules
+      say (a hand's placement goes too), until placed by hand or «Авто»
   unpack.auto {url, kinds: [voice | subtitles]} — «Авто»: the automatic layout makes its deleted folders of these kinds
-      again; the hand's placements stay
+      again and places again the tracks taken out of folders; the hand's placements stay
 Events out:
   unpack.table.changed {url} — the rows of the page changed (`sources` reads its table again)
   unpack.editor.changed {url} — the editor of the page changed (a window shows it again)
@@ -76,6 +78,7 @@ class UnpackModule(BaseModule):
         self.handle("unpack.folder.set", self.on_folder_set)
         self.handle("unpack.folder.delete", self.on_folder_delete)
         self.handle("unpack.auto", self.on_auto)
+        self.handle("unpack.remove", self.on_remove)
         self.handle(RELEASE_CHANGED_TOPIC, self.on_release_changed)
         self.handle("rules.profile.changed", self.on_profile_changed)
         for topic in ("series.source.added", "series.source.updated", "series.source.removed", "series.deleted"):
@@ -123,7 +126,8 @@ class UnpackModule(BaseModule):
             manual[row["tab"]][row["item"]] = row
         streams = {r.release: await self.repo.streams(url, r.release) for r in releases}
         inputs = Inputs(releases=releases, streams=streams, results={}, manual=manual, folders=await self.repo.folders(url),
-                        hidden={(row["kind"], row["name"]) for row in await self.repo.hidden(url)})
+                        hidden={(row["kind"], row["name"]) for row in await self.repo.hidden(url)},
+                        removed={(row["tab"], row["item"]) for row in await self.repo.removed(url)})
         profiles = await self.repo.profiles(url) or {}
         keyed = lines(inputs)
         inputs.results[EditorTab.FILES] = await self._apply(profiles.get(PROFILE_COLUMNS["files"]), keyed[EditorTab.FILES])
@@ -193,6 +197,11 @@ class UnpackModule(BaseModule):
         url = await self._page(env.payload["url"])
         await self.repo.delete_folder(url, env.payload["kind"], env.payload["name"], env.payload.get("items") or {},
                                       bool(env.payload.get("automatic")))
+        self._changed(url)
+
+    async def on_remove(self, env: Envelope) -> None:
+        url = await self._page(env.payload["url"])
+        await self.repo.remove(url, env.payload["tab"], list(env.payload["items"]))
         self._changed(url)
 
     async def on_auto(self, env: Envelope) -> None:

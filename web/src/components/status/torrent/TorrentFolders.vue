@@ -5,7 +5,7 @@ import { LANGUAGES } from "../../../lib/languages"
 import { SUBTITLE_TYPES } from "../../../lib/ruleVocabulary"
 import { FROM_META, episodeFolder, folderRows, nameOf, ruleOf, type Editor, type Folder, type FolderRow, type FolderTrack } from "../../../lib/torrent"
 import { spansOf } from "../../../lib/ranges"
-import { deleteFolder, setFolder, unassign } from "../../../composables/torrentCalls"
+import { deleteFolder, removeFromFolder, setFolder } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import type { TorrentPick } from "../../../composables/useTorrentPick"
 
@@ -15,7 +15,7 @@ import type { TorrentPick } from "../../../composables/useTorrentPick"
 // it holds: its episode, its stream as the left pane names it (A:n), «вручную» or «авто» (a rule, the file). A pick let go on
 // a row is placed in that folder by hand. Any folder may be deleted: its tracks are in no folder (red) — the hand's go
 // back to the rules and the files — and one of the automatic layout is not made again until «Авто». A track a hand put
-// is taken back to the rules by its cross. Nothing is left out here.
+// is taken out of it by its «−» — red. Nothing is left out here.
 const props = defineProps<{
   editor: Editor
   kinds: readonly Folder["kind"][]
@@ -93,8 +93,8 @@ const url = computed(() => props.editor.url)
 const save = (row: FolderRow, change: { language?: string; subtitle_type?: "" | (typeof TYPES)[number] }) => run([() => setFolder({
   url: url.value, kind: row.kind, name: row.name, language: change.language ?? row.language,
   subtitle_type: (change.subtitle_type ?? row.subtitle_type) as "" | (typeof TYPES)[number] })])
-// The cross of a track a hand put here: it goes back to where the rules and its file put it.
-const dropTrack = (track: FolderTrack) => run([() => unassign(url.value, track.tab, [track.entry.item])])
+// «−» of a track: out of the folder, red, whoever put it there; «Авто» gives the automatic layout back.
+const dropTrack = (track: FolderTrack) => run([() => removeFromFolder(url.value, track.tab, [track.entry.item])])
 // A folder deleted: the hand's placements in it go with it, the automatic layout does not make it again until «Авто».
 function dropFolder(row: FolderRow): Promise<void> {
   const items: Partial<Record<FolderTrack["tab"], string[]>> = {}
@@ -177,9 +177,9 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
                 <td colspan="3"><span v-if="track.entry.by === 'manual'" class="torrent-hand">{{ t("torrent.by.manual") }}</span>
                   <span v-else class="torrent-auto">{{ t("torrent.by.auto") }}</span></td>
                 <td class="torrent-folders-act">
-                  <button v-if="track.entry.by === 'manual'" type="button" class="torrent-bin-btn do-drop-track" :disabled="busy"
-                          :title="t('torrent.folders.dropHand')" :aria-label="t('torrent.folders.dropHand')"
-                          @click="dropTrack(track)"><i class="pi pi-times" aria-hidden="true" /></button>
+                  <button type="button" class="torrent-bin-btn do-drop-track" :disabled="busy"
+                          :title="t('torrent.folders.dropTrack')" :aria-label="t('torrent.folders.dropTrack')"
+                          @click="dropTrack(track)"><i class="pi pi-minus" aria-hidden="true" /></button>
                 </td>
               </tr>
               <tr v-if="row.fonts.length" class="torrent-folder-track">
