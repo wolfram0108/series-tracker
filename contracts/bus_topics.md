@@ -71,7 +71,7 @@
 | `trackerauth.credentials.changed {service}` | trackerauth | torrents | — |
 | `torrents.queue.changed {count, tasks}` | torrents | gateway | `agent_queue_update` |
 | `torrents.release.changed ReleaseView` — состояние, версия или файлы раздачи торрент-источника изменились; `ready` — все нужные файлы на месте (этап 15) | torrents | — | — |
-| `torrents.progress.changed {tasks}` (торренты старого конвейера и раздачи торрент-источников в работе или с ошибкой, `kind: release` — по задаче на сериал со страницей) | torrents | gateway | `torrent_progress_update` |
+| `torrents.progress.changed {tasks}` (торренты старого конвейера и все раздачи торрент-источников в любом состоянии, пока есть источник, `kind: release` — по задаче на сериал со страницей) | torrents | gateway | `torrent_progress_update` |
 | `torrents.preview.ready \| .failed` — исход одной раздачи команды `torrents.preview.fetch` | torrents | gateway | `preview_naming_ready`, `preview_naming_failed` |
 | `downloads.queue.changed {tasks, count}` — карточки загрузок; раз в секунду, пока загрузка идёт, и при подключении интерфейса; карточки живут с синхронизацией сериала (`scan.run.changed`): после её конца остаются только ошибки и завершённые с перестройкой плана (таблица `download_cards`) до «Удалить» или следующей синхронизации сериала | downloads | gateway | `download_queue_update` |
 | `downloads.fetch.started \| .finished {key, …}` | downloads | planner | — |

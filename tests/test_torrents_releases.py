@@ -128,7 +128,7 @@ async def test_a_release_downloads_into_its_folder_and_is_ready_when_every_file_
     assert [(each["release"], each["state"], each["infohash"]) for each in kept] == [("page", "ready", h)]
 
 
-async def test_the_monitor_shows_a_release_the_client_works_on_for_every_series_with_its_page_and_drops_it_once_ready(stand):
+async def test_the_monitor_shows_a_release_the_client_holds_for_every_series_with_its_page_ready_or_not(stand):
     model, world, torrents, told = stand
     world.series[2] = [PAGE]
     h = world.lists(model, release(V1), published="d1", link="L1", hold=True)
@@ -146,7 +146,15 @@ async def test_the_monitor_shows_a_release_the_client_works_on_for_every_series_
     assert all(0 <= t["progress"] < 100 and t["files_done"] < t["files_total"] for t in working)
     model.deliver(h)
     await until(told, "ready")
-    assert await asyncio.wait_for(release_tasks(True), LIMIT_S) == []
+
+    async def ready_tasks():
+        while True:
+            tasks = [t for t in (await monitor.queue.get()).payload["tasks"] if t.get("kind") == "release"]
+            if tasks and all(t["status"] == "ready" for t in tasks):
+                return tasks
+    ready = await asyncio.wait_for(ready_tasks(), LIMIT_S)
+    assert [(t["series_id"], t["progress"], t["files_done"], t["files_total"]) for t in ready] == [
+        (1, 100.0, len(V1), len(V1)), (2, 100.0, len(V1), len(V1))]
 
 
 async def test_the_folder_of_the_releases_is_an_absolute_path_written_to_the_settings(stand):

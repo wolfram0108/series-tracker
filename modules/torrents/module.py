@@ -69,7 +69,8 @@ files} / torrents.preview.failed {torrent_id, infohash, reason} (→ SSE:
 download_tasks принадлежит downloads, торрентов в ней нет): query torrents.db.progress.list и
 событие torrents.progress.changed отдают {tasks: [{id, qb_hash, series_id, series_name, status,
 progress, dlspeed, eta, error_message, created_at, updated_at}]}. With them stand the releases of the torrent sources the
-client works on or that failed, one task per series with the page: {kind: "release", qb_hash, url, release, title,
+keeps, whatever their state (downloading, ready, being updated, failed, archived) — a release is there until its source
+goes — one task per series with the page: {kind: "release", qb_hash, url, release, title,
 series_id, series_name, status (the state of the release), progress (by the size of the wanted files), files_done,
 files_total, error_message} — the monitor of «Агенты» shows every torrent of the client.
 
@@ -107,7 +108,7 @@ import os
 
 from core import BaseModule, BusRequestError, storage, torrent_profile_id
 from core.contracts import RUN_CHANGED, RunChanged
-from core.contracts.torrent import STAGING_DIR_KEY, ReleaseState
+from core.contracts.torrent import STAGING_DIR_KEY
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason, relayed
@@ -117,7 +118,7 @@ from . import pipeline, selection
 from .infohash import (TorrentParseError, infohash_candidates,
                        infohash_from_magnet, torrent_file_list)
 from .qbt_client import QbtClient, QbtError
-from .releases import MOVING, Releases
+from .releases import Releases
 from .repository import ReleaseStore, TorrentsRepository
 
 # state-исключения для downloading (старый sync_torrent_statuses +
@@ -1233,9 +1234,9 @@ class TorrentsModule(BaseModule):
         return tasks + await self._release_tasks()
 
     async def _release_tasks(self) -> list[dict]:
-        """The releases the client works on or that failed, one task per series whose torrent source is the page."""
-        rows = [row for row in await self.releases.store.all()
-                if ReleaseState(row["state"]) in MOVING or row["state"] == ReleaseState.FAILED.value]
+        """Every release the module keeps, one task per series whose torrent source is the page: it is there until its source
+        goes, whatever its state."""
+        rows = await self.releases.store.all()
         if not rows:
             return []
         series_of: dict[str, list[dict]] = {}
