@@ -40,8 +40,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ toggle: []; save: []; delete: []; move: [dir: -1 | 1] }>()
 
-// The actions of «ТО», numbered: a row shows its action by its number (compact), the list names them with it.
-const ACTIONS = actionOptions(props.place).map((each, at) => ({ ...each, label: `${at + 1}. ${each.label}` }))
+// The actions of «ТО», numbered: a row shows its action by its number (compact), the list shows the number as its mark.
+const ACTIONS = actionOptions(props.place).map((each, at) => ({ ...each, mark: at + 1 }))
 const numberOf = (type: string): number => ACTIONS.findIndex((each) => each.value === type) + 1
 // The cell clicked, and the row its choice was extended to (Shift+click): the cells of the column between the two are
 // chosen together.
@@ -248,6 +248,7 @@ function setRowAction(row: TableRow, value: string): void {
                 <span class="table-label label-then">{{ t("rules.label.then") }}</span>
                 <NumberMark :n="numberOf(table.action_type)" :title="actionLabel(table.action_type)" />
                 <StSelect class="table-action" :model-value="table.action_type" :options="ACTIONS" :display="actionLabel(table.action_type)"
+                          :list-min-width="19"
                           @update:model-value="setAction($event as string)" />
                 <!-- The language of every row with none of its own. -->
                 <StSelect
@@ -284,7 +285,7 @@ function setRowAction(row: TableRow, value: string): void {
                   <StSelect
                     class="row-action" :class="{ 'is-own': !!row.then.action }" :model-value="actionOf(row)" :options="ACTIONS"
                     :style="{ '--action': `var(--source-${(numberOf(actionOf(row)) - 1) % 16})` }"
-                    :display="String(numberOf(actionOf(row)))" :aria-label="t('rules.table.rowAction')" :list-min-width="16"
+                    :display="String(numberOf(actionOf(row)))" :aria-label="t('rules.table.rowAction')" :list-min-width="19"
                     @update:model-value="setRowAction(row, $event as string)"
                   />
                   <div class="row-then-value">

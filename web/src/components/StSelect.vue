@@ -3,12 +3,14 @@ import { computed, inject } from "vue"
 import { useDropList } from "../composables/useDropList"
 import { FIELD_LABEL } from "../lib/fieldLabel"
 import { t } from "../i18n"
+import NumberMark from "./NumberMark.vue"
 
 // The select of a group (constructor-item item-select): frameless, it shows the value chosen and a chevron. Its list is teleported
 // to <body> with position:fixed (useDropList): no frame of an ancestor (a window, an accordion) cuts it; its height is its content's,
 // up to the edge of the window, upwards where there is no room below. It is a combobox of the keyboard (useDropList) and is named
 // by the label of its group (lib/fieldLabel.ts) unless `ariaLabel` names it.
-interface Opt { label: string; value: unknown }
+// `mark`: the number of an option in a numbered list (the actions of «ТО»), shown before its label as NumberMark.
+interface Opt { label: string; value: unknown; mark?: number }
 const props = withDefaults(defineProps<{
   modelValue?: unknown
   options: Opt[]
@@ -57,9 +59,7 @@ const { open, root, list, dropStyle, active, listId, optionId } = drop
           :class="{ selected: o.value === modelValue, active: index === active }"
           :aria-selected="o.value === modelValue"
           @click.stop="drop.take(index)"
-        >
-          {{ o.label }}
-        </div>
+        ><NumberMark v-if="o.mark" :n="o.mark" />{{ o.label }}</div>
       </div>
     </Teleport>
   </div>

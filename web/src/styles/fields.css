@@ -126,6 +126,8 @@
 .option { padding: 0.75rem 1rem; cursor: pointer; color: var(--color-text); white-space: nowrap; }
 .option:hover, .option.active:not(.selected) { background: var(--color-gray-100); }
 .option.selected { font-weight: 600; background: #e9f2ff; }
+/* An option of a numbered list: its number as a coloured mark before its label (NumberMark). */
+.option .number-mark { margin-inline-end: 0.5rem; vertical-align: middle; }
 
 /* группа иконочных кнопок внутри группы (item-button-group + btn-icon) */
 .item-button-group {

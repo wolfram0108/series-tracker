@@ -10,7 +10,7 @@ import { useConfirm } from "../../composables/useConfirm"
 import { api } from "../../api/client"
 import { t } from "../../i18n"
 import { useBusyBar } from "../../composables/useWindowBusy"
-import { isExtract, type RulePlace } from "../../lib/ruleVocabulary"
+import { actionOptions, isExtract, type RulePlace } from "../../lib/ruleVocabulary"
 import LoadingMark from "../LoadingMark.vue"
 
 // The rules of one profile of the constructor: the cards of the rules in their order. A rule or a table is added from the
@@ -97,12 +97,14 @@ async function loadRules(): Promise<void> {
   })
 }
 
-// A new rule «Таблица» starts as a new ordinary rule does: «ТО» excludes, «продолжать» is off.
+// A new rule starts with the first action of its place (in «Правила» of a series: «Исключить видео»; a tab of the
+// torrent editor has no exclusion), «продолжать» off; a rule «Таблица» starts as an ordinary one does.
+const firstAction = (): string => actionOptions(props.place)[0].value
 function addTable(): void {
   const id = "new-" + Date.now()
   rules.value.push({
     id, name: t("rules.table.newName"), continue_after_match: false, is_new: true, conditions: [], actions: [],
-    table: { action_type: "exclude", rows: [] },
+    table: { action_type: firstAction(), rows: [] },
   })
   openRuleId.value = id
 }
@@ -117,7 +119,8 @@ function addRule(): void {
     conditions: [
       { condition_type: "contains", logical_operator: "AND", _blocks: [{ type: "text", value: "", id: Date.now() }] },
     ],
-    actions: [{ action_type: "exclude", action_pattern: "[]", _action_blocks: [] }],
+    actions: [{ action_type: firstAction(), action_pattern: isExtract(firstAction()) || firstAction() === "exclude" ? "[]" : "",
+                _action_blocks: [] }],
   })
   openRuleId.value = id
 }

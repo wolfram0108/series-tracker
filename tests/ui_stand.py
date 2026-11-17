@@ -340,8 +340,8 @@ CHOICES = {"assign_language": lambda code: f"{text(f'voices.language.{code}')} (
 
 
 def _labelled(label: str) -> re.Pattern:
-    """The whole text `label`, after the number of its place where the list numbers its items (the actions of «ТО»)."""
-    return re.compile(rf"^\s*(?:\d+\.\s)?{re.escape(label)}\s*$")
+    """The whole text `label`, after the number of its place where the list numbers its items (the mark of an action of «ТО»)."""
+    return re.compile(rf"^\s*(?:\d+\.?\s*)?{re.escape(label)}\s*$")
 
 
 def _option(page: Page, label: str):

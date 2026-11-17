@@ -58,7 +58,8 @@ const emit = defineEmits<{
 }>()
 
 const CONDITION_TYPES = conditionOptions()
-const ACTION_TYPES = actionOptions(props.place)
+// The actions of «ТО», numbered as in a table of rules: the list shows each number as its mark.
+const ACTION_TYPES = actionOptions(props.place).map((each, at) => ({ ...each, mark: at + 1 }))
 
 const toggleIcon = computed(() => (props.isOpen ? "pi-chevron-down" : "pi-chevron-right"))
 
