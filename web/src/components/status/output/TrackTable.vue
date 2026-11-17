@@ -1,20 +1,28 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import { t } from "../../../i18n"
-import { outputLines, type EpisodeView, type SourceMark as Mark, type TrackCell } from "../../../lib/output"
+import { t, type MessageKey } from "../../../i18n"
+import { outputLines, type EpisodeView, type QueueRow, type SourceMark as Mark, type TrackCell } from "../../../lib/output"
+import type { SubtitleLine } from "../../../lib/plan"
 import { reasonText } from "../../../lib/reason"
 import SourceMark from "./SourceMark.vue"
 import { stateLabel, TRACK_STATES } from "../../../lib/states"
 
 // The tracks of an episode, each with where it comes from, its state and the action that fits it: the reference is
 // downloaded again, a placed voice-over made anew, a failed one done again. An action is the one command it names.
-const props = withDefaults(defineProps<{ view: EpisodeView; cells: TrackCell[]; marks: Record<number, Mark>; busy?: boolean }>(),
-  { busy: false })
+// The subtitles follow the sounds (DESIGN.md 7.1.1), numbered in the order of the file; «Удалить» leaves the variant out of
+// this episode, and the next sync takes it out of the file.
+const props = withDefaults(defineProps<{ view: EpisodeView; cells: TrackCell[]; marks: Record<number, Mark>; busy?: boolean;
+  subtitles?: SubtitleLine[] }>(), { busy: false, subtitles: () => [] })
 const emit = defineEmits<{
   (e: "refetch", part: number | null): void
   (e: "retry", group: string): void
   (e: "redo", group: string): void
+  (e: "drop-subtitles", row: QueueRow): void
 }>()
+const variantOf = (line: SubtitleLine): QueueRow => ({ group: line.name, source_id: line.sourceId, player: line.player,
+  player_label: line.player, episodes: "", stale: "", allowed: true, allowed_level: "default", language: line.language,
+  subtitle_type: line.subtitleType })
+const subtitleType = (line: SubtitleLine): string => line.subtitleType ? t(`output.subtitles.kind.${line.subtitleType}` as MessageKey) : ""
 
 
 type Action = "refetch" | "retry" | "redo" | "delete" | null
@@ -89,6 +97,25 @@ function act(row: (typeof rows.value)[number]): void {
           <span v-else class="muted">—</span>
         </td>
       </tr>
+      <tr v-for="(line, index) in subtitles" :key="`s${index}`" class="subtitle-row" :class="{ 'is-first-subtitle': index === 0 }"
+          :data-subtitles="line.name">
+        <td><span class="subtitle-mark">{{ line.n === null ? "—" : t("output.subtitles.mark", { n: line.n }) }}</span></td>
+        <td>
+          <b>{{ line.name }}</b>
+          <span v-if="line.language || line.subtitleType" class="muted"> · {{ [line.language, subtitleType(line)].filter(Boolean).join(" · ") }}</span>
+        </td>
+        <td><span class="track-from"><SourceMark :mark="marks[line.sourceId]" />{{ marks[line.sourceId]?.place }}</span></td>
+        <td>
+          <span v-if="line.state === 'unaligned'" class="pill pill-secondary">{{ t("output.subtitles.unaligned") }}</span>
+          <span v-else class="pill" :data-state="TRACK_STATES[line.state === 'done' ? 'done' : 'wait']">
+            {{ stateLabel(TRACK_STATES[line.state === "done" ? "done" : "wait"]) }}</span>
+        </td>
+        <td class="narrow">
+          <button v-if="line.state !== 'unaligned'" type="button" class="row-action do-drop-subtitles" data-lever :disabled="busy"
+                  @click="emit('drop-subtitles', variantOf(line))">{{ t("output.action.delete") }}</button>
+          <span v-else class="muted">—</span>
+        </td>
+      </tr>
     </tbody>
   </table>
 </template>
@@ -107,4 +134,6 @@ function act(row: (typeof rows.value)[number]): void {
 .track-note { margin-inline-start: 0.4rem; color: var(--text-muted); }
 .track-offline { margin-inline-start: 0.4rem; color: var(--text-muted); font-style: italic; }
 .muted { color: var(--text-muted); }
+.subtitle-row.is-first-subtitle td { border-top: 0.125rem solid var(--border-color); }
+.subtitle-mark { font-weight: 700; color: var(--subtitle-color); }
 </style>

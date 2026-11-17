@@ -25,7 +25,7 @@ const ok = <T>(data: T): Answer<T> => ({ ok: true, data })
 const row = (over: Partial<Row> = {}): Row => ({
   series_id: 1, source_id: 7, in_output: true, row_key: "row", excluded: false, season: 1, episode_start: 2, episode_end: 2,
   voice_label: "Ruchime", voice_name: "Ruchime", player: "vibix", player_label: "", group: "", text: "",
-  heights: [1080], state: "playable", link: "", video: "", timeline: "", stale: false, ...over,
+  heights: [1080], state: "playable", link: "", video: "", timeline: "", track: "sound", language: "", subtitle_type: "", stale: false, ...over,
 })
 const reference = (over: Partial<Reference> = {}): Reference => ({
   season: 1, episode: 2, part: null, mark: "by_level", source_id: 7, row_key: "row", player: "vibix",
@@ -88,7 +88,7 @@ afterEach(() => {
 
 // The queues of the season the boxes tests press: the reference of two variants, the voice-over AniStar of one.
 const variant = (group: string, source_id: number, player: string, allowed = true): QueueRow => ({
-  group, source_id, player, player_label: player, episodes: "1", stale: "", allowed, allowed_level: allowed ? "default" : "season",
+  group, source_id, player, player_label: player, episodes: "1", stale: "", allowed, allowed_level: allowed ? "default" : "season", language: "", subtitle_type: "",
 })
 const seasonQueues = (allowed = true): Queues => ({
   series_id: 1, season: 1, episode: null, markup_follows: true,

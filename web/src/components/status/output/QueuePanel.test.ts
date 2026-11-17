@@ -5,7 +5,7 @@ import { t } from "../../../i18n"
 import QueuePanel from "./QueuePanel.vue"
 
 const row = (player: string) => ({ group: "OnWave", source_id: 55, player, player_label: player.toUpperCase(), height: 1080,
-  episodes: "1", stale: "", allowed: true, allowed_level: "default" as const })
+  episodes: "1", stale: "", allowed: true, allowed_level: "default" as const, language: "", subtitle_type: "" })
 
 describe("the queue of the markup reference (stage 14)", () => {
   it("says it follows the reference, with no way back, while no level has an order of its own", () => {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import type { FailedAttempt, HeldFile, ShownVoice, Taken } from "../../../lib/plan"
+import type { FailedAttempt, HeldFile, ShownVoice, SubtitleLine, Taken } from "../../../lib/plan"
 import type { SameGroups } from "../../../lib/same"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
@@ -52,7 +52,10 @@ const props = withDefaults(defineProps<{
   cuts?: Map<string, CutItem>
   /** The episodes of the season selected (lib/selection.ts): their outline behind the cards, over the compilations'. */
   selected?: number[]
-}>(), { names: () => [], mode: "cards", opened: null, busy: false, compilations: () => [], cuts: () => new Map(),
+  /** The subtitles of the file of each episode, and those of the containers of the season (DESIGN.md 7.1.1). */
+  subtitlesOf?: (episode: number) => SubtitleLine[]
+  seasonSubtitles?: { n: number; name: string; language: string; episodes: string }[]
+}>(), { subtitlesOf: () => [], seasonSubtitles: () => [], names: () => [], mode: "cards", opened: null, busy: false, compilations: () => [], cuts: () => new Map(),
   selected: () => [], failed: () => [] })
 
 const emit = defineEmits<{
@@ -188,6 +191,13 @@ function step(by: number): void {
         v-if="voices.length" :voices="voices" :busy="busy" @order="emit('voice-order', $event)"
         @title="(label, title) => emit('voice-title', label, title)"
       />
+      <section v-if="seasonSubtitles.length" class="season-subtitles" :aria-label="t('output.subtitles.inContainer')">
+        <span class="season-subtitles-title">{{ t("output.subtitles.inContainer") }}</span>
+        <span v-for="each in seasonSubtitles" :key="each.n" class="subtitle-chip">
+          <span class="subtitle-chip-mark">{{ t("output.subtitles.mark", { n: each.n }) }}</span>{{ each.name }}<template v-if="each.language"> · {{ each.language }}</template>
+          <span class="subtitle-chip-episodes">{{ each.episodes }}</span>
+        </span>
+      </section>
       <div ref="grid" class="season-grid" :class="`is-${mode}`" :style="columns">
         <span ref="ruler" class="grid-ruler" aria-hidden="true" />
         <GroupOutline :grid="grid" :layout="layout + episodes.length + (opened ? 1 : 0)" :groups="outline" />
@@ -197,6 +207,7 @@ function step(by: number): void {
             v-if="mode === 'cards' && (built(item.view.episode) || props.opened === item.view.episode)" :view="item.view" :cells="item.cells" :status="item.status" :marks="marks"
             :file="wide ? item.file : undefined" :open="opened?.view.episode === item.view.episode" :busy="busy"
             :badge="memberOf(members, season, item.view.episode)" selectable :selected="chosen.has(item.view.episode)"
+            :subtitles="subtitlesOf(item.view.episode)"
             @open="toggleOpen(item.view.episode)" @select="emit('select', item.view.episode, $event)"
             @switch="emit('switch-episode', item.view.episode, $event)"
           />
@@ -214,6 +225,7 @@ function step(by: number): void {
           <EpisodeDetail
             v-if="opened?.view.episode === item.view.episode" :view="item.view" :cells="item.cells" :status="item.status"
             :marks="marks" :file="item.file" :queues="queues" :held="held" :taken="taken" :failed="failed" :busy="busy"
+            :subtitles="subtitlesOf(item.view.episode)"
             @close="emit('open', null)" @step="step" @switch="emit('switch-episode', item.view.episode, $event)"
             @refetch="emit('refetch', item.view.episode, $event)" @retry="emit('retry', item.view.episode, $event)"
             @retry-failed="emit('retry-failed', item.view.episode)" @redo="emit('redo', item.view.episode, $event)"

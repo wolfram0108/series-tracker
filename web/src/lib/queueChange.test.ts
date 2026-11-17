@@ -3,7 +3,7 @@ import type { QueueRow } from "./output"
 import { bodyOf, changeKey, coreValue, levelOf, queueKey, scopeKey, withChanges, type QueueChange, type Queues } from "./queueChange"
 
 const row = (player: string, over: Partial<QueueRow> = {}): QueueRow => ({
-  group: "Ruchime", source_id: 7, player, player_label: player, episodes: "", stale: "", allowed: true, allowed_level: "default", ...over,
+  group: "Ruchime", source_id: 7, player, player_label: player, episodes: "", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "", ...over,
 })
 
 const queues = (): Queues => ({

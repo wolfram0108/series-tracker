@@ -280,7 +280,7 @@ async def test_the_queues_of_an_episode_say_which_variant_its_file_holds_beside_
     await ui.press_sync(series_id)
     await expect(page.locator(".episode-card[data-state='done']")).to_have_count(2)
     await page.locator(".episode-card[data-episode='1']").dblclick()
-    tabs = page.locator(".episode-detail .st-tabs .st-tab")
+    tabs = page.locator(".episode-detail .st-tabs .st-tab:not(.tab-subtitles)")  # the subtitles are no voice-over
     held = text("output.queue.held")
     await tabs.nth(1).click()  # the reference
     await expect(page.locator(".episode-detail .queue-held")).to_have_count(1)

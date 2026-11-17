@@ -40,6 +40,8 @@ const emit = defineEmits<{
 }>()
 
 const level = computed(() => (props.compilation ? "compilation" : props.season === null ? "series" : "season"))
+// The tab of the subtitles by a key no voice-over group can have: a group is a name a user typed.
+const SUBTITLES = "\u0000subtitles"
 const tab = ref<string>(props.compilation ? "cuts" : props.season === null ? "reference" : "tracks")
 // A compilation has its REF 2 and its cuts; the voice-overs are set on the season and on the episode.
 const groups = computed(() => props.compilation ? []
@@ -84,6 +86,11 @@ const countText = (state: TrackState | "reference", count: number): string => st
         </button>
         <button v-for="(group, index) in groups" :key="group" type="button" class="st-tab" :class="{ active: tab === group }" @click="tab = group">
           <VoiceMark :n="index + 1" :online="online[group]" />{{ group }}
+        </button>
+        <!-- The subtitles have one table on the series and one on an episode (DESIGN.md 7.1.1): a season has none of its own. -->
+        <button v-if="level === 'series'" type="button" class="st-tab tab-subtitles" :class="{ active: tab === SUBTITLES }"
+                @click="tab = SUBTITLES">
+          {{ t("output.tab.subtitles") }}
         </button>
       </div>
       <div v-if="tab === 'cuts' && compilation" class="level-cuts">
@@ -137,6 +144,11 @@ const countText = (state: TrackState | "reference", count: number): string => st
         :marks="marks" :busy="busy"
         @order="emit('order', 'markup', null, $event)" @allow="(row, allowed) => emit('allow', 'markup', row, allowed)"
         @reset="emit('reset', 'markup', null)" @same="emit('same', 'markup', $event)"
+      />
+      <QueuePanel
+        v-else-if="tab === SUBTITLES" queue="subtitles" :level="level" :view="queues?.subtitles" :marks="marks" :busy="busy"
+        @order="emit('order', 'subtitles', null, $event)" @allow="(row, allowed) => emit('allow', 'subtitles', row, allowed)"
+        @reset="emit('reset', 'subtitles', null)"
       />
       <QueuePanel
         v-else queue="voice" :level="level" :view="groupQueue(tab)" :marks="marks" :busy="busy"

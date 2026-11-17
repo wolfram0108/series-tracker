@@ -262,6 +262,8 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
         :taken="opened?.season === season.season ? output.takenOf(season.season, opened.episode) : null"
         :failed="opened?.season === season.season ? output.failedOf(season.season, opened.episode) : []" :busy="busy"
         :selected="selectedBySeason.get(season.season) ?? NONE"
+        :subtitles-of="(episode: number) => output.subtitlesOf(season.season, episode)"
+        :season-subtitles="output.seasonSubtitlesOf(season.season)"
         @open="open(season.season, $event)" @select="(episode, pick) => select(season.season, episode, pick)"
         @settings="openSettings(season.season)"
         @switch-season="output.switchTo(season.season, null, $event)"

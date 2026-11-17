@@ -19,6 +19,9 @@
   --color-blue-2: #0dcaf0;
   --color-purple-1: #6f42c1;
   --color-purple-2: #845ef7;
+  /* The subtitles of a container (stage 15): the marks of their numbers and their chips, apart from the numbers of the sounds. */
+  --subtitle-color: #5a3e8a;
+  --subtitle-ground: #efe9f7;
 
   /* --- шрифты --- */
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;

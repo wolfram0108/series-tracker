@@ -2191,6 +2191,8 @@ export interface components {
             rev: number;
             /** Rows */
             rows?: components["schemas"]["CompositionRow"][];
+            /** Subtitles */
+            subtitles?: components["schemas"]["CompositionRow"][];
             /** Sources */
             sources?: components["schemas"]["SourceSummary"][];
             /** Levels */
@@ -2291,6 +2293,19 @@ export interface components {
              * @default
              */
             timeline: string;
+            /** @default sound */
+            track: components["schemas"]["RowTrack"];
+            /**
+             * Language
+             * @default
+             */
+            language: string;
+            /**
+             * Subtitle Type
+             * @default
+             * @enum {string}
+             */
+            subtitle_type: "" | "full" | "signs" | "forced";
             /**
              * Stale
              * @default false
@@ -2301,7 +2316,7 @@ export interface components {
              * @description The row is a row of the output (the window «Выход», its plan and the planner): the rules gave it its numbers and
              *     the voice-over groups took it. The one way into the output: table, rules, groups (ЭТАП_10:107); a row of an
              *     unknown voice-over is in none of it — no reference, no markup reference, no voice-over — until its group takes
-             *     it.
+             *     it. A row of subtitles needs no group: it is no voice-over (DESIGN.md 7.1.1).
              */
             readonly in_output: boolean;
         };
@@ -3020,6 +3035,8 @@ export interface components {
             tracks?: components["schemas"]["PlanAssetTrack"][];
             /** @default null */
             timeline: components["schemas"]["PlanVariant"] | null;
+            /** Subtitles */
+            subtitles?: components["schemas"]["PlanSubtitle"][];
         };
         /** PlanAssetTrack */
         PlanAssetTrack: {
@@ -3150,6 +3167,10 @@ export interface components {
             markup: string | null;
             /** @default null */
             markup_variant: components["schemas"]["PlanVariant"] | null;
+            /** Subtitles */
+            subtitles?: components["schemas"]["PlanSubtitle"][];
+            /** Unaligned */
+            unaligned?: components["schemas"]["PlanVariant"][];
         };
         /**
          * PlanFailure
@@ -3319,6 +3340,33 @@ export interface components {
              * @default
              */
             video: string;
+        };
+        /**
+         * PlanSubtitle
+         * @description A subtitles track (DESIGN.md 7.1.1): its row, its name, the player of its row, its language and its type; in a goal
+         *     also how it is obtained — `take` (from the file of its row) or `reuse` (from the file that holds it).
+         */
+        PlanSubtitle: {
+            row: components["schemas"]["PlanRowRef"];
+            /** Name */
+            name: string;
+            /** Player */
+            player: string;
+            /**
+             * Language
+             * @default
+             */
+            language: string;
+            /**
+             * Subtitle Type
+             * @default
+             */
+            subtitle_type: string;
+            /**
+             * Kind
+             * @default null
+             */
+            kind: ("take" | "reuse") | null;
         };
         /**
          * PlanVariant
@@ -3524,7 +3572,7 @@ export interface components {
          *     levers of a queue on its tab.
          * @enum {string}
          */
-        Queue: "reference" | "voice" | "compilation" | "markup";
+        Queue: "reference" | "voice" | "compilation" | "markup" | "subtitles";
         /**
          * QueueRow
          * @description A variant of a queue in its place: a voice-over group at a player of a source, the best height it has on the level,
@@ -3560,6 +3608,16 @@ export interface components {
             allowed_level: components["schemas"]["Level"];
             /** Same */
             same?: number | null;
+            /**
+             * Language
+             * @default
+             */
+            language: string;
+            /**
+             * Subtitle Type
+             * @default
+             */
+            subtitle_type: string;
         };
         /**
          * QueueTask
@@ -3604,6 +3662,7 @@ export interface components {
              * @default true
              */
             markup_follows: boolean;
+            subtitles?: components["schemas"]["QueueView"];
         };
         /**
          * ReadCancelled
@@ -3711,6 +3770,14 @@ export interface components {
          * @enum {string}
          */
         RowState: "playable" | "absent" | "not_obtained";
+        /**
+         * RowTrack
+         * @description What a row carries: a video with its sound, or a sound track (every row of a site), or a subtitles track of a torrent
+         *     release (stage 15, DESIGN.md 7.1.1). The kind of the voice-over a player names is no such mark: a «subtitles»
+         *     translation of Kodik is a video with its sound.
+         * @enum {string}
+         */
+        RowTrack: "sound" | "subtitles";
         /**
          * RuleResult
          * @description The only source of episode, season, range and part numbers; an excluded line has none of them.

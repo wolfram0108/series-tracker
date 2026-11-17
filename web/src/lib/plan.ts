@@ -288,3 +288,57 @@ export function trackOf(view: PlannerView | undefined, name: string, voice: stri
   const asset = (view?.assets ?? []).find((each) => each.name === name)
   return asset?.tracks?.find((track) => track.group === voice || track.label === voice) ?? null
 }
+
+// --- the subtitles of the files (stage 15, DESIGN.md 7.1.1) ----------------------------------------------------------
+
+/** A subtitles track of an episode as the window shows it: its place in the file (`n`, none for one that waits for its
+ *  alignment), its name, language and type, the source and player of its row, and whether the file holds it (`done`), the
+ *  plan takes it (`planned`) or it is on no timeline of the video and waits (`unaligned`). */
+export interface SubtitleLine {
+  n: number | null
+  name: string
+  language: string
+  subtitleType: string
+  sourceId: number
+  player: string
+  state: "done" | "planned" | "unaligned"
+}
+
+const rowRef = (row: PlanRowRef): string => JSON.stringify([row.source_id, row.row_key, row.video ?? ""])
+
+/** The subtitles of an episode: those of its file in the order of the plan, then those that wait for their alignment. */
+export function planSubtitles(view: PlannerView | undefined, season: number, episode: number): SubtitleLine[] {
+  const goal = (view?.episodes ?? []).find((each) => each.slot[0] === season && each.slot[1] === episode && each.slot.length === 2)
+  if (!goal) return []
+  const asset = (view?.assets ?? []).find((each) => !each.off && each.episode[0] === season && each.episode[1] === episode
+    && partOf(each.episode) === null)
+  const held = new Set((asset?.subtitles ?? []).map((each) => rowRef(each.row)))
+  return [
+    ...(goal.subtitles ?? []).map((each, index): SubtitleLine => ({
+      n: index + 1, name: each.name, language: each.language ?? "", subtitleType: each.subtitle_type ?? "",
+      sourceId: each.row.source_id, player: each.player, state: held.has(rowRef(each.row)) ? "done" : "planned" })),
+    ...(goal.unaligned ?? []).map((each): SubtitleLine => ({
+      n: null, name: each.group, language: "", subtitleType: "", sourceId: each.source_id, player: each.player, state: "unaligned" })),
+  ]
+}
+
+/** The subtitles of the containers of a season, in the order the plan gives them, each with its episodes: what the head of
+ *  the season says its files hold. */
+export function seasonSubtitles(view: PlannerView | undefined, season: number): { n: number; name: string; language: string; episodes: string }[] {
+  const found = new Map<string, { name: string; language: string; place: number; episodes: number[] }>()
+  for (const goal of view?.episodes ?? []) {
+    if (goal.slot[0] !== season) continue
+    ;(goal.subtitles ?? []).forEach((each, index) => {
+      const key = JSON.stringify([each.name, each.row.source_id, each.player])
+      const known = found.get(key)
+      if (known) {
+        known.place = Math.min(known.place, index)
+        known.episodes.push(goal.slot[1])
+      } else {
+        found.set(key, { name: each.name, language: each.language ?? "", place: index, episodes: [goal.slot[1]] })
+      }
+    })
+  }
+  return [...found.values()].sort((a, b) => a.place - b.place)
+    .map((each, index) => ({ n: index + 1, name: each.name, language: each.language, episodes: spansOf(each.episodes) }))
+}

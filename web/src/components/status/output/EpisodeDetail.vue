@@ -2,7 +2,7 @@
 import { computed, ref } from "vue"
 import { t } from "../../../i18n"
 import type { Queues } from "../../../composables/outputCalls"
-import type { FailedAttempt, HeldFile, Taken } from "../../../lib/plan"
+import type { FailedAttempt, HeldFile, SubtitleLine, Taken } from "../../../lib/plan"
 import type { SameGroups } from "../../../lib/same"
 import type { EpisodeStatus, EpisodeView, QueueName, QueueRow, SourceMark as Mark, TrackCell } from "../../../lib/output"
 import FoldButton from "../../FoldButton.vue"
@@ -32,7 +32,9 @@ const props = withDefaults(defineProps<{
   busy?: boolean
   /** The view «Компиляции» (stage 12): the compilations that cover the episode, and its REF 2 instead of its tracks. */
   compilations?: CompilationRow[]
-}>(), { busy: false, compilations: undefined, taken: null, failed: () => [] })
+  /** The subtitles of the file of the episode (DESIGN.md 7.1.1). */
+  subtitles?: SubtitleLine[]
+}>(), { busy: false, compilations: undefined, taken: null, failed: () => [], subtitles: () => [] })
 
 const emit = defineEmits<{
   (e: "close"): void
@@ -52,6 +54,8 @@ const emit = defineEmits<{
 }>()
 
 const tab = ref<string>(props.compilations ? "compilations" : "tracks")
+// The tab of the subtitles by a key no voice-over group can have: a group is a name a user typed.
+const SUBTITLES = "\u0000subtitles"
 const groups = computed(() => props.cells.map((cell) => cell.group))
 const referenceGroup = computed(() => props.cells.find((cell) => cell.isReference)?.group ?? null)
 const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) => each.group === group)
@@ -100,6 +104,8 @@ const failedOfGroup = (group: string) => props.failed.filter((each) => each.held
           v-for="(group, index) in groups" :key="group" type="button" class="st-tab" :class="{ active: tab === group }" role="tab"
           :aria-selected="tab === group" @click="tab = group"
         ><VoiceMark :n="index + 1" :online="cells[index]?.online" />{{ group }}</button>
+        <button type="button" class="st-tab tab-subtitles" :class="{ active: tab === SUBTITLES }" role="tab"
+                :aria-selected="tab === SUBTITLES" @click="tab = SUBTITLES">{{ t("output.tab.subtitles") }}</button>
       </div>
 
       <CompilationTable
@@ -107,8 +113,14 @@ const failedOfGroup = (group: string) => props.failed.filter((each) => each.held
         @retry="emit('retry-cut')"
       />
       <TrackTable
-        v-else-if="tab === 'tracks'" :view="view" :cells="cells" :marks="marks" :busy="busy"
+        v-else-if="tab === 'tracks'" :view="view" :cells="cells" :marks="marks" :busy="busy" :subtitles="subtitles"
         @refetch="emit('refetch', $event)" @retry="emit('retry', $event)" @redo="emit('redo', $event)"
+        @drop-subtitles="emit('allow', 'subtitles', $event, false)"
+      />
+      <QueuePanel
+        v-else-if="tab === SUBTITLES" queue="subtitles" level="episode" :view="queues?.subtitles" :marks="marks" :busy="busy"
+        @order="emit('order', 'subtitles', null, $event)" @allow="(row, allowed) => emit('allow', 'subtitles', row, allowed)"
+        @reset="emit('reset', 'subtitles', null)"
       />
       <QueuePanel
         v-else-if="tab === 'reference'" queue="reference" level="episode" :view="queues?.reference" :marks="marks" :held="held?.video" :taken="taken?.reference" :failed="failed" :busy="busy"

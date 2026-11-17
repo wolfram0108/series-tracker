@@ -28,7 +28,7 @@ const ok = <T>(data: T): Answer<T> => ({ ok: true, data })
 const row = (season: number, episode: number, over: Partial<Row> = {}): Row => ({
   series_id: 1, source_id: 7, in_output: true, row_key: `r${season}-${episode}`, excluded: false, season, episode_start: episode,
   episode_end: episode, voice_label: "Ruchime", voice_name: "Ruchime", player: "vibix", player_label: "Vibix",
-  group: "", text: "", heights: [1080], state: "playable", link: "", video: "", timeline: "", stale: false, ...over,
+  group: "", text: "", heights: [1080], state: "playable", link: "", video: "", timeline: "", track: "sound", language: "", subtitle_type: "", stale: false, ...over,
 })
 const reference = (season: number, episode: number, over: Partial<Reference> = {}): Reference => ({
   season, episode, part: null, mark: "by_level", source_id: 7, row_key: `r${season}-${episode}`, player: "vibix", compilation: null,
@@ -45,11 +45,11 @@ const composition = (): Composition => ({
 const queues = (): Queues => ({
   series_id: 1, season: 1, episode: 1, markup_follows: true,
   reference: { order_level: "default", same_level: "default", rows: [
-    { group: "Ruchime", source_id: 7, player: "vibix", player_label: "Vibix", height: 1080, episodes: "1", stale: "", allowed: true, allowed_level: "default" },
-    { group: "AniStar", source_id: 8, player: "kodik", player_label: "Kodik", height: 720, episodes: "1", stale: "", allowed: true, allowed_level: "default" },
+    { group: "Ruchime", source_id: 7, player: "vibix", player_label: "Vibix", height: 1080, episodes: "1", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "" },
+    { group: "AniStar", source_id: 8, player: "kodik", player_label: "Kodik", height: 720, episodes: "1", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "" },
   ] },
   groups: [{ group: "AniStar", take: true, take_level: "default", order_level: "default", same_level: "default", rows: [
-    { group: "AniStar", source_id: 8, player: "kodik", player_label: "Kodik", height: 720, episodes: "1", stale: "", allowed: true, allowed_level: "default" },
+    { group: "AniStar", source_id: 8, player: "kodik", player_label: "Kodik", height: 720, episodes: "1", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "" },
   ] }],
 })
 

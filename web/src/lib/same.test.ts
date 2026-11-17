@@ -4,7 +4,7 @@ import { groupsOf, heldFirst, joined, left, rowKey, sizeOf, split } from "./same
 
 const row = (source_id: number, player: string, same: number | null = null): QueueRow => ({
   group: "Китайский", source_id, player, player_label: player, height: 2160, episodes: "481", stale: "", allowed: true,
-  allowed_level: "default", same,
+  allowed_level: "default", language: "", subtitle_type: "", same,
 })
 const variant = (source_id: number, player: string) => ({ group: "Китайский", source_id, player })
 const keys = (...rows: QueueRow[]) => new Set(rows.map(rowKey))

@@ -53,7 +53,7 @@ describe("SourcesEditor", () => {
     const part = (over: Partial<LayoutRow>): LayoutRow => ({
       series_id: 1, source_id: 7, in_output: true, row_key: "r", excluded: false, season: 1, episode_start: 1, episode_end: 1,
       voice_label: "", voice_name: "", voice_group: null, player: "vk", player_label: "VK", group: "", text: "",
-      heights: [], state: "playable", link: "", video: "", timeline: "", stale: false, ...over,
+      heights: [], state: "playable", link: "", video: "", timeline: "", track: "sound", language: "", subtitle_type: "", stale: false, ...over,
     })
     const rows = [
       part({ row_key: "a", episode_start: 1, episode_end: 10, heights: [480, 2160], voice_name: "ПВА ШОУ", voice_label: "ПВА ШОУ", voice_group: "ПВА ШОУ" }),

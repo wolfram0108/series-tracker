@@ -304,8 +304,11 @@ export function resetBody(scope: Scope, lever?: string, target?: string | null, 
   }
 }
 
-/** The queues of single videos: the reference and the markup reference (stage 14); their variants name their group. */
+/** The queues of single videos: the reference and the markup reference (stage 14). */
 export const singleQueue = (queue: QueueName): boolean => queue === "reference" || queue === "markup"
+/** The queues whose order names the group of a variant (no group is the target of their lever): the queues of single videos
+ *  and the subtitles, whose group is the name of the subtitles (DESIGN.md 7.1.1). */
+export const namesGroup = (queue: QueueName): boolean => singleQueue(queue) || queue === "subtitles"
 
 // --- deviations ------------------------------------------------------------------------------------------------------
 
@@ -594,7 +597,7 @@ export function queueLevers(specs: readonly LeverSpec[], queue: QueueName): Queu
   const of = (target: LeverSpec["target"], shape: LeverSpec["shape"]) =>
     specs.find((spec) => spec.queue === queue && spec.target === target && spec.shape === shape)?.name
   return {
-    order: of(singleQueue(queue) ? "none" : "group", "variant_order"),
+    order: of(namesGroup(queue) ? "none" : "group", "variant_order"),
     allow: of("variant", "flag"),
     take: queue === "voice" ? of("group", "flag") : undefined,
     same: singleQueue(queue) ? of("none", "variant_sets") : undefined,
@@ -604,7 +607,7 @@ export function queueLevers(specs: readonly LeverSpec[], queue: QueueName): Queu
 /** The value of an order lever for the rows of a queue in the order the user put them: the reference names the group of a
  *  variant, a voice-over does not (its group is the target of the lever). */
 export function orderValue(queue: QueueName, rows: readonly QueueRow[]): Record<string, unknown>[] {
-  return rows.map((row) => singleQueue(queue)
+  return rows.map((row) => namesGroup(queue)
     ? { group: row.group, source_id: row.source_id, player: row.player }
     : { source_id: row.source_id, player: row.player })
 }

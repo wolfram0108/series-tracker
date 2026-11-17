@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Button from "primevue/button"
 import { computed, ref, watch } from "vue"
-import { t } from "../../../i18n"
+import { t, type MessageKey } from "../../../i18n"
 import type { QueueName, QueueRow, SourceMark as Mark } from "../../../lib/output"
 import { isVariantOf, type FailedAttempt, type Held } from "../../../lib/plan"
 import { heldFirst, joined, left, rowKey, sizeOf, split, type SameGroups } from "../../../lib/same"
@@ -37,7 +37,10 @@ const emit = defineEmits<{
 }>()
 
 const keyOf = rowKey
-const withSame = computed(() => props.queue !== "voice")
+// The subtitles are tracks, not a queue of choices (DESIGN.md 7.1.1): every row taken is a track, no row stands first, and
+// their columns are their name, language and type, not a player and a height.
+const subtitles = computed(() => props.queue === "subtitles")
+const withSame = computed(() => props.queue !== "voice" && !subtitles.value)
 // The rows as they are shown. The list is made anew only when the rows or the variant the file holds change: a window that
 // draws again with the same file is given the same list (the list of the order the user dragged waits on it for the core).
 const heldKey = computed(() => props.held ? JSON.stringify([props.held.source_id, props.held.player, props.held.group ?? null]) : "")
@@ -52,7 +55,7 @@ const headOf = (rows: readonly QueueRow[]): QueueRow | undefined => {
   const taken = props.taken
   return rows.find((each) => each.allowed && isVariantOf(taken, each)) ?? rows.find((each) => each.allowed)
 }
-const isFirst = (row: QueueRow, rows: readonly QueueRow[]): boolean => headOf(rows) === row
+const isFirst = (row: QueueRow, rows: readonly QueueRow[]): boolean => !subtitles.value && headOf(rows) === row
 
 const markOf = (row: QueueRow, rows: readonly QueueRow[]): string => !row.allowed ? t("output.queue.skipped")
   : isFirst(row, rows) ? t(props.queue === "reference" ? "output.queue.reference"
@@ -118,9 +121,16 @@ const onMenu = (key: string): void => {
             <th class="queue-take">{{ t("output.queue.take") }}</th>
             <th class="queue-handle" />
             <th>{{ t("output.queue.source") }}</th>
-            <th>{{ t("output.queue.player") }}</th>
-            <th>{{ t("output.queue.height") }}</th>
-            <th v-if="queue !== 'voice'">{{ t("output.queue.group") }}</th>
+            <template v-if="subtitles">
+              <th>{{ t("output.subtitles.name") }}</th>
+              <th>{{ t("output.subtitles.language") }}</th>
+              <th>{{ t("output.subtitles.type") }}</th>
+            </template>
+            <template v-else>
+              <th>{{ t("output.queue.player") }}</th>
+              <th>{{ t("output.queue.height") }}</th>
+              <th v-if="queue !== 'voice'">{{ t("output.queue.group") }}</th>
+            </template>
             <th v-if="level">{{ t("output.queue.episodes") }}</th>
             <th v-if="withSame" class="queue-same" :title="t('output.queue.sameHint')" :aria-label="t('output.queue.same')"><i class="pi pi-link" aria-hidden="true" /></th>
             <th />
@@ -141,9 +151,16 @@ const onMenu = (key: string): void => {
                 </button>
               </td>
               <td><span class="queue-source"><SourceMark :mark="marks[row.source_id]" /><span class="queue-place">{{ marks[row.source_id]?.place }}</span></span></td>
-              <td class="queue-player">{{ row.player_label }}</td>
-              <td>{{ height(row) }}</td>
-              <td v-if="queue !== 'voice'">{{ row.group }}</td>
+              <template v-if="subtitles">
+                <td class="subtitle-name">{{ row.group }}</td>
+                <td>{{ row.language || "—" }}</td>
+                <td>{{ row.subtitle_type ? t(`output.subtitles.kind.${row.subtitle_type}` as MessageKey) : "—" }}</td>
+              </template>
+              <template v-else>
+                <td class="queue-player">{{ row.player_label }}</td>
+                <td>{{ height(row) }}</td>
+                <td v-if="queue !== 'voice'">{{ row.group }}</td>
+              </template>
               <td v-if="level">{{ row.episodes }}<template v-if="row.stale && row.stale !== row.episodes"> · <span class="stale-episodes">{{ row.stale }}</span></template></td>
               <td v-if="withSame" class="queue-same">
                 <button v-if="row.same != null" type="button" class="same-chip" :class="{ on: picked.has(rowKey(row)) }" :disabled="busy" data-lever

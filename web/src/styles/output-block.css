@@ -39,3 +39,17 @@
     color-mix(in srgb, var(--partial-stripe) var(--partial-stripe-share), var(--partial-ground)) 0.4rem 0.8rem);
   color: var(--color-gray-600);
 }
+
+/* The subtitles of the containers of a season (stage 15, DESIGN.md 7.1.1): the chips of the order of the tracks, apart from
+   the sounds by their colour. */
+.season-subtitles { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem; }
+.season-subtitles-title { color: var(--text-muted); font-size: 0.85rem; }
+.subtitle-chip {
+  display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.2rem 0.75rem 0.2rem 0.25rem; max-inline-size: 100%;
+  background: var(--subtitle-ground); border: 1px solid var(--border-color); border-radius: 20px; font-size: 0.85rem;
+  color: var(--color-gray-600);
+}
+.subtitle-chip-mark {
+  padding: 0 0.3rem; border-radius: 4px; background: var(--subtitle-color); color: var(--bg-white); font-size: 0.75rem; font-weight: 700;
+}
+.subtitle-chip-episodes { color: var(--text-muted); }

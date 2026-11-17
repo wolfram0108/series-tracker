@@ -50,7 +50,8 @@ const hasSame = computed(() => props.queue !== "voice" && props.view !== undefin
 const ownSame = computed(() => props.view?.same_level === props.level)
 const hint = computed(() => props.hint ?? (props.queue === "reference" ? t("output.queue.hintReference")
   : props.queue === "markup" ? t(props.follows ? "output.queue.hintMarkupFollows" : "output.queue.hintMarkup")
-    : t("output.queue.hintVoice", { group: props.view?.group ?? "" })))
+    : props.queue === "subtitles" ? t(props.level === "episode" ? "output.queue.hintSubtitlesEpisode" : "output.queue.hintSubtitles")
+      : t("output.queue.hintVoice", { group: props.view?.group ?? "" })))
 </script>
 
 <template>

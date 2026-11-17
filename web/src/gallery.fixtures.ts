@@ -71,7 +71,7 @@ type QueueView = components["schemas"]["QueueView"]
 // longer gives (stale), the plan takes it, and nine variants of one picture stand in one group. The second group is made up.
 const sameRow = (source_id: number, player: string, height: number, over: Partial<QueueRow> = {}): QueueRow => ({
   group: "Китайский", source_id, player: `line:${player}`, player_label: player, height, episodes: "481", stale: "", allowed: true,
-  allowed_level: "default", same: null, ...over,
+  allowed_level: "default", language: "", subtitle_type: "", same: null, ...over,
 })
 export const SAME_QUEUE: QueueView = {
   order_level: "season", same_level: "series",

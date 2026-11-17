@@ -38,6 +38,7 @@ export const bodyOf = (change: QueueChange): Schemas["OutputSettingsSet"] =>
 const rowsOf = (queues: Queues, change: QueueChange): readonly QueueRow[] | undefined => {
   if (change.queue === "reference") return queues.reference?.rows
   if (change.queue === "markup") return queues.markup?.rows
+  if (change.queue === "subtitles") return queues.subtitles?.rows
   return queues.groups?.find((each) => each.group === change.group)?.rows
 }
 
@@ -73,6 +74,8 @@ export function withChanges(queues: Queues, changes: readonly QueueChange[]): Qu
       shown = { ...shown, reference: { ...shown.reference, rows: set(rows) } }
     } else if (change.queue === "markup" && shown.markup) {
       shown = { ...shown, markup: { ...shown.markup, rows: set(rows) } }
+    } else if (change.queue === "subtitles" && shown.subtitles) {
+      shown = { ...shown, subtitles: { ...shown.subtitles, rows: set(rows) } }
     }
   }
   return shown

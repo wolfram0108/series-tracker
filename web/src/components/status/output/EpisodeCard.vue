@@ -11,6 +11,7 @@ import {
 import PowerSwitch from "./PowerSwitch.vue"
 import RefLine from "./RefLine.vue"
 import SourceMark from "./SourceMark.vue"
+import type { SubtitleLine } from "../../../lib/plan"
 import TrackStrip from "./TrackStrip.vue"
 
 // A card of an episode: coloured by its state; its number with the name of its file (when the card is wider than the
@@ -35,6 +36,8 @@ const props = defineProps<{
   /** A click selects the card, a double click opens it (the grid of a season). */
   selectable?: boolean
   selected?: boolean
+  /** The subtitles of the file of the episode (DESIGN.md 7.1.1): drawn after its sounds. */
+  subtitles?: SubtitleLine[]
 }>()
 const emit = defineEmits<{ (e: "open"): void; (e: "select", pick: Pick): void; (e: "switch", off: boolean): void }>()
 // A press of Enter on the card comes as a click with no count of presses: it opens, as a double click does.
@@ -125,7 +128,7 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
         </span>
       </span>
       <span v-if="note" class="glass card-note">{{ note }}</span>
-      <TrackStrip v-else class="glass card-strip" :cells="cells" />
+      <TrackStrip v-else class="glass card-strip" :cells="cells" :subtitles="subtitles" />
     </span>
   </div>
 </template>
