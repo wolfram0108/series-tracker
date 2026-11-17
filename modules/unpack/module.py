@@ -9,7 +9,7 @@ row of the table of the page, as a row of a site. The rules of the tab «Фай�
 of the torrent editor, setting `unpack.files_profile_id`); the tabs «Озвучки», «Субтитры», «Контейнеры» have profiles of
 each source, made when its editor is first opened. Both are profiles of the kind `torrent` (rules).
 
-Queries / commands:
+Queries / commands (a page is named by any mirror of its tracker; the module keeps it, and answers it, in its one spelling):
   unpack.table.get {url} → TableDraft {names, title, rows} — the rows of the page (`sources` asks it as the read of a tracker's
       page): a release downloaded for the first time gives none, a release being updated gives its rows not obtained
   unpack.editor.get {url} → {url, profiles: {files, voices, subtitles, streams}, view} — the editor of the page: its releases,
@@ -137,15 +137,21 @@ class UnpackModule(BaseModule):
             inputs.results[tab] = await self._apply(profiles.get(column), keyed[tab])
         return inputs
 
+    async def _page(self, url: str) -> str:
+        """The one spelling of a page (its tracker's own domain): what the module keeps of a page is keyed by it, whatever
+        mirror the source of a series was written with."""
+        resolved = await self.request("sources.site.resolve", {"url": url})
+        return resolved.get("canonical_url") or url
+
     async def on_table_get(self, env: Envelope) -> dict:
-        url = env.payload["url"]
+        url = await self._page(env.payload["url"])
         releases = await self._releases(url)
         _view, rows = compose(await self._inputs(url, releases))
         names = [r.title for r in releases if r.title][:1]
         return {"names": names, "rows": [row.model_dump(mode="json") for row in rows]}
 
     async def on_editor_get(self, env: Envelope) -> dict:
-        url = env.payload["url"]
+        url = await self._page(env.payload["url"])
         profiles = await self._tab_profiles(url)
         view, _rows = compose(await self._inputs(url))
         for release in view["releases"]:
@@ -173,24 +179,26 @@ class UnpackModule(BaseModule):
     # --- what the user places -------------------------------------------------------------------------------------
 
     async def on_assign(self, env: Envelope) -> None:
-        p = env.payload
-        await self.repo.assign(p["url"], p["tab"], list(p["items"]), season=p.get("season"), episode=p.get("episode"),
+        p, url = env.payload, await self._page(env.payload["url"])
+        await self.repo.assign(url, p["tab"], list(p["items"]), season=p.get("season"), episode=p.get("episode"),
                                episode_last=p.get("episode_last"), folder=p.get("folder"), excluded=bool(p.get("excluded")),
                                in_order=bool(p.get("in_order")))
-        self._changed(p["url"])
+        self._changed(url)
 
     async def on_unassign(self, env: Envelope) -> None:
-        await self.repo.unassign(env.payload["url"], env.payload["tab"], list(env.payload["items"]))
-        self._changed(env.payload["url"])
+        url = await self._page(env.payload["url"])
+        await self.repo.unassign(url, env.payload["tab"], list(env.payload["items"]))
+        self._changed(url)
 
     async def on_folder_set(self, env: Envelope) -> None:
-        p = env.payload
-        await self.repo.set_folder(p["url"], p["kind"], p["name"], p.get("language") or "", p.get("subtitle_type") or "")
-        self._changed(p["url"])
+        p, url = env.payload, await self._page(env.payload["url"])
+        await self.repo.set_folder(url, p["kind"], p["name"], p.get("language") or "", p.get("subtitle_type") or "")
+        self._changed(url)
 
     async def on_folder_delete(self, env: Envelope) -> None:
-        await self.repo.delete_folder(env.payload["url"], env.payload["kind"], env.payload["name"])
-        self._changed(env.payload["url"])
+        url = await self._page(env.payload["url"])
+        await self.repo.delete_folder(url, env.payload["kind"], env.payload["name"])
+        self._changed(url)
 
     # --- what torrents and rules tell ------------------------------------------------------------------------------
 

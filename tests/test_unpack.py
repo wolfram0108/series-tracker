@@ -187,7 +187,8 @@ class Torrents(BaseModule):
                  "ignored_episodes": "{}"}]
 
     async def on_resolve(self, env):
-        return {"canonical_url": env.payload["url"]}
+        # The page written with a mirror of the tracker is the page of its own domain.
+        return {"canonical_url": env.payload["url"].replace("kinozal.me", "kinozal.tv")}
 
 
 @pytest.fixture
@@ -244,6 +245,20 @@ async def test_files_dropped_on_a_season_take_its_episodes_from_the_one_given_in
     editor = await torrents.request("unpack.editor.get", {"url": URL})
     assert [(e["path"], e["place"], e["by"]) for e in editor["view"]["tabs"]["files"]] == [
         (path, {"season": 0, "episode": 4 + n, "last": None}, "manual") for n, path in enumerate(ova)]
+
+
+async def test_a_page_written_with_a_mirror_is_the_page_of_the_trackers_own_domain_in_the_editor(bus_stand):
+    torrents, unpack, bus, root = bus_stand
+    torrents.releases = [release(["Show/Show - 01.mkv"])]
+    mirror = URL.replace("kinozal.tv", "kinozal.me")
+    await torrents.request("unpack.assign", {"url": mirror, "tab": "files", "items": [item_of("page", "Show/Show - 01.mkv")],
+                                             "season": 2, "episode": 7})
+    await torrents.request("unpack.folder.set", {"url": mirror, "kind": "voice", "name": "Студия"})
+    by_mirror = await torrents.request("unpack.editor.get", {"url": mirror})
+    by_page = await torrents.request("unpack.editor.get", {"url": URL})
+    assert by_mirror["url"] == by_page["url"] == URL and by_mirror["profiles"] == by_page["profiles"]
+    assert by_page["view"]["tabs"]["files"][0]["place"] == {"season": 2, "episode": 7, "last": None}
+    assert [f["name"] for f in by_page["view"]["folders"]] == ["Студия"]
 
 
 async def test_the_files_of_a_season_every_series_with_the_page_excludes_are_not_downloaded(bus_stand):
