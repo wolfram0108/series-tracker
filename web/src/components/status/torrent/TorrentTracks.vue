@@ -7,6 +7,7 @@ import type { Answer } from "../../../composables/sourceCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
 import TorrentFolders from "./TorrentFolders.vue"
 import TorrentLine from "./TorrentLine.vue"
+import TorrentPanes from "./TorrentPanes.vue"
 
 // The editors «Озвучки» and «Субтитры» (their boards): the external sound or subtitles files of the release by the episode
 // of their video on the left, the folders on the right — the name of a folder is the name of the voice-over or of the
@@ -79,12 +80,12 @@ async function create(): Promise<void> {
 </script>
 
 <template>
-  <div class="torrent-cols torrent-tracks">
-    <section class="torrent-pane">
-      <div class="torrent-pane-head">
-        <b>{{ t(tab === "voices" ? "torrent.voices.title" : "torrent.subtitles.title") }}</b>
-        <span class="torrent-pane-hint" :title="t('torrent.tracks.line')">{{ t("torrent.tracks.line") }}</span>
-      </div>
+  <TorrentPanes class="torrent-tracks">
+    <template #left-head>
+      <b>{{ t(tab === "voices" ? "torrent.voices.title" : "torrent.subtitles.title") }}</b>
+      <span class="torrent-pane-hint" :title="t('torrent.tracks.line')">{{ t("torrent.tracks.line") }}</span>
+    </template>
+    <template #left>
       <div class="torrent-filters" role="group">
         <button v-for="each in FILTERS" :key="each" type="button" class="torrent-filter" :class="{ active: filter === each }"
                 :aria-pressed="filter === each" @click="filter = each">
@@ -128,19 +129,19 @@ async function create(): Promise<void> {
           <button type="button" class="torrent-mini" @click="pick.clear">{{ t("torrent.select.clear") }}</button>
         </div>
       </div>
-    </section>
+    </template>
 
-    <section class="torrent-pane">
-      <div class="torrent-pane-head">
-        <b>{{ t(tab === "voices" ? "torrent.folders.voices" : "torrent.folders.subtitles") }}</b>
-        <span class="torrent-pane-hint" :title="t(tab === 'voices' ? 'torrent.folders.voicesHint' : 'torrent.folders.subtitlesHint')">{{ t(tab === "voices" ? "torrent.folders.voicesHint" : "torrent.folders.subtitlesHint") }}</span>
-        <div class="torrent-pane-tools">
-          <button type="button" class="torrent-mini do-auto" :disabled="busy || !hiddenHere" :title="t('torrent.autoHint')"
-                  @click="toAuto">{{ t("torrent.auto") }}</button>
-          <button type="button" class="torrent-mini is-primary do-add-folder" @click="naming = true">
-            + {{ t(tab === "voices" ? "torrent.folder.addVoice" : "torrent.folder.addSubtitles") }}</button>
-        </div>
+    <template #right-head>
+      <b>{{ t(tab === "voices" ? "torrent.folders.voices" : "torrent.folders.subtitles") }}</b>
+      <span class="torrent-pane-hint" :title="t(tab === 'voices' ? 'torrent.folders.voicesHint' : 'torrent.folders.subtitlesHint')">{{ t(tab === "voices" ? "torrent.folders.voicesHint" : "torrent.folders.subtitlesHint") }}</span>
+      <div class="torrent-pane-tools">
+        <button type="button" class="torrent-mini do-auto" :disabled="busy || !hiddenHere" :title="t('torrent.autoHint')"
+                @click="toAuto">{{ t("torrent.auto") }}</button>
+        <button type="button" class="torrent-mini is-primary do-add-folder" @click="naming = true">
+          + {{ t(tab === "voices" ? "torrent.folder.addVoice" : "torrent.folder.addSubtitles") }}</button>
       </div>
+    </template>
+    <template #right>
       <form v-if="naming" class="torrent-new" @submit.prevent="create">
         <label>{{ t("torrent.folder.name") }} <input v-model="name" class="p-inputtext" required></label>
         <button type="submit" class="torrent-mini is-primary" :disabled="busy">{{ t("torrent.folder.create") }}</button>
@@ -151,6 +152,6 @@ async function create(): Promise<void> {
                         @drop="(_, name, items) => toFolder(name, items)" @failure="emit('failure', $event)" />
         <p v-if="!anyFolder" class="torrent-note">{{ t("torrent.folders.none") }}</p>
       </div>
-    </section>
-  </div>
+    </template>
+  </TorrentPanes>
 </template>

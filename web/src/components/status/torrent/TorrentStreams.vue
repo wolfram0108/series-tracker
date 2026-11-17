@@ -7,6 +7,7 @@ import type { Answer } from "../../../composables/sourceCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
 import TorrentFolders from "./TorrentFolders.vue"
 import TorrentLine from "./TorrentLine.vue"
+import TorrentPanes from "./TorrentPanes.vue"
 
 // The editors «Озв. конт.» and «Суб. конт.»: the sound or the subtitles inside the video files, files of one composition and
 // one season shown as one container with its video; a track of it picked is the track of every file of the container. The
@@ -81,9 +82,9 @@ async function create(): Promise<void> {
 </script>
 
 <template>
-  <div class="torrent-cols torrent-streams" :class="`torrent-${tab}`">
-    <section class="torrent-pane">
-      <div class="torrent-pane-head"><b>{{ t(`torrent.tab.${tab}`) }}</b><span class="torrent-pane-hint" :title="t('torrent.streams.hint')">{{ t("torrent.streams.hint") }}</span></div>
+  <TorrentPanes class="torrent-streams" :class="`torrent-${tab}`">
+    <template #left-head><b>{{ t(`torrent.tab.${tab}`) }}</b><span class="torrent-pane-hint" :title="t('torrent.streams.hint')">{{ t("torrent.streams.hint") }}</span></template>
+    <template #left>
       <div class="torrent-filters" role="group">
         <button v-for="each in FILTERS" :key="each" type="button" class="torrent-filter" :class="{ active: filter === each }"
                 :aria-pressed="filter === each" @click="filter = each">
@@ -115,20 +116,20 @@ async function create(): Promise<void> {
           <button type="button" class="torrent-mini" @click="pick.clear">{{ t("torrent.select.clear") }}</button>
         </div>
       </div>
-    </section>
+    </template>
 
-    <section class="torrent-pane">
-      <div class="torrent-pane-head">
-        <b>{{ t(kind === "voice" ? "torrent.folders.voices" : "torrent.folders.subtitles") }}</b>
-        <span class="torrent-pane-hint" :title="t(kind === 'voice' ? 'torrent.folders.voiceStreamsHint' : 'torrent.folders.subtitleStreamsHint')">
-          {{ t(kind === "voice" ? "torrent.folders.voiceStreamsHint" : "torrent.folders.subtitleStreamsHint") }}</span>
-        <div class="torrent-pane-tools">
-          <button type="button" class="torrent-mini do-auto" :disabled="busy || !hiddenHere" :title="t('torrent.autoHint')"
-                  @click="toAuto">{{ t("torrent.auto") }}</button>
-          <button type="button" class="torrent-mini is-primary do-add-folder" @click="naming = true">
-            + {{ t(kind === "voice" ? "torrent.folder.addVoice" : "torrent.folder.addSubtitles") }}</button>
-        </div>
+    <template #right-head>
+      <b>{{ t(kind === "voice" ? "torrent.folders.voices" : "torrent.folders.subtitles") }}</b>
+      <span class="torrent-pane-hint" :title="t(kind === 'voice' ? 'torrent.folders.voiceStreamsHint' : 'torrent.folders.subtitleStreamsHint')">
+        {{ t(kind === "voice" ? "torrent.folders.voiceStreamsHint" : "torrent.folders.subtitleStreamsHint") }}</span>
+      <div class="torrent-pane-tools">
+        <button type="button" class="torrent-mini do-auto" :disabled="busy || !hiddenHere" :title="t('torrent.autoHint')"
+                @click="toAuto">{{ t("torrent.auto") }}</button>
+        <button type="button" class="torrent-mini is-primary do-add-folder" @click="naming = true">
+          + {{ t(kind === "voice" ? "torrent.folder.addVoice" : "torrent.folder.addSubtitles") }}</button>
       </div>
+    </template>
+    <template #right>
       <form v-if="naming" class="torrent-new" @submit.prevent="create">
         <label>{{ t("torrent.folder.name") }} <input v-model="name" class="p-inputtext" required></label>
         <button type="submit" class="torrent-mini is-primary" :disabled="busy">{{ t("torrent.folder.create") }}</button>
@@ -139,6 +140,6 @@ async function create(): Promise<void> {
                         @drop="(_, name, items) => toFolder(name, items)" @failure="emit('failure', $event)" />
         <p v-if="!editor.view.folders.some((each) => each.tab === tab)" class="torrent-note">{{ t("torrent.folders.none") }}</p>
       </div>
-    </section>
-  </div>
+    </template>
+  </TorrentPanes>
 </template>

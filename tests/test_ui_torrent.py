@@ -192,3 +192,13 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     name = page.locator(".torrent-files .file-row .torrent-line-field.is-name").first
     await name.click()
     assert await page.evaluate("getSelection().toString()") == await name.inner_text()
+    # A drag across a part of the name takes that part alone, not the whole field (a drag that starts in a selection
+    # moves it, as in any page: the user drags over a name not selected yet).
+    await page.evaluate("getSelection().removeAllRanges()")
+    box = await name.bounding_box()
+    await page.mouse.move(box["x"] + 2, box["y"] + box["height"] / 2)
+    await page.mouse.down()
+    await page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, steps=5)
+    await page.mouse.up()
+    part = await page.evaluate("getSelection().toString()")
+    assert part and len(part) < len(await name.inner_text()) and (await name.inner_text()).startswith(part), part

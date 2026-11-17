@@ -227,8 +227,9 @@
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
-  block-size: var(--pattern-block);
-  padding: 0 0.375rem;
+  /* one line is x2 high; a long text wraps and the block grows with it */
+  min-block-size: var(--pattern-block);
+  padding: 0.125rem 0.375rem;
   border-radius: 4px;
   font-size: 0.9rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

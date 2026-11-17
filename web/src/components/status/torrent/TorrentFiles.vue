@@ -7,6 +7,7 @@ import { byFolder, draftOf, episodeFolder, fileCounts, fileFilterOf, nameOf, rul
 import { assign, unassign } from "../../../composables/torrentCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
 import TorrentLine from "./TorrentLine.vue"
+import TorrentPanes from "./TorrentPanes.vue"
 import type { Answer } from "../../../composables/sourceCalls"
 
 // The editor «Файлы» (the board «Файлы»): the files of the release by their folder on the left, the draft on the right —
@@ -123,9 +124,9 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
 </script>
 
 <template>
-  <div class="torrent-cols torrent-files">
-    <section class="torrent-pane">
-      <div class="torrent-pane-head"><b>{{ t("torrent.files.title") }}</b><span class="torrent-pane-hint" :title="t('torrent.files.line')">{{ t("torrent.files.line") }}</span></div>
+  <TorrentPanes class="torrent-files">
+    <template #left-head><b>{{ t("torrent.files.title") }}</b><span class="torrent-pane-hint" :title="t('torrent.files.line')">{{ t("torrent.files.line") }}</span></template>
+    <template #left>
       <div class="torrent-filters" role="group">
         <button v-for="each in FILTERS" :key="each" type="button" class="torrent-filter" :class="{ active: filter === each }"
                 :aria-pressed="filter === each" @click="chosenFilter = each">
@@ -178,15 +179,15 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
           <button type="button" class="torrent-mini" @click="pick.clear">{{ t("torrent.select.clear") }}</button>
         </div>
       </div>
-    </section>
+    </template>
 
-    <section class="torrent-pane">
-      <div class="torrent-pane-head">
-        <b>{{ t("torrent.draft.title") }}</b><span class="torrent-pane-hint" :title="t('torrent.draft.hint')">{{ t("torrent.draft.hint") }}</span>
-        <div class="torrent-pane-tools">
-          <button type="button" class="torrent-mini do-add-season" @click="startAdding(null)">+ {{ t("torrent.draft.addSeason") }}</button>
-        </div>
+    <template #right-head>
+      <b>{{ t("torrent.draft.title") }}</b><span class="torrent-pane-hint" :title="t('torrent.draft.hint')">{{ t("torrent.draft.hint") }}</span>
+      <div class="torrent-pane-tools">
+        <button type="button" class="torrent-mini do-add-season" @click="startAdding(null)">+ {{ t("torrent.draft.addSeason") }}</button>
       </div>
+    </template>
+    <template #right>
       <form v-if="adding" class="torrent-new" @submit.prevent="add">
         <label>{{ t(adding.season === null ? "torrent.draft.newSeason" : "torrent.draft.newEpisode") }}
           <input v-model.number="number" type="number" min="0" class="p-inputtext torrent-language" required>
@@ -243,6 +244,6 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
           </button>
         </div>
       </div>
-    </section>
-  </div>
+    </template>
+  </TorrentPanes>
 </template>

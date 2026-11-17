@@ -1,18 +1,38 @@
-/* The editors of the tab «Торрент» (components/status/torrent), as the boards of the accepted mockup draw them: two panes —
-   what the release holds on the left, where it goes on the right — that fill the height of the window and scroll inside. */
-.torrent-cols {
-  flex: 1 1 0; min-block-size: 26rem; display: grid; gap: 1.125rem; align-items: stretch;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
-}
-.torrent-pane {
-  display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; overflow: hidden;
+/* The editors of the tab «Торрент» (components/status/torrent): two panes — what the release holds on the left, where it goes on
+   the right — in one frame with one head (TorrentPanes), that fills the height of the window; each pane scrolls inside. */
+.torrent-panes {
+  flex: 1 1 0; min-block-size: 26rem; display: flex; flex-direction: column; overflow: hidden;
   border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--bg-white);
 }
-/* One line whatever the tab: the hint gives way (ellipsis), the title and the buttons keep their place. */
-.torrent-pane-head {
-  display: flex; align-items: center; gap: 0.625rem; min-block-size: 3rem; padding: 0.5rem 0.875rem;
-  border-block-end: 1px solid var(--color-gray-200); background: var(--bg-light); box-sizing: border-box;
+/* The head: the head of each pane over it, the switch of their width in the middle; a pane put away keeps its room in the
+   head empty, so the switch and the other head stay where they are. */
+.torrent-panes-head {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 0.625rem;
+  min-block-size: 3rem; padding: 0.5rem 0.875rem; border-block-end: 1px solid var(--color-gray-200); background: var(--bg-light);
+  box-sizing: border-box;
 }
+.torrent-pane-head { display: flex; align-items: center; gap: 0.625rem; min-inline-size: 0; }
+.torrent-pane-head.is-off { visibility: hidden; }
+/* The panes side by side (one under the other where the frame is narrow); the line between them is the gap of the grid. */
+.torrent-panes-body {
+  flex: 1 1 auto; min-block-size: 0; display: grid; gap: 1px; background: var(--color-gray-200);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+}
+.torrent-pane { display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; overflow: hidden; background: var(--bg-white); }
+/* The switch of three stops: at the left the right pane takes the width, at the right the left one, in the middle both. */
+.torrent-panes-switch {
+  position: relative; display: grid; grid-template-columns: repeat(3, 1.25rem); block-size: 1.25rem;
+  border-radius: 999px; background: var(--color-gray-200);
+}
+.torrent-panes-stop { position: relative; z-index: 1; padding: 0; border: 0; border-radius: 999px; background: none; cursor: pointer; }
+.torrent-panes-stop:focus-visible { outline: 0.125rem solid var(--color-blue); }
+.torrent-panes-thumb {
+  position: absolute; inset-block: 0.125rem; inline-size: 1rem; border-radius: 999px; background: var(--color-blue);
+  inset-inline-start: 0.125rem; transition: inset-inline-start 0.15s ease;
+}
+.torrent-panes.is-middle .torrent-panes-thumb { inset-inline-start: 1.375rem; }
+.torrent-panes.is-right .torrent-panes-thumb { inset-inline-start: 2.625rem; }
+@media (prefers-reduced-motion: reduce) { .torrent-panes-thumb { transition: none; } }
 .torrent-pane-head b { flex: none; font-size: 0.875rem; }
 .torrent-pane-hint { min-inline-size: 0; color: var(--text-muted); font-size: 0.78rem; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .torrent-pane-tools { display: flex; flex: none; gap: 0.375rem; margin-inline-start: auto; }
@@ -182,9 +202,9 @@
   flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text;
   font-family: var(--font-mono); font-size: 0.78rem; color: var(--color-text);
 }
-/* A field is one piece: a click takes it whole as it is shown (`N:MifSnaiper`, not the word after the colon); a drag across
-   fields takes them with their separators, the line as the rule reads it. */
-.torrent-line-field { user-select: all; cursor: text; }
+/* A click takes a field whole as it is shown (`N:MifSnaiper`, TorrentLine); a drag takes what it crosses — a part of a name, or
+   several fields with their separators, the line as the rule reads it. */
+.torrent-line-field { user-select: text; cursor: text; }
 .torrent-line-code { color: var(--text-muted); }
 .torrent-line-sep { color: var(--border-color); }
 .torrent-row.is-unplaced .torrent-line-field.is-name { color: #a61e2d; }
