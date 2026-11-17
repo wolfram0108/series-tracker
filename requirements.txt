@@ -17,6 +17,7 @@ beautifulsoup4==4.12.3
 lxml==6.0.0
 # Браузерная доставка astar/anilibria_tv (этап 6, Р-9): требует
 # `playwright install firefox` после установки пакета.
+# Автообновление профиля Alloha: `playwright install chromium`.
 playwright==1.52.0
 # Прохождение антибот-челленджа Cloudflare (rutracker) — антидетект-сборка
 # Firefox; обычный playwright челлендж не решает (см. modules/trackerauth/

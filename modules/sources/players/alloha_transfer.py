@@ -122,7 +122,7 @@ async def transfer(session: AllohaSession, listed: Playlist, target: str, connec
     """Every segment of the playlist into `target` (which must not exist), in order. Raises AllohaRefused."""
     count, started = len(listed.segments), time.monotonic()
     if session.error:
-        raise AllohaRefused(session.error)
+        raise AllohaRefused(session.error, profile_rejected=session.profile_rejected)
     if listed.init:
         await storage.call(_append, target, [await _media(session, listed.init)], owns=target)
     else:
@@ -150,7 +150,7 @@ async def transfer(session: AllohaSession, listed: Playlist, target: str, connec
                 index = taken
                 taken += 1
             if session.error:
-                raise AllohaRefused(session.error)
+                raise AllohaRefused(session.error, profile_rejected=session.profile_rejected)
             body = await _media(session, listed.segments[index][0], client)
             session.bytes_loaded += len(body)
             got += len(body)

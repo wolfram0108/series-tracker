@@ -171,7 +171,7 @@ async def test_a_download_plays_the_episode_and_takes_every_segment_in_order_at_
     assert model.reports[:3] == ["/events", "/stat", "/stat"]
     assert figures[0] == {"phase": "link", "source_seconds": 48.0} and figures[-1]["progress"] == 100
     # Each connection of the download is a client of its own: one client speaks HTTP/2 over one connection.
-    assert model.clients == 1 + 8
+    assert model.clients == 1 + 2
 
 
 async def test_a_new_edge_given_in_the_middle_is_carried_by_every_request_after_it(tmp_path):

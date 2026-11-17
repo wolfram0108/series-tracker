@@ -26,6 +26,17 @@ async def firefox() -> tuple[Any, Any]:
         raise
 
 
+async def chromium() -> tuple[Any, Any]:
+    """A separate Chromium pool for identities that the native Chrome transport will use (Alloha)."""
+    from playwright.async_api import async_playwright
+    driver = await async_playwright().start()
+    try:
+        return driver, await driver.chromium.launch(headless=True)
+    except BaseException:
+        await driver.stop()
+        raise
+
+
 class _Context:
     """A page context of the browser that tells the pool when it is closed; everything else is the context's own."""
 
@@ -84,7 +95,8 @@ class BrowserPool:
         async with self._changing:
             if self._browser is None:
                 self._driver, self._browser = await self._launch()
-                self._log.info("браузерный пул запущен (firefox, headless)")
+                self._log.info("браузерный пул запущен (%s, headless)",
+                               getattr(self._launch, "__name__", type(self._launch).__name__))
             self._users += 1
             browser = self._browser
         try:

@@ -4,8 +4,9 @@ YummyTV).
 
 The player asks its host for the files of the episode (`POST /bnsi/movies/<id>`) signed by a header `Borth`: the
 fingerprint of a browser, then a tail the player computes from the `viewporti` of its own document, fresh for every open.
-The fingerprint and the User-Agent are a client profile taken once from a run of the real player (`ST_ALLOHA_FINGERPRINT`,
-`ST_ALLOHA_USER_AGENT`); every request goes out with the TLS of that browser (curl_cffi, the Chrome of the User-Agent).
+The fingerprint and the User-Agent are a client profile captured from the real player (`alloha_profile.py` refreshes
+it on a refusal; `ST_ALLOHA_FINGERPRINT`, `ST_ALLOHA_USER_AGENT` are optional starting values). Every request goes out
+with the TLS of that browser (curl_cffi, the Chrome of the User-Agent).
 
 The CDN of the files gives them only to a player that plays: the answer of the host names a WebSocket where the player
 says it started (`playback_start`, `resumed`) and keeps saying it plays (`playing`, every 30 s); the server answers with
@@ -42,8 +43,8 @@ EDGE_TIMEOUT_S = 2 * REQUEST_TIMEOUT_S + 1
 PLAYING_EVERY_S = 30.0
 HEARTBEAT_EVERY_S = 10.0
 HEARTBEATS_A_BATCH = 3
-# The connections of one download measured on the CDN (prototype: 8, 40-127 Mbit/s an episode).
-CONNECTIONS = 8
+# The owner's limit per download (17.11.2026).
+CONNECTIONS = 2
 _STARTUP = ("ad_block_start", "view_start", "startup", "play", "pause", "playback_ready", "ad_block_end", "play",
             "first_frame", "file_load_complete")
 _CLIENT_ENV = {"connectionType": "4g", "downlink": 10, "pixelRatio": 1, "screenW": 1920, "screenH": 1080}
@@ -53,8 +54,10 @@ class AllohaRefused(TransferRefused):
     """A step of the open or of the transfer did not come through, in words for the log and the card. `status` is the
     HTTP status a host answered, `final` a refusal that is the source's last word on the file (it is not there)."""
 
-    def __init__(self, words: str, *, status: int | None = None, final: bool = False) -> None:
+    def __init__(self, words: str, *, status: int | None = None, final: bool = False,
+                 profile_rejected: bool = False) -> None:
         super().__init__(words, kind="final" if final else "broken", status=status)
+        self.profile_rejected = profile_rejected
 
 
 @dataclass(frozen=True)
@@ -65,7 +68,7 @@ class Profile:
 
 
 def profile_of(environ: Mapping[str, str]) -> Profile | None:
-    """The profile the environment holds; None without one (Alloha is then not asked). A fingerprint of another form is a
+    """The initial profile the environment holds; None without one (the player can capture it). A fingerprint of another form is a
     fault of the environment and stops the start."""
     fingerprint, agent = environ.get("ST_ALLOHA_FINGERPRINT", "").strip(), environ.get("ST_ALLOHA_USER_AGENT", "").strip()
     if not fingerprint and not agent:
@@ -186,6 +189,7 @@ class AllohaSession:
         self._tasks: list[asyncio.Task] = []
         self._edge_came = asyncio.Event()
         self.error: str | None = None
+        self.profile_rejected = False
         self.bytes_loaded = 0
         self._started = time.monotonic()
         self._track: Track | None = None
@@ -215,7 +219,8 @@ class AllohaSession:
             words = (reason("host_status_blocked", host=urlsplit(url).hostname, status=response.status_code, blocked=blocked)
                      if blocked else reason("host_status", host=urlsplit(url).hostname, status=response.status_code))
             raise AllohaRefused(words, status=response.status_code,
-                                final=response.status_code in (404, 410) and not blocked)
+                                final=response.status_code in (404, 410) and not blocked,
+                                profile_rejected=response.status_code == 403 and blocked in {"session_blocked", "client_blocked"})
         return response
 
     # --- the open -----------------------------------------------------------------------------------------------------
@@ -297,9 +302,10 @@ class AllohaSession:
         try:
             await asyncio.wait_for(self._edge_came.wait(), EDGE_TIMEOUT_S)
         except asyncio.TimeoutError as exc:
-            raise AllohaRefused(self.error or reason("socket_no_edge", seconds=f"{EDGE_TIMEOUT_S:.0f}")) from exc
+            raise AllohaRefused(self.error or reason("socket_no_edge", seconds=f"{EDGE_TIMEOUT_S:.0f}"),
+                                profile_rejected=self.profile_rejected) from exc
         if self.error:
-            raise AllohaRefused(self.error)
+            raise AllohaRefused(self.error, profile_rejected=self.profile_rejected)
         self._tasks.append(asyncio.ensure_future(self._keep_playing()))
 
     async def _listen(self) -> None:
@@ -316,7 +322,9 @@ class AllohaSession:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a socket that closed ends the transfer: no old edge is used blindly
-            self.error = reason("socket_closed", cause=type(exc).__name__)
+            code = getattr(self._ws, "close_code", None)
+            self.profile_rejected = code == 4005
+            self.error = reason("socket_closed", cause=type(exc).__name__, close_code=code)
             self._edge_came.set()
 
     async def _keep_playing(self) -> None:

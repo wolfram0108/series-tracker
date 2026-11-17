@@ -19,6 +19,7 @@ systemd (uvicorn :5000), фронт собирается на месте, БД �
 | ffmpeg | в `PATH` (нарезка, проверка файлов) |
 | yt-dlp | ставится в `.venv` из `requirements.txt` (с pycryptodomex); отдельная копия в `PATH` не нужна |
 | Firefox | для Playwright — браузерная доставка astar/anilibria_tv |
+| Chromium | для Playwright — автоматическое восстановление профиля Alloha |
 | qBittorrent | WebUI API доступен (на стенде — Docker-контейнер, `:8080`) |
 | NAS / хранилище | смонтировано (пути сохранения сериалов) |
 
@@ -38,6 +39,7 @@ cd series-tracker
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/playwright install firefox        # для astar/anilibria_tv
+.venv/bin/playwright install chromium       # восстановление профиля Alloha
 .venv/bin/python -m camoufox fetch          # антибот-челлендж rutracker
 
 # 3. БД: миграции
@@ -54,6 +56,18 @@ cd web && npm ci && npm run build && cd ..
 
 Учётки трекеров, VK, TMDB-токен вносятся **через UI** (Настройки → авторизация)
 после первого запуска и хранятся в БД — в `.env` их нет.
+
+Alloha получает профиль клиента штатным плеером в Chromium при первом обращении
+без профиля либо после явного отказа CDN `session_blocked` / `client_blocked`.
+Все загрузки ждут одно общее обновление. Новый профиль проверяется чтением
+плейлиста и сегмента через нативный клиент и сохраняется зашифрованным в
+`torrent_cache/alloha-profile.enc` с правами 0600. Сохранённый профиль имеет
+приоритет над необязательными начальными значениями `ST_ALLOHA_FINGERPRINT`
+и `ST_ALLOHA_USER_AGENT`; изменение применяется без рестарта.
+Срок действия не предполагается известным. При неудаче есть пауза между
+обновлениями, одна загрузка повторяется с новым профилем не более одного раза.
+Браузеры устанавливаются от пользователя сервиса; для Alloha не нужен REA
+или отдельно установленный системный Chrome.
 
 ### systemd-юнит
 

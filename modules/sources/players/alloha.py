@@ -1,6 +1,7 @@
-"""Alloha: the player of one voice-over of one episode, asked and downloaded the way the player itself does it, without a
-browser (alloha_session.py: the client profile, the signature `Borth` of each open, the socket that keeps the access to
-the CDN, the reports of the player).
+"""Alloha: one voice-over of one episode, read and downloaded by the native client (alloha_session.py: the client
+profile, the signature `Borth` of each open, the socket that keeps access to the CDN, the reports of the player).
+An absent or explicitly rejected profile is recovered by one shared Chromium capture, validated on the CDN and cached
+encrypted (alloha_profile.py). The failed transfer then starts again with a fresh session and an empty temporary file.
 
 The document of the iframe is an ordinary page of the host (it wants the site as its referer) and lists every voice-over,
 season and episode the player has of the title, each with the number its files are asked by. So an ask begins with that
@@ -16,19 +17,23 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import httpx
 
+from core import storage
 from core.reasons import reason
 
 from ..policy import Pacer
+from .alloha_profile import Profiles, capture_profile
 from .alloha_session import (CONNECTIONS, REQUEST_TIMEOUT_S, AllohaRefused, AllohaSession, Profile, chrome_profile,
                              tracks_of)
-from .alloha_transfer import ProgressCb, playlist, transfer
+from .alloha_transfer import ProgressCb, _media, playlist, transfer
 from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
 
 
@@ -126,14 +131,26 @@ class AllohaPlayer:
     series_scope = False
 
     def __init__(self, profile: Profile | None = None, client: Callable[[Profile], Any] | None = None) -> None:
-        self._profile, self._client = profile, client or _chrome_client
+        self._profiles, self._client = Profiles(profile), client or _chrome_client
         self._asks = Pacer(lambda: ASK_INTERVAL_S)
 
-    def configure(self, *, alloha_profile: Profile | None = None, alloha_client: Callable | None = None, **_wiring) -> None:
+    def configure(self, *, alloha_profile: Profile | None = None, alloha_client: Callable | None = None,
+                  alloha_browser_getter: Callable | None = None, alloha_profile_path: str | None = None, **_wiring) -> None:
         if alloha_profile is not None:
-            self._profile = alloha_profile
+            self._profiles.profile = alloha_profile
+            self._profiles.generation += 1
         if alloha_client is not None:
             self._client = alloha_client
+        if alloha_profile_path is not None:
+            self._profiles.path = Path(alloha_profile_path)
+        if alloha_browser_getter is not None:
+            async def capture(url: str) -> Profile:
+                page, iframe = parse_link(url)
+                return await capture_profile(alloha_browser_getter, _absolute(iframe), page)
+            self._profiles.capture = capture
+
+    async def close(self) -> None:
+        await self._profiles.close()
 
     def find(self, text: str, page_url: str) -> PlayerRef | None:
         match = _FRAME.search(text)
@@ -159,11 +176,14 @@ class AllohaPlayer:
         return parse_link(url) is not None
 
     @asynccontextmanager
-    async def _session(self) -> AsyncIterator[AllohaSession]:
-        if self._profile is None:
+    async def _session(self, profile: Profile | None = None) -> AsyncIterator[AllohaSession]:
+        await self._profiles.load()
+        profile = profile or self._profiles.profile
+        if profile is None:
             raise AllohaRefused(reason("alloha_no_profile"))
-        http = self._client(self._profile)
-        session = AllohaSession(self._profile, http, media=lambda: self._client(self._profile))
+        http = self._client(profile)
+        # A running session keeps its identity even when another download refreshes the shared profile.
+        session = AllohaSession(profile, http, media=lambda: self._client(profile))
         try:
             yield session
         finally:
@@ -189,12 +209,22 @@ class AllohaPlayer:
 
     async def fetch(self, ref: PlayerRef, http: httpx.AsyncClient, page_url: str) -> Answer:
         try:
-            async with self._session() as session:
-                page, settled = await self._opened(session, ref.url)
-                if settled is not None:
-                    return Answer(settled.status, reading=settled)
-                await self._asks.wait()
-                data = await session.answer(page)
+            verify = lambda candidate: self._verify(ref.url, candidate)
+            profile, generation = await self._profiles.ensure(ref.url, verify)
+            for attempt in range(2):
+                try:
+                    async with self._session(profile) as session:
+                        page, settled = await self._opened(session, ref.url)
+                        if settled is not None:
+                            return Answer(settled.status, reading=settled)
+                        await self._asks.wait()
+                        data = await session.answer(page)
+                    break
+                except AllohaRefused as exc:
+                    if attempt or not exc.profile_rejected or self._profiles.capture is None:
+                        raise
+                    await self._profiles.refresh(generation, ref.url, verify)
+                    profile, generation = self._profiles.profile, self._profiles.generation
         except AllohaRefused as exc:
             if exc.status is not None:
                 return Answer(exc.status, error=str(exc), reading=Reading(Kind.HTTP_ERROR, exc.status, message=str(exc)))
@@ -206,7 +236,8 @@ class AllohaPlayer:
 
     async def stream(self, url: str, http: httpx.AsyncClient, max_height: int | None, pacer) -> dict:
         """A download of Alloha is the player's own (`transfer`): the answer names the link and that the player takes it."""
-        if self._profile is None:
+        await self._profiles.load()
+        if self._profiles.profile is None and self._profiles.capture is None:
             raise StreamUnavailable(reason("player_failed", player=self.label,
                                            cause=reason("alloha_no_profile")), False)
         return {"stream_url": url, "player_fetch": True}
@@ -214,28 +245,55 @@ class AllohaPlayer:
     async def transfer(self, url: str, target: str, max_height: int | None, connections: int,
                        on_progress: ProgressCb) -> dict:
         """The episode of the link into `target`: the best height within the cap of the voice-over the iframe names, by
-        `connections` at once (at most the measured CONNECTIONS). {seconds, longest, height} of its playlist. Raises
+        `connections` at once (at most CONNECTIONS). {seconds, longest, height} of its playlist. Raises
         AllohaRefused."""
-        async with self._session() as session:
-            page, settled = await self._opened(session, url)
-            if settled is not None:
-                raise AllohaRefused(settled.message or reason("alloha_no_episode"), status=settled.status, final=True)
-            await self._asks.wait()
-            tracks = tracks_of(await session.answer(page))
-            if not tracks:
-                raise AllohaRefused(reason("alloha_no_files"), final=True)
-            voice = tracks[0].audio_id
-            fitting = [each for each in tracks if each.audio_id == voice and (not max_height or each.height <= max_height)]
-            if not fitting:
-                raise AllohaRefused(reason("alloha_no_height", height=f"{max_height}p"), final=True)
-            track = max(fitting, key=lambda each: each.height)
-            await session.authorize(page)
-            await session.play(track, _connector(session.http))
-            listed = await playlist(session, track.urls[0])
-            await on_progress({"phase": "link", "source_seconds": listed.seconds or None})
+        with storage.hold(target):
+            if await storage.call(os.path.lexists, target):
+                raise AllohaRefused(reason("alloha_target_exists"), final=True)
+            verify = lambda candidate: self._verify(url, candidate, max_height)
+            profile, generation = await self._profiles.ensure(url, verify)
+            for attempt in range(2):
+                try:
+                    async with self._session(profile) as session:
+                        listed, track = await self._playing(session, url, max_height)
+                        await on_progress({"phase": "link", "source_seconds": listed.seconds or None})
+                        await session.report(listed.seconds)
+                        await transfer(session, listed, target, max(1, min(connections, CONNECTIONS)), on_progress)
+                        return {"seconds": listed.seconds, "longest": listed.longest, "height": track.height}
+                except AllohaRefused as exc:
+                    if attempt or not exc.profile_rejected or self._profiles.capture is None:
+                        raise
+                    await on_progress({"phase": "link", "progress": 0})
+                    await self._profiles.refresh(generation, url, verify)
+                    # This call owned a previously absent target. Do not combine segments from different sessions.
+                    if not await storage.discard(target):
+                        raise AllohaRefused(reason("alloha_retry_cleanup_failed")) from None
+                    profile, generation = self._profiles.profile, self._profiles.generation
+
+    async def _playing(self, session: AllohaSession, url: str, max_height: int | None):
+        page, settled = await self._opened(session, url)
+        if settled is not None:
+            raise AllohaRefused(settled.message or reason("alloha_no_episode"), status=settled.status, final=True)
+        await self._asks.wait()
+        tracks = tracks_of(await session.answer(page))
+        if not tracks:
+            raise AllohaRefused(reason("alloha_no_files"), final=True)
+        voice = tracks[0].audio_id
+        fitting = [each for each in tracks if each.audio_id == voice and (not max_height or each.height <= max_height)]
+        if not fitting:
+            raise AllohaRefused(reason("alloha_no_height", height=f"{max_height}p"), final=True)
+        track = max(fitting, key=lambda each: each.height)
+        await session.authorize(page)
+        await session.play(track, _connector(session.http))
+        return await playlist(session, track.urls[0]), track
+
+    async def _verify(self, url: str, profile: Profile, max_height: int | None = None) -> None:
+        async with self._session(profile) as session:
+            listed, _track = await self._playing(session, url, max_height)
             await session.report(listed.seconds)
-            await transfer(session, listed, target, max(1, min(connections, CONNECTIONS)), on_progress)
-            return {"seconds": listed.seconds, "longest": listed.longest, "height": track.height}
+            if listed.init:
+                await _media(session, listed.init)
+            await _media(session, listed.segments[0][0])
 
 
 def _in_catalog(catalog: dict[tuple[str, str, str], str], named: dict[str, str]) -> tuple[Reading | None, str | None]:

@@ -152,7 +152,7 @@ from core.logging import get_logger
 from core.reasons import describe, reason
 
 from . import anilibria, delivery, parsers
-from .browser_pool import BrowserPool
+from .browser_pool import BrowserPool, chromium
 from .delivery import Delivery
 from .parsers import SourceParseError
 from .provider import Connector, ProviderClient, ProviderHost, is_web_address, not_connected
@@ -198,6 +198,7 @@ class SourcesModule(BaseModule):
         # The one browser of the module, started at the first page that needs it and stopped after its last user
         # (browser_pool.py): the players and the tracker pages take their contexts of it.
         self.browsers = BrowserPool(get_logger("sources"))
+        self.alloha_browsers = BrowserPool(get_logger("sources"), launch=chromium)
         wiring = dict(
             browser_getter=self.browsers.browser,
             key_path=os.path.abspath(os.path.join(torrent_cache_dir,
@@ -207,6 +208,9 @@ class SourcesModule(BaseModule):
             alloha_profile=alloha_profile)
         # One object per player for the whole module: the sites read with them and the streams are resolved by them.
         self.players = PlayerRegistry.standard(**wiring)
+        self.players.get("alloha").configure(
+            alloha_browser_getter=self.alloha_browsers.browser,
+            alloha_profile_path=os.path.abspath(os.path.join(torrent_cache_dir, "alloha-profile.enc")))
         # One term of what the sources answered for every reader of the module; the setting changes it for all at once.
         self.term = Term()
         # The pages some source lists, as the catalog said at the last change of the sources (None until it was asked), and
@@ -330,8 +334,10 @@ class SourcesModule(BaseModule):
     async def on_stop(self) -> None:
         await self.provider.stop()
         await self.tables.close()
+        await self.players.get("alloha").close()
         await self._http.aclose()
         await self.browsers.shutdown()
+        await self.alloha_browsers.shutdown()
 
     async def on_term_get(self, env: Envelope) -> dict:
         return {"hours": self.term.hours}
