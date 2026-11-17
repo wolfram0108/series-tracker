@@ -72,7 +72,7 @@ def test_every_placed_track_of_a_placed_video_and_of_a_file_beside_it_is_a_row_w
     assert all(row.text == "S01E01 | Show/Show - 01.mkv" and row.player == "torrent:page" for row in rows)
     assert {row.timeline for row in rows} == {"page/Show/Show - 01.mkv"}  # one video, one timeline, whatever file a track is in
     # The titles the file gives make the folders by themselves; the sound file has none and waits for the operator.
-    assert view["unplaced"] == {"files": 0, "voices": 1, "subtitles": 0, "streams": 0}
+    assert view["unplaced"] == {"files": 0, "voices": 1, "subtitles": 0, "voice_streams": 0, "subtitle_streams": 0}
 
 
 def test_a_flag_of_the_files_container_is_no_type_of_subtitles_and_no_fact_of_the_row():
@@ -84,7 +84,7 @@ def test_a_flag_of_the_files_container_is_no_type_of_subtitles_and_no_fact_of_th
     inputs = Inputs(releases=[r], manual={}, folders=[], streams={"page": {"Show/E01.mkv": facts}},
                     results={"files": numbered({"Show/E01.mkv": (1, 1)})})
     view, rows = compose(inputs)
-    assert [(entry["folder"], entry["subtitle_type"]) for entry in view["tabs"]["streams"]] == [("Надписи", "")]
+    assert [(entry["folder"], entry["subtitle_type"]) for entry in view["tabs"]["subtitle_streams"]] == [("Надписи", "")]
     assert [(row.subtitle_type, "forced" in row.site_fields, "default" in row.site_fields) for row in rows] == [("", False, False)]
 
 
@@ -96,17 +96,17 @@ def test_the_file_names_the_folder_and_the_language_by_itself_und_waits_and_a_ru
                                                               ("audio", 2, "und", "Original"), ("audio", 3, "jpn", ""))}},
                     results={"files": numbered({"Show/E01.mkv": (1, 1)})})
     view, rows = compose(inputs)
-    tracks = [(e["folder"], e["by"], e["language"], e["waiting"]) for e in view["tabs"]["streams"]]
+    tracks = [(e["folder"], e["by"], e["language"], e["waiting"]) for e in view["tabs"]["voice_streams"]]
     # A track with no known language is placed by nothing: it is in no folder, red, whatever its title.
     assert tracks == [("AniLiberty", "meta", "rus", False), (None, None, "und", True), (None, None, "jpn", True)]
     assert [(f["name"], f["manual"]) for f in view["folders"]] == [("AniLiberty", False)]
-    assert view["unplaced"]["streams"] == 2
+    assert view["unplaced"]["voice_streams"] == 2
     # Only the green track is a row: a track with no folder or no language is red and goes no further.
     assert [(row.voice.name, row.language) for row in rows] == [("AniLiberty", "rus")]
-    # A rule of the tab «Контейнеры» says otherwise: its folder and language go before what the file says.
-    inputs.results["streams"] = {f"{video}#2": {"voice_folder": "Оригинал", "language": "jpn", "events": [{"rule": "яп"}]}}
+    # A rule of the tab «Озв. конт.» says otherwise: its folder and language go before what the file says.
+    inputs.results["voice_streams"] = {f"{video}#2": {"voice_folder": "Оригинал", "language": "jpn", "events": [{"rule": "яп"}]}}
     view, _rows = compose(inputs)
-    assert [(e["folder"], e["by"], e["language"], e["waiting"]) for e in view["tabs"]["streams"]][1] == ("Оригинал", "яп", "jpn", False)
+    assert [(e["folder"], e["by"], e["language"], e["waiting"]) for e in view["tabs"]["voice_streams"]][1] == ("Оригинал", "яп", "jpn", False)
 
 
 def test_a_deleted_folder_of_the_automatic_layout_is_not_made_again_and_the_hands_placement_stays():
@@ -116,18 +116,18 @@ def test_a_deleted_folder_of_the_automatic_layout_is_not_made_again_and_the_hand
                     streams={"page": {"Show/E01.mkv": streams(("video", 0, "", ""), ("audio", 1, "rus", "AniLiberty"),
                                                               ("audio", 2, "jpn", "Original"), ("audio", 3, "rus", "x"))}},
                     results={"files": numbered({"Show/E01.mkv": (1, 1)}),
-                             "streams": {f"{video}#3": {"voice_folder": "Студия", "events": [{"rule": "студия"}]}}},
-                    manual={"streams": {f"{video}#1": {"folder": "Original"}}})
+                             "voice_streams": {f"{video}#3": {"voice_folder": "Студия", "events": [{"rule": "студия"}]}}},
+                    manual={"voice_streams": {f"{video}#1": {"folder": "Original"}}})
     view, rows = compose(inputs)
     # Deleted: «Original» of the title and «Студия» of a rule are made by neither — the tracks are red; the hand's placement
     # into «Original» stays, it is no work of the automatic layout.
-    assert [(e["item"][-2:], e["folder"], e["by"], e["waiting"]) for e in view["tabs"]["streams"]] == [
+    assert [(e["item"][-2:], e["folder"], e["by"], e["waiting"]) for e in view["tabs"]["voice_streams"]] == [
         ("#1", "Original", "manual", False), ("#2", None, None, True), ("#3", None, None, True)]
     assert view["hidden"] == [{"kind": "voice", "name": "Original"}, {"kind": "voice", "name": "Студия"}]
     # «Авто»: nothing hidden, the automatic layout makes them again.
     inputs.hidden = set()
     view, rows = compose(inputs)
-    assert [(e["folder"], e["by"]) for e in view["tabs"]["streams"]] == [("Original", "manual"), ("Original", "meta"), ("Студия", "студия")]
+    assert [(e["folder"], e["by"]) for e in view["tabs"]["voice_streams"]] == [("Original", "manual"), ("Original", "meta"), ("Студия", "студия")]
 
 
 def test_a_folder_a_rule_gives_names_the_track_and_the_users_folder_goes_before_it():
@@ -286,7 +286,7 @@ async def test_a_ready_release_is_read_its_files_wait_for_a_rule_and_one_rule_pl
     # No rule is the source's yet: every tab has its own empty profile, no file has an episode, the page has no rows.
     editor = await torrents.request("unpack.editor.get", {"url": URL})
     profiles = editor["profiles"]
-    assert set(profiles) == {"files", "voices", "subtitles", "streams"} and len(set(profiles.values())) == 4
+    assert set(profiles) == {"files", "voices", "subtitles", "voice_streams", "subtitle_streams"} and len(set(profiles.values())) == 5
     for each in profiles.values():
         assert not await torrents.request("rules.rules.list", {"profile_id": each})
     assert [(e["place"], e["by"]) for e in editor["view"]["tabs"]["files"]] == [(None, None)] * 3
@@ -335,14 +335,17 @@ async def test_a_folder_deleted_takes_the_hands_placements_in_it_and_auto_makes_
     sound = item_of("page", "Show/Show - 01.rus.mka")
     await torrents.request("unpack.folder.set", {"url": URL, "kind": "voice", "name": "Студия", "language": "rus"})
     await torrents.request("unpack.assign", {"url": URL, "tab": "voices", "items": [sound], "folder": "Студия"})
-    await torrents.request("unpack.folder.delete", {"url": URL, "kind": "voice", "name": "Студия", "items": {"voices": [sound]}})
+    await torrents.request("unpack.folder.delete", {"url": URL, "kind": "voice", "name": "Студия", "automatic": True,
+                                                     "items": {"voices": [sound]}})
     editor = await torrents.request("unpack.editor.get", {"url": URL})
     assert editor["view"]["folders"] == [] and editor["view"]["hidden"] == [{"kind": "voice", "name": "Студия"}]
     assert await unpack.repo.assignments(URL) == []
     await torrents.request("unpack.auto", {"url": URL, "kinds": ["voice"]})
     assert (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["hidden"] == []
-    # A folder the user names again is his: nothing hides it.
+    # A folder only the hand made is not hidden when deleted; one the user names again is his: nothing hides it.
     await torrents.request("unpack.folder.delete", {"url": URL, "kind": "voice", "name": "Студия"})
+    assert (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["hidden"] == []
+    await torrents.request("unpack.folder.delete", {"url": URL, "kind": "voice", "name": "Студия", "automatic": True})
     await torrents.request("unpack.folder.set", {"url": URL, "kind": "voice", "name": "Студия"})
     assert (await torrents.request("unpack.editor.get", {"url": URL}))["view"]["hidden"] == []
 
@@ -422,7 +425,7 @@ def test_the_editor_tells_the_file_episode_and_stream_of_every_track_and_what_ev
                                       "Show/Show - 01.rus.mka": streams(("audio", 0, "rus", ""))}},
                     results={"files": numbered({p.path: (1, 1) for p in r.files})})
     view, _rows = compose(inputs)
-    stream = view["tabs"]["streams"][0]
+    stream = view["tabs"]["voice_streams"][0]
     assert (stream["path"], stream["place"], stream["stream"]["index"], stream["stream"]["language"]) == (
         "Show/Show - 01.mkv", {"season": 1, "episode": 1, "last": None}, 1, "jpn")
     voice = view["tabs"]["voices"][0]

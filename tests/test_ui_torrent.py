@@ -91,9 +91,9 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     await expect(season.locator(".torrent-episode-name")).to_have_text(["s01e01", "s01e02"])
     await ui.shot("04-one-rule")
 
-    # «Контейнеры»: the sound inside the files has no title and no language in them, so it waits for the operator; one rule
+    # «Озв. конт.»: the sound inside the files has no title and no language in them, so it waits for the operator; one rule
     # puts it into a folder of a voice-over and gives it its language, and nothing waits any more.
-    await page.locator(".torrent-switch .tab-streams").click()
+    await page.locator(".torrent-switch .tab-voice_streams").click()
     sounds = page.locator(".torrent-streams .stream-row.is-unplaced")
     await expect(sounds).to_have_count(1)  # one container: the sound of both files
     # The row is the raw line of the stream, as the rule reads it: the kind, the number, the codec; no language in the file.
@@ -125,16 +125,15 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
         " pick.removeAllRanges(); pick.addRange(range); return [pick.toString(), line.title] }")
     assert whole[0] == whole[1], whole
 
-    # A sound picked: each folder of a voice-over is a place to put it, the folders of subtitles are not, and the pane says so;
-    # the columns of the folders stay where they were.
+    # A sound picked on «Озв. конт.»: each folder of a voice-over is a place to put it (the tab shows no other); the columns
+    # of the folders stay where they were.
     heads = page.locator(".torrent-folders-table th")
     columns = [await each.bounding_box() for each in await heads.all()]
     await row.locator("input[type=checkbox]").check()
     await expect(page.locator(".torrent-folder .drop-folder")).to_have_count(1)
-    await expect(page.locator(".torrent-pick-note")).to_contain_text(text("torrent.folders.pickVoice", tracks="2 дорожки звука"))
     await ui.shot("06-pick")
     assert [await each.bounding_box() for each in await heads.all()] == columns
-    await page.locator(".torrent-pick-note button").click()
+    await page.locator(".torrent-pick button", has_text=text("torrent.select.clear")).click()
     await expect(page.locator(".torrent-folder .drop-folder")).to_have_count(0)
 
     # A sound put by hand in a folder the user made: the folder says it comes from a hand, and the bin of the track, unfolded,
@@ -158,6 +157,14 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     await expect(page.locator(".torrent-folder[data-folder='Студия'] .torrent-folders-num").last).to_have_text("2", timeout=LONG_S)
     await hand.locator(".do-delete-folder").click()
     await expect(hand).to_have_count(0, timeout=LONG_S)
+    # A folder of the user's is no work of the automatic layout: «Авто» has nothing to make again.
+    await expect(page.locator(".do-auto")).to_be_disabled()
+    # A folder of a rule deleted: its tracks are red; «Авто» makes it again.
+    await page.locator(".torrent-folder[data-folder='Студия'] .do-delete-folder").click()
+    await expect(page.locator(".torrent-streams .stream-row.is-unplaced")).to_have_count(1, timeout=LONG_S)
+    await page.locator(".do-auto").click()
+    await expect(page.locator(".torrent-folder[data-folder='Студия']")).to_have_count(1, timeout=LONG_S)
+    await expect(page.locator(".torrent-streams .stream-row.is-unplaced")).to_have_count(0)
 
     # Nothing jitters: the switch of the tabs, the heads of the panes and the panes keep their place and size whatever tab
     # or filter is chosen; the names of the files are text the user selects and copies.
@@ -168,7 +175,7 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     async def boxes():
         return [await page.locator(frame).first.bounding_box() for frame in frames]
     first = await boxes()
-    for tab in ("voices", "subtitles", "streams", "files"):
+    for tab in ("voices", "subtitles", "voice_streams", "subtitle_streams", "files"):
         await page.locator(f".torrent-switch .tab-{tab}").click()
         await expect(page.locator(f".torrent-switch .tab-{tab}")).to_have_class(re.compile(r"\bactive\b"))
         assert await boxes() == first, tab

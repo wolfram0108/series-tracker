@@ -28,7 +28,7 @@ const emit = defineEmits<{ drop: [Folder["kind"], string, string[]]; failure: [s
 const TYPES = SUBTITLE_TYPES
 const groups = computed(() => props.kinds.map((kind) => ({ kind, rows: folderRows(props.editor.view, kind) })))
 const languages = computed(() => [...new Set([...props.editor.view.tabs.voices, ...props.editor.view.tabs.subtitles,
-  ...props.editor.view.tabs.streams].map((entry) => entry.language.trim().toLowerCase()).filter((code) => code && code !== "und"))].sort())
+  ...props.editor.view.tabs.voice_streams, ...props.editor.view.tabs.subtitle_streams].map((entry) => entry.language.trim().toLowerCase()).filter((code) => code && code !== "und"))].sort())
 const live = (kind: Folder["kind"]): boolean => props.pick.count.value > 0 && props.fits(kind)
 
 const keyOf = (row: FolderRow): string => `${row.kind}:${row.name}`
@@ -67,7 +67,7 @@ const sourcesOf = (row: FolderRow): Origin[] => row.tracks.length
 // What tells the track among the lines of the left pane: the stream of a container (`A:4`), the name of a file of its own.
 function idOf(track: FolderTrack): string {
   const parts = track.entry.line.split(" | ")
-  return track.tab === "streams" ? parts.find((part) => /^A:/.test(part)) ?? "" : parts.find((part) => !/^[A-Z]{1,3}:/.test(part)) ?? ""
+  return track.tab === "voice_streams" || track.tab === "subtitle_streams" ? parts.find((part) => /^A:/.test(part)) ?? "" : parts.find((part) => !/^[A-Z]{1,3}:/.test(part)) ?? ""
 }
 const placeOf = (track: FolderTrack): string => {
   const place = track.entry.place
@@ -99,7 +99,8 @@ const dropTrack = (track: FolderTrack) => run([() => unassign(url.value, track.t
 function dropFolder(row: FolderRow): Promise<void> {
   const items: Partial<Record<FolderTrack["tab"], string[]>> = {}
   for (const each of row.tracks) if (each.entry.by === "manual") items[each.tab] = [...items[each.tab] ?? [], each.entry.item]
-  return run([() => deleteFolder(url.value, row.kind, row.name, items)])
+  const automatic = row.tracks.some((each) => each.entry.by !== "manual")
+  return run([() => deleteFolder(url.value, row.kind, row.name, items, automatic)])
 }
 const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) => emit("drop", row.kind, row.name, items)) : {}
 </script>

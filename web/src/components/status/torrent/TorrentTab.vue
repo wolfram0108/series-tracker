@@ -103,7 +103,7 @@ const offs = [
 onMounted(() => void load())
 onUnmounted(() => offs.forEach((off) => off()))
 
-const counts = computed(() => editor.value?.view.unplaced ?? { files: 0, voices: 0, subtitles: 0, streams: 0 })
+const counts = computed(() => editor.value?.view.unplaced ?? { files: 0, voices: 0, subtitles: 0, voice_streams: 0, subtitle_streams: 0 })
 const lines = computed(() => {
   const view = editor.value?.view
   if (!view) return []
@@ -140,7 +140,7 @@ const profileId = computed(() => editor.value?.profiles[tab.value] ?? null)
         </section>
         <TorrentFiles v-if="tab === 'files'" :editor="editor" :release="release" @failure="failure = $event" />
         <TorrentTracks v-else-if="tab === 'voices' || tab === 'subtitles'" :key="tab" :editor="editor" :tab="tab" @failure="failure = $event" />
-        <TorrentStreams v-else :editor="editor" @failure="failure = $event" />
+        <TorrentStreams v-else :key="tab" :editor="editor" :tab="tab" @failure="failure = $event" />
       </template>
     </template>
   </div>

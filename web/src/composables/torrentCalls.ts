@@ -39,8 +39,8 @@ export const setFolder = (body: WithDefaults<Schemas["FolderBody"], "language" |
 /** A folder deleted, with the hand's placements in it (tab → items); one of the automatic layout is not made again until
  *  «Авто». */
 export const deleteFolder = (url: string, kind: "voice" | "subtitles", name: string,
-  items: Partial<Record<"voices" | "subtitles" | "streams", string[]>> = {}): Promise<Answer<unknown>> =>
-  call(() => api.POST("/api/torrent/editor/folder/delete", { body: { url, kind, name, items } }), WORDS)
+  items: Partial<Record<"voices" | "subtitles" | "voice_streams" | "subtitle_streams", string[]>> = {}, automatic = false): Promise<Answer<unknown>> =>
+  call(() => api.POST("/api/torrent/editor/folder/delete", { body: { url, kind, name, items, automatic } }), WORDS)
 
 /** «Авто»: the automatic layout makes its deleted folders of these kinds again; the hand's placements stay. */
 export const autoLayout = (url: string, kinds: ("voice" | "subtitles")[]): Promise<Answer<unknown>> =>

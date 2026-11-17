@@ -3,27 +3,27 @@ the torrent editor, and the rows of the table of a tracker's page. Tables of the
 unpack_assignments, unpack_sources (modules/unpack/repository.py).
 
 A release `torrents` downloaded is read here: every video, sound and subtitles file by ffprobe once per version and size
-(the video of a source is never compared by content); the files are laid out by the rules of the four tabs of the editor
+(the video of a source is never compared by content); the files are laid out by the rules of the five tabs of the editor
 and by what the user placed by hand (modules/unpack/layout.py). The editor places, it never leaves out: an item is placed
 (green) or not (red); every placed sound and subtitles track of a placed video is a row of the table of the page, as a row
 of a site, and a red one is no row — what goes out of the output is the work of the constructor of the series. Every file
 of a release is downloaded: nothing here tells `torrents` what not to download. Every tab of the editor of a source («Файлы», «Озвучки», «Субтитры»,
-«Контейнеры») has its own profile of rules (the kind `torrent`), empty until the owner writes rules in it, made when the
+«Озв. конт.», «Суб. конт.») has its own profile of rules (the kind `torrent`), empty until the owner writes rules in it, made when the
 editor is first opened; nothing is placed by rules no one wrote. A page no torrent source lists any more is forgotten with
 its profiles.
 
 Queries / commands (a page is named by any mirror of its tracker; the module keeps it, and answers it, in its one spelling):
   unpack.table.get {url} → TableDraft {names, title, rows} — the rows of the page (`sources` asks it as the read of a tracker's
       page): a release downloaded for the first time gives none, a release being updated gives its rows not obtained
-  unpack.editor.get {url} → {url, profiles: {files, voices, subtitles, streams}, view} — the editor of the page: its releases,
+  unpack.editor.get {url} → {url, profiles: {files, voices, subtitles, voice_streams, subtitle_streams}, view} — the editor of the page: its releases,
       the items of every tab with their line, their place or folder and what put them there, the folders, what is unplaced
   unpack.assign {url, tab, items, season?, episode?, episode_last?, folder?, in_order?} — placed by hand (a drag): a file
       in a season and an episode, a track in a folder; `in_order`: the items in the order given take the episodes from
       `episode` on, one each (files dropped on a season)
   unpack.unassign {url, tab, items} — back to what the rules give
   unpack.folder.set {url, kind: voice | subtitles, name, language?, subtitle_type?} / unpack.folder.delete {url, kind, name,
-      items?: {tab: [item]}} — a folder deleted takes the hand's placements in it (`items`) and, made by the automatic
-      layout (the titles in the files, the rules), is not made by it again until «Авто»
+      automatic?, items?: {tab: [item]}} — a folder deleted takes the hand's placements in it (`items`) and, holding tracks
+      of the automatic layout (`automatic`: the titles in the files, the rules), is not made by it again until «Авто»
   unpack.auto {url, kinds: [voice | subtitles]} — «Авто»: the automatic layout makes its deleted folders of these kinds
       again; the hand's placements stay
 Events out:
@@ -54,8 +54,9 @@ READ_PROGRESS_TOPIC = "unpack.read.progress"
 READ = {FileKind.VIDEO, FileKind.AUDIO, FileKind.SUBTITLES}
 # The profile of each tab of the editor in the table unpack_sources, and the word its name is made with.
 PROFILE_COLUMNS = {"files": "files_profile_id", "voices": "voices_profile_id", "subtitles": "subtitles_profile_id",
-                   "streams": "streams_profile_id"}
-TAB_WORDS = {"files": "файлы", "voices": "озвучки", "subtitles": "субтитры", "streams": "контейнеры"}
+                   "voice_streams": "voice_streams_profile_id", "subtitle_streams": "subtitle_streams_profile_id"}
+TAB_WORDS = {"files": "файлы", "voices": "озвучки", "subtitles": "субтитры", "voice_streams": "озв. конт.",
+             "subtitle_streams": "суб. конт."}
 
 class UnpackModule(BaseModule):
     name = "unpack"
@@ -127,7 +128,7 @@ class UnpackModule(BaseModule):
         keyed = lines(inputs)
         inputs.results[EditorTab.FILES] = await self._apply(profiles.get(PROFILE_COLUMNS["files"]), keyed[EditorTab.FILES])
         keyed = lines(inputs)  # the tabs of tracks read the places the files got
-        for tab in (EditorTab.VOICES, EditorTab.SUBTITLES, EditorTab.STREAMS):
+        for tab in (EditorTab.VOICES, EditorTab.SUBTITLES, EditorTab.VOICE_STREAMS, EditorTab.SUBTITLE_STREAMS):
             inputs.results[tab] = await self._apply(profiles.get(PROFILE_COLUMNS[tab.value]), keyed[tab])
         return inputs
 
@@ -154,7 +155,7 @@ class UnpackModule(BaseModule):
         return {"url": url, "profiles": profiles, "view": view}
 
     async def _tab_profiles(self, url: str) -> dict[str, int]:
-        """The profiles of the four tabs of the source, each its own and empty until the owner writes rules in it; made when
+        """The profiles of the five tabs of the source, each its own and empty until the owner writes rules in it; made when
         its editor is first opened (a tab missing from an older page gets its profile then)."""
         stored = await self.repo.profiles(url) or {}
         made = {}
@@ -190,7 +191,8 @@ class UnpackModule(BaseModule):
 
     async def on_folder_delete(self, env: Envelope) -> None:
         url = await self._page(env.payload["url"])
-        await self.repo.delete_folder(url, env.payload["kind"], env.payload["name"], env.payload.get("items") or {})
+        await self.repo.delete_folder(url, env.payload["kind"], env.payload["name"], env.payload.get("items") or {},
+                                      bool(env.payload.get("automatic")))
         self._changed(url)
 
     async def on_auto(self, env: Envelope) -> None:

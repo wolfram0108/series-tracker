@@ -4,8 +4,11 @@
 import { spansOf } from "./ranges"
 
 export type ReleaseState = "metadata" | "downloading" | "ready" | "updating" | "failed" | "archived"
-export type EditorTab = "files" | "voices" | "subtitles" | "streams"
-export const EDITOR_TABS: readonly EditorTab[] = ["files", "voices", "subtitles", "streams"]
+export type EditorTab = "files" | "voices" | "subtitles" | "voice_streams" | "subtitle_streams"
+export const EDITOR_TABS: readonly EditorTab[] = ["files", "voices", "subtitles", "voice_streams", "subtitle_streams"]
+/** The tabs of the tracks inside the video files: the sound («Озв. конт.») and the subtitles («Суб. конт.»). */
+export type StreamTab = "voice_streams" | "subtitle_streams"
+export const streamTabOf = (kind: "voice" | "subtitles"): StreamTab => kind === "voice" ? "voice_streams" : "subtitle_streams"
 
 export interface ReleaseFile { path: string; size: number; progress: number; priority: number }
 /** A release the core keeps for a page (torrents.releases.get). */
@@ -81,7 +84,7 @@ export interface EditorRelease { release: string; title: string; state: ReleaseS
   reading: { done: number; total: number } | null }
 export interface EditorView {
   releases: EditorRelease[]
-  tabs: { files: FileEntry[]; voices: TrackEntry[]; subtitles: TrackEntry[]; streams: TrackEntry[] }
+  tabs: { files: FileEntry[]; voices: TrackEntry[]; subtitles: TrackEntry[]; voice_streams: TrackEntry[]; subtitle_streams: TrackEntry[] }
   folders: Folder[]
   unplaced: Record<EditorTab, number>
   containers: ContainerFile[]
@@ -254,7 +257,7 @@ export function foldersOf(folders: readonly Folder[], entries: readonly TrackEnt
 }
 
 /** A track a folder holds, with the tab it is placed in (the folders are shared by «Озвучки», «Субтитры», «Контейнеры»). */
-export interface FolderTrack { tab: "voices" | "subtitles" | "streams"; entry: TrackEntry }
+export interface FolderTrack { tab: "voices" | "subtitles" | StreamTab; entry: TrackEntry }
 export interface FolderRow extends FolderView {
   /** Every track it holds, of the files and of the containers alike. */
   tracks: FolderTrack[]
@@ -264,9 +267,8 @@ export interface FolderRow extends FolderView {
  *  containers, in the order of the episodes. */
 export function folderRows(view: EditorView, kind: Folder["kind"]): FolderRow[] {
   const tab = kind === "voice" ? "voices" as const : "subtitles" as const
-  const sound = kind === "voice" ? "audio" : "subtitles"
   const tracks: FolderTrack[] = [...view.tabs[tab].map((entry) => ({ tab, entry })),
-    ...view.tabs.streams.filter((entry) => entry.kind === sound).map((entry) => ({ tab: "streams" as const, entry }))]
+    ...view.tabs[streamTabOf(kind)].map((entry) => ({ tab: streamTabOf(kind), entry }))]
   const order = (a: FolderTrack, b: FolderTrack): number => !a.entry.place ? 1 : !b.entry.place ? -1
     : a.entry.place.season - b.entry.place.season || a.entry.place.episode - b.entry.place.episode || a.entry.item.localeCompare(b.entry.item)
   return foldersOf(view.folders, tracks.map((each) => each.entry), kind).map((folder) => {

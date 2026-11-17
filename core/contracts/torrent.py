@@ -128,13 +128,20 @@ def video_of_link(link: str) -> str:
     return f"{parsed[0]}/{parsed[1]}" if parsed else ""
 
 
-# --- the lines of the torrent editor (its four tabs), the input of the rules of each tab -----------------------------
+# --- the lines of the torrent editor (its five tabs), the input of the rules of each tab -----------------------------
 
 class EditorTab(StrEnum):
     FILES = "files"
     VOICES = "voices"
     SUBTITLES = "subtitles"
-    STREAMS = "streams"
+    # The tracks inside the video files: the sound («Озв. конт.») and the subtitles («Суб. конт.»), each a tab of its own.
+    VOICE_STREAMS = "voice_streams"
+    SUBTITLE_STREAMS = "subtitle_streams"
+
+
+def stream_tab(kind: str) -> "EditorTab":
+    """The tab of a track inside a container by the kind of its stream (`audio`, `subtitle`)."""
+    return EditorTab.SUBTITLE_STREAMS if kind == "subtitle" else EditorTab.VOICE_STREAMS
 
 
 class FileKind(StrEnum):
@@ -198,7 +205,7 @@ STREAM_KINDS = {"video": "видео", "audio": "звук", "subtitle": "суб�
 
 
 def stream_line(kind: str, index: int, language: str = "", title: str = "", codec: str = "") -> str:
-    """A line of the tab «Контейнеры», one per stream: `T:<kind> | A:<number> | L:<language> | N:<title> | C:<codec>`."""
+    """A line of the tabs «Озв. конт.» and «Суб. конт.», one per stream: `T:<kind> | A:<number> | L:<language> | N:<title> | C:<codec>`."""
     parts = [f"T:{STREAM_KINDS.get(kind, kind)}", f"A:{index}", f"L:{language}" if language else "",
              f"N:{title}" if title else "", f"C:{codec}" if codec else ""]
     return _SEP.join(part for part in parts if part)

@@ -1745,7 +1745,7 @@ export interface paths {
         put?: never;
         /**
          * Editor
-         * @description The torrent editor of the page: the items of its four tabs, the folders, what is unplaced, the profiles.
+         * @description The torrent editor of the page: the items of its five tabs, the folders, what is unplaced, the profiles.
          */
         post: operations["editor_api_torrent_editor_post"];
         delete?: never;
@@ -2044,7 +2044,7 @@ export interface components {
              * Tab
              * @enum {string}
              */
-            tab: "files" | "voices" | "subtitles" | "streams";
+            tab: "files" | "voices" | "subtitles" | "voice_streams" | "subtitle_streams";
             /** Items */
             items: string[];
             /** Season */
@@ -2791,6 +2791,11 @@ export interface components {
             kind: "voice" | "subtitles";
             /** Name */
             name: string;
+            /**
+             * Automatic
+             * @default false
+             */
+            automatic: boolean;
             /** Items */
             items?: {
                 [key: string]: string[];
@@ -4322,7 +4327,7 @@ export interface components {
              * Tab
              * @enum {string}
              */
-            tab: "files" | "voices" | "subtitles" | "streams";
+            tab: "files" | "voices" | "subtitles" | "voice_streams" | "subtitle_streams";
             /** Items */
             items: string[];
         };

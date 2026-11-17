@@ -60,12 +60,12 @@ class UnpackRepository:
         await self._db.execute("INSERT OR REPLACE INTO unpack_folders (url, kind, name, language, subtitle_type) "
                                "VALUES (?, ?, ?, ?, ?)", (url, kind, name, language, subtitle_type))
 
-    async def delete_folder(self, url: str, kind: str, name: str, items: dict[str, list[str]]) -> None:
+    async def delete_folder(self, url: str, kind: str, name: str, items: dict[str, list[str]], automatic: bool) -> None:
         """The folder goes: its settings, the hand's placements in it (`items`: tab → items, as the editor names them), and
-        the automatic layout does not make it again until «Авто»."""
+        one of the automatic layout (`automatic`) is not made by it again until «Авто»."""
         await self._db.execute_many(
-            [("DELETE FROM unpack_folders WHERE url=? AND kind=? AND name=?", (url, kind, name)),
-             ("INSERT OR IGNORE INTO unpack_hidden (url, kind, name) VALUES (?, ?, ?)", (url, kind, name))]
+            [("DELETE FROM unpack_folders WHERE url=? AND kind=? AND name=?", (url, kind, name))]
+            + ([("INSERT OR IGNORE INTO unpack_hidden (url, kind, name) VALUES (?, ?, ?)", (url, kind, name))] if automatic else [])
             + [("DELETE FROM unpack_assignments WHERE url=? AND tab=? AND item=? AND folder=?", (url, tab, item, name))
                for tab, listed in items.items() for item in listed])
 
@@ -84,10 +84,11 @@ class UnpackRepository:
         return await self._db.fetch_one("SELECT * FROM unpack_sources WHERE url=?", (url,))
 
     async def save_profiles(self, url: str, profiles: dict[str, int]) -> None:
-        """`profiles`: tab → profile id, for the four tabs of the editor."""
+        """`profiles`: tab → profile id, for the five tabs of the editor."""
         await self._db.execute("INSERT OR REPLACE INTO unpack_sources (url, files_profile_id, voices_profile_id, "
-                               "subtitles_profile_id, streams_profile_id) VALUES (?, ?, ?, ?, ?)",
-                               (url, profiles["files"], profiles["voices"], profiles["subtitles"], profiles["streams"]))
+                               "subtitles_profile_id, voice_streams_profile_id, subtitle_streams_profile_id) VALUES (?, ?, ?, ?, ?, ?)",
+                               (url, profiles["files"], profiles["voices"], profiles["subtitles"], profiles["voice_streams"],
+                                profiles["subtitle_streams"]))
 
     async def pages(self) -> list[str]:
         """Every page the module keeps something of."""

@@ -80,7 +80,7 @@ def test_a_manual_place_is_an_episode_of_a_season_for_a_file_and_a_folder_for_a_
     conn.execute(insert, ("files", "Show/E01.mkv", 1, 1, None, None))
     conn.execute(insert, ("files", "Show/E01-E02.mkv", 1, 1, 2, None))
     conn.execute(insert, ("voices", "Show/Sound/E01.mka", None, None, None, "Студия"))
-    conn.execute(insert, ("streams", "Show/E01.mkv#2", None, None, None, "Студия"))
+    conn.execute(insert, ("voice_streams", "Show/E01.mkv#2", None, None, None, "Студия"))
     for bad in (("files", "a", None, 1, None, None), ("files", "b", 1, None, None, None),
                 ("files", "c", 1, 1, None, "Студия"), ("files", "d", 1, 3, 2, None), ("files", "x", None, None, None, None),
                 ("voices", "e", None, None, None, None), ("subtitles", "f", 1, 1, None, "Субтитры"),

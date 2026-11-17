@@ -38,7 +38,7 @@ const told = computed(() => {
   if (props.tab === "voices") return t("torrent.head.voices", { n: view.tabs.voices.length })
   if (props.tab === "subtitles") return t("torrent.head.subtitles", { n: view.tabs.subtitles.length,
     fonts: view.tabs.files.filter((file) => file.kind === "font").length })
-  return t("torrent.head.streams", { n: view.containers.length })
+  return t("torrent.head.streams", { n: view.containers.length })  // both tabs of the containers
 })
 
 const progress = computed(() => {

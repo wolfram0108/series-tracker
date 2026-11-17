@@ -36,7 +36,7 @@ async def test_a_refusal_of_the_owner_is_a_conflict_with_its_reason_and_a_malfor
         malformed = await client.post("/api/torrent/editor/assign", json={"url": URL, "tab": "other", "items": ["x"]})
         # The hand places, it never leaves out: a track with no folder, a file with no episode is no placement.
         nowhere = [await client.post("/api/torrent/editor/assign", json={"url": URL, "tab": tab, "items": ["x"]})
-                   for tab in ("streams", "files")]
+                   for tab in ("voice_streams", "files")]
     assert refused.status_code == 409 and "staging_dir_not_set" in refused.text
     assert malformed.status_code == 422 and [each.status_code for each in nowhere] == [422, 422]
     assert owners.asked("unpack.assign") == []

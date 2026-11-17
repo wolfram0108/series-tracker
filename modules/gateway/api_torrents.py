@@ -37,7 +37,7 @@ class AssignBody(BaseModel):
     """Items of a tab placed by hand: a file in a season and an episode (to `episode_last` for a file of several), a track
     in a folder by its name. Nothing is left out here: what goes out of the output is the constructor's of the series."""
     url: str
-    tab: Literal["files", "voices", "subtitles", "streams"]
+    tab: Literal["files", "voices", "subtitles", "voice_streams", "subtitle_streams"]
     items: list[str] = Field(min_length=1)
     season: int | None = None
     episode: int | None = None
@@ -57,7 +57,7 @@ class AssignBody(BaseModel):
 
 class UnassignBody(BaseModel):
     url: str
-    tab: Literal["files", "voices", "subtitles", "streams"]
+    tab: Literal["files", "voices", "subtitles", "voice_streams", "subtitle_streams"]
     items: list[str] = Field(min_length=1)
 
 
@@ -73,8 +73,11 @@ class FolderRef(BaseModel):
     url: str
     kind: Literal["voice", "subtitles"]
     name: str = Field(min_length=1)
+    # The folder holds tracks the automatic layout put there (the titles in the files, the rules): it is not made again
+    # until «Авто». A folder only the hand filled or made goes and is not hidden.
+    automatic: bool = False
     # The hand's placements in the folder, by tab: they go with it.
-    items: dict[Literal["voices", "subtitles", "streams"], list[str]] = Field(default_factory=dict)
+    items: dict[Literal["voices", "subtitles", "voice_streams", "subtitle_streams"], list[str]] = Field(default_factory=dict)
 
 
 class AutoBody(BaseModel):
@@ -126,7 +129,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.post("/api/torrent/editor", response_model=DynamicObject, responses=_ERR)
     async def editor(body: PageBody):
-        """The torrent editor of the page: the items of its four tabs, the folders, what is unplaced, the profiles."""
+        """The torrent editor of the page: the items of its five tabs, the folders, what is unplaced, the profiles."""
         return await asked("unpack.editor.get", body.model_dump())
 
     @r.post("/api/torrent/editor/assign", response_model=OkResponse, responses=_ERR)

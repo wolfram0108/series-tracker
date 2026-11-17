@@ -1,4 +1,4 @@
-"""The layout of the releases of a torrent page: what the editor shows on its four tabs and the rows of the table of the page.
+"""The layout of the releases of a torrent page: what the editor shows on its five tabs and the rows of the table of the page.
 
 Pure: the files of each release (`torrents`), what each file holds (ffprobe), what the rules of each tab gave every line
 and what the user placed by hand go in; the view of the editor and the rows go out. A placement by hand is the user's and
@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.contracts import RowState, RowTrack, RowVoice, TableRow
-from core.contracts.torrent import (EditorTab, FileKind, ReleaseState, ReleaseView, episode_word, files_line, fonts_of,
+from core.contracts.torrent import (EditorTab, FileKind, stream_tab, ReleaseState, ReleaseView, episode_word, files_line, fonts_of,
                                     kind_of, player_of, stream_line, track_file_line, track_link)
 from core.reasons import reason
 
@@ -75,7 +75,7 @@ def lines(inputs: Inputs) -> dict[str, dict[str, str]]:
             elif kind == FileKind.VIDEO:
                 for s in _probed(inputs, release.release, f.path):
                     if s["kind"] in TRACK_KINDS:
-                        out[EditorTab.STREAMS][item_of(release.release, f.path, s["index"])] = stream_line(
+                        out[stream_tab(s["kind"])][item_of(release.release, f.path, s["index"])] = stream_line(
                             s["kind"], s["index"], s["language"], s["title"], s["codec"])
     return out
 
@@ -138,7 +138,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
     """The view of the editor and the rows of the table."""
     places = _places(inputs)
     folder_facts = {(f["kind"], f["name"]): f for f in inputs.folders}
-    # `containers`: every video file placed, with what it holds (the window lays the tab «Контейнеры» out by it: files of
+    # `containers`: every video file placed, with what it holds (the window lays the tabs «Озв. конт.» and «Суб. конт.» out by it: files of
     # one composition are one).
     view: dict[str, Any] = {"releases": [], "tabs": {tab.value: [] for tab in EditorTab}, "folders": [],
                             "unplaced": {tab.value: 0 for tab in EditorTab}, "containers": [], "hidden": []}
@@ -207,7 +207,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                 height = max((s["height"] or 0 for s in streams if s["kind"] == "video" and not s["picture"]), default=0)
                 view["containers"].append({"item": item_of(release.release, video), "path": video, "place": _place_json(where),
                                            "streams": [{**{key: s.get(key) for key in _STREAM_KEYS},
-                                                        # the line of the stream as the rules of «Контейнеры» read it
+                                                        # the line of the stream as the rules of «Озв. конт.» and «Суб. конт.» read it
                                                         "line": stream_line(s["kind"], s["index"], s["language"], s["title"],
                                                                             s["codec"])}
                                                        for s in streams
@@ -217,7 +217,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                         continue
                     item = item_of(release.release, video, s["index"])
                     kind = TRACK_KINDS[s["kind"]]
-                    entry = track(EditorTab.STREAMS, item, stream_line(s["kind"], s["index"], s["language"], s["title"],
+                    entry = track(stream_tab(s["kind"]), item, stream_line(s["kind"], s["index"], s["language"], s["title"],
                                                                        s["codec"]), kind, s, video, where)
                     # A red track (no folder or no language yet) is no row: only what the editor placed goes on.
                     if release.state in SHOWN and not entry["waiting"] and kind in ROW_KINDS:
