@@ -35,7 +35,8 @@ const loading = ref(false)
 useBusyBar(() => loading.value)
 
 const tab = ref<EditorTab>("files")
-const rulesOpen = ref(true)
+// The rules start folded: the panes of the release are what the tab is opened for; «Добавить» or the head opens them.
+const rulesOpen = ref(false)
 
 // One release is edited: the one the core keeps for the page (a page of several releases keeps the one the user downloaded).
 const release = computed(() => kept.value[0])
