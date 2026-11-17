@@ -763,6 +763,7 @@ export const ru = {
   "rules.action.folderName": "Имя каталога",
   "rules.action.language": "Язык",
   "rules.action.defaultLanguage": "Язык строк по умолчанию",
+  "rules.action.subtitleType": "Тип субтитров",
   "rules.table.rowAction": "Действие строки",
   "rules.action.value": "Значение",
   "rules.rule.namePlaceholder": "Имя правила...",

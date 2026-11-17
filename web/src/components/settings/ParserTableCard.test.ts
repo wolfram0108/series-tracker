@@ -35,6 +35,19 @@ describe("a rule «Таблица»", () => {
     expect(w.find(".rule-rows").text()).toBe(t("rules.table.rows", { count: 1 }))
   })
 
+  it("gives a row of a folder of subtitles its name, language and type (П/Н), and a row its own action by its number", async () => {
+    const row = rowOf("T", "Signs")
+    const rule: EditableRule = { id: 5, name: "Субтитры", continue_after_match: true, conditions: [], actions: [],
+                                 table: { action_type: "assign_subtitle_folder", rows: [row] } }
+    mounted = mount(ParserTableCard, { props: { rule, index: 0, total: 1, isOpen: true, lines: LINES, codes: CODES, place: "subtitles" } })
+    const types = mounted.findAll("td.col-then .torrent-types button")
+    expect(types.map((each) => each.text())).toEqual([t("torrent.type.short.full"), t("torrent.type.short.signs")])
+    await types[1].trigger("click")
+    expect(JSON.parse(rule.table!.rows[0].then.value)).toEqual({ name: "Signs", type: "signs" })
+    // The row shows the number of the column's action while it has none of its own: «В каталог субтитров» is the first of «Субтитры».
+    expect(mounted.find("td.col-then .row-action .selected-value").text()).toBe("1")
+  })
+
   it("adds by a template a row for each value of the field the table does not hold, marked, value in «ТО»", async () => {
     const { w, rule } = opened()
     await chip(w, "V").trigger("click")

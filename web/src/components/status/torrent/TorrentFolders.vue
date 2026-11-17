@@ -9,6 +9,7 @@ import { spansOf } from "../../../lib/ranges"
 import { deleteFolder, removeFromFolder, setFolder } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import type { TorrentPick } from "../../../composables/useTorrentPick"
+import SubtitleTypes from "../../SubtitleTypes.vue"
 
 // The folders of the tracks as one table per kind (the boards «Озвучки», «Субтитры», «Контейнеры»): a row is a folder —
 // its name is the name of the voice-over or of the subtitles in the rows of the series, its language and type of subtitles
@@ -160,11 +161,8 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
                 </select></span>
               </td>
               <td v-if="group.kind === 'subtitles'">
-                <span class="torrent-types" role="group" :aria-label="t('torrent.folders.col.type')">
-                  <button v-for="each in TYPES" :key="each" type="button" :class="{ active: row.subtitle_type === each }"
-                          :aria-pressed="row.subtitle_type === each" :title="t(`torrent.type.${each}`)" :disabled="busy"
-                          @click="save(row, { subtitle_type: row.subtitle_type === each ? '' : each })">{{ t(`torrent.type.short.${each}`) }}</button>
-                </span>
+                <SubtitleTypes :model-value="row.subtitle_type" :disabled="busy" :label="t('torrent.folders.col.type')"
+                               @update:model-value="save(row, { subtitle_type: $event })" />
               </td>
               <td><span class="torrent-folders-sources">
                 <span :class="folderOrigin(row).css" :title="folderOrigin(row).text">{{ folderOrigin(row).text }}</span></span></td>

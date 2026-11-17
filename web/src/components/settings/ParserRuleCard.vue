@@ -4,6 +4,7 @@ import ToggleSwitch from "primevue/toggleswitch"
 import StGroup from "../StGroup.vue"
 import StSelect from "../StSelect.vue"
 import { t } from "../../i18n"
+import SubtitleTypes from "../SubtitleTypes.vue"
 import ParserPatternEditor, { type PatternBlock } from "./ParserPatternEditor.vue"
 import type { TableRow } from "../../lib/ruleTable"
 import { actionLabel, actionOptions, choicesOf, conditionOptions, fieldText, folderLanguages, folderValueOf, folderValueText, isAssign,
@@ -229,6 +230,11 @@ function getAssignActionLabel(actionType: string): string {
                   class="folder-language" :model-value="folderValueOf(action.action_pattern).language || null" :options="folderLanguages()"
                   :placeholder="t('rules.action.language')"
                   @update:model-value="action.action_pattern = folderValueText({ ...folderValueOf(action.action_pattern), language: String($event ?? '') })"
+                />
+                <SubtitleTypes
+                  v-if="action.action_type === 'assign_subtitle_folder'" class="folder-type"
+                  :model-value="folderValueOf(action.action_pattern).type ?? ''" :label="t('rules.action.subtitleType')"
+                  @update:model-value="action.action_pattern = folderValueText({ ...folderValueOf(action.action_pattern), type: $event })"
                 />
               </template>
               <StSelect

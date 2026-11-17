@@ -123,6 +123,19 @@ def test_a_folder_is_named_with_its_language_in_one_action_a_name_alone_names_th
                                                                                           "language": "rus"}
 
 
+def test_a_folder_of_subtitles_is_named_with_its_language_and_its_type_a_type_elsewhere_is_an_error():
+    signs = json.dumps({"name": "Надписи", "language": "rus", "type": "signs"}, ensure_ascii=False)
+    profile = compile_profile(8, [
+        rule(1, "надписи", [assign("assign_subtitle_folder", signs)], [contains(text("Signs"))]),
+        rule(2, "звук", [assign("assign_voice_folder", json.dumps({"name": "Студия", "type": "full"}))], [contains(text("Sound"))]),
+        rule(3, "чужой", [assign("assign_subtitle_folder", json.dumps({"name": "X", "type": "half"}))], [contains(text("Half"))])])
+    assert process_title(profile, "D:Subs/Signs | 01.ass")["extracted"] == {"subtitle_folder": "Надписи", "language": "rus",
+                                                                           "subtitle_type": "signs"}
+    for line in ("D:Sound | 01.mka", "D:Half | 01.ass"):
+        got = process_title(profile, line)
+        assert got["extracted"] == {} and '"rule_value_bad"' in got["errors"][0], line
+
+
 def test_a_row_of_a_table_does_its_own_action_and_the_others_the_columns():
     """A table extracts the number; one row of it gives the tag of the version instead (its own «ТО»)."""
     table = compile_profile(7, [{"id": 1, "name": "серии", "priority": 1, "continue_after_match": True,

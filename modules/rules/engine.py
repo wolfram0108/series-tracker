@@ -39,13 +39,14 @@ EDITOR_ASSIGN = {"assign_voice_folder": "voice_folder", "assign_subtitle_folder"
                  # «Тег видео» of the tab «Файлы»: a version of an episode (DIR), an episode of its own with its tag.
                  "assign_video_tag": "video_tag"}
 ASSIGN_TYPES = ASSIGN_TYPES + tuple(EDITOR_ASSIGN)
-# The folder of a track is named with its language in one action («ТО» of two fields): the value is `{"name", "language"}`
-# as JSON, or the name alone (a rule written before, a folder whose language is said elsewhere).
+# The folder of a track is named with its language — and a folder of subtitles with its type (full, signs) — in one action
+# («ТО» of several fields): the value is `{"name", "language", "type"}` as JSON, or the name alone (a rule written before, a
+# folder whose language is said elsewhere).
 FOLDER_ASSIGN = ("assign_voice_folder", "assign_subtitle_folder")
 
 
-def folder_value(raw) -> tuple[str, str]:
-    """(name, language) of the value of a folder action."""
+def folder_value(raw) -> tuple[str, str, str]:
+    """(name, language, type) of the value of a folder action."""
     text = str(raw or "").strip()
     if text.startswith("{"):
         try:
@@ -53,8 +54,9 @@ def folder_value(raw) -> tuple[str, str]:
         except ValueError:
             value = None
         if isinstance(value, dict):
-            return str(value.get("name") or "").strip(), str(value.get("language") or "").strip()
-    return text, ""
+            return (str(value.get("name") or "").strip(), str(value.get("language") or "").strip(),
+                    str(value.get("type") or "").strip())
+    return text, "", ""
 ACTION_TYPES = ("exclude",) + EXTRACT_TYPES + ASSIGN_TYPES
 BLOCK_TYPES = ("text", "number", "range", "add", "subtract", "whitespace",
                "any_text", "start_of_line", "end_of_line", "or")
@@ -328,9 +330,10 @@ def table_rules(rule: dict) -> list[dict]:
             pattern = str(then if then is not None else "").strip()
             if not pattern:
                 raise ValueError(reason("table_row_then_empty", number=number))
-            name, own = folder_value(pattern) if language and row_type in FOLDER_ASSIGN else ("", "")
+            name, own, kind = folder_value(pattern) if language and row_type in FOLDER_ASSIGN else ("", "", "")
             if name and not own:
-                pattern = json.dumps({"name": name, "language": language}, ensure_ascii=False)
+                pattern = json.dumps({"name": name, "language": language, **({"type": kind} if kind else {})},
+                                     ensure_ascii=False)
         else:
             if not then:
                 raise ValueError(reason("table_row_template_empty", number=number))
@@ -558,13 +561,15 @@ def _run_actions(title: str, rule: CompiledRule,
             extracted["resolution"] = action.raw_value
             produced = True
         elif a_type in FOLDER_ASSIGN:
-            name, language = folder_value(action.raw_value)
-            if not name:
+            name, language, kind = folder_value(action.raw_value)
+            if not name or (kind and (a_type != "assign_subtitle_folder" or kind not in SUBTITLE_TYPES)):
                 errors.append(reason("rule_value_bad", rule=rule.name, action=a_type, value=str(action.raw_value or "")))
                 continue
             extracted[EDITOR_ASSIGN[a_type]] = name
             if language:
                 extracted["language"] = language
+            if kind:
+                extracted["subtitle_type"] = kind
             produced = True
         elif a_type in EDITOR_ASSIGN:
             value = str(action.raw_value or "").strip()

@@ -12,6 +12,7 @@ import {
 import { actionLabel, actionOptions, choicesOf, fieldText, folderLanguages, folderValueOf, folderValueText, isAssign, isExtract,
   isFolderAction, isNumberAssign, type RulePlace } from "../../lib/ruleVocabulary"
 import type { EditableRule } from "./ParserRuleCard.vue"
+import SubtitleTypes from "../SubtitleTypes.vue"
 import ParserPatternEditor from "./ParserPatternEditor.vue"
 import PatternPalette from "./PatternPalette.vue"
 import { reasonText } from "../../lib/reason"
@@ -296,6 +297,11 @@ function setRowAction(row: TableRow, value: string): void {
                         :class="{ 'is-default': !folderValueOf(row.then.value).language && table.language }"
                         @update:model-value="row.then.value = folderValueText({ ...folderValueOf(row.then.value), language: String($event ?? '') })"
                       />
+                      <SubtitleTypes
+                        v-if="actionOf(row) === 'assign_subtitle_folder'" class="table-type"
+                        :model-value="folderValueOf(row.then.value).type ?? ''" :label="t('rules.action.subtitleType')"
+                        @update:model-value="row.then.value = folderValueText({ ...folderValueOf(row.then.value), type: $event })"
+                      />
                     </div>
                     <StSelect
                       v-else-if="isAssign(actionOf(row)) && choicesOf(actionOf(row))" class="table-value" :model-value="row.then.value || null"
@@ -405,7 +411,7 @@ function setRowAction(row: TableRow, value: string): void {
 .rule-table td :deep(.pattern-constructor) { padding: 0; background: transparent; }
 .rule-table td :deep(.pattern-blocks-container) { min-height: 1.5rem; padding: 0; }
 /* «ТО» of a row: the number of its action, then its value. */
-.row-then { display: flex; gap: 0.375rem; align-items: flex-start; }
+.row-then { display: flex; gap: 0.375rem; align-items: center; }
 .row-then-value { flex: 1 1 auto; min-width: 0; }
 .row-action {
   flex: 0 0 auto; min-height: 2rem; padding: 0 0.375rem; border: 1px solid #ced4da; border-radius: 4px; background: #fff;
@@ -414,6 +420,7 @@ function setRowAction(row: TableRow, value: string): void {
 .row-action.is-own { color: #198754; border-color: #a3cfbb; }
 .row-action :deep(.selected-value) { white-space: nowrap; padding: 0; }
 .table-folder { display: flex; gap: 0.375rem; align-items: stretch; }
+.table-folder > .table-type { flex: none; align-self: center; }
 .table-folder > input.table-value { flex: 1 1 8rem; min-width: 0; }
 .table-folder > .table-language {
   flex: 0 0 5rem; min-width: 0; padding: 0 0.5rem; border: 1px solid #ced4da; border-radius: 4px; background: #fff; font-size: 0.875rem;

@@ -168,6 +168,7 @@
 .rule-body .mt-2 { margin-top: 0.3125rem; }
 /* The language of a folder beside its name («ТО» of two fields): as wide as a language, the name takes the rest. */
 .rule-body .folder-language { flex: 0 0 5.5rem; min-width: 0; padding: 0 0.625rem; }
+.rule-body .folder-type { flex: none; align-self: center; margin-inline: 0.375rem; }
 
 .rule-block { margin-bottom: 0.5rem; }
 .rule-block:last-child { margin-bottom: 0; }
