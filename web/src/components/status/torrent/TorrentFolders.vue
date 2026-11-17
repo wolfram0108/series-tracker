@@ -97,6 +97,12 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
       <div class="torrent-folders-group">{{ t(group.kind === "voice" ? "torrent.folders.groupVoices" : "torrent.folders.groupSubtitles") }}
         <span>{{ group.rows.length }}</span></div>
       <table v-if="group.rows.length" class="torrent-folders-table">
+        <colgroup>
+          <col class="torrent-col-fold"><col><col class="torrent-col-language">
+          <col v-if="group.kind === 'subtitles'" class="torrent-col-type">
+          <col class="torrent-col-source"><col class="torrent-col-episodes">
+          <col :class="group.kind === 'subtitles' ? 'torrent-col-tracks-short' : 'torrent-col-tracks'"><col class="torrent-col-act">
+        </colgroup>
         <thead>
           <tr>
             <td />
@@ -106,7 +112,7 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
             <th scope="col">{{ t("torrent.folders.col.source") }}</th>
             <th scope="col">{{ t("torrent.folders.col.episodes") }}</th>
             <th scope="col">{{ t(group.kind === "subtitles" ? "torrent.folders.col.tracksShort" : "torrent.folders.col.tracks") }}</th>
-            <td class="torrent-folders-act" />
+            <td />
           </tr>
         </thead>
         <tbody>
@@ -119,15 +125,15 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
                         @click="unfold(row)">{{ open.has(keyOf(row)) ? "▾" : "▸" }}</button>
               </td>
               <td class="torrent-folder-name" :title="row.name">{{ row.name }}</td>
-              <td>
-                <select class="torrent-language" :class="{ 'is-bad': !languageOf(row) }" :value="languageOf(row) ?? ''" :disabled="busy"
+              <td class="torrent-folders-lang">
+                <span class="torrent-language-box"><select class="torrent-language" :class="{ 'is-bad': !languageOf(row) }" :value="languageOf(row) ?? ''" :disabled="busy"
                         :aria-label="t('torrent.folders.languageOf', { name: row.name })"
                         @change="save(row, { language: ($event.target as HTMLSelectElement).value })">
                   <option v-if="!languageOf(row)" value="" disabled>
                     {{ row.noLanguage ? t("torrent.folders.noLanguage", { n: row.noLanguage }) : t("torrent.folder.language") }}</option>
                   <option v-else-if="row.language" value="">{{ t("torrent.folders.trackLanguage") }}</option>
                   <option v-for="code in optionsOf(row)" :key="code" :value="code" :title="languageName(code)">{{ code }}</option>
-                </select>
+                </select></span>
               </td>
               <td v-if="group.kind === 'subtitles'">
                 <span class="torrent-types" role="group" :aria-label="t('torrent.folders.col.type')">
@@ -136,8 +142,8 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
                           @click="save(row, { subtitle_type: row.subtitle_type === each ? '' : each })">{{ t(`torrent.type.short.${each}`) }}</button>
                 </span>
               </td>
-              <td><span :class="sourceOf(row).css">{{ sourceOf(row).text }}</span></td>
-              <td class="torrent-folders-num">{{ episodesOf(row) }}</td>
+              <td><span :class="sourceOf(row).css" :title="sourceOf(row).text">{{ sourceOf(row).text }}</span></td>
+              <td class="torrent-folders-num" :title="episodesOf(row)">{{ episodesOf(row) }}</td>
               <td class="torrent-folders-num">{{ row.tracks.length }}</td>
               <td class="torrent-folders-act">
                 <button v-if="live(row.kind)" type="button" class="torrent-put drop-folder" :disabled="busy"
