@@ -121,8 +121,9 @@ async function create(): Promise<void> {
               <template v-if="stream.facts.title">«{{ stream.facts.title }}» <span class="torrent-meta">{{ t("torrent.meta") }}</span></template>
               <template v-else>{{ t("torrent.streams.noTitle") }}</template>
               <template v-if="stream.facts.language && stream.facts.language !== 'und'"> · {{ stream.facts.language }} <span class="torrent-meta">{{ t("torrent.meta") }}</span></template>
-              <template v-else> · <span class="torrent-tg is-problem">{{ t("torrent.track.noLanguage") }}</span></template>
             </span>
+            <span v-if="stream.noLanguage" class="torrent-tg is-problem">
+              {{ t("torrent.track.noLanguage") }}</span>
             <span v-if="stream.facts.kind !== 'video'" class="torrent-tg">{{ stream.folder ?? "—" }}</span>
           </div>
         </template>

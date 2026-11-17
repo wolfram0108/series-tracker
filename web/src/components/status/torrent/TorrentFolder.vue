@@ -28,7 +28,9 @@ const TYPES = ["full", "signs", "forced"] as const
 const FONTS_SHOWN = 3
 const allFonts = ref(false)
 const fonts = computed(() => allFonts.value ? props.folder.fonts : props.folder.fonts.slice(0, FONTS_SHOWN))
-const options = computed(() => [...new Set([props.folder.language, ...props.languages].filter(Boolean))].sort())
+// What the folder's tracks go out with: its own language set by hand, else the one its tracks carry (a rule's or the file's).
+const shownLanguage = computed(() => props.folder.language || props.folder.trackLanguage || null)
+const options = computed(() => [...new Set([shownLanguage.value ?? "", ...props.languages].filter(Boolean))].sort())
 
 const busy = ref(false)
 async function save(change: { language?: string; subtitle_type?: "" | (typeof TYPES)[number] }): Promise<void> {
@@ -65,7 +67,7 @@ const live = computed(() => props.pick.count.value > 0 && props.fits)
     <div class="torrent-folder-head">
       <span class="torrent-folder-name">{{ folder.name }}</span>
       <span v-if="showKind" class="torrent-kd">{{ t(folder.kind === "voice" ? "torrent.folder.kind.voice" : "torrent.folder.kind.subtitles") }}</span>
-      <Select :model-value="folder.language || null" :options="options" editable :disabled="busy" class="torrent-language"
+      <Select :model-value="shownLanguage" :options="options" editable :disabled="busy" class="torrent-language"
               :aria-label="t('torrent.folder.language')" :placeholder="t('torrent.folder.language')"
               @update:model-value="(value: string | null) => save({ language: value ?? '' })" />
       <div v-if="folder.kind === 'subtitles'" class="torrent-types" role="group">

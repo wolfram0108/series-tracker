@@ -122,7 +122,7 @@
 .torrent-folder-tools { display: flex; gap: 0.375rem; margin-inline-start: auto; }
 .torrent-folder-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; color: var(--text-muted); font-size: 0.78rem; }
 .torrent-folder .torrent-drop { margin: 0; }
-.torrent-language.p-select { inline-size: 6.5rem; block-size: 2.125rem; border: var(--border-width) solid #e9ecef; border-radius: 8px; }
+.torrent-language.p-select { inline-size: 8rem; block-size: 2.125rem; border: var(--border-width) solid #e9ecef; border-radius: 8px; }
 .torrent-rule, .torrent-hand {
   display: inline-flex; align-items: center; padding: 0.125rem 0.625rem; border: 1px solid; border-radius: 999px;
   font-size: 0.75rem; font-weight: 600; white-space: nowrap;

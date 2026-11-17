@@ -60,7 +60,7 @@ describe("the tracks of a release", () => {
     const folders = [{ kind: "voice" as const, name: "JAM", items: 9, manual: false, language: "rus", subtitle_type: "", fonts: [] },
       { kind: "subtitles" as const, name: "Cafe", items: 1, manual: false, language: "", subtitle_type: "", fonts: ["f.ttf"] }]
     expect(foldersOf(folders, tracks, "voice")).toEqual([{ ...folders[0], episodes: "1: 1–2, 4", rule: { rule: "Озвучка", row: 1 }, held: 3,
-      fromMeta: false }])
+      fromMeta: false, trackLanguage: "rus" }])
     // A folder made of the titles of the files alone says so, and names no rule.
     const meta = [track("a", "AniLiberty", 1, "meta"), track("b", "AniLiberty", 2, "meta")]
     const [made] = foldersOf([{ ...folders[0], name: "AniLiberty" }], meta, "voice")
@@ -73,8 +73,8 @@ describe("the tracks of a release", () => {
     const tracks = [1, 2, 3].map((n) => ({ ...track(`r/E${n}.mkv#1`, n === 1 ? "MS" : null, n) }))
     const groups = containerGroups(files, tracks)
     expect(groups.map((group) => [group.season, group.episodes, group.files])).toEqual([[2, "3", 1], [1, "1–2", 2]])
-    expect(groups[1].streams.map((each) => [each.label, each.items, each.folder, each.unplaced])).toEqual([
-      ["v0", [], null, false], ["a0", ["r/E1.mkv#1", "r/E2.mkv#1"], null, true]])
+    expect(groups[1].streams.map((each) => [each.label, each.items, each.folder, each.unplaced, each.noLanguage])).toEqual([
+      ["v0", [], null, false, false], ["a0", ["r/E1.mkv#1", "r/E2.mkv#1"], null, true, false]])
     expect(streamLabel({ index: 3, kind: "subtitle" }, 1)).toBe("s1")
   })
 })

@@ -226,6 +226,9 @@ export interface FolderView extends Folder {
   rule: { rule: string; row: number | null } | null
   /** Made by itself of the titles the files give (no rule, no hand). */
   fromMeta: boolean
+  /** The language its tracks go out with when they all have one (theirs: a rule's or the file's); the folder's own, set by
+   *  hand, goes before it. Empty when they differ or none is known. */
+  trackLanguage: string
   /** Its items among those given (the items of one tab). */
   held: number
 }
@@ -243,13 +246,23 @@ export function foldersOf(folders: readonly Folder[], entries: readonly TrackEnt
     }
     const episodes = [...bySeason].sort((a, b) => a[0] - b[0]).map(([season, numbers]) => `${season}: ${spansOf(numbers)}`).join(" · ")
     const rule = mine.map((entry) => ruleOf(entry.by)).find((each) => each !== null) ?? null
-    return { ...folder, episodes, rule, held: mine.length, fromMeta: mine.length > 0 && mine.every((entry) => entry.by === FROM_META) }
+    const languages = new Set(mine.map((entry) => entry.language.trim().toLowerCase()).filter((code) => code && code !== "und"))
+    return { ...folder, episodes, rule, held: mine.length, fromMeta: mine.length > 0 && mine.every((entry) => entry.by === FROM_META),
+      trackLanguage: languages.size === 1 ? [...languages][0] : "" }
   })
 }
 
 // --- the tab «Контейнеры» -------------------------------------------------------------------------------------------
 
-export interface ContainerStream { facts: StreamFacts; label: string; items: string[]; folder: string | null; unplaced: boolean }
+export interface ContainerStream {
+  facts: StreamFacts
+  label: string
+  items: string[]
+  folder: string | null
+  unplaced: boolean
+  /** Some track of it goes out with no known language (none, `und`), a rule's or the file's: a rule has to name it. */
+  noLanguage: boolean
+}
 export interface ContainerGroup { key: string; season: number | null; episodes: string; files: number; streams: ContainerStream[] }
 
 /** The letter and number of a stream as the editor names it: v0, a0, s0. */
@@ -277,7 +290,11 @@ export function containerGroups(files: readonly ContainerFile[], entries: readon
       const folders = new Set(items.map((item) => byItem.get(item)?.folder ?? null))
       const folder = folders.size === 1 ? [...folders][0] : null
       const unplaced = facts.kind !== "video" && items.some((item) => !!byItem.get(item)?.waiting)
-      return { facts, label: streamLabel(facts, n), items: facts.kind === "video" ? [] : items, folder, unplaced }
+      const noLanguage = facts.kind !== "video" && items.some((item) => {
+        const entry = byItem.get(item)
+        return !!entry && !entry.excluded && ["", "und"].includes(entry.language.trim().toLowerCase())
+      })
+      return { facts, label: streamLabel(facts, n), items: facts.kind === "video" ? [] : items, folder, unplaced, noLanguage }
     })
     return { key, season: group.season, files: group.files.length, streams,
       episodes: spansOf(group.files.flatMap((file) => file.place ? [file.place.episode] : [])) }
