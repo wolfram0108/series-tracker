@@ -189,7 +189,8 @@ class _Server(uvicorn.Server):
     """A server that tells when it listens: `up` is set by its own startup, nobody looks at it by time."""
 
     def __init__(self, app, host: str, port: int) -> None:
-        super().__init__(uvicorn.Config(app, host=host, port=port, log_level="warning"))
+        # The limit of a graceful stop is the fuse, as the service has it (start.sh): an open window holds its event stream.
+        super().__init__(uvicorn.Config(app, host=host, port=port, log_level="warning", timeout_graceful_shutdown=5))
         self.up = asyncio.Event()
 
     async def startup(self, sockets=None) -> None:
@@ -256,6 +257,13 @@ class Simulator:
             db_path=self.db_path, auth_required=True, cookie_secure=False,
             torrent_cache_dir=os.path.join(self.root, "cache"), qbit_url=f"http://127.0.0.1:{qbit_server.port}",
             qbit_username=self.qbit.username, qbit_password=self.qbit.password))
+        app = Starlette(routes=[Route("/sim", self.page), Route("/sim/api/find", self.find),
+                                Route("/sim/api/take", self.take, methods=["POST"]), Mount("/", app=self.gateway.app)])
+        server = _Server(app, "0.0.0.0", port)
+        serving = asyncio.create_task(server.serve())
+        await server.up.wait()
+        # The modules start once the server listens, as under the service: the gateway's hold of the stop signal goes over the
+        # server's and ends the event streams of open windows at once, so a stop does not wait for them.
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()
         next(each for each in self.modules if each.name == "sources")._http = httpx.AsyncClient(
@@ -267,11 +275,6 @@ class Simulator:
                                                            "password": os.environ.get("ST_ADMIN_PASSWORD", "")})
         own = {"cookie": entered.headers.get("set-cookie", "").split(";")[0]}
         await self._call("POST", "/api/settings/torrent_staging", {"value": os.path.join(self.root, "staging")}, own)
-        app = Starlette(routes=[Route("/sim", self.page), Route("/sim/api/find", self.find),
-                                Route("/sim/api/take", self.take, methods=["POST"]), Mount("/", app=self.gateway.app)])
-        server = _Server(app, "0.0.0.0", port)
-        serving = asyncio.create_task(server.serve())
-        await server.up.wait()
         print(f"SIM_READY http://0.0.0.0:{port}/sim", flush=True)
         await serving
         qbit_server.should_exit = True
