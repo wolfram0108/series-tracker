@@ -123,6 +123,8 @@ class RuchimeSite:
         return TableRow(
             key=f"{player.name}:{ident}", player=player.name, player_label=getattr(player, "label", ""),
             text=str(entry.get("title") or ""), voice=RowVoice(name=site_voice), heights=outcome.heights,
+            # The site gives an entry its episode as a property: as it comes.
+            episode="" if entry.get("number") is None else str(entry.get("number")),
             state=outcome.state, reason=outcome.reason, published=published_of(entry.get("date")), link=link,
             site_fields={name: entry.get(name) for name in
                          ("id", "number", "compilation_from", "compilation_to", "is_trailer", "is_vip")})

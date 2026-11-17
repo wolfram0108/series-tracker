@@ -32,14 +32,14 @@ async def stand(tmp_path):
 
 async def torrent_profile(stand: AppStand, subtitles: bool = False) -> int:
     """The rule a user makes for the lines of a release (`S:1 | E:5 | <file>`): the number after «E:», the voice-over named;
-    with `subtitles`, a rule before it gives the lines of subtitles (`TR:субтитры`) their number alone, keeping their name."""
+    with `subtitles`, a rule before it gives the lines of subtitles (`VT:subtitles`) their number alone, keeping their name."""
     made = await stand.call("POST", "/api/parser-profiles", {"name": "серии раздачи"})
     blocks = json.dumps(EPISODE, ensure_ascii=False)
     if subtitles:
         own = [{"action_type": "extract_single", "action_pattern": blocks}]
         await stand.call("POST", f"/api/parser-profiles/{made['id']}/rules", {
             "name": "субтитры", "action_pattern": json.dumps(own, ensure_ascii=False), "continue_after_match": False,
-            "conditions": [{"condition_type": "contains", "pattern": json.dumps([{"type": "text", "value": "TR:субтитры"}],
+            "conditions": [{"condition_type": "contains", "pattern": json.dumps([{"type": "text", "value": "VT:subtitles"}],
                                                                                 ensure_ascii=False), "logical_operator": "AND"}]})
     actions = [{"action_type": "extract_single", "action_pattern": blocks}, {"action_type": "assign_voiceover", "action_pattern": VOICE}]
     await stand.call("POST", f"/api/parser-profiles/{made['id']}/rules", {

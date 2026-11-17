@@ -163,7 +163,7 @@ class VibixPlayer:
                                transient=isinstance(exc, VibixUnavailable)) from exc
         return [Entry(key=f"{item.season_index}/{item.position}",
                       ref=PlayerRef(self.name, link_of(page_url, item.season_index, item.position)),
-                      text=item.title, group=item.season, voice=RowVoice(name=item.voice),
+                      text=item.title, group=item.season, season=item.season, voice=RowVoice(name=item.voice),
                       site_fields={"season_index": item.season_index, "position": item.position})
                 for item in playlist]
 

@@ -357,11 +357,12 @@ async def test_every_item_with_a_video_is_an_entry_none_is_dropped_for_an_upload
         {"cvhId": "c4", "vkId": "v4k", "voiceType": "x", "season": 3, "episode": 2.5},
         {"vkId": "v9", "voiceStudio": "B", "episode": 7}]})
 
-    assert [(e.key, e.voice.name, e.voice.kind, e.group, e.text) for e in found] == [
-        ("c1", "A", "x", "1 сезон", "1 серия"), ("c2", "A", "x", "1 сезон", "1 серия"),
-        ("c4", "", "x", "3 сезон", "2.5 серия"), ("v9", "B", "", "", "7 серия")]
+    # The season and the episode are the player's properties, as it sends them; it gives no text and no group, none is made.
+    assert [(e.key, e.voice.name, e.voice.kind, e.season, e.episode, e.group, e.text) for e in found] == [
+        ("c1", "A", "x", "1", "1", "", ""), ("c2", "A", "x", "1", "1", "", ""),
+        ("c4", "", "x", "3", "2.5", "", ""), ("v9", "B", "", "", "7", "", "")]
     assert found[0].ref.url == f"{PAGE}#cvh=v1" and cdnvideohub.CdnVideoHubPlayer.owns(found[0].ref.url)
-    assert found[0].site_fields == {"season": 1, "episode": "1", "vk_id": "v1"}
+    assert found[0].site_fields == {"season": "1", "episode": "1", "vk_id": "v1"}
 
 
 async def test_an_empty_playlist_is_no_entries_and_a_playlist_that_is_down_is_a_catalog_that_cannot_be_read():

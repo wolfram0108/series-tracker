@@ -195,6 +195,6 @@ async def catalog_rows(player, entries: Sequence[Entry], http: httpx.AsyncClient
         outcome = outcome_of(verdicts[entry.ref], entry.ref, player.label)
         rows.append(TableRow(
             key=f"{player.name}:{entry.key}", player=player.name, player_label=player.label, group=entry.group,
-            text=entry.text, voice=entry.voice, heights=outcome.heights, state=outcome.state, reason=outcome.reason,
+            season=entry.season, episode=entry.episode, text=entry.text, voice=entry.voice, heights=outcome.heights, state=outcome.state, reason=outcome.reason,
             link=entry.ref.url, site_fields=entry.site_fields))
     return rows

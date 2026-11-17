@@ -371,7 +371,9 @@ def _row(release: ReleaseView, key: str, link: str, video: str, where: Place, ki
     label = release.title or release.release
     return TableRow(key=key, player=player_of(release.release, where.tag),
                     player_label=f"{label} · {where.tag}" if where.tag else label,
-                    text=f"{where.fields} | {video}", voice=RowVoice(name=entry["folder"] or stream.get("title") or "",
+                    # The editor is the player of a torrent: the season and the episode it gave the file are its properties.
+                    season=str(where.season), episode=f"{where.episode}-{where.last}" if where.last else str(where.episode),
+                    text=video, voice=RowVoice(name=entry["folder"] or stream.get("title") or "",
                                                                    kind=kind),
                     track=RowTrack.SUBTITLES if kind == "subtitles" else RowTrack.SOUND,
                     language=entry["language"] or "", subtitle_type=entry["subtitle_type"] or "",

@@ -128,10 +128,11 @@ class YummyAniSite:
                 catalogs.append(ref)
                 voices.setdefault(ref, []).append(voice_of(data.get("dubbing", "")).name)
                 continue
-            number_text = str(item.get("number") or "").strip()
+            # The site gives a video its episode as a property and no text: the row carries the property as it comes.
+            number_text = "" if item.get("number") is None else str(item.get("number")).strip()
             entries.setdefault(ref.name, []).append(Entry(
                 key=player.video_of(ref.url) or str(item.get("video_id")), ref=ref,
-                text=f"{number_text} серия" if number_text else "", voice=voice_of(data.get("dubbing", "")),
+                episode=number_text, voice=voice_of(data.get("dubbing", "")),
                 site_fields={"video_id": item.get("video_id"), "number": number_text}))
         for player_label, count in unknown.items():
             logger.info("%s: %d videos of %r on %s are not read: no player knows them", SITE_NAME, count, player_label, url)

@@ -86,6 +86,8 @@ class KodikSeason:
     media_hash: str
     selected: bool
     media_kind: str = SERIAL
+    # The season as the list gives it as a property (the `value` of its option), raw; the title is what the list shows.
+    value: str = ""
 
 
 @dataclass(frozen=True)
@@ -159,7 +161,7 @@ def parse_seasons(page: str) -> list[KodikSeason]:
         if option.get("data-serial-id") and option.get("data-serial-hash"):
             seasons.append(KodikSeason(
                 title=html.unescape(option.get("data-title", "")).strip(), media_id=option["data-serial-id"],
-                media_hash=option["data-serial-hash"], selected="selected" in option))
+                media_hash=option["data-serial-hash"], selected="selected" in option, value=option.get("value", "")))
     return seasons
 
 
@@ -353,7 +355,8 @@ class KodikPlayer:
                     found.append(Entry(
                         key=f"{owner_id}:{item.id}",
                         ref=self.ref_of(page_url, season.media_id, season.media_hash, item.id, season.media_kind),
-                        text=item.text, group=season.title, voice=RowVoice(name=owner, kind="" if item.owner else voice.kind),
+                        text=item.text, group=season.title, season=season.value, episode=item.value,
+                        voice=RowVoice(name=owner, kind="" if item.owner else voice.kind),
                         site_fields={"value": item.value, "translation_id": owner_id,
                                      **({"listed_for": voice.translation_id} if item.owner else {})},
                         borrowed=bool(item.owner)))

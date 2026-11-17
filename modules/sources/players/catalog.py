@@ -43,6 +43,9 @@ class Entry:
     ref: PlayerRef
     text: str = ""
     group: str = ""
+    # The season and the episode where the player has them as properties, raw as it sends them (TableRow.season/episode).
+    season: str = ""
+    episode: str = ""
     voice: RowVoice = field(default_factory=RowVoice)
     site_fields: dict[str, Any] = field(default_factory=dict)
     # The catalog shows here a video of another voice-over (Kodik fills an episode a voice-over lacks with the video of

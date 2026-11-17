@@ -222,14 +222,15 @@ def parse_playlist(payload: Any) -> list[Episode]:
     for season_index, season in enumerate(seasons, 1):
         if not isinstance(season, dict):
             continue
-        season_title = str(season.get("title") or f"Сезон {season_index}")
+        # The titles are the player's own; one it does not give is none (nothing is made of the place in the list).
+        season_title = str(season.get("title") or "")
         folder = season.get("folder")
         if not isinstance(folder, list):
             continue
         for item_index, item in enumerate(folder, 1):
             if not isinstance(item, dict):
                 continue
-            title = str(item.get("title") or f"Серия {item_index}")
+            title = str(item.get("title") or "")
             streams = _parse_streams(str(item.get("file") or ""))
             episodes.append(Episode(position=item_index, title=title, season=season_title,
                                     streams=streams, season_index=season_index))

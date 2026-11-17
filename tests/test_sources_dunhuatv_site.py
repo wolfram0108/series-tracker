@@ -107,8 +107,9 @@ async def test_a_cvh_row_is_an_item_of_the_playlist_with_the_voice_the_player_na
     row = cvh[0]
 
     assert row.key == f"cvh:{first['cvhId']}" and row.link.endswith(f"#cvh={first['vkId']}")
-    assert (row.voice.name, row.voice.kind, row.group, row.text) == ("AniMy / RuChiMe", "Многоголосый", "1 сезон", "1 серия")
-    assert row.player_label == "CVH" and row.site_fields["season"] == 1 and row.site_fields["episode"] == "1"
+    assert (row.voice.name, row.voice.kind, row.season, row.episode, row.group, row.text) == (
+        "AniMy / RuChiMe", "Многоголосый", "1", "1", "", "")
+    assert row.player_label == "CVH" and row.site_fields["season"] == "1" and row.site_fields["episode"] == "1"
     # The studio is the name of the voice-over; the same studio with another type is another voice-over; no studio is none.
     assert Counter((row.voice.name, row.voice.kind) for row in cvh) == {
         ("AniMy / RuChiMe", "Многоголосый"): 330, ("AniStar", "Многоголосый"): 238,
@@ -117,10 +118,10 @@ async def test_a_cvh_row_is_an_item_of_the_playlist_with_the_voice_the_player_na
 
 async def test_a_cvh_row_that_skips_a_number_of_a_compilation_is_what_the_player_gives_and_nothing_is_guessed(whole):
     draft, *_ = whole
-    animy = [row.text for row in players(draft, "cvh") if row.voice.name == "AniMy / RuChiMe"]
+    animy = [row.episode for row in players(draft, "cvh") if row.voice.name == "AniMy / RuChiMe"]
 
     # The player gives no item "109" and one "110" (the file that holds both): the table shows exactly that.
-    assert "109 серия" not in animy and "110 серия" in animy and "108 серия" in animy
+    assert "109" not in animy and "110" in animy and "108" in animy
 
 
 async def test_a_kodik_row_is_an_item_of_the_list_with_its_text_verbatim_and_no_number_of_the_value(whole):
@@ -183,8 +184,8 @@ async def test_an_item_without_a_season_has_no_group_and_nothing_puts_the_first_
 
     draft = await Run().read(a_site(), web)
 
-    assert [(row.group, row.text) for row in draft.rows] == [("", "3 серия"), ("2 сезон", "4 серия"),
-                                                           ("2 сезон", "4.5 серия"), ("2 сезон", "")]
+    assert [(row.season, row.episode, row.group, row.text) for row in draft.rows] == [
+        ("", "3", "", ""), ("2", "4", "", ""), ("2", "4.5", "", ""), ("2", "", "", "")]
 
 
 async def test_two_uploads_of_one_episode_are_two_rows_none_is_dropped():

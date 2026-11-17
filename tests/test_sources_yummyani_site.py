@@ -101,11 +101,12 @@ async def test_the_table_has_every_player_of_the_api_each_read_as_on_any_page_th
     asked = dict(parse_qsl(urlsplit(next(url for _m, url, _b in web.asked if "/player/sv/playlist" in url)).query))
     assert (asked["id"], asked["pub"], asked["aggr"]) == ("41223", "745", "mali") and len(rows["cvh"]) == 1
     # VK: the video by its number; Alloha: a row for each element, with the voice-over as the site words it.
-    assert [(row.key, row.link, row.text, row.voice.name, row.voice.kind) for row in rows["vk"]] == [
-        ("vk:-35658163_163080986", "https://vk.com/video-35658163_163080986", "6 серия", "WiaDub", "Озвучка")]
-    assert [(row.key, row.text, row.voice.name, row.heights) for row in rows["alloha"]] == [
-        ("alloha:8bf4/158/1/1", "1 серия", "AniStar", [360, 720, 1080]),
-        ("alloha:8bf4/158/1/2", "2 серия", "AniStar", [360, 720, 1080])]
+    # The site gives a video its episode as a property and no text: the row has the episode as it comes, no text made of it.
+    assert [(row.key, row.link, row.episode, row.text, row.voice.name, row.voice.kind) for row in rows["vk"]] == [
+        ("vk:-35658163_163080986", "https://vk.com/video-35658163_163080986", "6", "", "WiaDub", "Озвучка")]
+    assert [(row.key, row.episode, row.text, row.voice.name, row.heights) for row in rows["alloha"]] == [
+        ("alloha:8bf4/158/1/1", "1", "", "AniStar", [360, 720, 1080]),
+        ("alloha:8bf4/158/1/2", "2", "", "AniStar", [360, 720, 1080])]
     # Each episode of Alloha is its document and one ask of its files, signed afresh.
     assert len(model.files_asked) == 2
     assert table.names == ["Любовь под гипнозом", "Hypnosis love", "Кохання під гіпнозом"]

@@ -2,9 +2,9 @@
 yummyani.me).
 
 The playlist lists every voice-over of a title; each item is a VK video whose signed
-mp4 links are bound to the User-Agent of the request that issued them. An item has the numbers the player gives
-(`season`, `episode`) and no text: the text of its row is made of those numbers, and nothing is made up for what the player
-does not give. A player asks once and reads the answer; asking again is decided by `policy`.
+mp4 links are bound to the User-Agent of the request that issued them. An item has the season and the episode as properties
+(`season`, `episode`) and no text: its row carries them as they come (TableRow.season, .episode) and has no text, nothing
+made up of them. A player asks once and reads the answer; asking again is decided by `policy`.
 """
 from __future__ import annotations
 
@@ -61,14 +61,14 @@ class CdnVideoHubError(RuntimeError):
 
 @dataclass(frozen=True)
 class VoiceVideo:
-    """One item of the playlist: the VK video behind it, its voice-over, and the numbers the player gives it (empty or
-    None where it gives none)."""
+    """One item of the playlist: the VK video behind it, its voice-over, and the season and episode as the player gives them
+    (raw, empty where it gives none)."""
 
     cvh_id: str
     vk_id: str
     studio: str
     voice_type: str
-    season: int | None
+    season: str
     episode: str
 
 
@@ -101,21 +101,9 @@ def vk_id_of(url: str) -> str | None:
     return found.group(1) if found else None
 
 
-def _whole(value: object) -> int | None:
-    try:
-        number = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-    return int(number) if number.is_integer() else None
-
-
-def _number_text(value: object) -> str:
-    """A number of the player as it reads: 5 for 5.0, 5.5 for 5.5, nothing for what is not a number."""
-    try:
-        number = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return ""
-    return str(int(number)) if number.is_integer() else str(number)
+def _raw(value: object) -> str:
+    """A property of the player as it sends it: its text, nothing made of it (no number taken out, no rounding)."""
+    return "" if value is None else str(value).strip()
 
 
 async def playlist_request(http: httpx.AsyncClient, title_id: int, publisher_id: int,
@@ -147,8 +135,8 @@ def read_playlist(answer: Answer) -> list[VoiceVideo]:
             continue
         items.append(VoiceVideo(
             cvh_id=str(raw.get("cvhId") or "").strip(), vk_id=str(vk_id), studio=str(raw.get("voiceStudio") or "").strip(),
-            voice_type=str(raw.get("voiceType") or "").strip(), season=_whole(raw.get("season")),
-            episode=_number_text(raw.get("episode"))))
+            voice_type=str(raw.get("voiceType") or "").strip(), season=_raw(raw.get("season")),
+            episode=_raw(raw.get("episode"))))
     return items
 
 
@@ -234,8 +222,8 @@ class CdnVideoHubPlayer:
         return vk_id_of(url) is not None
 
     async def entries(self, source: PlayerRef, http: httpx.AsyncClient, page_url: str) -> list[Entry]:
-        """The playlist of the title, one entry for each item: the voice-over as the player names it, the season as
-        a "season N" group when the player gives one (and nothing when it gives none), the text made of the episode number."""
+        """The playlist of the title, one entry for each item: the voice-over as the player names it, its season and episode
+        as it gives them. The player shows no text and no group of its own: none is made up."""
         title, publisher, aggregator = (source.raw_url.split("/") + ["", ""])[:3]
         answer = await ask(lambda: playlist_request(http, int(title), int(publisher or DEFAULT_PUBLISHER),
                                                     aggregator or DEFAULT_AGGREGATOR))
@@ -245,8 +233,7 @@ class CdnVideoHubPlayer:
             raise CatalogError(exc.reason, exc.transient) from exc
         return [Entry(
             key=item.cvh_id or item.vk_id, ref=self.ref_of(page_url, item.vk_id),
-            text=f"{item.episode} серия" if item.episode else "",
-            group=f"{item.season} сезон" if item.season is not None else "",
+            season=item.season, episode=item.episode,
             voice=RowVoice(name=item.studio, kind=item.voice_type),
             site_fields={"season": item.season, "episode": item.episode, "vk_id": item.vk_id}) for item in items]
 

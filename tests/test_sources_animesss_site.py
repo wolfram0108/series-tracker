@@ -100,8 +100,8 @@ async def test_the_table_has_the_playlist_of_cdn_videohub_and_the_voice_of_each_
     web = site_web()
     table = await read(web)
 
-    assert [(row.player, row.voice.name, row.text) for row in table.rows if row.player == "cvh"] == [
-        ("cvh", "ПВА ШОУ", "1 серия"), ("cvh", "AniMy / RuChiMe", "1 серия")]
+    assert [(row.player, row.voice.name, row.episode, row.text) for row in table.rows if row.player == "cvh"] == [
+        ("cvh", "ПВА ШОУ", "1", ""), ("cvh", "AniMy / RuChiMe", "1", "")]
     # Each iframe is limited to its voice-over: the voice-overs are the ones the playlist lists, each read once.
     kodik_rows = [row for row in table.rows if row.player == "kodik"]
     assert {row.voice.name for row in kodik_rows} == {"Animy", "AniStar"}

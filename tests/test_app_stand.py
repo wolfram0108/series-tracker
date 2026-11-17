@@ -497,7 +497,8 @@ async def test_a_title_whose_voice_over_plays_in_alloha_is_downloaded_by_its_pla
     url = stand.site.alloha_title("bratik", 700, "Братик", "AniStar", {1: 720, 2: 480})
     await stand.configure(["AniStar"])
     made = await stand.call("POST", "/api/parser-profiles", {"name": "серии Alloha"})
-    label = json.dumps([{"type": "number"}, {"type": "text", "value": " серия"}], ensure_ascii=False)
+    # The site gives a video its episode as a property: the rule takes the number after «E:».
+    label = json.dumps([{"type": "text", "value": "E:"}, {"type": "number"}], ensure_ascii=False)
     await stand.call("POST", f"/api/parser-profiles/{made['id']}/rules", {
         "name": "серия", "continue_after_match": False,
         "action_pattern": json.dumps([{"action_type": "extract_single", "action_pattern": label},

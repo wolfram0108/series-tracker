@@ -697,6 +697,11 @@
        "default": null,
        "title": "Duration S"
       },
+      "episode": {
+       "default": "",
+       "title": "Episode",
+       "type": "string"
+      },
       "group": {
        "default": "",
        "title": "Group",
@@ -760,6 +765,11 @@
        ],
        "default": null,
        "title": "Reason"
+      },
+      "season": {
+       "default": "",
+       "title": "Season",
+       "type": "string"
       },
       "site_fields": {
        "additionalProperties": true,
@@ -940,6 +950,11 @@
      "default": null,
      "title": "Duration S"
     },
+    "episode": {
+     "default": "",
+     "title": "Episode",
+     "type": "string"
+    },
     "group": {
      "default": "",
      "title": "Group",
@@ -1003,6 +1018,11 @@
      ],
      "default": null,
      "title": "Reason"
+    },
+    "season": {
+     "default": "",
+     "title": "Season",
+     "type": "string"
     },
     "site_fields": {
      "additionalProperties": true,

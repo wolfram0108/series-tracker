@@ -122,7 +122,8 @@ async def test_the_table_has_the_catalogs_the_api_gives_and_a_row_for_each_episo
     for row in table.rows:
         by_player.setdefault(row.player, []).append(row)
     assert set(by_player) == {"cvh", "kodik", "animakima"}
-    assert [(row.text, row.voice.name, row.group) for row in by_player["cvh"]] == [("1 серия", "AniStar", "4 сезон")]
+    assert [(row.season, row.episode, row.text, row.voice.name, row.group) for row in by_player["cvh"]] == [
+        ("4", "1", "", "AniStar", "")]
     kodik = KodikPlayer()
     async with site_web().client() as http:
         listed = await kodik.entries(kodik.find(VIEWS["kodik"]["data"], URL), http, URL)

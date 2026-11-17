@@ -53,6 +53,10 @@ class TableRow(BaseModel):
     player: str
     player_label: str = ""
     group: str = ""
+    # The season and the episode as the player sends them, each its own property, raw: nothing is made of them (no number
+    # is taken out, no word is added); empty where the player has no such property (its number is in its text, if anywhere).
+    season: str = ""
+    episode: str = ""
     text: str = ""
     voice: RowVoice = Field(default_factory=RowVoice)
     heights: list[int] = Field(default_factory=list)
@@ -146,12 +150,13 @@ LINE_FIELDS: tuple[tuple[str, Any], ...] = (
     ("", lambda table, row: table.channel),
     ("P", lambda table, row: row.player_label or row.player),
     ("", lambda table, row: table.names[0].strip() if table.names else ""),
+    # The season and the episode where the player has them as properties, as it sends them; a rule takes from them what it needs.
+    ("S", lambda table, row: row.season),
+    ("E", lambda table, row: row.episode),
     ("", lambda table, row: row.text),
     ("G", lambda table, row: row.group),
     ("V", lambda table, row: row.voice.name),
     ("VT", lambda table, row: row.voice.kind),
-    # A subtitles track says so; a row of sound has no value here, so its line stays as it was before subtitles came.
-    ("TR", lambda table, row: "субтитры" if row.track == RowTrack.SUBTITLES else ""),
     ("R", _resolution_of),
 )
 
