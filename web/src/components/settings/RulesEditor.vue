@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from "vue"
 import { useToast } from "primevue/usetoast"
-import Button from "primevue/button"
 import ParserRuleCard, { type EditableRule } from "./ParserRuleCard.vue"
 import ParserTableCard from "./ParserTableCard.vue"
 import { rowsOf, storedOf, type StoredTable } from "../../lib/ruleTable"
@@ -14,8 +13,8 @@ import { useBusyBar } from "../../composables/useWindowBusy"
 import { isExtract, type RulePlace } from "../../lib/ruleVocabulary"
 import LoadingMark from "../LoadingMark.vue"
 
-// The rules of one profile of the constructor: the bar that adds a rule or a table, and the cards of the rules in their
-// order. The section «Правила» and the tabs of the torrent editor hold the same editor; `lines` and `codes` are what the
+// The rules of one profile of the constructor: the cards of the rules in their order. A rule or a table is added from the
+// head of the section that holds the editor (RulesAddButtons calls `addRule`, `addTable`, waits `isLoading`). The section «Правила» and the tabs of the torrent editor hold the same editor; `lines` and `codes` are what the
 // quick templates of a table are made of (the lines the rules read and the codes of their fields).
 // `place`: where the editor stands — the section «Правила» or a tab of the torrent editor; «ТО» offers only its actions.
 const props = defineProps<{ profileId: number; lines?: string[]; codes?: string[]; place?: RulePlace }>()
@@ -226,15 +225,11 @@ function toggleRule(id: number | string): void {
 }
 
 watch(() => props.profileId, () => void loadRules(), { immediate: true })
+defineExpose({ addRule, addTable, isLoading })
 </script>
 
 <template>
   <div class="rules-editor">
-    <!-- A rule added while the rules are read would be written over by them: the bar waits for the read. -->
-    <div class="rules-toolbar">
-      <Button :label="t('rules.rule.add')" icon="pi pi-plus-circle" size="small" :disabled="isLoading" @click="addRule" />
-      <Button :label="t('rules.table.add')" icon="pi pi-table" size="small" severity="secondary" :disabled="isLoading" @click="addTable" />
-    </div>
     <div v-if="isLoading" class="parser-loading"><LoadingMark /></div>
     <div v-else-if="rules.length === 0" class="parser-empty">{{ t("rules.rule.none") }}</div>
     <div v-else class="rules-list">

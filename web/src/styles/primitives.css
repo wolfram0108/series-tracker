@@ -132,7 +132,10 @@
 /* The buttons of a head — the band of its own above a block: a season, a compilation, an episode, a source — are lower than the buttons
    on the ground (the header of the page, the line of actions of a tab, the footer of a window, a form): a head is a line of text with its
    actions, not a place of their own. */
-:is(.season-head, .detail-head, .source-head) .p-button {
-  min-height: 2rem !important; padding: 0.25rem 0.875rem !important; font-size: 13px !important; gap: 0.375rem !important;
+:is(.season-head, .detail-head, .source-head, .rules-add) .p-button {
+  min-height: 2rem !important; padding: 0.25rem 0.875rem !important; gap: 0.375rem !important;
 }
+/* The words of those heads are smaller too; the head of the rules of a constructor (RulesAddButtons) keeps them as large as
+   any button's. */
+:is(.season-head, .detail-head, .source-head) .p-button { font-size: 13px !important; }
 

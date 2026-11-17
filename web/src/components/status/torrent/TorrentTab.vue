@@ -9,6 +9,7 @@ import { useSSE } from "../../../composables/useSSE"
 import { useBusyBar } from "../../../composables/useWindowBusy"
 import { fetchEditor, fetchPage, fetchReleases } from "../../../composables/torrentCalls"
 import RulesEditor from "../../settings/RulesEditor.vue"
+import RulesAddButtons from "../../settings/RulesAddButtons.vue"
 import TorrentHead from "./TorrentHead.vue"
 import TorrentFiles from "./TorrentFiles.vue"
 import TorrentTracks from "./TorrentTracks.vue"
@@ -115,6 +116,12 @@ const codes = computed(() => [...new Set(lines.value.flatMap((line) => line.spli
   .map((part) => /^([A-Z]{1,3}):/.exec(part)?.[1] ?? "").filter(Boolean)))])
 const profileId = computed(() => editor.value?.profiles[tab.value] ?? null)
 // The place of the constructor of the tab: «ТО» offers only what applies there.
+// A rule or a table added from the head opens the rules, so the new card is seen.
+const rulesEditor = ref<InstanceType<typeof RulesEditor> | null>(null)
+function addTo(what: "addRule" | "addTable"): void {
+  rulesOpen.value = true
+  rulesEditor.value?.[what]()
+}
 const rulePlace = computed<RulePlace>(() => tab.value === "files" ? "files"
   : tab.value === "voices" || tab.value === "voice_streams" ? "voices" : "subtitles")
 </script>
@@ -133,13 +140,18 @@ const rulePlace = computed<RulePlace>(() => tab.value === "files" ? "files"
       <p v-if="state.stage === 'notLoaded'" class="torrent-hint">{{ t("torrent.notLoaded.hint") }}</p>
       <template v-else-if="editor">
         <section class="torrent-rules">
-          <button type="button" class="torrent-rules-head" :aria-expanded="rulesOpen" @click="rulesOpen = !rulesOpen">
-            <span>{{ t(`torrent.rules.${tab}` as MessageKey) }}</span>
-            <i class="pi" :class="rulesOpen ? 'pi-chevron-up' : 'pi-chevron-down'" aria-hidden="true" />
-          </button>
+          <!-- The whole bar folds the rules (its title button is the one of the keyboard); the chevron stands after the buttons. -->
+          <div class="torrent-rules-bar" @click="rulesOpen = !rulesOpen">
+            <button type="button" class="torrent-rules-head" :aria-expanded="rulesOpen">
+              <span>{{ t(`torrent.rules.${tab}` as MessageKey) }}</span>
+            </button>
+            <RulesAddButtons v-if="profileId !== null" :disabled="rulesEditor?.isLoading ?? true"
+                             @rule="addTo('addRule')" @table="addTo('addTable')" />
+            <i class="pi torrent-rules-chevron" :class="rulesOpen ? 'pi-chevron-up' : 'pi-chevron-down'" aria-hidden="true" />
+          </div>
           <div v-show="rulesOpen" class="torrent-rules-body">
-            <RulesEditor v-if="profileId !== null" :key="profileId" :profile-id="profileId" :lines="lines" :codes="codes"
-                         :place="rulePlace" />
+            <RulesEditor v-if="profileId !== null" ref="rulesEditor" :key="profileId" :profile-id="profileId" :lines="lines"
+                         :codes="codes" :place="rulePlace" />
           </div>
         </section>
         <TorrentFiles v-if="tab === 'files'" :editor="editor" :release="release" @failure="failure = $event" />
@@ -156,9 +168,15 @@ const rulePlace = computed<RulePlace>(() => tab.value === "files" ? "files"
 .torrent-hint { margin: 0; color: var(--text-muted); }
 .torrent-failure { margin: 0; }
 .torrent-rules { flex: none; border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow: hidden; }
-.torrent-rules-head {
-  display: flex; inline-size: 100%; align-items: center; justify-content: space-between; gap: 0.625rem; padding: 0.75rem 1.125rem;
-  border: 0; background: #cfe2ff; color: #0b5cd4; font: inherit; font-size: 0.94rem; cursor: pointer; text-align: start;
+/* The head: the title folds the rules, the buttons beside it add a rule or a table. */
+.torrent-rules-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.625rem; padding: 0.3125rem 0.75rem; background: #cfe2ff;
+  color: #0b5cd4; cursor: pointer;
 }
-.torrent-rules-body { padding: 0.875rem 1.125rem; }
+.torrent-rules-chevron { flex: none; }
+.torrent-rules-head {
+  display: flex; flex: 1 1 12rem; align-items: center; gap: 0.625rem; padding: 0.25rem 0;
+  border: 0; background: none; color: #0b5cd4; font: inherit; font-size: 0.94rem; cursor: pointer; text-align: start;
+}
+.torrent-rules-body { padding: 0.5rem 0.75rem; }
 </style>

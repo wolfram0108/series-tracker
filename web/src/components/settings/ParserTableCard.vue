@@ -299,7 +299,7 @@ function setAction(value: string): void {
 .rule-table-card .rule-header { flex-wrap: wrap; }
 .rule-table-card .rule-title { flex: 1 1 14rem; }
 .rule-table-card .rule-controls { margin-left: auto; }
-.table-body { display: flex; flex-direction: column; gap: 0.625rem; }
+.table-body { display: flex; flex-direction: column; gap: 0.375rem; }
 
 /* One grid with one frame: the columns line up through the whole table, a row is one line. */
 /* The table keeps its columns at any width: on a card narrower than the table can be, it scrolls in its own box, and
@@ -309,7 +309,7 @@ function setAction(value: string): void {
   width: 100%; min-width: 34rem; table-layout: fixed; border-collapse: separate; border-spacing: 0;
   border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;
 }
-.rule-table th, .rule-table td { padding: 0.5rem 0.625rem; text-align: left; vertical-align: middle; border-top: 1px solid #e9ecef; }
+.rule-table th, .rule-table td { padding: 0.3125rem 0.5rem; text-align: left; vertical-align: middle; border-top: 1px solid #e9ecef; }
 .rule-table thead th { background: #f8f9fa; border-top: 0; font-weight: 400; }
 .rule-table .col-if, .rule-table .col-then { border-left: 1px solid #e9ecef; }
 /* The narrow columns have no side padding: their width is all theirs, and their mark stands in its middle. */
@@ -344,19 +344,19 @@ function setAction(value: string): void {
 /* A joined cell is one cell of several rows: what it holds stands in its middle. */
 .rule-table td.is-joined { background: #fbfcfe; }
 /* The palette of blocks and the tools of the cells stand in one line over the table, and wrap when it is narrow. */
-.table-bar { display: flex; flex-wrap: wrap; gap: 0.625rem 1rem; align-items: center; justify-content: space-between; }
+.table-bar { display: flex; flex-wrap: wrap; gap: 0.375rem 0.625rem; align-items: center; justify-content: space-between; }
 .table-palette.is-idle { opacity: 0.45; }
 .cell-tools { display: flex; flex-wrap: wrap; gap: 0.375rem; align-items: center; }
 .cell-tools-name { margin-right: 0.125rem; color: var(--text-muted); font-size: 0.8125rem; }
 .cell-tool {
-  display: inline-flex; align-items: center; gap: 0.375rem; block-size: 2rem; padding: 0 0.75rem; border: 1px solid #9ec5fe;
+  display: inline-flex; align-items: center; gap: 0.375rem; block-size: 1.625rem; padding: 0 0.5rem; border: 1px solid #9ec5fe;
   border-radius: 6px; background: #fff; color: #0a58ca; font: inherit; font-size: 0.8125rem; cursor: pointer;
 }
 .cell-tool:hover:not(:disabled) { border-color: #0d6efd; }
 .cell-tool:disabled { border-color: #e9ecef; color: #adb5bd; cursor: default; }
 /* The template of a cell is the plain row of its blocks: the frame is the cell's. */
 .rule-table td :deep(.pattern-constructor) { padding: 0; background: transparent; }
-.rule-table td :deep(.pattern-blocks-container) { min-height: 2rem; padding: 0; }
+.rule-table td :deep(.pattern-blocks-container) { min-height: 1.5rem; padding: 0; }
 .table-value {
   display: block; width: 100%; box-sizing: border-box; padding: 0.35rem 0.625rem; font: inherit; font-size: 0.875rem;
   border: 1px solid #ced4da; border-radius: 4px; background: #fff;

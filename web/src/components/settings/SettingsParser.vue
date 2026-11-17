@@ -6,6 +6,7 @@ import StInput from "../StInput.vue"
 import StLabel from "../StLabel.vue"
 import StSelect from "../StSelect.vue"
 import RulesEditor from "./RulesEditor.vue"
+import RulesAddButtons from "./RulesAddButtons.vue"
 import ParserTest from "./ParserTest.vue"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
@@ -54,6 +55,13 @@ const profileOptions = computed(() => [
 const selectedProfileName = computed(
   () => profiles.value.find((p) => p.id === selectedProfileId.value)?.name ?? "",
 )
+
+// A rule or a table added from the head of the step opens the step, so the new card is seen.
+const rulesEditor = ref<InstanceType<typeof RulesEditor> | null>(null)
+function addTo(what: "addRule" | "addTable"): void {
+  openStep.value = "rules"
+  rulesEditor.value?.[what]()
+}
 
 function toggleStep(s: "profiles" | "rules" | "test"): void {
   openStep.value = openStep.value === s ? null : s
@@ -200,13 +208,17 @@ onMounted(() => {
     <template v-if="selectedProfileId">
       <!-- Шаг 2: правила -->
       <div class="accordion-item">
-        <button class="accordion-button" :class="{ active: openStep === 'rules' }" @click="toggleStep('rules')">
-          <span>{{ t("rules.step.rules", { profile: selectedProfileName }) }}</span>
-          <i class="pi pi-chevron-down acc-chevron" />
-        </button>
+        <!-- The whole bar folds the step (its title button is the one of the keyboard); the chevron stands after the buttons. -->
+        <div class="accordion-bar" :class="{ active: openStep === 'rules' }" @click="toggleStep('rules')">
+          <button class="accordion-button" :class="{ active: openStep === 'rules' }" :aria-expanded="openStep === 'rules'">
+            <span>{{ t("rules.step.rules", { profile: selectedProfileName }) }}</span>
+          </button>
+          <RulesAddButtons :disabled="rulesEditor?.isLoading ?? true" @rule="addTo('addRule')" @table="addTo('addTable')" />
+          <i class="pi pi-chevron-down acc-chevron" aria-hidden="true" />
+        </div>
         <!-- Kept while folded, as the rules were before: a rule being written is not lost when the step is closed. -->
         <div v-show="openStep === 'rules'" class="accordion-body">
-          <RulesEditor :profile-id="selectedProfileId" :lines="testLines" :codes="lineFields" />
+          <RulesEditor ref="rulesEditor" :profile-id="selectedProfileId" :lines="testLines" :codes="lineFields" />
         </div>
       </div>
 
