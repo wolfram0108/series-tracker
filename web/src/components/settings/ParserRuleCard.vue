@@ -6,7 +6,7 @@ import StSelect from "../StSelect.vue"
 import { t } from "../../i18n"
 import ParserPatternEditor, { type PatternBlock } from "./ParserPatternEditor.vue"
 import type { TableRow } from "../../lib/ruleTable"
-import { actionLabel, actionOptions, choicesOf, conditionOptions, fieldText, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
+import { actionLabel, actionOptions, choicesOf, conditionOptions, fieldText, isAssign, isExtract, isNumberAssign, type RulePlace } from "../../lib/ruleVocabulary"
 import { reasonText } from "../../lib/reason"
 
 // Карточка одного правила профиля парсера. Шапка (имя + управление) и
@@ -43,10 +43,8 @@ const props = defineProps<{
   index: number
   total: number
   isOpen: boolean
-  /** A card of a tab of the tracks of a release: the actions of the editor are offered too. */
-  editor?: boolean
-  /** A card of a tab of the torrent: no action leaves out. */
-  torrent?: boolean
+  /** Where the card stands: its «ТО» offers only the actions of that place (lib/ruleVocabulary.ts ACTION_PLACES). */
+  place?: RulePlace
 }>()
 
 const emit = defineEmits<{
@@ -57,7 +55,7 @@ const emit = defineEmits<{
 }>()
 
 const CONDITION_TYPES = conditionOptions()
-const ACTION_TYPES = actionOptions(props.editor, props.torrent)
+const ACTION_TYPES = actionOptions(props.place)
 
 const toggleIcon = computed(() => (props.isOpen ? "pi-chevron-down" : "pi-chevron-right"))
 

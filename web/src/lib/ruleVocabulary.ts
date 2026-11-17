@@ -32,10 +32,32 @@ export const fieldText = (event: Event): string => (event.target as HTMLInputEle
 
 /** The options of the selects of the constructor, worded by the catalog. */
 export const conditionOptions = () => CONDITION_TYPES.map((value) => ({ value, label: t(`rules.condition.${value}`) }))
-/** The actions a card offers: those of every rule, and with `editor` those of the editor of a release; a tab of the
- *  torrent (`torrent`) places and never leaves out — leaving out is the constructor's of the series. */
-export const actionOptions = (editor = false, torrent = false) => [...ACTION_TYPES, ...(editor ? EDITOR_ACTIONS : [])]
-  .filter((value) => !torrent || value !== "exclude")
+/** Where a constructor stands: the section «Правила» of the series, or a tab of the torrent editor — «Файлы», the sound
+ *  («Озвучки», «Озв. конт.»), the subtitles («Субтитры», «Суб. конт.»). */
+export type RulePlace = "series" | "files" | "voices" | "subtitles"
+/** Where each action applies: a card offers in «ТО» only the actions of its place. The torrent editor places and never
+ *  leaves out (leaving out is the constructor's of the series); «Файлы» gives a file its season and episode; the tabs of the
+ *  sound and of the subtitles give a track its folder, its language and (subtitles) its type. */
+export const ACTION_PLACES: Record<ActionType, readonly RulePlace[]> = {
+  exclude: ["series"],
+  extract_single: ["series", "files"],
+  extract_range: ["series", "files"],
+  extract_season: ["series", "files"],
+  assign_voiceover: ["series"],
+  assign_episode: ["series", "files"],
+  assign_season: ["series", "files"],
+  assign_part: ["series"],
+  assign_quality: ["series"],
+  assign_resolution: ["series"],
+  assign_range: ["series"],
+  assign_voice_folder: ["voices"],
+  assign_subtitle_folder: ["subtitles"],
+  assign_language: ["voices", "subtitles"],
+  assign_subtitle_type: ["subtitles"],
+}
+/** The actions a card of a place offers. */
+export const actionOptions = (place: RulePlace = "series") => [...ACTION_TYPES, ...EDITOR_ACTIONS]
+  .filter((value) => ACTION_PLACES[value].includes(place))
   .map((value) => ({ value, label: t(`rules.action.${value}`) }))
 export const actionLabel = (type: string): string =>
   ([...ACTION_TYPES, ...EDITOR_ACTIONS] as readonly string[]).includes(type) ? t(`rules.action.${type as ActionType}`) : t("rules.action.value")

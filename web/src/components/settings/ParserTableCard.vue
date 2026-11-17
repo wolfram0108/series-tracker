@@ -9,7 +9,7 @@ import {
   canJoin, canJoinRange, cellsIn, emptyRow, fieldValues, join, joinRange, joined, rangeOf, rowOf, settle, spanOf,
   splitRange, textsOf, type Side, type TableRow,
 } from "../../lib/ruleTable"
-import { actionLabel, actionOptions, choicesOf, fieldText, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
+import { actionLabel, actionOptions, choicesOf, fieldText, isAssign, isExtract, isNumberAssign, type RulePlace } from "../../lib/ruleVocabulary"
 import type { EditableRule } from "./ParserRuleCard.vue"
 import ParserPatternEditor from "./ParserPatternEditor.vue"
 import PatternPalette from "./PatternPalette.vue"
@@ -32,14 +32,12 @@ const props = defineProps<{
   lines: string[]
   /** The codes of the fields of a line of the constructor, in its order (core LINE_FIELDS). */
   codes: string[]
-  /** A card of a tab of the tracks of a release: the actions of the editor are offered too. */
-  editor?: boolean
-  /** A card of a tab of the torrent: no action leaves out. */
-  torrent?: boolean
+  /** Where the card stands: its «ТО» offers only the actions of that place (lib/ruleVocabulary.ts ACTION_PLACES). */
+  place?: RulePlace
 }>()
 const emit = defineEmits<{ toggle: []; save: []; delete: []; move: [dir: -1 | 1] }>()
 
-const ACTIONS = actionOptions(props.editor, props.torrent)
+const ACTIONS = actionOptions(props.place)
 // The cell clicked, and the row its choice was extended to (Shift+click): the cells of the column between the two are
 // chosen together.
 const selected = ref<Cell | null>(null)

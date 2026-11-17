@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { RulePlace } from "../../../lib/ruleVocabulary"
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import StTab from "../../StTab.vue"
 import { t, type MessageKey } from "../../../i18n"
@@ -113,6 +114,9 @@ const lines = computed(() => {
 const codes = computed(() => [...new Set(lines.value.flatMap((line) => line.split(" | ")
   .map((part) => /^([A-Z]{1,3}):/.exec(part)?.[1] ?? "").filter(Boolean)))])
 const profileId = computed(() => editor.value?.profiles[tab.value] ?? null)
+// The place of the constructor of the tab: «ТО» offers only what applies there.
+const rulePlace = computed<RulePlace>(() => tab.value === "files" ? "files"
+  : tab.value === "voices" || tab.value === "voice_streams" ? "voices" : "subtitles")
 </script>
 
 <template>
@@ -134,8 +138,8 @@ const profileId = computed(() => editor.value?.profiles[tab.value] ?? null)
             <i class="pi" :class="rulesOpen ? 'pi-chevron-up' : 'pi-chevron-down'" aria-hidden="true" />
           </button>
           <div v-show="rulesOpen" class="torrent-rules-body">
-            <RulesEditor v-if="profileId !== null" :key="profileId" :profile-id="profileId" torrent :lines="lines" :codes="codes"
-                         :editor="tab !== 'files'" />
+            <RulesEditor v-if="profileId !== null" :key="profileId" :profile-id="profileId" :lines="lines" :codes="codes"
+                         :place="rulePlace" />
           </div>
         </section>
         <TorrentFiles v-if="tab === 'files'" :editor="editor" :release="release" @failure="failure = $event" />

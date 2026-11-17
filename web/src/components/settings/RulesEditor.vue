@@ -11,14 +11,14 @@ import { useConfirm } from "../../composables/useConfirm"
 import { api } from "../../api/client"
 import { t } from "../../i18n"
 import { useBusyBar } from "../../composables/useWindowBusy"
-import { isExtract } from "../../lib/ruleVocabulary"
+import { isExtract, type RulePlace } from "../../lib/ruleVocabulary"
 import LoadingMark from "../LoadingMark.vue"
 
 // The rules of one profile of the constructor: the bar that adds a rule or a table, and the cards of the rules in their
 // order. The section «Правила» and the tabs of the torrent editor hold the same editor; `lines` and `codes` are what the
 // quick templates of a table are made of (the lines the rules read and the codes of their fields).
-// `editor`: the rules of a tab of the tracks of a release — the actions of the editor (folders, language, type) are offered.
-const props = defineProps<{ profileId: number; lines?: string[]; codes?: string[]; editor?: boolean; torrent?: boolean }>()
+// `place`: where the editor stands — the section «Правила» or a tab of the torrent editor; «ТО» offers only its actions.
+const props = defineProps<{ profileId: number; lines?: string[]; codes?: string[]; place?: RulePlace }>()
 const { request } = useApi()
 const confirm = useConfirm()
 const toast = useToast()
@@ -241,11 +241,11 @@ watch(() => props.profileId, () => void loadRules(), { immediate: true })
       <template v-for="(rule, index) in rules" :key="rule.id">
         <ParserTableCard
           v-if="rule.table" :rule="rule" :index="index" :total="rules.length" :is-open="openRuleId === rule.id"
-          :lines="lines ?? []" :codes="codes ?? []" :editor="editor" :torrent="torrent"
+          :lines="lines ?? []" :codes="codes ?? []" :place="place"
           @toggle="toggleRule(rule.id)" @save="saveRule(rule)" @delete="deleteRule(rule)" @move="moveRule(index, $event)"
         />
         <ParserRuleCard
-          v-else :rule="rule" :index="index" :total="rules.length" :is-open="openRuleId === rule.id" :editor="editor" :torrent="torrent"
+          v-else :rule="rule" :index="index" :total="rules.length" :is-open="openRuleId === rule.id" :place="place"
           @toggle="toggleRule(rule.id)" @save="saveRule(rule)" @delete="deleteRule(rule)" @move="moveRule(index, $event)"
         />
       </template>
