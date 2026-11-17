@@ -15,6 +15,7 @@ import subprocess
 import pytest
 
 from core import BaseModule, Bus
+from core.envelope import Envelope
 from core.contracts.torrent import RELEASE_CHANGED_TOPIC, ReleaseFile, ReleaseState, ReleaseView, track_link
 from core.contracts import RowTrack
 from core.db import Database
@@ -259,6 +260,18 @@ async def test_a_page_written_with_a_mirror_is_the_page_of_the_trackers_own_doma
     assert by_mirror["url"] == by_page["url"] == URL and by_mirror["profiles"] == by_page["profiles"]
     assert by_page["view"]["tabs"]["files"][0]["place"] == {"season": 2, "episode": 7, "last": None}
     assert [f["name"] for f in by_page["view"]["folders"]] == ["Студия"]
+
+
+async def test_the_progress_of_a_download_changes_neither_the_table_nor_the_editor(bus_stand):
+    torrents, unpack, bus, root = bus_stand
+    changed = bus.subscribe("unpack.table.changed", "unpack.editor.changed")
+    downloading = release(["Show/Show - 01.mkv", "Show/Show - 02.mkv"], state=ReleaseState.DOWNLOADING)
+    torrents.releases = [downloading]
+    for progress in (0.1, 0.5, 0.9):
+        moved = downloading.model_copy(update={"files": [f.model_copy(update={"progress": progress}) for f in downloading.files]})
+        await unpack.on_release_changed(Envelope(topic=RELEASE_CHANGED_TOPIC, kind="event", payload=moved.model_dump(mode="json")))
+    told = [changed.queue.get_nowait().topic for _ in range(changed.queue.qsize())]
+    assert told == ["unpack.table.changed", "unpack.editor.changed"]  # the first news only
 
 
 async def test_the_files_of_a_season_every_series_with_the_page_excludes_are_not_downloaded(bus_stand):

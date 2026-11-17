@@ -25,7 +25,8 @@ Events out:
   unpack.read.progress {url, release, done, total} — the files of a version read so far, while they are read; the editor
       gives the same as `reading` of a release, for a window opened in the middle of a read
 Events in: torrents.release.changed (a release with its files: the files not to download are told to `torrents` by the
-  numbers the preset gives the names of the files and the seasons and episodes the series exclude; a ready one is read),
+  numbers the preset gives the names of the files and the seasons and episodes the series exclude; a ready one is read;
+  a news that changes only how far the files are downloaded is passed by),
   rules.profile.changed (a profile of the editor changed), series.updated (the episodes a series excludes changed).
 """
 from __future__ import annotations
@@ -72,6 +73,8 @@ class UnpackModule(BaseModule):
         self._files_profile: int | None = None
         self._skips: dict[tuple[str, str], frozenset[str]] = {}  # the files not to download told to torrents last
         self._reading: dict[tuple[str, str], tuple[int, int]] = {}  # (url, release) → (files read, files to read)
+        # What the module last took of each release: a news that changes only how far its files are is none of its business.
+        self._shapes: dict[tuple[str, str], tuple] = {}
         super().__init__(bus)
 
     def register(self) -> None:
@@ -204,6 +207,11 @@ class UnpackModule(BaseModule):
 
     async def on_release_changed(self, env: Envelope) -> None:
         release = ReleaseView.model_validate(env.payload)
+        shape = (release.state, release.infohash, release.folder,
+                 tuple((f.path, f.size, f.priority) for f in release.files))
+        if self._shapes.get((release.url, release.release)) == shape:
+            return
+        self._shapes[(release.url, release.release)] = shape
         if release.files and release.state in (ReleaseState.DOWNLOADING, ReleaseState.UPDATING, ReleaseState.METADATA):
             await self._tell_skips(release)
         if release.state == ReleaseState.READY and release.folder:
