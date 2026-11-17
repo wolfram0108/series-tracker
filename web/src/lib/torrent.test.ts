@@ -23,15 +23,16 @@ describe("the state of a torrent source", () => {
   })
 })
 
-const file = (path: string, kind: FileEntry["kind"], place: [number, number] | null, by: string | null = null, excluded = false): FileEntry => ({
-  item: `r/${path}`, path, line: "", kind, size: 1, priority: 1, excluded, place: place && { season: place[0], episode: place[1], last: null }, by })
+const file = (path: string, kind: FileEntry["kind"], place: [number, number] | null, by: string | null = null): FileEntry => ({
+  item: `r/${path}`, path, line: "", kind, size: 1, priority: 1, place: place && { season: place[0], episode: place[1], last: null }, by })
 
 describe("the files of a release", () => {
   it("are counted by what they are and laid in seasons and episodes in the draft", () => {
     const files = [file("E02.mkv", "video", [1, 2], "Серия · 1"), file("E01.mkv", "video", [1, 1]), file("E01.mka", "audio", [1, 1]),
-      file("OVA.mkv", "video", [0, 1], "manual"), file("menu.mkv", "video", null, null, true), file("x.mkv", "video", null),
+      file("OVA.mkv", "video", [0, 1], "manual"), file("menu.mkv", "video", null), file("x.mkv", "video", null),
       file("a.ttf", "font", null)]
-    expect(fileCounts(files)).toEqual({ all: 7, unplaced: 1, placed: 4, excluded: 1, notInvolved: 1 })
+    // A file the rules and the hand gave no episode is red, whatever it is: nothing here leaves it out.
+    expect(fileCounts(files)).toEqual({ all: 7, unplaced: 2, placed: 4, notInvolved: 1 })
     expect(draftOf(files).map((season) => [season.season, season.manual, season.episodes.map((each) => [each.episode, each.kinds])])).toEqual([
       [0, true, [[1, { video: 1 }]]], [1, false, [[1, { video: 1, audio: 1 }], [2, { video: 1 }]]]])
   })
@@ -49,7 +50,7 @@ describe("the files of a release", () => {
 })
 
 const track = (item: string, folder: string | null, episode: number, by: string | null = null): TrackEntry => ({
-  item, line: "", kind: "audio", folder, by, excluded: false, waiting: !folder, language: "rus", subtitle_type: "", path: `${folder ?? "x"}/${item}`,
+  item, line: "", kind: "audio", folder, by, waiting: !folder, language: "rus", subtitle_type: "", path: `${folder ?? "x"}/${item}`,
   place: { season: 1, episode, last: null }, stream: null })
 
 describe("the tracks of a release", () => {

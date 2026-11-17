@@ -32,8 +32,10 @@ export const fieldText = (event: Event): string => (event.target as HTMLInputEle
 
 /** The options of the selects of the constructor, worded by the catalog. */
 export const conditionOptions = () => CONDITION_TYPES.map((value) => ({ value, label: t(`rules.condition.${value}`) }))
-/** The actions a card offers: those of every rule, and with `editor` those of the editor of a release. */
-export const actionOptions = (editor = false) => [...ACTION_TYPES, ...(editor ? EDITOR_ACTIONS : [])]
+/** The actions a card offers: those of every rule, and with `editor` those of the editor of a release; a tab of the
+ *  torrent (`torrent`) places and never leaves out — leaving out is the constructor's of the series. */
+export const actionOptions = (editor = false, torrent = false) => [...ACTION_TYPES, ...(editor ? EDITOR_ACTIONS : [])]
+  .filter((value) => !torrent || value !== "exclude")
   .map((value) => ({ value, label: t(`rules.action.${value}`) }))
 export const actionLabel = (type: string): string =>
   ([...ACTION_TYPES, ...EDITOR_ACTIONS] as readonly string[]).includes(type) ? t(`rules.action.${type as ActionType}`) : t("rules.action.value")

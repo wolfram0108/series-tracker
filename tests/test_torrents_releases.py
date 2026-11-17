@@ -234,16 +234,17 @@ async def _until_held(torrents) -> None:
         await asyncio.sleep(0.01)
 
 
-async def test_a_file_not_to_download_stays_off_the_disk_and_the_release_is_ready_without_it(stand):
+async def test_every_file_of_a_release_is_downloaded_and_the_module_takes_no_command_of_what_not_to_download(stand):
+    """No hidden logic of the download (a magnet has no files until its metadata comes): every file is fetched."""
     model, world, torrents, told = stand
     h = world.lists(model, release(V1), published="d1", link="L1", hold=True)
     await world.request("torrents.release.download", {"url": PAGE, "release": "page"})
-    await world.request("torrents.release.priorities", {"url": PAGE, "release": "page", "skip": ["Show/E02.mkv"]})
     model.deliver(h)
     ready = await until(told, "ready")
-
-    assert {f["path"]: f["priority"] for f in ready["files"]}["Show/E02.mkv"] == 0
-    assert not os.path.exists(f"{ready['folder']}/Show/E02.mkv") and os.path.exists(f"{ready['folder']}/Show/E01.mkv")
+    paths = [path for path, *_ in V1]
+    assert {f["path"]: f["priority"] for f in ready["files"]} == {path: 1 for path in paths}
+    assert all(os.path.exists(f"{ready['folder']}/{path}") for path in paths)
+    assert "torrents.release.priorities" not in {pattern for pattern, *_ in torrents._handlers}
 
 
 async def test_a_release_gone_from_the_client_fails_with_that_reason(stand):

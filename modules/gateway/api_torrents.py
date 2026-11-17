@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from core import BusRequestError
 from core.contracts import SubtitleType
@@ -35,7 +35,7 @@ class WatchBody(ReleaseBody):
 
 class AssignBody(BaseModel):
     """Items of a tab placed by hand: a file in a season and an episode (to `episode_last` for a file of several), a track
-    in a folder by its name, or left out («Не брать»)."""
+    in a folder by its name. Nothing is left out here: what goes out of the output is the constructor's of the series."""
     url: str
     tab: Literal["files", "voices", "subtitles", "streams"]
     items: list[str] = Field(min_length=1)
@@ -43,9 +43,16 @@ class AssignBody(BaseModel):
     episode: int | None = None
     episode_last: int | None = None
     folder: str | None = None
-    excluded: bool = False
     # The items in the order given take the episodes from `episode` on, one each (files dropped on a season).
     in_order: bool = False
+
+    @model_validator(mode="after")
+    def _a_place(self):
+        if self.tab == "files" and (self.season is None or self.episode is None):
+            raise ValueError("a file is placed in a season and an episode")
+        if self.tab != "files" and not self.folder:
+            raise ValueError("a track is placed in a folder")
+        return self
 
 
 class UnassignBody(BaseModel):

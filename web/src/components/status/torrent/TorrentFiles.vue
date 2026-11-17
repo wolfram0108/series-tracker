@@ -10,12 +10,13 @@ import TorrentLine from "./TorrentLine.vue"
 import type { Answer } from "../../../composables/sourceCalls"
 
 // The editor «Файлы» (the board «Файлы»): the files of the release by their folder on the left, the draft on the right —
-// seasons, their episodes and the files laid in each by the preset of the torrents or by hand. A pick is let go on a
-// season (its files take the episodes after its last one in the order of their names), on an episode, or on «Не брать».
+// seasons, their episodes and the files laid in each by the rules of the tab or by hand. A pick is let go on a season (its
+// files take the episodes after its last one in the order of their names) or on an episode. A row is painted by its state:
+// green placed, red not (it goes no further), plain a file that takes no part.
 const props = defineProps<{ editor: Editor; release?: ReleaseView }>()
 const emit = defineEmits<{ failure: [string] }>()
 
-const FILTERS: readonly FileFilter[] = ["all", "unplaced", "placed", "excluded", "notInvolved"]
+const FILTERS: readonly FileFilter[] = ["all", "unplaced", "placed", "notInvolved"]
 const entries = computed(() => props.editor.view.tabs.files)
 const counts = computed(() => fileCounts(entries.value))
 // Until the user picks a filter the list shows what waits for a place, or every file when nothing does.
@@ -24,9 +25,7 @@ const filter = computed<FileFilter>(() => chosenFilter.value ?? (counts.value.un
 const fits = (entry: FileEntry): boolean => filter.value === "all" || fileFilterOf(entry) === filter.value
 const folders = computed(() => byFolder(entries.value).map((group) => {
   const shown = group.entries.filter(fits)
-  const kinds = fileCounts(group.entries)
-  const excludedBy = new Set(group.entries.filter((each) => each.excluded).map((each) => ruleOf(each.by)?.rule ?? ""))
-  return { ...group, shown, kinds, excludedBy: excludedBy.size === 1 ? [...excludedBy][0] : "" }
+  return { ...group, shown, kinds: fileCounts(group.entries) }
 }))
 const visible = computed(() => folders.value.filter((group) => group.shown.length))
 const hidden = computed(() => filter.value === "all" ? [] : folders.value.filter((group) => !group.shown.length))
@@ -37,7 +36,7 @@ function fold(folder: string): void {
   folded.value = next
 }
 
-// What the client does with each file, as the release tells it: not downloaded (left out in this editor), how far it is.
+// How far the client has downloaded each file, as the release tells it.
 const fetched = computed(() => new Map((props.release?.files ?? []).map((file) => [file.path, file] as const)))
 function loadOf(entry: FileEntry): string {
   const file = fetched.value.get(entry.path)
@@ -119,7 +118,6 @@ const toSeason = (season: number, from: number) => (items: string[]) => send(() 
   items: [...items].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), season, episode: from, in_order: true }))
 const toEpisode = (season: number, episode: DraftEpisode) => (items: string[]) => send(() => assign({ url: url.value,
   tab: "files", items, season, episode: episode.episode, episode_last: episode.last }))
-const toBin = (items: string[]) => send(() => assign({ url: url.value, tab: "files", items, excluded: true }))
 const back = (items: string[]) => send(() => unassign(url.value, "files", items))
 const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value) void apply([...pick.chosen.value]) }
 </script>
@@ -131,7 +129,7 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
       <div class="torrent-filters" role="group">
         <button v-for="each in FILTERS" :key="each" type="button" class="torrent-filter" :class="{ active: filter === each }"
                 :aria-pressed="filter === each" @click="chosenFilter = each">
-          <i v-if="each !== 'all'" class="torrent-dot" :class="`is-${each}`" aria-hidden="true" />{{ t(`torrent.filter.${each}` as MessageKey) }}
+          {{ t(`torrent.filter.${each}` as MessageKey) }}
           <b>{{ counts[each] }}</b>
         </button>
       </div>
@@ -150,21 +148,17 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
             <TorrentLine v-if="group.folder" :line="`D:${group.folder}`" />
             <span v-else class="torrent-name">{{ t("torrent.root") }}</span>
             <span class="torrent-side">
-              <template v-for="kind in (['unplaced', 'placed', 'excluded', 'notInvolved'] as const)" :key="kind">
-                <span v-if="group.kinds[kind]"><i class="torrent-dot" :class="`is-${kind}`" aria-hidden="true" />{{ group.kinds[kind] }}
-                  <template v-if="kind === 'excluded' && group.excludedBy"> · {{ t("torrent.by.rule", { rule: group.excludedBy }) }}</template>
-                </span>
+              <template v-for="kind in (['unplaced', 'placed'] as const)" :key="kind">
+                <span v-if="group.kinds[kind]" class="torrent-count" :class="`is-${kind}`">{{ t(`torrent.filter.${kind}`) }} {{ group.kinds[kind] }}</span>
               </template>
             </span>
           </div>
           <template v-if="!folded.has(group.folder)">
             <div v-for="entry in group.shown" :key="entry.item" class="torrent-row is-nested file-row"
-                 :class="{ 'is-chosen': pick.has(entry.item), 'is-unplaced': fileFilterOf(entry) === 'unplaced',
-                           'is-excluded': entry.excluded }">
+                 :class="[`is-${fileFilterOf(entry)}`, { 'is-chosen': pick.has(entry.item) }]">
               <span class="torrent-grip" draggable="true" :title="t('torrent.drag')" aria-hidden="true"
                   @dragstart="pick.dragStart($event, [entry.item])" @dragend="pick.dragEnd"><i class="pi pi-ellipsis-v" /></span>
               <input type="checkbox" :checked="pick.has(entry.item)" :aria-label="nameOf(entry.path)" @change="pick.toggle(entry.item)">
-              <i class="torrent-dot" :class="`is-${fileFilterOf(entry)}`" aria-hidden="true" />
               <TorrentLine :line="entry.line" :skip="['D']" />
               <span v-if="loadOf(entry)" class="torrent-how file-load">{{ loadOf(entry) }}</span>
             </div>
@@ -249,11 +243,6 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
           </button>
         </div>
       </div>
-      <button type="button" class="torrent-bin drop-bin" :class="{ 'is-live': pick.count.value > 0 }" :disabled="!pick.count.value || busy"
-              v-bind="pick.target(toBin)" @click="by(toBin)()">
-        <i class="pi pi-trash" aria-hidden="true" />
-        <span>{{ pick.count.value ? t("torrent.skip.drop", { n: pick.count.value }) : t("torrent.skip") }}</span>
-      </button>
     </section>
   </div>
 </template>

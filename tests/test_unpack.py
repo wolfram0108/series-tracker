@@ -4,7 +4,8 @@ The layout (modules/unpack/layout.py) on synthetic releases of the kinds of the 
 in one folder with suffixes, sounds in folders by studio, seasons in folders of their own, two videos of one episode; a
 placement by hand before a rule; the rows of a release being updated not obtained, of a first download none. Then the
 module on the bus with the real rules and real small files made by ffmpeg and read by ffprobe: the preset of the editor
-made at the start, the table of the page, the files of the excluded episodes not downloaded."""
+made at the start, the table of the page. The editor places and never leaves out: a red item (no episode, no folder, no
+language) is no row, and every file of a release is downloaded — nothing tells `torrents` otherwise."""
 from __future__ import annotations
 
 import asyncio
@@ -41,22 +42,17 @@ def streams(*specs) -> dict:
                         for k, i, lang, title in specs], "attachments": [], "chapters": 0, "reason": None}
 
 
-EXCLUDE = "exclude"
-
-
-def numbered(paths: dict[str, tuple[int, int] | str | None]) -> dict:
-    """The results of the tab «Файлы» as the preset would give them: season and episode by item, `EXCLUDE` for a file a
-    rule excludes, None for a file no rule gave a number."""
+def numbered(paths: dict[str, tuple[int, int] | None]) -> dict:
+    """The results of the tab «Файлы» as its rules would give them: season and episode by item, None for a file no rule
+    gave a number."""
     out = {}
     for path, value in paths.items():
-        if value == EXCLUDE:
-            out[item_of("page", path)] = {"excluded": True}
-        elif value is not None:
+        if value is not None:
             out[item_of("page", path)] = {"season": value[0], "episode": value[1]}
     return out
 
 
-def test_every_track_of_a_placed_video_and_of_a_sound_beside_it_is_a_row_with_that_video():
+def test_every_placed_track_of_a_placed_video_and_of_a_file_beside_it_is_a_row_with_that_video_and_a_red_one_none():
     r = release(["Show/Show - 01.mkv", "Show/Show - 01.rus.mka", "Show/Show - 01.rus.ass"])
     inputs = Inputs(releases=[r], manual={}, folders=[],
                     streams={"page": {"Show/Show - 01.mkv": streams(("video", 0, "", ""), ("audio", 1, "jpn", "Original")),
@@ -65,14 +61,13 @@ def test_every_track_of_a_placed_video_and_of_a_sound_beside_it_is_a_row_with_th
                     results={"files": numbered({p.path: (1, 1) for p in r.files})})
     view, rows = compose(inputs)
     # The link names the n-th track of its kind in its file (`-map <file>:a:<n>`, `:s:<n>`), not the index of the stream; a
-    # row of subtitles says so (DESIGN.md 7.1.1) and is no voice-over.
+    # row of subtitles says so (DESIGN.md 7.1.1) and is no voice-over. The sound file has no title: it is in no folder,
+    # red, and goes no further — no row.
     assert [(row.key, row.voice.name, row.voice.kind, row.track, row.link) for row in rows] == [
         ("page/Show/Show - 01.mkv#1", "Original", "audio", RowTrack.SOUND, track_link("page", "Show/Show - 01.mkv", 0)),
-        ("page/Show/Show - 01.rus.mka#0", "", "audio", RowTrack.SOUND,
-         track_link("page", "Show/Show - 01.mkv", 0, file="Show/Show - 01.rus.mka")),
         ("page/Show/Show - 01.rus.ass#0", "Надписи", "subtitles", RowTrack.SUBTITLES,
          track_link("page", "Show/Show - 01.mkv", 0, file="Show/Show - 01.rus.ass"))]
-    assert rows[2].language == "rus" and rows[2].subtitle_type == ""
+    assert rows[1].language == "rus" and rows[1].subtitle_type == ""
     assert all(row.heights == [1080] for row in rows)
     assert all(row.text == "S01E01 | Show/Show - 01.mkv" and row.player == "torrent:page" for row in rows)
     assert {row.timeline for row in rows} == {"page/Show/Show - 01.mkv"}  # one video, one timeline, whatever file a track is in
@@ -105,7 +100,8 @@ def test_the_file_names_the_folder_and_the_language_by_itself_und_waits_and_a_ru
     assert tracks == [("AniLiberty", "meta", "rus", False), ("Original", "meta", "und", True), (None, None, "jpn", True)]
     assert [(f["name"], f["manual"]) for f in view["folders"]] == [("AniLiberty", False), ("Original", False)]
     assert view["unplaced"]["streams"] == 2
-    assert [(row.voice.name, row.language) for row in rows] == [("AniLiberty", "rus"), ("Original", "und"), ("", "jpn")]
+    # Only the green track is a row: a track with no folder or no language is red and goes no further.
+    assert [(row.voice.name, row.language) for row in rows] == [("AniLiberty", "rus")]
     # A rule of the tab «Контейнеры» says otherwise: its folder and language go before what the file says.
     inputs.results["streams"] = {f"{video}#2": {"voice_folder": "Оригинал", "language": "jpn", "events": [{"rule": "яп"}]}}
     view, _rows = compose(inputs)
@@ -122,10 +118,10 @@ def test_a_folder_a_rule_gives_names_the_track_and_the_users_folder_goes_before_
                              "voices": {item_of("page", "Show/Rus Audio/JAM/E01.mka"): {"voice_folder": "JAM",
                                                                                          "events": [{"rule": "студии"}]},
                                         item_of("page", "Show/Rus Audio/Studio/E01.mka"): {"voice_folder": "Studio"}}},
-                    manual={"voices": {item_of("page", "Show/Rus Audio/Studio/E01.mka"): {
-                        "folder": "Студия", "excluded": False}}})
+                    manual={"voices": {item_of("page", "Show/Rus Audio/Studio/E01.mka"): {"folder": "Студия"}}})
     view, rows = compose(inputs)
-    assert [(row.voice.name, row.site_fields["language"]) for row in rows] == [("JAM", ""), ("Студия", "rus")]
+    # JAM has a folder but no language yet: red, no row; the user's folder has its language: a row.
+    assert [(row.voice.name, row.site_fields["language"]) for row in rows] == [("Студия", "rus")]
     voices = {entry["item"]: entry for entry in view["tabs"]["voices"]}
     assert voices[item_of("page", "Show/Rus Audio/JAM/E01.mka")]["by"] == "студии"
     assert voices[item_of("page", "Show/Rus Audio/Studio/E01.mka")]["by"] == "manual"
@@ -135,8 +131,8 @@ def test_a_folder_a_rule_gives_names_the_track_and_the_users_folder_goes_before_
 def test_seasons_in_folders_of_their_own_place_their_files_and_a_track_of_another_season_is_not_taken():
     r = release(["Show/Season 1/E01.mkv", "Show/Season 2/E01.mkv", "Show/Season 2/E01.mka"])
     inputs = Inputs(releases=[r], folders=[], manual={},
-                    streams={"page": {p.path: streams(("video", 0, "", ""), ("audio", 1, "jpn", "")) if p.path.endswith("mkv")
-                                      else streams(("audio", 0, "rus", "")) for p in r.files}},
+                    streams={"page": {p.path: streams(("video", 0, "", ""), ("audio", 1, "jpn", "Original")) if p.path.endswith("mkv")
+                                      else streams(("audio", 0, "rus", "Студия")) for p in r.files}},
                     results={"files": numbered({"Show/Season 1/E01.mkv": (1, 1), "Show/Season 2/E01.mkv": (2, 1),
                                                 "Show/Season 2/E01.mka": (2, 1)})})
     _view, rows = compose(inputs)
@@ -158,21 +154,20 @@ def test_a_sound_of_an_episode_with_two_videos_waits_for_the_user():
 def test_a_placement_by_hand_goes_before_the_rule_and_does_not_reach_other_files():
     r = release(["Show/a.mkv", "Show/b.mkv", "Show/extra.mkv"])
     inputs = Inputs(releases=[r], folders=[],
-                    streams={"page": {p.path: streams(("video", 0, "", ""), ("audio", 1, "", "")) for p in r.files}},
+                    streams={"page": {p.path: streams(("video", 0, "", ""), ("audio", 1, "jpn", "Original")) for p in r.files}},
                     results={"files": numbered({"Show/a.mkv": (1, 1), "Show/b.mkv": (1, 2), "Show/extra.mkv": None})},
-                    manual={"files": {item_of("page", "Show/a.mkv"): {"season": 1, "episode": 5, "episode_last": None,
-                                                                      "excluded": False},
-                                      item_of("page", "Show/b.mkv"): {"season": None, "episode": None, "excluded": True}}})
+                    manual={"files": {item_of("page", "Show/a.mkv"): {"season": 1, "episode": 5, "episode_last": None}}})
     view, rows = compose(inputs)
-    assert [row.text for row in rows] == ["S01E05 | Show/a.mkv"]
+    # The file no rule and no hand placed is red: it has no row, and nothing else is left out.
+    assert [row.text for row in rows] == ["S01E02 | Show/b.mkv", "S01E05 | Show/a.mkv"]
     files = {entry["path"]: entry for entry in view["tabs"]["files"]}
-    assert files["Show/b.mkv"]["excluded"] and files["Show/extra.mkv"]["place"] is None
+    assert files["Show/extra.mkv"]["place"] is None and "excluded" not in files["Show/extra.mkv"]
     assert view["unplaced"]["files"] == 1
 
 
 def test_a_release_being_updated_gives_its_rows_not_obtained_and_a_first_download_none():
     paths = ["Show/E01.mkv"]
-    probed = {"page": {"Show/E01.mkv": streams(("video", 0, "", ""), ("audio", 1, "jpn", ""))}}
+    probed = {"page": {"Show/E01.mkv": streams(("video", 0, "", ""), ("audio", 1, "jpn", "Original"))}}
     results = {"files": numbered({"Show/E01.mkv": (1, 1)})}
     _v, updating = compose(Inputs([release(paths, ReleaseState.UPDATING)], probed, results, {}))
     _v, first = compose(Inputs([release(paths, ReleaseState.DOWNLOADING)], probed, results, {}))
@@ -181,6 +176,9 @@ def test_a_release_being_updated_gives_its_rows_not_obtained_and_a_first_downloa
 
 
 # --- the module on the bus -------------------------------------------------------------------------------------------
+
+TITLES = {"jpn": "Original", "rus": "Студия"}
+
 
 def _file(path: str, *, video: bool, audios: list[str]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -191,8 +189,8 @@ def _file(path: str, *, video: bool, audios: list[str]) -> None:
         args += ["-f", "lavfi", "-i", "sine=f=440:d=1"]
     for i in range(len(audios) + (1 if video else 0)):
         args += ["-map", str(i)]
-    for i, lang in enumerate(audios):
-        args += [f"-metadata:s:a:{i}", f"language={lang}"]
+    for i, lang in enumerate(audios):  # a title too: the track lies in a folder by it, green, a row
+        args += [f"-metadata:s:a:{i}", f"language={lang}", f"-metadata:s:a:{i}", f"title={TITLES[lang]}"]
     subprocess.run(args + ["-c:a", "aac", "-shortest", path], check=True)
 
 
@@ -202,13 +200,10 @@ class Torrents(BaseModule):
     def __init__(self, bus) -> None:
         super().__init__(bus)
         self.releases: list[ReleaseView] = []
-        self.skips: list[dict] = []
         self.listed = True  # a series lists the page as its torrent source
-        self.told = asyncio.Event()  # a command of priorities came
 
     def register(self) -> None:
         self.handle("torrents.releases.get", self.on_releases)
-        self.handle("torrents.release.priorities", self.on_priorities)
         self.handle("catalog.sources.by_profile", self.on_by_profile)
         for topic in ("catalog.series.list", "sources.site.resolve"):
             self.handle(topic, getattr(self, "on_" + topic.split(".")[-1]))
@@ -218,18 +213,6 @@ class Torrents(BaseModule):
 
     async def on_releases(self, env):
         return {"releases": [r.model_dump(mode="json") for r in self.releases]}
-
-    async def on_priorities(self, env):
-        self.skips.append(env.payload)
-        self.told.set()
-
-    async def next_skip(self) -> dict:
-        """The next command of priorities: a command goes over the bus after the request that caused it is answered."""
-        count = len(self.skips)
-        while len(self.skips) == count:
-            self.told.clear()
-            await asyncio.wait_for(self.told.wait(), 10)
-        return self.skips[-1]
 
     async def on_list(self, env):
         return [{"id": 1, "sources": [{"url": URL, "source_type": "torrent"}] if self.listed else [], "ignored_seasons": "[2]",
@@ -349,19 +332,18 @@ async def test_the_progress_of_a_download_changes_neither_the_table_nor_the_edit
     assert told == ["unpack.table.changed", "unpack.editor.changed"]  # the first news only
 
 
-async def test_only_the_files_the_editor_leaves_out_are_not_downloaded(bus_stand):
+async def test_every_file_of_a_release_is_downloaded_the_editor_tells_torrents_nothing_of_it(bus_stand):
+    """No hidden logic of the download: the editor places, a red file is just red, and no command of what not to download
+    goes to `torrents` — neither for a release that downloads nor for a placement by hand."""
     torrents, unpack, bus, root = bus_stand
+    told = bus.subscribe("torrents.release.priorities")
     downloading = release(["Show/Season 1/Show - 01.mkv", "Show/Season 2/Show - 01.mkv"], state=ReleaseState.DOWNLOADING)
     torrents.releases = [downloading]
-    # The series excludes season 2 (its memory of disabled episodes): that is no business of the download.
-    first = asyncio.ensure_future(torrents.next_skip())
     await unpack.on_release_changed(Envelope(topic=RELEASE_CHANGED_TOPIC, kind="event", payload=downloading.model_dump(mode="json")))
-    assert await first == {"url": URL, "release": "page", "skip": []}
-    # «Не брать» in the tab «Файлы»: that file is not downloaded.
-    second = asyncio.ensure_future(torrents.next_skip())
     await torrents.request("unpack.assign", {"url": URL, "tab": "files", "items": [item_of("page", "Show/Season 2/Show - 01.mkv")],
-                                             "excluded": True})
-    assert await second == {"url": URL, "release": "page", "skip": ["Show/Season 2/Show - 01.mkv"]}
+                                             "season": 2, "episode": 1})
+    await torrents.request("unpack.editor.get", {"url": URL})  # every command sent before this answer is on the bus by now
+    assert told.queue.empty()
 
 
 def test_the_fonts_of_subtitles_are_those_beside_them_else_of_the_nearest_folder_above_that_has_any():

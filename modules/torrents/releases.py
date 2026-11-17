@@ -266,19 +266,6 @@ class Releases:
         await self._told(url, release)
         return await self.view(await self.store.get(url, release) or row)
 
-    async def priorities(self, url: str, release: str, skip: set[str]) -> None:
-        """The files not to download (the seasons and episodes the series excludes, as `unpack` names them by their
-        paths): priority 0 for them, 1 for the others."""
-        row = await self._row(url, release)
-        qbt = self._client()
-        listed = await qbt.torrent_files(row["infohash"]) or []
-        off = [f["index"] for f in listed if f["name"] in skip and f["priority"] != 0]
-        on = [f["index"] for f in listed if f["name"] not in skip and f["priority"] == 0]
-        await qbt.set_file_priority(row["infohash"], off, 0)
-        await qbt.set_file_priority(row["infohash"], on, 1)
-        if off or on:
-            self.wake()
-
     async def drop_files(self, url: str, release: str) -> None:
         """A release no longer watched gives its files up once what was taken from it lives in the output files: it leaves
         the client with them and stays as a record (`archived`); taking it again is a new download."""

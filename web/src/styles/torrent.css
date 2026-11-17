@@ -27,13 +27,6 @@
 .torrent-filter b { font-weight: 700; }
 .torrent-filter.active { background: #343a40; border-color: #343a40; color: var(--bg-white); }
 
-/* The dot of what an item is: no place yet, placed, left out, not taking part. */
-.torrent-dot { display: inline-block; inline-size: 0.5625rem; block-size: 0.5625rem; flex: none; border-radius: 50%; box-sizing: border-box; }
-.torrent-dot.is-unplaced { background: #dc3545; }
-.torrent-dot.is-placed { background: #2e9d4f; }
-.torrent-dot.is-excluded { background: #adb5bd; }
-.torrent-dot.is-notInvolved { background: var(--bg-white); border: 1px solid #ced4da; }
-
 /* A row of a list: a folder or an episode (a group, bold), a file or a track under it. */
 .torrent-row {
   display: flex; align-items: center; gap: 0.5rem; min-inline-size: 0; min-block-size: 1.875rem; padding: 0 0.875rem;
@@ -42,9 +35,13 @@
 }
 .torrent-row.is-group { font-weight: 700; background: #fcfcfd; }
 .torrent-row.is-nested { padding-inline-start: 2.375rem; }
-.torrent-row.is-chosen { background: #e7f1ff; }
+/* A row is painted by its state: green placed (it goes on as a row), red not placed (it goes no further). */
+.torrent-row.is-placed { background: #eaf6ee; }
+.torrent-row.is-unplaced { background: #fdf3f4; }
 .torrent-row.is-unplaced .torrent-name { color: #a61e2d; }
-.torrent-row.is-excluded .torrent-name, .torrent-row.is-excluded .torrent-line { color: #adb5bd; text-decoration: line-through; }
+.torrent-row.is-chosen { background: #e7f1ff; }
+.torrent-count.is-unplaced { color: #a61e2d; }
+.torrent-count.is-placed { color: #1e7b3c; }
 /* A row is dragged by its grip; its text is text: it is selected and copied as any (the names go into the rules). */
 .torrent-grip { flex: none; display: inline-flex; color: #adb5bd; font-size: 0.75rem; cursor: grab; }
 .torrent-grip:active { cursor: grabbing; }
@@ -104,12 +101,6 @@
   font: inherit; font-size: 0.84rem; text-align: start; cursor: pointer;
 }
 .torrent-drop:disabled { opacity: 0.6; cursor: default; }
-.torrent-bin {
-  display: flex; inline-size: 100%; align-items: center; gap: 0.625rem; padding: 0.75rem 0.875rem; border: 0;
-  border-block-start: 1px solid var(--color-gray-200); background: none; color: var(--text-muted); font: inherit; font-size: 0.8125rem; text-align: start;
-}
-.torrent-bin:not(:disabled) { cursor: pointer; }
-.torrent-bin.is-live { background: #fdf3f4; color: #a61e2d; }
 
 /* The folders of the tracks: a table per kind, a row a folder; unfolded, the tracks it holds. */
 .torrent-folders-group {

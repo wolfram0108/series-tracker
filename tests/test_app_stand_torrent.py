@@ -48,6 +48,16 @@ async def torrent_profile(stand: AppStand, subtitles: bool = False) -> int:
     return made["id"]
 
 
+async def sound_rule(stand: AppStand, profile_id: int) -> None:
+    """The rule of the tab «Контейнеры» a user writes for a sound the file gives no title and no language: it goes into the
+    folder of the voice-over with its language — green, a row. Without it the sound is red and goes no further."""
+    actions = [{"action_type": "assign_voice_folder", "action_pattern": VOICE}, {"action_type": "assign_language", "action_pattern": "rus"}]
+    await stand.call("POST", f"/api/parser-profiles/{profile_id}/rules", {
+        "name": "звук", "action_pattern": json.dumps(actions, ensure_ascii=False), "continue_after_match": False,
+        "conditions": [{"condition_type": "contains", "pattern": json.dumps([{"type": "text", "value": "T:звук"}], ensure_ascii=False),
+                        "logical_operator": "AND"}]})
+
+
 async def until_table(stand: AppStand, url: str, rows: int) -> None:
     """The table of the page has its rows: the read the end of the read of the release starts (sources.table.ready)."""
     key = (await stand.module("sources").request("sources.site.resolve", {"url": url}))["canonical_url"]
@@ -90,6 +100,7 @@ async def test_a_release_added_as_a_source_is_downloaded_read_and_synced_into_th
     action = [{"action_type": "extract_single", "action_pattern": json.dumps([{"type": "text", "value": " - "}, {"type": "number"}])}]
     await stand.call("POST", f"/api/parser-profiles/{profiles['files']}/rules", {
         "name": "серия", "action_pattern": json.dumps(action), "continue_after_match": False, "conditions": []})
+    await sound_rule(stand, profiles["streams"])
     await until_table(stand, page.url, 2)
     kept = (await stand.call("POST", "/api/torrent/releases", {"url": page.url}))["releases"]
     assert [(each["state"], os.path.dirname(each["folder"])) for each in kept] == [("ready", stand.staging)]
@@ -120,6 +131,7 @@ async def test_the_output_lays_the_subtitles_of_a_release_in_the_container_defau
     action = [{"action_type": "extract_single", "action_pattern": json.dumps([{"type": "text", "value": " - "}, {"type": "number"}])}]
     await stand.call("POST", f"/api/parser-profiles/{profiles['files']}/rules", {
         "name": "серия", "action_pattern": json.dumps(action), "continue_after_match": False, "conditions": []})
+    await sound_rule(stand, profiles["streams"])
     await until_table(stand, page.url, 1)
     # The file of subtitles has no name in it: the operator makes the folder, its language and its type, and puts it there.
     await stand.call("POST", "/api/torrent/editor/folder", {"url": page.url, "kind": "subtitles", "name": "Надписи",

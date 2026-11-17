@@ -89,7 +89,6 @@ torrent_release_files, torrent_release_versions), keyed by the page and the id o
   torrents.staging.get {} → {value} and torrents.staging.set {value} → {ok, value, reason?} — the folder the releases download
       into (the setting torrents.staging_dir); a value that is no absolute path is refused (`staging_dir_not_absolute`); the
       releases move there on settings.changed; event torrents.staging.changed {value} tells every window the folder held now
-  torrents.release.priorities {url, release, skip: [path]} (command) — the files not to download
   torrents.release.drop_files {url, release} (command) — a release no longer watched gives up its files (archived)
   Event torrents.release.changed ReleaseView — state, version or files changed; `ready` once every wanted file is there
   (an update ends by removing the files of the old version the new one does not list). A page no source lists any more
@@ -225,7 +224,6 @@ class TorrentsModule(BaseModule):
         self.handle("torrents.staging.set", self.on_staging_set)
         self.handle("torrents.release.check", self.on_release_check)
         self.handle("torrents.release.watch", self.on_release_watch)
-        self.handle("torrents.release.priorities", self.on_release_priorities)
         self.handle("torrents.release.drop_files", self.on_release_drop_files)
         self.handle(RUN_CHANGED, self.on_run_changed)
         self.handle("series.source.removed", self.on_source_removed)
@@ -1375,10 +1373,6 @@ class TorrentsModule(BaseModule):
     async def on_release_watch(self, env: Envelope) -> dict:
         url = await self._canonical(env.payload["url"])
         return (await self.releases.watch(url, env.payload["release"], bool(env.payload["watched"]))).model_dump(mode="json")
-
-    async def on_release_priorities(self, env: Envelope) -> None:
-        url = await self._canonical(env.payload["url"])
-        await self.releases.priorities(url, env.payload["release"], set(env.payload.get("skip") or []))
 
     async def on_release_drop_files(self, env: Envelope) -> None:
         url = await self._canonical(env.payload["url"])

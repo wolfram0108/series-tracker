@@ -79,18 +79,12 @@ def lines(inputs: Inputs) -> dict[str, dict[str, str]]:
     return out
 
 
-EXCLUDED = "excluded"
-
-
-def _place_of(result: dict | None, manual: dict | None) -> Place | str | None:
+def _place_of(result: dict | None, manual: dict | None) -> Place | None:
+    """The season and episode of a file: the hand's, else the rule's; none — the file is red, it gives no row."""
     if manual is not None:
-        if manual["excluded"]:
-            return EXCLUDED
         return Place(manual["season"], manual["episode"], manual.get("episode_last"))
     if not result:
         return None
-    if result.get("excluded"):
-        return EXCLUDED
     season = result.get("season") or 1
     if result.get("episode") is not None:
         return Place(season, result["episode"])
@@ -99,7 +93,7 @@ def _place_of(result: dict | None, manual: dict | None) -> Place | str | None:
     return None
 
 
-def _places(inputs: Inputs) -> dict[str, Place | str | None]:
+def _places(inputs: Inputs) -> dict[str, Place | None]:
     files_results, files_manual = inputs.results.get(EditorTab.FILES, {}), inputs.manual.get(EditorTab.FILES, {})
     return {item_of(r.release, f.path): _place_of(files_results.get(item_of(r.release, f.path)),
                                                     files_manual.get(item_of(r.release, f.path)))
@@ -128,9 +122,7 @@ def _folder_of(kind: str, result: dict | None, manual: dict | None, stream: dict
     """(folder, how): the user's folder, else the rule's, else the title of the track in its file (`how`: `manual`, the
     name of the rule, or `meta`). A rule overrides what the file says; the hand overrides both."""
     if manual is not None:
-        return (None, "manual") if manual["excluded"] else (manual["folder"], "manual")
-    if result and result.get("excluded"):
-        return None, None
+        return manual["folder"], "manual"
     key = "voice_folder" if kind == "audio" else "subtitle_folder"
     if result and result.get(key):
         return result[key], _rule_of(result)
@@ -156,24 +148,23 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
               where: "Place | str | None" = None) -> dict:
         result, manual = inputs.results.get(tab, {}).get(item), inputs.manual.get(tab, {}).get(item)
         folder, how = _folder_of(kind, result, manual, stream)
-        excluded = bool(manual and manual["excluded"]) or bool(result and result.get("excluded"))
         folder_kind = "voice" if kind == "audio" else "subtitles"
         facts = folder_facts.get((folder_kind, folder), {}) if folder else {}
         language = (result or {}).get("language") or facts.get("language") or (stream or {}).get("language") or ""
         # The type is what a rule or the folder names; a flag of the file's container is no type (DESIGN.md 7.1.1).
         subtitle_type = (result or {}).get("subtitle_type") or facts.get("subtitle_type") or ""
         # A track waits for the operator while it has no folder or no known language: a rule, a hand or the file gives them.
-        waiting = not excluded and (not folder or language.strip().lower() in UNKNOWN_LANGUAGES)
+        waiting = not folder or language.strip().lower() in UNKNOWN_LANGUAGES
         # The file and its episode, and the stream (its place in the file and what it is): the window groups tracks by them.
-        entry = {"item": item, "line": line, "kind": kind, "folder": folder, "by": how, "excluded": excluded, "waiting": waiting,
+        entry = {"item": item, "line": line, "kind": kind, "folder": folder, "by": how, "waiting": waiting,
                  "language": language, "subtitle_type": subtitle_type if kind == "subtitles" else "", "path": path,
                  "place": _place_json(where),
                  "stream": None if stream is None else {key: stream.get(key) for key in _STREAM_KEYS}}
         view["tabs"][tab].append(entry)
-        if folder and not excluded and tab == EditorTab.SUBTITLES and path:
+        if folder and tab == EditorTab.SUBTITLES and path:
             owner = next(each for each in paths_of if item.startswith(f"{each}{KEYS_SEP}"))
             fonts.setdefault(folder, set()).update(fonts_of(paths_of[owner], path))
-        if folder and not excluded:
+        if folder:
             named.setdefault((folder_kind, folder), {"kind": folder_kind, "name": folder, "items": 0,
                                                      "manual": (folder_kind, folder) in folder_facts,
                                                      "language": facts.get("language", ""),
@@ -192,7 +183,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
             result, manual = inputs.results.get(EditorTab.FILES, {}).get(item), inputs.manual.get(EditorTab.FILES, {}).get(item)
             view["tabs"][EditorTab.FILES].append({
                 "item": item, "path": f.path, "line": files_line(f.path), "kind": kind.value, "size": f.size,
-                "priority": f.priority, "excluded": where == EXCLUDED,
+                "priority": f.priority,
                 "place": None if not isinstance(where, Place) else {"season": where.season, "episode": where.episode,
                                                                     "last": where.last},
                 "by": "manual" if manual is not None else _rule_of(result),
@@ -221,7 +212,8 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                     kind = TRACK_KINDS[s["kind"]]
                     entry = track(EditorTab.STREAMS, item, stream_line(s["kind"], s["index"], s["language"], s["title"],
                                                                        s["codec"]), kind, s, video, where)
-                    if release.state in SHOWN and not entry["excluded"] and kind in ROW_KINDS:
+                    # A red track (no folder or no language yet) is no row: only what the editor placed goes on.
+                    if release.state in SHOWN and not entry["waiting"] and kind in ROW_KINDS:
                         rows.append(_row(release, item, track_link(release.release, video, _nth(streams, s)), video, where,
                                          kind, entry, s, height, state, why))
             if len(paths) != 1:
@@ -239,7 +231,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                                                                          "title": "", "codec": "", "forced": False}]:
                     item = item_of(release.release, f.path)
                     entry = track(tab, item, track_file_line(f.path, where.word), track_kind, s, f.path, where)
-                    if release.state in SHOWN and not entry["excluded"] and s.get("kind") in TRACK_KINDS \
+                    if release.state in SHOWN and not entry["waiting"] and s.get("kind") in TRACK_KINDS \
                             and track_kind in ROW_KINDS:
                         rows.append(_row(release, item_of(release.release, f.path, s["index"]),
                                          track_link(release.release, video, _nth(_probed(inputs, release.release, f.path), s),

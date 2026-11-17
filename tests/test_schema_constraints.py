@@ -74,27 +74,30 @@ def test_the_files_and_versions_of_a_release_go_with_it(conn):
 
 
 def test_a_manual_place_is_an_episode_of_a_season_for_a_file_and_a_folder_for_a_track(conn):
-    insert = ("INSERT INTO unpack_assignments (url, tab, item, season, episode, episode_last, folder, excluded) "
-              "VALUES ('u', ?, ?, ?, ?, ?, ?, ?)")
-    conn.execute(insert, ("files", "Show/E01.mkv", 1, 1, None, None, 0))
-    conn.execute(insert, ("files", "Show/E01-E02.mkv", 1, 1, 2, None, 0))
-    conn.execute(insert, ("files", "Show/extra.mkv", None, None, None, None, 1))
-    conn.execute(insert, ("voices", "Show/Sound/E01.mka", None, None, None, "Студия", 0))
-    conn.execute(insert, ("streams", "Show/E01.mkv#2", None, None, None, "Студия", 0))
-    for bad in (("files", "a", None, 1, None, None, 0), ("files", "b", 1, None, None, None, 0),
-                ("files", "c", 1, 1, None, "Студия", 0), ("files", "d", 1, 3, 2, None, 0),
-                ("voices", "e", None, None, None, None, 0), ("subtitles", "f", 1, 1, None, "Субтитры", 0),
-                ("other", "g", None, None, None, None, 1)):
+    """The hand places, it never leaves out: a file has a season and an episode, a track a folder; nothing else is stored."""
+    insert = ("INSERT INTO unpack_assignments (url, tab, item, season, episode, episode_last, folder) "
+              "VALUES ('u', ?, ?, ?, ?, ?, ?)")
+    conn.execute(insert, ("files", "Show/E01.mkv", 1, 1, None, None))
+    conn.execute(insert, ("files", "Show/E01-E02.mkv", 1, 1, 2, None))
+    conn.execute(insert, ("voices", "Show/Sound/E01.mka", None, None, None, "Студия"))
+    conn.execute(insert, ("streams", "Show/E01.mkv#2", None, None, None, "Студия"))
+    for bad in (("files", "a", None, 1, None, None), ("files", "b", 1, None, None, None),
+                ("files", "c", 1, 1, None, "Студия"), ("files", "d", 1, 3, 2, None), ("files", "x", None, None, None, None),
+                ("voices", "e", None, None, None, None), ("subtitles", "f", 1, 1, None, "Субтитры"),
+                ("other", "g", None, None, None, "Студия")):
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(insert, bad)
     with pytest.raises(sqlite3.IntegrityError):
-        conn.execute(insert, ("files", "Show/E01.mkv", 1, 2, None, None, 0))
+        conn.execute(insert, ("files", "Show/E01.mkv", 1, 2, None, None))
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(unpack_assignments)")]
+    assert "excluded" not in columns
 
 
 def test_a_folder_of_the_editor_is_one_by_its_name_and_of_a_known_type(conn):
     conn.execute("INSERT INTO unpack_folders (url, kind, name, subtitle_type) VALUES ('u', 'subtitles', 'Надписи', 'signs')")
     conn.execute("INSERT INTO unpack_folders (url, kind, name) VALUES ('u', 'voice', 'Надписи')")
     for bad in ("('u', 'subtitles', 'Надписи', '')", "('u', 'voice', '', '')", "('u', 'subtitles', 'x', 'other')",
+                "('u', 'subtitles', 'y', 'forced')",
                 "('u', 'video', 'x', '')"):
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(f"INSERT INTO unpack_folders (url, kind, name, subtitle_type) VALUES {bad}")

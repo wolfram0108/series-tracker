@@ -4,8 +4,10 @@ unpack_assignments, unpack_sources (modules/unpack/repository.py).
 
 A release `torrents` downloaded is read here: every video, sound and subtitles file by ffprobe once per version and size
 (the video of a source is never compared by content); the files are laid out by the rules of the four tabs of the editor
-and by what the user placed by hand (modules/unpack/layout.py), and every sound and subtitles track of a placed video is a
-row of the table of the page, as a row of a site. Every tab of the editor of a source («Файлы», «Озвучки», «Субтитры»,
+and by what the user placed by hand (modules/unpack/layout.py). The editor places, it never leaves out: an item is placed
+(green) or not (red); every placed sound and subtitles track of a placed video is a row of the table of the page, as a row
+of a site, and a red one is no row — what goes out of the output is the work of the constructor of the series. Every file
+of a release is downloaded: nothing here tells `torrents` what not to download. Every tab of the editor of a source («Файлы», «Озвучки», «Субтитры»,
 «Контейнеры») has its own profile of rules (the kind `torrent`), empty until the owner writes rules in it, made when the
 editor is first opened; nothing is placed by rules no one wrote. A page no torrent source lists any more is forgotten with
 its profiles.
@@ -15,9 +17,9 @@ Queries / commands (a page is named by any mirror of its tracker; the module kee
       page): a release downloaded for the first time gives none, a release being updated gives its rows not obtained
   unpack.editor.get {url} → {url, profiles: {files, voices, subtitles, streams}, view} — the editor of the page: its releases,
       the items of every tab with their line, their place or folder and what put them there, the folders, what is unplaced
-  unpack.assign {url, tab, items, season?, episode?, episode_last?, folder?, excluded?, in_order?} — placed by hand (a drag,
-      «Не брать»); `in_order`: the items in the order given take the episodes from `episode` on, one each (files dropped on
-      a season)
+  unpack.assign {url, tab, items, season?, episode?, episode_last?, folder?, in_order?} — placed by hand (a drag): a file
+      in a season and an episode, a track in a folder; `in_order`: the items in the order given take the episodes from
+      `episode` on, one each (files dropped on a season)
   unpack.unassign {url, tab, items} — back to what the rules give
   unpack.folder.set {url, kind: voice | subtitles, name, language?, subtitle_type?} / unpack.folder.delete {url, kind, name}
 Events out:
@@ -25,9 +27,8 @@ Events out:
   unpack.editor.changed {url} — the editor of the page changed (a window shows it again)
   unpack.read.progress {url, release, done, total} — the files of a version read so far, while they are read; the editor
       gives the same as `reading` of a release, for a window opened in the middle of a read
-Events in: torrents.release.changed (a release with its files: the files the editor leaves out of the tab «Файлы» — by a
-  rule or «Не брать» — are told to `torrents` not to download, and nothing else; a ready one is read; a news that changes
-  only how far the files are downloaded is passed by), rules.profile.changed (a profile of the editor changed),
+Events in: torrents.release.changed (a release with its files: a ready one is read; a news that changes only how far the
+  files are downloaded is passed by), rules.profile.changed (a profile of the editor changed),
   series.source.added / updated / removed and series.deleted (a page no source lists any more is forgotten).
 """
 from __future__ import annotations
@@ -40,7 +41,7 @@ from core.db import Database
 from core.envelope import Envelope
 from core.ffprobe import layout_of
 
-from .layout import EXCLUDED, Inputs, _places, compose, item_of, lines
+from .layout import Inputs, compose, lines
 from .repository import UnpackRepository
 
 TABLE_CHANGED_TOPIC = "unpack.table.changed"
@@ -57,7 +58,6 @@ class UnpackModule(BaseModule):
 
     def __init__(self, bus, db: Database) -> None:
         self.repo = UnpackRepository(db)
-        self._skips: dict[tuple[str, str], frozenset[str]] = {}  # the files not to download told to torrents last
         self._reading: dict[tuple[str, str], tuple[int, int]] = {}  # (url, release) → (files read, files to read)
         # What the module last took of each release: a news that changes only how far its files are is none of its business.
         self._shapes: dict[tuple[str, str], tuple] = {}
@@ -168,17 +168,12 @@ class UnpackModule(BaseModule):
     async def on_assign(self, env: Envelope) -> None:
         p, url = env.payload, await self._page(env.payload["url"])
         await self.repo.assign(url, p["tab"], list(p["items"]), season=p.get("season"), episode=p.get("episode"),
-                               episode_last=p.get("episode_last"), folder=p.get("folder"), excluded=bool(p.get("excluded")),
-                               in_order=bool(p.get("in_order")))
-        if p["tab"] == EditorTab.FILES:
-            await self._retell(url)
+                               episode_last=p.get("episode_last"), folder=p.get("folder"), in_order=bool(p.get("in_order")))
         self._changed(url)
 
     async def on_unassign(self, env: Envelope) -> None:
         url = await self._page(env.payload["url"])
         await self.repo.unassign(url, env.payload["tab"], list(env.payload["items"]))
-        if env.payload["tab"] == EditorTab.FILES:
-            await self._retell(url)
         self._changed(url)
 
     async def on_folder_set(self, env: Envelope) -> None:
@@ -200,8 +195,6 @@ class UnpackModule(BaseModule):
         if self._shapes.get((release.url, release.release)) == shape:
             return
         self._shapes[(release.url, release.release)] = shape
-        if release.files and release.state in (ReleaseState.DOWNLOADING, ReleaseState.UPDATING, ReleaseState.METADATA):
-            await self._tell_skips(release)
         if release.state == ReleaseState.READY and release.folder:
             await self._read(release)
         self._changed(release.url)
@@ -228,29 +221,11 @@ class UnpackModule(BaseModule):
         self._reading[key] = (done, total)
         self.publish_event(READ_PROGRESS_TOPIC, {"url": key[0], "release": key[1], "done": done, "total": total})
 
-    async def _tell_skips(self, release: ReleaseView) -> None:
-        """The files the editor leaves out (a rule of the tab «Файлы» or «Не брать») are not downloaded; nothing else holds a
-        file back, so what the window shows of a file is all there is to it."""
-        places = _places(await self._inputs(release.url, [release]))
-        skip = frozenset(f.path for f in release.files if places.get(item_of(release.release, f.path)) == EXCLUDED)
-        if self._skips.get((release.url, release.release)) == skip:
-            return
-        self._skips[(release.url, release.release)] = skip
-        self.send_command("torrents.release.priorities", {"url": release.url, "release": release.release,
-                                                          "skip": sorted(skip)})
-
-    async def _retell(self, url: str) -> None:
-        """What the editor leaves out changed: the releases of the page being downloaded or kept hear of it."""
-        for release in await self._releases(url):
-            if release.files and release.state != ReleaseState.ARCHIVED:
-                await self._tell_skips(release)
-
     async def on_profile_changed(self, env: Envelope) -> None:
         profile_id = env.payload.get("profile_id")
         for url in await self._pages():
             stored = await self.repo.profiles(url) or {}
             if profile_id in {stored.get(column) for column in PROFILE_COLUMNS.values()}:
-                await self._retell(url)
                 self._changed(url)
 
     async def _pages(self) -> list[str]:

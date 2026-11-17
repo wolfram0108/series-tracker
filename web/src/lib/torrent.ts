@@ -48,7 +48,6 @@ export interface FileEntry {
   kind: FileKind
   size: number
   priority: number
-  excluded: boolean
   place: Place | null
   by: string | null
   problem?: string | null
@@ -59,7 +58,6 @@ export interface TrackEntry {
   kind: "audio" | "subtitles"
   folder: string | null
   by: string | null
-  excluded: boolean
   /** No folder or no known language yet (none, `und`): the track waits for a rule or a hand. */
   waiting: boolean
   language: string
@@ -136,17 +134,16 @@ export function ruleOf(by: string | null): { rule: string; row: number | null } 
 /** How a track got its folder when no rule and no hand placed it: its title in the file (modules/unpack/layout.py). */
 export const FROM_META = "meta"
 
-export type FileFilter = "all" | "unplaced" | "placed" | "excluded" | "notInvolved"
+export type FileFilter = "all" | "unplaced" | "placed" | "notInvolved"
 const INVOLVED: readonly FileKind[] = ["video", "audio", "subtitles"]
 
 export function fileFilterOf(entry: FileEntry): Exclude<FileFilter, "all"> {
   if (!INVOLVED.includes(entry.kind)) return "notInvolved"
-  if (entry.excluded) return "excluded"
   return entry.place ? "placed" : "unplaced"
 }
 
 export function fileCounts(entries: readonly FileEntry[]): Record<FileFilter, number> {
-  const counts: Record<FileFilter, number> = { all: entries.length, unplaced: 0, placed: 0, excluded: 0, notInvolved: 0 }
+  const counts: Record<FileFilter, number> = { all: entries.length, unplaced: 0, placed: 0, notInvolved: 0 }
   for (const entry of entries) counts[fileFilterOf(entry)]++
   return counts
 }
@@ -181,7 +178,7 @@ export function draftOf(entries: readonly FileEntry[]): DraftSeason[] {
   const seasons = new Map<number, Map<string, DraftEpisode>>()
   const manual = new Set<number>()
   for (const entry of entries) {
-    if (!entry.place || entry.excluded) continue
+    if (!entry.place) continue
     const { season, episode, last } = entry.place
     const episodes = seasons.get(season) ?? new Map<string, DraftEpisode>()
     seasons.set(season, episodes)
@@ -200,13 +197,13 @@ export function draftOf(entries: readonly FileEntry[]): DraftSeason[] {
 
 // --- the tabs of the tracks -----------------------------------------------------------------------------------------
 
-export type TrackFilter = "all" | "unplaced" | "placed" | "excluded"
+export type TrackFilter = "all" | "unplaced" | "placed"
 export function trackCounts(entries: readonly TrackEntry[]): Record<TrackFilter, number> {
   return { all: entries.length, unplaced: entries.filter((entry) => entry.waiting).length,
-    placed: entries.filter((entry) => !entry.waiting && !entry.excluded).length, excluded: entries.filter((entry) => entry.excluded).length }
+    placed: entries.filter((entry) => !entry.waiting).length }
 }
 export const trackFits = (entry: TrackEntry, filter: TrackFilter): boolean =>
-  filter === "all" || (filter === "placed" ? !entry.waiting && !entry.excluded : filter === "excluded" ? entry.excluded : entry.waiting)
+  filter === "all" || (filter === "placed" ? !entry.waiting : entry.waiting)
 
 /** Tracks grouped by the episode of their file; those of no episode last. */
 export function byEpisode(entries: readonly TrackEntry[]): { place: Place | null; entries: TrackEntry[] }[] {
@@ -238,7 +235,7 @@ export interface FolderView extends Folder {
 /** The folders of a kind with what their items say of them (episodes, the rule that made them). */
 export function foldersOf(folders: readonly Folder[], entries: readonly TrackEntry[], kind: Folder["kind"]): FolderView[] {
   return folders.filter((folder) => folder.kind === kind).map((folder) => {
-    const mine = entries.filter((entry) => entry.folder === folder.name && !entry.excluded)
+    const mine = entries.filter((entry) => entry.folder === folder.name)
     const bySeason = new Map<number, number[]>()
     for (const entry of mine) {
       if (!entry.place) continue
@@ -275,7 +272,7 @@ export function folderRows(view: EditorView, kind: Folder["kind"]): FolderRow[] 
   const order = (a: FolderTrack, b: FolderTrack): number => !a.entry.place ? 1 : !b.entry.place ? -1
     : a.entry.place.season - b.entry.place.season || a.entry.place.episode - b.entry.place.episode || a.entry.item.localeCompare(b.entry.item)
   return foldersOf(view.folders, tracks.map((each) => each.entry), kind).map((folder) => {
-    const mine = tracks.filter((each) => each.entry.folder === folder.name && !each.entry.excluded).sort(order)
+    const mine = tracks.filter((each) => each.entry.folder === folder.name).sort(order)
     return { ...folder, tracks: mine, noLanguage: mine.filter((each) => unknownLanguage(each.entry.language)).length }
   })
 }
@@ -290,8 +287,6 @@ export interface ContainerStream {
   unplaced: boolean
   /** Some track of it goes out with no known language (none, `und`), a rule's or the file's: a rule has to name it. */
   noLanguage: boolean
-  /** Some track of it is left out of the output (by a hand or a rule): it lies in no folder and the row says so. */
-  excluded: boolean
 }
 export interface ContainerGroup { key: string; season: number | null; episodes: string; files: number; streams: ContainerStream[] }
 
@@ -322,10 +317,9 @@ export function containerGroups(files: readonly ContainerFile[], entries: readon
       const unplaced = facts.kind !== "video" && items.some((item) => !!byItem.get(item)?.waiting)
       const noLanguage = facts.kind !== "video" && items.some((item) => {
         const entry = byItem.get(item)
-        return !!entry && !entry.excluded && ["", "und"].includes(entry.language.trim().toLowerCase())
+        return !!entry && ["", "und"].includes(entry.language.trim().toLowerCase())
       })
-      const excluded = facts.kind !== "video" && items.some((item) => !!byItem.get(item)?.excluded)
-      return { facts, label: streamLabel(facts, n), items: facts.kind === "video" ? [] : items, folder, unplaced, noLanguage, excluded }
+      return { facts, label: streamLabel(facts, n), items: facts.kind === "video" ? [] : items, folder, unplaced, noLanguage }
     })
     return { key, season: group.season, files: group.files.length, streams,
       episodes: spansOf(group.files.flatMap((file) => file.place ? [file.place.episode] : [])) }

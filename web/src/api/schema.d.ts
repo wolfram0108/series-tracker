@@ -2018,7 +2018,7 @@ export interface components {
         /**
          * AssignBody
          * @description Items of a tab placed by hand: a file in a season and an episode (to `episode_last` for a file of several), a track
-         *     in a folder by its name, or left out («Не брать»).
+         *     in a folder by its name. Nothing is left out here: what goes out of the output is the constructor's of the series.
          */
         AssignBody: {
             /** Url */
@@ -2038,11 +2038,6 @@ export interface components {
             episode_last?: number | null;
             /** Folder */
             folder?: string | null;
-            /**
-             * Excluded
-             * @default false
-             */
-            excluded: boolean;
             /**
              * In Order
              * @default false

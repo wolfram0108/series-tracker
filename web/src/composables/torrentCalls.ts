@@ -26,9 +26,9 @@ type Schemas = components["schemas"]
 /** A body whose fields with a default on the core may be left out. */
 type WithDefaults<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 
-/** Items placed by hand: a file in an episode (to `episode_last` for a file of several), a track in a folder, or left out. */
-export const assign = (body: WithDefaults<Schemas["AssignBody"], "excluded" | "in_order">): Promise<Answer<unknown>> =>
-  call(() => api.POST("/api/torrent/editor/assign", { body: { excluded: false, in_order: false, ...body } }), WORDS)
+/** Items placed by hand: a file in an episode (to `episode_last` for a file of several), a track in a folder. */
+export const assign = (body: WithDefaults<Schemas["AssignBody"], "in_order">): Promise<Answer<unknown>> =>
+  call(() => api.POST("/api/torrent/editor/assign", { body: { in_order: false, ...body } }), WORDS)
 
 export const unassign = (url: string, tab: EditorTab, items: string[]): Promise<Answer<unknown>> =>
   call(() => api.POST("/api/torrent/editor/unassign", { body: { url, tab, items } }), WORDS)

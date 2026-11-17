@@ -34,10 +34,12 @@ const props = defineProps<{
   codes: string[]
   /** A card of a tab of the tracks of a release: the actions of the editor are offered too. */
   editor?: boolean
+  /** A card of a tab of the torrent: no action leaves out. */
+  torrent?: boolean
 }>()
 const emit = defineEmits<{ toggle: []; save: []; delete: []; move: [dir: -1 | 1] }>()
 
-const ACTIONS = actionOptions(props.editor)
+const ACTIONS = actionOptions(props.editor, props.torrent)
 // The cell clicked, and the row its choice was extended to (Shift+click): the cells of the column between the two are
 // chosen together.
 const selected = ref<Cell | null>(null)

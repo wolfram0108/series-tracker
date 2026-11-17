@@ -45,6 +45,8 @@ const props = defineProps<{
   isOpen: boolean
   /** A card of a tab of the tracks of a release: the actions of the editor are offered too. */
   editor?: boolean
+  /** A card of a tab of the torrent: no action leaves out. */
+  torrent?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -55,7 +57,7 @@ const emit = defineEmits<{
 }>()
 
 const CONDITION_TYPES = conditionOptions()
-const ACTION_TYPES = actionOptions(props.editor)
+const ACTION_TYPES = actionOptions(props.editor, props.torrent)
 
 const toggleIcon = computed(() => (props.isOpen ? "pi-chevron-down" : "pi-chevron-right"))
 

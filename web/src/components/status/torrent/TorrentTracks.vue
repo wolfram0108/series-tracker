@@ -16,9 +16,8 @@ const emit = defineEmits<{ failure: [string] }>()
 
 type Shown = TrackFilter | "fonts"
 const kind = computed(() => props.tab === "voices" ? "voice" as const : "subtitles" as const)
-const FILTERS = computed<Shown[]>(() => props.tab === "subtitles" ? ["all", "unplaced", "placed", "excluded", "fonts"]
-  : ["all", "unplaced", "placed", "excluded"])
-const filterWord = (each: Shown): string => t(({ all: "torrent.filter.all", fonts: "torrent.filter.fonts", excluded: "torrent.filter.excluded",
+const FILTERS = computed<Shown[]>(() => props.tab === "subtitles" ? ["all", "unplaced", "placed", "fonts"] : ["all", "unplaced", "placed"])
+const filterWord = (each: Shown): string => t(({ all: "torrent.filter.all", fonts: "torrent.filter.fonts",
   unplaced: props.tab === "voices" ? "torrent.filter.noVoice" : "torrent.filter.noFolder", placed: "torrent.filter.inFolder" } as const)[each])
 const filter = ref<Shown>("all")
 const entries = computed(() => props.editor.view.tabs[props.tab])
@@ -26,13 +25,14 @@ const fonts = computed(() => props.editor.view.tabs.files.filter((file) => file.
 const counts = computed(() => ({ ...trackCounts(entries.value), fonts: fonts.value.length }))
 const groups = computed(() => filter.value === "fonts" ? []
   : byEpisode(entries.value.filter((entry) => trackFits(entry, filter.value as TrackFilter))))
-const dotOf = (entry: TrackEntry): string => entry.excluded ? "is-excluded" : entry.waiting ? "is-unplaced" : "is-placed"
+// A row is painted by its state: red no folder or no language yet (it goes no further), green placed.
+const stateOf = (entry: TrackEntry): string => entry.waiting ? "is-unplaced" : "is-placed"
 
 const groupTitle = (group: (typeof groups.value)[number]): string => group.place
   ? t("torrent.tracks.group", { season: group.place.season, episode: group.place.last ? `${group.place.episode}–${group.place.last}` : group.place.episode })
   : t("torrent.tracks.noEpisode")
 const groupSide = (group: (typeof groups.value)[number]): string => t("torrent.tracks.count",
-  { n: group.entries.length, placed: group.entries.filter((each) => each.folder && !each.excluded).length })
+  { n: group.entries.length, placed: group.entries.filter((each) => !each.waiting).length })
 
 const pick = useTorrentPick()
 const chosenEntries = computed(() => entries.value.filter((entry) => pick.has(entry.item)))
@@ -86,7 +86,6 @@ async function create(): Promise<void> {
       <div class="torrent-filters" role="group">
         <button v-for="each in FILTERS" :key="each" type="button" class="torrent-filter" :class="{ active: filter === each }"
                 :aria-pressed="filter === each" @click="filter = each">
-          <i v-if="each !== 'all'" class="torrent-dot" :class="each === 'fonts' ? 'is-notInvolved' : `is-${each}`" aria-hidden="true" />
           {{ filterWord(each) }} <b>{{ counts[each] }}</b>
         </button>
       </div>
@@ -99,11 +98,10 @@ async function create(): Promise<void> {
             <span class="torrent-name">{{ groupTitle(group) }}</span><span class="torrent-side">{{ groupSide(group) }}</span>
           </div>
           <div v-for="entry in group.entries" :key="entry.item" class="torrent-row is-nested track-row"
-               :class="{ 'is-chosen': pick.has(entry.item), 'is-unplaced': dotOf(entry) === 'is-unplaced', 'is-excluded': entry.excluded }">
+               :class="[stateOf(entry), { 'is-chosen': pick.has(entry.item) }]">
             <span class="torrent-grip" draggable="true" :title="t('torrent.drag')" aria-hidden="true"
                   @dragstart="pick.dragStart($event, [entry.item])" @dragend="pick.dragEnd"><i class="pi pi-ellipsis-v" /></span>
             <input type="checkbox" :checked="pick.has(entry.item)" :aria-label="entry.path" @change="pick.toggle(entry.item)">
-            <i class="torrent-dot" :class="dotOf(entry)" aria-hidden="true" />
             <TorrentLine :line="entry.line" />
           </div>
         </template>
@@ -112,7 +110,7 @@ async function create(): Promise<void> {
             <span class="torrent-side">{{ t("torrent.tracks.fonts", { n: fonts.length }) }}</span></div>
           <template v-if="filter === 'fonts'">
             <div v-for="font in fonts" :key="font.item" class="torrent-row is-nested">
-              <i class="torrent-dot is-notInvolved" aria-hidden="true" /><span class="torrent-name">{{ font.path }}</span>
+              <span class="torrent-name">{{ font.path }}</span>
             </div>
           </template>
         </template>
