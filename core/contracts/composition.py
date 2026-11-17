@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from .compilation import CompilationView
 from .output_settings import EpisodeSettings, LeverSpec, LevelSettings
-from .release_table import RowState, RowTrack, TableState
+from .release_table import RowState, RowTrack, SubtitleType, TableState
 from .rules import RuleResult
 
 
@@ -68,7 +67,7 @@ class CompositionRow(BaseModel):
     track: RowTrack = RowTrack.SOUND
     # The language of the track and the type of subtitles (TableRow.language, .subtitle_type).
     language: str = ""
-    subtitle_type: Literal["", "full", "signs", "forced"] = ""
+    subtitle_type: SubtitleType = ""
     # The source did not give this episode of this player in its last read (a part of the page that did not answer, or a
     # read that failed): the row stands from an earlier read, and every window shows it as not current.
     stale: bool = False

@@ -80,6 +80,19 @@ def test_every_track_of_a_placed_video_and_of_a_sound_beside_it_is_a_row_with_th
     assert view["unplaced"] == {"files": 0, "voices": 1, "subtitles": 0, "streams": 0}
 
 
+def test_a_flag_of_the_files_container_is_no_type_of_subtitles_and_no_fact_of_the_row():
+    """The source tells of subtitles their name, language and type (full, signs); how a track lies in a container (forced,
+    default) is the output's (DESIGN.md 7.1.1): the flags of the release's own file make neither a type nor a field."""
+    r = release(["Show/E01.mkv"])
+    facts = streams(("video", 0, "", ""), ("subtitle", 1, "rus", "Надписи"))
+    facts["streams"][1].update(forced=True, default=True)
+    inputs = Inputs(releases=[r], manual={}, folders=[], streams={"page": {"Show/E01.mkv": facts}},
+                    results={"files": numbered({"Show/E01.mkv": (1, 1)})})
+    view, rows = compose(inputs)
+    assert [(entry["folder"], entry["subtitle_type"]) for entry in view["tabs"]["streams"]] == [("Надписи", "")]
+    assert [(row.subtitle_type, "forced" in row.site_fields, "default" in row.site_fields) for row in rows] == [("", False, False)]
+
+
 def test_the_file_names_the_folder_and_the_language_by_itself_und_waits_and_a_rule_overrides_the_file():
     r = release(["Show/E01.mkv"])
     video = item_of("page", "Show/E01.mkv")

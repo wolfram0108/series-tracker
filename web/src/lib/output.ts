@@ -582,23 +582,30 @@ export function sourceMarks(
 
 export type QueueName = Schemas["Queue"]
 export type QueueRow = Schemas["QueueRow"]
+/** A box of a variant: taken at all, or how its track lies in the output container (the subtitles). */
+export type VariantFlag = "allowed" | "default" | "forced"
 
 /** The levers that act on a queue, found by their description, not by their names: its order (`variant_order`), the flag
  *  that leaves a variant out of it (a flag of a variant) and, for a voice-over, the flag that takes its group at all. */
 export interface QueueLevers {
   order?: string
   allow?: string
+  /** How the track of a variant lies in the output container (the subtitles): the default one, the forced one. */
+  default?: string
+  forced?: string
   take?: string
   /** The groups of variants the user declared equal (the queues of single videos only). */
   same?: string
 }
 
 export function queueLevers(specs: readonly LeverSpec[], queue: QueueName): QueueLevers {
-  const of = (target: LeverSpec["target"], shape: LeverSpec["shape"]) =>
-    specs.find((spec) => spec.queue === queue && spec.target === target && spec.shape === shape)?.name
+  const of = (target: LeverSpec["target"], shape: LeverSpec["shape"], flag: LeverSpec["flag"] = null) =>
+    specs.find((spec) => spec.queue === queue && spec.target === target && spec.shape === shape && (spec.flag ?? null) === flag)?.name
   return {
     order: of(namesGroup(queue) ? "none" : "group", "variant_order"),
     allow: of("variant", "flag"),
+    default: of("variant", "flag", "default"),
+    forced: of("variant", "flag", "forced"),
     take: queue === "voice" ? of("group", "flag") : undefined,
     same: singleQueue(queue) ? of("none", "variant_sets") : undefined,
   }

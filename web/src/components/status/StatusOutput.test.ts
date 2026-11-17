@@ -45,11 +45,11 @@ const composition = (): Composition => ({
 const queues = (): Queues => ({
   series_id: 1, season: 1, episode: 1, markup_follows: true,
   reference: { order_level: "default", same_level: "default", rows: [
-    { group: "Ruchime", source_id: 7, player: "vibix", player_label: "Vibix", height: 1080, episodes: "1", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "" },
-    { group: "AniStar", source_id: 8, player: "kodik", player_label: "Kodik", height: 720, episodes: "1", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "" },
+    { group: "Ruchime", source_id: 7, player: "vibix", player_label: "Vibix", height: 1080, episodes: "1", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "", default: false, default_level: "default", forced: false, forced_level: "default" },
+    { group: "AniStar", source_id: 8, player: "kodik", player_label: "Kodik", height: 720, episodes: "1", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "", default: false, default_level: "default", forced: false, forced_level: "default" },
   ] },
   groups: [{ group: "AniStar", take: true, take_level: "default", order_level: "default", same_level: "default", rows: [
-    { group: "AniStar", source_id: 8, player: "kodik", player_label: "Kodik", height: 720, episodes: "1", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "" },
+    { group: "AniStar", source_id: 8, player: "kodik", player_label: "Kodik", height: 720, episodes: "1", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "", default: false, default_level: "default", forced: false, forced_level: "default" },
   ] }],
 })
 

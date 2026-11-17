@@ -5,7 +5,7 @@ import { t } from "../../../i18n"
 import type { Queues } from "../../../composables/outputCalls"
 import type { FailedAttempt, HeldFile, SubtitleLine, Taken } from "../../../lib/plan"
 import type { SameGroups } from "../../../lib/same"
-import type { EpisodeStatus, EpisodeView, QueueName, QueueRow, SourceMark as Mark, TrackCell } from "../../../lib/output"
+import type { EpisodeStatus, EpisodeView, QueueName, QueueRow, SourceMark as Mark, TrackCell, VariantFlag } from "../../../lib/output"
 import FoldButton from "../../FoldButton.vue"
 import SyncButton from "../../SyncButton.vue"
 import CompilationTable, { type CompilationRow } from "./CompilationTable.vue"
@@ -45,7 +45,7 @@ const emit = defineEmits<{
   (e: "retry", group: string): void
   (e: "redo", group: string): void
   (e: "order", queue: QueueName, group: string | null, rows: QueueRow[]): void
-  (e: "allow", queue: QueueName, row: QueueRow, allowed: boolean): void
+  (e: "allow", queue: QueueName, row: QueueRow, allowed: boolean, flag: VariantFlag): void
   (e: "take", group: string, taken: boolean): void
   (e: "reset", queue: QueueName, group: string | null): void
   (e: "same", queue: QueueName, groups: SameGroups | null): void
@@ -106,28 +106,28 @@ const failedOfGroup = (group: string) => props.failed.filter((each) => each.held
       <TrackTable
         v-else-if="tab === 'tracks'" :view="view" :cells="cells" :marks="marks" :busy="busy" :subtitles="subtitles"
         @refetch="emit('refetch', $event)" @retry="emit('retry', $event)" @redo="emit('redo', $event)"
-        @drop-subtitles="emit('allow', 'subtitles', $event, false)"
+        @drop-subtitles="emit('allow', 'subtitles', $event, false, 'allowed')"
       />
       <QueuePanel
         v-else-if="tab === SUBTITLES" queue="subtitles" level="episode" :view="queues?.subtitles" :marks="marks" :busy="busy"
-        @order="emit('order', 'subtitles', null, $event)" @allow="(row, allowed) => emit('allow', 'subtitles', row, allowed)"
+        @order="emit('order', 'subtitles', null, $event)" @allow="(row, allowed, flag) => emit('allow', 'subtitles', row, allowed, flag)"
         @reset="emit('reset', 'subtitles', null)"
       />
       <QueuePanel
         v-else-if="tab === 'reference'" queue="reference" level="episode" :view="queues?.reference" :marks="marks" :held="held?.video" :taken="taken?.reference" :failed="failed" :busy="busy"
         :hint="compilations ? t('output.queue.hintRef2') : undefined"
-        @order="emit('order', 'reference', null, $event)" @allow="(row, allowed) => emit('allow', 'reference', row, allowed)"
+        @order="emit('order', 'reference', null, $event)" @allow="(row, allowed, flag) => emit('allow', 'reference', row, allowed, flag)"
         @reset="emit('reset', 'reference', null)" @same="emit('same', 'reference', $event)"
       />
       <QueuePanel
         v-else-if="tab === 'markup'" queue="markup" level="episode" :view="queues?.markup" :follows="queues?.markup_follows"
         :marks="marks" :held="held?.timeline" :taken="queues?.markup_follows ? taken?.reference : taken?.markup" :failed="failed" :busy="busy"
-        @order="emit('order', 'markup', null, $event)" @allow="(row, allowed) => emit('allow', 'markup', row, allowed)"
+        @order="emit('order', 'markup', null, $event)" @allow="(row, allowed, flag) => emit('allow', 'markup', row, allowed, flag)"
         @reset="emit('reset', 'markup', null)" @same="emit('same', 'markup', $event)"
       />
       <QueuePanel
         v-else queue="voice" level="episode" :view="groupQueue(tab)" :marks="marks" :held="held?.tracks[tab]" :failed="failedOfGroup(tab)" :busy="busy" :from-reference="tab === referenceGroup"
-        @order="emit('order', 'voice', tab, $event)" @allow="(row, allowed) => emit('allow', 'voice', row, allowed)"
+        @order="emit('order', 'voice', tab, $event)" @allow="(row, allowed, flag) => emit('allow', 'voice', row, allowed, flag)"
         @take="emit('take', tab, $event)" @reset="emit('reset', 'voice', tab)"
       />
     </div>

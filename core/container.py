@@ -78,7 +78,7 @@ class AudioIn:
 @dataclass(frozen=True)
 class SubtitleIn:
     """A subtitles track to put into a container: the `stream`-th subtitles stream of `path`, its key (`ST_SUB`), its name,
-    its language and whether it is forced."""
+    its language and how it lies in the container (the default one, forced), as the output says."""
 
     path: str
     stream: int
@@ -86,6 +86,7 @@ class SubtitleIn:
     title: str = ""
     language: str = ""
     forced: bool = False
+    default: bool = False
     # The font files of the release the track is drawn with, beside it (not attachments of its own file).
     fonts: tuple[str, ...] = ()
 
@@ -99,6 +100,7 @@ class SubtitleOut:
     title: str = ""
     language: str = ""
     forced: bool = False
+    default: bool = False
 
 
 @dataclass(frozen=True)
@@ -179,7 +181,8 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
         cmd += [*([f"-metadata:s:s:{number}", f"language={each.language}"] if each.language else []),
                 *([f"-metadata:s:s:{number}", f"title={each.title}"] if each.title else []),
                 f"-metadata:s:s:{number}", f"ST_SUB={each.key}",
-                f"-disposition:s:{number}", "forced" if each.forced else "0"]
+                f"-disposition:s:{number}", "+".join(flag for flag, on in (("default", each.default), ("forced", each.forced))
+                                                     if on) or "0"]
     for number, (_path, stream) in enumerate(fonts):
         cmd += [f"-metadata:s:t:{number}", f"filename={stream['filename']}",
                 f"-metadata:s:t:{number}", f"mimetype={stream['mimetype'] or 'application/x-truetype-font'}"]
@@ -351,7 +354,8 @@ async def contents(path: str, *, timeout: float = READ_TIMEOUT_S) -> Contents | 
         own = _tags(stream)
         subtitles.append(SubtitleOut(index=number, key=own.get("st_sub", ""), title=own.get("title", ""),
                                      language=own.get("language", ""),
-                                     forced=bool((stream.get("disposition") or {}).get("forced"))))
+                                     forced=bool((stream.get("disposition") or {}).get("forced")),
+                                     default=bool((stream.get("disposition") or {}).get("default"))))
     try:
         duration = float(info.get("format", {}).get("duration") or 0.0)
     except ValueError:

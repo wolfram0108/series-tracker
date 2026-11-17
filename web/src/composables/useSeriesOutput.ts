@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, shallowRef, watch, type Ref } fr
 import { t } from "../i18n"
 import {
   bySeason, groupTarget, joinEpisodes, orderValue, queueLevers, resetBody, setBody, sourceMarks, variantTarget,
-  type QueueName, type QueueRow, type Reference, type Scope,
+  type QueueName, type QueueRow, type VariantFlag, type Reference, type Scope,
 } from "../lib/output"
 import { Gather } from "../lib/gather"
 import { QUEUE_PAUSE_MS, bodyOf, changeKey, coreValue, queueKey, scopeKey, withChanges, type QueueChange } from "../lib/queueChange"
@@ -287,10 +287,12 @@ export function useSeriesOutput(seriesId: number) {
     if (change.value === base) gather.drop(key)
     else gather.put(key, change)
   }
-  const setAllowed = (scope: Scope, queue: QueueName, row: QueueRow, allowed: boolean): void => {
-    const lever = leversOf(queue).allow
+  // A box of a variant: taken at all, or how its track lies in the container (the subtitles: the default one, the forced one).
+  const setAllowed = (scope: Scope, queue: QueueName, row: QueueRow, value: boolean, flag: VariantFlag = "allowed"): void => {
+    const levers = leversOf(queue)
+    const lever = flag === "allowed" ? levers.allow : levers[flag]
     if (!lever) return
-    stage({ kind: "allow", scope, queue, lever, target: variantTarget(row.group, row.source_id, row.player), value: allowed,
+    stage({ kind: "allow", flag, scope, queue, lever, target: variantTarget(row.group, row.source_id, row.player), value,
       group: row.group, source_id: row.source_id, player: row.player })
   }
   // The variants of a queue of single videos the user declared equal: the whole value of the lever, none to go back to the level above.

@@ -5,7 +5,7 @@ import { t } from "../../../i18n"
 import QueuePanel from "./QueuePanel.vue"
 
 const row = (player: string) => ({ group: "OnWave", source_id: 55, player, player_label: player.toUpperCase(), height: 1080,
-  episodes: "1", stale: "", allowed: true, allowed_level: "default" as const, language: "", subtitle_type: "" })
+  episodes: "1", stale: "", allowed: true, allowed_level: "default" as const, language: "", subtitle_type: "", default: false, default_level: "default" as const, forced: false, forced_level: "default" as const })
 
 describe("the queue of the markup reference (stage 14)", () => {
   it("says it follows the reference, with no way back, while no level has an order of its own", () => {
@@ -169,7 +169,8 @@ describe("«Снять все»", () => {
     const w = mount(QueuePanel, { props: { queue: "reference", level: "season", marks: {},
       view: view([row("cvh"), { ...row("kodik"), allowed: false }, row("vibix")]) } })
     await w.find(".queue-clear").trigger("click")
-    expect(w.emitted("allow")).toEqual([[expect.objectContaining({ player: "cvh" }), false], [expect.objectContaining({ player: "vibix" }), false]])
+    expect(w.emitted("allow")).toEqual([[expect.objectContaining({ player: "cvh" }), false, "allowed"],
+      [expect.objectContaining({ player: "vibix" }), false, "allowed"]])
   })
 
   it("is off when no row is taken, and absent for a queue without rows", async () => {

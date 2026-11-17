@@ -3,7 +3,7 @@ import type { QueueRow } from "./output"
 import { bodyOf, changeKey, coreValue, levelOf, queueKey, scopeKey, withChanges, type QueueChange, type Queues } from "./queueChange"
 
 const row = (player: string, over: Partial<QueueRow> = {}): QueueRow => ({
-  group: "Ruchime", source_id: 7, player, player_label: player, episodes: "", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "", ...over,
+  group: "Ruchime", source_id: 7, player, player_label: player, episodes: "", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "", default: false, default_level: "default", forced: false, forced_level: "default", ...over,
 })
 
 const queues = (): Queues => ({
@@ -18,7 +18,7 @@ const queues = (): Queues => ({
 })
 
 const allow = (queue: "reference" | "markup" | "voice", player: string, value: boolean, group = "Ruchime"): QueueChange => ({
-  kind: "allow", scope: { season: 1 }, queue, lever: `${queue}.allow`, target: `variant:${group}:7:${player}`, value, group, source_id: 7, player,
+  kind: "allow", flag: "allowed", scope: { season: 1 }, queue, lever: `${queue}.allow`, target: `variant:${group}:7:${player}`, value, group, source_id: 7, player,
 })
 const take = (group: string, value: boolean): QueueChange => ({
   kind: "take", scope: { season: 1 }, queue: "voice", lever: "voice.take", target: `group:${group}`, value, group,
@@ -92,5 +92,16 @@ describe("withChanges", () => {
   it("takes the later change of a box, and ignores a change of a variant that the queue does not list", () => {
     const shown = withChanges(queues(), [allow("reference", "vk", false), allow("reference", "vk", true), allow("reference", "gone", false)])
     expect(shown.reference!.rows!.map((each) => each.allowed)).toEqual([true, true])
+  })
+})
+
+describe("a flag of a track of the subtitles", () => {
+  it("is read and shown as the box of its field, at the level of the change", () => {
+    const shown: Queues = { ...queues(), subtitles: { rows: [row("torrent:1", { group: "Надписи" })], order_level: "default", same_level: "default" } }
+    const change: QueueChange = { kind: "allow", flag: "forced", scope: { season: 1, episode: 2 }, queue: "subtitles",
+      lever: "subtitles.forced", target: "variant:x", value: true, group: "Надписи", source_id: 7, player: "torrent:1" }
+    expect(coreValue(shown, change)).toBe(false)
+    const after = withChanges(shown, [change]).subtitles!.rows![0]
+    expect([after.forced, after.forced_level, after.allowed, after.default]).toEqual([true, "episode", true, false])
   })
 })

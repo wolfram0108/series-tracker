@@ -41,6 +41,10 @@ MARKUP_SAME = "markup.same"
 # and the flag of a variant that leaves it out; set on the series and on an episode only.
 SUBTITLES_ORDER = "subtitles.order"
 SUBTITLES_ALLOW = "subtitles.allow"
+# How a variant of subtitles lies in the output container (DESIGN.md 7.1.1): the track a player shows by itself (one at
+# most: the first in the order of the container that has it) and the forced one. The output decides them, not the source.
+SUBTITLES_DEFAULT = "subtitles.default"
+SUBTITLES_FORCED = "subtitles.forced"
 
 
 class Level(StrEnum):
@@ -68,6 +72,13 @@ class ValueShape(StrEnum):
     COMPILATION = "compilation"
     # Groups of variants (a list of lists), as a queue's variants the user declared equal.
     VARIANT_SETS = "variant_sets"
+
+
+class TrackFlag(StrEnum):
+    """A flag of a track of the output container a lever of a variant sets (a lever of no flag leaves the variant out)."""
+
+    DEFAULT = "default"
+    FORCED = "forced"
 
 
 class Queue(StrEnum):
@@ -158,6 +169,8 @@ class LeverSpec(BaseModel):
     default: Any = None
     consumer: str
     queue: Queue
+    # The flag of the output track the lever sets; none for a lever of the choice of variants.
+    flag: TrackFlag | None = None
 
 
 class PlayerVariant(BaseModel):
@@ -262,9 +275,14 @@ class QueueRow(BaseModel):
     # The number of the group of equal variants the row stands in (1, 2… in the order the groups first appear in the queue);
     # none for a variant that equals no other one the level lists.
     same: int | None = None
-    # A variant of subtitles: the language of its tracks and their type (`full`, `signs`, `forced`), as its rows say.
+    # A variant of subtitles: the language of its tracks and their type (full, signs), as its rows say; and how its track
+    # lies in the container (`subtitles.default`, `subtitles.forced`) with the level each comes from.
     language: str = ""
     subtitle_type: str = ""
+    default: bool = False
+    default_level: Level = Level.DEFAULT
+    forced: bool = False
+    forced_level: Level = Level.DEFAULT
 
 
 class QueueView(BaseModel):

@@ -1,5 +1,5 @@
 import type { components } from "../api/schema"
-import { setBody, type QueueName, type QueueRow, type Scope } from "./output"
+import { setBody, type QueueName, type QueueRow, type Scope, type VariantFlag } from "./output"
 
 type Schemas = components["schemas"]
 
@@ -17,7 +17,10 @@ export type QueueChange = {
   lever: string
   target: string
   value: boolean
-} & ({ kind: "allow"; group: string; source_id: number; player: string } | { kind: "take"; group: string })
+} & ({ kind: "allow"; flag: VariantFlag; group: string; source_id: number; player: string } | { kind: "take"; group: string })
+
+const LEVEL_OF: Record<VariantFlag, "allowed_level" | "default_level" | "forced_level"> =
+  { allowed: "allowed_level", default: "default_level", forced: "forced_level" }
 
 /** The level a window holds queues of, by its place: the key `useSeriesOutput` keeps them under. */
 export const queueKey = (season: number | null, episode: number | null, compilation: string | null = null): string =>
@@ -49,7 +52,9 @@ const isRowOf = (row: QueueRow, change: QueueChange): boolean =>
 export function coreValue(queues: Queues | undefined, change: QueueChange): boolean | undefined {
   if (!queues) return undefined
   if (change.kind === "take") return queues.groups?.find((each) => each.group === change.group)?.take
-  return rowsOf(queues, change)?.find((row) => isRowOf(row, change))?.allowed
+  if (change.kind !== "allow") return undefined
+  const flag = change.flag
+  return rowsOf(queues, change)?.find((row) => isRowOf(row, change))?.[flag]
 }
 
 /** The queues of a level as they are shown with the changes the core does not hold yet: only what a change touches is made
@@ -65,9 +70,10 @@ export function withChanges(queues: Queues, changes: readonly QueueChange[]): Qu
       continue
     }
     const rows = rowsOf(shown, change)
-    if (!rows?.some((row) => isRowOf(row, change) && row.allowed !== change.value)) continue
+    const flag = change.flag
+    if (!rows?.some((row) => isRowOf(row, change) && row[flag] !== change.value)) continue
     const set = (list: readonly QueueRow[]): QueueRow[] =>
-      list.map((row) => isRowOf(row, change) ? { ...row, allowed: change.value, allowed_level: level } : row)
+      list.map((row) => isRowOf(row, change) ? { ...row, [flag]: change.value, [LEVEL_OF[flag]]: level } : row)
     if (change.queue === "voice") {
       shown = { ...shown, groups: (shown.groups ?? []).map((each) => each.group === change.group ? { ...each, rows: set(rows) } : each) }
     } else if (change.queue === "reference" && shown.reference) {

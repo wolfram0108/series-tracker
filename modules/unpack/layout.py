@@ -160,8 +160,8 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
         folder_kind = "voice" if kind == "audio" else "subtitles"
         facts = folder_facts.get((folder_kind, folder), {}) if folder else {}
         language = (result or {}).get("language") or facts.get("language") or (stream or {}).get("language") or ""
-        subtitle_type = (result or {}).get("subtitle_type") or facts.get("subtitle_type") or (
-            "forced" if (stream or {}).get("forced") else "")
+        # The type is what a rule or the folder names; a flag of the file's container is no type (DESIGN.md 7.1.1).
+        subtitle_type = (result or {}).get("subtitle_type") or facts.get("subtitle_type") or ""
         # A track waits for the operator while it has no folder or no known language: a rule, a hand or the file gives them.
         waiting = not excluded and (not folder or language.strip().lower() in UNKNOWN_LANGUAGES)
         # The file and its episode, and the stream (its place in the file and what it is): the window groups tracks by them.
@@ -300,7 +300,6 @@ def _row(release: ReleaseView, key: str, link: str, video: str, where: Place, ki
                     # Every track of the file is on the file's own timeline: in step with its video (DESIGN.md, 7.0).
                     timeline=item_of(release.release, video),
                     site_fields={"language": entry["language"], "codec": stream.get("codec") or "",
-                                 "channels": stream.get("channels"), "forced": entry["subtitle_type"] == "forced",
-                                 "subtitle_type": entry["subtitle_type"], "default": bool(stream.get("default")),
+                                 "channels": stream.get("channels"), "subtitle_type": entry["subtitle_type"],
                                  "folder": entry["folder"] or "", "file": key.split("#")[0].split(KEYS_SEP, 1)[1]},
                     part=release.release)

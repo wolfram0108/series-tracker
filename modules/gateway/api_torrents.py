@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from core import BusRequestError
+from core.contracts import SubtitleType
 
 from .routing import refusal
 from .schemas import DynamicObject, ErrorResponse, OkResponse
@@ -58,7 +59,7 @@ class FolderBody(BaseModel):
     kind: Literal["voice", "subtitles"]
     name: str = Field(min_length=1)
     language: str = ""
-    subtitle_type: Literal["", "full", "signs", "forced"] = ""
+    subtitle_type: SubtitleType = ""
 
 
 class FolderRef(BaseModel):

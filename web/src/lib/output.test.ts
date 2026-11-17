@@ -411,8 +411,8 @@ describe("the levers of a queue", () => {
 
   it("makes the value of an order from the rows in the order the user put them", () => {
     const rows: QueueRow[] = [
-      { group: "A", source_id: 2, player: "kodik", player_label: "Kodik", episodes: "1", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "" },
-      { group: "B", source_id: 1, player: "vk", player_label: "VK", episodes: "1", stale: "", allowed: false, allowed_level: "season", language: "", subtitle_type: "" },
+      { group: "A", source_id: 2, player: "kodik", player_label: "Kodik", episodes: "1", stale: "", allowed: true, allowed_level: "default", language: "", subtitle_type: "", default: false, default_level: "default", forced: false, forced_level: "default" },
+      { group: "B", source_id: 1, player: "vk", player_label: "VK", episodes: "1", stale: "", allowed: false, allowed_level: "season", language: "", subtitle_type: "", default: false, default_level: "default", forced: false, forced_level: "default" },
     ]
     expect(orderValue("reference", rows)).toEqual([
       { group: "A", source_id: 2, player: "kodik" }, { group: "B", source_id: 1, player: "vk" }])

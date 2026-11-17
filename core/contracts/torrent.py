@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import posixpath
 from enum import StrEnum
-from typing import Iterable
+from typing import Iterable, get_args
 from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from .release_table import SubtitleType
 
 TORRENT_PLAYER = "torrent"
 _SCHEME = "torrent:"
@@ -204,7 +206,7 @@ def stream_line(kind: str, index: int, language: str = "", title: str = "", code
 
 # What a rule of the editor may set besides numbers: the folder of a voice-over or of subtitles by its name, the language,
 # the type of subtitles (DESIGN.md, 4.1).
-SUBTITLE_TYPES = ("full", "signs", "forced")
+SUBTITLE_TYPES = tuple(each for each in get_args(SubtitleType) if each)
 
 
 def fonts_of(paths: Iterable[str], subtitles: str) -> list[str]:

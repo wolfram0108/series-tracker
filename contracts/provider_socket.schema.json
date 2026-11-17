@@ -774,8 +774,7 @@
        "enum": [
         "",
         "full",
-        "signs",
-        "forced"
+        "signs"
        ],
        "title": "Subtitle Type",
        "type": "string"
@@ -1018,8 +1017,7 @@
      "enum": [
       "",
       "full",
-      "signs",
-      "forced"
+      "signs"
      ],
      "title": "Subtitle Type",
      "type": "string"

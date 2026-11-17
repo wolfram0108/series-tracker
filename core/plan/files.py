@@ -145,8 +145,8 @@ class Library:
                                if each.key == dub_key(item.row)), None)
                 if stream is None:
                     raise FileNotFoundError(f"{way.container.name} holds no subtitles {item.row}")
-            found.append(mkv.SubtitleIn(path, stream, dub_key(item.row), item.name, item.language,
-                                        item.subtitle_type == "forced", taken.fonts if way.kind == "take" else ()))
+            found.append(mkv.SubtitleIn(path, stream, dub_key(item.row), item.name, item.language, forced=item.forced,
+                                        default=item.default, fonts=taken.fonts if way.kind == "take" else ()))
         return found
 
     def video_path(self, goal: Goal, results: dict[str, Made]) -> str:
@@ -261,8 +261,8 @@ class Library:
                                       title=each.title if each.title != each.label else "",
                                       language=each.language if each.language != mkv.UNSTATED else "")
                           for each in held.audio]
-                subtitles = [mkv.SubtitleIn(path, each.index, each.key, each.title, each.language, each.forced)
-                             for each in held.subtitles]
+                subtitles = [mkv.SubtitleIn(path, each.index, each.key, each.title, each.language, forced=each.forced,
+                                            default=each.default) for each in held.subtitles]
                 problem = await mkv.build(again, path, held.video, tracks, provenance=table[step[1]], subtitles=subtitles)
                 if problem is not None:
                     raise BuildFailed(step[1], problem)

@@ -20,7 +20,7 @@ def _variant(variant: tuple[str, int, str] | None) -> dict | None:
 
 def _subtitle(item, kind: str | None = None) -> dict:
     return {"row": _row(item.row), "name": item.name, "player": item.player, "language": item.language,
-            "subtitle_type": item.subtitle_type, "kind": kind}
+            "subtitle_type": item.subtitle_type, "default": item.default, "forced": item.forced, "kind": kind}
 
 
 def _slots(row: OnlineRow) -> list[list[int]]:

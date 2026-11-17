@@ -10,7 +10,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 
-from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, SUBTITLES_ALLOW, SUBTITLES_ORDER, CompilationRef, EffectiveLever, EpisodeSettings, Level,
+from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED,
+                            SUBTITLES_ORDER, CompilationRef, EffectiveLever, EpisodeSettings, Level,
                             LevelSettings, Queue, SettingRecord, SettingsReset, ValueShape, compilation_key, group_target,
                             parse_compilation_key, parse_group_target, parse_variant_target, variant_target)
 from core.reasons import reason
@@ -23,7 +24,7 @@ _Index = dict[str, dict[str | None, dict[_Scope, Any]]]
 # The levels a lever may be set on, where it is not every level: the subtitles have one table on the series and one on an
 # episode (DESIGN.md 7.1.1).
 _ONLY_ON = {COMPILATION_MEMBER: {Level.EPISODE}, COMPILATION_TAKE: {Level.COMPILATION},
-            SUBTITLES_ORDER: {Level.SERIES, Level.EPISODE}, SUBTITLES_ALLOW: {Level.SERIES, Level.EPISODE}}
+            **{lever: {Level.SERIES, Level.EPISODE} for lever in (SUBTITLES_ORDER, SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED)}}
 
 
 def validate(record: SettingRecord) -> str | None:

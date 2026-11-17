@@ -2,6 +2,7 @@
 import { computed, ref } from "vue"
 import { hasMessage, t } from "../../../i18n"
 import { LANGUAGES } from "../../../lib/languages"
+import { SUBTITLE_TYPES } from "../../../lib/ruleVocabulary"
 import { episodeFolder, folderRows, nameOf, streamLabels, type Editor, type Folder, type FolderRow, type FolderTrack } from "../../../lib/torrent"
 import { spansOf } from "../../../lib/ranges"
 import { assign, deleteFolder, setFolder } from "../../../composables/torrentCalls"
@@ -21,7 +22,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ drop: [Folder["kind"], string, string[]]; failure: [string] }>()
 
-const TYPES = ["full", "signs", "forced"] as const
+const TYPES = SUBTITLE_TYPES
 const SHOWN = 6
 const groups = computed(() => props.kinds.map((kind) => ({ kind, rows: folderRows(props.editor.view, kind) })))
 const labels = computed(() => streamLabels(props.editor.view.containers))

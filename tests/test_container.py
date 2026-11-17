@@ -162,7 +162,8 @@ def test_the_chosen_subtitles_go_in_their_order_with_the_fonts_of_their_file_and
     video = _torrent_video(tmp)
     out = str(tmp / "built.mkv")
     tracks = [AudioIn("Оригинал", video, 0, "1:E01", own=True), AudioIn("ruchime", dubs["ruchime"], 0, "1:E01")]
-    chosen = [SubtitleIn(video, 1, "1:full:", "Full", "eng"), SubtitleIn(video, 0, "1:signs:", "Надписи", "rus", forced=True)]
+    chosen = [SubtitleIn(video, 1, "1:full:", "Full", "eng", default=True),
+              SubtitleIn(video, 0, "1:signs:", "Надписи", "rus", forced=True)]
     assert asyncio.run(container.build(out, video, "1:E01", tracks, provenance={"video": "E01"}, subtitles=chosen)) is None
 
     layout, _ = asyncio.run(layout_of(out))
@@ -170,8 +171,8 @@ def test_the_chosen_subtitles_go_in_their_order_with_the_fonts_of_their_file_and
     attached = [s["filename"] for s in layout["streams"] if s["kind"] == "attachment"]
     assert [(s["codec"], s["language"], s["title"], s["forced"]) for s in subtitles] == [
         ("ass", "eng", "Full", False), ("ass", "rus", "Надписи", True)]
-    assert [(each.key, each.title) for each in asyncio.run(container.contents(out)).subtitles] == [
-        ("1:full:", "Full"), ("1:signs:", "Надписи")]
+    assert [(each.key, each.title, each.default, each.forced) for each in asyncio.run(container.contents(out)).subtitles] == [
+        ("1:full:", "Full", True, False), ("1:signs:", "Надписи", False, True)]
     assert sorted(attached) == ["Kurinto.ttf", container.PROVENANCE]
     assert layout["chapters"] == 2
 
@@ -185,11 +186,12 @@ def test_the_chosen_subtitles_go_in_their_order_with_the_fonts_of_their_file_and
     held = asyncio.run(container.contents(out)).subtitles
     assert asyncio.run(container.build(again, out, "1:E01", [AudioIn("Оригинал", out, 0, "1:E01", own=True)],
                                        provenance={"video": "E01"},
-                                       subtitles=[SubtitleIn(out, each.index, each.key, each.title, each.language, each.forced)
-                                                  for each in held])) is None
+                                       subtitles=[SubtitleIn(out, each.index, each.key, each.title, each.language,
+                                                             forced=each.forced, default=each.default) for each in held])) is None
     layout, _ = asyncio.run(layout_of(again))
     assert sorted(s["filename"] for s in layout["streams"] if s["kind"] == "attachment") == ["Kurinto.ttf", container.PROVENANCE]
-    assert [each.key for each in asyncio.run(container.contents(again)).subtitles] == ["1:full:", "1:signs:"]
+    assert [(each.key, each.default, each.forced) for each in asyncio.run(container.contents(again)).subtitles] == [
+        ("1:full:", True, False), ("1:signs:", False, True)]
     assert layout["chapters"] == 2
 
 

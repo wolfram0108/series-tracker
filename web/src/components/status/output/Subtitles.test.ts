@@ -13,14 +13,15 @@ import TrackTable from "./TrackTable.vue"
 
 const variant = (group: string, source_id: number, language: string, subtitle_type: string, allowed = true): QueueRow => ({
   group, source_id, player: `torrent:${source_id}`, player_label: "", episodes: "1–12", stale: "", allowed,
-  allowed_level: allowed ? "default" : "series", language, subtitle_type })
+  allowed_level: allowed ? "default" : "series", language, subtitle_type, default: false, default_level: "default", forced: false,
+  forced_level: "default" })
 const marks = { 1: { n: 1, color: 0, place: "kinozal.tv · 2144110" }, 2: { n: 2, color: 1, place: "rutracker.org · 6612345" } }
 
 describe("the table of the subtitles of a level", () => {
   it("lists the name, the language and the type of each variant, with no player, height or mark of a first one", () => {
     const w = mount(QueuePanel, { props: { queue: "subtitles", level: "series", marks,
       view: { order_level: "default", same_level: "default",
-        rows: [variant("Полные", 1, "rus", "full"), variant("Forced", 2, "eng", "forced", false)] } } })
+        rows: [variant("Полные", 1, "rus", "full"), variant("Signs", 2, "eng", "signs", false)] } } })
     expect(w.text()).toContain(t("output.queue.hintSubtitles"))
     const heads = w.findAll("th").map((each) => each.text())
     expect(heads).toContain(t("output.subtitles.name"))
@@ -34,6 +35,24 @@ describe("the table of the subtitles of a level", () => {
     expect(w.find(".same-pick").exists()).toBe(false)
   })
 
+  it("lays the tracks in the container: one default, which a press takes from another row, and forced ones", async () => {
+    const shown = [{ ...variant("Полные", 1, "rus", "full"), default: true, default_level: "series" as const },
+      variant("Надписи", 1, "rus", "signs"), variant("Off", 2, "eng", "full", false)]
+    const w = mount(QueuePanel, { props: { queue: "subtitles", level: "series", marks,
+      view: { order_level: "default", same_level: "default", rows: shown } } })
+    const heads = w.findAll("th").map((each) => each.text())
+    expect(heads).toEqual(expect.arrayContaining([t("output.subtitles.default"), t("output.subtitles.forced")]))
+    const rows = w.findAll(".variant-row")
+    expect(rows.map((row) => (row.find(".subtitle-default").element as HTMLInputElement).checked)).toEqual([true, false, false])
+    // A variant not taken is no track: it has no flags to set.
+    expect(rows[2].find(".subtitle-default").attributes("disabled")).toBeDefined()
+    await rows[1].find(".subtitle-default").setValue(true)
+    expect(w.emitted("allow")).toEqual([[expect.objectContaining({ group: "Полные" }), false, "default"],
+      [expect.objectContaining({ group: "Надписи" }), true, "default"]])
+    await rows[1].find(".subtitle-forced").setValue(true)
+    expect(w.emitted("allow")!.at(-1)).toEqual([expect.objectContaining({ group: "Надписи" }), true, "forced"])
+  })
+
   it("says it is the table of the episode on an episode", () => {
     const w = mount(QueuePanel, { props: { queue: "subtitles", level: "episode", marks,
       view: { order_level: "episode", same_level: "default", rows: [variant("Полные", 1, "rus", "full")] } } })
@@ -45,8 +64,12 @@ describe("the table of the subtitles of a level", () => {
     const specs = [
       { name: "subtitles.order", target: "none", shape: "variant_order", default: [], consumer: "planner", queue: "subtitles" },
       { name: "subtitles.allow", target: "variant", shape: "flag", default: true, consumer: "planner", queue: "subtitles" },
+      { name: "subtitles.default", target: "variant", shape: "flag", default: false, consumer: "planner", queue: "subtitles", flag: "default" },
+      { name: "subtitles.forced", target: "variant", shape: "flag", default: false, consumer: "planner", queue: "subtitles", flag: "forced" },
     ] as const
-    expect(queueLevers([...specs], "subtitles")).toEqual({ order: "subtitles.order", allow: "subtitles.allow", take: undefined, same: undefined })
+    // The flags of a variant are told apart by the flag of the track they set, not by their names.
+    expect(queueLevers([...specs], "subtitles")).toEqual({ order: "subtitles.order", allow: "subtitles.allow",
+      default: "subtitles.default", forced: "subtitles.forced", take: undefined, same: undefined })
     expect(namesGroup("subtitles")).toBe(true)
     expect(orderValue("subtitles", [variant("Надписи", 1, "rus", "signs")])).toEqual([{ group: "Надписи", source_id: 1, player: "torrent:1" }])
   })

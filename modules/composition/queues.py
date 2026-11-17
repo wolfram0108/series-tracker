@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Iterable, Sequence
 
 from core.contracts import (MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME,
-                            SUBTITLES_ALLOW, SUBTITLES_ORDER, VOICE_ALLOW,
+                            SUBTITLES_ALLOW, SUBTITLES_DEFAULT, SUBTITLES_FORCED, SUBTITLES_ORDER, VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, GroupQueue, Level, QueueRow, QueueView,
                             RowState, group_target, variant_target)
 from core.subtitle_queue import named_of, ordered
@@ -116,6 +116,8 @@ def subtitles(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever],
     for key in ordered(found, named_of(named)):
         items = [row for _, row in level.by_variant[key]]
         allowed, allowed_level = level.value(SUBTITLES_ALLOW, variant_target(*key), True)
+        default, default_level = level.value(SUBTITLES_DEFAULT, variant_target(*key), False)
+        forced, forced_level = level.value(SUBTITLES_FORCED, variant_target(*key), False)
         current = {number for row in items if not row.stale for number in _episodes(row, episode)}
         stale = {number for row in items if row.stale for number in _episodes(row, episode)} - current
         first = items[0]
@@ -123,7 +125,8 @@ def subtitles(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever],
                              player_label=next((row.player_label for row in items if row.player_label), key[2]),
                              episodes=spans(number for row in items for number in _episodes(row, episode)),
                              stale=spans(stale), allowed=allowed is not False, allowed_level=allowed_level,
-                             language=first.language, subtitle_type=first.subtitle_type))
+                             language=first.language, subtitle_type=first.subtitle_type,
+                             default=default is True, default_level=default_level, forced=forced is True, forced_level=forced_level))
     return QueueView(rows=rows, order_level=order_level)
 
 

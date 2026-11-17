@@ -101,6 +101,28 @@ def test_a_file_whose_subtitles_the_goal_does_not_carry_is_hidden_unless_the_use
     assert made.groups[0].remove == ("s01e01 old.mkv",)
 
 
+def test_the_output_lays_the_tracks_default_and_forced_as_its_levers_say_and_the_type_of_the_row_sets_neither():
+    """How a track lies in the container is the output's word (`subtitles.default`, `subtitles.forced`): the type the source
+    gives (full, signs) is no flag. A container shows one track by itself: the first in its order the user made default."""
+    variant = lambda name: (name, 1, "torrent:page")  # noqa: E731
+    flags = lambda goal: [(way.subtitle.name, way.subtitle.default, way.subtitle.forced) for way in goal.subtitles]  # noqa: E731
+    assert flags(goal_of()) == [("Полные", False, False), ("Надписи", False, False)]
+    both = frozenset({variant("Полные"), variant("Надписи")})
+    goal = goal_of(subtitle_default={(1, 1): both}, subtitle_forced={(1, 1): frozenset({variant("Надписи")})})
+    assert flags(goal) == [("Полные", True, False), ("Надписи", False, True)]
+    # A file whose tracks lie otherwise is built again from what it holds; one that lies so stays.
+    items = tuple(Subtitle(row.id, row.label, row.player, row.timeline, row.language, row.subtitle_type) for row in ROWS[1:])
+    file = held("s01e01.mkv", items)
+    forced = {(1, 1): frozenset({variant("Надписи")})}
+    made = plan(Inputs(ROWS, (file,), Choices(groups={1: ("Оригинал",)}, sources=(1, 2), subtitle_forced=forced)))
+    assert [op.kind for op in made.ops] == ["build"]
+    assert [(way.kind, way.subtitle.forced) for way in made.goal((1, 1)).subtitles] == [("reuse", False), ("reuse", True)]
+    lying = held("s01e01.mkv", (items[0], replace(items[1], forced=True)))
+    assert not plan(Inputs(ROWS, (lying,), Choices(groups={1: ("Оригинал",)}, sources=(1, 2), subtitle_forced=forced))).ops
+
+
 def test_the_table_of_the_asset_keeps_the_subtitles_of_a_container():
-    file = held("s01e01.mkv", (Subtitle(RowId(1, "page/E01.mkv#s0"), "Полные", "torrent:page", TIMELINE, "rus", "full"),))
+    file = held("s01e01.mkv", (Subtitle(RowId(1, "page/E01.mkv#s0"), "Полные", "torrent:page", TIMELINE, "rus", "full"),
+                               Subtitle(RowId(1, "page/E01.mkv#s1"), "Надписи", "torrent:page", TIMELINE, "rus", "signs",
+                                        default=True, forced=True)))
     assert container_of(container_json(file)) == file

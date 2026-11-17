@@ -155,7 +155,8 @@ class Track:
 @dataclass(frozen=True)
 class Subtitle:
     """A subtitles track in a container (DESIGN.md 7.1.1): the row it came from, its name, the player of that row, the
-    timeline it is in step with, its language and its type (`full`, `signs`, `forced`)."""
+    timeline it is in step with, its language and its type (full, signs) as the row gives them; and how it lies in the
+    container, as the output's levers say (`subtitles.default`, `subtitles.forced`)."""
 
     row: RowId
     name: str
@@ -163,6 +164,8 @@ class Subtitle:
     timeline: RowId
     language: str = ""
     subtitle_type: str = ""
+    default: bool = False
+    forced: bool = False
 
     @property
     def variant(self) -> tuple[str, int, str]:
@@ -234,6 +237,9 @@ class Choices:
     # order, and those he left out.
     subtitle_order: Mapping[Slot, tuple[tuple[str, int, str], ...]] = field(default_factory=dict)
     subtitle_deny: Mapping[Slot, frozenset[tuple[str, int, str]]] = field(default_factory=dict)
+    # How their tracks lie in the container: the variants the user made the default one and those he made forced.
+    subtitle_default: Mapping[Slot, frozenset[tuple[str, int, str]]] = field(default_factory=dict)
+    subtitle_forced: Mapping[Slot, frozenset[tuple[str, int, str]]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

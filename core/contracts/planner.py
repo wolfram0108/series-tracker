@@ -57,6 +57,9 @@ class PlanSubtitle(BaseModel):
     player: str
     language: str = ""
     subtitle_type: str = ""
+    # How it lies in the container (the output's levers): the default one, forced.
+    default: bool = False
+    forced: bool = False
     kind: Literal["take", "reuse"] | None = None
 
 

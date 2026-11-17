@@ -15,7 +15,7 @@ export const ACTION_TYPES = ["exclude", "extract_single", "extract_range", "extr
  *  of a site has none of them. */
 export const EDITOR_ACTIONS = ["assign_voice_folder", "assign_subtitle_folder", "assign_language", "assign_subtitle_type"] as const
 /** The values of the type of subtitles (core/contracts/torrent.py SUBTITLE_TYPES). */
-export const SUBTITLE_TYPES = ["full", "signs", "forced"] as const
+export const SUBTITLE_TYPES = ["full", "signs"] as const
 /** The assignments whose value is a number. */
 export const NUMBER_ASSIGNS = ["assign_episode", "assign_season", "assign_part"] as const
 

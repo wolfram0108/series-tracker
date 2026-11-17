@@ -9,7 +9,7 @@ import { t } from "../../../i18n"
 import {
   badgeOf, cardStatus, cutOf, cutState, heldCut, shareOf, takes, type CompilationView, type CutItem, type CutState,
 } from "../../../lib/compilations"
-import { isOff, trackCells, type EpisodeView, type QueueName, type QueueRow, type SourceMark as Mark } from "../../../lib/output"
+import { isOff, trackCells, type EpisodeView, type QueueName, type QueueRow, type VariantFlag, type SourceMark as Mark } from "../../../lib/output"
 import type { CompilationRow } from "./CompilationTable.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
@@ -53,7 +53,7 @@ const emit = defineEmits<{
   (e: "retry", episode: number): void
   (e: "retry-failed", episode: number): void
   (e: "queue-order", episode: number, queue: QueueName, group: string | null, rows: QueueRow[]): void
-  (e: "queue-allow", episode: number, queue: QueueName, row: QueueRow, allowed: boolean): void
+  (e: "queue-allow", episode: number, queue: QueueName, row: QueueRow, allowed: boolean, flag: VariantFlag): void
   (e: "queue-reset", episode: number, queue: QueueName, group: string | null): void
   (e: "queue-same", episode: number, queue: QueueName, groups: SameGroups | null): void
 }>()
@@ -182,7 +182,7 @@ const rows = computed<CompilationRow[]>(() => {
             @member="emit('member', item.view.episode, $event)" @retry-cut="emit('retry', item.view.episode)"
             @retry-failed="emit('retry-failed', item.view.episode)"
             @order="(queue, group, list) => emit('queue-order', item.view.episode, queue, group, list)"
-            @allow="(queue, row, allowed) => emit('queue-allow', item.view.episode, queue, row, allowed)"
+            @allow="(queue, row, allowed, flag) => emit('queue-allow', item.view.episode, queue, row, allowed, flag)"
             @reset="(queue, group) => emit('queue-reset', item.view.episode, queue, group)"
             @same="(queue, groups) => emit('queue-same', item.view.episode, queue, groups)"
           />

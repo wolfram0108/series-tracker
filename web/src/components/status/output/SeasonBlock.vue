@@ -5,7 +5,7 @@ import type { SameGroups } from "../../../lib/same"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
 import {
-  allOff, episodeStatus, fileNamesOf, isOff, trackCells, type EpisodeView, type QueueName, type QueueRow,
+  allOff, episodeStatus, fileNamesOf, isOff, trackCells, type EpisodeView, type QueueName, type QueueRow, type VariantFlag,
   type SourceMark as Mark,
 } from "../../../lib/output"
 import { spansOf } from "../../../lib/ranges"
@@ -72,7 +72,7 @@ const emit = defineEmits<{
   (e: "retry-season"): void
   (e: "redo", episode: number, group: string): void
   (e: "queue-order", episode: number, queue: QueueName, group: string | null, rows: QueueRow[]): void
-  (e: "queue-allow", episode: number, queue: QueueName, row: QueueRow, allowed: boolean): void
+  (e: "queue-allow", episode: number, queue: QueueName, row: QueueRow, allowed: boolean, flag: VariantFlag): void
   (e: "queue-take", episode: number, group: string, taken: boolean): void
   (e: "queue-reset", episode: number, queue: QueueName, group: string | null): void
   (e: "queue-same", episode: number, queue: QueueName, groups: SameGroups | null): void
@@ -230,7 +230,7 @@ function step(by: number): void {
             @refetch="emit('refetch', item.view.episode, $event)" @retry="emit('retry', item.view.episode, $event)"
             @retry-failed="emit('retry-failed', item.view.episode)" @redo="emit('redo', item.view.episode, $event)"
             @order="(queue, group, rows) => emit('queue-order', item.view.episode, queue, group, rows)"
-            @allow="(queue, row, allowed) => emit('queue-allow', item.view.episode, queue, row, allowed)"
+            @allow="(queue, row, allowed, flag) => emit('queue-allow', item.view.episode, queue, row, allowed, flag)"
             @take="(group, taken) => emit('queue-take', item.view.episode, group, taken)"
             @reset="(queue, group) => emit('queue-reset', item.view.episode, queue, group)"
             @same="(queue, groups) => emit('queue-same', item.view.episode, queue, groups)"

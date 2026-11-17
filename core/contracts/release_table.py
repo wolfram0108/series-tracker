@@ -17,6 +17,9 @@ LINE_SEPARATOR = " | "
 TABLE_TRACE_TOPIC = "sources.table.trace"
 
 
+# The type of subtitles a source gives: full (every line) or signs (the signs and songs alone); empty when it says none.
+SubtitleType = Literal["", "full", "signs"]
+
 class RowState(StrEnum):
     """`not_obtained` is not `absent`: the answer stayed unsure to the end, the player may still have the video."""
 
@@ -67,10 +70,10 @@ class TableRow(BaseModel):
     # other (the tracks of one file of a torrent release). Empty: the row itself, as a row of a site is one video.
     timeline: str = ""
     track: RowTrack = RowTrack.SOUND
-    # The language of the track (ISO 639-2) and the type of subtitles (`full`, `signs`, `forced`), as the torrent editor
-    # gives them; empty for a row of a site. The container is written with them.
+    # The language of the track (ISO 639-2) and the type of subtitles (full or signs), as the torrent editor gives them;
+    # empty for a row of a site. How a track lies in the output (default, forced) is the output's, not the row's.
     language: str = ""
-    subtitle_type: Literal["", "full", "signs", "forced"] = ""
+    subtitle_type: SubtitleType = ""
     # The site's own numbers and marks, for a human and for debugging; no decision reads them.
     site_fields: dict[str, Any] = Field(default_factory=dict)
     # The part of the page the row was read from (the catalog of a player, the page of an episode); empty for the rows the
