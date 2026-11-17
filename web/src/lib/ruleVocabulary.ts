@@ -1,4 +1,5 @@
 import { t } from "../i18n"
+import { LANGUAGES } from "./languages"
 import { attachmentBlockCount, isAttachmentType, numberBlockCount, type PatternBlock } from "./patternBlocks"
 
 /** The vocabulary of the rules constructor the panel offers: one place for every card of it. Each list is written out
@@ -9,13 +10,20 @@ export const ASSIGN_TYPES = ["assign_voiceover", "assign_episode", "assign_seaso
   "assign_resolution", "assign_range"] as const
 export const ACTION_TYPES = ["exclude", "extract_single", "extract_range", "extract_season", "assign_voiceover",
   "assign_episode", "assign_season", "assign_part", "assign_quality", "assign_resolution", "assign_range"] as const
+/** The actions of the editor of a release (modules/rules/engine.py EDITOR_ASSIGN): a track into a folder of a voice-over or of
+ *  subtitles, its language, its type of subtitles. Offered by the cards of the tabs of the tracks of a release only: a row
+ *  of a site has none of them. */
+export const EDITOR_ACTIONS = ["assign_voice_folder", "assign_subtitle_folder", "assign_language", "assign_subtitle_type"] as const
+/** The values of the type of subtitles (core/contracts/torrent.py SUBTITLE_TYPES). */
+export const SUBTITLE_TYPES = ["full", "signs", "forced"] as const
 /** The assignments whose value is a number. */
 export const NUMBER_ASSIGNS = ["assign_episode", "assign_season", "assign_part"] as const
 
-export type ActionType = (typeof ACTION_TYPES)[number]
+export type ActionType = (typeof ACTION_TYPES)[number] | (typeof EDITOR_ACTIONS)[number]
 
 export const isExtract = (type: string): boolean => (EXTRACT_TYPES as readonly string[]).includes(type)
-export const isAssign = (type: string): boolean => (ASSIGN_TYPES as readonly string[]).includes(type)
+export const isAssign = (type: string): boolean =>
+  (ASSIGN_TYPES as readonly string[]).includes(type) || (EDITOR_ACTIONS as readonly string[]).includes(type)
 export const isNumberAssign = (type: string): boolean => (NUMBER_ASSIGNS as readonly string[]).includes(type)
 
 /** What a field of the editor holds, as text: the value of every assignment is text for the core and for the editor,
@@ -24,9 +32,19 @@ export const fieldText = (event: Event): string => (event.target as HTMLInputEle
 
 /** The options of the selects of the constructor, worded by the catalog. */
 export const conditionOptions = () => CONDITION_TYPES.map((value) => ({ value, label: t(`rules.condition.${value}`) }))
-export const actionOptions = () => ACTION_TYPES.map((value) => ({ value, label: t(`rules.action.${value}`) }))
+/** The actions a card offers: those of every rule, and with `editor` those of the editor of a release. */
+export const actionOptions = (editor = false) => [...ACTION_TYPES, ...(editor ? EDITOR_ACTIONS : [])]
+  .map((value) => ({ value, label: t(`rules.action.${value}`) }))
 export const actionLabel = (type: string): string =>
-  (ACTION_TYPES as readonly string[]).includes(type) ? t(`rules.action.${type as ActionType}`) : t("rules.action.value")
+  ([...ACTION_TYPES, ...EDITOR_ACTIONS] as readonly string[]).includes(type) ? t(`rules.action.${type as ActionType}`) : t("rules.action.value")
+
+/** The values an action of the editor is chosen from: the languages of the project, the types of subtitles; none for the rest
+ *  (a folder is any name). */
+export function choicesOf(type: string): { value: string; label: string }[] | null {
+  if (type === "assign_language") return LANGUAGES.map((code) => ({ value: code, label: `${t(`voices.language.${code}`)} (${code})` }))
+  if (type === "assign_subtitle_type") return SUBTITLE_TYPES.map((value) => ({ value, label: t(`torrent.type.${value}`) }))
+  return null
+}
 
 /** A block the palette offers; `disabled` with its `reason` when the template it would go to cannot take it. */
 export interface PaletteItem { type: string; label: string; title: string; disabled?: boolean; reason?: string }

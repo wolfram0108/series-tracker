@@ -74,6 +74,7 @@ const live = computed(() => props.pick.count.value > 0 && props.fits)
                 @click="save({ subtitle_type: folder.subtitle_type === each ? '' : each })">{{ t(`torrent.type.${each}`) }}</button>
       </div>
       <span v-if="ruleText" class="torrent-rule">{{ ruleText }}</span>
+      <span v-else-if="folder.fromMeta" class="torrent-meta-folder">{{ t("torrent.folder.fromMeta") }}</span>
       <span v-else-if="folder.manual" class="torrent-hand">
         {{ t(folder.items ? "torrent.folder.manual" : "torrent.folder.manualEmpty") }}</span>
       <div class="torrent-folder-tools">

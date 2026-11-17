@@ -129,6 +129,11 @@
 }
 .torrent-rule { background: #e6f4f1; color: #00695c; border-color: #a3d9cf; }
 .torrent-hand { background: #f3ecfb; color: #5a32a3; border-color: #d8c8f0; }
+.torrent-meta-folder {
+  display: inline-flex; align-items: center; padding: 0.125rem 0.625rem; border: 1px dashed #adb5bd; border-radius: 999px;
+  font-size: 0.75rem; font-weight: 600; color: var(--text-muted); white-space: nowrap;
+}
+.torrent-tg.is-problem { color: #a61e2d; }
 .torrent-kd {
   display: inline-flex; align-items: center; padding: 0 0.45rem; border-radius: 6px; font-size: 0.72rem; line-height: 1.25rem;
   background: #e6f4f1; color: #00695c;

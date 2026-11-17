@@ -49,7 +49,7 @@ describe("the files of a release", () => {
 })
 
 const track = (item: string, folder: string | null, episode: number, by: string | null = null): TrackEntry => ({
-  item, line: "", kind: "audio", folder, by, excluded: false, language: "rus", subtitle_type: "", path: `${folder ?? "x"}/${item}`,
+  item, line: "", kind: "audio", folder, by, excluded: false, waiting: !folder, language: "rus", subtitle_type: "", path: `${folder ?? "x"}/${item}`,
   place: { season: 1, episode, last: null }, stream: null })
 
 describe("the tracks of a release", () => {
@@ -59,7 +59,12 @@ describe("the tracks of a release", () => {
       [1, ["a", "c"]], [2, ["b"]], [4, ["d"]]])
     const folders = [{ kind: "voice" as const, name: "JAM", items: 9, manual: false, language: "rus", subtitle_type: "", fonts: [] },
       { kind: "subtitles" as const, name: "Cafe", items: 1, manual: false, language: "", subtitle_type: "", fonts: ["f.ttf"] }]
-    expect(foldersOf(folders, tracks, "voice")).toEqual([{ ...folders[0], episodes: "1: 1–2, 4", rule: { rule: "Озвучка", row: 1 }, held: 3 }])
+    expect(foldersOf(folders, tracks, "voice")).toEqual([{ ...folders[0], episodes: "1: 1–2, 4", rule: { rule: "Озвучка", row: 1 }, held: 3,
+      fromMeta: false }])
+    // A folder made of the titles of the files alone says so, and names no rule.
+    const meta = [track("a", "AniLiberty", 1, "meta"), track("b", "AniLiberty", 2, "meta")]
+    const [made] = foldersOf([{ ...folders[0], name: "AniLiberty" }], meta, "voice")
+    expect([made.fromMeta, made.rule]).toEqual([true, null])
   })
 
   it("inside video files of one composition and one season are one container, a track standing for that track of each", () => {

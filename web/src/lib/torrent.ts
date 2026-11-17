@@ -58,6 +58,8 @@ export interface TrackEntry {
   folder: string | null
   by: string | null
   excluded: boolean
+  /** No folder or no known language yet (none, `und`): the track waits for a rule or a hand. */
+  waiting: boolean
   language: string
   subtitle_type: string
   path: string
@@ -122,12 +124,15 @@ export function sourceState(kept: ReleaseView | undefined, reading: { done: numb
 /** The rule an item was placed by, as the window words it: a row of a table is told by its number. The engine names the
  *  rule of a row of a table «name · N» (modules/rules/engine.table_rules). */
 export function ruleOf(by: string | null): { rule: string; row: number | null } | null {
-  if (!by || by === "manual") return null
+  if (!by || by === "manual" || by === FROM_META) return null
   const found = /^(.*) · (\d+)$/.exec(by)
   return found ? { rule: found[1], row: Number(found[2]) } : { rule: by, row: null }
 }
 
 // --- the tab «Файлы» ------------------------------------------------------------------------------------------------
+
+/** How a track got its folder when no rule and no hand placed it: its title in the file (modules/unpack/layout.py). */
+export const FROM_META = "meta"
 
 export type FileFilter = "all" | "unplaced" | "placed" | "excluded" | "notInvolved"
 const INVOLVED: readonly FileKind[] = ["video", "audio", "subtitles"]
@@ -195,11 +200,11 @@ export function draftOf(entries: readonly FileEntry[]): DraftSeason[] {
 
 export type TrackFilter = "all" | "unplaced" | "placed"
 export function trackCounts(entries: readonly TrackEntry[]): Record<TrackFilter, number> {
-  const live = entries.filter((entry) => !entry.excluded)
-  return { all: entries.length, unplaced: live.filter((entry) => !entry.folder).length, placed: live.filter((entry) => !!entry.folder).length }
+  return { all: entries.length, unplaced: entries.filter((entry) => entry.waiting).length,
+    placed: entries.filter((entry) => !entry.waiting && !entry.excluded).length }
 }
 export const trackFits = (entry: TrackEntry, filter: TrackFilter): boolean =>
-  filter === "all" || (filter === "placed" ? !!entry.folder && !entry.excluded : !entry.folder && !entry.excluded)
+  filter === "all" || (filter === "placed" ? !entry.waiting && !entry.excluded : entry.waiting)
 
 /** Tracks grouped by the episode of their file; those of no episode last. */
 export function byEpisode(entries: readonly TrackEntry[]): { place: Place | null; entries: TrackEntry[] }[] {
@@ -217,8 +222,10 @@ export function byEpisode(entries: readonly TrackEntry[]): { place: Place | null
 export interface FolderView extends Folder {
   /** The seasons and episodes its items are of: `1: 1–146`. */
   episodes: string
-  /** The rule that names it, when one does; none when every item of it was placed by hand. */
+  /** The rule that names it, when one does; none when every item of it was placed by hand or by its title in the file. */
   rule: { rule: string; row: number | null } | null
+  /** Made by itself of the titles the files give (no rule, no hand). */
+  fromMeta: boolean
   /** Its items among those given (the items of one tab). */
   held: number
 }
@@ -236,7 +243,7 @@ export function foldersOf(folders: readonly Folder[], entries: readonly TrackEnt
     }
     const episodes = [...bySeason].sort((a, b) => a[0] - b[0]).map(([season, numbers]) => `${season}: ${spansOf(numbers)}`).join(" · ")
     const rule = mine.map((entry) => ruleOf(entry.by)).find((each) => each !== null) ?? null
-    return { ...folder, episodes, rule, held: mine.length }
+    return { ...folder, episodes, rule, held: mine.length, fromMeta: mine.length > 0 && mine.every((entry) => entry.by === FROM_META) }
   })
 }
 
@@ -269,7 +276,7 @@ export function containerGroups(files: readonly ContainerFile[], entries: readon
       const items = group.files.map((file) => `${file.item}#${file.streams[position]?.index ?? facts.index}`)
       const folders = new Set(items.map((item) => byItem.get(item)?.folder ?? null))
       const folder = folders.size === 1 ? [...folders][0] : null
-      const unplaced = facts.kind !== "video" && items.some((item) => { const entry = byItem.get(item); return !!entry && !entry.folder && !entry.excluded })
+      const unplaced = facts.kind !== "video" && items.some((item) => !!byItem.get(item)?.waiting)
       return { facts, label: streamLabel(facts, n), items: facts.kind === "video" ? [] : items, folder, unplaced }
     })
     return { key, season: group.season, files: group.files.length, streams,

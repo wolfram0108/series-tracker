@@ -134,7 +134,8 @@ const profileId = computed(() => editor.value?.profiles[tab.value] ?? null)
             <i class="pi" :class="rulesOpen ? 'pi-chevron-up' : 'pi-chevron-down'" aria-hidden="true" />
           </button>
           <div v-show="rulesOpen" class="torrent-rules-body">
-            <RulesEditor v-if="profileId !== null" :key="profileId" :profile-id="profileId" :lines="lines" :codes="codes" />
+            <RulesEditor v-if="profileId !== null" :key="profileId" :profile-id="profileId" :lines="lines" :codes="codes"
+                         :editor="tab !== 'files'" />
           </div>
         </section>
         <TorrentFiles v-if="tab === 'files'" :editor="editor" :release="release" @failure="failure = $event" />

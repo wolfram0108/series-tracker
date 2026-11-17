@@ -37,9 +37,9 @@ const view = (overrides: Partial<EditorView> = {}): EditorView => ({
   tabs: {
     files: [file("S/E01.mkv", "video", [1, 1], "Серия · 1"), file("Bonus/OVA 2.mkv", "video", null), file("Bonus/OVA 1.mkv", "video", null),
       file("S/fonts/a.ttf", "font", null)],
-    voices: [{ item: "page/S/JAM/E01.mka", line: "", kind: "audio", folder: "JAM", by: "Озвучка · 1", excluded: false, language: "rus",
+    voices: [{ item: "page/S/JAM/E01.mka", line: "", kind: "audio", folder: "JAM", by: "Озвучка · 1", excluded: false, waiting: false, language: "rus",
       subtitle_type: "", path: "S/JAM/E01.mka", place: { season: 1, episode: 1, last: null }, stream: null },
-    { item: "page/S/Mil/E01.mka", line: "", kind: "audio", folder: null, by: null, excluded: false, language: "rus", subtitle_type: "",
+    { item: "page/S/Mil/E01.mka", line: "", kind: "audio", folder: null, by: null, excluded: false, waiting: true, language: "rus", subtitle_type: "",
       path: "S/Mil/E01.mka", place: { season: 1, episode: 1, last: null }, stream: null }],
     subtitles: [], streams: [],
   },
@@ -151,7 +151,7 @@ describe("the editors of the tracks", () => {
   it("show the containers of one composition as one, a track of it standing for that track of every file", async () => {
     const streams = () => [{ index: 0, kind: "video", codec: "h264", height: 1080 },
       { index: 1, kind: "audio", codec: "ac3", channels: 2, language: "rus", title: "" }]
-    const track = (n: number) => ({ item: `page/S/E0${n}.mkv#1`, line: "", kind: "audio" as const, folder: null, by: null, excluded: false,
+    const track = (n: number) => ({ item: `page/S/E0${n}.mkv#1`, line: "", kind: "audio" as const, folder: null, by: null, excluded: false, waiting: true,
       language: "rus", subtitle_type: "", path: `S/E0${n}.mkv`, place: { season: 0, episode: n, last: null }, stream: streams()[1] })
     const w = mountWith(TorrentStreams, { editor: editor({
       tabs: { ...view().tabs, streams: [track(1), track(2)] },

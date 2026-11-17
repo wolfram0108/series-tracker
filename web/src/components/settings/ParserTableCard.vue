@@ -9,7 +9,7 @@ import {
   canJoin, canJoinRange, cellsIn, emptyRow, fieldValues, join, joinRange, joined, rangeOf, rowOf, settle, spanOf,
   splitRange, textsOf, type Side, type TableRow,
 } from "../../lib/ruleTable"
-import { actionLabel, actionOptions, fieldText, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
+import { actionLabel, actionOptions, choicesOf, fieldText, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
 import type { EditableRule } from "./ParserRuleCard.vue"
 import ParserPatternEditor from "./ParserPatternEditor.vue"
 import PatternPalette from "./PatternPalette.vue"
@@ -32,10 +32,12 @@ const props = defineProps<{
   lines: string[]
   /** The codes of the fields of a line of the constructor, in its order (core LINE_FIELDS). */
   codes: string[]
+  /** A card of a tab of the tracks of a release: the actions of the editor are offered too. */
+  editor?: boolean
 }>()
 const emit = defineEmits<{ toggle: []; save: []; delete: []; move: [dir: -1 | 1] }>()
 
-const ACTIONS = actionOptions()
+const ACTIONS = actionOptions(props.editor)
 // The cell clicked, and the row its choice was extended to (Shift+click): the cells of the column between the two are
 // chosen together.
 const selected = ref<Cell | null>(null)
@@ -256,6 +258,11 @@ function setAction(value: string): void {
                 :class="[markOf(at, 'then'), { 'is-joined': rowsOfCell(at, 'then') > 1 }]" @mousedown="select(row, 'then', $event)"
               >
                 <ParserPatternEditor v-if="extracts" :blocks="row.then.blocks" context="then" :show-palette="false" />
+                <StSelect
+                  v-else-if="assigns && choicesOf(table.action_type)" class="table-value" :model-value="row.then.value || null"
+                  :options="choicesOf(table.action_type)!" :placeholder="t('rules.action.valuePlaceholder')"
+                  @update:model-value="row.then.value = String($event ?? '')"
+                />
                 <input
                   v-else-if="assigns" :value="row.then.value" class="table-value" :type="isNumberAssign(table.action_type) ? 'number' : 'text'"
                   :placeholder="table.action_type === 'assign_range' ? t('rules.action.assign_range.hint') : t('rules.action.valuePlaceholder')"

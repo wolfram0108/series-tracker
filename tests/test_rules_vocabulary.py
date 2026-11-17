@@ -19,9 +19,7 @@ WEB = Path(__file__).resolve().parent.parent / "web" / "src"
 VOCABULARY = WEB / "lib" / "ruleVocabulary.ts"
 
 # Типы, которые движок умеет, а панель сознательно не предлагает.
-ENGINE_ONLY = {"extract_part",
-               # The actions of the torrent editor: offered by the cards of the editor's tabs, not of the rules of a series.
-               "assign_voice_folder", "assign_subtitle_folder", "assign_language", "assign_subtitle_type"}
+ENGINE_ONLY = {"extract_part"}
 
 
 def _const_block(path: Path, name: str) -> str | None:
@@ -70,8 +68,15 @@ def test_panel_block_types_known_to_engine():
     assert panel <= set(BLOCK_TYPES), f"панель знает лишние: {panel - set(BLOCK_TYPES)}"
 
 
+def test_the_cards_of_the_editor_of_a_release_offer_its_actions_as_the_engine_knows_them():
+    from modules.rules.engine import EDITOR_ASSIGN
+    assert _values(VOCABULARY, "EDITOR_ACTIONS") == set(EDITOR_ASSIGN)
+    from core.contracts.torrent import SUBTITLE_TYPES
+    assert _values(VOCABULARY, "SUBTITLE_TYPES") == set(SUBTITLE_TYPES)
+
+
 def test_panel_offers_every_engine_action():
-    panel = _values(VOCABULARY, "ACTION_TYPES")
+    panel = _values(VOCABULARY, "ACTION_TYPES") | _values(VOCABULARY, "EDITOR_ACTIONS")
     missing = set(ACTION_TYPES) - panel - ENGINE_ONLY
     assert not missing, (f"панель не предлагает: {sorted(missing)} — "
                          "добавьте в панель или в ENGINE_ONLY теста")

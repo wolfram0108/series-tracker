@@ -6,7 +6,7 @@ import StSelect from "../StSelect.vue"
 import { t } from "../../i18n"
 import ParserPatternEditor, { type PatternBlock } from "./ParserPatternEditor.vue"
 import type { TableRow } from "../../lib/ruleTable"
-import { actionLabel, actionOptions, conditionOptions, fieldText, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
+import { actionLabel, actionOptions, choicesOf, conditionOptions, fieldText, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
 import { reasonText } from "../../lib/reason"
 
 // Карточка одного правила профиля парсера. Шапка (имя + управление) и
@@ -43,6 +43,8 @@ const props = defineProps<{
   index: number
   total: number
   isOpen: boolean
+  /** A card of a tab of the tracks of a release: the actions of the editor are offered too. */
+  editor?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -53,7 +55,7 @@ const emit = defineEmits<{
 }>()
 
 const CONDITION_TYPES = conditionOptions()
-const ACTION_TYPES = actionOptions()
+const ACTION_TYPES = actionOptions(props.editor)
 
 const toggleIcon = computed(() => (props.isOpen ? "pi-chevron-down" : "pi-chevron-right"))
 
@@ -215,7 +217,12 @@ function getAssignActionLabel(actionType: string): string {
             <!-- assign_*: простое значение -->
             <StGroup v-else-if="isAssign(action.action_type)">
               <div class="constructor-item item-label">{{ getAssignActionLabel(action.action_type) }}</div>
+              <StSelect
+                v-if="choicesOf(action.action_type)" :model-value="action.action_pattern || null" :options="choicesOf(action.action_type)!"
+                :placeholder="t('rules.action.valuePlaceholder')" @update:model-value="action.action_pattern = String($event ?? '')"
+              />
               <input
+                v-else
                 :value="action.action_pattern"
                 :type="isNumberAssign(action.action_type) ? 'number' : 'text'"
                 @input="action.action_pattern = fieldText($event)"

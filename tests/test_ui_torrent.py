@@ -91,6 +91,20 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     await expect(season.locator(".torrent-episode-name")).to_have_text(["s01e01", "s01e02"])
     await ui.shot("04-one-rule")
 
+    # «Контейнеры»: the sound inside the files has no title and no language in them, so it waits for the operator; one rule
+    # puts it into a folder of a voice-over and gives it its language, and nothing waits any more.
+    await page.locator(".torrent-switch .tab-streams").click()
+    sounds = page.locator(".torrent-streams .stream-row.is-unplaced")
+    await expect(sounds).to_have_count(1)  # one container: the sound of both files
+    await expect(sounds.first).to_contain_text(text("torrent.track.noLanguage"))
+    await ui._rule({"name": "звук", "if": [{"type": "text", "value": "T:звук"}],
+                    "then": [("assign_voice_folder", "Студия"), ("assign_language", "rus")]})
+    await expect(page.locator(".torrent-streams .stream-row.is-unplaced")).to_have_count(0, timeout=LONG_S)
+    folder = page.locator(".torrent-folder[data-folder='Студия']")
+    await expect(folder).to_be_visible()
+    await expect(folder.locator(".torrent-rule")).to_contain_text("звук")
+    await ui.shot("05-tracks-by-rule")
+
     # Nothing jitters: the switch of the tabs, the heads of the panes and the panes keep their place and size whatever tab
     # or filter is chosen; the names of the files are text the user selects and copies.
     await page.locator(".torrent-rules-head").click()

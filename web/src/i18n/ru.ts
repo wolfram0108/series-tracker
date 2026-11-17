@@ -185,6 +185,8 @@ export const ru = {
   "torrent.folder.delete": "Удалить",
   "torrent.folder.language": "Язык",
   "torrent.drag": "Перетащить",
+  "torrent.track.noLanguage": "язык не указан",
+  "torrent.folder.fromMeta": "из метаданных",
   "torrent.file.skipped": "не качается",
   "torrent.file.progress": "скачано {share}%",
   "torrent.files.one": "{count} файл",

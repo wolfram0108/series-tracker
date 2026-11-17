@@ -226,6 +226,8 @@ class UiStand(AppStand):
             await _pick(page, group.locator(".item-select").first, ACTION_LABEL[kind])
             if kind.startswith("extract_"):
                 await _template(group.locator(".pattern-constructor"), value)
+            elif kind in CHOICES:
+                await _pick(page, group.locator(".item-select").nth(1), CHOICES[kind](value))
             else:
                 await group.locator("input.item-input").fill(value)
         # The window saves the rule and reads the rules of the profile again: both answers of the server are the signal.
@@ -330,7 +332,11 @@ class UiStand(AppStand):
 
 ADMIN, PASSWORD = "stand", "stand-throwaway"  # of the database of the stand, which goes with it
 ACTION_LABEL = {kind: text(f"rules.action.{kind}") for kind in ("extract_single", "extract_range", "assign_voiceover",
-                                                                 "assign_season")}
+                                                                 "assign_season", "assign_voice_folder", "assign_subtitle_folder",
+                                                                 "assign_language", "assign_subtitle_type")}
+# The actions whose value is chosen from a list (the languages of the project, the types of subtitles): value → its word.
+CHOICES = {"assign_language": lambda code: f"{text(f'voices.language.{code}')} ({code})",
+           "assign_subtitle_type": lambda kind: text(f"torrent.type.{kind}")}
 
 
 def _option(page: Page, label: str):
