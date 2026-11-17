@@ -44,7 +44,7 @@
 .torrent-row.is-nested { padding-inline-start: 2.375rem; }
 .torrent-row.is-chosen { background: #e7f1ff; }
 .torrent-row.is-unplaced .torrent-name { color: #a61e2d; }
-.torrent-row.is-excluded .torrent-name { color: #adb5bd; text-decoration: line-through; }
+.torrent-row.is-excluded .torrent-name, .torrent-row.is-excluded .torrent-line { color: #adb5bd; text-decoration: line-through; }
 /* A row is dragged by its grip; its text is text: it is selected and copied as any (the names go into the rules). */
 .torrent-grip { flex: none; display: inline-flex; color: #adb5bd; font-size: 0.75rem; cursor: grab; }
 .torrent-grip:active { cursor: grabbing; }
@@ -144,9 +144,8 @@
 .torrent-folder.is-drop > td { background: #f3f8ff; border-block: 1px dashed var(--color-blue); }
 .torrent-folders-table .torrent-folder-track > td { block-size: 1.625rem; background: #fbfcfd; color: var(--color-gray-600); font-size: 0.75rem; }
 .torrent-folders-place { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); }
-/* A track of a folder as the left pane writes it: its raw line, its file under it. */
-.torrent-folders-trackline { display: flex; flex-direction: column; min-inline-size: 0; padding-block: 0.25rem; }
-.torrent-folders-trackline .torrent-line { display: block; }
+/* A track of a folder: the stream as the left pane names it. */
+.torrent-folders-id { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text); }
 .torrent-folders-file { overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: 0.7rem; }
 /* Where a folder's tracks come from, each way once: one under the other when they are several. */
 .torrent-folders-sources { display: flex; flex-direction: column; align-items: flex-start; gap: 0.125rem; padding-block: 0.25rem; }
@@ -170,14 +169,14 @@
   padding: 0.125rem 0.375rem; border: 0; background: var(--bg-white); color: var(--color-gray-600); font: inherit; font-size: 0.72rem; cursor: pointer;
 }
 .torrent-types button.active { background: var(--color-blue); color: var(--bg-white); }
-.torrent-rule, .torrent-hand, .torrent-meta-folder {
+.torrent-rule, .torrent-hand, .torrent-meta-folder, .torrent-auto {
   display: inline-block; max-inline-size: 100%; box-sizing: border-box; block-size: 1.25rem; padding: 0 0.45rem; border: 1px solid;
   border-radius: 999px; font-size: 0.72rem; line-height: 1.125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
 }
 .torrent-rule { background: #e6f4f1; color: #00695c; border-color: #a3d9cf; }
 .torrent-hand { background: #f3ecfb; color: #5a32a3; border-color: #d8c8f0; }
-.torrent-meta-folder { border-style: dashed; border-color: #adb5bd; color: var(--text-muted); }
-.torrent-skip {
+.torrent-meta-folder, .torrent-auto { border-style: dashed; border-color: #adb5bd; color: var(--text-muted); }
+.torrent-bin-btn {
   display: inline-flex; align-items: center; justify-content: center; inline-size: 1.75rem; block-size: 1.5rem; padding: 0;
   border: 1px solid #dee2e6; border-radius: 6px; background: var(--bg-white); color: #a61e2d; font-size: 0.75rem; cursor: pointer;
 }

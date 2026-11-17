@@ -200,13 +200,13 @@ export function draftOf(entries: readonly FileEntry[]): DraftSeason[] {
 
 // --- the tabs of the tracks -----------------------------------------------------------------------------------------
 
-export type TrackFilter = "all" | "unplaced" | "placed"
+export type TrackFilter = "all" | "unplaced" | "placed" | "excluded"
 export function trackCounts(entries: readonly TrackEntry[]): Record<TrackFilter, number> {
   return { all: entries.length, unplaced: entries.filter((entry) => entry.waiting).length,
-    placed: entries.filter((entry) => !entry.waiting && !entry.excluded).length }
+    placed: entries.filter((entry) => !entry.waiting && !entry.excluded).length, excluded: entries.filter((entry) => entry.excluded).length }
 }
 export const trackFits = (entry: TrackEntry, filter: TrackFilter): boolean =>
-  filter === "all" || (filter === "placed" ? !entry.waiting && !entry.excluded : entry.waiting)
+  filter === "all" || (filter === "placed" ? !entry.waiting && !entry.excluded : filter === "excluded" ? entry.excluded : entry.waiting)
 
 /** Tracks grouped by the episode of their file; those of no episode last. */
 export function byEpisode(entries: readonly TrackEntry[]): { place: Place | null; entries: TrackEntry[] }[] {
@@ -290,6 +290,8 @@ export interface ContainerStream {
   unplaced: boolean
   /** Some track of it goes out with no known language (none, `und`), a rule's or the file's: a rule has to name it. */
   noLanguage: boolean
+  /** Some track of it is left out of the output (by a hand or a rule): it lies in no folder and the row says so. */
+  excluded: boolean
 }
 export interface ContainerGroup { key: string; season: number | null; episodes: string; files: number; streams: ContainerStream[] }
 
@@ -322,7 +324,8 @@ export function containerGroups(files: readonly ContainerFile[], entries: readon
         const entry = byItem.get(item)
         return !!entry && !entry.excluded && ["", "und"].includes(entry.language.trim().toLowerCase())
       })
-      return { facts, label: streamLabel(facts, n), items: facts.kind === "video" ? [] : items, folder, unplaced, noLanguage }
+      const excluded = facts.kind !== "video" && items.some((item) => !!byItem.get(item)?.excluded)
+      return { facts, label: streamLabel(facts, n), items: facts.kind === "video" ? [] : items, folder, unplaced, noLanguage, excluded }
     })
     return { key, season: group.season, files: group.files.length, streams,
       episodes: spansOf(group.files.flatMap((file) => file.place ? [file.place.episode] : [])) }

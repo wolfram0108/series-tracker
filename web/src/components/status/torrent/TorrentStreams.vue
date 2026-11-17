@@ -14,26 +14,28 @@ import TorrentLine from "./TorrentLine.vue"
 const props = defineProps<{ editor: Editor }>()
 const emit = defineEmits<{ failure: [string] }>()
 
-type Shown = "all" | "unplaced" | "placed" | "video"
-const FILTERS: readonly Shown[] = ["all", "unplaced", "placed", "video"]
+type Shown = "all" | "unplaced" | "placed" | "excluded" | "video"
+const FILTERS: readonly Shown[] = ["all", "unplaced", "placed", "excluded", "video"]
 const WORDS: Record<Shown, MessageKey> = { all: "torrent.filter.allTracks", unplaced: "torrent.filter.noFolder",
-  placed: "torrent.filter.inFolder", video: "torrent.filter.video" }
+  placed: "torrent.filter.inFolder", excluded: "torrent.filter.excluded", video: "torrent.filter.video" }
 const filter = ref<Shown>("all")
 const entries = computed(() => props.editor.view.tabs.streams)
 const byItem = computed(() => new Map(entries.value.map((entry) => [entry.item, entry] as const)))
 const counts = computed(() => {
   const tracks = trackCounts(entries.value)
   const video = props.editor.view.containers.length
-  return { all: entries.value.length + video, unplaced: tracks.unplaced, placed: tracks.placed, video }
+  return { all: entries.value.length + video, unplaced: tracks.unplaced, placed: tracks.placed, excluded: tracks.excluded, video }
 })
 const fits = (stream: ContainerStream): boolean => filter.value === "all" || (filter.value === "video" ? stream.facts.kind === "video"
-  : stream.facts.kind !== "video" && (filter.value === "placed" ? !stream.unplaced : stream.unplaced))
+  : stream.facts.kind !== "video" && (filter.value === "placed" ? !stream.unplaced && !stream.excluded
+    : filter.value === "excluded" ? stream.excluded : stream.unplaced))
 const groups = computed(() => containerGroups(props.editor.view.containers, entries.value)
   .map((group) => ({ ...group, shown: group.streams.filter(fits) })).filter((group) => group.shown.length))
 const groupTitle = (group: (typeof groups.value)[number]): string => group.season === null
   ? t("torrent.streams.groupNoSeason", { files: tn("torrent.files", group.files) }) : t("torrent.streams.group", { season: group.season, episodes: group.episodes })
 
-const dotOf = (stream: ContainerStream): string => stream.facts.kind === "video" ? "is-notInvolved" : stream.unplaced ? "is-unplaced" : "is-placed"
+const dotOf = (stream: ContainerStream): string => stream.facts.kind === "video" ? "is-notInvolved" : stream.unplaced ? "is-unplaced"
+  : stream.excluded ? "is-excluded" : "is-placed"
 
 const pick = useTorrentPick()
 const chosenKinds = computed(() => new Set([...pick.chosen.value].map((item) => byItem.value.get(item)?.kind)))
@@ -101,7 +103,7 @@ async function create(): Promise<void> {
             <span class="torrent-side">{{ t("torrent.streams.files", { files: tn("torrent.files", group.files) }) }}</span>
           </div>
           <div v-for="stream in group.shown" :key="`${group.key}:${stream.label}`" class="torrent-row is-nested stream-row"
-               :class="{ 'is-chosen': stream.items.length && pick.allOf(stream.items), 'is-unplaced': stream.unplaced }">
+               :class="{ 'is-chosen': stream.items.length && pick.allOf(stream.items), 'is-unplaced': stream.unplaced, 'is-excluded': stream.excluded }">
             <template v-if="stream.items.length">
               <span class="torrent-grip" draggable="true" :title="t('torrent.drag')" aria-hidden="true"
                   @dragstart="pick.dragStart($event, stream.items)" @dragend="pick.dragEnd"><i class="pi pi-ellipsis-v" /></span>

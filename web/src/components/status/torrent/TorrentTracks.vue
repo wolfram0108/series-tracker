@@ -16,8 +16,9 @@ const emit = defineEmits<{ failure: [string] }>()
 
 type Shown = TrackFilter | "fonts"
 const kind = computed(() => props.tab === "voices" ? "voice" as const : "subtitles" as const)
-const FILTERS = computed<Shown[]>(() => props.tab === "subtitles" ? ["all", "unplaced", "placed", "fonts"] : ["all", "unplaced", "placed"])
-const filterWord = (each: Shown): string => t(({ all: "torrent.filter.all", fonts: "torrent.filter.fonts",
+const FILTERS = computed<Shown[]>(() => props.tab === "subtitles" ? ["all", "unplaced", "placed", "excluded", "fonts"]
+  : ["all", "unplaced", "placed", "excluded"])
+const filterWord = (each: Shown): string => t(({ all: "torrent.filter.all", fonts: "torrent.filter.fonts", excluded: "torrent.filter.excluded",
   unplaced: props.tab === "voices" ? "torrent.filter.noVoice" : "torrent.filter.noFolder", placed: "torrent.filter.inFolder" } as const)[each])
 const filter = ref<Shown>("all")
 const entries = computed(() => props.editor.view.tabs[props.tab])
