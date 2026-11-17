@@ -184,6 +184,7 @@ export const ru = {
   "torrent.folder.create": "Создать",
   "torrent.folder.delete": "Удалить",
   "torrent.folder.language": "Язык",
+  "torrent.drag": "Перетащить",
   "torrent.file.skipped": "не качается",
   "torrent.file.progress": "скачано {share}%",
   "torrent.files.one": "{count} файл",

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
+import StTab from "../../StTab.vue"
 import { t, type MessageKey } from "../../../i18n"
 import type { SeriesSource } from "../../../lib/sources"
 import { EDITOR_TABS, sourceState, type Editor, type EditorTab, type PageReleases, type ReleaseView } from "../../../lib/torrent"
@@ -117,8 +118,7 @@ const profileId = computed(() => editor.value?.profiles[tab.value] ?? null)
 <template>
   <div class="torrent-tab">
     <div v-if="torrents.length > 1" class="torrent-sources st-tabs st-tabs-wrap" role="tablist" :aria-label="t('torrent.sources')">
-      <button v-for="each in torrents" :key="each.id" type="button" class="st-tab" role="tab" :aria-selected="each.id === source?.id"
-              :class="{ active: each.id === source?.id }" @click="chosenId = each.id">{{ each.url }}</button>
+      <StTab v-for="each in torrents" :key="each.id" :active="each.id === source?.id" :label="each.url" @click="chosenId = each.id" />
     </div>
     <template v-if="source">
       <TorrentHead
@@ -147,7 +147,7 @@ const profileId = computed(() => editor.value?.profiles[tab.value] ?? null)
 
 <style scoped>
 /* The tab fills the body of the window: the rules above, the two panes under them take the rest and scroll inside. */
-.torrent-tab { display: flex; flex-direction: column; gap: 0.875rem; min-block-size: 100%; }
+.torrent-tab { display: flex; flex-direction: column; gap: 0.875rem; block-size: 100%; }
 .torrent-hint { margin: 0; color: var(--text-muted); }
 .torrent-failure { margin: 0; }
 .torrent-rules { flex: none; border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow: hidden; }

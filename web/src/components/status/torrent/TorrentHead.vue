@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
+import StTab from "../../StTab.vue"
 import Select from "primevue/select"
 import ToggleSwitch from "primevue/toggleswitch"
 import Button from "primevue/button"
@@ -115,10 +116,8 @@ async function setWatched(watched: boolean): Promise<void> {
                 class="do-download" @click="download" />
       </template>
       <div v-if="editor && state.stage !== 'notLoaded'" class="st-tabs st-tabs-wrap torrent-switch" role="tablist">
-        <button v-for="each in EDITOR_TABS" :key="each" type="button" role="tab" class="st-tab" :class="[`tab-${each}`, { active: tab === each }]"
-                :aria-selected="tab === each" @click="emit('tab', each)">
-          {{ t(`torrent.tab.${each}` as MessageKey) }}<span v-if="counts[each]" class="torrent-count">{{ counts[each] }}</span>
-        </button>
+        <StTab v-for="each in EDITOR_TABS" :key="each" :class="`tab-${each}`" :active="tab === each" :label="t(`torrent.tab.${each}` as MessageKey)"
+               @click="emit('tab', each)"><span v-if="counts[each]" class="torrent-count">{{ counts[each] }}</span></StTab>
       </div>
     </div>
   </div>

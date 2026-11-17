@@ -38,7 +38,7 @@ describe("SourcesEditor", () => {
     const w = mountEditor()
     expect(w.find(".source-head .source-place").text()).toBe("1.ruchime.org")
     expect(w.find(".source-head").text()).toContain("3 плеера, 41 строка")
-    expect(w.findAll(".player-tab").map((tab) => [tab.find(".player-name").text(), tab.find(".player-rows").text()]))
+    expect(w.findAll(".player-tab").map((tab) => [tab.find(".tl-text").text(), tab.find(".player-rows").text()]))
       .toEqual([["VK", "13"], ["Vibix", "23"], ["kodik", "5"]])
     for (const word of ["сезона", "до 1080p", "группа"]) expect(w.text()).not.toContain(word)
     expect(w.find(".voice-table").exists()).toBe(false)

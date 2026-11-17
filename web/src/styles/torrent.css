@@ -1,20 +1,21 @@
 /* The editors of the tab «Торрент» (components/status/torrent), as the boards of the accepted mockup draw them: two panes —
    what the release holds on the left, where it goes on the right — that fill the height of the window and scroll inside. */
 .torrent-cols {
-  flex: 1 1 auto; min-block-size: 26rem; display: grid; gap: 1.125rem; align-items: stretch;
+  flex: 1 1 0; min-block-size: 26rem; display: grid; gap: 1.125rem; align-items: stretch;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
 }
 .torrent-pane {
   display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; overflow: hidden;
   border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--bg-white);
 }
+/* One line whatever the tab: the hint gives way (ellipsis), the title and the buttons keep their place. */
 .torrent-pane-head {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.625rem; padding: 0.625rem 0.875rem;
-  border-block-end: 1px solid #e9ecef; background: var(--bg-light);
+  display: flex; align-items: center; gap: 0.625rem; min-block-size: 3rem; padding: 0.5rem 0.875rem;
+  border-block-end: 1px solid #e9ecef; background: var(--bg-light); box-sizing: border-box;
 }
-.torrent-pane-head b { font-size: 0.875rem; }
-.torrent-pane-hint { color: var(--text-muted); font-size: 0.78rem; font-weight: 400; }
-.torrent-pane-tools { display: flex; flex-wrap: wrap; gap: 0.375rem; margin-inline-start: auto; }
+.torrent-pane-head b { flex: none; font-size: 0.875rem; }
+.torrent-pane-hint { min-inline-size: 0; color: var(--text-muted); font-size: 0.78rem; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.torrent-pane-tools { display: flex; flex: none; gap: 0.375rem; margin-inline-start: auto; }
 .torrent-pane-body { flex: 1 1 auto; min-block-size: 0; overflow: auto; }
 
 /* The filters of a list: pills, the one chosen dark. */
@@ -44,7 +45,10 @@
 .torrent-row.is-chosen { background: #e7f1ff; }
 .torrent-row.is-unplaced .torrent-name { color: #a61e2d; }
 .torrent-row.is-excluded .torrent-name { color: #adb5bd; text-decoration: line-through; }
-.torrent-row[draggable="true"] { cursor: grab; }
+/* A row is dragged by its grip; its text is text: it is selected and copied as any (the names go into the rules). */
+.torrent-grip { flex: none; display: inline-flex; color: #adb5bd; font-size: 0.75rem; cursor: grab; }
+.torrent-grip:active { cursor: grabbing; }
+.torrent-name { user-select: text; }
 .torrent-row input[type="checkbox"] { inline-size: 0.9375rem; block-size: 0.9375rem; margin: 0; flex: none; accent-color: var(--color-blue); }
 .torrent-name { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .torrent-side { display: inline-flex; flex: none; gap: 0.625rem; margin-inline-start: auto; color: var(--text-muted); font-size: 0.75rem; font-weight: 400; }

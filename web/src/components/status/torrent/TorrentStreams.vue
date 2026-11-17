@@ -93,7 +93,7 @@ async function create(): Promise<void> {
 <template>
   <div class="torrent-cols torrent-streams">
     <section class="torrent-pane">
-      <div class="torrent-pane-head"><b>{{ t("torrent.streams.title") }}</b><span class="torrent-pane-hint">{{ t("torrent.streams.hint") }}</span></div>
+      <div class="torrent-pane-head"><b>{{ t("torrent.streams.title") }}</b><span class="torrent-pane-hint" :title="t('torrent.streams.hint')">{{ t("torrent.streams.hint") }}</span></div>
       <div class="torrent-filters" role="group">
         <button v-for="each in FILTERS" :key="each" type="button" class="torrent-filter" :class="{ active: filter === each }"
                 :aria-pressed="filter === each" @click="filter = each">
@@ -107,12 +107,13 @@ async function create(): Promise<void> {
             <span class="torrent-name">{{ groupTitle(group) }}</span>
             <span class="torrent-side">{{ t("torrent.streams.files", { files: tn("torrent.files", group.files) }) }}</span>
           </div>
-          <component :is="stream.items.length ? 'label' : 'div'" v-for="stream in group.shown" :key="`${group.key}:${stream.label}`"
-                     class="torrent-row is-nested stream-row"
-                     :class="{ 'is-chosen': stream.items.length && pick.allOf(stream.items), 'is-unplaced': stream.unplaced }"
-                     :draggable="stream.items.length ? 'true' : undefined"
-                     @dragstart="stream.items.length && pick.dragStart($event, stream.items)" @dragend="pick.dragEnd">
-            <input v-if="stream.items.length" type="checkbox" :checked="pick.allOf(stream.items)" @change="pick.toggleAll(stream.items)">
+          <div v-for="stream in group.shown" :key="`${group.key}:${stream.label}`" class="torrent-row is-nested stream-row"
+               :class="{ 'is-chosen': stream.items.length && pick.allOf(stream.items), 'is-unplaced': stream.unplaced }">
+            <template v-if="stream.items.length">
+              <span class="torrent-grip" draggable="true" :title="t('torrent.drag')" aria-hidden="true"
+                  @dragstart="pick.dragStart($event, stream.items)" @dragend="pick.dragEnd"><i class="pi pi-ellipsis-v" /></span>
+              <input type="checkbox" :checked="pick.allOf(stream.items)" :aria-label="stream.label" @change="pick.toggleAll(stream.items)">
+            </template>
             <i class="torrent-dot" :class="dotOf(stream)" aria-hidden="true" />
             <span class="torrent-stream-facts">{{ stream.label }}<template v-if="factsOf(stream.facts)"> · {{ factsOf(stream.facts) }}</template></span>
             <span v-if="stream.facts.kind === 'video'" class="torrent-name torrent-pane-hint">{{ t("torrent.streams.video") }}</span>
@@ -122,7 +123,7 @@ async function create(): Promise<void> {
               <template v-if="stream.facts.language"> · {{ stream.facts.language }} <span class="torrent-meta">{{ t("torrent.meta") }}</span></template>
             </span>
             <span v-if="stream.facts.kind !== 'video'" class="torrent-tg">{{ stream.folder ?? "—" }}</span>
-          </component>
+          </div>
         </template>
         <p v-if="!groups.length" class="torrent-note">{{ t("torrent.empty") }}</p>
       </div>
@@ -137,7 +138,7 @@ async function create(): Promise<void> {
 
     <section class="torrent-pane">
       <div class="torrent-pane-head">
-        <b>{{ t("torrent.folders.streams") }}</b><span class="torrent-pane-hint">{{ t("torrent.folders.streamsHint") }}</span>
+        <b>{{ t("torrent.folders.streams") }}</b><span class="torrent-pane-hint" :title="t('torrent.folders.streamsHint')">{{ t("torrent.folders.streamsHint") }}</span>
         <div class="torrent-pane-tools">
           <button type="button" class="torrent-mini is-primary" @click="naming = 'voice'">+ {{ t("torrent.folder.addVoice") }}</button>
           <button type="button" class="torrent-mini is-primary" @click="naming = 'subtitles'">+ {{ t("torrent.folder.addSubtitles") }}</button>

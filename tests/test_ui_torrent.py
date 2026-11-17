@@ -5,6 +5,8 @@ source in the window of the series and sees the tab «Торрент» come in t
 rule in the tab «Файлы» and sees every episode placed. Everything the user sees comes by the events of the service."""
 from __future__ import annotations
 
+import re
+
 import pytest
 from playwright.async_api import expect
 
@@ -68,7 +70,9 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     await expect(card).to_have_attribute("data-state", "download")
     await ui.shot("02-agents-download")
     ui.qbit.deliver(tracker.infohash)
-    await expect(card).to_have_count(0, timeout=LONG_S)
+    # Downloaded, the release stays in the client and in the monitor: ready, every file there.
+    await expect(card).to_have_attribute("data-state", "done", timeout=LONG_S)
+    await ui.shot("02b-agents-done")
 
     # The tab: the release is downloaded and read; its files have no episode, since the source has no rule yet.
     await torrent_tab.click()
@@ -86,3 +90,26 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     await expect(season).to_have_count(1)
     await expect(season.locator(".torrent-episode-name")).to_have_text(["s01e01", "s01e02"])
     await ui.shot("04-one-rule")
+
+    # Nothing jitters: the switch of the tabs, the heads of the panes and the panes keep their place and size whatever tab
+    # or filter is chosen; the names of the files are text the user selects and copies.
+    await page.locator(".torrent-rules-head").click()
+    frames = [".torrent-switch", ".torrent-pane >> nth=0", ".torrent-pane >> nth=1", ".torrent-pane-head >> nth=0",
+              ".torrent-pane-head >> nth=1"]
+
+    async def boxes():
+        return [await page.locator(frame).first.bounding_box() for frame in frames]
+    first = await boxes()
+    for tab in ("voices", "subtitles", "streams", "files"):
+        await page.locator(f".torrent-switch .tab-{tab}").click()
+        await expect(page.locator(f".torrent-switch .tab-{tab}")).to_have_class(re.compile(r"\bactive\b"))
+        assert await boxes() == first, tab
+        filters = page.locator(".torrent-filters .torrent-filter")
+        for index in range(await filters.count()):
+            await filters.nth(index).click()
+            await expect(filters.nth(index)).to_have_class(re.compile(r"\bactive\b"))
+            assert await boxes() == first, (tab, index)
+    await page.locator(".torrent-filters .torrent-filter").first.click()  # «Все»: the files are listed again
+    name = page.locator(".torrent-files .file-row .torrent-name").first
+    await name.dblclick()
+    assert (await page.evaluate("getSelection().toString()")).strip()

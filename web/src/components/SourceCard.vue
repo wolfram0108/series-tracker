@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
+import StTab from "./StTab.vue"
 import { useToast } from "primevue/usetoast"
 import Skeleton from "primevue/skeleton"
 import FoldButton from "./FoldButton.vue"
@@ -172,13 +173,10 @@ async function copyAddress(): Promise<void> {
 
       <div v-if="player" class="players stack">
         <div class="st-tabs st-tabs-wrap" role="tablist" :aria-label="t('sources.player.tabs')">
-          <button
-            v-for="each in view.players" :key="each.player" type="button" class="st-tab player-tab" role="tab"
-            :class="{ active: each.player === player.player, 'is-off': each.off, 'is-stale': each.allStale }" :aria-selected="each.player === player.player"
-            @click="picked = each.player"
-          >
-            <span class="player-name">{{ each.title }}</span><small class="player-rows">{{ each.rows }}</small>
-          </button>
+          <StTab
+            v-for="each in view.players" :key="each.player" class="player-tab" :active="each.player === player.player" :label="each.title"
+            :class="{ 'is-off': each.off, 'is-stale': each.allStale }" @click="picked = each.player"
+          ><small class="player-rows">{{ each.rows }}</small></StTab>
         </div>
         <div class="player stack" :class="{ 'is-off': player.off }" role="tabpanel" :data-player="player.player">
           <div class="player-top">
@@ -262,7 +260,7 @@ async function copyAddress(): Promise<void> {
 .muted { color: var(--text-muted); font-size: smaller; }
 .player-tab { padding-block: 0.3rem; font-size: 0.85rem; }
 .player-rows { color: var(--text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
-.player-tab.is-off .player-name { text-decoration: line-through; }
+.player-tab.is-off .tl-text { text-decoration: line-through; }
 .player-tab.is-stale { background: var(--stale-ground); border-bottom: 0.125rem solid var(--stale-mark); }
 .player-top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.9rem; font-size: 0.875rem; color: var(--color-gray-600); }
 .player-top b { color: #2c3e50; }

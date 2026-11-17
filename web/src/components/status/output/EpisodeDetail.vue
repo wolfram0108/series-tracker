@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
+import StTab from "../../StTab.vue"
 import { t } from "../../../i18n"
 import type { Queues } from "../../../composables/outputCalls"
 import type { FailedAttempt, HeldFile, SubtitleLine, Taken } from "../../../lib/plan"
@@ -85,27 +86,17 @@ const failedOfGroup = (group: string) => props.failed.filter((each) => each.held
     </header>
     <div class="detail-body">
       <div v-if="compilations" class="st-tabs st-tabs-wrap" role="tablist">
-        <button type="button" class="st-tab" :class="{ active: tab === 'compilations' }" role="tab"
-                :aria-selected="tab === 'compilations'" @click="tab = 'compilations'">{{ t("output.tab.compilations") }}</button>
-        <button type="button" class="st-tab" :class="{ active: tab === 'reference' }" role="tab"
-                :aria-selected="tab === 'reference'" @click="tab = 'reference'">{{ t("output.tab.ref2") }}</button>
+        <StTab :active="tab === 'compilations'" :label="t('output.tab.compilations')" @click="tab = 'compilations'" />
+        <StTab :active="tab === 'reference'" :label="t('output.tab.ref2')" @click="tab = 'reference'" />
       </div>
       <div v-else class="st-tabs st-tabs-wrap" role="tablist">
-        <button type="button" class="st-tab" :class="{ active: tab === 'tracks' }" role="tab" :aria-selected="tab === 'tracks'" @click="tab = 'tracks'">
-          {{ t("output.tab.tracks") }}
-        </button>
-        <button type="button" class="st-tab" :class="{ active: tab === 'reference' }" role="tab" :aria-selected="tab === 'reference'" @click="tab = 'reference'">
-          {{ t("output.tab.reference") }}
-        </button>
-        <button type="button" class="st-tab" :class="{ active: tab === 'markup' }" role="tab" :aria-selected="tab === 'markup'" @click="tab = 'markup'">
-          {{ t("output.tab.markup") }}
-        </button>
-        <button
-          v-for="(group, index) in groups" :key="group" type="button" class="st-tab" :class="{ active: tab === group }" role="tab"
-          :aria-selected="tab === group" @click="tab = group"
-        ><VoiceMark :n="index + 1" :online="cells[index]?.online" />{{ group }}</button>
-        <button type="button" class="st-tab tab-subtitles" :class="{ active: tab === SUBTITLES }" role="tab"
-                :aria-selected="tab === SUBTITLES" @click="tab = SUBTITLES">{{ t("output.tab.subtitles") }}</button>
+        <StTab :active="tab === 'tracks'" :label="t('output.tab.tracks')" @click="tab = 'tracks'" />
+        <StTab :active="tab === 'reference'" :label="t('output.tab.reference')" @click="tab = 'reference'" />
+        <StTab :active="tab === 'markup'" :label="t('output.tab.markup')" @click="tab = 'markup'" />
+        <StTab v-for="(group, index) in groups" :key="group" :active="tab === group" :label="group" @click="tab = group">
+          <template #before><VoiceMark :n="index + 1" :online="cells[index]?.online" /></template>
+        </StTab>
+        <StTab class="tab-subtitles" :active="tab === SUBTITLES" :label="t('output.tab.subtitles')" @click="tab = SUBTITLES" />
       </div>
 
       <CompilationTable

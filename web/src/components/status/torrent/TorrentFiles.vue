@@ -126,7 +126,7 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
 <template>
   <div class="torrent-cols torrent-files">
     <section class="torrent-pane">
-      <div class="torrent-pane-head"><b>{{ t("torrent.files.title") }}</b><span class="torrent-pane-hint">{{ t("torrent.files.line") }}</span></div>
+      <div class="torrent-pane-head"><b>{{ t("torrent.files.title") }}</b><span class="torrent-pane-hint" :title="t('torrent.files.line')">{{ t("torrent.files.line") }}</span></div>
       <div class="torrent-filters" role="group">
         <button v-for="each in FILTERS" :key="each" type="button" class="torrent-filter" :class="{ active: filter === each }"
                 :aria-pressed="filter === each" @click="chosenFilter = each">
@@ -136,8 +136,9 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
       </div>
       <div class="torrent-pane-body">
         <template v-for="group in visible" :key="group.folder">
-          <div class="torrent-row is-group" draggable="true" @dragstart="pick.dragStart($event, group.shown.map((each) => each.item))"
-               @dragend="pick.dragEnd">
+          <div class="torrent-row is-group">
+            <span class="torrent-grip" draggable="true" :title="t('torrent.drag')" aria-hidden="true"
+                  @dragstart="pick.dragStart($event, group.shown.map((each) => each.item))" @dragend="pick.dragEnd"><i class="pi pi-ellipsis-v" /></span>
             <input type="checkbox" :checked="pick.allOf(group.shown.map((each) => each.item))"
                    :indeterminate="pick.someOf(group.shown.map((each) => each.item))"
                    :aria-label="t('torrent.select.folder', { folder: folderLabel(group.folder) })"
@@ -155,16 +156,17 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
             </span>
           </div>
           <template v-if="!folded.has(group.folder)">
-            <label v-for="entry in group.shown" :key="entry.item" class="torrent-row is-nested file-row"
-                   :class="{ 'is-chosen': pick.has(entry.item), 'is-unplaced': fileFilterOf(entry) === 'unplaced',
-                             'is-excluded': entry.excluded }"
-                   draggable="true" @dragstart="pick.dragStart($event, [entry.item])" @dragend="pick.dragEnd">
-              <input type="checkbox" :checked="pick.has(entry.item)" @change="pick.toggle(entry.item)">
+            <div v-for="entry in group.shown" :key="entry.item" class="torrent-row is-nested file-row"
+                 :class="{ 'is-chosen': pick.has(entry.item), 'is-unplaced': fileFilterOf(entry) === 'unplaced',
+                           'is-excluded': entry.excluded }">
+              <span class="torrent-grip" draggable="true" :title="t('torrent.drag')" aria-hidden="true"
+                  @dragstart="pick.dragStart($event, [entry.item])" @dragend="pick.dragEnd"><i class="pi pi-ellipsis-v" /></span>
+              <input type="checkbox" :checked="pick.has(entry.item)" :aria-label="nameOf(entry.path)" @change="pick.toggle(entry.item)">
               <i class="torrent-dot" :class="`is-${fileFilterOf(entry)}`" aria-hidden="true" />
               <span class="torrent-name" :title="entry.path">{{ nameOf(entry.path) }}</span>
               <span v-if="loadOf(entry)" class="torrent-how file-load">{{ loadOf(entry) }}</span>
               <span class="torrent-kind" :class="`is-${entry.kind}`">{{ kindWord(entry.kind) }}</span>
-            </label>
+            </div>
           </template>
         </template>
         <p v-if="!visible.length" class="torrent-note">{{ t("torrent.empty") }}</p>
@@ -185,7 +187,7 @@ const by = (apply: (items: string[]) => unknown) => () => { if (pick.count.value
 
     <section class="torrent-pane">
       <div class="torrent-pane-head">
-        <b>{{ t("torrent.draft.title") }}</b><span class="torrent-pane-hint">{{ t("torrent.draft.hint") }}</span>
+        <b>{{ t("torrent.draft.title") }}</b><span class="torrent-pane-hint" :title="t('torrent.draft.hint')">{{ t("torrent.draft.hint") }}</span>
         <div class="torrent-pane-tools">
           <button type="button" class="torrent-mini do-add-season" @click="startAdding(null)">+ {{ t("torrent.draft.addSeason") }}</button>
         </div>

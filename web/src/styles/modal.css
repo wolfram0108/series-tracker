@@ -113,6 +113,8 @@
   display: inline-grid; align-items: center; overflow: hidden; max-width: 160px;
   transition: max-width 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
 }
+/* A tab in the body of a window shows its whole label: only the tabs of a head are fitted to their room. */
+.st-tab .tab-label.tab-label-free { max-width: none; }
 .st-tab .tab-label .tl-text {
   grid-area: 1 / 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

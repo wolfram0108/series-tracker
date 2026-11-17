@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from "vue"
+import StTab from "./StTab.vue"
 import Button from "primevue/button"
 import { useToast } from "primevue/usetoast"
 import ModalShell from "./ModalShell.vue"
@@ -229,18 +230,12 @@ onBeforeUnmount(() => {
     <!-- The first source; the next ones are added in the list of sources -->
     <div v-if="!sourceItems.length" class="field-group add-url-row stack">
       <div class="st-tabs st-tabs-wrap source-mode" role="tablist" :aria-label="t('sources.mode.label')">
-        <button
-          type="button" class="st-tab" role="tab" :class="{ active: firstMode === 'address' }"
-          :aria-selected="firstMode === 'address'" @click="firstMode = 'address'"
-        >
-          <i class="pi pi-link tab-icon" /><span>{{ t("sources.mode.address") }}</span>
-        </button>
-        <button
-          type="button" class="st-tab" role="tab" :class="{ active: firstMode === 'apps' }"
-          :aria-selected="firstMode === 'apps'" @click="firstMode = 'apps'"
-        >
-          <i class="pi pi-search tab-icon" /><span>{{ t("sources.mode.apps") }}</span>
-        </button>
+        <StTab :active="firstMode === 'address'" :label="t('sources.mode.address')" @click="firstMode = 'address'">
+          <template #before><i class="pi pi-link tab-icon" /></template>
+        </StTab>
+        <StTab :active="firstMode === 'apps'" :label="t('sources.mode.apps')" @click="firstMode = 'apps'">
+          <template #before><i class="pi pi-search tab-icon" /></template>
+        </StTab>
       </div>
       <AppSearch v-if="firstMode === 'apps'" :names="seriesNames" :added="{}" :busy="sourcesBusy" @add="addSource" />
       <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->

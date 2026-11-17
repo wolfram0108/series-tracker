@@ -79,7 +79,7 @@ async function create(): Promise<void> {
     <section class="torrent-pane">
       <div class="torrent-pane-head">
         <b>{{ t(tab === "voices" ? "torrent.voices.title" : "torrent.subtitles.title") }}</b>
-        <span class="torrent-pane-hint">{{ t("torrent.tracks.line") }}</span>
+        <span class="torrent-pane-hint" :title="t('torrent.tracks.line')">{{ t("torrent.tracks.line") }}</span>
       </div>
       <div class="torrent-filters" role="group">
         <button v-for="each in FILTERS" :key="each" type="button" class="torrent-filter" :class="{ active: filter === each }"
@@ -96,14 +96,15 @@ async function create(): Promise<void> {
                    @change="pick.toggleAll(group.entries.map((each) => each.item))">
             <span class="torrent-name">{{ groupTitle(group) }}</span><span class="torrent-side">{{ groupSide(group) }}</span>
           </div>
-          <label v-for="entry in group.entries" :key="entry.item" class="torrent-row is-nested track-row"
-                 :class="{ 'is-chosen': pick.has(entry.item), 'is-unplaced': dotOf(entry) === 'is-unplaced', 'is-excluded': entry.excluded }"
-                 draggable="true" @dragstart="pick.dragStart($event, [entry.item])" @dragend="pick.dragEnd">
-            <input type="checkbox" :checked="pick.has(entry.item)" @change="pick.toggle(entry.item)">
+          <div v-for="entry in group.entries" :key="entry.item" class="torrent-row is-nested track-row"
+               :class="{ 'is-chosen': pick.has(entry.item), 'is-unplaced': dotOf(entry) === 'is-unplaced', 'is-excluded': entry.excluded }">
+            <span class="torrent-grip" draggable="true" :title="t('torrent.drag')" aria-hidden="true"
+                  @dragstart="pick.dragStart($event, [entry.item])" @dragend="pick.dragEnd"><i class="pi pi-ellipsis-v" /></span>
+            <input type="checkbox" :checked="pick.has(entry.item)" :aria-label="entry.path" @change="pick.toggle(entry.item)">
             <i class="torrent-dot" :class="dotOf(entry)" aria-hidden="true" />
             <span class="torrent-name" :title="entry.path">{{ entry.path }}</span>
             <span v-if="entry.folder" class="torrent-tg">{{ entry.folder }}</span>
-          </label>
+          </div>
         </template>
         <template v-if="filter === 'fonts' || (filter === 'all' && tab === 'subtitles' && fonts.length)">
           <div class="torrent-row is-group"><span class="torrent-name">{{ t("torrent.filter.fonts") }}</span>
@@ -131,7 +132,7 @@ async function create(): Promise<void> {
     <section class="torrent-pane">
       <div class="torrent-pane-head">
         <b>{{ t(tab === "voices" ? "torrent.folders.voices" : "torrent.folders.subtitles") }}</b>
-        <span class="torrent-pane-hint">{{ t(tab === "voices" ? "torrent.folders.voicesHint" : "torrent.folders.subtitlesHint") }}</span>
+        <span class="torrent-pane-hint" :title="t(tab === 'voices' ? 'torrent.folders.voicesHint' : 'torrent.folders.subtitlesHint')">{{ t(tab === "voices" ? "torrent.folders.voicesHint" : "torrent.folders.subtitlesHint") }}</span>
         <div class="torrent-pane-tools">
           <button type="button" class="torrent-mini is-primary do-add-folder" @click="naming = true">
             + {{ t(tab === "voices" ? "torrent.folder.addVoice" : "torrent.folder.addSubtitles") }}</button>

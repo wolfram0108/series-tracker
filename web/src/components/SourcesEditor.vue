@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
+import StTab from "./StTab.vue"
 import AppSearch from "./AppSearch.vue"
 import SourceCard from "./SourceCard.vue"
 import StGroup from "./StGroup.vue"
@@ -127,18 +128,12 @@ function clear(): void {
     />
     <div class="stack">
       <div class="st-tabs st-tabs-wrap source-mode" role="tablist" :aria-label="t('sources.mode.label')">
-        <button
-          type="button" class="st-tab" role="tab" :class="{ active: mode === 'address' }" :aria-selected="mode === 'address'"
-          @click="mode = 'address'"
-        >
-          <i class="pi pi-link tab-icon" /><span>{{ t("sources.mode.address") }}</span>
-        </button>
-        <button
-          type="button" class="st-tab" role="tab" :class="{ active: mode === 'apps' }" :aria-selected="mode === 'apps'"
-          @click="mode = 'apps'"
-        >
-          <i class="pi pi-search tab-icon" /><span>{{ t("sources.mode.apps") }}</span>
-        </button>
+        <StTab :active="mode === 'address'" :label="t('sources.mode.address')" @click="mode = 'address'">
+          <template #before><i class="pi pi-link tab-icon" /></template>
+        </StTab>
+        <StTab :active="mode === 'apps'" :label="t('sources.mode.apps')" @click="mode = 'apps'">
+          <template #before><i class="pi pi-search tab-icon" /></template>
+        </StTab>
       </div>
       <AppSearch v-if="mode === 'apps'" :names="searchNames" :added="added" :busy="busy || adding" @add="addCard" />
       <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->

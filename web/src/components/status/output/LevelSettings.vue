@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
+import StTab from "../../StTab.vue"
 import ModalShell from "../../ModalShell.vue"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
@@ -72,26 +73,16 @@ const countText = (state: TrackState | "reference", count: number): string => st
       <!-- The tabs of a level are as many as its voice-overs: they wrap in the body, as those of an episode do; the
            header holds the few tabs of a window. -->
       <div class="st-tabs st-tabs-wrap" role="tablist">
-        <button v-if="compilation" type="button" class="st-tab" :class="{ active: tab === 'cuts' }" @click="tab = 'cuts'">
-          {{ t("output.tab.cuts") }}
-        </button>
-        <button v-else-if="season !== null" type="button" class="st-tab" :class="{ active: tab === 'tracks' }" @click="tab = 'tracks'">
-          {{ t("output.tab.tracks") }}
-        </button>
-        <button type="button" class="st-tab" :class="{ active: tab === 'reference' }" @click="tab = 'reference'">
-          {{ compilation ? t("output.tab.ref2") : t("output.tab.reference") }}
-        </button>
-        <button v-if="!compilation" type="button" class="st-tab" :class="{ active: tab === 'markup' }" @click="tab = 'markup'">
-          {{ t("output.tab.markup") }}
-        </button>
-        <button v-for="(group, index) in groups" :key="group" type="button" class="st-tab" :class="{ active: tab === group }" @click="tab = group">
-          <VoiceMark :n="index + 1" :online="online[group]" />{{ group }}
-        </button>
+        <StTab v-if="compilation" :active="tab === 'cuts'" :label="t('output.tab.cuts')" @click="tab = 'cuts'" />
+        <StTab v-else-if="season !== null" :active="tab === 'tracks'" :label="t('output.tab.tracks')" @click="tab = 'tracks'" />
+        <StTab :active="tab === 'reference'" :label="compilation ? t('output.tab.ref2') : t('output.tab.reference')" @click="tab = 'reference'" />
+        <StTab v-if="!compilation" :active="tab === 'markup'" :label="t('output.tab.markup')" @click="tab = 'markup'" />
+        <StTab v-for="(group, index) in groups" :key="group" :active="tab === group" :label="group" @click="tab = group">
+          <template #before><VoiceMark :n="index + 1" :online="online[group]" /></template>
+        </StTab>
         <!-- The subtitles have one table on the series and one on an episode (DESIGN.md 7.1.1): a season has none of its own. -->
-        <button v-if="level === 'series'" type="button" class="st-tab tab-subtitles" :class="{ active: tab === SUBTITLES }"
-                @click="tab = SUBTITLES">
-          {{ t("output.tab.subtitles") }}
-        </button>
+        <StTab v-if="level === 'series'" class="tab-subtitles" :active="tab === SUBTITLES" :label="t('output.tab.subtitles')"
+               @click="tab = SUBTITLES" />
       </div>
       <div v-if="tab === 'cuts' && compilation" class="level-cuts">
         <span class="level-counts">

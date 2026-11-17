@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue"
+import StTab from "../StTab.vue"
 import { useSeriesOutput } from "../../composables/useSeriesOutput"
 import { useBusyBar } from "../../composables/useWindowBusy"
 import type { LoadState } from "../../composables/useLoad"
@@ -221,10 +222,10 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
         </div>
         <span class="output-grow" />
         <div class="st-tabs output-view" role="group" :aria-label="t('output.view.label')">
-          <button type="button" class="st-tab" :class="{ active: mode === 'cards' }" @click="mode = 'cards'">{{ t("output.view.cards") }}</button>
-          <button type="button" class="st-tab" :class="{ active: mode === 'tiles' }" @click="mode = 'tiles'">{{ t("output.view.tiles") }}</button>
-          <button type="button" class="st-tab output-view-compilations" :class="{ active: mode === 'compilations' }"
-                  @click="mode = 'compilations'">{{ t("output.view.compilations") }}</button>
+          <StTab role="button" :active="mode === 'cards'" :label="t('output.view.cards')" @click="mode = 'cards'" />
+          <StTab role="button" :active="mode === 'tiles'" :label="t('output.view.tiles')" @click="mode = 'tiles'" />
+          <StTab role="button" class="output-view-compilations" :active="mode === 'compilations'" :label="t('output.view.compilations')"
+                 @click="mode = 'compilations'" />
         </div>
       </div>
 
