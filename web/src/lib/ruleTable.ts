@@ -1,9 +1,11 @@
 import type { PatternBlock } from "./patternBlocks"
+import { isExtract } from "./ruleVocabulary"
 
 /** The cells of a row. A cell is an object of its own: rows whose cells are joined («объединить ячейки») hold the same
  *  one, so what is typed into it is typed for each of them. */
 export interface IfCell { blocks: PatternBlock[] }
-export interface ThenCell { value: string; blocks: PatternBlock[] }
+/** `action`: the action of the cell when it is not the column's (a row of a table may do another thing). */
+export interface ThenCell { value: string; blocks: PatternBlock[]; action?: string }
 export type Side = "if" | "then"
 
 /** A row of a rule «Таблица»: the template of «ЕСЛИ» and what «ТО» puts for the action of the column — a value for an
@@ -24,7 +26,9 @@ export interface StoredTable {
   action_type: string
   /** A table of folders: the language of every row that names none of its own. */
   language?: string
-  rows: { if: StoredBlocks; then: string | number | StoredBlocks | null; if_joined?: boolean; then_joined?: boolean }[]
+  rows: { if: StoredBlocks; then: string | number | StoredBlocks | null; if_joined?: boolean; then_joined?: boolean
+    /** The action of the row when it is not the column's. */
+    action_type?: string }[]
 }
 
 const SEPARATOR = " | "
@@ -163,21 +167,28 @@ export function rowsOf(table: StoredTable): TableRow[] {
     // A value is text; a table stored with a number (the core takes both) is read as its text.
     else if (typeof stored.then === "string" || typeof stored.then === "number") row.then.value = String(stored.then)
     else if (Array.isArray(stored.then)) row.then.blocks = withIds(stored.then)
+    if (!(stored.then_joined && above) && stored.action_type && stored.action_type !== table.action_type) row.then.action = stored.action_type
     rows.push(row)
   }
   return rows
 }
 
 /** The table as the core takes it: what «ТО» holds follows the action of the column. */
-export function storedOf(actionType: string, rows: TableRow[], extract: boolean, language = ""): StoredTable {
+export function storedOf(actionType: string, rows: TableRow[], language = ""): StoredTable {
   return {
     action_type: actionType,
     ...(language && { language }),
-    rows: rows.map((row, at) => ({
-      if: withoutIds(row.if.blocks),
-      then: actionType === "exclude" ? null : extract ? withoutIds(row.then.blocks) : row.then.value.trim(),
-      ...(joined(rows, at, "if") && { if_joined: true }),
-      ...(joined(rows, at, "then") && { then_joined: true }),
-    })),
+    rows: rows.map((row, at) => {
+      // The value is written for the action of the row: its own, else the column's.
+      const own = row.then.action && row.then.action !== actionType ? row.then.action : ""
+      const type = own || actionType
+      return {
+        if: withoutIds(row.if.blocks),
+        then: type === "exclude" ? null : isExtract(type) ? withoutIds(row.then.blocks) : row.then.value.trim(),
+        ...(joined(rows, at, "if") && { if_joined: true }),
+        ...(joined(rows, at, "then") && { then_joined: true }),
+        ...(own && { action_type: own }),
+      }
+    }),
   }
 }

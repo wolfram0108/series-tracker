@@ -43,7 +43,8 @@ Queries:
   rules.rules.update {rule_id, data} → {ok}
   rules.rules.delete {rule_id} → {ok}
   rules.rules.reorder {ordered_ids} → {ok}
-      — правило вида «Таблица» несёт `rule_table` {action_type, rows: [{if: блоки, then: значение | блоки}], language?}
+      — правило вида «Таблица» несёт `rule_table` {action_type, rows: [{if: блоки, then: значение | блоки, action_type?}], language?}
+        (`action_type` строки — её своё действие вместо действия колонки)
         (`language` — язык по умолчанию строк таблицы каталогов без своего языка)
       (у обычного правила null): строки — те же правила «если содержит → действие столбца», движок
       раскладывает их по порядку на месте таблицы (engine.table_rules); строка без условия или значения —

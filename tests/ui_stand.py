@@ -339,15 +339,20 @@ CHOICES = {"assign_language": lambda code: f"{text(f'voices.language.{code}')} (
            "assign_subtitle_type": lambda kind: text(f"torrent.type.{kind}")}
 
 
+def _labelled(label: str) -> re.Pattern:
+    """The whole text `label`, after the number of its place where the list numbers its items (the actions of «ТО»)."""
+    return re.compile(rf"^\s*(?:\d+\.\s)?{re.escape(label)}\s*$")
+
+
 def _option(page: Page, label: str):
     """The item of an opened list whose whole text is `label`."""
-    return page.locator(".options-list .option").filter(has_text=re.compile(rf"^\s*{re.escape(label)}\s*$"))
+    return page.locator(".options-list .option").filter(has_text=_labelled(label))
 
 
 async def _pick(page: Page, select, label: str) -> None:
     await select.click()
     await _option(page, label).click()
-    await expect(select.locator(".selected-value")).to_have_text(label)
+    await expect(select.locator(".selected-value")).to_have_text(_labelled(label))
 
 
 async def _template(editor, blocks: list[dict]) -> None:

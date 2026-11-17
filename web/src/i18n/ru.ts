@@ -763,6 +763,7 @@ export const ru = {
   "rules.action.folderName": "Имя каталога",
   "rules.action.language": "Язык",
   "rules.action.defaultLanguage": "Язык строк по умолчанию",
+  "rules.table.rowAction": "Действие строки",
   "rules.action.value": "Значение",
   "rules.rule.namePlaceholder": "Имя правила...",
   "rules.rule.toggle": "Развернуть или свернуть правило",

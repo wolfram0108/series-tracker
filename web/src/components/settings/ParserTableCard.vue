@@ -38,7 +38,9 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ toggle: []; save: []; delete: []; move: [dir: -1 | 1] }>()
 
-const ACTIONS = actionOptions(props.place)
+// The actions of «ТО», numbered: a row shows its action by its number (compact), the list names them with it.
+const ACTIONS = actionOptions(props.place).map((each, at) => ({ ...each, label: `${at + 1}. ${each.label}` }))
+const numberOf = (type: string): number => ACTIONS.findIndex((each) => each.value === type) + 1
 // The cell clicked, and the row its choice was extended to (Shift+click): the cells of the column between the two are
 // chosen together.
 const selected = ref<Cell | null>(null)
@@ -48,8 +50,10 @@ const fresh = ref<Set<number>>(new Set())
 
 const table = computed(() => props.rule.table as Table)
 const toggleIcon = computed(() => (props.isOpen ? "pi-chevron-down" : "pi-chevron-right"))
-const extracts = computed(() => isExtract(table.value.action_type))
-const assigns = computed(() => isAssign(table.value.action_type))
+// The action of a row: its own, else the column's.
+const actionOf = (row: TableRow): string => row.then.action || table.value.action_type
+// A table of folders: any row whose action names a folder.
+const folders = computed(() => table.value.rows.some((row) => isFolderAction(actionOf(row))) || isFolderAction(table.value.action_type))
 
 const templates = computed(() => {
   const taken = textsOf(table.value.rows)
@@ -75,7 +79,7 @@ const target = computed<{ blocks: PatternBlock[]; context: "if" | "then" } | nul
   if (!chosen || chosen.cells !== 1) return null
   const row = table.value.rows[chosen.first]
   if (chosen.side === "if") return { blocks: row.if.blocks, context: "if" }
-  return extracts.value ? { blocks: row.then.blocks, context: "then" } : null
+  return isExtract(actionOf(row)) ? { blocks: row.then.blocks, context: "then" } : null
 })
 
 /** How the cell that begins at the row stands in the choice: the one cell chosen, or its place in a run of several. */
@@ -158,6 +162,12 @@ function moved(): void {
 }
 function setAction(value: string): void {
   table.value.action_type = value
+  // A row whose own action is now the column's has none of its own.
+  for (const row of table.value.rows) if (row.then.action === value) delete row.then.action
+}
+function setRowAction(row: TableRow, value: string): void {
+  if (value === table.value.action_type) delete row.then.action
+  else row.then.action = value
 }
 </script>
 
@@ -214,7 +224,7 @@ function setAction(value: string): void {
       </div>
 
       <div class="table-scroll">
-      <table class="rule-table" :class="{ 'is-folders': isFolderAction(table.action_type) }">
+      <table class="rule-table" :class="{ 'is-folders': folders }">
         <thead>
           <tr>
             <th class="col-handle" />
@@ -236,7 +246,7 @@ function setAction(value: string): void {
                           @update:model-value="setAction($event as string)" />
                 <!-- The language of every row with none of its own. -->
                 <StSelect
-                  v-if="isFolderAction(table.action_type)" class="table-language table-default-language"
+                  v-if="folders" class="table-language table-default-language"
                   :model-value="table.language || null" :options="folderLanguages()" :placeholder="t('rules.action.language')"
                   :aria-label="t('rules.action.defaultLanguage')" @update:model-value="table.language = String($event ?? '')"
                 />
@@ -264,31 +274,43 @@ function setAction(value: string): void {
                 v-if="!isJoined(at, 'then')" class="col-then" :rowspan="rowsOfCell(at, 'then')"
                 :class="[markOf(at, 'then'), { 'is-joined': rowsOfCell(at, 'then') > 1 }]" @mousedown="select(row, 'then', $event)"
               >
-                <ParserPatternEditor v-if="extracts" :blocks="row.then.blocks" context="then" :show-palette="false" />
-                <!-- A folder with its language: two fields of one value. -->
-                <div v-else-if="assigns && isFolderAction(table.action_type)" class="table-folder">
-                  <input
-                    :value="folderValueOf(row.then.value).name" class="table-value" type="text" :placeholder="t('rules.action.folderName')"
-                    :aria-label="t('rules.action.folderName')"
-                    @input="row.then.value = folderValueText({ ...folderValueOf(row.then.value), name: fieldText($event) })"
-                  />
+                <div class="row-then">
+                  <!-- The action of the row by its number in the list of «ТО»; dimmed while it is the column's. -->
                   <StSelect
-                    class="table-language" :model-value="folderValueOf(row.then.value).language || null" :options="folderLanguages()"
-                    :placeholder="table.language || t('rules.action.language')" :class="{ 'is-default': !folderValueOf(row.then.value).language && table.language }"
-                    @update:model-value="row.then.value = folderValueText({ ...folderValueOf(row.then.value), language: String($event ?? '') })"
+                    class="row-action" :class="{ 'is-own': !!row.then.action }" :model-value="actionOf(row)" :options="ACTIONS"
+                    :display="String(numberOf(actionOf(row)))" :aria-label="t('rules.table.rowAction')" :list-min-width="16"
+                    @update:model-value="setRowAction(row, $event as string)"
                   />
+                  <div class="row-then-value">
+                    <ParserPatternEditor v-if="isExtract(actionOf(row))" :blocks="row.then.blocks" context="then" :show-palette="false" />
+                    <!-- A folder with its language: two fields of one value. -->
+                    <div v-else-if="isFolderAction(actionOf(row))" class="table-folder">
+                      <input
+                        :value="folderValueOf(row.then.value).name" class="table-value" type="text" :placeholder="t('rules.action.folderName')"
+                        :aria-label="t('rules.action.folderName')"
+                        @input="row.then.value = folderValueText({ ...folderValueOf(row.then.value), name: fieldText($event) })"
+                      />
+                      <StSelect
+                        class="table-language" :model-value="folderValueOf(row.then.value).language || null" :options="folderLanguages()"
+                        :placeholder="table.language || t('rules.action.language')"
+                        :class="{ 'is-default': !folderValueOf(row.then.value).language && table.language }"
+                        @update:model-value="row.then.value = folderValueText({ ...folderValueOf(row.then.value), language: String($event ?? '') })"
+                      />
+                    </div>
+                    <StSelect
+                      v-else-if="isAssign(actionOf(row)) && choicesOf(actionOf(row))" class="table-value" :model-value="row.then.value || null"
+                      :options="choicesOf(actionOf(row))!" :placeholder="t('rules.action.valuePlaceholder')"
+                      @update:model-value="row.then.value = String($event ?? '')"
+                    />
+                    <input
+                      v-else-if="isAssign(actionOf(row))" :value="row.then.value" class="table-value"
+                      :type="isNumberAssign(actionOf(row)) ? 'number' : 'text'"
+                      :placeholder="actionOf(row) === 'assign_range' ? t('rules.action.assign_range.hint') : t('rules.action.valuePlaceholder')"
+                      :aria-label="actionLabel(actionOf(row))"
+                      @input="row.then.value = fieldText($event)"
+                    />
+                  </div>
                 </div>
-                <StSelect
-                  v-else-if="assigns && choicesOf(table.action_type)" class="table-value" :model-value="row.then.value || null"
-                  :options="choicesOf(table.action_type)!" :placeholder="t('rules.action.valuePlaceholder')"
-                  @update:model-value="row.then.value = String($event ?? '')"
-                />
-                <input
-                  v-else-if="assigns" :value="row.then.value" class="table-value" :type="isNumberAssign(table.action_type) ? 'number' : 'text'"
-                  :placeholder="table.action_type === 'assign_range' ? t('rules.action.assign_range.hint') : t('rules.action.valuePlaceholder')"
-                  :aria-label="actionLabel(table.action_type)"
-                  @input="row.then.value = fieldText($event)"
-                />
               </td>
               <td class="col-remove">
                 <button type="button" class="row-remove" :title="t('rules.table.removeRow')" :aria-label="t('rules.table.removeRow')" @click="removeRow(at)">
@@ -382,6 +404,15 @@ function setAction(value: string): void {
 /* The template of a cell is the plain row of its blocks: the frame is the cell's. */
 .rule-table td :deep(.pattern-constructor) { padding: 0; background: transparent; }
 .rule-table td :deep(.pattern-blocks-container) { min-height: 1.5rem; padding: 0; }
+/* «ТО» of a row: the number of its action, then its value. */
+.row-then { display: flex; gap: 0.375rem; align-items: flex-start; }
+.row-then-value { flex: 1 1 auto; min-width: 0; }
+.row-action {
+  flex: 0 0 auto; min-height: 2rem; padding: 0 0.375rem; border: 1px solid #ced4da; border-radius: 4px; background: #fff;
+  font-size: 0.875rem; font-weight: 600; color: var(--text-muted);
+}
+.row-action.is-own { color: #198754; border-color: #a3cfbb; }
+.row-action :deep(.selected-value) { white-space: nowrap; padding: 0; }
 .table-folder { display: flex; gap: 0.375rem; align-items: stretch; }
 .table-folder > input.table-value { flex: 1 1 8rem; min-width: 0; }
 .table-folder > .table-language {

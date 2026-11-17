@@ -29,20 +29,35 @@ describe("a rule table", () => {
     const episode = emptyRow()
     episode.if.blocks = [{ id: 1, type: "text", value: "Серия" }, { id: 2, type: "number" }]
     episode.then.blocks = [{ id: 3, type: "number" }]
-    const voices = storedOf("assign_voiceover", [rowOf("V", "AniStar")], false)
+    const voices = storedOf("assign_voiceover", [rowOf("V", "AniStar")])
     expect(voices).toEqual({ action_type: "assign_voiceover", rows: [{ if: [{ type: "text", value: "V:AniStar" }], then: "AniStar" }] })
-    const episodes = storedOf("extract_single", [episode], true)
+    const episodes = storedOf("extract_single", [episode])
     expect(episodes.rows).toEqual([{ if: [{ type: "text", value: "Серия" }, { type: "number" }], then: [{ type: "number" }] }])
-    expect(storedOf("exclude", [episode], false).rows[0].then).toBeNull()
-    for (const [table, extract] of [[voices, false], [episodes, true]] as const) {
-      expect(storedOf(table.action_type, rowsOf(table), extract)).toEqual(table)
-    }
+    expect(storedOf("exclude", [episode]).rows[0].then).toBeNull()
+    for (const table of [voices, episodes]) expect(storedOf(table.action_type, rowsOf(table))).toEqual(table)
+  })
+
+  it("keeps the action of a row that is not the column's, with its value written for it, and drops the column's own", () => {
+    const episode = emptyRow()
+    episode.if.blocks = [{ id: 1, type: "text", value: "Dir" }]
+    episode.then.blocks = [{ id: 2, type: "number" }]
+    const tag = rowOf("T", "DIR")
+    tag.then.action = "assign_video_tag"
+    const same = rowOf("S", "1")
+    same.then.action = "extract_single"
+    const stored = storedOf("extract_single", [episode, tag])
+    expect(stored.rows).toEqual([
+      { if: [{ type: "text", value: "Dir" }], then: [{ type: "number" }] },
+      { if: [{ type: "text", value: "T:DIR" }], then: "DIR", action_type: "assign_video_tag" }])
+    expect(rowsOf(stored).map((row) => row.then.action)).toEqual([undefined, "assign_video_tag"])
+    expect(storedOf("extract_single", rowsOf(stored))).toEqual(stored)
+    expect(storedOf("extract_single", [same]).rows[0].action_type).toBeUndefined()
   })
 
   it("reads a number a table was stored with as the text of its value", () => {
     const stored = { action_type: "assign_season", rows: [{ if: [{ type: "text", value: "PID:site" }], then: 4 as unknown as string }] }
     expect(rowsOf(stored)[0].then.value).toBe("4")
-    expect(storedOf("assign_season", rowsOf(stored), false).rows[0].then).toBe("4")
+    expect(storedOf("assign_season", rowsOf(stored)).rows[0].then).toBe("4")
   })
 
   // --- joined cells -------------------------------------------------------------------------------------------------
@@ -56,7 +71,7 @@ describe("a rule table", () => {
     expect(spanOf(rows, 1, "then")).toEqual([0, 2])
     rows[0].then.value = "ChinaTown (оба написания)"
     // For the core each row is whole: both rows carry the value of the joined cell, the second marked as joined.
-    expect(storedOf("assign_voiceover", rows, false).rows.map((row) => [row.if[0].value, row.then, row.then_joined ?? false])).toEqual([
+    expect(storedOf("assign_voiceover", rows).rows.map((row) => [row.if[0].value, row.then, row.then_joined ?? false])).toEqual([
       ["V:ChinaTown", "ChinaTown (оба написания)", false], ["V:ChineTown", "ChinaTown (оба написания)", true],
       ["V:AniStar", "AniStar", false]])
     // Joined again from any of its rows, the cell takes the next one below.
@@ -128,9 +143,9 @@ describe("a rule table", () => {
   it("is read back with its joined cells as it was stored", () => {
     const rows = voices()
     join(rows, 0, "then")
-    const stored = storedOf("assign_voiceover", rows, false)
+    const stored = storedOf("assign_voiceover", rows)
     const read = rowsOf(stored)
     expect(read.map((_row, at) => joined(read, at, "then"))).toEqual([false, true, false])
-    expect(storedOf("assign_voiceover", read, false)).toEqual(stored)
+    expect(storedOf("assign_voiceover", read)).toEqual(stored)
   })
 })

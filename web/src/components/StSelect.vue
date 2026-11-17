@@ -14,11 +14,16 @@ const props = withDefaults(defineProps<{
   options: Opt[]
   placeholder?: string
   ariaLabel?: string
-}>(), { placeholder: t("common.choose"), ariaLabel: undefined })
+  /** A short text the closed select shows instead of the label of its value (a number of an action); the list shows labels. */
+  display?: string
+  /** The list is at least this wide (rem), wider than a narrow trigger (a number): its labels are read whole. */
+  listMinWidth?: number
+}>(), { placeholder: t("common.choose"), ariaLabel: undefined, display: undefined, listMinWidth: 0 })
 
 const emit = defineEmits<{ "update:modelValue": [unknown] }>()
 const fieldLabel = inject(FIELD_LABEL, null)
 const selText = computed(() => {
+  if (props.display !== undefined) return props.display
   const o = props.options.find((o) => o.value === props.modelValue)
   return o ? o.label : props.placeholder
 })
@@ -28,6 +33,7 @@ const drop = useDropList({
   count: () => props.options.length,
   selected: () => props.options.findIndex((o) => o.value === props.modelValue),
   choose: (index) => emit("update:modelValue", props.options[index].value),
+  place: () => ({ minWidth: props.listMinWidth * parseFloat(getComputedStyle(document.documentElement).fontSize) }),
 })
 const { open, root, list, dropStyle, active, listId, optionId } = drop
 </script>

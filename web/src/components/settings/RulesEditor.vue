@@ -10,7 +10,7 @@ import { useConfirm } from "../../composables/useConfirm"
 import { api } from "../../api/client"
 import { t } from "../../i18n"
 import { useBusyBar } from "../../composables/useWindowBusy"
-import { isExtract, isFolderAction, type RulePlace } from "../../lib/ruleVocabulary"
+import { isExtract, type RulePlace } from "../../lib/ruleVocabulary"
 import LoadingMark from "../LoadingMark.vue"
 
 // The rules of one profile of the constructor: the cards of the rules in their order. A rule or a table is added from the
@@ -126,7 +126,7 @@ function prepareRuleForSave(rule: EditableRule): Record<string, unknown> {
   if (rule.table) {
     const { action_type: actionType, rows, language } = rule.table
     return { name: rule.name, continue_after_match: !!rule.continue_after_match, action_pattern: "[]", conditions: [],
-             rule_table: storedOf(actionType, rows, isExtract(actionType), isFolderAction(actionType) ? language : "") }
+             rule_table: storedOf(actionType, rows, language) }
   }
   const conditions = rule.conditions.map((c) => ({
     condition_type: c.condition_type,

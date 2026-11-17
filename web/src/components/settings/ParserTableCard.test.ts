@@ -30,7 +30,8 @@ describe("a rule «Таблица»", () => {
     expect(w.findAll("table.rule-table")).toHaveLength(1)
     expect(w.findAll(".template-chip").map((each) => each.text())).toEqual(["PID:2", "P:2", "G:0", "V:2", "VT:1", "R:2"])
     expect(chip(w, "G").attributes("disabled")).toBeDefined()
-    expect(w.find(".col-then .selected-value").text()).toBe(t("rules.action.assign_voiceover"))
+    // The actions of «ТО» are numbered: a row shows its action by the number.
+    expect(w.find(".col-then .selected-value").text()).toBe(`5. ${t("rules.action.assign_voiceover")}`)
     expect(w.find(".rule-rows").text()).toBe(t("rules.table.rows", { count: 1 }))
   })
 
@@ -56,7 +57,7 @@ describe("a rule «Таблица»", () => {
       expect(field.attributes("type")).toBe("number")
       await field.setValue("4")
       expect(rule.table!.rows[0].then.value).toBe("4")
-      expect(storedOf(action, rule.table!.rows, false).rows[0].then).toBe("4")
+      expect(storedOf(action, rule.table!.rows).rows[0].then).toBe("4")
     }
   })
 
@@ -89,7 +90,7 @@ describe("a rule «Таблица»", () => {
     await tool("join").trigger("click")
     // One cell «ТО» of two rows with what the upper one held; it is the cell chosen now.
     expect(spans("then")).toEqual(["2", "1"])
-    expect(storedOf("assign_voiceover", rule.table!.rows, false).rows.map((row) => row.then)).toEqual(["ChinaTown", "ChinaTown", "AniStar"])
+    expect(storedOf("assign_voiceover", rule.table!.rows).rows.map((row) => row.then)).toEqual(["ChinaTown", "ChinaTown", "AniStar"])
     expect(thens()[0].classes()).toContain("is-selected")
     await w.find("td.col-then input.table-value").setValue("Чайнатаун")
     expect(rule.table!.rows.map((row) => row.then.value)).toEqual(["Чайнатаун", "Чайнатаун", "AniStar"])

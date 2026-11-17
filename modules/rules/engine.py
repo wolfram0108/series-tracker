@@ -297,7 +297,7 @@ def _compile_any(rule: dict) -> list[CompiledRule]:
 
 def table_rules(rule: dict) -> list[dict]:
     """The rows of a rule «Таблица» as the ordinary rules they are, in their order, at the place of the table: each row is
-    one condition «содержит» (its template «ЕСЛИ») and one action of the column (its value «ТО»), with the table's own
+    one condition «содержит» (its template «ЕСЛИ») and one action — the row's own, else the column's — (its value «ТО»), with the table's own
     `continue_after_match`. Matching them is the code of every rule; nothing of it is the table's own. A row carries
     both its cells whole; the marks `if_joined` / `then_joined` (a cell joined with the one above) are the editor's way
     of writing the table and mean nothing here."""
@@ -310,22 +310,26 @@ def table_rules(rule: dict) -> list[dict]:
     rows = table.get("rows")
     if not isinstance(rows, list) or not rows:
         raise ValueError(reason("table_empty"))
-    # A table of folders may name a language for all its rows: a row with no language of its own takes it.
-    language = str(table.get("language") or "").strip() if a_type in FOLDER_ASSIGN else ""
+    # A table may name a language for its rows of folders: a row with no language of its own takes it.
+    language = str(table.get("language") or "").strip()
     expanded = []
     for number, row in enumerate(rows, 1):
         blocks = row.get("if") if isinstance(row, dict) else None
         if not blocks:
             raise ValueError(reason("table_row_if_empty", number=number))
         then = row.get("then")
-        if a_type == "exclude":
+        # A row may have an action of its own; without it, the action of the column.
+        row_type = row.get("action_type") or a_type
+        if row_type not in ACTION_TYPES:
+            raise ValueError(reason("action_unknown", type=str(row_type)))
+        if row_type == "exclude":
             pattern = "[]"
-        elif a_type in ASSIGN_TYPES:
+        elif row_type in ASSIGN_TYPES:
             pattern = str(then if then is not None else "").strip()
             if not pattern:
                 raise ValueError(reason("table_row_then_empty", number=number))
-            name, own = folder_value(pattern) if language else ("", "")
-            if language and not own:
+            name, own = folder_value(pattern) if language and row_type in FOLDER_ASSIGN else ("", "")
+            if name and not own:
                 pattern = json.dumps({"name": name, "language": language}, ensure_ascii=False)
         else:
             if not then:
@@ -334,7 +338,7 @@ def table_rules(rule: dict) -> list[dict]:
         expanded.append({
             "id": rule["id"], "name": f"{rule['name']} · {number}",
             "continue_after_match": rule.get("continue_after_match"),
-            "action_pattern": json.dumps([{"action_type": a_type, "action_pattern": pattern}], ensure_ascii=False),
+            "action_pattern": json.dumps([{"action_type": row_type, "action_pattern": pattern}], ensure_ascii=False),
             "conditions": [{"condition_type": "contains", "logical_operator": "AND",
                             "pattern": json.dumps(blocks, ensure_ascii=False)}],
         })

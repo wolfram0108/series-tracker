@@ -9,7 +9,7 @@ from playwright.async_api import expect
 
 from core import container as mkv
 
-from ui_stand import SERIES, SERIES_EN, SINGLE, _pick, text, ui  # noqa: F401 - the fixture
+from ui_stand import SERIES, SERIES_EN, SINGLE, _labelled, _pick, text, ui  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.ui
 
@@ -38,9 +38,9 @@ async def test_a_table_filled_from_the_pages_by_a_template_names_the_voice_overs
     card = page.locator(".rule-table-card")
     await card.locator(".rule-name-input").fill("Озвучки")
     # A new table starts as a new rule does: «ТО» excludes and «продолжать» is off.
-    await expect(card.locator(".col-then .selected-value")).to_have_text(text("rules.action.exclude"))
+    await expect(card.locator("th.col-then .table-action .selected-value")).to_have_text(_labelled(text("rules.action.exclude")))
     await expect(card.locator(".p-toggleswitch")).not_to_have_class(re.compile(r"p-toggleswitch-checked"))
-    await _pick(page, card.locator(".col-then .item-select"), text("rules.action.assign_voiceover"))
+    await _pick(page, card.locator("th.col-then .table-action"), text("rules.action.assign_voiceover"))
     for slug in VOICES:
         await page.get_by_text(text("rules.step.test")).click()
         await page.get_by_label(text("rulesTest.field.address")).fill(ui.site.releases[slug].url)
@@ -62,7 +62,7 @@ async def test_a_table_filled_from_the_pages_by_a_template_names_the_voice_overs
     # stays whole (it once fell apart into a letter a line).
     await page.set_viewport_size({"width": 390, "height": 900})
     assert await page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth") <= 0
-    assert (await card.locator(".col-then .item-select").bounding_box())["height"] < 60
+    assert (await card.locator("th.col-then .table-action").bounding_box())["height"] < 60
     assert await card.locator(".table-scroll").evaluate("box => box.scrollWidth > box.clientWidth")
     await ui.shot("t1-table-on-a-phone")
     await page.set_viewport_size({"width": 1440, "height": 1000})
@@ -117,7 +117,7 @@ async def test_a_season_assigned_by_a_table_and_by_a_rule_is_saved_as_typed_and_
     await page.get_by_role("button", name=text("rules.table.add")).click()
     table = page.locator(".rule-table-card")
     await table.locator(".rule-name-input").fill("сезон")
-    await _pick(page, table.locator(".col-then .item-select"), text("rules.action.assign_season"))
+    await _pick(page, table.locator("th.col-then .table-action"), text("rules.action.assign_season"))
     await table.locator(".template-chip", has_text="V:").click()
     await table.locator("input.table-value").fill("7")
     async with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/rules")) as saved, \
@@ -167,7 +167,7 @@ async def test_cells_joined_in_the_table_are_saved_joined_and_give_their_one_val
     await page.get_by_role("button", name=text("rules.table.add")).click()
     table = page.locator(".rule-table-card")
     await table.locator(".rule-name-input").fill("Озвучки")
-    await _pick(page, table.locator(".col-then .item-select"), text("rules.action.assign_voiceover"))
+    await _pick(page, table.locator("th.col-then .table-action"), text("rules.action.assign_voiceover"))
     for slug in VOICES:
         await test_step.click()
         await page.get_by_label(text("rulesTest.field.address")).fill(ui.site.releases[slug].url)

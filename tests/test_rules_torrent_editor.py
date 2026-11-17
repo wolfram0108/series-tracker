@@ -123,6 +123,17 @@ def test_a_folder_is_named_with_its_language_in_one_action_a_name_alone_names_th
                                                                                           "language": "rus"}
 
 
+def test_a_row_of_a_table_does_its_own_action_and_the_others_the_columns():
+    """A table extracts the number; one row of it gives the tag of the version instead (its own «ТО»)."""
+    table = compile_profile(7, [{"id": 1, "name": "серии", "priority": 1, "continue_after_match": True,
+                                 "action_pattern": "[]", "conditions": [],
+                                 "rule_table": {"action_type": "extract_single", "rows": [
+                                     {"if": [text("Evangelion")], "then": [text(" "), NUMBER]},
+                                     {"if": [text("Dir")], "then": "DIR", "action_type": "assign_video_tag"}]}}])
+    assert process_title(table, "Evangelion 21Dir.mkv")["extracted"] == {"episode": 21, "video_tag": "DIR"}
+    assert process_title(table, "Evangelion 21.mkv")["extracted"] == {"episode": 21}
+
+
 async def test_the_profiles_of_the_editor_are_not_listed_among_the_profiles_of_a_series(tmp_path):
     from core.db import Database
     from modules.rules.repository import RulesRepository
