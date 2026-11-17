@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { t, tn, type MessageKey } from "../../../i18n"
-import { containerGroups, foldersOf, trackCounts, type ContainerStream, type Editor, type Folder } from "../../../lib/torrent"
+import { containerGroups, trackCounts, type ContainerStream, type Editor, type Folder } from "../../../lib/torrent"
 import { assign, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
-import TorrentFolder from "./TorrentFolder.vue"
+import TorrentFolders from "./TorrentFolders.vue"
 import TorrentLine from "./TorrentLine.vue"
 
 // The editor «Контейнеры» (its board): the tracks inside the video files, files of one composition and one season shown
@@ -37,19 +37,17 @@ const dotOf = (stream: ContainerStream): string => stream.facts.kind === "video"
 
 const pick = useTorrentPick()
 const chosenKinds = computed(() => new Set([...pick.chosen.value].map((item) => byItem.value.get(item)?.kind)))
-const fitsFolder = (folder: Folder): boolean => chosenKinds.value.size === 1
-  && chosenKinds.value.has(folder.kind === "voice" ? "audio" : "subtitles")
-
-const folders = computed(() => [...foldersOf(props.editor.view.folders, entries.value, "voice"),
-  ...foldersOf(props.editor.view.folders, entries.value, "subtitles")])
-const languages = computed(() => [...new Set(entries.value.map((entry) => entry.language).filter(Boolean))])
-// What a folder holds: its tracks of containers, and the external files of the other tab laid in it.
-function holds(folder: Folder & { held: number }): string {
-  const tab = folder.kind === "voice" ? "voices" : "subtitles"
-  const external = props.editor.view.tabs[tab].filter((entry) => entry.folder === folder.name && !entry.excluded).length
-  const tracks = t("torrent.folder.tracks", { n: folder.held })
-  return external ? `${tracks} · ${t("torrent.folder.external", { n: external, tab: t(`torrent.tab.${tab}` as MessageKey) })}` : tracks
-}
+const fitsFolder = (kind: Folder["kind"]): boolean => chosenKinds.value.size === 1
+  && chosenKinds.value.has(kind === "voice" ? "audio" : "subtitles")
+const KINDS: readonly Folder["kind"][] = ["voice", "subtitles"]
+// What the pick may go into: a sound only into a voice-over, subtitles only into subtitles, the two together nowhere.
+const pickNote = computed(() => {
+  const n = pick.count.value
+  if (!n) return ""
+  if (chosenKinds.value.size > 1) return t("torrent.folders.pickMixed")
+  return chosenKinds.value.has("audio") ? t("torrent.folders.pickVoice", { tracks: tn("torrent.folders.audioTracks", n) })
+    : t("torrent.folders.pickSubtitles", { tracks: tn("torrent.folders.subtitleTracks", n) })
+})
 
 const url = computed(() => props.editor.url)
 const busy = ref(false)
@@ -138,10 +136,12 @@ async function create(): Promise<void> {
         <button type="button" class="torrent-mini" @click="naming = null">{{ t("common.cancel") }}</button>
       </form>
       <div class="torrent-pane-body">
-        <TorrentFolder v-for="folder in folders" :key="`${folder.kind}:${folder.name}`" :folder="folder" :url="url" :pick="pick"
-                       :holds="holds(folder)" :languages="languages" show-kind :fits="fitsFolder(folder)"
-                       @drop="toFolder(folder.name, $event)" @failure="emit('failure', $event)" />
-        <p v-if="!folders.length" class="torrent-note">{{ t("torrent.folders.none") }}</p>
+        <TorrentFolders :editor="editor" :kinds="KINDS" :pick="pick" :fits="fitsFolder"
+                        @drop="(_, name, items) => toFolder(name, items)" @failure="emit('failure', $event)" />
+        <p v-if="!editor.view.folders.length" class="torrent-note">{{ t("torrent.folders.none") }}</p>
+      </div>
+      <div v-if="pickNote" class="torrent-pick torrent-pick-note">{{ pickNote }}
+        <div class="torrent-pick-tools"><button type="button" class="torrent-mini" @click="pick.clear">{{ t("torrent.select.clear") }}</button></div>
       </div>
     </section>
   </div>

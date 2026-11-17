@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
-import { t, tn } from "../../../i18n"
-import { byEpisode, folderOf, foldersOf, trackCounts, trackFits, type Editor, type TrackEntry, type TrackFilter } from "../../../lib/torrent"
+import { t } from "../../../i18n"
+import { byEpisode, folderOf, trackCounts, trackFits, type Editor, type TrackEntry, type TrackFilter } from "../../../lib/torrent"
 import { assign, setFolder, unassign } from "../../../composables/torrentCalls"
 import type { Answer } from "../../../composables/sourceCalls"
 import { useTorrentPick } from "../../../composables/useTorrentPick"
-import TorrentFolder from "./TorrentFolder.vue"
+import TorrentFolders from "./TorrentFolders.vue"
 import TorrentLine from "./TorrentLine.vue"
 
 // The editors «Озвучки» and «Субтитры» (their boards): the external sound or subtitles files of the release by the episode
@@ -39,9 +39,8 @@ const chosenEntries = computed(() => entries.value.filter((entry) => pick.has(en
 const pickedFolder = computed(() => chosenEntries.value.length ? folderOf(chosenEntries.value[0].path) : null)
 const chooseFolder = (): void => pick.choose(entries.value.filter((entry) => folderOf(entry.path) === pickedFolder.value).map((entry) => entry.item))
 
-const folders = computed(() => foldersOf(props.editor.view.folders, entries.value, kind.value))
-const languages = computed(() => [...new Set(entries.value.map((entry) => entry.language).filter(Boolean))])
-const holds = (items: number): string => tn("torrent.files", items)
+const kinds = computed(() => [kind.value])
+const anyFolder = computed(() => props.editor.view.folders.some((folder) => folder.kind === kind.value))
 
 const url = computed(() => props.editor.url)
 const busy = ref(false)
@@ -145,9 +144,9 @@ async function create(): Promise<void> {
         <button type="button" class="torrent-mini" @click="naming = false">{{ t("common.cancel") }}</button>
       </form>
       <div class="torrent-pane-body">
-        <TorrentFolder v-for="folder in folders" :key="folder.name" :folder="folder" :url="url" :pick="pick" :holds="holds(folder.held)"
-                       :languages="languages" :fits="true" @drop="toFolder(folder.name, $event)" @failure="emit('failure', $event)" />
-        <p v-if="!folders.length" class="torrent-note">{{ t("torrent.folders.none") }}</p>
+        <TorrentFolders :editor="editor" :kinds="kinds" :pick="pick" :fits="() => true"
+                        @drop="(_, name, items) => toFolder(name, items)" @failure="emit('failure', $event)" />
+        <p v-if="!anyFolder" class="torrent-note">{{ t("torrent.folders.none") }}</p>
       </div>
     </section>
   </div>

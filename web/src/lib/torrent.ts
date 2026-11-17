@@ -254,6 +254,46 @@ export function foldersOf(folders: readonly Folder[], entries: readonly TrackEnt
   })
 }
 
+/** A track a folder holds, with the tab it is placed in (the folders are shared by «Озвучки», «Субтитры», «Контейнеры»). */
+export interface FolderTrack { tab: "voices" | "subtitles" | "streams"; entry: TrackEntry }
+export interface FolderRow extends FolderView {
+  /** Every track it holds, of the files and of the containers alike. */
+  tracks: FolderTrack[]
+  /** Its tracks that go out with no known language (none, `und`): a rule or the folder's language names it. */
+  noLanguage: number
+}
+
+const unknownLanguage = (language: string): boolean => ["", "und"].includes(language.trim().toLowerCase())
+
+/** The folders of a kind with every track of the release they hold: the external files of their tab and the tracks of the
+ *  containers, in the order of the episodes. */
+export function folderRows(view: EditorView, kind: Folder["kind"]): FolderRow[] {
+  const tab = kind === "voice" ? "voices" as const : "subtitles" as const
+  const sound = kind === "voice" ? "audio" : "subtitles"
+  const tracks: FolderTrack[] = [...view.tabs[tab].map((entry) => ({ tab, entry })),
+    ...view.tabs.streams.filter((entry) => entry.kind === sound).map((entry) => ({ tab: "streams" as const, entry }))]
+  const order = (a: FolderTrack, b: FolderTrack): number => !a.entry.place ? 1 : !b.entry.place ? -1
+    : a.entry.place.season - b.entry.place.season || a.entry.place.episode - b.entry.place.episode || a.entry.item.localeCompare(b.entry.item)
+  return foldersOf(view.folders, tracks.map((each) => each.entry), kind).map((folder) => {
+    const mine = tracks.filter((each) => each.entry.folder === folder.name && !each.entry.excluded).sort(order)
+    return { ...folder, tracks: mine, noLanguage: mine.filter((each) => unknownLanguage(each.entry.language)).length }
+  })
+}
+
+/** The letter and number of each track of the containers by its item (`a1`, `s0`), as «Контейнеры» names it. */
+export function streamLabels(files: readonly ContainerFile[]): Map<string, string> {
+  const labels = new Map<string, string>()
+  for (const file of files) {
+    const nth: Record<string, number> = {}
+    for (const facts of file.streams) {
+      const n = nth[facts.kind] ?? 0
+      nth[facts.kind] = n + 1
+      labels.set(`${file.item}#${facts.index}`, streamLabel(facts, n))
+    }
+  }
+  return labels
+}
+
 // --- the tab «Контейнеры» -------------------------------------------------------------------------------------------
 
 export interface ContainerStream {

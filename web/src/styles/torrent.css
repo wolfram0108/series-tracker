@@ -11,7 +11,7 @@
 /* One line whatever the tab: the hint gives way (ellipsis), the title and the buttons keep their place. */
 .torrent-pane-head {
   display: flex; align-items: center; gap: 0.625rem; min-block-size: 3rem; padding: 0.5rem 0.875rem;
-  border-block-end: 1px solid #e9ecef; background: var(--bg-light); box-sizing: border-box;
+  border-block-end: 1px solid var(--color-gray-200); background: var(--bg-light); box-sizing: border-box;
 }
 .torrent-pane-head b { flex: none; font-size: 0.875rem; }
 .torrent-pane-hint { min-inline-size: 0; color: var(--text-muted); font-size: 0.78rem; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -22,7 +22,7 @@
 .torrent-filters { display: flex; flex-wrap: wrap; gap: 0.375rem; padding: 0.625rem 0.875rem; border-block-end: 1px solid #f1f3f5; }
 .torrent-filter {
   display: inline-flex; align-items: center; gap: 0.375rem; block-size: 1.75rem; padding: 0 0.7rem; border: 1px solid var(--border-color);
-  border-radius: 999px; background: var(--bg-white); color: #495057; font: inherit; font-size: 0.78rem; cursor: pointer;
+  border-radius: 999px; background: var(--bg-white); color: var(--color-gray-600); font: inherit; font-size: 0.78rem; cursor: pointer;
 }
 .torrent-filter b { font-weight: 700; }
 .torrent-filter.active { background: #343a40; border-color: #343a40; color: var(--bg-white); }
@@ -54,7 +54,7 @@
 .torrent-side { display: inline-flex; flex: none; gap: 0.625rem; margin-inline-start: auto; color: var(--text-muted); font-size: 0.75rem; font-weight: 400; }
 .torrent-side > span { display: inline-flex; align-items: center; gap: 0.25rem; }
 .torrent-fold { flex: none; border: 0; background: none; padding: 0; color: var(--text-muted); font: inherit; cursor: pointer; }
-.torrent-tg { flex: none; font-size: 0.75rem; font-weight: 600; color: #495057; }
+.torrent-tg { flex: none; font-size: 0.75rem; font-weight: 600; color: var(--color-gray-600); }
 .torrent-meta {
   display: inline-block; margin-inline-start: 0.25rem; padding: 0 0.375rem; border: 1px dashed #adb5bd; border-radius: 999px;
   font-size: 0.65rem; line-height: 1rem; color: var(--text-muted);
@@ -63,27 +63,27 @@
 
 /* The pick: how much is chosen and what to do with it. */
 .torrent-pick {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.5rem 0.875rem; border-block-start: 1px solid #e9ecef;
-  background: #f3f8ff; color: #0b5cd4; font-size: 0.78rem;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.5rem 0.875rem; border-block-start: 1px solid var(--color-gray-200);
+  background: #f3f8ff; color: var(--color-blue-ink); font-size: 0.78rem;
 }
 .torrent-pick-tools { display: flex; gap: 0.375rem; margin-inline-start: auto; }
 
 /* A small button of a pane: the adding of a season, an episode or a folder, a deletion. */
 .torrent-mini {
   display: inline-flex; align-items: center; gap: 0.375rem; block-size: 1.75rem; padding: 0 0.625rem; border: 1px solid #ced4da;
-  border-radius: 6px; background: var(--bg-white); color: #495057; font: inherit; font-size: 0.78rem; cursor: pointer;
+  border-radius: 6px; background: var(--bg-white); color: var(--color-gray-600); font: inherit; font-size: 0.78rem; cursor: pointer;
 }
-.torrent-mini.is-primary { border-color: var(--color-blue); color: #0b5cd4; }
+.torrent-mini.is-primary { border-color: var(--color-blue); color: var(--color-blue-ink); }
 .torrent-mini:disabled { opacity: 0.55; cursor: default; }
 
 /* The kind of a file: video, sound, subtitles, font. */
-.torrent-kind { flex: none; padding: 0 0.45rem; border-radius: 6px; font-size: 0.72rem; line-height: 1.25rem; background: #f1f3f5; color: #495057; }
-.torrent-kind.is-video { background: #e7f1ff; color: #0b5cd4; }
+.torrent-kind { flex: none; padding: 0 0.45rem; border-radius: 6px; font-size: 0.72rem; line-height: 1.25rem; background: #f1f3f5; color: var(--color-gray-600); }
+.torrent-kind.is-video { background: #e7f1ff; color: var(--color-blue-ink); }
 .torrent-kind.is-audio { background: #e6f4f1; color: #00695c; }
 .torrent-kind.is-subtitles { background: #f3ecfb; color: #5a32a3; }
 
 /* The draft: a season, its episodes, the files of an episode. */
-.torrent-season + .torrent-season { border-block-start: 1px solid #e9ecef; }
+.torrent-season + .torrent-season { border-block-start: 1px solid var(--color-gray-200); }
 .torrent-season-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem; padding: 0.625rem 0.875rem; background: var(--bg-light); }
 .torrent-season-head b { font-size: 0.9rem; }
 .torrent-episode {
@@ -93,60 +93,74 @@
 .torrent-episode .torrent-episode-name { flex: 0 1 auto; font-family: var(--font-mono); font-size: 0.8125rem; font-weight: 700; color: var(--color-text); }
 .torrent-episode .torrent-kind:first-of-type { margin-inline-start: auto; }
 .torrent-folder-icon { flex: none; color: #636b73; font-size: 0.85rem; }
-.torrent-file { display: flex; align-items: center; gap: 0.5rem; min-block-size: 1.625rem; padding: 0 0.875rem 0 3.25rem; font-size: 0.78rem; color: #495057; }
+.torrent-file { display: flex; align-items: center; gap: 0.5rem; min-block-size: 1.625rem; padding: 0 0.875rem 0 3.25rem; font-size: 0.78rem; color: var(--color-gray-600); }
 .torrent-how { flex: none; font-size: 0.72rem; color: var(--text-muted); }
 .torrent-how.is-hand { color: #6f42c1; }
 
 /* A place a pick is let go on (a button too: the keyboard places the pick by it). */
 .torrent-drop {
   display: flex; align-items: center; gap: 0.625rem; margin: 0.5rem 0.875rem; padding: 0.75rem 0.875rem;
-  border: var(--border-width) dashed var(--color-blue); border-radius: 8px; background: #f3f8ff; color: #0b5cd4;
+  border: var(--border-width) dashed var(--color-blue); border-radius: 8px; background: #f3f8ff; color: var(--color-blue-ink);
   font: inherit; font-size: 0.84rem; text-align: start; cursor: pointer;
 }
 .torrent-drop:disabled { opacity: 0.6; cursor: default; }
 .torrent-bin {
   display: flex; inline-size: 100%; align-items: center; gap: 0.625rem; padding: 0.75rem 0.875rem; border: 0;
-  border-block-start: 1px solid #e9ecef; background: none; color: var(--text-muted); font: inherit; font-size: 0.8125rem; text-align: start;
+  border-block-start: 1px solid var(--color-gray-200); background: none; color: var(--text-muted); font: inherit; font-size: 0.8125rem; text-align: start;
 }
 .torrent-bin:not(:disabled) { cursor: pointer; }
 .torrent-bin.is-live { background: #fdf3f4; color: #a61e2d; }
 
-/* A folder of tracks: its name, language, type of subtitles, the rule that names it, what it holds. */
-.torrent-folder { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem 0.875rem; border-block-start: 1px solid #e9ecef; }
-.torrent-folder:first-child { border-block-start: 0; }
-.torrent-folder-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-.torrent-folder-name {
-  display: inline-flex; align-items: center; min-inline-size: min(100%, 13rem); block-size: 2.125rem; padding: 0 0.625rem;
-  border: var(--border-width) solid #e9ecef; border-radius: 8px; font-size: 0.875rem; font-weight: 700; box-sizing: border-box;
+/* The folders of the tracks: a table per kind, a row a folder; unfolded, the tracks it holds. */
+.torrent-folders-group {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.875rem; border-block-end: 1px solid var(--color-gray-200); background: #fcfcfd;
+  color: var(--color-gray-600); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
 }
-.torrent-folder-tools { display: flex; gap: 0.375rem; margin-inline-start: auto; }
-.torrent-folder-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; color: var(--text-muted); font-size: 0.78rem; }
-.torrent-folder .torrent-drop { margin: 0; }
-.torrent-language.p-select { inline-size: 8rem; block-size: 2.125rem; border: var(--border-width) solid #e9ecef; border-radius: 8px; }
-.torrent-rule, .torrent-hand {
-  display: inline-flex; align-items: center; padding: 0.125rem 0.625rem; border: 1px solid; border-radius: 999px;
-  font-size: 0.75rem; font-weight: 600; white-space: nowrap;
+.torrent-folders-group span { font-weight: 400; color: var(--text-muted); }
+.torrent-folders-table { inline-size: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.torrent-folders-table th {
+  padding: 0.375rem 0.5rem; border-block-end: 1px solid #f1f3f5; color: var(--text-muted); font-size: 0.72rem; font-weight: 400; text-align: start;
+}
+.torrent-folders-table td { block-size: 2.125rem; padding: 0 0.5rem; border-block-end: 1px solid #f1f3f5; white-space: nowrap; }
+.torrent-folders-table td.torrent-folders-fold { inline-size: 1.125rem; padding-inline-start: 0.75rem; }
+.torrent-folders-chev { padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 0.7rem; cursor: pointer; }
+.torrent-folders-table .torrent-folder-name { max-inline-size: 10rem; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
+.torrent-folders-num { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-gray-600); }
+/* As wide as «Сюда N»: a pick that turns ⊘ into it moves no column. */
+.torrent-folders-act { inline-size: 5.5rem; text-align: end; }
+.torrent-folder.is-open > td { background: #f8fbff; }
+.torrent-folder.is-drop > td { background: #f3f8ff; border-block: 1px dashed var(--color-blue); }
+.torrent-folders-table .torrent-folder-track > td { block-size: 1.625rem; background: #fbfcfd; color: var(--color-gray-600); font-size: 0.75rem; }
+.torrent-folders-place { padding-inline-start: 2.125rem; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); }
+.torrent-folders-file { max-inline-size: 15rem; overflow: hidden; text-overflow: ellipsis; }
+.torrent-folders-table .is-bad { color: #a61e2d; }
+.torrent-folders-table .torrent-language {
+  inline-size: auto; block-size: 1.5rem; padding: 0 0.25rem; border: 1px solid #dee2e6; border-radius: 6px; background: var(--bg-white);
+  font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text);
+}
+.torrent-folders-table .torrent-language.is-bad { border-color: #f1aeb5; background: #fdf3f4; color: #a61e2d; font-family: inherit; }
+.torrent-types { display: inline-flex; border: 1px solid #ced4da; border-radius: 6px; overflow: hidden; }
+.torrent-types button {
+  padding: 0.125rem 0.375rem; border: 0; background: var(--bg-white); color: var(--color-gray-600); font: inherit; font-size: 0.72rem; cursor: pointer;
+}
+.torrent-types button.active { background: var(--color-blue); color: var(--bg-white); }
+.torrent-rule, .torrent-hand, .torrent-meta-folder {
+  display: inline-flex; align-items: center; block-size: 1.25rem; padding: 0 0.45rem; border: 1px solid; border-radius: 999px;
+  font-size: 0.72rem; white-space: nowrap;
 }
 .torrent-rule { background: #e6f4f1; color: #00695c; border-color: #a3d9cf; }
 .torrent-hand { background: #f3ecfb; color: #5a32a3; border-color: #d8c8f0; }
-.torrent-meta-folder {
-  display: inline-flex; align-items: center; padding: 0.125rem 0.625rem; border: 1px dashed #adb5bd; border-radius: 999px;
-  font-size: 0.75rem; font-weight: 600; color: var(--text-muted); white-space: nowrap;
+.torrent-meta-folder { border-style: dashed; border-color: #adb5bd; color: var(--text-muted); }
+.torrent-skip {
+  display: inline-flex; align-items: center; justify-content: center; inline-size: 1.75rem; block-size: 1.5rem; padding: 0;
+  border: 1px solid #dee2e6; border-radius: 6px; background: var(--bg-white); color: #a61e2d; font-size: 0.75rem; cursor: pointer;
+}
+.torrent-put {
+  display: inline-flex; align-items: center; block-size: 1.5rem; padding: 0 0.5rem; border: 0; border-radius: 6px;
+  background: var(--color-blue); color: var(--bg-white); font: inherit; font-size: 0.75rem; cursor: pointer;
 }
 .torrent-tg.is-problem { color: #a61e2d; }
-.torrent-kd {
-  display: inline-flex; align-items: center; padding: 0 0.45rem; border-radius: 6px; font-size: 0.72rem; line-height: 1.25rem;
-  background: #e6f4f1; color: #00695c;
-}
-.torrent-types { display: flex; gap: 0.2rem; }
-.torrent-types button {
-  padding: 0.3rem 0.56rem; border: 1px solid #ced4da; border-radius: 6px; background: var(--bg-white); color: #495057;
-  font: inherit; font-size: 0.78rem; cursor: pointer;
-}
-.torrent-types button.active { background: var(--color-blue); border-color: var(--color-blue); color: var(--bg-white); }
-.torrent-fonts { display: flex; flex-wrap: wrap; gap: 0.375rem; }
-.torrent-fonts span { padding: 0.125rem 0.45rem; border-radius: 5px; background: #f1f3f5; color: #495057; font-family: var(--font-mono); font-size: 0.72rem; }
-.torrent-new { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.5rem 0.875rem; border-block-end: 1px solid #e9ecef; }
+.torrent-new { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.5rem 0.875rem; border-block-end: 1px solid var(--color-gray-200); }
 
 /* A track inside a container: its letter and number with what the file says of it, its name, the folder it lies in. */
 /* The raw line of an item, field by field (TorrentLine): the code of a field dimmed, the text selectable as it is. */
@@ -160,4 +174,4 @@
 .torrent-line-code { color: var(--text-muted); }
 .torrent-line-sep { color: var(--border-color); }
 .torrent-row.is-unplaced .torrent-line-field.is-name { color: #a61e2d; }
-.torrent-stream-facts { flex: none; inline-size: 9.5rem; font-family: var(--font-mono); font-size: 0.75rem; color: #495057; }
+.torrent-stream-facts { flex: none; inline-size: 9.5rem; font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-gray-600); }

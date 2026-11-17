@@ -105,6 +105,9 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     folder = page.locator(".torrent-folder[data-folder='Студия']")
     await expect(folder).to_be_visible()
     await expect(folder.locator(".torrent-rule")).to_contain_text("звук")
+    # The folder is a row of the table; unfolded, it lists the track of each episode it holds, named as «Контейнеры» names it.
+    await folder.locator(".torrent-folders-chev").click()
+    await expect(page.locator(".torrent-folder-track .torrent-folders-place")).to_have_text(["s01e01 · a0", "s01e02 · a0"])
     await ui.shot("05-tracks-by-rule")
 
     # What is shown is what is copied: a click takes a field whole, code and all; the whole line, as the rule reads it.
@@ -117,6 +120,18 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
         "line => { const range = document.createRange(); range.selectNodeContents(line); const pick = getSelection();"
         " pick.removeAllRanges(); pick.addRange(range); return [pick.toString(), line.title] }")
     assert whole[0] == whole[1], whole
+
+    # A sound picked: each folder of a voice-over is a place to put it, the folders of subtitles are not, and the pane says so;
+    # the columns of the folders stay where they were.
+    heads = page.locator(".torrent-folders-table th")
+    columns = [await each.bounding_box() for each in await heads.all()]
+    await row.locator("input[type=checkbox]").check()
+    await expect(page.locator(".torrent-folder .drop-folder")).to_have_count(1)
+    await expect(page.locator(".torrent-pick-note")).to_contain_text(text("torrent.folders.pickVoice", tracks="2 дорожки звука"))
+    await ui.shot("06-pick")
+    assert [await each.bounding_box() for each in await heads.all()] == columns
+    await page.locator(".torrent-pick-note button").click()
+    await expect(page.locator(".torrent-folder .drop-folder")).to_have_count(0)
 
     # Nothing jitters: the switch of the tabs, the heads of the panes and the panes keep their place and size whatever tab
     # or filter is chosen; the names of the files are text the user selects and copies.
