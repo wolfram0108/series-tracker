@@ -9,6 +9,8 @@
 .page-title { font-size: 28px; font-weight: 700; color: #2c3e50; margin: 0; }
 .page-title-container { display: flex; align-items: center; gap: 16px; }
 .header-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+/* The time left to the scheduled scan, beside the lamps of the agents. */
+.scan-clock { color: var(--text-muted); font-size: 0.9rem; white-space: nowrap; }
 
 /* Индикаторы агентов — круглые точки; неактив серый, активный синий + пульс.
    Размеры: мониторинг 24px, загрузка/нарезка 18px (≈ на 30% меньше). */

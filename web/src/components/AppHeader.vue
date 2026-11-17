@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Button from "primevue/button"
 import FoldButton from "./FoldButton.vue"
+import ScanClock from "./ScanClock.vue"
 import { useIndicatorsStore } from "../stores/indicators"
 import { useAuthStore } from "../stores/auth"
 import { t } from "../i18n"
@@ -22,6 +23,7 @@ defineEmits<{ (e: "add"): void; (e: "logs"): void; (e: "extensions"): void; (e: 
         <div class="indicator" :class="{ 'ind-active': ind.monitoring }" :title="t('agents.torrents.title')"></div>
         <div class="indicator ind-small" :class="{ 'ind-active': ind.downloader }" :title="t('download.title')"></div>
       </div>
+      <ScanClock />
     </div>
     <div class="header-actions">
       <FoldButton :label="t('header.add')" :hint="t('header.addSeries')" icon="pi pi-plus" fold="xl" @click="$emit('add')" />
