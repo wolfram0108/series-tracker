@@ -154,6 +154,9 @@
   flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text;
   font-family: var(--font-mono); font-size: 0.78rem; color: var(--color-text);
 }
+/* A field is one piece: a click takes it whole as it is shown (`N:MifSnaiper`, not the word after the colon); a drag across
+   fields takes them with their separators, the line as the rule reads it. */
+.torrent-line-field { user-select: all; cursor: text; }
 .torrent-line-code { color: var(--text-muted); }
 .torrent-line-sep { color: var(--border-color); }
 .torrent-row.is-unplaced .torrent-line-field.is-name { color: #a61e2d; }

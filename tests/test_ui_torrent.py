@@ -107,6 +107,17 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     await expect(folder.locator(".torrent-rule")).to_contain_text("звук")
     await ui.shot("05-tracks-by-rule")
 
+    # What is shown is what is copied: a click takes a field whole, code and all; the whole line, as the rule reads it.
+    row = page.locator(".torrent-streams .stream-row").nth(1)
+    field = row.locator(".torrent-line-field").last
+    await field.click()
+    assert await page.evaluate("getSelection().toString()") == await field.inner_text()
+    assert (await field.inner_text()).startswith("C:")
+    whole = await row.locator(".torrent-line").evaluate(
+        "line => { const range = document.createRange(); range.selectNodeContents(line); const pick = getSelection();"
+        " pick.removeAllRanges(); pick.addRange(range); return [pick.toString(), line.title] }")
+    assert whole[0] == whole[1], whole
+
     # Nothing jitters: the switch of the tabs, the heads of the panes and the panes keep their place and size whatever tab
     # or filter is chosen; the names of the files are text the user selects and copies.
     await page.locator(".torrent-rules-head").click()
@@ -127,5 +138,5 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
             assert await boxes() == first, (tab, index)
     await page.locator(".torrent-filters .torrent-filter").first.click()  # «Все»: the files are listed again
     name = page.locator(".torrent-files .file-row .torrent-line-field.is-name").first
-    await name.dblclick()
-    assert (await page.evaluate("getSelection().toString()")).strip()
+    await name.click()
+    assert await page.evaluate("getSelection().toString()") == await name.inner_text()
