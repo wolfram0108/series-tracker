@@ -10,6 +10,11 @@ unplaced: which video it is in sync with is the user's word). A track lies in th
 a rule names, else the one its title in the file names (folders are made of the titles by themselves); its language is the
 rule's, else its folder's, else the file's. A track with no folder or with no known language (none, `und`) waits for the
 operator: a rule settles it, and a rule overrides what the file says.
+
+An episode is the season, the number and the tag of its video (a version: `S01E21` and `S01E21 DIR` are two episodes, two
+variants of the output). It is taken by the first source that put a video in it — the hand, else the rules of «Файлы» in their
+order: what a later source put in it (a video, a sound, subtitles) is red, with the conflict told; two videos one source put
+in one episode are both red, which one it is is the user's word.
 """
 from __future__ import annotations
 
@@ -41,10 +46,21 @@ class Place:
     season: int
     episode: int
     last: int | None = None
+    tag: str = ""  # the version of the episode its video is (DIR); an episode with its tag is an episode of its own
 
     @property
     def word(self) -> str:
-        return episode_word(self.season, self.episode, self.last)
+        word = episode_word(self.season, self.episode, self.last)
+        return f"{word} {self.tag}" if self.tag else word
+
+
+@dataclass(frozen=True)
+class Conflict:
+    """Why a file «Файлы» gave an episode is red: the episode was `taken` by a source before it, or one source put `twice`
+    a video in it."""
+    code: str
+    word: str
+    by: str  # the source that took the episode: `manual` or the name of a rule
 
 
 @dataclass
@@ -61,7 +77,7 @@ class Inputs:
 def lines(inputs: Inputs) -> dict[str, dict[str, str]]:
     """The line of every item of every tab, for the rules of the tab (the tabs of tracks need the places of the files)."""
     out: dict[str, dict[str, str]] = {tab: {} for tab in EditorTab}
-    places = _places(inputs)
+    places, _conflicts = _placing(inputs)
     for release in inputs.releases:
         for f in release.files:
             item = item_of(release.release, f.path)
@@ -82,24 +98,60 @@ def lines(inputs: Inputs) -> dict[str, dict[str, str]]:
 
 
 def _place_of(result: dict | None, manual: dict | None) -> Place | None:
-    """The season and episode of a file: the hand's, else the rule's; none — the file is red, it gives no row."""
+    """The season, episode and tag of a file: the hand's, else the rule's; none — the file is red, it gives no row."""
     if manual is not None:
-        return Place(manual["season"], manual["episode"], manual.get("episode_last"))
+        return Place(manual["season"], manual["episode"], manual.get("episode_last"), manual.get("tag") or "")
     if not result:
         return None
-    season = result.get("season") or 1
+    season, tag = result.get("season") or 1, str(result.get("video_tag") or "").strip()
     if result.get("episode") is not None:
-        return Place(season, result["episode"])
+        return Place(season, result["episode"], None, tag)
     if result.get("start") is not None:
-        return Place(season, result["start"], result.get("end"))
+        return Place(season, result["start"], result.get("end"), tag)
     return None
 
 
-def _places(inputs: Inputs) -> dict[str, Place | None]:
+_LAST = 1 << 30  # the rank of a source no rule names: after every rule
+
+
+def _source_of(result: dict | None, manual: dict | None) -> tuple[int, str]:
+    """(rank, name) of what gave a file its episode: the hand first, then the rules by their place in the profile (the rule
+    that gave the number)."""
+    if manual is not None:
+        return -1, "manual"
+    for event in reversed((result or {}).get("events") or []):
+        if {"episode", "start"} & set(event.get("extracted") or {}):
+            return event.get("order", _LAST), event.get("rule") or ""
+    return _LAST, _rule_of(result) or ""
+
+
+def _placing(inputs: Inputs) -> tuple[dict[str, Place | None], dict[str, Conflict]]:
+    """The place of every file and the conflicts: an episode is the first source's that put a video in it."""
     files_results, files_manual = inputs.results.get(EditorTab.FILES, {}), inputs.manual.get(EditorTab.FILES, {})
-    return {item_of(r.release, f.path): _place_of(files_results.get(item_of(r.release, f.path)),
-                                                    files_manual.get(item_of(r.release, f.path)))
-            for r in inputs.releases for f in r.files}
+    given: dict[str, tuple[Place | None, tuple[int, str], FileKind]] = {}
+    for r in inputs.releases:
+        for f in r.files:
+            item = item_of(r.release, f.path)
+            result, manual = files_results.get(item), files_manual.get(item)
+            given[item] = (_place_of(result, manual), _source_of(result, manual), kind_of(f.path))
+    videos: dict[Place, list[tuple[int, str, str]]] = {}
+    for item, (place, (rank, name), kind) in given.items():
+        if place is not None and kind == FileKind.VIDEO:
+            videos.setdefault(place, []).append((rank, name, item))
+    owner: dict[Place, tuple[int, str]] = {}
+    conflicts: dict[str, Conflict] = {}
+    for place, found in videos.items():
+        first = min(rank for rank, _name, _item in found)
+        firsts = [each for each in found if each[0] == first]
+        owner[place] = (first, firsts[0][1])
+        if len(firsts) > 1:
+            for _rank, name, item in firsts:
+                conflicts[item] = Conflict("twice", place.word, name)
+    for item, (place, (rank, _name), _kind) in given.items():
+        taken = owner.get(place) if place is not None else None
+        if item not in conflicts and taken is not None and rank != taken[0]:
+            conflicts[item] = Conflict("taken", place.word, taken[1])
+    return {item: None if item in conflicts else place for item, (place, _source, _kind) in given.items()}, conflicts
 
 
 def _probed(inputs: Inputs, release: str, path: str) -> list[dict]:
@@ -136,7 +188,7 @@ def _folder_of(tab: str, kind: str, result: dict | None, manual: dict | None, st
 
 def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
     """The view of the editor and the rows of the table."""
-    places = _places(inputs)
+    places, conflicts = _placing(inputs)
     folder_facts = {(f["tab"], f["name"]): f for f in inputs.folders}
     # `containers`: every video file placed, with what it holds (the window lays the tabs «Озв. конт.» and «Суб. конт.» out by it: files of
     # one composition are one).
@@ -193,9 +245,10 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
             view["tabs"][EditorTab.FILES].append({
                 "item": item, "path": f.path, "line": files_line(f.path), "kind": kind.value, "size": f.size,
                 "priority": f.priority,
-                "place": None if not isinstance(where, Place) else {"season": where.season, "episode": where.episode,
-                                                                    "last": where.last},
+                "place": _place_json(where),
                 "by": "manual" if manual is not None else _rule_of(result),
+                "conflict": None if (found := conflicts.get(item)) is None else {"code": found.code, "episode": found.word,
+                                                                                "by": found.by},
                 "problem": (inputs.streams.get(release.release, {}).get(f.path) or {}).get("reason")})
             if where is None and kind in (FileKind.VIDEO, FileKind.AUDIO, FileKind.SUBTITLES):
                 view["unplaced"][EditorTab.FILES] += 1
@@ -276,7 +329,8 @@ _STREAM_KEYS = ("index", "kind", "codec", "language", "title", "channels", "heig
 
 
 def _place_json(where: "Place | str | None") -> dict | None:
-    return {"season": where.season, "episode": where.episode, "last": where.last} if isinstance(where, Place) else None
+    return {"season": where.season, "episode": where.episode, "last": where.last, "tag": where.tag} \
+        if isinstance(where, Place) else None
 
 
 def _nth(streams: list[dict], stream: dict) -> int:
@@ -297,7 +351,10 @@ def _row_state(release: ReleaseView) -> tuple[RowState, str | None]:
 
 def _row(release: ReleaseView, key: str, link: str, video: str, where: Place, kind: str, entry: dict, stream: dict,
          height: int, state: RowState, why: str | None) -> TableRow:
-    return TableRow(key=key, player=player_of(release.release), player_label=release.title or release.release,
+    # A version of the episode (its tag) is a line of the player of its own: a variant of the output apart.
+    label = release.title or release.release
+    return TableRow(key=key, player=player_of(release.release, where.tag),
+                    player_label=f"{label} · {where.tag}" if where.tag else label,
                     text=f"{where.word} | {video}", voice=RowVoice(name=entry["folder"] or stream.get("title") or "",
                                                                    kind=kind),
                     track=RowTrack.SUBTITLES if kind == "subtitles" else RowTrack.SOUND,

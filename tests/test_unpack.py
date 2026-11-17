@@ -93,6 +93,73 @@ def test_the_tabs_are_a_chain_a_file_files_left_red_goes_neither_to_voices_nor_t
     assert view["unplaced"]["files"] == 2
 
 
+def ruled(numbers: dict[str, tuple[int, int, int, str, str]]) -> dict:
+    """The results of «Файлы» as rules in their order give them: path → (season, episode, order, rule, tag)."""
+    return {item_of("page", path): {"season": season, "episode": episode, **({"video_tag": tag} if tag else {}),
+                                    "events": [{"rule": rule, "order": order, "action": "extract",
+                                                "extracted": {"episode": episode}}]}
+            for path, (season, episode, order, rule, tag) in numbers.items()}
+
+
+def test_an_episode_is_the_first_sources_and_what_a_later_one_put_in_it_is_red_with_the_conflict_told():
+    """«Директор» (first) and «Серия» (second) both give episode 21: the director's cut takes it, the plain video, its sound
+    and subtitles are red, the conflict told; one rule giving two videos one episode leaves both red."""
+    r = release(["Show/Show 21Dir.mkv", "Show/Show 21Dir.rus.mka", "Show/Show 21.mkv", "Show/Show 21.rus.mka",
+                 "Show/Show 21.rus.ass", "Show/Show 22.mkv", "Show/Show 22 (v2).mkv"])
+    inputs = Inputs(releases=[r], manual={}, folders=[], streams={},
+                    results={"files": ruled({"Show/Show 21Dir.mkv": (1, 21, 0, "Директор", ""),
+                                             "Show/Show 21Dir.rus.mka": (1, 21, 0, "Директор", ""),
+                                             "Show/Show 21.mkv": (1, 21, 1, "Серия", ""),
+                                             "Show/Show 21.rus.mka": (1, 21, 1, "Серия", ""),
+                                             "Show/Show 21.rus.ass": (1, 21, 1, "Серия", ""),
+                                             "Show/Show 22.mkv": (1, 22, 1, "Серия", ""),
+                                             "Show/Show 22 (v2).mkv": (1, 22, 1, "Серия", "")})})
+    view, _rows = compose(inputs)
+    files = {entry["path"]: entry for entry in view["tabs"]["files"]}
+    assert files["Show/Show 21Dir.mkv"]["place"] == {"season": 1, "episode": 21, "last": None, "tag": ""}
+    assert files["Show/Show 21Dir.rus.mka"]["conflict"] is None
+    for path in ("Show/Show 21.mkv", "Show/Show 21.rus.mka", "Show/Show 21.rus.ass"):
+        assert files[path]["place"] is None
+        assert files[path]["conflict"] == {"code": "taken", "episode": "S01E21", "by": "Директор"}, path
+    for path in ("Show/Show 22.mkv", "Show/Show 22 (v2).mkv"):
+        assert files[path]["place"] is None and files[path]["conflict"] == {"code": "twice", "episode": "S01E22", "by": "Серия"}
+    # Red goes no further: the plain sound and subtitles are in none of the next tabs.
+    assert [e["path"] for e in view["tabs"]["voices"]] == ["Show/Show 21Dir.rus.mka"]
+    assert view["tabs"]["subtitles"] == []
+    # The hand goes before every rule: a video placed by hand takes the episode from the rules.
+    inputs.manual = {"files": {item_of("page", "Show/Show 21.mkv"): {"season": 1, "episode": 21, "episode_last": None, "tag": ""}}}
+    files = {entry["path"]: entry for entry in compose(inputs)[0]["tabs"]["files"]}
+    assert files["Show/Show 21.mkv"]["conflict"] is None
+    assert files["Show/Show 21Dir.mkv"]["conflict"] == {"code": "taken", "episode": "S01E21", "by": "manual"}
+
+
+def test_a_tag_of_the_video_makes_a_version_an_episode_of_its_own_and_a_variant_of_the_output():
+    """The director's cut tagged DIR: `S01E21 DIR` and `S01E21` are two episodes; each sound goes with the video of its own
+    version, and its rows are a line of the player of their own (`torrent:page#DIR`), a variant apart."""
+    r = release(["Show/Show 21Dir.mkv", "Show/Show 21Dir.rus.mka", "Show/Show 21.mkv", "Show/Show 21.rus.mka"])
+    inputs = Inputs(releases=[r], manual={}, folders=[],
+                    streams={"page": {"Show/Show 21Dir.mkv": streams(("video", 0, "", "")),
+                                      "Show/Show 21.mkv": streams(("video", 0, "", "")),
+                                      "Show/Show 21Dir.rus.mka": streams(("audio", 0, "rus", "Студия")),
+                                      "Show/Show 21.rus.mka": streams(("audio", 0, "rus", "Студия"))}},
+                    results={"files": ruled({"Show/Show 21Dir.mkv": (1, 21, 0, "Директор", "DIR"),
+                                             "Show/Show 21Dir.rus.mka": (1, 21, 0, "Директор", "DIR"),
+                                             "Show/Show 21.mkv": (1, 21, 1, "Серия", ""),
+                                             "Show/Show 21.rus.mka": (1, 21, 1, "Серия", "")})})
+    view, rows = compose(inputs)
+    assert all(entry["conflict"] is None for entry in view["tabs"]["files"])
+    assert sorted((row.player, row.player_label, row.link) for row in rows) == [
+        ("torrent:page", "Тайтл · 1-12", track_link("page", "Show/Show 21.mkv", 0, file="Show/Show 21.rus.mka")),
+        ("torrent:page#DIR", "Тайтл · 1-12 · DIR", track_link("page", "Show/Show 21Dir.mkv", 0, file="Show/Show 21Dir.rus.mka"))]
+    assert {row.text for row in rows} == {"S01E21 | Show/Show 21.mkv", "S01E21 DIR | Show/Show 21Dir.mkv"}
+    # The hand gives a version too.
+    inputs.results = {"files": {}}
+    inputs.manual = {"files": {item_of("page", path): {"season": 1, "episode": 21, "episode_last": None, "tag": tag}
+                               for path, tag in (("Show/Show 21Dir.mkv", "DIR"), ("Show/Show 21Dir.rus.mka", "DIR"),
+                                                 ("Show/Show 21.mkv", ""), ("Show/Show 21.rus.mka", ""))}}
+    assert sorted(row.player for row in compose(inputs)[1]) == ["torrent:page", "torrent:page#DIR"]
+
+
 def test_a_flag_of_the_files_container_is_no_type_of_subtitles_and_no_fact_of_the_row():
     """The source tells of subtitles their name, language and type (full, signs); how a track lies in a container (forced,
     default) is the output's (DESIGN.md 7.1.1): the flags of the release's own file make neither a type nor a field."""
@@ -373,7 +440,7 @@ async def test_files_dropped_on_a_season_take_its_episodes_from_the_one_given_in
                                              "season": 0, "episode": 4, "episode_last": 9, "in_order": True})
     editor = await torrents.request("unpack.editor.get", {"url": URL})
     assert [(e["path"], e["place"], e["by"]) for e in editor["view"]["tabs"]["files"]] == [
-        (path, {"season": 0, "episode": 4 + n, "last": None}, "manual") for n, path in enumerate(ova)]
+        (path, {"season": 0, "episode": 4 + n, "last": None, "tag": ""}, "manual") for n, path in enumerate(ova)]
 
 
 async def test_a_folder_deleted_takes_the_hands_placements_in_it_and_auto_makes_the_automatic_ones_again(bus_stand):
@@ -420,7 +487,7 @@ async def test_a_page_written_with_a_mirror_is_the_page_of_the_trackers_own_doma
     by_mirror = await torrents.request("unpack.editor.get", {"url": mirror})
     by_page = await torrents.request("unpack.editor.get", {"url": URL})
     assert by_mirror["url"] == by_page["url"] == URL and by_mirror["profiles"] == by_page["profiles"]
-    assert by_page["view"]["tabs"]["files"][0]["place"] == {"season": 2, "episode": 7, "last": None}
+    assert by_page["view"]["tabs"]["files"][0]["place"] == {"season": 2, "episode": 7, "last": None, "tag": ""}
     assert [f["name"] for f in by_page["view"]["folders"]] == ["Студия"]
 
 
@@ -487,7 +554,7 @@ def test_the_editor_tells_the_file_episode_and_stream_of_every_track_and_what_ev
     view, _rows = compose(inputs)
     stream = view["tabs"]["voice_streams"][0]
     assert (stream["path"], stream["place"], stream["stream"]["index"], stream["stream"]["language"]) == (
-        "Show/Show - 01.mkv", {"season": 1, "episode": 1, "last": None}, 1, "jpn")
+        "Show/Show - 01.mkv", {"season": 1, "episode": 1, "last": None, "tag": ""}, 1, "jpn")
     voice = view["tabs"]["voices"][0]
     assert (voice["path"], voice["place"]["episode"]) == ("Show/Show - 01.rus.mka", 1)
     assert [(each["path"], [s["kind"] for s in each["streams"]]) for each in view["containers"]] == [

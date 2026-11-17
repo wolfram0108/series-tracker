@@ -42,6 +42,8 @@ class AssignBody(BaseModel):
     season: int | None = None
     episode: int | None = None
     episode_last: int | None = None
+    # The version of the episode a file is (DIR): an episode with its tag is an episode of its own.
+    tag: str = ""
     folder: str | None = None
     # The items in the order given take the episodes from `episode` on, one each (files dropped on a season).
     in_order: bool = False
@@ -50,6 +52,8 @@ class AssignBody(BaseModel):
     def _a_place(self):
         if self.tab == "files" and (self.season is None or self.episode is None):
             raise ValueError("a file is placed in a season and an episode")
+        if self.tab != "files" and self.tag.strip():
+            raise ValueError("a tag is a video's: a track goes with the video of its episode")
         if self.tab != "files" and not self.folder:
             raise ValueError("a track is placed in a folder")
         return self

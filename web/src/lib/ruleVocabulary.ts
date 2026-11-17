@@ -13,7 +13,8 @@ export const ACTION_TYPES = ["exclude", "extract_single", "extract_range", "extr
 /** The actions of the editor of a release (modules/rules/engine.py EDITOR_ASSIGN): a track into a folder of a voice-over or of
  *  subtitles, its language, its type of subtitles. Offered by the cards of the tabs of the tracks of a release only: a row
  *  of a site has none of them. */
-export const EDITOR_ACTIONS = ["assign_voice_folder", "assign_subtitle_folder", "assign_language", "assign_subtitle_type"] as const
+export const EDITOR_ACTIONS = ["assign_video_tag", "assign_voice_folder", "assign_subtitle_folder", "assign_language",
+  "assign_subtitle_type"] as const
 /** The values of the type of subtitles (core/contracts/torrent.py SUBTITLE_TYPES). */
 export const SUBTITLE_TYPES = ["full", "signs"] as const
 /** The assignments whose value is a number. */
@@ -50,6 +51,7 @@ export const ACTION_PLACES: Record<ActionType, readonly RulePlace[]> = {
   assign_quality: ["series"],
   assign_resolution: ["series"],
   assign_range: ["series"],
+  assign_video_tag: ["files"],
   assign_voice_folder: ["voices"],
   assign_subtitle_folder: ["subtitles"],
   assign_language: ["voices", "subtitles"],

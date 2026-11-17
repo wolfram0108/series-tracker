@@ -40,13 +40,15 @@ class UnpackRepository:
         return await self._db.fetch_all("SELECT * FROM unpack_assignments WHERE url=?", (url,))
 
     async def assign(self, url: str, tab: str, items: list[str], *, season: int | None = None, episode: int | None = None,
-                     episode_last: int | None = None, folder: str | None = None, in_order: bool = False) -> None:
-        """`in_order`: the items in the order given take the episodes from `episode` on, one each."""
+                     episode_last: int | None = None, folder: str | None = None, in_order: bool = False,
+                     tag: str = "") -> None:
+        """`in_order`: the items in the order given take the episodes from `episode` on, one each; `tag`: the version of
+        the episode (a file of «Файлы»)."""
         await self._db.execute_many([
-            ("INSERT OR REPLACE INTO unpack_assignments (url, tab, item, season, episode, episode_last, folder) "
-             "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("INSERT OR REPLACE INTO unpack_assignments (url, tab, item, season, episode, episode_last, folder, tag) "
+             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
              (url, tab, item, season, episode + number if in_order and episode is not None else episode,
-              None if in_order else episode_last, folder))
+              None if in_order else episode_last, folder, tag.strip()))
             for number, item in enumerate(items)]
             # A track placed by hand is no longer one the user took out of its folder.
             + [("DELETE FROM unpack_removed WHERE url=? AND tab=? AND item=?", (url, tab, item)) for item in items])

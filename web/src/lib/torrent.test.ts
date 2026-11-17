@@ -24,7 +24,7 @@ describe("the state of a torrent source", () => {
 })
 
 const file = (path: string, kind: FileEntry["kind"], place: [number, number] | null, by: string | null = null): FileEntry => ({
-  item: `r/${path}`, path, line: "", kind, size: 1, priority: 1, place: place && { season: place[0], episode: place[1], last: null }, by })
+  item: `r/${path}`, path, line: "", kind, size: 1, priority: 1, place: place && { season: place[0], episode: place[1], last: null, tag: "" }, by })
 
 describe("the files of a release", () => {
   it("are counted by what they are and laid in seasons and episodes in the draft", () => {
@@ -41,6 +41,14 @@ describe("the files of a release", () => {
     expect([episodeFolder(1, 5), episodeFolder(0, 12, 13), episodeFolder(2, 3, 3)]).toEqual(["s01e05", "s00e12-e13", "s02e03"])
   })
 
+  it("make two episodes of two versions of one number: the tag of the video is a part of the episode", () => {
+    const dir = (path: string, kind: FileEntry["kind"]): FileEntry => ({ ...file(path, kind, [1, 21]),
+      place: { season: 1, episode: 21, last: null, tag: "DIR" } })
+    const files = [file("21.mkv", "video", [1, 21]), file("21.mka", "audio", [1, 21]), dir("21Dir.mkv", "video"), dir("21Dir.mka", "audio")]
+    expect(draftOf(files)[0].episodes.map((each) => [episodeFolder(1, each.episode, each.last, each.tag), each.files.map((f) => f.path)]))
+      .toEqual([["s01e21", ["21.mkv", "21.mka"]], ["s01e21 · DIR", ["21Dir.mkv", "21Dir.mka"]]])
+  })
+
   it("name the rule that placed them, a row of a table by its number", () => {
     expect(ruleOf("Серия · 2")).toEqual({ rule: "Серия", row: 2 })
     expect(ruleOf("Исключить")).toEqual({ rule: "Исключить", row: null })
@@ -51,7 +59,7 @@ describe("the files of a release", () => {
 
 const track = (item: string, folder: string | null, episode: number, by: string | null = null): TrackEntry => ({
   item, line: "", kind: "audio", folder, by, waiting: !folder, language: "rus", subtitle_type: "", path: `${folder ?? "x"}/${item}`,
-  place: { season: 1, episode, last: null }, stream: null })
+  place: { season: 1, episode, last: null, tag: "" }, stream: null })
 
 describe("the tracks of a release", () => {
   it("are grouped by their episode and their folders say what they hold and the rule that named them", () => {
@@ -70,7 +78,7 @@ describe("the tracks of a release", () => {
 
   it("inside video files of one composition and one season are one container, a track standing for that track of each", () => {
     const streams = [{ index: 0, kind: "video" }, { index: 1, kind: "audio", language: "rus", title: "" }]
-    const files: ContainerFile[] = [1, 2, 3].map((n) => ({ item: `r/E${n}.mkv`, path: `E${n}.mkv`, place: { season: n === 3 ? 2 : 1, episode: n, last: null }, streams }))
+    const files: ContainerFile[] = [1, 2, 3].map((n) => ({ item: `r/E${n}.mkv`, path: `E${n}.mkv`, place: { season: n === 3 ? 2 : 1, episode: n, last: null, tag: "" }, streams }))
     const tracks = [1, 2, 3].map((n) => ({ ...track(`r/E${n}.mkv#1`, n === 1 ? "MS" : null, n) }))
     const groups = containerGroups(files, tracks)
     expect(groups.map((group) => [group.season, group.episodes, group.files])).toEqual([[2, "3", 1], [1, "1–2", 2]])

@@ -2070,6 +2070,11 @@ export interface components {
             episode?: number | null;
             /** Episode Last */
             episode_last?: number | null;
+            /**
+             * Tag
+             * @default
+             */
+            tag: string;
             /** Folder */
             folder?: string | null;
             /**

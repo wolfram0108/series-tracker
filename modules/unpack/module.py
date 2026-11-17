@@ -17,8 +17,8 @@ Queries / commands (a page is named by any mirror of its tracker; the module kee
       page): a release downloaded for the first time gives none, a release being updated gives its rows not obtained
   unpack.editor.get {url} → {url, profiles: {files, voices, subtitles, voice_streams, subtitle_streams}, view} — the editor of the page: its releases,
       the items of every tab with their line, their place or folder and what put them there, the folders, what is unplaced
-  unpack.assign {url, tab, items, season?, episode?, episode_last?, folder?, in_order?} — placed by hand (a drag): a file
-      in a season and an episode, a track in a folder; `in_order`: the items in the order given take the episodes from
+  unpack.assign {url, tab, items, season?, episode?, episode_last?, tag?, folder?, in_order?} — placed by hand (a drag): a
+      file in a season and an episode (of the version `tag`, DIR), a track in a folder; `in_order`: the items in the order given take the episodes from
       `episode` on, one each (files dropped on a season)
   unpack.unassign {url, tab, items} — back to what the rules give
   unpack.folder.set {url, tab, name, language?, subtitle_type?} / unpack.folder.delete {url, tab, name, automatic?, items?}
@@ -180,7 +180,8 @@ class UnpackModule(BaseModule):
     async def on_assign(self, env: Envelope) -> None:
         p, url = env.payload, await self._page(env.payload["url"])
         await self.repo.assign(url, p["tab"], list(p["items"]), season=p.get("season"), episode=p.get("episode"),
-                               episode_last=p.get("episode_last"), folder=p.get("folder"), in_order=bool(p.get("in_order")))
+                               episode_last=p.get("episode_last"), folder=p.get("folder"), in_order=bool(p.get("in_order")),
+                               tag=p.get("tag") or "")
         self._changed(url)
 
     async def on_unassign(self, env: Envelope) -> None:

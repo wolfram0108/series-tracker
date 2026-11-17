@@ -29,7 +29,9 @@ const groups = computed(() => filter.value === "fonts" ? []
 const stateOf = (entry: TrackEntry): string => entry.waiting ? "is-unplaced" : "is-placed"
 
 const groupTitle = (group: (typeof groups.value)[number]): string => group.place
-  ? t("torrent.tracks.group", { season: group.place.season, episode: group.place.last ? `${group.place.episode}–${group.place.last}` : group.place.episode })
+  ? t("torrent.tracks.group", { season: group.place.season,
+    episode: (group.place.last ? `${group.place.episode}–${group.place.last}` : String(group.place.episode))
+      + (group.place.tag ? ` · ${group.place.tag}` : "") })
   : t("torrent.tracks.noEpisode")
 const groupSide = (group: (typeof groups.value)[number]): string => t("torrent.tracks.count",
   { n: group.entries.length, placed: group.entries.filter((each) => !each.waiting).length })

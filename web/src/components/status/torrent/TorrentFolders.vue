@@ -82,7 +82,7 @@ function idOf(track: FolderTrack): string {
 }
 const placeOf = (track: FolderTrack): string => {
   const place = track.entry.place
-  return place ? episodeFolder(place.season, place.episode, place.last) : t("torrent.tracks.noEpisode")
+  return place ? episodeFolder(place.season, place.episode, place.last, place.tag) : t("torrent.tracks.noEpisode")
 }
 
 const busy = ref(false)

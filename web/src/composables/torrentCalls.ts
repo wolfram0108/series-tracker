@@ -27,8 +27,8 @@ type Schemas = components["schemas"]
 type WithDefaults<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 
 /** Items placed by hand: a file in an episode (to `episode_last` for a file of several), a track in a folder. */
-export const assign = (body: WithDefaults<Schemas["AssignBody"], "in_order">): Promise<Answer<unknown>> =>
-  call(() => api.POST("/api/torrent/editor/assign", { body: { in_order: false, ...body } }), WORDS)
+export const assign = (body: WithDefaults<Schemas["AssignBody"], "in_order" | "tag">): Promise<Answer<unknown>> =>
+  call(() => api.POST("/api/torrent/editor/assign", { body: { in_order: false, tag: "", ...body } }), WORDS)
 
 export const unassign = (url: string, tab: EditorTab, items: string[]): Promise<Answer<unknown>> =>
   call(() => api.POST("/api/torrent/editor/unassign", { body: { url, tab, items } }), WORDS)

@@ -35,7 +35,9 @@ ASSIGN_TYPES = ("assign_voiceover", "assign_episode", "assign_season",
                 "assign_range")
 # The actions of the torrent editor (stage 15): a value set as it is, under its own key of the result.
 EDITOR_ASSIGN = {"assign_voice_folder": "voice_folder", "assign_subtitle_folder": "subtitle_folder",
-                 "assign_language": "language", "assign_subtitle_type": "subtitle_type"}
+                 "assign_language": "language", "assign_subtitle_type": "subtitle_type",
+                 # «Тег видео» of the tab «Файлы»: a version of an episode (DIR), an episode of its own with its tag.
+                 "assign_video_tag": "video_tag"}
 ASSIGN_TYPES = ASSIGN_TYPES + tuple(EDITOR_ASSIGN)
 ACTION_TYPES = ("exclude",) + EXTRACT_TYPES + ASSIGN_TYPES
 BLOCK_TYPES = ("text", "number", "range", "add", "subtract", "whitespace",
@@ -580,17 +582,18 @@ def process_title(profile: CompiledProfile, title: str) -> dict[str, Any]:
     """Результат: {excluded, extracted, events, errors}."""
     extracted: dict[str, Any] = {}
     events, errors = [], []
-    for rule in profile.rules:
+    # `order`: the place of the rule in its profile — what came first decides between rules that gave one thing to two lines.
+    for order, rule in enumerate(profile.rules):
         if not _conditions_match(title, rule.conditions):
             continue
         before = dict(extracted)
         outcome = _run_actions(title, rule, extracted, errors)
         if outcome == "exclude":
-            events.append({"rule": rule.name, "action": "exclude"})
+            events.append({"rule": rule.name, "order": order, "action": "exclude"})
             return {"excluded": True, "extracted": {}, "events": events,
                     "errors": errors}
         if outcome == "data":
-            events.append({"rule": rule.name, "action": "extract",
+            events.append({"rule": rule.name, "order": order, "action": "extract",
                            "extracted": {k: v for k, v in extracted.items()
                                          if before.get(k) != v}})
             # Фикс В: остановка — только если правило ДАЛО результат.

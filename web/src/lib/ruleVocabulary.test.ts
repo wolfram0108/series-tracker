@@ -9,8 +9,9 @@ describe("the actions «ТО» offers where the constructor stands", () => {
       "assign_episode", "assign_season", "assign_part", "assign_quality", "assign_resolution", "assign_range"])
   })
 
-  it("«Файлы» of the torrent offers only the season and the episode of a file", () => {
-    expect(offered("files")).toEqual(["extract_single", "extract_range", "extract_season", "assign_episode", "assign_season"])
+  it("«Файлы» of the torrent offers only the season, the episode and the tag of the version of a file", () => {
+    expect(offered("files")).toEqual(["extract_single", "extract_range", "extract_season", "assign_episode", "assign_season",
+      "assign_video_tag"])
   })
 
   it("the sound offers its folder and language, the subtitles their folder, language and type", () => {

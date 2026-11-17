@@ -28,7 +28,11 @@ export interface ReleaseView {
 export interface PageRelease { release: string; title: string; link?: string | null; magnet?: string | null; published?: string | null; episodes?: string | null }
 export interface PageReleases { url: string; site: string; title: string; releases: PageRelease[] }
 
-export interface Place { season: number; episode: number; last: number | null }
+/** The place of a file: its season, episode and the tag of its version (DIR) — an episode with its tag is one of its own. */
+export interface Place { season: number; episode: number; last: number | null; tag: string }
+/** Why a file «Файлы» gave an episode is red: the episode was `taken` by a source before it (`by`: `manual` or a rule), or
+ *  one source put `twice` a video in it (modules/unpack/layout.py). */
+export interface FileConflict { code: "taken" | "twice"; episode: string; by: string }
 export interface StreamFacts {
   index: number
   kind: string
@@ -53,6 +57,7 @@ export interface FileEntry {
   place: Place | null
   by: string | null
   problem?: string | null
+  conflict?: FileConflict | null
 }
 export interface TrackEntry {
   item: string
@@ -173,14 +178,21 @@ export function byFolder<T extends { path: string }>(entries: readonly T[]): { f
   return [...groups].map(([folder, list]) => ({ folder, entries: list }))
 }
 
-/** The folder of an episode in the draft, as the files of the library name it: `s01e05`, `s01e05-e06` for several. */
-export function episodeFolder(season: number, episode: number, last: number | null = null): string {
+/** The folder of an episode in the draft, as the files of the library name it: `s01e05`, `s01e05-e06` for several; a
+ *  version with its tag: `s01e05 · DIR`. */
+export function episodeFolder(season: number, episode: number, last: number | null = null, tag = ""): string {
   const two = (n: number): string => String(n).padStart(2, "0")
   const word = `s${two(season)}e${two(episode)}`
-  return last !== null && last !== episode ? `${word}-e${two(last)}` : word
+  const folder = last !== null && last !== episode ? `${word}-e${two(last)}` : word
+  return tag ? `${folder} · ${tag}` : folder
 }
+/** The key of an episode with its version: two versions of one number are two episodes. */
+export const placeKey = (place: Pick<Place, "season" | "episode" | "last" | "tag">): string =>
+  `${place.season}:${place.episode}:${place.last ?? ""}:${place.tag}`
 
-export interface DraftEpisode { episode: number; last: number | null; files: FileEntry[]; kinds: Partial<Record<FileKind, number>> }
+export interface DraftEpisode {
+  episode: number; last: number | null; tag: string; files: FileEntry[]; kinds: Partial<Record<FileKind, number>>
+}
 export interface DraftSeason { season: number; episodes: DraftEpisode[]; manual: boolean }
 
 /** The draft of the release: seasons, their episodes and the files laid in each, by the rules or by hand. */
@@ -189,11 +201,11 @@ export function draftOf(entries: readonly FileEntry[]): DraftSeason[] {
   const manual = new Set<number>()
   for (const entry of entries) {
     if (!entry.place) continue
-    const { season, episode, last } = entry.place
+    const { season, episode, last, tag } = entry.place
     const episodes = seasons.get(season) ?? new Map<string, DraftEpisode>()
     seasons.set(season, episodes)
-    const key = `${episode}:${last ?? ""}`
-    const found = episodes.get(key) ?? { episode, last, files: [], kinds: {} }
+    const key = placeKey(entry.place)
+    const found = episodes.get(key) ?? { episode, last, tag, files: [], kinds: {} }
     episodes.set(key, found)
     found.files.push(entry)
     found.kinds[entry.kind] = (found.kinds[entry.kind] ?? 0) + 1
@@ -201,7 +213,7 @@ export function draftOf(entries: readonly FileEntry[]): DraftSeason[] {
   }
   return [...seasons].sort((a, b) => a[0] - b[0]).map(([season, episodes]) => ({
     season, manual: manual.has(season),
-    episodes: [...episodes.values()].sort((a, b) => a.episode - b.episode),
+    episodes: [...episodes.values()].sort((a, b) => a.episode - b.episode || a.tag.localeCompare(b.tag)),
   }))
 }
 
@@ -219,13 +231,13 @@ export const trackFits = (entry: TrackEntry, filter: TrackFilter): boolean =>
 export function byEpisode(entries: readonly TrackEntry[]): { place: Place | null; entries: TrackEntry[] }[] {
   const groups = new Map<string, { place: Place | null; entries: TrackEntry[] }>()
   for (const entry of entries) {
-    const key = entry.place ? `${entry.place.season}:${entry.place.episode}:${entry.place.last ?? ""}` : ""
+    const key = entry.place ? placeKey(entry.place) : ""
     const group = groups.get(key) ?? { place: entry.place, entries: [] }
     groups.set(key, group)
     group.entries.push(entry)
   }
   return [...groups.values()].sort((a, b) => !a.place ? 1 : !b.place ? -1
-    : a.place.season - b.place.season || a.place.episode - b.place.episode)
+    : a.place.season - b.place.season || a.place.episode - b.place.episode || a.place.tag.localeCompare(b.place.tag))
 }
 
 export interface FolderView extends Folder {

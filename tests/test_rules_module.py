@@ -210,7 +210,7 @@ async def test_an_excluded_line_has_no_numbers_even_with_a_card_season(system):
     trailer, episode = reply["results"]["t"], reply["results"]["s"]
     assert trailer["excluded"] is True
     assert [trailer[k] for k in ("season", "episode", "start", "end", "part")] == [None] * 5
-    assert trailer["events"] == [{"rule": "трейлеры", "action": "exclude"}]
+    assert trailer["events"] == [{"rule": "трейлеры", "order": 0, "action": "exclude"}]
     assert episode["excluded"] is False and episode["episode"] == 3
 
 

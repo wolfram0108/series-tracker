@@ -113,6 +113,8 @@
 .torrent-file { display: flex; align-items: center; gap: 0.5rem; min-block-size: 1.625rem; padding: 0 0.875rem 0 3.25rem; font-size: 0.78rem; color: var(--color-gray-600); }
 .torrent-how { flex: none; font-size: 0.72rem; color: var(--text-muted); }
 .torrent-how.is-hand { color: #6f42c1; }
+/* A file red for a conflict of episodes says why, in the red of what goes no further. */
+.torrent-how.file-conflict { color: #a61e2d; }
 
 /* A place a pick is let go on (a button too: the keyboard places the pick by it). */
 .torrent-drop {

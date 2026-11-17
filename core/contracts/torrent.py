@@ -93,9 +93,10 @@ class PageReleases(BaseModel):
     releases: list[PageRelease] = Field(default_factory=list)
 
 
-def player_of(release: str) -> str:
-    """The player a row of a release's track names: the release is a line of the player `torrent`."""
-    return f"{TORRENT_PLAYER}:{release}"
+def player_of(release: str, tag: str = "") -> str:
+    """The player a row of a release's track names: the release is a line of the player `torrent`; a version of the episode
+    with a tag of its video (DIR) is a line of its own (`torrent:<release>#DIR`), a variant of the output apart."""
+    return f"{TORRENT_PLAYER}:{release}" + (f"#{tag}" if tag else "")
 
 
 def track_link(release: str, video: str, stream: int, file: str | None = None) -> str:
