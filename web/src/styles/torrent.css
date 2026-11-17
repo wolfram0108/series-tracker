@@ -131,24 +131,18 @@
 }
 .torrent-folders-group span { font-weight: 400; color: var(--text-muted); }
 /* Fixed columns: the name takes what is left, a long value is cut with its whole text in its title; nothing runs out of the
-   pane, and a pick that turns ⊘ into «Сюда N» moves no column. */
+   pane, and a pick that turns × into «↓ N» moves no column. */
 .torrent-folders-table { inline-size: 100%; table-layout: fixed; border-collapse: collapse; font-size: 0.8125rem; }
-.torrent-col-fold { inline-size: 1.25rem; }
-.torrent-col-language { inline-size: 6.5rem; }
-.torrent-col-type { inline-size: 4.5rem; }
-.torrent-col-source { inline-size: 5.25rem; }
-.torrent-col-episodes { inline-size: 3.5rem; }
-.torrent-col-tracks { inline-size: 3.75rem; }
-.torrent-col-tracks-short { inline-size: 2.5rem; }
-.torrent-col-act { inline-size: 4.25rem; }
+.torrent-col-episode { inline-size: 4.5rem; }
+.torrent-col-type { inline-size: 3.5rem; }
+.torrent-col-source { inline-size: 4.75rem; }
+.torrent-col-act { inline-size: 2.75rem; }
 .torrent-folders-table th {
   padding: 0.375rem; border-block-end: 1px solid #f1f3f5; color: var(--text-muted); font-size: 0.72rem; font-weight: 400; text-align: start;
 }
 .torrent-folders-table td {
   block-size: 2.125rem; padding: 0 0.375rem; border-block-end: 1px solid #f1f3f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.torrent-folders-table td.torrent-folders-fold { padding-inline: 0.5rem 0; }
-.torrent-folders-table td.torrent-folders-lang { padding-inline: 0.25rem; }
 .torrent-folders-chev { padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 0.7rem; cursor: pointer; }
 .torrent-folders-table .torrent-folder-name { font-weight: 700; }
 .torrent-folders-num { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-gray-600); }
@@ -158,7 +152,22 @@
 .torrent-folders-table .torrent-folder-track > td { block-size: 1.625rem; background: #fbfcfd; color: var(--color-gray-600); font-size: 0.75rem; }
 .torrent-folders-place { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); }
 /* A track of a folder: its episode and what tells it, in the column of the name (cut, whole in the title). */
-.torrent-folders-table td.torrent-folders-track { padding-inline-start: 0.375rem; }
+/* The head of a folder: its name, language, episodes and number of tracks in one line over the columns of its tracks;
+   the name gives way (cut, whole in its title), the rest keep their size. */
+.torrent-folder-line { display: flex; align-items: center; gap: 0.5rem; min-inline-size: 0; }
+.torrent-folder-line .torrent-folder-name { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.torrent-folder-line :is(.torrent-folders-chev, .torrent-folders-gap) { flex: none; inline-size: 0.75rem; }
+.torrent-folder-line .torrent-language-box { flex: none; inline-size: 4.75rem; }
+.torrent-folder-fact { flex: none; font-family: var(--font-mono); font-size: 0.72rem; color: var(--color-gray-600); }
+.torrent-folders-table td.torrent-folder-head { padding-inline-start: 0.5rem; }
+/* Where it comes from: a mark or a word, at the start of its cell. */
+.torrent-folders-table td.torrent-folders-origin { padding-inline: 0.25rem; }
+/* The type a track of subtitles has (П, Н): what the rule or the folder gave it; «—» none. */
+.torrent-type-mark {
+  display: inline-flex; align-items: center; justify-content: center; min-inline-size: 1.25rem; block-size: 1.125rem;
+  padding-inline: 0.25rem; border-radius: 4px; background: var(--color-blue); color: var(--bg-white); font-size: 0.7rem; font-weight: 700;
+}
+.torrent-type-none { color: var(--text-muted); }
 /* A track of a folder: the stream as the left pane names it. */
 .torrent-folders-id { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text); }
 .torrent-folders-file { overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: 0.7rem; }

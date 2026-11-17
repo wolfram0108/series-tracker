@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
-import { hasMessage, t } from "../../../i18n"
+import { hasMessage, t, type MessageKey } from "../../../i18n"
 import { LANGUAGES } from "../../../lib/languages"
 import { SUBTITLE_TYPES } from "../../../lib/ruleVocabulary"
 import { FROM_META, episodeFolder, folderRows, kindOfTab, nameOf, ruleOf, type Editor, type Folder, type FolderRow, type FolderTrack,
@@ -124,22 +124,21 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
     <template v-for="group in groups" :key="group.kind">
       <div class="torrent-folders-group">{{ t(group.kind === "voice" ? "torrent.folders.groupVoices" : "torrent.folders.groupSubtitles") }}
         <span>{{ group.rows.length }}</span></div>
-      <table v-if="group.rows.length" class="torrent-folders-table">
+      <!-- Four columns: the episode (no title in the head), what the track is, its type (subtitles), its source. Every folder
+           is a head of its own over its tracks: its name, language, episodes and number of tracks in one line, its type and
+           source in their columns. -->
+      <table v-if="group.rows.length" class="torrent-folders-table" :class="`is-${group.kind}`">
         <colgroup>
-          <col class="torrent-col-fold"><col><col class="torrent-col-language">
+          <col class="torrent-col-episode"><col>
           <col v-if="group.kind === 'subtitles'" class="torrent-col-type">
-          <col class="torrent-col-source"><col class="torrent-col-episodes">
-          <col :class="group.kind === 'subtitles' ? 'torrent-col-tracks-short' : 'torrent-col-tracks'"><col class="torrent-col-act">
+          <col class="torrent-col-source"><col class="torrent-col-act">
         </colgroup>
         <thead>
           <tr>
             <td />
             <th scope="col">{{ t("torrent.folders.col.name") }}</th>
-            <th scope="col">{{ t("torrent.folders.col.language") }}</th>
             <th v-if="group.kind === 'subtitles'" scope="col">{{ t("torrent.folders.col.type") }}</th>
             <th scope="col">{{ t("torrent.folders.col.source") }}</th>
-            <th scope="col">{{ t("torrent.folders.col.episodes") }}</th>
-            <th scope="col">{{ t(group.kind === "subtitles" ? "torrent.folders.col.tracksShort" : "torrent.folders.col.tracks") }}</th>
             <td />
           </tr>
         </thead>
@@ -147,31 +146,32 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
           <template v-for="row in group.rows" :key="keyOf(row)">
             <tr class="torrent-folder" :data-folder="row.name" :class="{ 'is-open': open.has(keyOf(row)), 'is-drop': live(row.kind) }"
                 v-bind="target(row)">
-              <td class="torrent-folders-fold">
-                <button v-if="row.tracks.length || row.fonts.length" type="button" class="torrent-folders-chev"
-                        :aria-expanded="open.has(keyOf(row))" :aria-label="t('torrent.folders.unfold', { name: row.name })"
-                        @click="unfold(row)">{{ open.has(keyOf(row)) ? "▾" : "▸" }}</button>
-              </td>
-              <td class="torrent-folder-name" :title="row.name">{{ row.name }}</td>
-              <td class="torrent-folders-lang">
-                <span class="torrent-language-box"><select class="torrent-language" :value="languageOf(row) ?? ''" :disabled="busy"
-                        :aria-label="t('torrent.folders.languageOf', { name: row.name })"
-                        @change="save(row, { language: ($event.target as HTMLSelectElement).value })">
-                  <option v-if="!languageOf(row)" value="" disabled>
-                    {{ t("torrent.folder.language") }}</option>
-                  <option v-else-if="row.language" value="">{{ t("torrent.folders.trackLanguage") }}</option>
-                  <option v-for="code in optionsOf(row)" :key="code" :value="code" :title="languageName(code)">{{ code }}</option>
-                </select></span>
+              <td colspan="2" class="torrent-folder-head">
+                <span class="torrent-folder-line">
+                  <button v-if="row.tracks.length || row.fonts.length" type="button" class="torrent-folders-chev"
+                          :aria-expanded="open.has(keyOf(row))" :aria-label="t('torrent.folders.unfold', { name: row.name })"
+                          @click="unfold(row)">{{ open.has(keyOf(row)) ? "▾" : "▸" }}</button>
+                  <span v-else class="torrent-folders-gap" aria-hidden="true" />
+                  <span class="torrent-folder-name" :title="row.name">{{ row.name }}</span>
+                  <span class="torrent-language-box"><select class="torrent-language" :value="languageOf(row) ?? ''" :disabled="busy"
+                          :aria-label="t('torrent.folders.languageOf', { name: row.name })"
+                          @change="save(row, { language: ($event.target as HTMLSelectElement).value })">
+                    <option v-if="!languageOf(row)" value="" disabled>
+                      {{ t("torrent.folder.language") }}</option>
+                    <option v-else-if="row.language" value="">{{ t("torrent.folders.trackLanguage") }}</option>
+                    <option v-for="code in optionsOf(row)" :key="code" :value="code" :title="languageName(code)">{{ code }}</option>
+                  </select></span>
+                  <span class="torrent-folder-fact" :title="t('torrent.folders.col.episodes')">{{ episodesOf(row) }}</span>
+                  <span class="torrent-folder-fact" :title="t('torrent.folders.col.tracks')">{{ t("torrent.folders.tracks", { n: row.tracks.length }) }}</span>
+                </span>
               </td>
               <td v-if="group.kind === 'subtitles'">
                 <SubtitleTypes :model-value="row.subtitle_type" :disabled="busy" :label="t('torrent.folders.col.type')"
                                @update:model-value="save(row, { subtitle_type: $event })" />
               </td>
-              <td><span class="torrent-folders-sources">
+              <td class="torrent-folders-origin">
                 <NumberMark v-if="folderOrigin(row).number" :n="folderOrigin(row).number!" :title="folderOrigin(row).text" />
-                <span v-else :class="folderOrigin(row).css" :title="folderOrigin(row).text">{{ folderOrigin(row).text }}</span></span></td>
-              <td class="torrent-folders-num" :title="episodesOf(row)">{{ episodesOf(row) }}</td>
-              <td class="torrent-folders-num">{{ row.tracks.length }}</td>
+                <span v-else :class="folderOrigin(row).css" :title="folderOrigin(row).text">{{ folderOrigin(row).text }}</span></td>
               <td class="torrent-folders-act">
                 <button v-if="live(row.kind)" type="button" class="torrent-put drop-folder" :disabled="busy"
                         :title="t('torrent.folder.drop', { name: row.name, n: pick.count.value })"
@@ -183,14 +183,16 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
             </tr>
             <template v-if="open.has(keyOf(row))">
               <tr v-for="track in row.tracks" :key="track.entry.item" class="torrent-folder-track">
-                <td />
-                <td class="torrent-folders-track" :title="`${placeOf(track)} ${idOf(track)}`">
-                  <span class="torrent-folders-place">{{ placeOf(track) }}</span> <span class="torrent-folders-id">{{ idOf(track) }}</span></td>
-                <td :colspan="group.kind === 'subtitles' ? 2 : 1" />
-                <td>
+                <td class="torrent-folders-place">{{ placeOf(track) }}</td>
+                <td class="torrent-folders-id" :title="idOf(track)">{{ idOf(track) }}</td>
+                <td v-if="group.kind === 'subtitles'">
+                  <span v-if="track.entry.subtitle_type" class="torrent-type-mark" :title="t(`torrent.type.${track.entry.subtitle_type}` as MessageKey)">
+                    {{ t(`torrent.type.short.${track.entry.subtitle_type}` as MessageKey) }}</span>
+                  <span v-else class="torrent-type-none" :title="t('torrent.folders.noType')">—</span>
+                </td>
+                <td class="torrent-folders-origin">
                   <NumberMark v-if="trackOrigin(track.entry).number" :n="trackOrigin(track.entry).number!" :title="trackOrigin(track.entry).text" />
                   <span v-else :class="trackOrigin(track.entry).css" :title="trackOrigin(track.entry).text">{{ trackOrigin(track.entry).text }}</span></td>
-                <td colspan="2" />
                 <td class="torrent-folders-act">
                   <button type="button" class="torrent-bin-btn do-drop-track" :disabled="busy"
                           :title="t('torrent.folders.dropTrack')" :aria-label="t('torrent.folders.dropTrack')"
@@ -198,9 +200,8 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
                 </td>
               </tr>
               <tr v-if="row.fonts.length" class="torrent-folder-track">
-                <td />
                 <td class="torrent-folders-place">{{ t("torrent.folder.fonts", { n: row.fonts.length }) }}</td>
-                <td class="torrent-folders-file" :colspan="group.kind === 'subtitles' ? 6 : 5" :title="row.fonts.join('\n')">
+                <td class="torrent-folders-file" :colspan="group.kind === 'subtitles' ? 4 : 3" :title="row.fonts.join('\n')">
                   {{ row.fonts.map(nameOf).join(", ") }}</td>
               </tr>
             </template>

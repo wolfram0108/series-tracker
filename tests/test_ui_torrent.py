@@ -147,7 +147,7 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     await expect(hand.locator(".torrent-hand")).to_have_text(text("torrent.by.manual"))
     await row.locator("input[type=checkbox]").check()
     await hand.locator(".drop-folder").click()
-    await expect(hand.locator(".torrent-folders-num").last).to_have_text("2", timeout=LONG_S)
+    await expect(hand.locator(".torrent-folder-fact").last).to_have_text(text("torrent.folders.tracks", n=2), timeout=LONG_S)
     await expect(page.locator(".torrent-folder[data-folder='Студия']")).to_have_count(0)
     await hand.locator(".torrent-folders-chev").click()
     back = page.locator(".torrent-folder-track .torrent-hand")
@@ -162,7 +162,8 @@ async def test_a_release_added_to_a_series_is_downloaded_seen_in_the_agents_and_
     await expect(hand).to_have_count(0, timeout=LONG_S)
     # «Авто» gives the sound back to the automatic layout: the rule puts it into «Студия» again.
     await page.locator(".do-auto").click()
-    await expect(page.locator(".torrent-folder[data-folder='Студия'] .torrent-folders-num").last).to_have_text("2", timeout=LONG_S)
+    await expect(page.locator(".torrent-folder[data-folder='Студия'] .torrent-folder-fact").last).to_have_text(
+        text("torrent.folders.tracks", n=2), timeout=LONG_S)
     # Nothing of the automatic layout is taken away now: «Авто» has nothing to make again.
     await expect(page.locator(".do-auto")).to_be_disabled()
     # A folder of a rule deleted: its tracks are red; «Авто» makes it again.

@@ -181,8 +181,9 @@ describe("the editors of the tracks", () => {
     expect(w.findAll(".torrent-folder").map((each) => each.attributes("data-folder"))).toEqual(["Чужой", "Original"])
     const original = w.find(".torrent-folder[data-folder='Original']")
     // The folder says where it comes from — the titles in the files — and each track, on its row, where it got its folder.
-    expect(original.findAll(".torrent-folders-sources > span").map((each) => each.text())).toEqual([t("torrent.folder.fromFile")])
-    expect(original.findAll(".torrent-folders-num").map((cell) => cell.text())).toEqual(["1–2", "2"])
+    expect(original.findAll(".torrent-folders-origin > span").map((each) => each.text())).toEqual([t("torrent.folder.fromFile")])
+    // The head of the folder tells its episodes and number of tracks in its line.
+    expect(original.findAll(".torrent-folder-fact").map((cell) => cell.text())).toEqual(["1–2", t("torrent.folders.tracks", { n: 2 })])
     // The language of the folder is set here.
     const language = original.find("select.torrent-language")
     await language.setValue("jpn")
