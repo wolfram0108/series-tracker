@@ -157,6 +157,17 @@ async def test_the_monitor_shows_a_release_the_client_holds_for_every_series_wit
         (1, 100.0, len(V1), len(V1)), (2, 100.0, len(V1), len(V1))]
 
 
+async def test_a_window_that_connects_gets_the_picture_of_the_monitor_at_once(stand):
+    model, world, torrents, told = stand
+    h = world.lists(model, release(V1), published="d1", link="L1")
+    await world.request("torrents.release.download", {"url": PAGE, "release": "page"})
+    await until(told, "ready")
+    monitor = torrents.bus.subscribe("torrents.progress.changed")
+    world.publish_event("gateway.sse.clients", {"count": 1})
+    tasks = (await asyncio.wait_for(monitor.queue.get(), LIMIT_S)).payload["tasks"]
+    assert [(t["kind"], t["qb_hash"], t["status"]) for t in tasks] == [("release", h, "ready")]
+
+
 async def test_the_folder_of_the_releases_is_an_absolute_path_written_to_the_settings(stand):
     model, world, torrents, told = stand
     refused = await world.request("torrents.staging.set", {"value": "staging"})

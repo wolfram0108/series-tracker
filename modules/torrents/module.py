@@ -72,7 +72,8 @@ progress, dlspeed, eta, error_message, created_at, updated_at}]}. With them stan
 keeps, whatever their state (downloading, ready, being updated, failed, archived) — a release is there until its source
 goes — one task per series with the page: {kind: "release", qb_hash, url, release, title,
 series_id, series_name, status (the state of the release), progress (by the size of the wanted files), files_done,
-files_total, error_message} — the monitor of «Агенты» shows every torrent of the client.
+files_total, error_message} — the monitor of «Агенты» shows every torrent of the client. Both pictures (the queue and the
+progress) go again when a window connects (gateway.sse.clients).
 
 The releases of the torrent sources (stage 15, modules/torrents/releases.py; tables torrent_releases,
 torrent_release_files, torrent_release_versions), keyed by the page and the id of the release on it, never by a series:
@@ -218,6 +219,7 @@ class TorrentsModule(BaseModule):
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("series.updated", self.on_series_updated)
         self.handle("torrents.releases.get", self.on_releases_get)
+        self.handle("gateway.sse.clients", self.on_sse_clients)
         self.handle("torrents.release.download", self.on_release_download)
         self.handle("torrents.staging.get", self.on_staging_get)
         self.handle("torrents.staging.set", self.on_staging_set)
@@ -1271,6 +1273,15 @@ class TorrentsModule(BaseModule):
     async def on_progress_list(self, env: Envelope) -> dict:
         """Контракт старого GET /api/series/active_torrents."""
         return {"tasks": await self._progress_tasks()}
+
+    async def on_sse_clients(self, env: Envelope) -> None:
+        """A window that connects gets the pictures of the torrents at once, as those of the other queues: it does not wait
+        for the next change or tick to see what the client holds."""
+        if not env.payload.get("count"):
+            return
+        self._broadcast_queue()
+        self._progress_snapshot = None
+        await self._broadcast_progress()
 
     async def _broadcast_progress(self) -> None:
         """torrents.progress.changed — только при реальных изменениях

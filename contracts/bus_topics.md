@@ -37,7 +37,7 @@
 | Событие | Издатель | Подписчики | SSE |
 |---|---|---|---|
 | `system.started {}` — все модули подняты | `run.py` (сборка процесса, после `Runner.start`) | gateway (читает группы отладочного логирования) | —; scan, library, renaming, voices, downloads (возобновляют прерванную работу, когда соседи отвечают) |
-| `gateway.sse.clients {count}` | gateway | catalog (0 → сброс viewing), scan (>0 → публикация статуса), conform и voices (снимок при подключении) | — |
+| `gateway.sse.clients {count}` | gateway | catalog (0 → сброс viewing), scan (>0 → публикация статуса), conform, voices, downloads, planner и torrents (снимок при подключении) | — |
 | `series.added {…сериал, sources}` | catalog | composition, gateway | `series_added` |
 | `series.updated {series_id, …поля, statuses, is_busy}` | catalog, metadata | composition (сезон карточки), torrents (память исключений старого конвейера), gateway | `series_updated` (дельта) |
 | `series.deleted {series_id}` | catalog | все владельцы серийных таблиц (scan, torrents, downloads, library, metadata, voices, composition, planner, sources), unpack (страницы без источника забываются), gateway | `series_deleted {id}` |
