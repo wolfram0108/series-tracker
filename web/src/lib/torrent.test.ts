@@ -74,8 +74,8 @@ describe("the tracks of a release", () => {
     const tracks = [1, 2, 3].map((n) => ({ ...track(`r/E${n}.mkv#1`, n === 1 ? "MS" : null, n) }))
     const groups = containerGroups(files, tracks)
     expect(groups.map((group) => [group.season, group.episodes, group.files])).toEqual([[2, "3", 1], [1, "1–2", 2]])
-    expect(groups[1].streams.map((each) => [each.label, each.items, each.folder, each.unplaced, each.noLanguage])).toEqual([
-      ["v0", [], null, false, false], ["a0", ["r/E1.mkv#1", "r/E2.mkv#1"], null, true, false]])
+    expect(groups[1].streams.map((each) => [each.label, each.items, each.folder, each.unplaced])).toEqual([
+      ["v0", [], null, false], ["a0", ["r/E1.mkv#1", "r/E2.mkv#1"], null, true]])
     expect(streamLabel({ index: 3, kind: "subtitle" }, 1)).toBe("s1")
   })
 })

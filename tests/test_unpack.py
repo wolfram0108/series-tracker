@@ -97,8 +97,9 @@ def test_the_file_names_the_folder_and_the_language_by_itself_und_waits_and_a_ru
                     results={"files": numbered({"Show/E01.mkv": (1, 1)})})
     view, rows = compose(inputs)
     tracks = [(e["folder"], e["by"], e["language"], e["waiting"]) for e in view["tabs"]["streams"]]
-    assert tracks == [("AniLiberty", "meta", "rus", False), ("Original", "meta", "und", True), (None, None, "jpn", True)]
-    assert [(f["name"], f["manual"]) for f in view["folders"]] == [("AniLiberty", False), ("Original", False)]
+    # A track with no known language is placed by nothing: it is in no folder, red, whatever its title.
+    assert tracks == [("AniLiberty", "meta", "rus", False), (None, None, "und", True), (None, None, "jpn", True)]
+    assert [(f["name"], f["manual"]) for f in view["folders"]] == [("AniLiberty", False)]
     assert view["unplaced"]["streams"] == 2
     # Only the green track is a row: a track with no folder or no language is red and goes no further.
     assert [(row.voice.name, row.language) for row in rows] == [("AniLiberty", "rus")]
@@ -141,12 +142,13 @@ def test_a_folder_a_rule_gives_names_the_track_and_the_users_folder_goes_before_
                                         item_of("page", "Show/Rus Audio/Studio/E01.mka"): {"voice_folder": "Studio"}}},
                     manual={"voices": {item_of("page", "Show/Rus Audio/Studio/E01.mka"): {"folder": "Студия"}}})
     view, rows = compose(inputs)
-    # JAM has a folder but no language yet: red, no row; the user's folder has its language: a row.
+    # JAM has no language: not placed, no row; the user's folder has its language: a row.
     assert [(row.voice.name, row.site_fields["language"]) for row in rows] == [("Студия", "rus")]
     voices = {entry["item"]: entry for entry in view["tabs"]["voices"]}
-    assert voices[item_of("page", "Show/Rus Audio/JAM/E01.mka")]["by"] == "студии"
+    # The rule gives JAM no language and the file has none: the track is not placed, there is no folder JAM.
+    assert voices[item_of("page", "Show/Rus Audio/JAM/E01.mka")]["folder"] is None
     assert voices[item_of("page", "Show/Rus Audio/Studio/E01.mka")]["by"] == "manual"
-    assert [(f["name"], f["items"], f["manual"]) for f in view["folders"]] == [("JAM", 1, False), ("Студия", 1, True)]
+    assert [(f["name"], f["items"], f["manual"]) for f in view["folders"]] == [("Студия", 1, True)]
 
 
 def test_seasons_in_folders_of_their_own_place_their_files_and_a_track_of_another_season_is_not_taken():
@@ -404,9 +406,9 @@ def test_a_folder_of_subtitles_names_the_fonts_its_files_go_with_and_a_folder_of
               "Show/sub/Shift/E01.ass": (1, 1), "Show/Audio/JAM/E01.mka": (1, 1)}
     inputs = Inputs(releases=[r], manual={}, folders=[], streams={},
                     results={"files": numbered(places),
-                             "subtitles": {item_of("page", p): {"subtitle_folder": p.split("/")[2]}
+                             "subtitles": {item_of("page", p): {"subtitle_folder": p.split("/")[2], "language": "rus"}
                                            for p in paths if p.endswith(".ass")},
-                             "voices": {item_of("page", "Show/Audio/JAM/E01.mka"): {"voice_folder": "JAM"}}})
+                             "voices": {item_of("page", "Show/Audio/JAM/E01.mka"): {"voice_folder": "JAM", "language": "rus"}}})
     view, _rows = compose(inputs)
     assert [(f["kind"], f["name"], f["fonts"]) for f in view["folders"]] == [
         ("subtitles", "Cafe", ["Show/sub/Cafe/fonts/a.ttf"]), ("subtitles", "Shift", ["Show/sub/Cafe/fonts/a.ttf"]),

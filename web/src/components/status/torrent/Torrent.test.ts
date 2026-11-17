@@ -177,9 +177,8 @@ describe("the editors of the tracks", () => {
     expect(original.findAll(".torrent-folders-sources > span").map((each) => each.text()))
       .toEqual([t("torrent.folder.fromFile"), t("torrent.by.manual")])
     expect(original.findAll(".torrent-folders-num").map((cell) => cell.text())).toEqual(["1–2", "2"])
-    // Its track has no language in the file: the folder says how many, and its language set here names them.
+    // The language of the folder is set here.
     const language = original.find("select.torrent-language")
-    expect(language.find("option:checked").text()).toBe(t("torrent.folders.noLanguage", { n: 1 }))
     await language.setValue("jpn")
     expect(calls.setFolder).toHaveBeenCalledWith({ url: URL, kind: "voice", name: "Original", language: "jpn", subtitle_type: "" })
     await original.find(".torrent-folders-chev").trigger("click")

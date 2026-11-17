@@ -258,11 +258,7 @@ export interface FolderTrack { tab: "voices" | "subtitles" | "streams"; entry: T
 export interface FolderRow extends FolderView {
   /** Every track it holds, of the files and of the containers alike. */
   tracks: FolderTrack[]
-  /** Its tracks that go out with no known language (none, `und`): a rule or the folder's language names it. */
-  noLanguage: number
 }
-
-const unknownLanguage = (language: string): boolean => ["", "und"].includes(language.trim().toLowerCase())
 
 /** The folders of a kind with every track of the release they hold: the external files of their tab and the tracks of the
  *  containers, in the order of the episodes. */
@@ -275,7 +271,7 @@ export function folderRows(view: EditorView, kind: Folder["kind"]): FolderRow[] 
     : a.entry.place.season - b.entry.place.season || a.entry.place.episode - b.entry.place.episode || a.entry.item.localeCompare(b.entry.item)
   return foldersOf(view.folders, tracks.map((each) => each.entry), kind).map((folder) => {
     const mine = tracks.filter((each) => each.entry.folder === folder.name).sort(order)
-    return { ...folder, tracks: mine, noLanguage: mine.filter((each) => unknownLanguage(each.entry.language)).length }
+    return { ...folder, tracks: mine }
   })
 }
 
@@ -287,8 +283,6 @@ export interface ContainerStream {
   items: string[]
   folder: string | null
   unplaced: boolean
-  /** Some track of it goes out with no known language (none, `und`), a rule's or the file's: a rule has to name it. */
-  noLanguage: boolean
 }
 export interface ContainerGroup { key: string; season: number | null; episodes: string; files: number; streams: ContainerStream[] }
 
@@ -317,11 +311,7 @@ export function containerGroups(files: readonly ContainerFile[], entries: readon
       const folders = new Set(items.map((item) => byItem.get(item)?.folder ?? null))
       const folder = folders.size === 1 ? [...folders][0] : null
       const unplaced = facts.kind !== "video" && items.some((item) => !!byItem.get(item)?.waiting)
-      const noLanguage = facts.kind !== "video" && items.some((item) => {
-        const entry = byItem.get(item)
-        return !!entry && ["", "und"].includes(entry.language.trim().toLowerCase())
-      })
-      return { facts, label: streamLabel(facts, n), items: facts.kind === "video" ? [] : items, folder, unplaced, noLanguage }
+      return { facts, label: streamLabel(facts, n), items: facts.kind === "video" ? [] : items, folder, unplaced }
     })
     return { key, season: group.season, files: group.files.length, streams,
       episodes: spansOf(group.files.flatMap((file) => file.place ? [file.place.episode] : [])) }

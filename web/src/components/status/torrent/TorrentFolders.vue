@@ -41,7 +41,7 @@ function flipped(set: Set<string>, key: string): Set<string> {
 const unfold = (row: FolderRow): void => { open.value = flipped(open.value, keyOf(row)) }
 
 // What its tracks go out with: its own language set by hand, else the one its tracks carry (a rule's or the file's).
-const languageOf = (row: FolderRow): string | null => row.language || (row.noLanguage ? "" : row.trackLanguage) || null
+const languageOf = (row: FolderRow): string | null => row.language || row.trackLanguage || null
 // The languages of the project (those the constructor offers), those the tracks of the release carry, the folder's own.
 const optionsOf = (row: FolderRow): string[] => [...new Set([...LANGUAGES, ...languages.value, languageOf(row) ?? ""].filter(Boolean))]
 const languageName = (code: string): string => { const key = `voices.language.${code}`; return hasMessage(key) ? t(key) : code }
@@ -139,11 +139,11 @@ const target = (row: FolderRow) => live(row.kind) ? props.pick.target((items) =>
               </td>
               <td class="torrent-folder-name" :title="row.name">{{ row.name }}</td>
               <td class="torrent-folders-lang">
-                <span class="torrent-language-box"><select class="torrent-language" :class="{ 'is-bad': !languageOf(row) }" :value="languageOf(row) ?? ''" :disabled="busy"
+                <span class="torrent-language-box"><select class="torrent-language" :value="languageOf(row) ?? ''" :disabled="busy"
                         :aria-label="t('torrent.folders.languageOf', { name: row.name })"
                         @change="save(row, { language: ($event.target as HTMLSelectElement).value })">
                   <option v-if="!languageOf(row)" value="" disabled>
-                    {{ row.noLanguage ? t("torrent.folders.noLanguage", { n: row.noLanguage }) : t("torrent.folder.language") }}</option>
+                    {{ t("torrent.folder.language") }}</option>
                   <option v-else-if="row.language" value="">{{ t("torrent.folders.trackLanguage") }}</option>
                   <option v-for="code in optionsOf(row)" :key="code" :value="code" :title="languageName(code)">{{ code }}</option>
                 </select></span>

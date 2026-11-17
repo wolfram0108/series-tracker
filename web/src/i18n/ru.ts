@@ -212,7 +212,6 @@ export const ru = {
   "torrent.folders.col.tracks": "Дорожек",
   "torrent.folders.col.tracksShort": "Дор.",
   "torrent.folders.unfold": "Дорожки каталога «{name}»",
-  "torrent.folders.noLanguage": "{n} без языка",
   "torrent.folders.languageOf": "Язык каталога «{name}»",
   "torrent.folders.trackLanguage": "как у дорожек",
   "torrent.folders.drop": "Удалить каталог «{name}»: его дорожки останутся без каталога; «Авто» построит автоматику заново",

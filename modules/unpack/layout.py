@@ -157,8 +157,11 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
         language = (result or {}).get("language") or facts.get("language") or (stream or {}).get("language") or ""
         # The type is what a rule or the folder names; a flag of the file's container is no type (DESIGN.md 7.1.1).
         subtitle_type = (result or {}).get("subtitle_type") or facts.get("subtitle_type") or ""
-        # A track waits for the operator while it has no folder or no known language: a rule, a hand or the file gives them.
-        waiting = not folder or language.strip().lower() in UNKNOWN_LANGUAGES
+        # A track is placed whole or not at all: with no known language it is in no folder — red, it waits for a rule.
+        if folder and language.strip().lower() in UNKNOWN_LANGUAGES:
+            folder, how, facts = None, None, {}
+            subtitle_type = ""
+        waiting = not folder
         # The file and its episode, and the stream (its place in the file and what it is): the window groups tracks by them.
         entry = {"item": item, "line": line, "kind": kind, "folder": folder, "by": how, "waiting": waiting,
                  "language": language, "subtitle_type": subtitle_type if kind == "subtitles" else "", "path": path,

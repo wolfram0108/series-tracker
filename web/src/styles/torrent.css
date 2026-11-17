@@ -140,7 +140,6 @@
 .torrent-folders-file { overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: 0.7rem; }
 /* Where a folder's tracks come from, each way once: one under the other when they are several. */
 .torrent-folders-sources { display: flex; flex-direction: column; align-items: flex-start; gap: 0.125rem; padding-block: 0.25rem; }
-.torrent-folders-table .is-bad { color: #a61e2d; }
 /* The language as a chip «rus ▾»: the select of the browser without its own arrow, the chevron drawn over it. */
 .torrent-language-box { position: relative; display: block; }
 .torrent-language-box::after {
@@ -151,9 +150,6 @@
   inline-size: 100%; block-size: 1.5rem; padding: 0 1rem 0 0.375rem; border: 1px solid #dee2e6; border-radius: 6px;
   background: var(--bg-white); font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text);
   appearance: none; text-overflow: ellipsis; cursor: pointer;
-}
-.torrent-folders-table .torrent-language.is-bad {
-  border-color: #f1aeb5; background: #fdf3f4; color: #a61e2d; font-family: inherit; font-size: 0.72rem;
 }
 .torrent-types { display: inline-flex; border: 1px solid #ced4da; border-radius: 6px; overflow: hidden; }
 .torrent-types button {
