@@ -10,8 +10,8 @@ export type Side = "if" | "then"
 
 /** A row of a rule «Таблица»: the template of «ЕСЛИ» and what «ТО» puts for the action of the column — a value for an
  *  assignment, a template for an extraction. A cell joined with the one above is the same cell: one «ЕСЛИ» with several
- *  «ТО» (the same condition, each «ТО» tried in its turn), or several «ЕСЛИ» with one «ТО». For the core every row is a
- *  rule of its own with the whole of both cells, so joining changes how the table is written, never what it does. */
+ *  «ТО» — for the core one rule with those actions in order (of one kind alternatives, the first that works wins; of
+ *  different kinds each acts: the episode and the season) — or several «ЕСЛИ» with one «ТО», each row a rule of its own. */
 export interface TableRow {
   key: number
   if: IfCell

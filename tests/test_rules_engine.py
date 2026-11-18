@@ -912,7 +912,27 @@ def test_the_rule_that_stops_the_rest_says_so_in_its_event_and_a_table_reads_its
                   "then": [{"type": "number"}, {"type": "whitespace"}, {"type": "text", "value": "серия"}]}]}}
     profile = compile_profile(1, [table])
     assert profile.invalid_rules == []
-    # The first «ТО» of the joined «ЕСЛИ» finds nothing in this line, the second does and stops the rest.
+    # The first «ТО» of the joined «ЕСЛИ» finds nothing in this line, the second does and stops the rest: one rule of two.
     outcome = process_title(profile, "PID:a | 12 серия")
     assert outcome["extracted"] == {"episode": 12}
-    assert [(event["rule"], event.get("stopped", False)) for event in outcome["events"]] == [("Серия · 2", True)]
+    assert [(event["rule"], event.get("stopped", False)) for event in outcome["events"]] == [("Серия · 1–2", True)]
+    # Both find a number: the first «ТО» wins, as the first action of a rule.
+    assert process_title(profile, "PID:a | 第3 | 12 серия")["extracted"] == {"episode": 3}
+
+
+def test_the_rows_of_one_joined_condition_with_different_actions_each_act_the_episode_and_the_season():
+    """A torrent's files: «ЕСЛИ» the name of the release, «ТО» the number of the episode and, in a row joined to it, the
+    season 6. Both act, as the two actions of one rule; a row that is not joined is a rule of its own after it."""
+    table = {"id": 9, "name": "JoJo", "continue_after_match": 0, "action_pattern": "[]", "conditions": [],
+             "rule_table": {"action_type": "extract_single", "rows": [
+                 {"if": [{"type": "text", "value": "Steel_Ball_Run"}],
+                  "then": [{"type": "text", "value": "["}, {"type": "number"}, {"type": "text", "value": "]"}]},
+                 {"if": [{"type": "text", "value": "Steel_Ball_Run"}], "if_joined": True, "then": "6",
+                  "action_type": "assign_season"},
+                 {"if": [{"type": "text", "value": "Other"}], "then": "2", "action_type": "assign_season"}]}}
+    profile = compile_profile(1, [table])
+    assert profile.invalid_rules == []
+    outcome = process_title(profile, "D:JoJo | JoJo_Steel_Ball_Run_[01].mkv | K:видео | X:mkv")
+    assert outcome["extracted"] == {"episode": 1, "season": 6}
+    assert [event["rule"] for event in outcome["events"]] == ["JoJo · 1–2"]
+    assert process_title(profile, "Other_[01].mkv")["extracted"] == {"season": 2}

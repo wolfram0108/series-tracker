@@ -304,10 +304,12 @@ def _compile_any(rule: dict) -> list[CompiledRule]:
 
 def table_rules(rule: dict) -> list[dict]:
     """The rows of a rule «Таблица» as the ordinary rules they are, in their order, at the place of the table: each row is
-    one condition «содержит» (its template «ЕСЛИ») and one action — the row's own, else the column's — (its value «ТО»), with the table's own
-    `continue_after_match`. Matching them is the code of every rule; nothing of it is the table's own. A row carries
-    both its cells whole; the marks `if_joined` / `then_joined` (a cell joined with the one above) are the editor's way
-    of writing the table and mean nothing here."""
+    one condition «содержит» (its template «ЕСЛИ») and one action — the row's own, else the column's — (its value «ТО»), with
+    the table's own `continue_after_match`. A row whose «ЕСЛИ» is joined with the one above (`if_joined`) is one more «ТО»
+    of that condition: the rows of one «ЕСЛИ» are one rule with their actions in order, as an ordinary rule with several
+    actions — of one kind they are alternatives (the first that works wins), of different kinds each of them acts (the
+    number of the episode and the season). Matching them is the code of every rule; nothing of it is the table's own.
+    `then_joined` (several «ЕСЛИ» with one «ТО») is the editor's way of writing the table: each such row is a rule."""
     table = rule["rule_table"]
     if not isinstance(table, dict):
         raise ValueError(reason("table_broken"))
@@ -343,10 +345,17 @@ def table_rules(rule: dict) -> list[dict]:
             if not then:
                 raise ValueError(reason("table_row_template_empty", number=number))
             pattern = json.dumps(then, ensure_ascii=False)
+        action = {"action_type": row_type, "action_pattern": pattern}
+        if row.get("if_joined") and expanded:
+            # One more «ТО» of the condition above: an action of its rule, named by the rows it holds.
+            actions = json.loads(expanded[-1]["action_pattern"])
+            expanded[-1]["action_pattern"] = json.dumps([*actions, action], ensure_ascii=False)
+            expanded[-1]["name"] = f"{rule['name']} · {expanded[-1]['first']}–{number}"
+            continue
         expanded.append({
-            "id": rule["id"], "name": f"{rule['name']} · {number}",
+            "id": rule["id"], "name": f"{rule['name']} · {number}", "first": number,
             "continue_after_match": rule.get("continue_after_match"),
-            "action_pattern": json.dumps([{"action_type": row_type, "action_pattern": pattern}], ensure_ascii=False),
+            "action_pattern": json.dumps([action], ensure_ascii=False),
             "conditions": [{"condition_type": "contains", "logical_operator": "AND",
                             "pattern": json.dumps(blocks, ensure_ascii=False)}],
         })
