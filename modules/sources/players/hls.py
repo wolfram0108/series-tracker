@@ -5,7 +5,7 @@ segment that is a whole file (a playlist of one MP4) is measured from its bounde
 probe as a fallback. When a prefix has no picture, a larger bounded prefix is tried. An exhausted prefix or a failed probe is inconclusive; a complete small body with no
 picture is reported as missing media.
 
-A host may say nothing true of the frame of what it serves (the label of a list, the name of a line of an application), so
+A host may say nothing true of the frame of what it serves (the label of a list, the name of a line), so
 the players whose streams are playlists measure it here, one way for all of them.
 """
 from __future__ import annotations

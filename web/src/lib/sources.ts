@@ -52,7 +52,7 @@ export interface PlayerView {
 }
 
 export interface SourceView {
-  /** The name the site gives the source for the head (a card of an application); empty when the place is the name. */
+  /** The name the site gives the source for the head (a title of the provider); empty when the place is the name. */
   title: string
   state: SourceState
   /** Coded reason of a failure; worded by `reasonText`. */
@@ -69,7 +69,7 @@ export interface SourceItem {
   profileId: number | null
   vibixSeason: number | null
   playersOff: string[]
-  /** How many rows of each line of an application card a read takes: `all`, `N` (the first N) or `-N` (the last N). */
+  /** How many rows of each line of a title of the provider a read takes: `all`, `N` (the first N) or `-N` (the last N). */
   rowsPerLine: string
   /** The colour the catalog gave the source in its series (0–15 of the palette); none for a draft not saved yet. */
   color: number | null

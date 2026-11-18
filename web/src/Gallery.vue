@@ -171,7 +171,7 @@ const VOICE_SAMPLE = [
 const sheetUrl = ref("http://127.0.0.1:5100")
 const sheetOn = ref(true)
 const sheetNote = (sources: number, lines: number) =>
-  t("extensions.chines.appNote", { sources: tn("extensions.chines.sources", sources), lines: tn("extensions.chines.lines", lines) })
+  t("extensions.chines.siteNote", { sources: tn("extensions.chines.sources", sources), lines: tn("extensions.chines.lines", lines) })
 const SHEET_TILES = [{ title: "半日 Banri", note: sheetNote(10, 7) }, { title: "橘汁 Juzi", note: sheetNote(8, 6) },
   { title: "米诺 AppMN", note: sheetNote(2, 2) }, { title: "139云盘 139 Cloud", note: sheetNote(0, 2) }]
 
@@ -456,7 +456,7 @@ const rtPass = ref("password123")
                 </StGroup>
               </div>
             </SheetRow>
-            <SheetRow :caption="t('extensions.sheet.apps')" :count="SHEET_TILES.length">
+            <SheetRow :caption="t('extensions.sheet.sites')" :count="SHEET_TILES.length">
               <div class="tile-grid">
                 <InfoTile v-for="tile in SHEET_TILES" :key="tile.title" :title="tile.title" :note="tile.note" />
               </div>

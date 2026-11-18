@@ -34,8 +34,8 @@ const toast = useToast()
 
 const isTorrent = computed(() => props.item.sourceType === "torrent")
 const isChannel = computed(() => props.item.sourceType === "vk_video")
-// A card of a video application has no page a browser opens: its address is shown and copied, with no link to open.
-const appCard = computed(() => props.item.url.startsWith("title://"))
+// A title of the provider has no page a browser opens: its address is shown and copied, with no link to open.
+const titleSource = computed(() => props.item.url.startsWith("title://"))
 const view = computed(() => props.item.view)
 const options = computed(() => profileOptions(props.profiles))
 const seasonOptions = (groups: number) => [
@@ -63,7 +63,7 @@ watch(() => props.item.url, (url) => {
   query.value = parts.query
 }, { immediate: true })
 
-// The rows of each line of an application card a read takes: `all`, `10` (the first ten), `-10` (the last ten), `50-60`
+// The rows of each line of a title of the provider a read takes: `all`, `10` (the first ten), `-10` (the last ten), `50-60`
 // (from the 50th to the 60th). It is edited as text and sent when the field is left, and a value that is none of them is
 // not sent.
 const rows = ref("")
@@ -135,7 +135,7 @@ async function copyAddress(): Promise<void> {
         </div>
         <small v-if="!vkQuery(query)" class="source-reason">{{ t("sources.vk.queryMissing") }}</small>
       </div>
-      <SheetField v-else-if="appCard" class="source-app-card is-readonly" :label="t('sources.titles.card')" icon="pi pi-video">
+      <SheetField v-else-if="titleSource" class="source-title is-readonly" :label="t('sources.titles.card')" icon="pi pi-video">
         <StValue :value="item.url" mono />
         <div class="constructor-item url-actions">
           <button type="button" class="url-action-btn" :title="t('sources.address.copy')" @click="copyAddress">
@@ -143,14 +143,14 @@ async function copyAddress(): Promise<void> {
           </button>
         </div>
       </SheetField>
-      <div v-if="appCard" class="stack source-rows" @focusout="commitRows" @keyup.enter="commitRows">
+      <div v-if="titleSource" class="stack source-rows" @focusout="commitRows" @keyup.enter="commitRows">
         <SheetField :label="t('sources.rows.label')" icon="pi pi-list">
           <StInput v-model="rows" />
         </SheetField>
         <small v-if="rowsValid" class="muted">{{ t("sources.rows.hint") }}</small>
         <small v-else class="source-reason">{{ t("sources.rows.invalid") }}</small>
       </div>
-      <SheetField v-if="!isChannel && !appCard" class="is-readonly" :label="t('sources.address.label')" icon="pi pi-link">
+      <SheetField v-if="!isChannel && !titleSource" class="is-readonly" :label="t('sources.address.label')" icon="pi pi-link">
         <StValue :value="item.url" mono />
         <div class="constructor-item url-actions">
           <button type="button" class="url-action-btn" :title="t('sources.address.copy')" @click="copyAddress">

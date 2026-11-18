@@ -23,7 +23,7 @@ const props = withDefaults(defineProps<{
   waiting?: boolean
   /** Takes the typed address and says whether a source was made of it; the field is cleared only then. */
   adder: (address: string) => Promise<boolean>
-  /** The names of the series the search of the video applications offers (its own, the original one of TMDB). */
+  /** The names of the series the search of the titles of the provider offers (its own, the original one of TMDB). */
   names?: { text: string; mark?: string }[]
   /** Names that cost a request (the original name of TMDB): asked once, when the search is first opened. */
   loadNames?: () => Promise<{ text: string; mark?: string }[]>
@@ -36,7 +36,7 @@ const emit = defineEmits<{
   (e: "stop", id: string | number): void
 }>()
 
-// How a source is added: by the address of a page, or by a card the search of a video application found.
+// How a source is added: by the address of a page, or by a title the search of the provider found.
 const mode = ref<"address" | "titles">("address")
 const added = computed(() => Object.fromEntries(props.items.map((item, index) => [item.url, index + 1])))
 const loaded = ref<{ text: string; mark?: string }[]>([])

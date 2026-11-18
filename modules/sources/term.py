@@ -1,5 +1,5 @@
 """How long what a source answered stays current: the table of a page, the listing of a VK channel, the address a parser
-of a video application gave for an episode. Each site has its own term (the owner's setting `sources.terms`: minutes by
+of the provider of external sources gave for an episode. Each site has its own term (the owner's setting `sources.terms`: minutes by
 the site, release_table.site_of), since each site has its own cost of asking; a site the setting does not name has
 DEFAULT_MINUTES. A read the user asks for takes nothing kept, whatever the term.
 

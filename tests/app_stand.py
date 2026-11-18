@@ -470,7 +470,7 @@ class AppStand:
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()
         self.module("sources")._http = self.site.web().client()
-        # The tracker is up when the manifest of the provider is in its registries: the sites of the applications are its sites.
+        # The tracker is up when the manifest of the provider is in its registries: the sites of the provider are its sites.
         await self._provider_in()
         # Alloha is asked as its player asks, by the client of its model, with the profile of the model.
         self.module("sources").players.get("alloha").configure(alloha_profile=ALLOHA_PROFILE,
@@ -585,7 +585,7 @@ class AppStand:
         self.now += timedelta(hours=hours)
 
     async def read_card(self, url: str) -> None:
-        """The user's read of a card of an application, as the button of its source asks it: the first read of a card
+        """The user's read of a title of the provider, as the button of its source asks it: the first read of a card
         waits for it, and nothing but it begins one."""
         key = (await self.module("sources").request("sources.site.resolve", {"url": url}))["canonical_url"]
         ended = self.bus.subscribe("sources.table.ready", "sources.table.failed")

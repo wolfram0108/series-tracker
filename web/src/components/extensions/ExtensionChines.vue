@@ -18,7 +18,7 @@ import { reasonText } from "../../lib/reason"
 import { useProviderStore, type ProviderView } from "../../stores/provider"
 
 // The tab «Чинес» of the extensions: the provider of external sources — its address and token, the state of the socket and what its
-// manifest says, how many downloads of it go at once, the folder it writes to, and its applications. Without an address there is the
+// manifest says, how many downloads of it go at once, the folder it writes to, and its sites. Without an address there is the
 // line of the address and nothing else: the rest comes with the address, as it is typed. The address and the token are written when a
 // field is left or Enter is pressed; the core takes them at once and tells the whole picture again, every open screen shows it.
 type Problem = components["schemas"]["SettingProblem"]
@@ -36,7 +36,7 @@ const held = ref("")
 
 const view = computed(() => store.view)
 const named = computed(() => url.value.trim() !== "")
-const apps = computed(() => view.value?.apps ?? [])
+const sites = computed(() => view.value?.sites ?? [])
 const stale = computed(() => view.value?.state === "down" || view.value?.state === "incompatible")
 
 function adopt(next: ProviderView): void {
@@ -86,8 +86,8 @@ watch(useSSE().connected, (up) => {
   if (up) void gate.run()
 })
 
-const appNote = (app: { sources: number; lines: number }) =>
-  t("extensions.chines.appNote", { sources: tn("extensions.chines.sources", app.sources), lines: tn("extensions.chines.lines", app.lines) })
+const siteNote = (site: { sources: number; lines: number }) =>
+  t("extensions.chines.siteNote", { sources: tn("extensions.chines.sources", site.sources), lines: tn("extensions.chines.lines", site.lines) })
 
 onMounted(gate.run)
 </script>
@@ -141,9 +141,9 @@ onMounted(gate.run)
           </div>
         </SheetRow>
 
-        <SheetRow v-if="apps.length" :caption="t('extensions.sheet.apps')" :count="apps.length">
+        <SheetRow v-if="sites.length" :caption="t('extensions.sheet.sites')" :count="sites.length">
           <div class="tile-grid" :class="{ 'is-stale': stale }">
-            <InfoTile v-for="app in apps" :key="app.name" :title="app.label" :note="appNote(app)" />
+            <InfoTile v-for="site in sites" :key="site.name" :title="site.label" :note="siteNote(site)" />
           </div>
         </SheetRow>
       </template>

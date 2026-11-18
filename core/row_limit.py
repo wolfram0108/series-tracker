@@ -1,4 +1,4 @@
-"""How many rows of each line of a card an application source reads: the one place that words the setting.
+"""How many rows of each line of a title a provider source reads: the one place that words the setting.
 
 `all` (or nothing) reads every row of a line; `10` the first ten, `-10` the last ten, `50-60` the rows from the 50th to
 the 60th (both included), in the order the application lists the episodes of the line. The setting belongs to a source and

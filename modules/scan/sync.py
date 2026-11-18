@@ -116,7 +116,7 @@ async def _sync_source(source: SeriesSource, ask: Ask, signals: TableSignals, sa
         else:
             failure = verdict.reason or reason("scan_step_failed", step="sources.table.get")
     elif reply.state == TableState.ABSENT:
-        # A page of an application nobody has read waits for the user's read: the sync has nothing of it to wait for.
+        # A page of the provider nobody has read waits for the user's read: the sync has nothing of it to wait for.
         failure = reason("table_not_read", url=reply.url)
     elif failure is None:
         failure = reason("scan_step_failed", step="sources.table.get")

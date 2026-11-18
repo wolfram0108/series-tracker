@@ -44,7 +44,7 @@ async def tables_of(stand: AppStand, urls: list[str]) -> list[dict]:
 
 async def test_every_row_of_every_kind_of_source_has_the_frame_of_its_own_episode_and_a_player_the_order_places(stand):
     # Every kind of source the stand models, each with episodes in different frames: a frame carried from one row to
-    # another shows as a row whose frame is not the one of its own episode. The applications are the provider's: the stand
+    # another shows as a row whose frame is not the one of its own episode. The sites are the provider's: the stand
     # reads them through a provider of the socket by the specification (tests/provider_mock.py), at its address.
     stand.site.release("ref", "AniStar")
     stand.site.episode("ref", 1, height=720)
@@ -77,7 +77,7 @@ async def test_every_row_of_every_kind_of_source_has_the_frame_of_its_own_episod
             assert order["player_labels"].get(row["player"]), (url, row["player"])
         # Condition 2: the frame of each row is the frame of its own episode, never one carried from another row.
         assert got == frames, (url, got)
-    assert order["player_labels"]["line:BLU"] == "BLU"  # a line of an application is named by the provider's manifest
+    assert order["player_labels"]["line:BLU"] == "BLU"  # a line of the provider is named by the provider's manifest
     # Obligation 3 for every player a row can be of, whether a table of the stand holds one or not.
     for player in sources.players:
         if not getattr(player, "lines", False):

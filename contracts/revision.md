@@ -2558,5 +2558,5 @@ yt-dlp страницу серии, тот находил закрытый VK-р
   отказ при потерянной строке под файлом. Боевой перенос — после завершения разработки поставщика, осознанно, с бэкапом
   ([provider_parity.md](provider_parity.md)).
 - **Проверка.** `tests/test_provider_socket.py`, `test_provider_settings.py`, `test_gateway_sources.py`, `test_adopt_titles.py`;
-  браузерные `tests/test_ui_apps.py`, `test_ui_extensions.py`; `web/src/components/TitleSearch.test.ts`; совместно с поставщиком —
+  браузерные `tests/test_ui_titles.py`, `test_ui_extensions.py`; `web/src/components/TitleSearch.test.ts`; совместно с поставщиком —
   его `tests_joint/test_tracker_joint.py` (поиск → источник → чтение → файл по ссылке строки) на симуляции.

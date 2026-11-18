@@ -12,13 +12,13 @@ import ExtensionChines from "./ExtensionChines.vue"
 import { useProviderStore } from "../../stores/provider"
 
 const LIMITS = { threads_total: 32, threads_per_file: 16, single_at_once: 4, provider_at_once: 2, multi_at_once: 2 }
-const APPS = [{ name: "banri", label: "半日 Banri", sources: 10, lines: 7 }, { name: "appmn", label: "米诺 AppMN", sources: 2, lines: 2 }]
+const SITES = [{ name: "chines", label: "Чинес", sources: 10, lines: 7 }, { name: "second", label: "Второй", sources: 2, lines: 2 }]
 const view = (extra: object = {}) => ({
-  url: "http://127.0.0.1:5100", has_token: true, state: "up", reason: null, provider: "chinese_sources", version: "1.0.0", protocol: 1,
-  revision: "3f9a0c7b21d4e58a", apps: APPS, downloads_dir: "/nas/work/downloads", seq: 1, ...extra,
+  url: "http://127.0.0.1:5100", has_token: true, state: "up", reason: null, provider: "chinese_sources", version: "2.0.0", protocol: 2,
+  revision: "3f9a0c7b21d4e58a", sites: SITES, downloads_dir: "/nas/work/downloads", seq: 1, ...extra,
 })
 const NONE = { url: "", has_token: false, state: "none", reason: null, provider: null, version: null, protocol: null, revision: null,
-  apps: [], downloads_dir: "", seq: 1 }
+  sites: [], downloads_dir: "", seq: 1 }
 
 let mounted: VueWrapper | null = null
 
@@ -43,21 +43,21 @@ describe("the tab of the provider of external sources", () => {
     expect(mounted.text()).not.toContain("Папка загрузок")
   })
 
-  it("shows the state of the socket, what the manifest says, the downloads and the applications once the address is named", async () => {
+  it("shows the state of the socket, what the manifest says, the downloads and the sites once the address is named", async () => {
     serve(view())
     mounted = mount(ExtensionChines, { global: { plugins: [PrimeVue] } })
     await flushPromises()
     const text = mounted.text()
     expect(text).toContain("Чинес работает")
-    expect(text).toContain("chinese_sources 1.0.0")
-    expect(text).toContain("протокол 1")
+    expect(text).toContain("chinese_sources 2.0.0")
+    expect(text).toContain("протокол 2")
     expect(text).toContain("ревизия 3f9a0c7b21d4e58a")
     expect(text).toContain("/nas/work/downloads")
-    expect(mounted.findAll(".tile").map((each) => each.text())).toEqual(["半日 Banri10 источников · 7 линий", "米诺 AppMN2 источника · 2 линии"])
+    expect(mounted.findAll(".tile").map((each) => each.text())).toEqual(["Чинес10 источников · 7 линий", "Второй2 источника · 2 линии"])
     expect((mounted.find("input[inputmode='numeric']").element as HTMLInputElement).value).toBe("2")
   })
 
-  it("tells why the provider is not up and keeps the applications of its last manifest, dimmed", async () => {
+  it("tells why the provider is not up and keeps the sites of its last manifest, dimmed", async () => {
     serve(view({ state: "down", reason: JSON.stringify({ code: "provider_unavailable" }) }))
     mounted = mount(ExtensionChines, { global: { plugins: [PrimeVue] } })
     await flushPromises()
@@ -126,10 +126,10 @@ describe("the tab of the provider of external sources", () => {
     serve(view({ seq: 5 }))
     mounted = mount(ExtensionChines, { global: { plugins: [PrimeVue] } })
     await flushPromises()
-    useProviderStore().apply(view({ seq: 4, apps: [] }) as never)
+    useProviderStore().apply(view({ seq: 4, sites: [] }) as never)
     await flushPromises()
     expect(mounted.findAll(".tile")).toHaveLength(2)
-    useProviderStore().apply(view({ seq: 6, apps: [APPS[0]] }) as never)
+    useProviderStore().apply(view({ seq: 6, sites: [SITES[0]] }) as never)
     await flushPromises()
     expect(mounted.findAll(".tile")).toHaveLength(1)
   })

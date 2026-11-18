@@ -15,9 +15,9 @@ class ProviderSettingsDraft(BaseModel):
     token: str | None = None
 
 
-class ProviderApp(BaseModel):
-    """An application of the provider's manifest: how many sources of the series are its cards, how many lines of the order
-    of sources are its."""
+class ProviderSite(BaseModel):
+    """A site of the provider's manifest: how many sources of the series are its titles, how many lines of the order of sources
+    are its."""
 
     name: str
     label: str
@@ -28,7 +28,7 @@ class ProviderApp(BaseModel):
 class ProviderView(BaseModel):
     """The reply of `sources.provider.get` and the body of `sources.provider.changed`: everything the tab shows, every value
     stated. `state` is that of the socket (`none`: no address); `reason` is why it is not up, as the event of the state gives
-    it. The manifest facts and the applications are those of the last manifest, kept while the provider is down.
+    it. The manifest facts and the sites are those of the last manifest, kept while the provider is down.
     `downloads_dir` is the folder the provider writes the files of the series to (the one inside the work folder of the
     alignment). `seq` grows with every view: a screen never takes a view older than the one it shows."""
 
@@ -40,7 +40,7 @@ class ProviderView(BaseModel):
     version: str | None = None
     protocol: int | None = None
     revision: str | None = None
-    apps: list[ProviderApp] = Field(default_factory=list)
+    sites: list[ProviderSite] = Field(default_factory=list)
     downloads_dir: str = ""
     seq: int = 0
 

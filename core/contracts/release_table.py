@@ -110,8 +110,8 @@ class ReleaseTable(BaseModel):
     url: str
     site: str
     names: list[str] = Field(default_factory=list)
-    # The name of the source a window shows in its head, when its site gives one (a card of a video application: the
-    # application and the title, `半日 · 万界独尊 (2021)`); empty when the place of the address is the name.
+    # The name of the source a window shows in its head, when its site gives one (a title of the provider: its name and
+    # year, `万界独尊 (2021)`); empty when the place of the address is the name.
     title: str = ""
     site_voice: str = ""
     # The channel the page belongs to (the community of a VK channel), so that rules tell apart two channels of one site.
@@ -126,7 +126,7 @@ class ReleaseTable(BaseModel):
 
 
 def site_of(url: str) -> str:
-    """The site of an address: its host (the channels of VK are one site, an application `app://<key>/…` is its key)."""
+    """The site of an address: its host (the channels of VK are one site, a title of the provider `title://<site>/…` is its site)."""
     return (urlparse(url.split("|")[0].strip()).hostname or "").lower()
 
 
@@ -187,10 +187,10 @@ class TableGetRequest(BaseModel):
 
     url: str
     refresh: bool = True
-    # How many rows of each line of a card an application source reads (core/row_limit.py): the setting of the source
+    # How many rows of each line of a title a provider source reads (core/row_limit.py): the setting of the source
     # the read is for; a site that reads no lines ignores it. None is all.
     rows: str = "all"
-    # The request is a synchronization's own. The page of a site that waits for the user (an application card) is begun
+    # The request is a synchronization's own. The page of a site that waits for the user (a title of the provider) is begun
     # by the user's command or by a synchronization, never by a window, a preview or the recount of a layout.
     by_sync: bool = False
 
@@ -253,8 +253,8 @@ class SiteResolveReply(BaseModel):
 
 
 class PlayerPlace(BaseModel):
-    """A site or an application where a player is: `sources` is how many of the sources asked about are its pages with rows
-    of the player (0 for an application that admits the line while none of those sources is a card of it)."""
+    """A site where a player is (of the tracker, or of the provider): `sources` is how many of the sources asked about are its pages
+    with rows of the player (0 for a site of the provider that admits the line while none of those sources is a title of it)."""
 
     name: str
     label: str
@@ -263,7 +263,7 @@ class PlayerPlace(BaseModel):
 
 class PlayerFacts(BaseModel):
     """A player of the order of sources as the sources know it: a player of the pages of sites or a line of the
-    applications, the best height its rows of the sources asked about were measured at (None when none was), and where
+    provider, the best height its rows of the sources asked about were measured at (None when none was), and where
     it is, the place with the most sources first."""
 
     name: str
@@ -275,7 +275,7 @@ class PlayerFacts(BaseModel):
 
 class PlayersListRequest(BaseModel):
     """`sources.players.list`: the addresses of the sources whose tables say where each player is; none, no place but the
-    applications that admit a line."""
+    sites of the provider that admit a line."""
 
     urls: list[str] = Field(default_factory=list)
 

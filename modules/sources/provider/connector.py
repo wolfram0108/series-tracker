@@ -62,7 +62,7 @@ class Connector:
         return self.client.download(request)
 
     def term_hours(self, url: str) -> int:
-        """The term of the application of an address, whole hours (the socket counts hours)."""
+        """The term of the site of an address, whole hours (the socket counts hours)."""
         return self._term.hours_of(url)
 
     def known_player(self, name: str) -> bool:

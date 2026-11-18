@@ -1,4 +1,4 @@
-"""The first read of a card of an application waits for the user, and a read takes the first or the last rows of each line
+"""The first read of a title of the provider waits for the user, and a read takes the first or the last rows of each line
 (core/row_limit.py): the rows of the earlier reads that it did not take stay in the table as they were."""
 import asyncio
 
@@ -30,7 +30,7 @@ def test_a_limit_takes_the_first_or_the_last_rows_of_a_line_in_the_order_they_ca
 
 
 class Card(FakeSite):
-    """A card of an application: its page waits for the user's first read, and the rows it gives are those of its limit."""
+    """A title of the provider: its page waits for the user's first read, and the rows it gives are those of its limit."""
     first_read_by_user = True
 
     def __init__(self) -> None:

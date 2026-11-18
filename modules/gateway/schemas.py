@@ -295,7 +295,7 @@ class TableReadRequest(RequestModel):
     """Read the page of an address now."""
 
     url: str
-    # How many rows of each line of an application card to read: `all`, `N` (the first N) or `-N` (the last N); none is all.
+    # How many rows of each line of a title of the provider to read: `all`, `N` (the first N) or `-N` (the last N); none is all.
     rows: str | None = None
 
 

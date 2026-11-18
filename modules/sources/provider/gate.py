@@ -1,7 +1,7 @@
 """Whether the provider of the socket can be asked for a page now, and the one word the tracker answers with when it cannot.
 
 A page of the provider's world is one its sites read (the sites of the manifest, kept while the provider is down) or one whose
-address is no web address at all (`app://…`: no site of the tracker reads it, and no generic reader could): such a page is read
+address is no web address at all (`title://…`: no site of the tracker reads it, and no generic reader could): such a page is read
 and downloaded by the provider alone. While the provider is not up — none is configured, the first hello is not in yet, the feed
 dropped, its protocol is not ours — nothing of that world is begun: a read says `provider_not_connected`, a sync of a series
 that has such a page is not opened, a download is not handed to a generic downloader. A page of any other address is the

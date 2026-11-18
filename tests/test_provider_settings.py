@@ -1,5 +1,5 @@
 """The tab of the provider of external sources, from the core's side: the address and the token are settings taken at once, the
-whole picture of the provider (the socket, the manifest, the applications with their sources and lines, the folder of the
+whole picture of the provider (the socket, the manifest, the sites with their sources and lines, the folder of the
 downloads) is one view that is told again whenever a part of it changes, and a secret never goes round the bus."""
 from __future__ import annotations
 
@@ -90,25 +90,25 @@ def mock_of(app: str, label: str) -> MockProvider:
     return mock
 
 
-async def test_with_no_address_the_picture_is_none_and_has_no_applications(tmp_path):
+async def test_with_no_address_the_picture_is_none_and_has_no_sites(tmp_path):
     world = await build(tmp_path)
     try:
         view = await world.view()
-        assert (view["url"], view["state"], view["apps"], view["has_token"]) == ("", "none", [], False)
+        assert (view["url"], view["state"], view["sites"], view["has_token"]) == ("", "none", [], False)
         assert view["downloads_dir"] == "/nas/work/downloads" and view["provider"] is None
     finally:
         await stop(world)
 
 
-async def test_the_picture_of_a_provider_that_is_up_is_its_manifest_with_the_sources_and_lines_of_each_application(tmp_path):
+async def test_the_picture_of_a_provider_that_is_up_is_its_manifest_with_the_sources_and_lines_of_each_site(tmp_path):
     mock = mock_of("mock", "Мок (Mock)")
     async with serving(mock) as server:
         world = await build(tmp_path, default=ProviderClient(server.url, "secret"), addresses=("title://mock/7", "title://mock/8", "https://x.test/p"))
         try:
-            view = await world.until(lambda each: each["state"] == "up" and each["apps"])
+            view = await world.until(lambda each: each["state"] == "up" and each["sites"])
             assert view["url"] == server.url and view["has_token"] is True and view["protocol"] == 2
             assert view["provider"] == mock.manifest().provider.id and view["revision"] == mock.manifest().revision
-            assert view["apps"] == [{"name": "mock", "label": "Мок (Mock)", "sources": 2, "lines": 2}]
+            assert view["sites"] == [{"name": "mock", "label": "Мок (Mock)", "sources": 2, "lines": 2}]
             assert "secret" not in str(view)  # the token is told as present, never as its value
         finally:
             await stop(world)
@@ -121,15 +121,15 @@ async def test_an_address_saved_is_taken_at_once_and_the_sites_of_the_old_provid
         try:
             saved = await world.save(one.url)
             assert saved["saved"] is True and saved["problems"] == []
-            await world.until(lambda each: each["state"] == "up" and [a["name"] for a in each["apps"]] == ["one"])
+            await world.until(lambda each: each["state"] == "up" and [a["name"] for a in each["sites"]] == ["one"])
             assert world.sources.tables.resolve("title://one/7").site == "one"
             await world.save(two.url)
-            view = await world.until(lambda each: each["state"] == "up" and [a["name"] for a in each["apps"]] == ["two"])
+            view = await world.until(lambda each: each["state"] == "up" and [a["name"] for a in each["sites"]] == ["two"])
             assert view["url"] == two.url
             assert world.sources.tables.resolve("title://one/7").site is None and world.sources.tables.resolve("title://two/7").site == "two"
             await world.save("")
             gone = await world.until(lambda each: each["state"] == "none")
-            assert gone["apps"] == [] and world.sources.tables.resolve("title://two/7").site is None
+            assert gone["sites"] == [] and world.sources.tables.resolve("title://two/7").site is None
             assert await world.stored("provider.url") == ""  # stored empty: the owner's «none», not the environment's address
         finally:
             await stop(world)
@@ -175,15 +175,15 @@ async def test_the_address_the_owner_saved_stands_over_the_environments_and_a_sa
         path.mkdir()
         world = await build(path, default=ProviderClient(from_env.url))
         try:
-            await world.until(lambda each: each["state"] == "up" and [a["name"] for a in each["apps"]] == ["env"])
+            await world.until(lambda each: each["state"] == "up" and [a["name"] for a in each["sites"]] == ["env"])
             await world.save(from_owner.url)
-            await world.until(lambda each: each["state"] == "up" and [a["name"] for a in each["apps"]] == ["saved"])
+            await world.until(lambda each: each["state"] == "up" and [a["name"] for a in each["sites"]] == ["saved"])
         finally:
             await stop(world)
         again = await build(path, default=ProviderClient(from_env.url))  # a restart: what was saved is taken, not the environment's
         try:
-            view = await again.until(lambda each: each["state"] == "up" and each["apps"])
-            assert view["url"] == from_owner.url and [a["name"] for a in view["apps"]] == ["saved"]
+            view = await again.until(lambda each: each["state"] == "up" and each["sites"])
+            assert view["url"] == from_owner.url and [a["name"] for a in view["sites"]] == ["saved"]
             await again.save("")
         finally:
             await stop(again)
@@ -201,7 +201,7 @@ async def test_of_two_pictures_the_one_taken_later_has_the_greater_number_and_sh
     async with serving(mock) as server:
         world = await build(tmp_path, default=ProviderClient(server.url), addresses=("title://mock/7",))
         try:
-            await world.until(lambda each: each["state"] == "up" and each["apps"])
+            await world.until(lambda each: each["state"] == "up" and each["sites"])
             host, gate, real = world.sources.provider, asyncio.Event(), world.sources.provider._sources_by_app
             calls = []
 

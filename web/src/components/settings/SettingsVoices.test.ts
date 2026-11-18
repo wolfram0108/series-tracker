@@ -115,7 +115,7 @@ describe("the order of the players in the settings of the voices", () => {
     const w = await opened(["kodik", "vibix", "line:zijianm3u8"])
     const rows = w.findAll(".priority-row")
     const places = (index: number) => rows[index].findAll(".place").map((each) => [each.text(), each.classes("zero")])
-    expect(rows.map((row) => row.find(".kind").text())).toEqual(["Плеер сайта", "Плеер сайта", "Линия приложения"])
+    expect(rows.map((row) => row.find(".kind").text())).toEqual(["Плеер сайта", "Плеер сайта", "Линия"])
     expect(rows.map((row) => row.find(".height-cell").exists() ? row.find(".height-cell").text() : "")).toEqual(["720p", "", "2160p"])
     expect(places(0)).toEqual([["yummyani 10", false], ["ruchime 4", false]])
     expect(rows[1].find(".none").text()).toBe("нет источников")

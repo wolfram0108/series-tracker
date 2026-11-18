@@ -67,7 +67,7 @@ if (info && info.tmdb_id) {
   tmdb.episodeCount.value = Number(info.total_episodes ?? 0)
 }
 
-// The names the search of the video applications offers: those of the series, then the original one of TMDB, asked
+// The names the search of the titles of the provider offers: those of the series, then the original one of TMDB, asked
 // only when the search is opened.
 const seriesNames = computed(() => [...form.name.split("/"), form.name_en].map((text) => ({ text: text.trim() })).filter((name) => name.text))
 async function tmdbOriginal(): Promise<{ text: string; mark?: string }[]> {

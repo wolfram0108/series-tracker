@@ -4,16 +4,16 @@ import { api } from "../../api/client"
 import { t } from "../../i18n"
 import { useApi } from "../../composables/useApi"
 
-// «Хранение данных источников», folded by default: every site the sources of the series read (VK is one site, an
-// application is its key) with how many sources read it and the term of what it answered, hours and minutes.
-interface SiteTerm { site: string; app: boolean; sources: number; minutes: number }
+// «Хранение данных источников», folded by default: every site the sources of the series read (VK is one site, a site of the
+// provider of external sources is listed apart) with how many sources read it and the term of what it answered, hours and minutes.
+interface SiteTerm { site: string; provider: boolean; sources: number; minutes: number }
 
 const { request } = useApi()
 const open = ref(false)
 const sites = ref<SiteTerm[] | null>(null)
 const groups = computed(() => [
-  { key: "sites", label: t("terms.sites"), rows: (sites.value ?? []).filter((each) => !each.app) },
-  { key: "apps", label: t("terms.apps"), rows: (sites.value ?? []).filter((each) => each.app) },
+  { key: "sites", label: t("terms.sites"), rows: (sites.value ?? []).filter((each) => !each.provider) },
+  { key: "provider", label: t("terms.provider"), rows: (sites.value ?? []).filter((each) => each.provider) },
 ].filter((group) => group.rows.length))
 
 async function load(): Promise<void> {

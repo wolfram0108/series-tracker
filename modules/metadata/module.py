@@ -129,7 +129,7 @@ class MetadataModule(BaseModule):
         data = await self._get(f"/tv/{tmdb_id}", {"language": "ru-RU"})
         return {
             "name": data.get("name"),
-            # The name in the language of the title (Chinese for a donghua): the search of a video application asks by it.
+            # The name in the language of the title (Chinese for a donghua): the search of the provider of external sources asks by it.
             "original_name": data.get("original_name"),
             "poster_path": data.get("poster_path"),
             "status": data.get("status"),

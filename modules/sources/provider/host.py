@@ -12,7 +12,7 @@ from collections import Counter
 from typing import Awaitable, Callable
 
 from core import BusRequestError
-from core.contracts import ProviderApp, ProviderSaved, ProviderSettingsDraft, ProviderView
+from core.contracts import ProviderSaved, ProviderSettingsDraft, ProviderSite, ProviderView
 from core.logging import get_logger
 
 from ..players.registry import PlayerRegistry
@@ -163,10 +163,10 @@ class ProviderHost:
             state=connector.state if connector is not None else "none", reason=(connector.why or None) if connector is not None else None,
             provider=manifest.provider.id if manifest else None, version=manifest.provider.version if manifest else None,
             protocol=manifest.protocol if manifest else None, revision=manifest.revision if manifest else None)
-        apps: list[ProviderApp] = []
+        sites: list[ProviderSite] = []
         if manifest is not None:
             lines = Counter(place.name for each in manifest.players if each.kind == "line" for place in each.places)
             sources = await self._sources_by_app()
-            apps = [ProviderApp(name=each.name, label=each.label or each.name, sources=sources.get(each.name, 0),
+            sites = [ProviderSite(name=each.name, label=each.label or each.name, sources=sources.get(each.name, 0),
                                 lines=lines.get(each.name, 0)) for each in manifest.sites]
-        return ProviderView(**fixed, apps=apps, downloads_dir=await self._downloads_dir(), seq=seq)
+        return ProviderView(**fixed, sites=sites, downloads_dir=await self._downloads_dir(), seq=seq)

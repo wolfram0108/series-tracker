@@ -3531,27 +3531,6 @@ export interface components {
             heights?: number[];
         };
         /**
-         * ProviderApp
-         * @description An application of the provider's manifest: how many sources of the series are its cards, how many lines of the order
-         *     of sources are its.
-         */
-        ProviderApp: {
-            /** Name */
-            name: string;
-            /** Label */
-            label: string;
-            /**
-             * Sources
-             * @default 0
-             */
-            sources: number;
-            /**
-             * Lines
-             * @default 0
-             */
-            lines: number;
-        };
-        /**
          * ProviderSaved
          * @description The reply of `sources.provider.set`: saved, or the problems that kept it from being saved.
          */
@@ -3573,10 +3552,31 @@ export interface components {
             token?: string | null;
         };
         /**
+         * ProviderSite
+         * @description A site of the provider's manifest: how many sources of the series are its titles, how many lines of the order of sources
+         *     are its.
+         */
+        ProviderSite: {
+            /** Name */
+            name: string;
+            /** Label */
+            label: string;
+            /**
+             * Sources
+             * @default 0
+             */
+            sources: number;
+            /**
+             * Lines
+             * @default 0
+             */
+            lines: number;
+        };
+        /**
          * ProviderView
          * @description The reply of `sources.provider.get` and the body of `sources.provider.changed`: everything the tab shows, every value
          *     stated. `state` is that of the socket (`none`: no address); `reason` is why it is not up, as the event of the state gives
-         *     it. The manifest facts and the applications are those of the last manifest, kept while the provider is down.
+         *     it. The manifest facts and the sites are those of the last manifest, kept while the provider is down.
          *     `downloads_dir` is the folder the provider writes the files of the series to (the one inside the work folder of the
          *     alignment). `seq` grows with every view: a screen never takes a view older than the one it shows.
          */
@@ -3600,8 +3600,8 @@ export interface components {
             protocol?: number | null;
             /** Revision */
             revision?: string | null;
-            /** Apps */
-            apps?: components["schemas"]["ProviderApp"][];
+            /** Sites */
+            sites?: components["schemas"]["ProviderSite"][];
             /**
              * Downloads Dir
              * @default

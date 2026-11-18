@@ -21,8 +21,8 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    says how the page stands: `reading` while a read goes, `failed` (with the
                                    reason) when the last read failed, `ready` for a complete table however old,
                                    `absent` when nothing was read; with the last complete table when there is one.
-                                   `rows` is how many rows of each line of an application card a read takes (the
-                                   setting of the source). The page of an application card waits for the user: it
+                                   `rows` is how many rows of each line of a title of the provider a read takes (the
+                                   setting of the source). The page of a title of the provider waits for the user: it
                                    is begun by `sources.table.read` or by a request with `by_sync` (a
                                    synchronization's own) that finds a table already read; any other request
                                    (a window, a preview, the recount of a layout) says how the page stands and
@@ -64,7 +64,7 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    another protocol) the search is refused: NotAllowed `provider_not_connected`
   sources.provider.get {} → ProviderView: the provider of external sources as the tab of the extensions shows it — its address,
                                    whether a token is set (never the token), the state of the socket and why it is not up, what its
-                                   last manifest says (id, version, protocol, revision), its applications with the sources of the
+                                   last manifest says (id, version, protocol, revision), its sites with the sources of the
                                    series and the lines each has, and the folder it writes the downloads to (inside the work folder of
                                    the alignment, asked of `conform.workspace`)
   sources.provider.set ProviderSettingsDraft {url, token?} → ProviderSaved {saved, problems, provider}: the address (empty: none) and
@@ -79,7 +79,7 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    is no web address and no site reads (modules/sources/provider/gate.py). Scan asks it
                                    before it opens a sync of a series, whatever else the series is made of
   sources.terms.get {} → {sites: [{site, app, sources, minutes}]}: every site some source of a series reads (not a
-                                   tracker: its table is the release `torrents` keeps), whether it is an application, how
+                                   tracker: its table is the release `torrents` keeps), whether it is a site of the provider, how
                                    many sources read it and the term of what it answered (term.py), minutes
   sources.tables.fresh {urls} → {pages: [{url, read_at, fresh_until}]}: when the tables of the pages (canonical) were
                                    read and until when their term holds; a page with no table read is left out
@@ -110,7 +110,7 @@ forgets the table of a page that was listed and is not any more at once, and of 
 from before) when its table is past the term; a read of it that goes is stopped first. `series.deleted` is answered with
 `series.purged {owner: sources}` (the cascade of Р-19).
 settings.changed {key: sources.terms} — the terms of the sites (term.py): the tables of pages, the listings of VK channels
-and the addresses parsers of applications gave are current for the term of their site; every stored table of a site whose
+and the addresses parsers of the provider gave are current for the term of their site; every stored table of a site whose
 term moved is told again (`sources.table.fresh`).
 settings.changed {key: voices.players_off} — the players the owner switched off for every source: a read asks none of
 them (ReadContext.off) and keeps their rows of the last read as they were; a player switched on is asked at the next
@@ -348,9 +348,10 @@ class SourcesModule(BaseModule):
         await self.alloha_browsers.shutdown()
 
     async def on_terms_get(self, env: Envelope) -> dict:
-        """Every site some source of a series reads, with how many sources read it and its term."""
+        """Every site some source of a series reads, with how many sources read it and its term; `provider` marks the sites of the
+        provider of external sources (no web address), which the window lists apart."""
         counted: dict[str, int] = {}
-        apps: set[str] = set()
+        provided: set[str] = set()
         for series in await self.request("catalog.series.list", {}):
             for source in series.get("sources") or []:
                 if source.get("source_type") == SourceType.TORRENT:
@@ -359,9 +360,9 @@ class SourcesModule(BaseModule):
                 if site:
                     counted[site] = counted.get(site, 0) + 1
                     if not is_web_address(source["url"]):
-                        apps.add(site)
-        order = sorted(counted, key=lambda site: (site in apps, -counted[site], site))
-        return {"sites": [{"site": site, "app": site in apps, "sources": counted[site],
+                        provided.add(site)
+        order = sorted(counted, key=lambda site: (site in provided, -counted[site], site))
+        return {"sites": [{"site": site, "provider": site in provided, "sources": counted[site],
                            "minutes": self.term.minutes.get(site, DEFAULT_MINUTES)} for site in order]}
 
     async def on_tables_fresh(self, env: Envelope) -> dict:
@@ -596,7 +597,7 @@ class SourcesModule(BaseModule):
     async def on_players_list(self, env: Envelope) -> dict:
         """Every player a row of a table can be of, with the words a window names it by and where it is among the pages
         asked about: the players of the registry, and those the manifest of the provider names (`line:<code>` of the
-        video applications), each in every place the manifest says it is."""
+        sources of the provider), each in every place the manifest says it is."""
         request = PlayersListRequest.model_validate(env.payload or {})
         urls = list(dict.fromkeys(self.tables.resolve(url).canonical_url or url for url in request.urls))
         pages, heights = await self.repo.players_of_pages(urls)
