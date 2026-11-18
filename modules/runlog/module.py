@@ -16,7 +16,7 @@ File: <ST_LOG_DIR>/runs/<series_id>/<start, UTC>-<pid>.jsonl.gz, and for a read 
 <ST_LOG_DIR>/runs/reads/<the address of the page as a name>/<start, UTC>-<pid>.jsonl.gz — a JSON line per entry, gzip
 members appended as the lines come (a file cut by a stop is read up to its last member). The first line is `open`, the
 last `close` (`stopped` when the process stopped first). The newest KEEP files of a series or of a page stay, the older
-ones go when a new run opens; and all the dumps together keep within BUDGET bytes: the oldest go, whatever they are of,
+ones go when a new run opens and at the start; and all the dumps together keep within BUDGET bytes: the oldest go, whatever they are of,
 when a run opens and at the start (a sync of hours is a dump of a gigabyte, and the disk is the disk of the database).
 Without ST_LOG_DIR (a script, a test that names no folder) nothing is written.
 
@@ -40,7 +40,7 @@ from core.contracts.release_table import TABLE_TRACE_TOPIC
 from core.contracts.work import RUN_CHANGED
 from core.envelope import Envelope
 
-KEEP = 50  # dumps kept per series: the disk of the service is not endless, the last syncs are what is looked into
+KEEP = 3  # dumps kept per series and per page: the last syncs are what is looked into
 BUDGET = 2 * 1024 ** 3  # bytes of all the dumps together; the dumps being written are never removed
 
 
@@ -93,6 +93,12 @@ def _prune(folder: str, keep: int) -> None:
     names = sorted(name for name in os.listdir(folder) if name.endswith(".jsonl.gz"))
     for name in names[:max(0, len(names) - keep)]:
         os.remove(os.path.join(folder, name))
+
+
+def _prune_all(root: str, keep: int) -> None:
+    """Every folder of dumps under `root` keeps its newest `keep`: a series that has not synced since keeps no more."""
+    for folder, _dirs, _names in os.walk(root):
+        _prune(folder, keep)
 
 
 def _within(root: str, budget: int, writing: set[str]) -> list[str]:
@@ -173,6 +179,7 @@ class RunlogModule(BaseModule):
         self._untap = self.bus.tap(self._seen)
         self._handler = _Records(self)
         logging.getLogger().addHandler(self._handler)
+        await storage.call(_prune_all, self.folder, self.keep)
         await self._keep_within()
         self.spawn(self._writer(), name="runlog:writer", lasting=True)
 

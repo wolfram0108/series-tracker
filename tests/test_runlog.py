@@ -190,3 +190,19 @@ async def test_all_the_dumps_keep_within_the_budget_the_oldest_go_first_and_the_
         assert list(old.iterdir()) == [] and len(dumps(tmp_path, 9)) == 1
     finally:
         await runner.stop()
+
+
+async def test_at_the_start_every_folder_keeps_its_newest_dumps_only(tmp_path):
+    folder = tmp_path / "46"
+    folder.mkdir()
+    for day in range(1, 6):
+        (folder / f"2026010{day}T000000Z-1.jsonl.gz").write_bytes(b"x")
+    bus = Bus()
+    module = RunlogModule(bus, str(tmp_path), keep=3)
+    runner = Runner(bus, [module])
+    await runner.start()
+    try:
+        assert sorted(each.name for each in folder.iterdir()) == [
+            "20260103T000000Z-1.jsonl.gz", "20260104T000000Z-1.jsonl.gz", "20260105T000000Z-1.jsonl.gz"]
+    finally:
+        await runner.stop()
