@@ -161,3 +161,32 @@ async def test_a_read_inside_the_sync_of_a_series_is_in_the_dump_of_that_sync_an
     (path,) = dumps(tmp_path, 5)
     assert [each.get("topic") for each in lines(path) if each["e"] == "bus"] == [RUN_CHANGED, TABLE_TRACE_TOPIC, TABLE_TRACE_TOPIC, RUN_CHANGED]
     assert not os.path.exists(os.path.join(tmp_path, "reads"))
+
+
+async def test_all_the_dumps_keep_within_the_budget_the_oldest_go_first_and_the_one_being_written_stays(tmp_path):
+    """A sync of hours is a dump of a gigabyte: the dumps of every series and page together keep within the budget, the
+    oldest going first, at the start and when a run opens; the dump being written is never removed."""
+    old = tmp_path / "40"
+    old.mkdir()
+    for at, name in enumerate(("20260101T000000Z-1.jsonl.gz", "20260102T000000Z-1.jsonl.gz")):
+        path = old / name
+        path.write_bytes(b"x" * 600)
+        os.utime(path, (1_000_000 + at, 1_000_000 + at))
+    bus = Bus()
+    module = RunlogModule(bus, str(tmp_path), budget=1000)
+    runner = Runner(bus, [module])
+    await runner.start()
+    try:
+        assert sorted(each.name for each in old.iterdir()) == ["20260102T000000Z-1.jsonl.gz"]
+        bus.publish(run_changed(9, True))
+        await module.written()
+        assert sorted(each.name for each in old.iterdir()) == ["20260102T000000Z-1.jsonl.gz"] and len(dumps(tmp_path, 9)) == 1
+        module.budget = 10
+        bus.publish(run_changed(9, False))
+        await module.written()
+        bus.publish(run_changed(9, True))
+        await module.written()
+        # The 600 bytes go; of the dumps of 9 the one being written stays, the closed one goes.
+        assert list(old.iterdir()) == [] and len(dumps(tmp_path, 9)) == 1
+    finally:
+        await runner.stop()

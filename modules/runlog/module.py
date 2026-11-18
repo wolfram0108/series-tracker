@@ -16,7 +16,8 @@ File: <ST_LOG_DIR>/runs/<series_id>/<start, UTC>-<pid>.jsonl.gz, and for a read 
 <ST_LOG_DIR>/runs/reads/<the address of the page as a name>/<start, UTC>-<pid>.jsonl.gz — a JSON line per entry, gzip
 members appended as the lines come (a file cut by a stop is read up to its last member). The first line is `open`, the
 last `close` (`stopped` when the process stopped first). The newest KEEP files of a series or of a page stay, the older
-ones go when a new run opens.
+ones go when a new run opens; and all the dumps together keep within BUDGET bytes: the oldest go, whatever they are of,
+when a run opens and at the start (a sync of hours is a dump of a gigabyte, and the disk is the disk of the database).
 Without ST_LOG_DIR (a script, a test that names no folder) nothing is written.
 
 Queries, commands, events: none of its own; it only looks at the bus and the log (no subscription, no answer)."""
@@ -40,6 +41,7 @@ from core.contracts.work import RUN_CHANGED
 from core.envelope import Envelope
 
 KEEP = 50  # dumps kept per series: the disk of the service is not endless, the last syncs are what is looked into
+BUDGET = 2 * 1024 ** 3  # bytes of all the dumps together; the dumps being written are never removed
 
 
 READS = "reads"  # the folder of the dumps of the reads of pages, beside the folders of the series
@@ -93,6 +95,34 @@ def _prune(folder: str, keep: int) -> None:
         os.remove(os.path.join(folder, name))
 
 
+def _within(root: str, budget: int, writing: set[str]) -> list[str]:
+    """The oldest dumps under `root` go until all of them together keep within `budget` bytes; the dumps being written
+    stay. Returns the files removed."""
+    found = []
+    for folder, _dirs, names in os.walk(root):
+        for name in names:
+            if name.endswith(".jsonl.gz"):
+                path = os.path.join(folder, name)
+                try:
+                    found.append((os.stat(path).st_mtime, os.path.getsize(path), path))
+                except OSError:
+                    continue
+    total = sum(size for _at, size, _path in found)
+    removed = []
+    for _at, size, path in sorted(found):
+        if total <= budget:
+            break
+        if path in writing:
+            continue
+        try:
+            os.remove(path)
+        except OSError:
+            continue
+        total -= size
+        removed.append(path)
+    return removed
+
+
 class _Records(logging.Handler):
     """Every line of the log, from any thread, into the open runs."""
 
@@ -121,9 +151,10 @@ class _Records(logging.Handler):
 class RunlogModule(BaseModule):
     name = "runlog"
 
-    def __init__(self, bus, folder: str | None, keep: int = KEEP) -> None:
+    def __init__(self, bus, folder: str | None, keep: int = KEEP, budget: int = BUDGET) -> None:
         self.folder = folder
         self.keep = keep
+        self.budget = budget
         self.runs: dict[int | str, _Run] = {}  # by the series, or by the address of the page being read
         self.loop: asyncio.AbstractEventLoop | None = None
         self.loop_thread = 0
@@ -142,7 +173,20 @@ class RunlogModule(BaseModule):
         self._untap = self.bus.tap(self._seen)
         self._handler = _Records(self)
         logging.getLogger().addHandler(self._handler)
+        await self._keep_within()
         self.spawn(self._writer(), name="runlog:writer", lasting=True)
+
+    async def _keep_within(self) -> None:
+        """All the dumps together within the budget: the oldest go."""
+        writing = {run.path for run in self.runs.values()}
+        try:
+            removed = await storage.call(_within, self.folder or "", self.budget, writing)
+        except Exception:  # noqa: BLE001 — a dump that cannot be removed is named, the service goes on
+            self.log.exception("старые дампы не убраны")
+            return
+        if removed:
+            self.log.info("старые дампы убраны, чтобы все дампы уложились в %d МБ: %d файлов", self.budget // 1024 ** 2,
+                          len(removed))
 
     async def on_stop(self) -> None:
         if self._untap is not None:
@@ -209,6 +253,7 @@ class RunlogModule(BaseModule):
                 if key not in pruned:
                     pruned.add(key)
                     await storage.call(_prune, os.path.dirname(run.path), self.keep - 1)
+                    await self._keep_within()
                 lines, run.lines = run.lines, []
                 if lines:
                     try:
