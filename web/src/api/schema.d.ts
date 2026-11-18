@@ -4382,8 +4382,9 @@ export interface components {
         };
         /**
          * TitleSearchReply
-         * @description A page of the search: the titles, how many pages and titles the provider says there are (None when it does not say), the
-         *     codes of what the answer lacks (a part of the sources did not answer) and the reason it gave no title.
+         * @description A page of the search: the titles, how many pages and titles the provider says there are and whether a page follows (None when
+         *     it does not say), how many titles of the page it left out for having no line it plays, the codes of what the answer lacks (a
+         *     part of the sources did not answer) and the reason it gave no title.
          */
         TitleSearchReply: {
             /** Titles */
@@ -4397,6 +4398,13 @@ export interface components {
             pages?: number | null;
             /** Total */
             total?: number | null;
+            /** More */
+            more?: boolean | null;
+            /**
+             * Without Lines
+             * @default 0
+             */
+            without_lines: number;
             /** Notes */
             notes?: string[];
             /** Reason */

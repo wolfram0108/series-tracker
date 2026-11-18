@@ -63,6 +63,8 @@ class MockProvider:
         self.read_error = ""
         self.read_breaks = False
         self.search_status = 200
+        # What the model adds to a page of its search beyond the titles: `more`, `without_lines` (contracts/provider_socket.md A.5).
+        self.search_page: dict = {}
         # What the provider says of the addresses of protocol 1 it is asked to adopt: url -> AdoptItem dict.
         self.adoptions: dict[str, dict] = {}
         self.revision = 1
@@ -186,7 +188,7 @@ class MockProvider:
 
             titles = [{"id": str(each["id"]), "name": each.get("name", ""), "lines": lines_of(site, each)}
                       for site in self.sites.values() for each in site.found]
-            return {"titles": titles, "page": body.get("page", 1), "pages": 1, "total": len(titles)}
+            return {"titles": titles, "page": body.get("page", 1), "pages": 1, "total": len(titles), **self.search_page}
 
         @api.post("/v1/adopt")
         async def adopt(request: Request, authorization: str = Header(default="")):

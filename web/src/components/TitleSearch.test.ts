@@ -18,7 +18,7 @@ const card = (over: Partial<TitleCard>): TitleCard => ({
   id: "", name: "万界独尊", sub: "", year: "", area: "", genres: "", remarks: "", blurb: "", pic: "", lines: [], ...over,
 })
 const page = (titles: TitleCard[], over: Partial<TitleSearchReply> = {}): TitleSearchReply => ({
-  titles, page: 1, pages: 2, total: 3, notes: [], reason: null, ...over,
+  titles, page: 1, pages: 2, total: 3, without_lines: 0, notes: [], reason: null, ...over,
 })
 const stored = (over: Partial<SeriesSource> = {}): SeriesSource => ({
   id: 7, series_id: 1, position: 0, url: "title://chines/k3f9a1/CO4K", source_type: "web_video", parser_profile_id: null,
@@ -102,6 +102,25 @@ describe("the search of the titles of the provider in the sources", () => {
     expect(done.find(".ts-added").text()).toBe(t("sources.titles.added", { n: 1 }))
     expect(done.find(".ts-add").exists()).toBe(false)
     expect(w.find(".ts-line[data-line='duanju'] .ts-add").exists()).toBe(true)
+  })
+
+  it("believes the provider that says whether a page follows, and says how many titles it left out of the page", async () => {
+    // a page of nothing the provider could give is no end of the search: it says another follows, and what it left out
+    vi.mocked(calls.searchTitles).mockResolvedValue({ ok: true, data: page([], { pages: null, total: null, more: true, without_lines: 3 }) })
+    const w = mountEditor()
+    await w.findAll(".source-mode .st-tab")[1].trigger("click")
+    await w.find(".ts-find").trigger("click")
+    await flushPromises()
+    expect(w.find(".ts-head").text()).toBe(`${t("sources.titles.page", { page: 1 })} · ${t("sources.titles.withoutLines", { n: 3 })}`)
+    expect(w.find(".ts-more").exists()).toBe(true)
+
+    const line = { code: "CO4K", url: "title://chines/9/CO4K", label: "4K", rows: 482, routes: 3 }
+    vi.mocked(calls.searchTitles).mockResolvedValue({ ok: true, data: page([card({ id: "9", lines: [line] })], { page: 2, pages: null, total: null, more: false }) })
+    await w.find(".ts-more").trigger("click")
+    await flushPromises()
+    expect(calls.searchTitles).toHaveBeenLastCalledWith("万界独尊", 2)
+    expect(w.find(".ts-more").exists()).toBe(false)  // the provider said it is the last, though it gave no count of pages
+    expect(w.find(".ts-head").text()).toBe(t("sources.titles.page", { page: 2 }))  // what it left out is that of the page it gave last
   })
 
   it("a provider that gave no title says why, worded from its reason, and what a part of its sources lacked from its notes", async () => {

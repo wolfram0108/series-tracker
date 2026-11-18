@@ -295,6 +295,10 @@ async def test_the_search_gives_the_titles_of_the_provider_or_its_reason(system)
     got = await system.probe.request("sources.titles.search", {"query": "名", "page": 1})
     assert [line["url"] for title in got["titles"] for line in title["lines"]] == [CARD, "title://mock/7/Y"]  # a line is the source
     assert got["page"] == 1 and got["reason"] is None and "url" not in got["titles"][0]
+    assert got["more"] is None and got["without_lines"] == 0  # a provider that does not say whether a page follows: not said
+    system.mock.search_page = {"more": True, "without_lines": 3}  # what the provider left out of the page, and that another follows
+    said = await system.probe.request("sources.titles.search", {"query": "名", "page": 1})
+    assert said["more"] is True and said["without_lines"] == 3
     system.mock.search_status = 500
     failed = await system.probe.request("sources.titles.search", {"query": "名"})
     assert failed["titles"] == [] and json.loads(failed["reason"])["code"] == "provider_unavailable"

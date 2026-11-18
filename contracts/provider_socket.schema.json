@@ -1318,8 +1318,20 @@
      "type": "object"
     }
    },
-   "description": "A page of the search: the titles, how many pages and titles the provider says there are (None when it does not say), the\ncodes of what the answer lacks (a part of the sources did not answer) and the reason it gave no title.",
+   "description": "A page of the search: the titles, how many pages and titles the provider says there are and whether a page follows (None when\nit does not say), how many titles of the page it left out for having no line it plays, the codes of what the answer lacks (a\npart of the sources did not answer) and the reason it gave no title.",
    "properties": {
+    "more": {
+     "anyOf": [
+      {
+       "type": "boolean"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "More"
+    },
     "notes": {
      "items": {
       "type": "string"
@@ -1374,6 +1386,11 @@
      ],
      "default": null,
      "title": "Total"
+    },
+    "without_lines": {
+     "default": 0,
+     "title": "Without Lines",
+     "type": "integer"
     }
    },
    "title": "TitleSearchReply",

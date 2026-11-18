@@ -53,22 +53,26 @@ async function find(page = 1): Promise<void> {
   }
 }
 
-// A provider that does not say how many pages it has has more while a page brings any title.
+// A provider that says whether a page follows is believed (a page it left bare may still be followed by one that is not); one that
+// does not say how many pages it has has more while a page brings any title.
 const more = computed(() => {
   const reply = last.value
   if (!reply || reply.reason) return false
+  if (reply.more != null) return reply.more
   if (reply.pages != null) return (reply.page ?? 1) < reply.pages
   return (reply.titles?.length ?? 0) > 0
 })
 const nextPage = computed(() => (last.value?.page ?? 1) + 1)
 
+// What the provider left out of the page (titles with no line it plays) is said, so that nothing is lost in silence.
+const withoutLines = computed(() => last.value?.without_lines ?? 0)
 const found = computed(() => {
   const reply = last.value
   if (!reply) return ""
-  if (reply.total != null && reply.pages != null) {
-    return t("sources.titles.found", { total: reply.total, page: reply.page ?? 1, pages: reply.pages })
-  }
-  return t("sources.titles.page", { page: reply.page ?? 1 })
+  const count = reply.total != null && reply.pages != null
+    ? t("sources.titles.found", { total: reply.total, page: reply.page ?? 1, pages: reply.pages })
+    : t("sources.titles.page", { page: reply.page ?? 1 })
+  return withoutLines.value ? `${count} · ${t("sources.titles.withoutLines", { n: withoutLines.value })}` : count
 })
 
 function meta(card: TitleCard): string {
@@ -104,7 +108,7 @@ function lineText(line: TitleLine): string {
       <div v-if="last.reason" class="ts-reason">{{ reasonText(last.reason) }}</div>
       <div v-for="note in last.notes ?? []" :key="note" class="ts-reason">{{ reasonText(note) }}</div>
       <div v-if="!titles.length && !last.reason" class="muted">{{ t("sources.titles.empty") }}</div>
-      <header v-if="titles.length" class="ts-head"><span class="muted">{{ found }}</span></header>
+      <header v-if="titles.length || withoutLines" class="ts-head"><span class="muted">{{ found }}</span></header>
     </template>
 
     <article v-for="card in titles" :key="card.id" class="ts-card" :data-card="card.id">

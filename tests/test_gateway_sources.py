@@ -170,7 +170,7 @@ async def test_the_search_of_the_titles_is_asked_of_sources_and_the_titles_are_t
     found = {"titles": [
         {"id": "ab12cd", "name": "万界独尊", "sub": "", "year": "2021", "area": "", "genres": "",
          "remarks": "", "blurb": "", "pic": "", "lines": [{"code": "CO4K", "url": "title://chines/ab12cd/CO4K", "label": "4K", "rows": 480, "routes": 3}]}],
-        "page": 1, "pages": 2, "total": 51, "notes": [], "reason": None}
+        "page": 1, "pages": 2, "total": 51, "more": True, "without_lines": 4, "notes": [], "reason": None}
     async with serving(tmp_path, {"sources.titles.search": found}) as (client, owners, _, _):
         response = await client.post("/api/sources/search", json={"query": "万界独尊"})
     assert response.json() == found

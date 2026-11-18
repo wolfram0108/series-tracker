@@ -882,6 +882,7 @@ export const ru = {
   "sources.titles.tmdb": "TMDB",
   "sources.titles.found": "найдено {total} · страница {page} из {pages}",
   "sources.titles.page": "страница {page}",
+  "sources.titles.withoutLines": "без линий для загрузки: {n}",
   "sources.titles.more": "Ещё",
   "sources.titles.empty": "Ничего не найдено",
   "sources.titles.added": "Источник № {n}",

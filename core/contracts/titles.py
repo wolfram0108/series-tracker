@@ -1,8 +1,10 @@
 """The search of the titles a provider of the socket reads (contracts/provider_socket.md): a title has no page of its own, it is found
 by the search of the provider, and the line of a title the user picks is a source by its address (`title://<site>/<id>/<line>`).
 
-The titles come as the provider gives them, in its order: nothing is chosen, ranked or left out here. What reaches the title
-(which doors, which protocols) is the provider's own business: nothing of it is in these messages.
+The titles come in the order of the provider, which ranks nothing; it gives only what can be chosen (a title with no line it plays is
+no source) and says how many of the page it left out (`without_lines`), so that nothing is lost in silence. Nothing is chosen, ranked
+or left out here. What reaches the title (which doors, which protocols) is the provider's own business: nothing of it is in these
+messages.
 """
 from __future__ import annotations
 
@@ -42,12 +44,15 @@ class TitleCard(BaseModel):
 
 
 class TitleSearchReply(BaseModel):
-    """A page of the search: the titles, how many pages and titles the provider says there are (None when it does not say), the
-    codes of what the answer lacks (a part of the sources did not answer) and the reason it gave no title."""
+    """A page of the search: the titles, how many pages and titles the provider says there are and whether a page follows (None when
+    it does not say), how many titles of the page it left out for having no line it plays, the codes of what the answer lacks (a
+    part of the sources did not answer) and the reason it gave no title."""
 
     titles: list[TitleCard] = Field(default_factory=list)
     page: int = 1
     pages: int | None = None
     total: int | None = None
+    more: bool | None = None  # whether a page follows this one, when the provider says; None: it does not
+    without_lines: int = 0  # the titles of this page left out because none of their lines is one the provider plays
     notes: list[str] = Field(default_factory=list)
     reason: str | None = None
