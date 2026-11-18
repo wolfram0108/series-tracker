@@ -107,11 +107,11 @@ class Releases:
         found = next_at(self.checks, datetime.fromisoformat(checked_at))
         return found.astimezone(timezone.utc).isoformat() if found is not None else None
 
-    async def due(self, last: datetime | None) -> list[str]:
-        """The watched pages not checked since the last check of the schedule (`last`; none: nothing is due)."""
+    async def due(self, last: datetime | None, among: set[str]) -> list[str]:
+        """The watched pages of `among` not checked since the last check of the schedule (`last`; none: nothing is due)."""
         if last is None:
             return []
-        rows = [row for row in await self.store.all() if row["watched"]]
+        rows = [row for row in await self.store.all() if row["watched"] and row["url"] in among]
         return sorted({row["url"] for row in rows
                        if not row["checked_at"] or datetime.fromisoformat(row["checked_at"]) < last})
 

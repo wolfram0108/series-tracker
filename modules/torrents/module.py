@@ -85,8 +85,9 @@ torrent_release_files, torrent_release_versions), keyed by the page and the id o
       infohash, else another date) begins its update — the old version leaves the client without its files, the new one
       comes started into the same folder, the client checks the files there and downloads the rest; while a sync of a
       series with the page runs (scan.run.changed) the update waits for its end. The check sets `checked_at` of every
-      watched release of the page. The pages are also checked at the times of the schedule (core/schedule.py), and a
-      time missed while the service was down at the start; «Перечитать» of the source checks them too (trackers.py).
+      watched release of the page. The pages of the series in the automatic mode are also checked at the times of the
+      schedule (core/schedule.py) while the automatic sync is on, and a time missed while the service was down at the
+      start; «Перечитать» of the source checks its page whatever the mode (trackers.py).
   torrents.release.watch {url, release, watched} → ReleaseView — the automatic update on or off
   torrents.staging.get {} → {value} and torrents.staging.set {value} → {ok, value, reason?} — the folder the releases download
       into (the setting torrents.staging_dir); a value that is no absolute path is refused (`staging_dir_not_absolute`); the
@@ -96,7 +97,7 @@ torrent_release_files, torrent_release_versions), keyed by the page and the id o
   (an update ends by removing the files of the old version the new one does not list). A page no source lists any more
   (series.source.removed, series.deleted) leaves the client with its files and its folder. settings.changed
   {key: torrents.staging_dir} moves every release to the new folder (setLocation); {key: schedule} sets the times of the
-  checks and tells every release again (its `fresh_until` moved).
+  checks and tells every release again (its `fresh_until` moved); {key: scanner_agent_enabled} wakes the checks.
 
 Переименование файлов — query renaming.process_torrent (зона renaming);
 мониторинг прогресса — адаптивный опрос qBit (часто при активности,
@@ -1363,6 +1364,18 @@ class TorrentsModule(BaseModule):
         resolved = await self.request("sources.site.resolve", {"url": url})
         return resolved.get("canonical_url") or url
 
+    async def _scheduled_pages(self) -> set[str]:
+        """The pages the schedule checks: of the series in the automatic mode, while the automatic sync is on."""
+        try:
+            if (await self.request("settings.value.get", {"key": "scanner_agent_enabled"})).get("value") != "true":
+                return set()
+            series = await self.request("catalog.series.list", {})
+            return {await self._canonical(source["url"]) for one in series if one.get("auto_scan_enabled")
+                    for source in one.get("sources") or []}
+        except Exception:  # noqa: BLE001 - what cannot be counted is not checked; the next time of the schedule counts again
+            self.log.exception("страницы для проверки раздач не посчитаны")
+            return set()
+
     async def _pages_of(self, series_id: int) -> set[str]:
         series = await self.request("catalog.series.get", {"series_id": series_id})
         return {await self._canonical(source["url"]) for source in (series or {}).get("sources") or []}
@@ -1424,6 +1437,8 @@ class TorrentsModule(BaseModule):
             # Every open window of the settings shows the folder the core holds now, whichever window set it.
             self.publish_event("torrents.staging.changed", {"value": env.payload.get("value") or ""})
             await self.releases.relocate(env.payload.get("value") or "")
+        elif env.payload.get("key") == "scanner_agent_enabled":
+            self._schedule_wake.set()  # switched on: a time missed while it was off is made up now
         elif env.payload.get("key") == SCHEDULE_KEY:
             self.releases.checks = parse(env.payload.get("value")).checks()
             self._schedule_wake.set()
@@ -1455,11 +1470,13 @@ class TorrentsModule(BaseModule):
     async def _watch_loop(self) -> None:
         """The watched pages are checked at the times of the schedule (core/schedule.py; the time of day is the subject of
         the wait): a page not checked since the last of them is checked now, so a time missed while the service was down
-        is made up at the start. A change of the schedule wakes the loop to count again."""
+        is made up at the start. Only the pages of the series in the automatic mode are checked, and only while the
+        automatic sync is on: a series switched off is not asked of the tracker by the schedule («Перечитать» still asks).
+        A change of the schedule or of the switch wakes the loop to count again."""
         while True:
             self._schedule_wake.clear()
             now = datetime.now(timezone.utc)
-            for url in await self.releases.due(last_at(self.releases.checks, now)):
+            for url in await self.releases.due(last_at(self.releases.checks, now), await self._scheduled_pages()):
                 try:
                     await self.releases.check(url)
                 except Exception:  # noqa: BLE001 - one page that cannot be read leaves the others checked

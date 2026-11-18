@@ -39,6 +39,8 @@ class World(BaseModule):
         self.page: list[PageRelease] = []
         self.torrents: dict[str, bytes] = {}
         self.series: dict[int, list[str]] = {1: [PAGE]}
+        self.auto: set[int] = set()  # the series in the automatic mode
+        self.sync_on = "false"  # the setting scanner_agent_enabled
 
     def register(self) -> None:
         for topic, handler in (("sources.releases.get", self.on_releases), ("sources.torrent_file.get", self.on_file),
@@ -61,13 +63,15 @@ class World(BaseModule):
         return {"id": env.payload["series_id"], "sources": [{"url": u} for u in self.series.get(env.payload["series_id"], [])]}
 
     async def on_list(self, env):
-        return [{"id": sid, "name": f"Сериал {sid}", "sources": [{"url": u, "source_type": "torrent"} for u in urls]}
-                for sid, urls in self.series.items()]
+        return [{"id": sid, "name": f"Сериал {sid}", "auto_scan_enabled": sid in self.auto,
+                 "sources": [{"url": u, "source_type": "torrent"} for u in urls]} for sid, urls in self.series.items()]
 
     async def on_runs(self, env):
         return {"runs": [], "as_of": 0}
 
     async def on_setting(self, env):
+        if env.payload["key"] == "scanner_agent_enabled":
+            return {"key": env.payload["key"], "value": self.sync_on}
         return {"key": env.payload["key"], "value": self.staging}
 
     async def on_set(self, env):
@@ -290,6 +294,17 @@ async def test_a_check_tells_when_it_was_and_the_next_check_of_the_schedule_and_
     at = datetime.fromisoformat(checked["checked_at"])
     assert datetime.fromisoformat(checked["fresh_until"]) == next_at((360, 1080), at)
 
-    assert await torrents.releases.due(None) == []
-    assert await torrents.releases.due(at - timedelta(minutes=1)) == []
-    assert await torrents.releases.due(at + timedelta(minutes=1)) == [PAGE]
+    assert await torrents.releases.due(None, {PAGE}) == []
+    assert await torrents.releases.due(at - timedelta(minutes=1), {PAGE}) == []
+    assert await torrents.releases.due(at + timedelta(minutes=1), {PAGE}) == [PAGE]
+    assert await torrents.releases.due(at + timedelta(minutes=1), set()) == []
+
+
+async def test_the_schedule_checks_the_pages_of_the_series_in_the_automatic_mode_only_and_only_while_the_sync_is_on(stand):
+    """A series switched off is not asked of the tracker by the schedule; with the automatic sync off no page is."""
+    _model, world, torrents, _told = stand
+    assert await torrents._scheduled_pages() == set()  # the automatic sync is off
+    world.sync_on = "true"
+    assert await torrents._scheduled_pages() == set()  # the series is not in the automatic mode
+    world.auto = {1}
+    assert await torrents._scheduled_pages() == {PAGE}
