@@ -1,6 +1,6 @@
-"""A provider of the socket (contracts/provider_socket.md) made by the specification alone, on real HTTP, for the tests of the
-tracker's end of it. It holds applications with cards of rows a test gives it, tells its manifest and its changes on the feed,
-answers a search, reads a card into frames, and downloads the file of a link into the path it is given — and what the test needs to watch: every request it
+"""A provider of the socket (contracts/provider_socket.md, protocol 2) made by the specification alone, on real HTTP, for the tests of
+the tracker's end of it. It holds sites with titles of rows a test gives it, tells its manifest and its changes on the feed,
+answers a search of titles, reads a title into frames, and downloads the file of a link into the path it is given — and what the test needs to watch: every request it
 got, every read that began, every read or download that was cancelled by a closed connection. A test makes it slow, silent, broken, down.
 
 Nothing here is a snapshot of a real provider: it is the specification played by a model."""
@@ -21,28 +21,29 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from core.contracts import RowState, TableRow
-from core.contracts.provider import (PROTOCOL, FeedEvent, Manifest, ManifestFamily, ManifestPlace, ManifestPlayer, ManifestSearch,
-                                     ManifestSite, ProviderInfo, SiteAddress)
+from core.contracts.provider import (PROTOCOL, AdoptItem, AdoptReply, FeedEvent, Manifest, ManifestFamily, ManifestPlace,
+                                     ManifestPlayer, ManifestSearch, ManifestSite, ProviderInfo, SiteAddress)
 
 FAMILY = "line"
 
 
-def link_of(app: str, card: int, line: str, item: str) -> str:
-    return f"app://{app}/{card}#line={quote(line, safe='')}&item={quote(item, safe='')}"
+def link_of(line: str, item: str) -> str:
+    """The link of a row: the line and the token of the row, the token written in percent codes (the socket, §2.1)."""
+    return f"line://{quote(line, safe='')}/{quote(item, safe='')}"
 
 
 @dataclass
-class MockApp:
+class MockSite:
     name: str
     label: str
-    cards: dict[int, dict] = field(default_factory=dict)  # card -> {names, title, rows: [TableRow dicts]}
+    titles: dict[str, dict] = field(default_factory=dict)  # id -> {names, title, rows: [TableRow dicts]}
     found: list[dict] = field(default_factory=list)
 
 
 class MockProvider:
     def __init__(self, token: str = "", heartbeat_s: float = 0.2, *, protocol: int = PROTOCOL) -> None:
         self.token, self.heartbeat_s, self.protocol = token, heartbeat_s, protocol
-        self.apps: dict[str, MockApp] = {}
+        self.sites: dict[str, MockSite] = {}
         # What a download of a link comes to: the frames it sends before its end and its end (a `done` or an `error` frame);
         # a link with no script is downloaded whole into the path, with a frame of telemetry before the end.
         self.downloads: dict[str, dict] = {}
@@ -62,26 +63,29 @@ class MockProvider:
         self.read_error = ""
         self.read_breaks = False
         self.search_status = 200
+        # What the provider says of the addresses of protocol 1 it is asked to adopt: url -> AdoptItem dict.
+        self.adoptions: dict[str, dict] = {}
         self.revision = 1
         self._watchers: set[asyncio.Event] = set()
         self._feeds_end: set[asyncio.Event] = set()
 
     # --- what a test gives the provider --------------------------------------------------------------------------
 
-    def add_app(self, name: str, label: str) -> MockApp:
-        app = self.apps[name] = MockApp(name, label)
+    def add_site(self, name: str, label: str) -> MockSite:
+        site = self.sites[name] = MockSite(name, label)
         self.changed()
-        return app
+        return site
 
-    def card(self, app: str, card: int, names: list[str], rows: list[tuple[str, str, str, list[int]]],
-             title: str = "") -> None:
-        """A card of an application: its rows are (text, line, item, heights); a row without a height is absent."""
+    def title(self, site: str, ident: str | int, names: list[str], rows: list[tuple[str, str, str, list[int]]],
+              title: str = "") -> None:
+        """A title of a site: its rows are (text, line, token, heights); a row without a height is absent. The key of a row
+        is `<line>:<place>`, its part the line (the socket, appendix A.2)."""
         made = []
         for place, (text, line, item, heights) in enumerate(rows, start=1):
-            made.append(TableRow(key=f"{app}:{line}:{place}", player=f"{FAMILY}:{line}", player_label=line, text=text,
+            made.append(TableRow(key=f"{line}:{place}", player=f"{FAMILY}:{line}", player_label=line, text=text, part=line,
                                  state=RowState.PLAYABLE if heights else RowState.ABSENT, heights=heights,
-                                 link=link_of(app, card, line, item), site_fields={"app": app, "line": line}).model_dump(mode="json"))
-        self.apps[app].cards[card] = {"names": names, "title": title or f"{self.apps[app].label} · {names[0]}", "rows": made}
+                                 link=link_of(line, item), site_fields={"line": line}).model_dump(mode="json"))
+        self.sites[site].titles[str(ident)] = {"names": names, "title": title or f"{names[0]}", "rows": made}
 
     def download_of(self, link: str, end: dict) -> None:
         """How the download of a link ends: the frame (`done` with a height, or `error` with a reason and a kind)."""
@@ -101,26 +105,25 @@ class MockProvider:
     # --- what the provider tells ---------------------------------------------------------------------------------------
 
     def manifest(self) -> Manifest:
-        sites = [ManifestSite(name=app.name, label=app.label, domains=[app.name], first_read_by_user=True,
-                              address=SiteAddress(schemes=["app"], path=r"^/(?P<card>[0-9]+)/?$",
-                                                  canonical=f"app://{app.name}/{{card}}"))
-                 for app in self.apps.values()]
-        hosts = "|".join(re.escape(name) for name in self.apps)
-        families = [ManifestFamily(name=FAMILY, label="Линии приложений", video="video",
-                                   owns=rf"^app://(?:{hosts})/[0-9]+#line=(?P<line>[^&]+)&item=(?P<video>[^&]+)$")] if self.apps else []
+        sites = [ManifestSite(name=site.name, label=site.label, domains=[site.name], first_read_by_user=True,
+                              address=SiteAddress(schemes=["title"], path=r"^/(?P<title>[0-9a-z]{1,32})/?$",
+                                                  canonical=f"title://{site.name}/{{title}}"))
+                 for site in self.sites.values()]
+        families = [ManifestFamily(name=FAMILY, label="Линии", video="video",
+                                   owns=r"^line://(?P<line>[A-Za-z0-9_]+)/(?P<video>[A-Za-z0-9._~%-]+)$")] if self.sites else []
         lines: dict[str, list[ManifestPlace]] = {}
-        for app in self.apps.values():
-            for card in app.cards.values():
-                for row in card["rows"]:
-                    place = ManifestPlace(name=app.name, label=app.label)
-                    held = lines.setdefault(row["site_fields"]["line"], [])
-                    if place not in held:
-                        held.append(place)
+        for site in self.sites.values():
+            for held in site.titles.values():
+                for row in held["rows"]:
+                    place = ManifestPlace(name=site.name, label=site.label)
+                    placed = lines.setdefault(row["site_fields"]["line"], [])
+                    if place not in placed:
+                        placed.append(place)
         players = [ManifestPlayer(name=f"{FAMILY}:{line}", label=line, kind="line", places=places)
                    for line, places in sorted(lines.items())]
         return Manifest(protocol=self.protocol, provider=ProviderInfo(id="mock", version="0"), revision=str(self.revision),
                         sites=sites, families=families, players=players,
-                        search=[ManifestSearch(name=app.name, label=app.label) for app in self.apps.values()])
+                        search=ManifestSearch(label="mock") if self.sites else None)
 
     def app(self) -> FastAPI:
         api = FastAPI()
@@ -176,11 +179,18 @@ class MockProvider:
             self.requests.append(("search", body))
             if self.search_status != 200:
                 raise HTTPException(status_code=self.search_status)
-            asked = [app for app in self.apps.values() if not body.get("app") or app.name == body["app"]]
-            return {"apps": [{"app": app.name, "label": app.label, "page": body.get("page", 1), "pages": 1,
-                              "total": len(app.found), "cards": [
-                                  {"app": app.name, "id": str(each["id"]), "url": f"app://{app.name}/{each['id']}",
-                                   "name": each.get("name", "")} for each in app.found]} for app in asked]}
+            titles = [{"id": str(each["id"]), "url": f"title://{site.name}/{each['id']}", "name": each.get("name", ""),
+                       "lines": each.get("lines", [])} for site in self.sites.values() for each in site.found]
+            return {"titles": titles, "page": body.get("page", 1), "pages": 1, "total": len(titles)}
+
+        @api.post("/v1/adopt")
+        async def adopt(request: Request, authorization: str = Header(default="")):
+            guard(authorization)
+            body = await request.json()
+            self.requests.append(("adopt", body))
+            return AdoptReply(items=[AdoptItem.model_validate(self.adoptions.get(url) or {
+                "url": url, "to": None, "reason": json.dumps({"code": "not_a_link_of_the_provider"})})
+                for url in body.get("urls", [])]).model_dump(mode="json")
 
         @api.post("/v1/download")
         async def download(request: Request, authorization: str = Header(default="")):
@@ -227,10 +237,10 @@ class MockProvider:
                         return
                     if self.read_breaks:
                         return
-                    match = re.fullmatch(r"app://([^/]+)/(\d+)", body["url"])
-                    card = self.apps[match.group(1)].cards.get(int(match.group(2))) if match else None
+                    match = re.fullmatch(r"title://([^/]+)/([0-9a-z]+)", body["url"])
+                    card = self.sites[match.group(1)].titles.get(match.group(2)) if match and match.group(1) in self.sites else None
                     if card is None:
-                        yield json.dumps({"type": "error", "reason": json.dumps({"code": "app_title_absent"})}) + "\n"
+                        yield json.dumps({"type": "error", "reason": json.dumps({"code": "title_unknown"})}) + "\n"
                         return
                     yield json.dumps({"type": "draft", "draft": {"names": card["names"], "title": card["title"],
                                                                   "rows": card["rows"]}}, ensure_ascii=False) + "\n"

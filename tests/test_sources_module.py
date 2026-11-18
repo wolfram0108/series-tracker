@@ -88,8 +88,8 @@ def page(url: str, site: str, *rows: tuple[str, str, list[int]]) -> ReleaseTable
 async def with_lines(tmp_path):
     """A module with a provider of the socket whose one application has two lines: they are the players its manifest names."""
     mock = MockProvider()
-    mock.add_app("banri", "半日 (Banri)")
-    mock.card("banri", 7, ["万界独尊"], [("1", "NBY", "n1", [1080]), ("2", "CO4K", "c1", [720])])
+    mock.add_site("banri", "半日 (Banri)")
+    mock.title("banri", 7, ["万界独尊"], [("1", "NBY", "n1", [1080]), ("2", "CO4K", "c1", [720])])
     async with serving(mock) as server:
         bus = Bus()
         sources = SourcesModule(bus, Database(str(migrated(tmp_path / "sources.db"))), torrent_cache_dir=str(tmp_path / "cache"),

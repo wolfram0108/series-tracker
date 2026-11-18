@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-PROTOCOL = 1
+PROTOCOL = 2
 # The provider says it is alive at least this often while a read or the event feed is silent; silence for SILENCE_S is a
 # dead connection (detection of a failure, not a way to wait).
 HEARTBEAT_S = 15.0
@@ -92,7 +92,8 @@ class ManifestPlayer(BaseModel):
 
 
 class ManifestSearch(BaseModel):
-    name: str = Field(min_length=1)
+    """The search of titles the provider has (`POST /v1/search`); a manifest without it has no search."""
+
     label: str = ""
 
 
@@ -105,7 +106,7 @@ class Manifest(BaseModel):
     sites: list[ManifestSite] = Field(default_factory=list)
     families: list[ManifestFamily] = Field(default_factory=list)
     players: list[ManifestPlayer] = Field(default_factory=list)
-    search: list[ManifestSearch] = Field(default_factory=list)
+    search: ManifestSearch | None = None
 
 
 class FeedEvent(BaseModel):
@@ -158,6 +159,26 @@ class DownloadFrame(BaseModel):
     height: int | None = None
     reason: str = ""
     kind: Literal["final", "broken", "unasked"] = "broken"
+
+
+class AdoptRequest(BaseModel):
+    """`POST /v1/adopt` (transitional, contracts/provider_socket.md, appendix B): addresses of protocol 1 (`app://<door>/<card>`)."""
+
+    urls: list[str] = Field(default_factory=list)
+
+
+class AdoptItem(BaseModel):
+    """What the provider makes of one address of protocol 1: the address of the title of protocol 2 it came to (None when it
+    did not), the codes of the lines of the card it plays, and the reason it came to none."""
+
+    url: str
+    to: str | None = None
+    lines: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+
+class AdoptReply(BaseModel):
+    items: list[AdoptItem] = Field(default_factory=list)
 
 
 class ProviderState(BaseModel):

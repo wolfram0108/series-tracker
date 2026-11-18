@@ -15,7 +15,7 @@ import logging
 from contextlib import aclosing
 from typing import Callable, Iterable
 
-from core.contracts import AppResults, AppSearchReply, AppSearchRequest
+from core.contracts import TitleSearchReply, TitleSearchRequest
 from core.contracts.provider import (EVENT_CHANGED, EVENT_HELLO, PROTOCOL, PROVIDER_INCOMPATIBLE, PROVIDER_UNAVAILABLE, DownloadRequest, Manifest,
                                      ManifestPlayer, ProviderState, ReadRequest)
 from core.reasons import reason
@@ -170,20 +170,15 @@ class Connector:
 
     # --- what the provider adds to the answers of the module ---------------------------------------------------------
 
-    async def search(self, request: AppSearchRequest) -> list[AppResults]:
-        """The search of the provider, as the results of the applications it names; the reason of a failure, for each of its
-        sources of search the request asks, when it cannot be reached."""
-        if self.manifest is None:
-            return []
-        declared = [each for each in self.manifest.search if not request.app or each.name == request.app]
-        if not declared:
-            return []
+    async def search(self, request: TitleSearchRequest) -> TitleSearchReply:
+        """The search of the provider; the reason of the failure, as the page of no title, when it cannot be reached. A
+        provider that names no search has none: an empty page."""
+        if self.manifest is None or self.manifest.search is None:
+            return TitleSearchReply(page=request.page)
         try:
-            reply: AppSearchReply = await self.client.search(request)
+            return await self.client.search(request)
         except ProviderError as exc:
-            return [AppResults(app=each.name, label=each.label or each.name, page=request.page, reason=exc.reason)
-                    for each in declared]
-        return reply.apps
+            return TitleSearchReply(page=request.page, reason=exc.reason)
 
     def players(self) -> Iterable[ManifestPlayer]:
         """The players of the order of sources the provider names."""

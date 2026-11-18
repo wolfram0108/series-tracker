@@ -166,14 +166,15 @@ async def test_a_preview_refused_by_composition_carries_the_reason(tmp_path):
     assert "success" not in response.json()
 
 
-async def test_the_search_of_the_applications_is_asked_of_sources_and_the_cards_are_theirs(tmp_path):
-    found = {"apps": [{"app": "banri", "label": "半日", "page": 1, "pages": 2, "total": 51, "reason": None, "cards": [
-        {"app": "banri", "id": "219017", "url": "app://banri/219017", "name": "万界独尊", "sub": "", "year": "2021", "area": "",
-         "genres": "", "remarks": "", "blurb": "", "pic": ""}]}]}
-    async with serving(tmp_path, {"sources.apps.search": found}) as (client, owners, _, _):
+async def test_the_search_of_the_titles_is_asked_of_sources_and_the_titles_are_theirs(tmp_path):
+    found = {"titles": [
+        {"id": "ab12cd", "url": "title://chines/ab12cd", "name": "万界独尊", "sub": "", "year": "2021", "area": "", "genres": "",
+         "remarks": "", "blurb": "", "pic": "", "lines": [{"code": "CO4K", "label": "4K", "rows": 480, "routes": 3}]}],
+        "page": 1, "pages": 2, "total": 51, "notes": [], "reason": None}
+    async with serving(tmp_path, {"sources.titles.search": found}) as (client, owners, _, _):
         response = await client.post("/api/sources/search", json={"query": "万界独尊"})
     assert response.json() == found
-    assert owners.asked("sources.apps.search") == [{"query": "万界独尊", "page": 1, "app": ""}]
+    assert owners.asked("sources.titles.search") == [{"query": "万界独尊", "page": 1}]
 
 
 async def test_an_address_is_resolved_by_sources_and_the_answer_is_theirs(tmp_path):

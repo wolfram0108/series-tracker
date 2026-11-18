@@ -1,7 +1,7 @@
-"""A card of a video application as the source of a series, in a browser (tests/ui_stand.py). The provider of the socket is a
+"""A title of the provider of external sources as the source of a series, in a browser (tests/ui_stand.py). The provider of the socket is a
 model of it by the specification (tests/provider_mock.py) at an address the user names in the window of the extensions: the user
-finds the title by the search of the application in the window of a new series, adds the card it gave, reads it by its button,
-puts the rule of its labels («第N集») to it and sees its line as a player. The card of the search keeps its parts at every width."""
+finds the title by the search of the provider in the window of a new series, adds the title it gave, reads it by its button,
+puts the rule of its labels («第N集») to it and sees its line as a player. The title of the search keeps its parts at every width."""
 import pytest
 from playwright.async_api import expect
 
@@ -18,8 +18,8 @@ CARD_LAYOUT = """() => {
   const bad = [];
   const box = (el) => el.getBoundingClientRect();
   const cross = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
-  document.querySelectorAll('.app-card').forEach((card) => {
-    const frame = box(card), words = card.querySelector('.app-body'), act = card.querySelector('.app-act');
+  document.querySelectorAll('.ts-card').forEach((card) => {
+    const frame = box(card), words = card.querySelector('.ts-body'), act = card.querySelector('.ts-act');
     if (cross(box(words), box(act))) bad.push('action over words');
     card.querySelectorAll('*').forEach((el) => {
       const part = box(el);
@@ -31,11 +31,11 @@ CARD_LAYOUT = """() => {
 }"""
 
 
-async def test_a_card_found_by_the_search_of_an_application_is_added_read_by_its_button_and_its_line_is_a_player(ui):  # noqa: F811
+async def test_a_title_found_by_the_search_of_the_provider_is_added_read_by_its_button_and_its_line_is_a_player(ui):  # noqa: F811
     mock = MockProvider()
-    mock.add_app("banri", "半日 Banri")
-    mock.card("banri", 219017, ["万界独尊"], [("第1集", "BLU", "1", [1080])], title="半日 · 万界独尊 (2021)")
-    mock.apps["banri"].found = [{"id": 219017, "name": "万界独尊"}]
+    mock.add_site("chines", "Чинес")
+    mock.title("chines", "k3f9a1", ["万界独尊"], [("第1集", "BLU", "1", [1080])], title="万界独尊 (2021)")
+    mock.sites["chines"].found = [{"id": "k3f9a1", "name": "万界独尊", "lines": [{"code": "BLU", "label": "BLU", "rows": 1, "routes": 3}]}]
     await ui.first_run()
     await ui.set_up([ORIGINAL], languages={ORIGINAL: "chi"})
     await ui.profile("серии 半日", [{"name": "серия", "if": LABEL,
@@ -44,10 +44,10 @@ async def test_a_card_found_by_the_search_of_an_application_is_added_read_by_its
         await ui.use_provider(server.url)
         page = ui.page
         await page.get_by_role("button", name="Добавить сериал").click()
-        await page.locator(".add-url-row .source-mode .st-tab", has_text=text("sources.mode.apps")).click()
-        await page.get_by_label(text("sources.apps.query")).fill("万界独尊")
-        await page.locator(".app-find").click()
-        found = page.locator(".app-card[data-card='219017']")
+        await page.locator(".add-url-row .source-mode .st-tab", has_text=text("sources.mode.titles")).click()
+        await page.get_by_label(text("sources.titles.query")).fill("万界独尊")
+        await page.locator(".ts-find").click()
+        found = page.locator(".ts-card[data-card='k3f9a1']")
         await expect(found).to_contain_text("万界独尊")
         await ui.shot("a1-search")
         size = page.viewport_size
@@ -58,24 +58,24 @@ async def test_a_card_found_by_the_search_of_an_application_is_added_read_by_its
                 faults[width] = found_here
         await page.set_viewport_size(size)
         assert not faults, faults
-        await found.locator(".app-add").click()
+        await found.locator(".ts-add").click()
 
         source = page.locator(".source-card").first
-        # A card of an application is read when the user asks (its button), not when it is added.
+        # A title of the provider is read when the user asks (its button), not when it is added.
         await expect(source.locator(".source-state")).to_have_text(state("notRead"))
         assert not [each for each in mock.requests if each[0] == "read"]
         await source.locator(".source-reread").click()
-        # The head names the source as its site does (the application and the title); its field is its address, the one
+        # The head names the source as its site does (the title); its field is its address, the one
         # writing a field of an address takes.
-        await expect(source.locator(".source-place")).to_have_text("半日 · 万界独尊 (2021)")
-        await expect(source.locator(".source-app-card .item-value")).to_have_text("app://banri/219017")
+        await expect(source.locator(".source-place")).to_have_text("万界独尊 (2021)")
+        await expect(source.locator(".source-app-card .item-value")).to_have_text("title://chines/k3f9a1")
         await _pick(page, source.locator(".item-select").first, "серии 半日")
         await expect(source.locator(".source-state")).to_have_text(state("readDone"), timeout=60_000)
         await expect(source.locator(".player-tab")).to_have_text(["BLU1"])  # a line is named by its code
         assert len([each for each in mock.requests if each[0] == "read"]) == 1
-        # The search stays at hand in the sources: the card already added is marked by its place.
+        # The search stays at hand in the sources: the title already added is marked by its place.
         sources = page.locator(".sources")
-        await sources.locator(".source-mode .st-tab", has_text=text("sources.mode.apps")).click()
-        await sources.locator(".app-find").click()
-        await expect(sources.locator(".app-card[data-card='219017'] .app-added")).to_have_text(text("sources.apps.added", n=1))
+        await sources.locator(".source-mode .st-tab", has_text=text("sources.mode.titles")).click()
+        await sources.locator(".ts-find").click()
+        await expect(sources.locator(".ts-card[data-card='k3f9a1'] .ts-added")).to_have_text(text("sources.titles.added", n=1))
         await ui.shot("a2-added")

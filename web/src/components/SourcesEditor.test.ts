@@ -219,7 +219,7 @@ describe("SourcesEditor", () => {
   })
 
   it("limits the rows of each line of a card of an application, sends only a value that is a limit, and shows it to no other source", async () => {
-    const card = itemOfSource(stored({ url: "app://banri/219017", rows_per_line: "10" }), null, null)
+    const card = itemOfSource(stored({ url: "title://chines/k3f9a1", rows_per_line: "10" }), null, null)
     const w = mountEditor([card])
     const input = w.find(".source-rows input")
     expect((input.element as HTMLInputElement).value).toBe("10")

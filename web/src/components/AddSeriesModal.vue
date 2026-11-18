@@ -13,7 +13,7 @@ import StGroup from "./StGroup.vue"
 import StInput from "./StInput.vue"
 import StLabel from "./StLabel.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
-import AppSearch from "./AppSearch.vue"
+import TitleSearch from "./TitleSearch.vue"
 import SourcesEditor from "./SourcesEditor.vue"
 import { api } from "../api/client"
 import { t } from "../i18n"
@@ -70,7 +70,7 @@ const dirty = computed(() => !!(newSeries.url || newSeries.name || newSeries.nam
 const draftAddresses = async (): Promise<SourceAddress[]> =>
   sourceItems.value.map((item) => ({ url: item.url, vk: item.sourceType === "vk_video" }))
 // How the first source is added: by an address (a page of a site or of a tracker), or by a card a video application found.
-const firstMode = ref<"address" | "apps">("address")
+const firstMode = ref<"address" | "titles">("address")
 const profiles = ref<{ id: number; name: string }[]>([])
 const saving = ref(false)
 
@@ -86,7 +86,7 @@ const canAddSeries = computed(() => !!newSeries.name && !!newSeries.name_en && i
   && sourceItems.value.length > 0 && !sourcesFailed.value)
 // The names the search of the video applications offers: the original one of the TMDB card chosen, then those typed.
 const seriesNames = computed(() => [
-  ...(tmdb.selected.value?.original_name ? [{ text: tmdb.selected.value.original_name, mark: t("sources.apps.tmdb") }] : []),
+  ...(tmdb.selected.value?.original_name ? [{ text: tmdb.selected.value.original_name, mark: t("sources.titles.tmdb") }] : []),
   ...[...(newSeries.name || "").split("/"), newSeries.name_en || ""].map((text) => ({ text })),
 ].map((name) => ({ ...name, text: name.text.trim() })).filter((name) => name.text))
 
@@ -233,11 +233,11 @@ onBeforeUnmount(() => {
         <StTab :active="firstMode === 'address'" :label="t('sources.mode.address')" @click="firstMode = 'address'">
           <template #before><i class="pi pi-link tab-icon" /></template>
         </StTab>
-        <StTab :active="firstMode === 'apps'" :label="t('sources.mode.apps')" @click="firstMode = 'apps'">
+        <StTab :active="firstMode === 'titles'" :label="t('sources.mode.titles')" @click="firstMode = 'titles'">
           <template #before><i class="pi pi-search tab-icon" /></template>
         </StTab>
       </div>
-      <AppSearch v-if="firstMode === 'apps'" :names="seriesNames" :added="{}" :busy="sourcesBusy" @add="addSource" />
+      <TitleSearch v-if="firstMode === 'titles'" :names="seriesNames" :added="{}" :busy="sourcesBusy" @add="addSource" />
       <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->
       <StGroup v-if="firstMode === 'address'" :state="urlState">
         <StLabel icon="pi pi-link" :text="t('add.urlLabel')" />

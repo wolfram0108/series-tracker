@@ -1412,7 +1412,7 @@
  {
   "method": "POST",
   "path": "/api/sources/search",
-  "func": "search_apps",
+  "func": "search_titles",
   "file": "modules/gateway/api_sources.py",
   "line": 96,
   "access": "session",

@@ -1,105 +1,61 @@
 {
  "messages": {
-  "AppSearchReply": {
-   "$defs": {
-    "AppCard": {
-     "description": "A card of a title as the search of its application gives it; `url` is the address it is a source by (empty when\nthe application gave the card no number to be asked by again).",
-     "properties": {
-      "app": {
-       "title": "App",
-       "type": "string"
-      },
-      "area": {
-       "default": "",
-       "title": "Area",
-       "type": "string"
-      },
-      "blurb": {
-       "default": "",
-       "title": "Blurb",
-       "type": "string"
-      },
-      "genres": {
-       "default": "",
-       "title": "Genres",
-       "type": "string"
-      },
-      "id": {
-       "title": "Id",
-       "type": "string"
-      },
-      "name": {
-       "default": "",
-       "title": "Name",
-       "type": "string"
-      },
-      "pic": {
-       "default": "",
-       "title": "Pic",
-       "type": "string"
-      },
-      "remarks": {
-       "default": "",
-       "title": "Remarks",
-       "type": "string"
-      },
-      "sub": {
-       "default": "",
-       "title": "Sub",
-       "type": "string"
-      },
-      "url": {
-       "title": "Url",
-       "type": "string"
-      },
-      "year": {
-       "default": "",
-       "title": "Year",
-       "type": "string"
-      }
+  "AdoptItem": {
+   "description": "What the provider makes of one address of protocol 1: the address of the title of protocol 2 it came to (None when it\ndid not), the codes of the lines of the card it plays, and the reason it came to none.",
+   "properties": {
+    "lines": {
+     "items": {
+      "type": "string"
      },
-     "required": [
-      "app",
-      "id",
-      "url"
-     ],
-     "title": "AppCard",
-     "type": "object"
+     "title": "Lines",
+     "type": "array"
     },
-    "AppResults": {
-     "description": "One application's answer to the search: a page of its cards, or the reason it gave none.",
+    "reason": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Reason"
+    },
+    "to": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "To"
+    },
+    "url": {
+     "title": "Url",
+     "type": "string"
+    }
+   },
+   "required": [
+    "url"
+   ],
+   "title": "AdoptItem",
+   "type": "object"
+  },
+  "AdoptReply": {
+   "$defs": {
+    "AdoptItem": {
+     "description": "What the provider makes of one address of protocol 1: the address of the title of protocol 2 it came to (None when it\ndid not), the codes of the lines of the card it plays, and the reason it came to none.",
      "properties": {
-      "app": {
-       "title": "App",
-       "type": "string"
-      },
-      "cards": {
+      "lines": {
        "items": {
-        "$ref": "#/$defs/AppCard"
+        "type": "string"
        },
-       "title": "Cards",
+       "title": "Lines",
        "type": "array"
-      },
-      "label": {
-       "title": "Label",
-       "type": "string"
-      },
-      "page": {
-       "default": 1,
-       "title": "Page",
-       "type": "integer"
-      },
-      "pages": {
-       "anyOf": [
-        {
-         "type": "integer"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "default": null,
-       "title": "Pages"
       },
       "reason": {
        "anyOf": [
@@ -113,61 +69,54 @@
        "default": null,
        "title": "Reason"
       },
-      "total": {
+      "to": {
        "anyOf": [
         {
-         "type": "integer"
+         "type": "string"
         },
         {
          "type": "null"
         }
        ],
        "default": null,
-       "title": "Total"
+       "title": "To"
+      },
+      "url": {
+       "title": "Url",
+       "type": "string"
       }
      },
      "required": [
-      "app",
-      "label"
+      "url"
      ],
-     "title": "AppResults",
+     "title": "AdoptItem",
      "type": "object"
     }
    },
    "properties": {
-    "apps": {
+    "items": {
      "items": {
-      "$ref": "#/$defs/AppResults"
+      "$ref": "#/$defs/AdoptItem"
      },
-     "title": "Apps",
+     "title": "Items",
      "type": "array"
     }
    },
-   "title": "AppSearchReply",
+   "title": "AdoptReply",
    "type": "object"
   },
-  "AppSearchRequest": {
+  "AdoptRequest": {
+   "description": "`POST /v1/adopt` (transitional, contracts/provider_socket.md, appendix B): addresses of protocol 1 (`app://<door>/<card>`).",
    "properties": {
-    "app": {
-     "default": "",
-     "title": "App",
-     "type": "string"
-    },
-    "page": {
-     "default": 1,
-     "minimum": 1,
-     "title": "Page",
-     "type": "integer"
-    },
-    "query": {
-     "title": "Query",
-     "type": "string"
+    "urls": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Urls",
+     "type": "array"
     }
    },
-   "required": [
-    "query"
-   ],
-   "title": "AppSearchRequest",
+   "title": "AdoptRequest",
    "type": "object"
   },
   "DownloadFrame": {
@@ -364,21 +313,14 @@
      "type": "object"
     },
     "ManifestSearch": {
+     "description": "The search of titles the provider has (`POST /v1/search`); a manifest without it has no search.",
      "properties": {
       "label": {
        "default": "",
        "title": "Label",
        "type": "string"
-      },
-      "name": {
-       "minLength": 1,
-       "title": "Name",
-       "type": "string"
       }
      },
-     "required": [
-      "name"
-     ],
      "title": "ManifestSearch",
      "type": "object"
     },
@@ -505,11 +447,15 @@
      "type": "string"
     },
     "search": {
-     "items": {
-      "$ref": "#/$defs/ManifestSearch"
-     },
-     "title": "Search",
-     "type": "array"
+     "anyOf": [
+      {
+       "$ref": "#/$defs/ManifestSearch"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
     },
     "sites": {
      "items": {
@@ -1073,6 +1019,331 @@
    "title": "TableRow",
    "type": "object"
   },
+  "TitleCard": {
+   "$defs": {
+    "TitleLine": {
+     "description": "A line of a title: the archive its episodes come from. `rows` is how many it holds when the provider knows, `routes` how\nmany independent ways to it the provider has (a reserve: nothing in the tracker depends on it).",
+     "properties": {
+      "code": {
+       "title": "Code",
+       "type": "string"
+      },
+      "label": {
+       "default": "",
+       "title": "Label",
+       "type": "string"
+      },
+      "routes": {
+       "default": 0,
+       "title": "Routes",
+       "type": "integer"
+      },
+      "rows": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Rows"
+      }
+     },
+     "required": [
+      "code"
+     ],
+     "title": "TitleLine",
+     "type": "object"
+    }
+   },
+   "description": "A title as the search of its provider gives it; `url` is the address it is a source by.",
+   "properties": {
+    "area": {
+     "default": "",
+     "title": "Area",
+     "type": "string"
+    },
+    "blurb": {
+     "default": "",
+     "title": "Blurb",
+     "type": "string"
+    },
+    "genres": {
+     "default": "",
+     "title": "Genres",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "string"
+    },
+    "lines": {
+     "items": {
+      "$ref": "#/$defs/TitleLine"
+     },
+     "title": "Lines",
+     "type": "array"
+    },
+    "name": {
+     "default": "",
+     "title": "Name",
+     "type": "string"
+    },
+    "pic": {
+     "default": "",
+     "title": "Pic",
+     "type": "string"
+    },
+    "remarks": {
+     "default": "",
+     "title": "Remarks",
+     "type": "string"
+    },
+    "sub": {
+     "default": "",
+     "title": "Sub",
+     "type": "string"
+    },
+    "url": {
+     "title": "Url",
+     "type": "string"
+    },
+    "year": {
+     "default": "",
+     "title": "Year",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "url"
+   ],
+   "title": "TitleCard",
+   "type": "object"
+  },
+  "TitleLine": {
+   "description": "A line of a title: the archive its episodes come from. `rows` is how many it holds when the provider knows, `routes` how\nmany independent ways to it the provider has (a reserve: nothing in the tracker depends on it).",
+   "properties": {
+    "code": {
+     "title": "Code",
+     "type": "string"
+    },
+    "label": {
+     "default": "",
+     "title": "Label",
+     "type": "string"
+    },
+    "routes": {
+     "default": 0,
+     "title": "Routes",
+     "type": "integer"
+    },
+    "rows": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Rows"
+    }
+   },
+   "required": [
+    "code"
+   ],
+   "title": "TitleLine",
+   "type": "object"
+  },
+  "TitleSearchReply": {
+   "$defs": {
+    "TitleCard": {
+     "description": "A title as the search of its provider gives it; `url` is the address it is a source by.",
+     "properties": {
+      "area": {
+       "default": "",
+       "title": "Area",
+       "type": "string"
+      },
+      "blurb": {
+       "default": "",
+       "title": "Blurb",
+       "type": "string"
+      },
+      "genres": {
+       "default": "",
+       "title": "Genres",
+       "type": "string"
+      },
+      "id": {
+       "title": "Id",
+       "type": "string"
+      },
+      "lines": {
+       "items": {
+        "$ref": "#/$defs/TitleLine"
+       },
+       "title": "Lines",
+       "type": "array"
+      },
+      "name": {
+       "default": "",
+       "title": "Name",
+       "type": "string"
+      },
+      "pic": {
+       "default": "",
+       "title": "Pic",
+       "type": "string"
+      },
+      "remarks": {
+       "default": "",
+       "title": "Remarks",
+       "type": "string"
+      },
+      "sub": {
+       "default": "",
+       "title": "Sub",
+       "type": "string"
+      },
+      "url": {
+       "title": "Url",
+       "type": "string"
+      },
+      "year": {
+       "default": "",
+       "title": "Year",
+       "type": "string"
+      }
+     },
+     "required": [
+      "id",
+      "url"
+     ],
+     "title": "TitleCard",
+     "type": "object"
+    },
+    "TitleLine": {
+     "description": "A line of a title: the archive its episodes come from. `rows` is how many it holds when the provider knows, `routes` how\nmany independent ways to it the provider has (a reserve: nothing in the tracker depends on it).",
+     "properties": {
+      "code": {
+       "title": "Code",
+       "type": "string"
+      },
+      "label": {
+       "default": "",
+       "title": "Label",
+       "type": "string"
+      },
+      "routes": {
+       "default": 0,
+       "title": "Routes",
+       "type": "integer"
+      },
+      "rows": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Rows"
+      }
+     },
+     "required": [
+      "code"
+     ],
+     "title": "TitleLine",
+     "type": "object"
+    }
+   },
+   "description": "A page of the search: the titles, how many pages and titles the provider says there are (None when it does not say), the\ncodes of what the answer lacks (a part of the sources did not answer) and the reason it gave no title.",
+   "properties": {
+    "notes": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Notes",
+     "type": "array"
+    },
+    "page": {
+     "default": 1,
+     "title": "Page",
+     "type": "integer"
+    },
+    "pages": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Pages"
+    },
+    "reason": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Reason"
+    },
+    "titles": {
+     "items": {
+      "$ref": "#/$defs/TitleCard"
+     },
+     "title": "Titles",
+     "type": "array"
+    },
+    "total": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Total"
+    }
+   },
+   "title": "TitleSearchReply",
+   "type": "object"
+  },
+  "TitleSearchRequest": {
+   "properties": {
+    "page": {
+     "default": 1,
+     "minimum": 1,
+     "title": "Page",
+     "type": "integer"
+    },
+    "query": {
+     "title": "Query",
+     "type": "string"
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "title": "TitleSearchRequest",
+   "type": "object"
+  },
   "UnreadPart": {
    "additionalProperties": false,
    "description": "A part of a page the read could not get: its rows are the ones it gave the last read that got it, if any.\n`names` are what the site calls its content (the voice-overs of a catalog, the title of an episode).",
@@ -1106,5 +1377,5 @@
    "type": "object"
   }
  },
- "protocol": 1
+ "protocol": 2
 }

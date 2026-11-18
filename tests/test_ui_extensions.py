@@ -66,8 +66,8 @@ async def _no_provider(ui) -> None:
 
 def _provider() -> MockProvider:
     mock = MockProvider()
-    mock.add_app("mock", "Мок (Mock)")
-    mock.card("mock", 7, ["名"], [("1", "X", "tok 1", [1080]), ("2", "Y", "tok 2", [720])])
+    mock.add_site("mock", "Мок (Mock)")
+    mock.title("mock", 7, ["名"], [("1", "X", "tok 1", [1080]), ("2", "Y", "tok 2", [720])])
     return mock
 
 
@@ -88,7 +88,7 @@ async def test_the_provider_tab_is_the_line_of_its_address_until_one_is_named_an
         await expect(page.get_by_text(text("extensions.chines.up"))).to_be_visible()
         await expect(page.locator(".tile")).to_have_count(1)
         await expect(page.locator(".tile")).to_contain_text("Мок (Mock)")
-        await expect(page.get_by_text(text("extensions.chines.protocol", protocol=1))).to_be_visible()
+        await expect(page.get_by_text(text("extensions.chines.protocol", protocol=2))).to_be_visible()
         await ui.shot("51-provider-connected")
         assert (await ui.call("GET", "/api/provider"))["url"] == server.url
 

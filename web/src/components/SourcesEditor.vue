@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import StTab from "./StTab.vue"
-import AppSearch from "./AppSearch.vue"
+import TitleSearch from "./TitleSearch.vue"
 import SourceCard from "./SourceCard.vue"
 import StGroup from "./StGroup.vue"
 import StInput from "./StInput.vue"
@@ -37,12 +37,12 @@ const emit = defineEmits<{
 }>()
 
 // How a source is added: by the address of a page, or by a card the search of a video application found.
-const mode = ref<"address" | "apps">("address")
+const mode = ref<"address" | "titles">("address")
 const added = computed(() => Object.fromEntries(props.items.map((item, index) => [item.url, index + 1])))
 const loaded = ref<{ text: string; mark?: string }[]>([])
 let loading = false
 watch(mode, async (now) => {
-  if (now !== "apps" || loading || !props.loadNames) return
+  if (now !== "titles" || loading || !props.loadNames) return
   loading = true
   loaded.value = await props.loadNames()
 })
@@ -131,11 +131,11 @@ function clear(): void {
         <StTab :active="mode === 'address'" :label="t('sources.mode.address')" @click="mode = 'address'">
           <template #before><i class="pi pi-link tab-icon" /></template>
         </StTab>
-        <StTab :active="mode === 'apps'" :label="t('sources.mode.apps')" @click="mode = 'apps'">
+        <StTab :active="mode === 'titles'" :label="t('sources.mode.titles')" @click="mode = 'titles'">
           <template #before><i class="pi pi-search tab-icon" /></template>
         </StTab>
       </div>
-      <AppSearch v-if="mode === 'apps'" :names="searchNames" :added="added" :busy="busy || adding" @add="addCard" />
+      <TitleSearch v-if="mode === 'titles'" :names="searchNames" :added="added" :busy="busy || adding" @add="addCard" />
       <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->
       <StGroup v-if="mode === 'address'" class="source-add">
         <StLabel icon="pi pi-link" :text="t('sources.add.label')" />

@@ -462,11 +462,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Search Apps
-         * @description The search of the video applications: a page of the cards of each, as it gives them; a card is a source by its
-         *     address.
+         * Search Titles
+         * @description The search of the titles of the provider of external sources: a page of them as it gives them; a title is a source by
+         *     its address.
          */
-        post: operations["search_apps_api_sources_search_post"];
+        post: operations["search_titles_api_sources_search_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1995,102 +1995,6 @@ export interface components {
          * @enum {string}
          */
         Absence: "elsewhere" | "not_better" | "no_single" | "own" | "off";
-        /**
-         * AppCard
-         * @description A card of a title as the search of its application gives it; `url` is the address it is a source by (empty when
-         *     the application gave the card no number to be asked by again).
-         */
-        AppCard: {
-            /** App */
-            app: string;
-            /** Id */
-            id: string;
-            /** Url */
-            url: string;
-            /**
-             * Name
-             * @default
-             */
-            name: string;
-            /**
-             * Sub
-             * @default
-             */
-            sub: string;
-            /**
-             * Year
-             * @default
-             */
-            year: string;
-            /**
-             * Area
-             * @default
-             */
-            area: string;
-            /**
-             * Genres
-             * @default
-             */
-            genres: string;
-            /**
-             * Remarks
-             * @default
-             */
-            remarks: string;
-            /**
-             * Blurb
-             * @default
-             */
-            blurb: string;
-            /**
-             * Pic
-             * @default
-             */
-            pic: string;
-        };
-        /**
-         * AppResults
-         * @description One application's answer to the search: a page of its cards, or the reason it gave none.
-         */
-        AppResults: {
-            /** App */
-            app: string;
-            /** Label */
-            label: string;
-            /**
-             * Page
-             * @default 1
-             */
-            page: number;
-            /** Pages */
-            pages?: number | null;
-            /** Total */
-            total?: number | null;
-            /** Cards */
-            cards?: components["schemas"]["AppCard"][];
-            /** Reason */
-            reason?: string | null;
-        };
-        /** AppSearchReply */
-        AppSearchReply: {
-            /** Apps */
-            apps?: components["schemas"]["AppResults"][];
-        };
-        /** AppSearchRequest */
-        AppSearchRequest: {
-            /** Query */
-            query: string;
-            /**
-             * Page
-             * @default 1
-             */
-            page: number;
-            /**
-             * App
-             * @default
-             */
-            app: string;
-        };
         /**
          * AssignBody
          * @description Items of a tab placed by hand: a file in a season and an episode (to `episode_last` for a file of several), a track
@@ -4403,6 +4307,111 @@ export interface components {
          */
         TargetKind: "none" | "group" | "variant";
         /**
+         * TitleCard
+         * @description A title as the search of its provider gives it; `url` is the address it is a source by.
+         */
+        TitleCard: {
+            /** Id */
+            id: string;
+            /** Url */
+            url: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Sub
+             * @default
+             */
+            sub: string;
+            /**
+             * Year
+             * @default
+             */
+            year: string;
+            /**
+             * Area
+             * @default
+             */
+            area: string;
+            /**
+             * Genres
+             * @default
+             */
+            genres: string;
+            /**
+             * Remarks
+             * @default
+             */
+            remarks: string;
+            /**
+             * Blurb
+             * @default
+             */
+            blurb: string;
+            /**
+             * Pic
+             * @default
+             */
+            pic: string;
+            /** Lines */
+            lines?: components["schemas"]["TitleLine"][];
+        };
+        /**
+         * TitleLine
+         * @description A line of a title: the archive its episodes come from. `rows` is how many it holds when the provider knows, `routes` how
+         *     many independent ways to it the provider has (a reserve: nothing in the tracker depends on it).
+         */
+        TitleLine: {
+            /** Code */
+            code: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /** Rows */
+            rows?: number | null;
+            /**
+             * Routes
+             * @default 0
+             */
+            routes: number;
+        };
+        /**
+         * TitleSearchReply
+         * @description A page of the search: the titles, how many pages and titles the provider says there are (None when it does not say), the
+         *     codes of what the answer lacks (a part of the sources did not answer) and the reason it gave no title.
+         */
+        TitleSearchReply: {
+            /** Titles */
+            titles?: components["schemas"]["TitleCard"][];
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /** Pages */
+            pages?: number | null;
+            /** Total */
+            total?: number | null;
+            /** Notes */
+            notes?: string[];
+            /** Reason */
+            reason?: string | null;
+        };
+        /** TitleSearchRequest */
+        TitleSearchRequest: {
+            /** Query */
+            query: string;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+        };
+        /**
          * TmdbInfo
          * @description TMDB-маппинг серии; поля динамические (tmdb_id, series_name, year,
          *     poster_path, last_updated, ...).
@@ -6069,7 +6078,7 @@ export interface operations {
             };
         };
     };
-    search_apps_api_sources_search_post: {
+    search_titles_api_sources_search_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -6078,7 +6087,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AppSearchRequest"];
+                "application/json": components["schemas"]["TitleSearchRequest"];
             };
         };
         responses: {
@@ -6088,7 +6097,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppSearchReply"];
+                    "application/json": components["schemas"]["TitleSearchReply"];
                 };
             };
             /** @description Bad Request */

@@ -82,8 +82,8 @@ export const SAME_QUEUE: QueueView = {
   ],
 }
 export const SAME_MARKS: Record<number, SourceMark> = {
-  106: { n: 5, color: 4, place: "app://mtq/313" }, 107: { n: 6, color: 5, place: "app://gulu/1291" },
-  108: { n: 7, color: 6, place: "app://appmn/1522016" }, 109: { n: 8, color: 7, place: "app://juquan/191" },
-  110: { n: 9, color: 8, place: "app://juzi/164312" },
+  106: { n: 5, color: 4, place: "title://chines/k3f9a1" }, 107: { n: 6, color: 5, place: "title://chines/p7d2c4" },
+  108: { n: 7, color: 6, place: "title://chines/m2x8w5" }, 109: { n: 8, color: 7, place: "title://chines/t9r1e6" },
+  110: { n: 9, color: 8, place: "title://chines/h4b7n3" },
 }
 export const SAME_HELD: Held = { source_id: 108, player: "line:duanju" }

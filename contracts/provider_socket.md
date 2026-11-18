@@ -63,7 +63,7 @@
 |---|---|---|
 | `GET /v1/manifest` | — | `Manifest` (раздел 4) |
 | `GET /v1/events` | — | поток событий (раздел 5): `text/event-stream` |
-| `POST /v1/search` | `SearchRequest {query, page}` | `SearchReply {titles, page, pages, total, notes, reason}` (приложение A.5) |
+| `POST /v1/search` | `TitleSearchRequest {query, page}` | `TitleSearchReply {titles, page, pages, total, notes, reason}` (приложение A.5) |
 | `POST /v1/read` | `ReadRequest` (раздел 6) | `application/x-ndjson`: кадры раздела 6 |
 | `POST /v1/download` | `DownloadRequest` (раздел 7) | `application/x-ndjson`: кадры раздела 7 |
 | `POST /v1/adopt` | `AdoptRequest {urls}` | `AdoptReply {items}` (приложение B, переходное) |
@@ -430,8 +430,8 @@
 
 | Сообщение | Поля |
 |---|---|
-| `SearchRequest` | `query` — слова; `page` — страница, от 1 (по умолчанию 1) |
-| `SearchReply` | `titles` — названия в порядке поставщика; `page`; `pages`, `total` — сколько страниц и названий, когда поставщик говорит, иначе `null`; `notes` — причины-коды неполноты ответа (часть источников не ответила); `reason` — причина-код, когда названий нет |
+| `TitleSearchRequest` | `query` — слова; `page` — страница, от 1 (по умолчанию 1) |
+| `TitleSearchReply` | `titles` — названия в порядке поставщика; `page`; `pages`, `total` — сколько страниц и названий, когда поставщик говорит, иначе `null`; `notes` — причины-коды неполноты ответа (часть источников не ответила); `reason` — причина-код, когда названий нет |
 | `TitleCard` | `id` — номер названия у поставщика; `url` — адрес, которым название становится источником сериала (`title://chines/<id>`); `name`, `sub` (другое название: английское, подпись), `year`, `area`, `genres`, `remarks` (что источник говорит о вышедших сериях: «更新至第499集»), `blurb` (описание), `pic` (постер: адрес источника), `lines` |
 | `TitleLine` | `code` — код линии; `label` — подпись; `rows` — сколько рядов линии известно, когда известно, иначе `null`; `routes` — сколько независимых путей к линии у поставщика (резерв: ни на что в трекере не влияет) |
 

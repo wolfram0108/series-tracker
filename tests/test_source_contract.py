@@ -53,11 +53,11 @@ async def test_every_row_of_every_kind_of_source_has_the_frame_of_its_own_episod
     await asyncio.to_thread(stand.site.hls_episode, 4794, 1, height=1080)
     await asyncio.to_thread(stand.site.hls_episode, 4794, 2, height=720)
     mock = MockProvider()
-    mock.add_app("banri", "半日 Banri")
-    mock.card("banri", 219017, ["万界独尊"], [("第1集", "BLU", "1", [1080]), ("第2集", "BLU", "2", [2160])])
-    mock.card("banri", 219018, ["师兄啊师兄"], [("第1集", "BLU", "1", [720]), ("第2集", "BLU", "2", [1080])])
+    mock.add_site("banri", "半日 Banri")
+    mock.title("banri", 219017, ["万界独尊"], [("第1集", "BLU", "1", [1080]), ("第2集", "BLU", "2", [2160])])
+    mock.title("banri", 219018, ["师兄啊师兄"], [("第1集", "BLU", "1", [720]), ("第2集", "BLU", "2", [1080])])
     truth = {stand.site.releases["ref"].url: {1: 720, 2: 480}, stand.site.titles[4794].url: {1: 1080, 2: 720},
-             "app://banri/219017": {1: 1080, 2: 2160}, "app://banri/219018": {1: 720, 2: 1080}}
+             "title://banri/219017": {1: 1080, 2: 2160}, "title://banri/219018": {1: 720, 2: 1080}}
     async with serving(mock) as server:
         await stand.use_provider(server.url)
         tables = await tables_of(stand, list(truth))

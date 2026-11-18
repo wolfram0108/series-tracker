@@ -35,7 +35,7 @@ const toast = useToast()
 const isTorrent = computed(() => props.item.sourceType === "torrent")
 const isChannel = computed(() => props.item.sourceType === "vk_video")
 // A card of a video application has no page a browser opens: its address is shown and copied, with no link to open.
-const appCard = computed(() => props.item.url.startsWith("app://"))
+const appCard = computed(() => props.item.url.startsWith("title://"))
 const view = computed(() => props.item.view)
 const options = computed(() => profileOptions(props.profiles))
 const seasonOptions = (groups: number) => [
@@ -135,7 +135,7 @@ async function copyAddress(): Promise<void> {
         </div>
         <small v-if="!vkQuery(query)" class="source-reason">{{ t("sources.vk.queryMissing") }}</small>
       </div>
-      <SheetField v-else-if="appCard" class="source-app-card is-readonly" :label="t('sources.apps.card')" icon="pi pi-video">
+      <SheetField v-else-if="appCard" class="source-app-card is-readonly" :label="t('sources.titles.card')" icon="pi pi-video">
         <StValue :value="item.url" mono />
         <div class="constructor-item url-actions">
           <button type="button" class="url-action-btn" :title="t('sources.address.copy')" @click="copyAddress">

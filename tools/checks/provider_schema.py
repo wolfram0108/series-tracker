@@ -13,14 +13,14 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from core.contracts import AppSearchReply, AppSearchRequest, TableRow, UnreadPart  # noqa: E402
-from core.contracts.provider import (PROTOCOL, DownloadFrame, DownloadRequest, FeedEvent, Manifest, ReadFrame,  # noqa: E402
-                                     ReadRequest)
+from core.contracts import TableRow, TitleCard, TitleLine, TitleSearchReply, TitleSearchRequest, UnreadPart  # noqa: E402
+from core.contracts.provider import (PROTOCOL, AdoptItem, AdoptReply, AdoptRequest, DownloadFrame, DownloadRequest,  # noqa: E402
+                                     FeedEvent, Manifest, ReadFrame, ReadRequest)
 from modules.sources.sites import TableDraft  # noqa: E402
 
 PATH = os.path.join(ROOT, "contracts", "provider_socket.schema.json")
-MESSAGES = (Manifest, FeedEvent, AppSearchRequest, AppSearchReply, ReadRequest, ReadFrame, TableDraft, TableRow, UnreadPart,
-            DownloadRequest, DownloadFrame)
+MESSAGES = (Manifest, FeedEvent, TitleSearchRequest, TitleSearchReply, TitleCard, TitleLine, ReadRequest, ReadFrame, TableDraft,
+            TableRow, UnreadPart, DownloadRequest, DownloadFrame, AdoptRequest, AdoptReply, AdoptItem)
 
 
 def document() -> dict:

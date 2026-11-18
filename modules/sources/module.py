@@ -56,13 +56,12 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    places a provider of the socket says it is in, each with how many of the pages are
                                    its. The players are those of the registry and those the manifest of the provider
                                    names
-  sources.apps.search {query, page?, app?} → AppSearchReply {apps: [AppResults]}: a page of the search of every source
-                                   of search the provider of the socket names (contracts/provider_socket.md), or of the
-                                   one named, as the provider gives it, or the reason it gave none (`provider_unavailable`
-                                   when it cannot be reached). A card picked is a source by the address the provider
-                                   gives (for video applications `app://<application>/<card>`). With the provider not up
-                                   (none configured, not heard yet, dropped, another protocol) the search is refused:
-                                   NotAllowed `provider_not_connected`
+  sources.titles.search {query, page?} → TitleSearchReply {titles: [TitleCard], page, pages?, total?, notes, reason?}: a page of
+                                   the search of the titles of the provider of the socket (contracts/provider_socket.md), as the
+                                   provider gives it, or the reason it gave none (`provider_unavailable` when it cannot be
+                                   reached). A title picked is a source by the address the provider gives
+                                   (`title://<site>/<id>`). With the provider not up (none configured, not heard yet, dropped,
+                                   another protocol) the search is refused: NotAllowed `provider_not_connected`
   sources.provider.get {} → ProviderView: the provider of external sources as the tab of the extensions shows it — its address,
                                    whether a token is set (never the token), the state of the socket and why it is not up, what its
                                    last manifest says (id, version, protocol, revision), its applications with the sources of the
@@ -148,9 +147,9 @@ from core import storage
 from core.contracts.torrent import PageReleases
 from core.contracts.release_table import site_of
 from core.contracts.voices import PLAYERS_OFF_KEY
-from core.contracts import (AppSearchReply, AppSearchRequest, NotAllowed, ParsedDomains, PlayerFacts, PlayerPlace,
+from core.contracts import (NotAllowed, ParsedDomains, PlayerFacts, PlayerPlace,
                             PlayersListReply, PlayersListRequest, SiteResolveRequest,
-                            SourceType, SourcesSettingsView, TableGetRequest, TrackerMirrors)
+                            SourceType, SourcesSettingsView, TableGetRequest, TitleSearchReply, TitleSearchRequest, TrackerMirrors)
 from core.deadlines import TABLE_READ_S
 from core.db import Database
 from core.envelope import Envelope
@@ -267,7 +266,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.table.cancel", self.on_table_cancel)
         self.handle("sources.site.resolve", self.on_site_resolve)
         self.handle("sources.settings.get", self.on_settings_get)
-        self.handle("sources.apps.search", self.on_apps_search)
+        self.handle("sources.titles.search", self.on_titles_search)
         self.handle("sources.pages.check", self.on_pages_check)
         self.handle("sources.provider.get", self.on_provider_get)
         self.handle("sources.provider.set", self.on_provider_set)
@@ -619,14 +618,13 @@ class SourcesModule(BaseModule):
                                        height=heights.get(each.name), places=places(each.name, each.places)))
         return PlayersListReply(players=players).model_dump(mode="json")
 
-    async def on_apps_search(self, env: Envelope) -> dict:
-        """payload: AppSearchRequest; reply: AppSearchReply — a page of the search of every source of search the provider of the
-        socket names (or of the one named), each as the provider gives it, or the reason it gave none. No provider, no source of
-        search: the reply is empty."""
-        request = AppSearchRequest.model_validate(env.payload)
+    async def on_titles_search(self, env: Envelope) -> dict:
+        """payload: TitleSearchRequest; reply: TitleSearchReply — a page of the search of the titles of the provider of the socket,
+        as the provider gives it, or the reason it gave none. No provider, no search: the user is told."""
+        request = TitleSearchRequest.model_validate(env.payload)
         if (why := not_connected(self.connector)) is not None:
             raise NotAllowed(why)  # the search is the provider's: with none up there is nothing to search, and the user is told
-        return AppSearchReply(apps=await self.connector.search(request)).model_dump(mode="json")
+        return (await self.connector.search(request)).model_dump(mode="json")
 
     @property
     def connector(self) -> Connector | None:

@@ -303,6 +303,6 @@ describe("testOffers", () => {
 
   it("offers nothing for a series without sources, and no query for sites that have none", () => {
     expect(testOffers([])).toEqual({ addresses: [], queries: [] })
-    expect(testOffers([{ url: "app://banri/219047", vk: false }]).queries).toEqual([])
+    expect(testOffers([{ url: "title://chines/k3f9a1", vk: false }]).queries).toEqual([])
   })
 })

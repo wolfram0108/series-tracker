@@ -19,9 +19,9 @@ export type SourceType = Schemas["SourceType"]
 export type PreviewReply = Schemas["CompositionPreviewReply"]
 export type TableState = Schemas["TableState"]
 export type ResolveReply = Schemas["SiteResolveReply"]
-export type AppSearchReply = Schemas["AppSearchReply"]
-export type AppResults = Schemas["AppResults"]
-export type AppCard = Schemas["AppCard"]
+export type TitleSearchReply = Schemas["TitleSearchReply"]
+export type TitleCard = Schemas["TitleCard"]
+export type TitleLine = Schemas["TitleLine"]
 export type LayoutRow = Schemas["CompositionRow"]
 
 /** The player whose list holds several seasons of a catalog; the user picks the one that belongs to the source. */
@@ -295,10 +295,10 @@ export function pageHost(url: string): string {
   }
 }
 
-/** Where a source is, as every tab names it: the site, and the channel of a VK channel (`vkvideo.ru @name`); a card of a
- *  video application is its address itself (`app://banri/219017`), the one written everywhere the source is. */
+/** Where a source is, as every tab names it: the site, and the channel of a VK channel (`vkvideo.ru @name`); a title of
+ *  the provider of external sources is its address itself (`title://chines/k3f9a1`), the one written everywhere the source is. */
 export function placeOf(url: string): string {
-  if (url.startsWith("app://")) return url
+  if (url.startsWith("title://")) return url
   try {
     const link = new URL(url.split("|")[0])
     return link.pathname.startsWith("/@") ? `${link.host} ${link.pathname.slice(1)}` : link.host

@@ -74,7 +74,7 @@ async function tmdbOriginal(): Promise<{ text: string; mark?: string }[]> {
   if (!tmdb.selected.value?.id) return []
   const { data } = await api.GET("/api/tmdb/details/{tmdb_id}", { params: { path: { tmdb_id: tmdb.selected.value.id } } })
   const original = String((data as Record<string, unknown> | undefined)?.original_name ?? "").trim()
-  return original ? [{ text: original, mark: t("sources.apps.tmdb") }] : []
+  return original ? [{ text: original, mark: t("sources.titles.tmdb") }] : []
 }
 
 // --- валидация ---

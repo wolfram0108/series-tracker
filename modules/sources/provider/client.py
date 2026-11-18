@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from core.contracts import AppSearchReply, AppSearchRequest
+from core.contracts import TitleSearchReply, TitleSearchRequest
 from core.deadlines import deadline_of
 from core.contracts.provider import (PROVIDER_BAD_ANSWER, PROVIDER_REFUSED, PROVIDER_UNAVAILABLE, SILENCE_S, DownloadFrame,
                                      DownloadRequest, Manifest, ReadFrame, ReadRequest)
@@ -57,8 +57,8 @@ class ProviderClient:
         self.url = url.rstrip("/")
         self.token = token
         self._headers = {"Authorization": f"Bearer {token}"} if token else {}
-        # The fuse of the request that waits for an application: that of the topic it answers (core/deadlines.py).
-        self._search_s = search_s or (deadline_of("sources.apps.search") or 0) - FUSE_MARGIN_S
+        # The fuse of the request that waits for the sources of the search: that of the topic it answers (core/deadlines.py).
+        self._search_s = search_s or (deadline_of("sources.titles.search") or 0) - FUSE_MARGIN_S
         self._http = http or httpx.AsyncClient(timeout=httpx.Timeout(REQUEST_TIMEOUT_S, read=SILENCE_S))
 
     async def close(self) -> None:
@@ -94,8 +94,8 @@ class ProviderClient:
             raise _broken("manifest", exc) from exc
         return self._model(Manifest, data, "manifest")
 
-    async def search(self, request: AppSearchRequest) -> AppSearchReply:
-        return await self._post("/v1/search", request, self._search_s, AppSearchReply, "search")
+    async def search(self, request: TitleSearchRequest) -> TitleSearchReply:
+        return await self._post("/v1/search", request, self._search_s, TitleSearchReply, "search")
 
     async def _frames(self, path: str, body: BaseModel, frame: type[BaseModel], what: str) -> AsyncIterator[Any]:
         """The frames of a request the provider answers line by line. Closing the generator (the work is stopped) closes the
