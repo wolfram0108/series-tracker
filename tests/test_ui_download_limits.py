@@ -1,5 +1,5 @@
 """The limits of the downloads: three numbers in the settings (Настройки → Отладка) and the one that is the provider's in the
-extensions (Расширения → Чинес), all of the module of the downloads and shown, changed and kept by the whole application on the stand (tests/ui_stand.py); a value that is no whole number from 1
+extensions (Расширения → Chines), all of the module of the downloads and shown, changed and kept by the whole application on the stand (tests/ui_stand.py); a value that is no whole number from 1
 up is refused and the field shows the limit kept."""
 from __future__ import annotations
 

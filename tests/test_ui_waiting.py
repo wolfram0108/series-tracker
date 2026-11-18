@@ -61,7 +61,7 @@ SCREENS = [  # the button that opens the window, its tab, what is on the tab onc
     ("Настройки", "Источники", "[role=combobox]"),
     ("Настройки", "Озвучки", "[role=combobox]"),
     ("Настройки", "Отладка", "input.item-input"),
-    (None, "Чинес", "input.item-input"),  # the extensions: their own button
+    (None, "Chines", "input.item-input"),  # the extensions: their own button
     (None, "Conform", "input.item-input"),
 ]
 

@@ -1,4 +1,4 @@
-"""What the screen of the provider of external sources (the tab «Чинес» of the extensions) sends and shows."""
+"""What the screen of the provider of external sources (the tab «Chines» of the extensions) sends and shows."""
 from __future__ import annotations
 
 from typing import Literal

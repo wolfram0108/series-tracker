@@ -17,7 +17,7 @@ import { t, tn } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 import { useProviderStore, type ProviderView } from "../../stores/provider"
 
-// The tab «Чинес» of the extensions: the provider of external sources — its address and token, the state of the socket and what its
+// The tab «Chines» of the extensions: the provider of external sources — its address and token, the state of the socket and what its
 // manifest says, how many downloads of it go at once, the folder it writes to, and its sites. Without an address there is the
 // line of the address and nothing else: the rest comes with the address, as it is typed. The address and the token are written when a
 // field is left or Enter is pressed; the core takes them at once and tells the whole picture again, every open screen shows it.

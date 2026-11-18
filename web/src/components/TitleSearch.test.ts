@@ -148,12 +148,12 @@ describe("the search of the titles of the provider in the sources", () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     useProviderStore().apply({ url: "http://p", has_token: true, state: "up", reason: null, provider: "chinese_sources", version: "2", protocol: 2,
-      revision: "1", sites: [{ name: "chines", label: "Чинес", sources: 1, lines: 1 }], downloads_dir: "", seq: 1 })
+      revision: "1", sites: [{ name: "chines", label: "Chines", sources: 1, lines: 1 }], downloads_dir: "", seq: 1 })
     const w = mountEditor({}, pinia)
     await w.findAll(".source-mode .st-tab")[1].trigger("click")
     await w.find(".ts-find").trigger("click")
     await flushPromises()
-    expect(w.find(".ts-provider").text()).toBe("Чинес")
+    expect(w.find(".ts-provider").text()).toBe("Chines")
   })
 
   it("a line of a title of the provider is headed by its provider, its line and the name of the title; its fields say where it comes from, and its address is copied, never opened", async () => {
@@ -161,11 +161,11 @@ describe("the search of the titles of the provider in the sources", () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     useProviderStore().apply({ url: "http://p", has_token: true, state: "up", reason: null, provider: "chinese_sources", version: "2", protocol: 2,
-      revision: "1", sites: [{ name: "chines", label: "Чинес", sources: 1, lines: 1 }], downloads_dir: "", seq: 1 })
+      revision: "1", sites: [{ name: "chines", label: "Chines", sources: 1, lines: 1 }], downloads_dir: "", seq: 1 })
     const w = mountEditor({ items: [itemOfSource(stored(), summary, null)] }, pinia)
     await flushPromises()
-    expect(w.find(".source-place").text()).toBe("Чинес · CO4K · 万界独尊 (2021)")
-    expect(w.find(".source-provider .item-value").text()).toBe("Чинес")
+    expect(w.find(".source-place").text()).toBe("Chines · CO4K · 万界独尊 (2021)")
+    expect(w.find(".source-provider .item-value").text()).toBe("Chines")
     expect(w.find(".source-line-code .item-value").text()).toBe("CO4K")
     expect(w.find(".source-name .item-value").text()).toBe("万界独尊 (2021)")
     expect(w.find(".source-line .url-action-btn").exists()).toBe(true)

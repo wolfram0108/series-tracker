@@ -12,7 +12,7 @@ import ExtensionChines from "./ExtensionChines.vue"
 import { useProviderStore } from "../../stores/provider"
 
 const LIMITS = { threads_total: 32, threads_per_file: 16, single_at_once: 4, provider_at_once: 2, multi_at_once: 2 }
-const SITES = [{ name: "chines", label: "Чинес", sources: 10, lines: 7 }, { name: "second", label: "Второй", sources: 2, lines: 2 }]
+const SITES = [{ name: "chines", label: "Chines", sources: 10, lines: 7 }, { name: "second", label: "Второй", sources: 2, lines: 2 }]
 const view = (extra: object = {}) => ({
   url: "http://127.0.0.1:5100", has_token: true, state: "up", reason: null, provider: "chinese_sources", version: "2.0.0", protocol: 2,
   revision: "3f9a0c7b21d4e58a", sites: SITES, downloads_dir: "/nas/work/downloads", seq: 1, ...extra,
@@ -48,12 +48,12 @@ describe("the tab of the provider of external sources", () => {
     mounted = mount(ExtensionChines, { global: { plugins: [PrimeVue] } })
     await flushPromises()
     const text = mounted.text()
-    expect(text).toContain("Чинес работает")
+    expect(text).toContain("Chines работает")
     expect(text).toContain("chinese_sources 2.0.0")
     expect(text).toContain("протокол 2")
     expect(text).toContain("ревизия 3f9a0c7b21d4e58a")
     expect(text).toContain("/nas/work/downloads")
-    expect(mounted.findAll(".tile").map((each) => each.text())).toEqual(["Чинес10 источников · 7 линий", "Второй2 источника · 2 линии"])
+    expect(mounted.findAll(".tile").map((each) => each.text())).toEqual(["Chines10 источников · 7 линий", "Второй2 источника · 2 линии"])
     expect((mounted.find("input[inputmode='numeric']").element as HTMLInputElement).value).toBe("2")
   })
 
@@ -61,7 +61,7 @@ describe("the tab of the provider of external sources", () => {
     serve(view({ state: "down", reason: JSON.stringify({ code: "provider_unavailable" }) }))
     mounted = mount(ExtensionChines, { global: { plugins: [PrimeVue] } })
     await flushPromises()
-    expect(mounted.find(".pill-danger").text()).toBe("Чинес недоступен: внешний поставщик источников не отвечает")
+    expect(mounted.find(".pill-danger").text()).toBe("Chines недоступен: внешний поставщик источников не отвечает")
     expect(mounted.find(".tile-grid").classes()).toContain("is-stale")
     expect(mounted.findAll(".tile")).toHaveLength(2)
   })
@@ -76,7 +76,7 @@ describe("the tab of the provider of external sources", () => {
     await address.trigger("change")
     await flushPromises()
     expect(client.PUT).toHaveBeenCalledWith("/api/provider", { body: { url: "http://127.0.0.1:5100" } })
-    expect(mounted.text()).toContain("Чинес работает")
+    expect(mounted.text()).toContain("Chines работает")
   })
 
   it("sends a typed token once and forgets it, and takes it away by its own button", async () => {

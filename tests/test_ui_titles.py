@@ -33,7 +33,7 @@ CARD_LAYOUT = """() => {
 
 async def test_a_title_found_by_the_search_of_the_provider_is_added_read_by_its_button_and_its_line_is_a_player(ui):  # noqa: F811
     mock = MockProvider()
-    mock.add_site("chines", "Чинес")
+    mock.add_site("chines", "Chines")
     mock.title("chines", "k3f9a1", ["万界独尊"], [("第1集", "BLU", "1", [1080])], title="万界独尊 (2021)")
     mock.sites["chines"].found = [{"id": "k3f9a1", "name": "万界独尊"}]
     await ui.first_run()
@@ -67,8 +67,8 @@ async def test_a_title_found_by_the_search_of_the_provider_is_added_read_by_its_
         await source.locator(".source-reread").click()
         # The head names the source by whose it is, which line it is and the title as its source gives it; the fields say the same
         # part by part, and the address is not written where a person reads.
-        await expect(source.locator(".source-place")).to_have_text("Чинес · BLU · 万界独尊 (2021)")
-        await expect(source.locator(".source-provider .item-value")).to_have_text("Чинес")
+        await expect(source.locator(".source-place")).to_have_text("Chines · BLU · 万界独尊 (2021)")
+        await expect(source.locator(".source-provider .item-value")).to_have_text("Chines")
         await expect(source.locator(".source-line-code .item-value")).to_have_text("BLU")
         await expect(source.locator(".source-name .item-value")).to_have_text("万界独尊 (2021)")
         assert "title://" not in await source.inner_text()
