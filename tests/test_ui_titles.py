@@ -65,10 +65,13 @@ async def test_a_title_found_by_the_search_of_the_provider_is_added_read_by_its_
         await expect(source.locator(".source-state")).to_have_text(state("notRead"))
         assert not [each for each in mock.requests if each[0] == "read"]
         await source.locator(".source-reread").click()
-        # The head names the source as its site does (the title); its field is its address, the one
-        # writing a field of an address takes.
-        await expect(source.locator(".source-place")).to_have_text("万界独尊 (2021) · BLU")
-        await expect(source.locator(".source-title .item-value")).to_have_text("title://chines/k3f9a1/BLU")
+        # The head names the source by whose it is, which line it is and the title as its source gives it; the fields say the same
+        # part by part, and the address is not written where a person reads.
+        await expect(source.locator(".source-place")).to_have_text("Чинес · BLU · 万界独尊 (2021)")
+        await expect(source.locator(".source-provider .item-value")).to_have_text("Чинес")
+        await expect(source.locator(".source-line-code .item-value")).to_have_text("BLU")
+        await expect(source.locator(".source-name .item-value")).to_have_text("万界独尊 (2021)")
+        assert "title://" not in await source.inner_text()
         await _pick(page, source.locator(".item-select").first, "серии 半日")
         await expect(source.locator(".source-state")).to_have_text(state("readDone"), timeout=60_000)
         await expect(source.locator(".player-tab")).to_have_text(["BLU1"])  # a line is named by its code
@@ -77,5 +80,5 @@ async def test_a_title_found_by_the_search_of_the_provider_is_added_read_by_its_
         sources = page.locator(".sources")
         await sources.locator(".source-mode .st-tab", has_text=text("sources.mode.titles")).click()
         await sources.locator(".ts-find").click()
-        await expect(sources.locator(".ts-card[data-card='k3f9a1'] .ts-line[data-line='BLU'] .ts-added")).to_have_text(text("sources.titles.added", n=1))
+        await expect(sources.locator(".ts-card[data-card='k3f9a1'] .ts-line[data-line='BLU'] .ts-added")).to_contain_text(text("sources.titles.added", n=1))
         await ui.shot("a2-added")

@@ -179,7 +179,7 @@ async def test_a_card_is_read_into_a_table_from_frames_and_every_row_says_which_
         phases.append((await nxt(system.progress))["phase"])
     assert phases and set(phases) == {"release"}
     table = (await system.table())["table"]
-    assert (table["title"], table["names"], table["site"]) == ("名 · X", ["名"], "mock")
+    assert (table["title"], table["names"], table["site"]) == ("名", ["名"], "mock")
     assert [(row["key"], row["player"], row["state"], row["heights"], row["video"]) for row in table["rows"]] == [
         ("X:1", "line:X", "playable", [1080], "tok 1"), ("X:2", "line:X", "playable", [2160], "tok 2")]
     (_path, sent), = [request for request in system.mock.requests if request[0] == "read"]

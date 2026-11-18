@@ -182,7 +182,8 @@ const markStyle = (color: number | null) => ({ backgroundColor: color === null ?
   flex: none; inline-size: 4rem; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 0.375rem; background: var(--bg-light);
   max-inline-size: 100%; overflow: hidden;
 }
-.ts-body { flex: 1 1 14rem; display: grid; gap: 0.2rem; min-inline-size: 0; }
+/* The one column of the words is as wide as the room the card gives it, never as its widest line: a line wraps its parts instead. */
+.ts-body { flex: 1 1 14rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.2rem; min-inline-size: 0; }
 .ts-title { display: flex; flex-wrap: wrap; gap: 0.25rem 0.6rem; align-items: baseline; }
 .ts-name-text { font-weight: 700; overflow-wrap: anywhere; }
 .ts-sub { font-size: 0.875rem; overflow-wrap: anywhere; }
@@ -191,7 +192,9 @@ const markStyle = (color: number | null) => ({ backgroundColor: color === null ?
 /* A line is a group of the sheet: its name, how much it holds, and what can be done with it (add it, or its place as a source). */
 .ts-line { min-block-size: 2.5rem; flex-wrap: wrap; }
 .ts-code { font-weight: 700; color: var(--color-text); }
-.ts-rows { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* A count stays one piece (its number and its word); the words that say it is not known wrap where the row is short. */
+.ts-rows { font-variant-numeric: tabular-nums; }
+.ts-rows:not(.is-unknown) { white-space: nowrap; }
 .ts-rows.is-unknown { color: var(--text-muted); }
 .ts-added {
   gap: 0.5rem; padding: 0 0.9rem; color: color-mix(in srgb, var(--color-green-1) 85%, black); font-weight: 600;

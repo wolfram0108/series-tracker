@@ -253,7 +253,7 @@ class MockProvider:
                     if not rows:
                         yield json.dumps({"type": "error", "reason": json.dumps({"code": "title_no_lines", "line": match.group(3)})}) + "\n"
                         return
-                    yield json.dumps({"type": "draft", "draft": {"names": card["names"], "title": f"{card['title']} · {match.group(3)}",
+                    yield json.dumps({"type": "draft", "draft": {"names": card["names"], "title": card["title"],
                                                                   "rows": rows}}, ensure_ascii=False) + "\n"
                 except asyncio.CancelledError:
                     self.reads_cancelled += 1
