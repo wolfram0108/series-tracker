@@ -92,6 +92,8 @@
 /* A strip of tabs in the body of a window, as many as its data has (the voice-overs of an episode or a level, the
    players of a source): it wraps instead of scrolling, and takes no more width than its tabs. */
 .st-tabs.st-tabs-wrap { flex-wrap: wrap; align-self: flex-start; }
+/* A tab never outgrows its strip: a long label (the title of a release) ends in an ellipsis, whole on hover. */
+.st-tabs.st-tabs-wrap .st-tab { flex-shrink: 1; max-inline-size: 100%; }
 .st-tab {
   flex: 0 0 auto; min-width: 0; /* по содержимому: ширина стабильна, выбор её НЕ меняет (не пляшут) */
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -110,7 +112,8 @@
 /* подпись: «призрак жирного текста» резервирует ширину по bold-копии,
    поэтому жирный шрифт активной вкладки НЕ меняет ширину кнопки (не пляшет) */
 .st-tab .tab-label {
-  display: inline-grid; align-items: center; overflow: hidden; max-width: 160px;
+  display: inline-grid; grid-template-columns: minmax(0, 1fr); /* the column shrinks: the text ends in an ellipsis */
+  align-items: center; overflow: hidden; max-width: 10rem; min-inline-size: 0;
   transition: max-width 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
 }
 /* A tab in the body of a window shows its whole label: only the tabs of a head are fitted to their room. */

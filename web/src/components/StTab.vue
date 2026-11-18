@@ -6,7 +6,7 @@ withDefaults(defineProps<{ active: boolean; label: string; role?: string }>(), {
 </script>
 
 <template>
-  <button type="button" class="st-tab" :role="role" :class="{ active }" :aria-selected="role === 'tab' ? active : undefined"
+  <button type="button" class="st-tab" :role="role" :class="{ active }" :title="label" :aria-selected="role === 'tab' ? active : undefined"
           :aria-pressed="role === 'tab' ? undefined : active">
     <slot name="before" />
     <span class="tab-label tab-label-free" :data-text="label"><span class="tl-text">{{ label }}</span></span>
