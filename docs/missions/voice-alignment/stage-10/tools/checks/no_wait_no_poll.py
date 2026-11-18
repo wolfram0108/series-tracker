@@ -61,7 +61,7 @@ ALLOWED_WAITS: list[tuple[str, str, str, str]] = [
     ("modules/torrents/module.py", "TorrentsModule._release_loop", POLL,
      "qBittorrent has no push: while a release of a torrent source moves its state is asked on a timer, sooner on a word"),
     ("modules/torrents/module.py", "TorrentsModule._watch_loop", SUBJECT,
-     "the time is the subject: a watched tracker page is read again once a term of the sources"),
+     "the time is the subject: the watched tracker pages are checked at the times of the day of the schedule"),
     ("core/module.py", "BaseModule.request", SAFEGUARD,
      "the reply of a query ends the wait; the timeout is the safeguard of the caller"),
     ("core/retry.py", "retrying", RETRY, "the retry policy itself: the pause between attempts"),
@@ -97,6 +97,10 @@ ALLOWED_TIMERS: list[tuple[str, str, str]] = [
      "the pause of a debounce: changes made in quick succession go together once the user is quiet (law-ui)"),
     ("web/src/Gallery.vue", "simTimer",
      "the gallery page animates a card through its states by hand; no data is polled"),
+    ("web/src/components/ScanClock.vue", "timer = setTimeout",
+     "the time left to the scheduled scan is the subject: the words change at the next whole minute; the status is pushed"),
+    ("web/src/components/FreshMark.vue", "timer = setTimeout",
+     "the end of the term of the data is the subject: the dot turns yellow at that moment; the term itself is pushed"),
 ]
 
 WAIT_NAMES = {"sleep", "wait_for"}

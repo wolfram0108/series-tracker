@@ -61,9 +61,9 @@ class Connector:
     def download(self, request: DownloadRequest):
         return self.client.download(request)
 
-    @property
-    def term_hours(self) -> int:
-        return self._term.hours
+    def term_hours(self, url: str) -> int:
+        """The term of the application of an address, whole hours (the socket counts hours)."""
+        return self._term.hours_of(url)
 
     def known_player(self, name: str) -> bool:
         return name in self._players

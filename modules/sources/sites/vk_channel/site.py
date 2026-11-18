@@ -39,7 +39,7 @@ from ...players.vk_files import embed_parts
 from ...policy import Pacer
 from ...term import Term
 from .. import PHASE_PLAYERS, PHASE_RECHECK, PHASE_VIDEOS, Progress, ReadContext, SiteError, TableDraft
-from .api import (PAGE_SIZE, dedupe, error_code_of, heights_of, is_external, keep_by_terms, key_of, link_of,
+from .api import (CHANNEL_HOST, PAGE_SIZE, dedupe, error_code_of, heights_of, is_external, keep_by_terms, key_of, link_of,
                   owner_id_from_resolve, parse_address, published_of)
 
 logger = logging.getLogger("sources")
@@ -130,7 +130,7 @@ class VkChannelSite:
         """The listing of the channel: the one kept, while it is in its term and the user did not ask for a new one, else
         the one in progress, else a new one. A read that stops waiting does not stop the listing the others wait for."""
         kept = self._listings.get(name)
-        if kept is not None and not ctx.fresh and self._clock() - kept.at < self.term.seconds:
+        if kept is not None and not ctx.fresh and self._clock() - kept.at < self.term.of(CHANNEL_HOST).total_seconds():
             return kept
         flight = self._flights.get(name)
         if flight is None:

@@ -15,6 +15,7 @@ import hashlib
 import os
 import shutil
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from core import ids, storage
@@ -24,6 +25,7 @@ from core.contracts.torrent import (RELEASE_CHANGED_TOPIC, PageRelease, PageRele
 from core.fsnames import sanitize_name
 from core.logging import get_logger
 from core.reasons import reason
+from core.schedule import next_at
 
 from .infohash import TorrentParseError, infohash_candidates, infohash_from_magnet
 from .qbt_client import QbtClient
@@ -85,6 +87,8 @@ class Releases:
     runs: dict[int, set[str]] = field(default_factory=dict)
     # Releases whose newer version waits for a run to end: (url, release) → the page release.
     pending: dict[tuple[str, str], PageRelease] = field(default_factory=dict)
+    # The minutes of the day the watched pages are checked (the schedule, core/schedule.py).
+    checks: tuple[int, ...] = ()
 
     # --- what is asked ---------------------------------------------------------------------------------------------------
 
@@ -93,7 +97,28 @@ class Releases:
         return ReleaseView(url=row["url"], release=row["release"], title=row["title"], published=row["published"],
                            infohash=row["infohash"], state=ReleaseState(row["state"]), reason=row["reason"],
                            watched=bool(row["watched"]), folder=row["folder"],
-                           pending=(row["url"], row["release"]) in self.pending, files=files)
+                           pending=(row["url"], row["release"]) in self.pending, files=files,
+                           checked_at=row["checked_at"], fresh_until=self.fresh_until(row["checked_at"]))
+
+    def fresh_until(self, checked_at: str | None) -> str | None:
+        """The next check of the schedule after the last one: past it the release is not known to be current."""
+        if not checked_at:
+            return None
+        found = next_at(self.checks, datetime.fromisoformat(checked_at))
+        return found.astimezone(timezone.utc).isoformat() if found is not None else None
+
+    async def due(self, last: datetime | None) -> list[str]:
+        """The watched pages not checked since the last check of the schedule (`last`; none: nothing is due)."""
+        if last is None:
+            return []
+        rows = [row for row in await self.store.all() if row["watched"]]
+        return sorted({row["url"] for row in rows
+                       if not row["checked_at"] or datetime.fromisoformat(row["checked_at"]) < last})
+
+    async def told_all(self) -> None:
+        """Every release is told again: the schedule moved the next check of each."""
+        for row in await self.store.all():
+            await self._told(row["url"], row["release"])
 
     async def of_page(self, url: str) -> list[ReleaseView]:
         return [await self.view(row) for row in await self.store.of_page(url)]
@@ -163,17 +188,21 @@ class Releases:
 
     async def check(self, url: str) -> list[str]:
         """Read the page now; every watched release whose version the page lists is newer begins its update, or waits for
-        the end of the run of a series with this source. Returns the releases whose update began or waits."""
-        rows = [row for row in await self.store.of_page(url) if row["watched"]
-                and row["state"] in (ReleaseState.READY, ReleaseState.FAILED)]
-        if not rows:
+        the end of the run of a series with this source. Every watched release of the page is checked now (`checked_at`)
+        and told once, with what the check found. Returns the releases whose update began or waits."""
+        watched = [row for row in await self.store.of_page(url) if row["watched"]]
+        if not watched:
             return []
         page = await self._page(url)
+        checked_at = datetime.now(timezone.utc).isoformat()
+        for row in watched:
+            await self.store.save(url, row["release"], checked_at=checked_at)
         listed = {each.release: _titled(page, each) for each in page.releases}
         newer = []
-        for row in rows:
+        for row in watched:
             now = listed.get(row["release"])
-            if now is None or not _is_newer(row, now):
+            if row["state"] not in (ReleaseState.READY, ReleaseState.FAILED) or now is None or not _is_newer(row, now):
+                await self._told(url, row["release"])
                 continue
             newer.append(row["release"])
             if self.held(url):

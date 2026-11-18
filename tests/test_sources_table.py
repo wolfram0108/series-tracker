@@ -14,6 +14,7 @@ import pytest
 
 from core import BaseModule, Bus
 from core.contracts import ReleaseTable, RowState, RowVoice, TableGetRequest, TableRow, UnreadPart
+from core.contracts.release_table import site_of
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import parse, reason
@@ -243,30 +244,40 @@ async def test_a_page_asked_after_the_hour_is_read_again_and_the_old_table_serve
     assert len(system.site.reads) == 2
 
 
-async def test_the_term_of_a_table_is_the_setting_of_the_owner_kept_over_a_start_and_a_value_out_of_it_is_refused(
+async def test_the_term_of_a_table_is_the_term_of_its_site_kept_over_a_start_and_a_value_out_of_it_is_refused(
         db_path, tmp_path):
-    """The term is the setting `sources_term_hours` (whole hours from one, an hour by default): a table within it serves
-    as it is, past it the page is read again; the stored setting is the term after a start."""
+    """The term is the setting `sources.terms` (minutes by the site, an hour for a site it does not name): a table within it
+    serves as it is, past it the page is read again; the stored setting is the term after a start. The reply and the event
+    of a table say until when it is current, and a change of the term of its site tells it again."""
     bus = Bus()
     settings = SettingsModule(bus, Database(str(db_path)))
     await settings.start()
     system = await build(db_path, tmp_path / "cache", bus=bus)
+    site = site_of(PAGE)
     try:
-        assert await system.probe.request("sources.term.get", {}) == {"hours": 1}
-        for wrong in ("0", "1.5", "час", None):
-            refused = await system.probe.request("sources.term.set", {"hours": wrong})
-            assert (refused["ok"], refused["hours"], parse(refused["reason"])["code"]) == (False, 1, "sources_term_invalid")
-        assert await system.probe.request("sources.term.set", {"hours": "3"}) == {"ok": True, "hours": 3}
-        await system.get()
-        await system.next(system.ready)
+        for wrong in ("0", "1.5", "час", None, 50000):
+            refused = await system.probe.request("sources.terms.set", {"site": site, "minutes": wrong})
+            assert (refused["ok"], parse(refused["reason"])["code"]) == (False, "sources_term_invalid")
+        assert await system.probe.request("sources.terms.set", {"site": site, "minutes": 180}) == {"ok": True, "minutes": 180}
+        first = await system.get()
+        ready = await system.next(system.ready)
+        read_at = datetime.fromisoformat(ready["read_at"])
+        assert datetime.fromisoformat(ready["fresh_until"]) == read_at + timedelta(minutes=180)
         system.clock.advance(hours=2, minutes=59)
-        assert (await system.get())["state"] == "ready" and len(system.site.reads) == 1
-        system.clock.advance(minutes=1)
+        served = await system.get()
+        assert served["state"] == "ready" and len(system.site.reads) == 1 and first["state"] == "reading"
+        assert datetime.fromisoformat(served["fresh_until"]) == read_at + timedelta(minutes=180)
+        fresh = bus.subscribe("sources.table.fresh")
+        assert (await system.probe.request("sources.terms.set", {"site": site, "minutes": 240}))["ok"]
+        told = await system.next(fresh)
+        assert (told["url"], datetime.fromisoformat(told["fresh_until"])) == (PAGE, read_at + timedelta(minutes=240))
+        assert (await system.probe.request("sources.tables.fresh", {"urls": [PAGE, OTHER_PAGE]}))["pages"] == [told]
+        system.clock.advance(hours=1, minutes=1)
         assert (await system.get())["state"] == "reading"
         await system.next(system.ready)
         await system.stop()
         system = await build(db_path, tmp_path / "cache", system.site, clock=system.clock, bus=bus)
-        assert await system.probe.request("sources.term.get", {}) == {"hours": 3}
+        assert system.sources.term.minutes == {site: 240}
     finally:
         await system.stop()
         await settings.stop()
@@ -731,7 +742,7 @@ async def test_an_address_of_no_site_is_refused_at_once_and_no_read_begins(syste
     reply = await system.get("https://nowhere.test/p/1")
 
     assert reply == {"url": "https://nowhere.test/p/1", "state": "failed", "table": None,
-                     "reason": reason("site_not_found")}
+                     "reason": reason("site_not_found"), "fresh_until": None}
     assert system.site.reads == [] and system.failed.queue.empty()
 
 
@@ -773,7 +784,8 @@ def test_the_pace_of_a_read_is_the_steps_of_its_phase_per_second_since_the_phase
 # --- the parameters of a request: a table as it is, the site of an address ------------------------------
 
 async def test_a_table_asked_for_as_it_is_costs_no_read_whatever_its_age(system):
-    assert await system.get(refresh=False) == {"url": PAGE, "state": "absent", "table": None, "reason": None}
+    assert await system.get(refresh=False) == {"url": PAGE, "state": "absent", "table": None, "reason": None,
+                                               "fresh_until": None}
     assert system.site.reads == []
     await system.warm()
     system.clock.advance(days=3)

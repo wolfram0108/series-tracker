@@ -281,7 +281,7 @@ async def test_delete_cascade_by_owners(db_path, tmp_path):
     # только в работе, подписка на series.deleted — чистая БД
     from modules.scan import ScanModule
     modules = [gateway, CatalogModule(bus, db), MetadataModule(bus, db),
-               ScanModule(bus, db, scheduler_tick=None), LibraryModule(bus, db)]
+               ScanModule(bus, db, scheduler=False), LibraryModule(bus, db)]
     runner = Runner(bus, modules)
     await runner.start()
     try:

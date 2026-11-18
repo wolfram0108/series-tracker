@@ -125,9 +125,14 @@ class ReleaseTable(BaseModel):
         return next((row for row in self.rows if row.key == key), None)
 
 
+def site_of(url: str) -> str:
+    """The site of an address: its host (the channels of VK are one site, an application `app://<key>/…` is its key)."""
+    return (urlparse(url.split("|")[0].strip()).hostname or "").lower()
+
+
 def pid_of(table: ReleaseTable) -> str:
     """The host of the page the table was read from (`PID` of the line): it tells which site a row comes from."""
-    return (urlparse(table.url).hostname or "").lower()
+    return site_of(table.url)
 
 
 def place_of(table: ReleaseTable) -> tuple[str, ...]:
@@ -204,6 +209,8 @@ class TableGetReply(BaseModel):
     state: TableState
     table: ReleaseTable | None = None
     reason: str | None = None
+    # The end of the term of the table (its read and the term of its site, term.py); none without a table.
+    fresh_until: str | None = None
 
 
 class SiteResolveRequest(BaseModel):
@@ -304,8 +311,12 @@ class SeriesReadProgress(BaseModel):
 
 
 class TableReady(BaseModel):
+    """A complete table is stored (`sources.table.ready`), or the term of its site changed (`sources.table.fresh`): the
+    time it was read and the end of its term (term.py)."""
+
     url: str
     read_at: str
+    fresh_until: str | None = None
 
 
 class TableFailed(BaseModel):

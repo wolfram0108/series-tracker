@@ -1,4 +1,5 @@
 import { api } from "../api/client"
+import type { components } from "../api/schema"
 import { t, type MessageKey } from "../i18n"
 import { reasonText } from "../lib/reason"
 import type { AppSearchReply, PreviewReply, ResolveReply, SeriesSource, SourceDraft } from "../lib/sources"
@@ -56,6 +57,11 @@ export function previewAddress(body: {
 }
 
 /** Reads the page now, whatever the age of its table; how the read goes and where it ends come as events. */
+/** When the tables of the pages were read and until when they are current (the term of their site). */
+export function fetchFreshness(urls: string[]): Promise<Answer<{ pages: components["schemas"]["TableReady"][] }>> {
+  return call(() => api.POST("/api/sources/fresh", { body: { urls } }))
+}
+
 export function readPageNow(url: string, rows = "all"): Promise<Answer<unknown>> {
   return call(() => api.POST("/api/sources/read", { body: { url, rows } }))
 }

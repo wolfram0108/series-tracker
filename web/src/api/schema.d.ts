@@ -493,6 +493,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sources/fresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tables Fresh
+         * @description When the tables of the pages were read and until when they are current; the events `sources_table_ready` and
+         *     `sources_table_fresh` carry it on.
+         */
+        post: operations["tables_fresh_api_sources_fresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sources/cancel": {
         parameters: {
             query?: never;
@@ -819,6 +840,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Schedule
+         * @description The times of day of the syncs and of the checks of the torrent releases; a schedule scan refuses is 400 with
+         *     its reason.
+         */
+        post: operations["schedule_api_schedule_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scanner/scan_all": {
         parameters: {
             query?: never;
@@ -1136,7 +1178,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/settings/sources_term": {
+    "/api/settings/source_terms": {
         parameters: {
             query?: never;
             header?: never;
@@ -1144,18 +1186,18 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Sources Term
-         * @description The term of what the sources answered, whole hours (sources, term.py): {value} both ways; a value the sources
-         *     refuse is 400 with its reason.
+         * Source Terms
+         * @description The terms of the sites the sources read (sources, term.py): GET {sites: [{site, app, sources, minutes}]}, POST
+         *     {site, minutes} sets one; a value the sources refuse is 400 with its reason.
          */
-        get: operations["sources_term_api_settings_sources_term_get"];
+        get: operations["source_terms_api_settings_source_terms_get"];
         put?: never;
         /**
-         * Sources Term
-         * @description The term of what the sources answered, whole hours (sources, term.py): {value} both ways; a value the sources
-         *     refuse is 400 with its reason.
+         * Source Terms
+         * @description The terms of the sites the sources read (sources, term.py): GET {sites: [{site, app, sources, minutes}]}, POST
+         *     {site, minutes} sets one; a value the sources refuse is 400 with its reason.
          */
-        post: operations["sources_term_api_settings_sources_term_post"];
+        post: operations["source_terms_api_settings_source_terms_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2823,6 +2865,14 @@ export interface components {
             items?: string[];
         };
         /**
+         * FreshRequest
+         * @description The pages (canonical addresses) whose freshness a window shows.
+         */
+        FreshRequest: {
+            /** Urls */
+            urls: string[];
+        };
+        /**
          * GroupQueue
          * @description The queue of the voice-over of one group, and whether the level takes that voice-over at all (`voice.take`).
          */
@@ -3956,12 +4006,40 @@ export interface components {
             scanner_enabled: boolean;
             /** Is Scanning */
             is_scanning: boolean;
-            /** Scan Interval */
-            scan_interval: number;
             /** Next Scan Time */
             next_scan_time?: string | null;
+            /** Next Check Time */
+            next_check_time?: string | null;
+            schedule: components["schemas"]["ScheduleValue"];
+            /** Checks */
+            checks?: string[];
         } & {
             [key: string]: unknown;
+        };
+        /** ScheduleBody */
+        ScheduleBody: {
+            schedule: components["schemas"]["ScheduleValue"];
+        };
+        /**
+         * ScheduleValue
+         * @description The times of day of the syncs and of the checks of the torrent releases (core/schedule.py), «HH:MM».
+         */
+        ScheduleValue: {
+            /** Syncs */
+            syncs?: string[];
+            /**
+             * Torrent Mode
+             * @default between
+             * @enum {string}
+             */
+            torrent_mode: "between" | "free";
+            /** Torrent Free */
+            torrent_free?: string[];
+            /**
+             * Torrent Between
+             * @default 1
+             */
+            torrent_between: number;
         };
         /**
          * SeasonVoiceOrder
@@ -4556,12 +4634,21 @@ export interface components {
              */
             rate: number | null;
         };
-        /** TableReady */
+        /**
+         * TableReady
+         * @description A complete table is stored (`sources.table.ready`), or the term of its site changed (`sources.table.fresh`): the
+         *     time it was read and the end of its term (term.py).
+         */
         TableReady: {
             /** Url */
             url: string;
             /** Read At */
             read_at: string;
+            /**
+             * Fresh Until
+             * @default null
+             */
+            fresh_until: string | null;
         };
         /** TableFailed */
         TableFailed: {
@@ -4662,7 +4749,7 @@ export interface components {
         /** StreamEvent */
         StreamEvent: {
             /** @enum {string} */
-            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "torrent_release_update" | "torrent_editor_update" | "torrent_read_update" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_read_progress" | "conform_queue_update" | "pack_queue_update" | "pack_journal_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "torrent_staging_update" | "conform_settings_update" | "provider_update" | "relocation_started" | "relocation_finished";
+            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_fresh" | "torrent_release_update" | "torrent_editor_update" | "torrent_read_update" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_read_progress" | "conform_queue_update" | "pack_queue_update" | "pack_journal_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "torrent_staging_update" | "conform_settings_update" | "provider_update" | "relocation_started" | "relocation_finished";
             data: unknown;
         };
     };
@@ -6102,6 +6189,66 @@ export interface operations {
             };
         };
     };
+    tables_fresh_api_sources_fresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DynamicObject"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
     cancel_read_api_sources_cancel_post: {
         parameters: {
             query?: never;
@@ -7033,6 +7180,48 @@ export interface operations {
             };
         };
     };
+    schedule_api_schedule_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DynamicObject"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     scan_all_api_scanner_scan_all_post: {
         parameters: {
             query?: never;
@@ -7709,7 +7898,7 @@ export interface operations {
             };
         };
     };
-    sources_term_api_settings_sources_term_get: {
+    source_terms_api_settings_source_terms_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -7765,7 +7954,7 @@ export interface operations {
             };
         };
     };
-    sources_term_api_settings_sources_term_post: {
+    source_terms_api_settings_source_terms_post: {
         parameters: {
             query?: never;
             header?: never;

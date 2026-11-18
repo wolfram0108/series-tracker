@@ -22,6 +22,10 @@
   /* The subtitles of a container (stage 15): the marks of their numbers and their chips, apart from the numbers of the sounds. */
   --subtitle-color: #5a3e8a;
   --subtitle-ground: #efe9f7;
+  /* How current the data of a source is (FreshMark): the ink of «устарели с …» beside its yellow dot. */
+  --fresh-stale-ink: #8a5a00;
+  /* The checks of the torrent releases on the line of the day (settings «Расписание»), apart from the blue syncs. */
+  --check-color: #b45309;
 
   /* --- шрифты --- */
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;

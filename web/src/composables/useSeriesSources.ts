@@ -8,6 +8,7 @@ import {
 import { useCompositionStore } from "../stores/composition"
 import { useLayoutStore } from "../stores/layout"
 import { useSourceTablesStore } from "../stores/sourceTables"
+import { useFreshnessStore } from "../stores/freshness"
 import { useSSE } from "./useSSE"
 import {
   changeSource, createSource, fetchSources, readPageNow, removeSource, resolveAddress, stopReading,
@@ -21,6 +22,7 @@ import type { DraftPatch } from "./useSourceDrafts"
  */
 export function useSeriesSources(seriesId: number, initial: SeriesSource[]) {
   const tables = useSourceTablesStore()
+  const freshness = useFreshnessStore()
   const composition = useCompositionStore()
   const sources = ref<SeriesSource[]>(initial)
   // The layout is the window's one copy (stores/layout.ts): the output of the window reads the same one.
@@ -56,9 +58,9 @@ export function useSeriesSources(seriesId: number, initial: SeriesSource[]) {
       summaryOf(summaries.value, source.id), source.players_off ?? [], rows.get(source.id) ?? [])] as const))
   })
 
-  const items = computed<SourceItem[]>(() => sources.value.map((source) => itemOfSource(
+  const items = computed<SourceItem[]>(() => sources.value.map((source) => ({ ...itemOfSource(
     source, summaryOf(summaries.value, source.id), tables.forUrl(canonical.value[source.id] ?? ""), [],
-    players.value.get(source.id))))
+    players.value.get(source.id)), fresh: freshness.forUrl(canonical.value[source.id] ?? "") })))
 
   async function nameThePage(source: SeriesSource): Promise<void> {
     const answer = await resolveAddress(source.url)
@@ -79,6 +81,7 @@ export function useSeriesSources(seriesId: number, initial: SeriesSource[]) {
     if (ask !== asked) return
     tablesLoading.value = false
     await Promise.all(sources.value.filter((source) => !(source.id in canonical.value)).map(nameThePage))
+    await freshness.load(Object.values(canonical.value))
   }
 
   function refused(text: string): false {

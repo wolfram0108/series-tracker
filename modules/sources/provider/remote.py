@@ -34,8 +34,7 @@ class Wire(Protocol):
 
     def known_player(self, name: str) -> bool: ...
 
-    @property
-    def term_hours(self) -> int: ...
+    def term_hours(self, url: str) -> int: ...
 
 
 class RemoteSite:
@@ -70,7 +69,7 @@ class RemoteSite:
     async def read(self, url: str, ctx: ReadContext) -> TableDraft:
         request = ReadRequest(url=url, rows=ctx.rows, recent=ctx.recent, fresh=ctx.fresh, off=sorted(ctx.off),
                               last_rows=[row.model_dump(mode="json") for row in ctx.last_rows],
-                              term_hours=self._wire.term_hours)
+                              term_hours=self._wire.term_hours(url))
         draft: TableDraft | None = None
         try:
             # Closed on every way out: the closed connection is how the provider learns the read is over (or was stopped).
@@ -141,7 +140,7 @@ class RemoteFamily:
         is at `target` whole when this returns. The number of connections is the provider's own business: `connections` is
         not sent. A refusal has its kind (final, broken, unasked) as the provider says it; a provider that cannot be reached, or
         whose answer ends with no outcome, says nothing of the source."""
-        request = DownloadRequest(url=url, path=target, max_height=max_height, term_hours=self._wire.term_hours)
+        request = DownloadRequest(url=url, path=target, max_height=max_height, term_hours=self._wire.term_hours(url))
         try:
             # Closed on every way out: the closed connection is how the provider learns the file is given up.
             async with aclosing(self._wire.download(request)) as frames:

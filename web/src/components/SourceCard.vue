@@ -10,6 +10,8 @@ import StSelect from "./StSelect.vue"
 import StValue from "./StValue.vue"
 import PowerSwitch from "./status/output/PowerSwitch.vue"
 import SourceMark from "./status/output/SourceMark.vue"
+import FreshMark from "./FreshMark.vue"
+import ReleaseFresh from "./ReleaseFresh.vue"
 import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
@@ -106,6 +108,9 @@ async function copyAddress(): Promise<void> {
         <i v-if="view.state === 'reading'" class="pi pi-spin pi-spinner" />{{ stateText }}
       </span>
       <span v-if="view.players.length && !waiting" class="muted">{{ sourceCaption(view.players) }}</span>
+      <!-- How current its data is: the table by the term of its site; a torrent source by the check of its release. -->
+      <ReleaseFresh v-if="isTorrent && typeof item.id === 'number'" :url="item.url" />
+      <FreshMark v-else-if="item.fresh && !waiting" :at="item.fresh.readAt" :until="item.fresh.freshUntil" />
       <span class="source-actions">
         <!-- One place for both: while the page is read the button that reads it again is the one that stops the read. -->
         <FoldButton v-if="view.state === 'reading'" :label="t('sources.stopRead')" icon="pi pi-stop-circle" severity="danger"

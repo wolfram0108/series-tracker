@@ -319,7 +319,7 @@ async def test_the_tables_of_one_channel_share_its_listing_within_the_hour_and_l
     run = Run(api, clock=clock)
 
     first = await run.read(f"{CHANNEL}|противостояние")
-    clock.now += run.site.term.seconds - 1
+    clock.now += run.site.term.of_site("vkvideo.ru").total_seconds() - 1
     other = await run.read(f"{CHANNEL}|другое аниме")
     assert len(api.asked("video.get")) == 3 and len(api.asked("utils.resolveScreenName")) == 1
     assert len(first.rows) == 83 and len(other.rows) == 167
@@ -332,7 +332,7 @@ async def test_the_tables_of_one_channel_share_its_listing_within_the_hour_and_l
 async def test_the_listing_of_a_channel_serves_within_the_term_the_module_gives_its_sites():
     api, clock = Api(), Clock()
     run = Run(api, clock=clock)
-    term = Term(5)
+    term = Term({"vkvideo.ru": 5 * 60})
     run.site.configure(term=term)
     await run.read(f"{CHANNEL}|противостояние")
     clock.now += 5 * 3600 - 1

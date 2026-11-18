@@ -2,6 +2,7 @@
 // their voice-overs. Nothing here computes an episode, a season, a voice-over or a resolution — those are the rows the
 // rules of the assigned profile made (the layout); the ranges below only join the numbers of the rows that follow one
 // another. A source without such rows shows no line of episodes or voice-overs.
+import type { Freshness } from "../stores/freshness"
 import type { components } from "../api/schema"
 import { ru } from "../i18n/ru"
 import { t, tn, type MessageKey } from "../i18n"
@@ -75,6 +76,8 @@ export interface SourceItem {
   view: SourceView
   /** The names of the release as its page writes them, when the window has them (a draft after its first table). */
   names?: string[]
+  /** When its table was read and until when it is current (the term of its site); none before the core told it. */
+  fresh?: Freshness | null
 }
 
 // --- the view of one source ------------------------------------------------------------------------------------------

@@ -22,7 +22,7 @@ import httpx
 
 from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress,
                             TableReady, TableRow, TableState, UnreadPart)
-from core.contracts.release_table import TABLE_TRACE_TOPIC
+from core.contracts.release_table import TABLE_TRACE_TOPIC, site_of
 from core.deadlines import TABLE_READ_S
 from core.logging import get_logger
 from core.reasons import EXTERNAL, describe, parse, reason
@@ -35,6 +35,7 @@ from .term import Term
 
 PROGRESS_TOPIC = "sources.table.progress"
 READY_TOPIC = "sources.table.ready"
+FRESH_TOPIC = "sources.table.fresh"
 FAILED_TOPIC = "sources.table.failed"
 # What a read does, told as it happens for its dump (modules/runlog): `begin` when a page is taken for a read, `end`
 # with what the read came to — how long it took and what every player of the page gave.
@@ -144,6 +145,42 @@ class TableReader:
     # --- requests -----------------------------------------------------------------------
 
     async def get(self, request: TableGetRequest) -> TableGetReply:
+        reply = await self._get(request)
+        return reply.model_copy(update={"fresh_until": self.fresh_until(reply.table)}) if reply.table is not None else reply
+
+    def fresh_until(self, table: ReleaseTable | None) -> str | None:
+        """The end of the term of a table: its read and the term of its site (term.py); none for a table never read."""
+        if table is None or not table.read_at:
+            return None
+        try:
+            read_at = datetime.fromisoformat(table.read_at)
+        except ValueError:
+            return None
+        return (read_at + self._term.of(table.url)).astimezone(timezone.utc).isoformat()
+
+    async def fresh_of(self, urls: list[str]) -> list[TableReady]:
+        """The stored tables of the addresses (by their canonical page) with the end of their term; an address with no
+        table read is left out."""
+        read = {page["url"]: page["read_at"] for page in await self._repo.pages() if page["read_at"]}
+        found = {}
+        for url in urls:
+            resolved = self._resolve(url)
+            key = resolved[1] if resolved is not None else url
+            if key in read:
+                table = ReleaseTable(url=key, site="", read_at=read[key])
+                found[key] = TableReady(url=key, read_at=read[key], fresh_until=self.fresh_until(table))
+        return list(found.values())
+
+    async def fresh_of_site(self, site: str) -> list[TableReady]:
+        """The stored tables of a site with the end of their term: what a change of its term changes."""
+        found = []
+        for page in await self._repo.pages():
+            if site_of(page["url"]) == site and page["read_at"]:
+                table = ReleaseTable(url=page["url"], site="", read_at=page["read_at"])
+                found.append(TableReady(url=page["url"], read_at=page["read_at"], fresh_until=self.fresh_until(table)))
+        return found
+
+    async def _get(self, request: TableGetRequest) -> TableGetReply:
         found = self._resolve(request.url)
         if found is None:
             # No site reads the address now (the provider of the socket is not up and was never heard of): the page is not read,
@@ -230,7 +267,7 @@ class TableReader:
         stopped first: its end must not write the page again. Returns the keys forgotten."""
         async with self._gate:
             gone = [page["url"] for page in await self._repo.pages() if page["url"] not in listed
-                    and (page["url"] in was_listed or not self._fresh_at(page["read_at"]))]
+                    and (page["url"] in was_listed or not self._fresh_at(page["url"], page["read_at"]))]
         stopping = [self._reading[key] for key in gone if key in self._reading]
         for key in gone:
             self._again.pop(key, None)
@@ -242,13 +279,13 @@ class TableReader:
             await self._repo.forget_pages(gone)
         return gone
 
-    def _fresh_at(self, read_at: str | None) -> bool:
+    def _fresh_at(self, url: str, read_at: str | None) -> bool:
         try:
             age = self._clock() - datetime.fromisoformat(read_at or "")
         except (TypeError, ValueError):
             return False
         # A table "from the future" means the clock moved back: it is not trusted.
-        return timedelta(0) <= age < self._term.delta
+        return timedelta(0) <= age < self._term.of(url)
 
     def resolve(self, url: str) -> SiteResolveReply:
         """Which site reads the address and its canonical form, with no network."""
@@ -286,7 +323,7 @@ class TableReader:
         return (site, site.canonical_url(url)) if site is not None else None
 
     def _fresh(self, table: ReleaseTable) -> bool:
-        return self._fresh_at(table.read_at)
+        return self._fresh_at(table.url, table.read_at)
 
     def _stamp(self) -> str:
         return self._clock().astimezone(timezone.utc).isoformat()
@@ -325,7 +362,8 @@ class TableReader:
                                     "reason": problem, "seconds": round(time.monotonic() - began, 1),
                                     **(read_summary(table) if problem is None and table is not None else {})})
         if problem is None and table is not None:
-            self._publish(READY_TOPIC, TableReady(url=key, read_at=table.read_at or "").model_dump(mode="json"))
+            self._publish(READY_TOPIC, TableReady(url=key, read_at=table.read_at or "",
+                                                  fresh_until=self.fresh_until(table)).model_dump(mode="json"))
         else:
             self._log.warning("table of %s not read: %s", key, describe(problem))
             self._publish(FAILED_TOPIC, TableFailed(url=key, reason=problem or "").model_dump(mode="json"))

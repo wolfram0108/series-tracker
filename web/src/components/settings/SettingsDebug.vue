@@ -8,54 +8,23 @@ import StBtn from "../StBtn.vue"
 import StInput from "../StInput.vue"
 import StNumber from "../StNumber.vue"
 import StSelect from "../StSelect.vue"
-import StSwitch from "../StSwitch.vue"
 import DatabaseViewerModal from "./DatabaseViewerModal.vue"
+import ScheduleSettings from "./ScheduleSettings.vue"
 import { api } from "../../api/client"
 import { sanitizePath } from "../../lib/fsnames"
 import { t, type MessageKey } from "../../i18n"
 import { useApi } from "../../composables/useApi"
 import { useDownloadLimits } from "../../composables/useDownloadLimits"
-import { useAction } from "../../composables/useAction"
 import { useConfirm } from "../../composables/useConfirm"
-import { useScannerStore } from "../../stores/scanner"
 import { reasonText } from "../../lib/reason"
 import LoadGate from "../LoadGate.vue"
 import { useLoad } from "../../composables/useLoad"
 
 // Вкладка «Отладка»: сканер, сохранённые пути, флаги/параметры конвейера,
 // просмотр и очистка БД. Контракт проверен по modules/gateway/api_settings.py.
-const scanner = useScannerStore()
 const { request } = useApi()
 const confirm = useConfirm()
 const toast = useToast()
-
-const enabled = ref(false)
-const interval = ref("360")
-
-function syncFromStore() {
-  if (scanner.status) {
-    enabled.value = scanner.status.scanner_enabled
-    interval.value = String(scanner.status.scan_interval)
-  }
-}
-
-async function saveScanner() {
-  // Контракт gateway (api_system): поля enabled/interval (НЕ scanner_enabled/
-  // scan_interval) — иначе тумблер автоскана молча не срабатывает.
-  await request(
-    api.POST("/api/scanner/settings", {
-      body: { enabled: enabled.value, interval: Number(interval.value) },
-    }),
-    { errorMessage: t("debug.autoSync.saveFailed") },
-  )
-}
-async function setEnabled(value: boolean) {
-  enabled.value = value
-  await saveScanner()
-}
-const scanAll = useAction(async () => {
-  await request(api.POST("/api/scanner/scan_all", {}), { errorMessage: t("debug.syncAll.failed") })
-})
 
 // --- the limits of the downloads by way (a state shared with the window of the extensions: composables/useDownloadLimits.ts) ----
 const { limits: shared, load: loadLimits, save: saveShared } = useDownloadLimits()
@@ -72,24 +41,6 @@ watch(shared, (got) => {
 // A field writes only itself: the other limits are the core's until their own fields are changed.
 async function saveLimits(field: keyof typeof limits.value) {
   await saveShared({ [field]: limits.value[field].trim() })
-}
-
-async function loadNum(path: "/api/settings/sources_term", fallback: number): Promise<string | null> {
-  const d = (await request(api.GET(path))) as { value?: number } | null
-  return d === null ? null : String(d.value ?? fallback)
-}
-
-// --- the term of what the sources answered (sources, term.py; GET/POST → {value}) ----
-const sourcesTerm = ref("1")
-
-async function saveSourcesTerm() {
-  const saved = (await request(
-    api.POST("/api/settings/sources_term", { body: { value: sourcesTerm.value.trim() } }),
-  )) as { value?: number } | null
-  if (saved !== null) {
-    toast.add({ severity: "info", summary: t("debug.sourcesTerm.label"), detail: String(saved.value), life: 2000 })
-  }
-  sourcesTerm.value = (await loadNum("/api/settings/sources_term", 1)) ?? sourcesTerm.value
 }
 
 // сохранённые пути
@@ -167,13 +118,7 @@ async function clearTable() {
 
 // Everything the tab shows is read together; the form is put on show when it all has come (components/LoadGate.vue).
 async function readAll(): Promise<boolean> {
-  syncFromStore()
-  const [term] = await Promise.all([
-    loadNum("/api/settings/sources_term", 1),
-    loadPaths(), loadTables(), loadLimits(),
-  ])
-  if (term === null) return false
-  sourcesTerm.value = term
+  await Promise.all([loadPaths(), loadTables(), loadLimits()])
   return true
 }
 const gate = useLoad(readAll)
@@ -183,25 +128,9 @@ onMounted(gate.run)
 <template>
   <LoadGate :state="gate.state.value" :rows="6" @retry="gate.run">
     <div class="sheet settings-debug">
-      <!-- Scanner -->
-      <SheetRow :caption="t('debug.sync.title')">
-        <div class="sheet-pair">
-          <SheetField :label="t('series.autoSync')" control>
-            <StSwitch :model-value="enabled" @update:model-value="setEnabled" />
-          </SheetField>
-          <SheetField :label="t('debug.autoSync.interval')" control>
-            <StNumber v-model="interval" @change="saveScanner" />
-          </SheetField>
-        </div>
-        <div class="sheet-line">
-          <Button
-            :label="t('debug.syncAll.button')"
-            icon="pi pi-refresh"
-            :loading="scanAll.pending()"
-            :disabled="scanner.status?.is_scanning"
-            @click="scanAll.run()"
-          />
-        </div>
+      <!-- The schedule of the day: the syncs, the checks of the torrent releases, the terms of the sites -->
+      <SheetRow :caption="t('schedule.title')">
+        <ScheduleSettings />
       </SheetRow>
 
       <!-- The pipeline and debugging -->
@@ -209,9 +138,6 @@ onMounted(gate.run)
         <div class="sheet-pair">
           <SheetField v-for="each in LIMITS" :key="each.field" :label="t(each.label)" :title="each.hint ? t(each.hint) : undefined" control>
             <StNumber v-model="limits[each.field]" @change="saveLimits(each.field)" />
-          </SheetField>
-          <SheetField :label="t('debug.sourcesTerm.label')" :title="t('debug.sourcesTerm.hint')" control>
-            <StNumber v-model="sourcesTerm" @change="saveSourcesTerm" />
           </SheetField>
         </div>
         <p class="sheet-hint">{{ t("debug.downloads.multiAtOnce", { count: multiAtOnce }) }}</p>

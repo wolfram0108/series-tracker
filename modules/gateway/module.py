@@ -176,6 +176,8 @@ SSE_MAP: dict[str, Outgoing] = {
     "series.source.removed": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "removed"}),
     "sources.table.progress": Outgoing("sources_table_progress", latest=lambda payload: payload.get("url")),
     "sources.table.ready": Outgoing("sources_table_ready"),
+    # The term of the site of a page changed: the end of the term of its table moved.
+    "sources.table.fresh": Outgoing("sources_table_fresh"),
     # The release of a torrent source and the editor of its page changed (stage 15): the tab «Торрент» shows them again.
     "torrents.release.changed": Outgoing("torrent_release_update"),
     "unpack.editor.changed": Outgoing("torrent_editor_update"),

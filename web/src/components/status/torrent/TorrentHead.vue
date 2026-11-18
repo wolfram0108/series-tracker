@@ -11,6 +11,7 @@ import { RELEASE_STATES, stateIcon, stateLabel } from "../../../lib/states"
 import { EDITOR_TABS, type Editor, type EditorTab, type PageReleases, type ReleaseView, type SourceState } from "../../../lib/torrent"
 import { downloadRelease, watchRelease } from "../../../composables/torrentCalls"
 import SourceMark from "../output/SourceMark.vue"
+import FreshMark from "../../FreshMark.vue"
 
 // The head of the tab «Торрент» (the board «Состояния»): the source, its release and its state, the progress of what
 // goes on, the automatic update, the download of a release not loaded yet, and the switch of the four editors.
@@ -90,6 +91,8 @@ async function setWatched(watched: boolean): Promise<void> {
     <b class="torrent-site">{{ page?.site || siteOf(source.url) }}</b>
     <span class="torrent-title" :title="title">{{ title }}<template v-if="told"> · {{ told }}</template></span>
     <span class="pill torrent-state" :data-state="named"><i class="pi" :class="stateIcon(named)" aria-hidden="true" />{{ stateLabel(named) }}</span>
+    <!-- When the page was last checked for a newer version, and whether the next check of the schedule is past. -->
+    <FreshMark v-if="release?.watched" :at="release.checked_at ?? null" :until="release.fresh_until ?? null" />
     <span v-if="progress" class="torrent-progress" :data-state="named">
       <span class="torrent-bar" role="progressbar" :aria-valuenow="progress.share" aria-valuemin="0" aria-valuemax="100">
         <span :style="{ inlineSize: `${progress.share}%` }" />

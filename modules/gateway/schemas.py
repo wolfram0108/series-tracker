@@ -75,11 +75,27 @@ class ErrorResponse(ApiModel):
 
 # --- блок «скан и очереди» (api_system) -------------------------------------
 
+class ScheduleValue(RequestModel):
+    """The times of day of the syncs and of the checks of the torrent releases (core/schedule.py), «HH:MM»."""
+
+    syncs: list[str] = Field(default_factory=list)
+    torrent_mode: Literal["between", "free"] = "between"
+    torrent_free: list[str] = Field(default_factory=list)
+    torrent_between: int = 1
+
+
+class ScheduleBody(RequestModel):
+    schedule: ScheduleValue
+
+
 class ScannerStatus(ApiModel):
     scanner_enabled: bool
     is_scanning: bool
-    scan_interval: int
     next_scan_time: str | None = None
+    next_check_time: str | None = None
+    schedule: ScheduleValue
+    # The times of day the releases are checked, as the schedule makes them (core/schedule.py).
+    checks: list[str] = Field(default_factory=list)
 
 
 class QueueTask(ApiModel):
@@ -268,6 +284,12 @@ class OutputSwitchBody(RequestModel):
 
 
 # --- the test of rules on a page (api_sources) -------------------------------
+
+class FreshRequest(RequestModel):
+    """The pages (canonical addresses) whose freshness a window shows."""
+
+    urls: list[str] = Field(max_length=500)
+
 
 class TableReadRequest(RequestModel):
     """Read the page of an address now."""

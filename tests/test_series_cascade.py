@@ -126,7 +126,7 @@ async def test_delete_during_scan_leaves_no_rows(db_path):
     db = Database(db_path)
     catalog = CatalogModule(bus, db)
     source = SlowSource(bus)
-    scan = ScanModule(bus, db, scheduler_tick=None)
+    scan = ScanModule(bus, db, scheduler=False)
     runner = Runner(bus, [catalog, source, scan])
     await runner.start()
     try:

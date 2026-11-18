@@ -4,6 +4,7 @@ import { useSeriesStore, type Series, type SeriesDelta } from "../stores/series"
 import { useQueuesStore, type ConformPicture, type DownloadCard, type PackCard, type PackJournal, type QueueTask } from "../stores/queues"
 import { useScannerStore, type ScannerStatus } from "../stores/scanner"
 import { useSourceTablesStore } from "../stores/sourceTables"
+import { useFreshnessStore } from "../stores/freshness"
 import { useSeriesReadsStore } from "../stores/seriesReads"
 import { useCompositionStore } from "../stores/composition"
 import type { components } from "../api/schema"
@@ -25,6 +26,7 @@ export function setupRealtime(): void {
   const queues = useQueuesStore()
   const scanner = useScannerStore()
   const tables = useSourceTablesStore()
+  const freshness = useFreshnessStore()
   const reads = useSeriesReadsStore()
   const composition = useCompositionStore()
   const voices = useVoicesStore()
@@ -54,7 +56,11 @@ export function setupRealtime(): void {
   // Reading of site pages and the layout: packets are whole for their part of the screen, nothing is asked back.
   sse.on("sources_table_progress", (d) => tables.applyProgress(d as Schemas["TableProgress"]))
   sse.on("series_read_progress", (d) => reads.apply(d as Schemas["SeriesReadProgress"]))
-  sse.on("sources_table_ready", (d) => tables.applyReady(d as Schemas["TableReady"]))
+  sse.on("sources_table_ready", (d) => {
+    tables.applyReady(d as Schemas["TableReady"])
+    freshness.apply(d as Schemas["TableReady"])
+  })
+  sse.on("sources_table_fresh", (d) => freshness.apply(d as Schemas["TableReady"]))
   sse.on("sources_table_failed", (d) => tables.applyFailed(d as Schemas["TableFailed"]))
   sse.on("composition_changed", (d) => composition.applyChanged(d as Schemas["CompositionChanged"]))
   sse.on("composition_failed", (d) => composition.applyFailed(d as Schemas["CompositionFailed"]))

@@ -152,3 +152,39 @@ async def test_the_releases_of_a_page_are_read_from_the_tracker_with_their_ids(s
     assert (page["url"], page["site"], page["title"]) == (PAGE, "kinozal", "Тайтл / Title / 2026 / ПМ / WEB-DL (1080p)")
     assert [(each["release"], each["link"], each["published"]) for each in page["releases"]] == [
         ("page", "https://dl.kinozal.me/download.php?id=2034617", "05.05.2026 10:15:00")]
+
+
+class Torrents(BaseModule):
+    """The module that keeps the releases, as a tracker's page meets it: the check of the releases of a page."""
+    name = "torrents"
+
+    def __init__(self, bus) -> None:
+        super().__init__(bus)
+        self.checked: list[str] = []
+
+    def register(self) -> None:
+        self.handle("torrents.release.check", self.on_check)
+
+    async def on_check(self, env):
+        self.checked.append(env.payload["url"])
+        return {"releases": []}
+
+
+async def test_reread_of_a_trackers_page_checks_its_releases_and_a_read_by_the_term_does_not(stand):
+    """«Перечитать» of a torrent source is one button for its table and its releases: the read the user asked for checks the
+    releases of the page on the tracker first; a read a window or a sync begins does not."""
+    sources, unpack, bus = stand
+    torrents = Torrents(bus)
+    unpack.rows = [track("Show/E01.mkv", 1, "Студия")]
+    await unpack.start()
+    await torrents.start()
+    try:
+        ready = bus.subscribe("sources.table.ready")
+        await unpack.request("sources.table.get", {"url": PAGE})
+        await asyncio.wait_for(ready.queue.get(), 5)
+        assert torrents.checked == []
+        await sources.tables.read(TableGetRequest(url=PAGE))
+        await asyncio.wait_for(ready.queue.get(), 5)
+        assert torrents.checked == [PAGE]
+    finally:
+        await torrents.stop()

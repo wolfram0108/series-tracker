@@ -4,7 +4,7 @@ import { scanClock } from "./scanClock"
 
 const NEXT = "2026-11-18T10:40:00+00:00"
 const at = Date.parse(NEXT)
-const status = (over = {}) => ({ scanner_enabled: true, is_scanning: false, scan_interval: 720, next_scan_time: NEXT, ...over })
+const status = (over = {}) => ({ scanner_enabled: true, is_scanning: false, next_scan_time: NEXT, schedule: { torrent_mode: "between" as const, torrent_between: 1 }, ...over })
 
 describe("the clock of the scheduled scan", () => {
   it("says in how long, in whole minutes rounded up, and when its words change next", () => {

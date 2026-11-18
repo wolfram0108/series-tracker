@@ -66,6 +66,13 @@ class TrackerSite:
     async def read(self, url: str, ctx: ReadContext) -> TableDraft:
         if ctx.ask is None:
             raise SiteError(reason("unpack_not_running"))
+        if ctx.fresh:
+            # «Перечитать» of the source also checks its releases on the tracker: one button for the page and its releases.
+            try:
+                await ctx.ask("torrents.release.check", {"url": url})
+            except BusRequestError as exc:
+                if code_of(str(exc)) != NO_HANDLER:
+                    raise SiteError(str(exc)) from exc
         try:
             answer = await ctx.ask("unpack.table.get", {"url": url})
         except BusRequestError as exc:

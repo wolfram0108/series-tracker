@@ -85,7 +85,7 @@ async def build(db_path: str, urls=(URL1,), *, table_wait_s: float = STUCK_S, pr
         series_id, source_ids = created.series_id, created.source_ids
     bus = Bus()
     world = World(bus)
-    scan = ScanModule(bus, db, scheduler_tick=None, table_wait_s=table_wait_s)
+    scan = ScanModule(bus, db, scheduler=False, table_wait_s=table_wait_s)
     probe = Probe(bus)
     runner = Runner(bus, [world, CatalogModule(bus, db), scan, probe])
     await runner.start()

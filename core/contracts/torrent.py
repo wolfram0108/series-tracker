@@ -63,6 +63,10 @@ class ReleaseView(BaseModel):
     folder: str | None = None
     pending: bool = False
     files: list[ReleaseFile] = Field(default_factory=list)
+    # When the page was last checked for a newer version of it (none: never), and the next check of the schedule after
+    # that (core/schedule.py; none: no check scheduled): past it the release is not known to be current.
+    checked_at: str | None = None
+    fresh_until: str | None = None
 
 
 class PageRelease(BaseModel):

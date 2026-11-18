@@ -57,7 +57,7 @@ async def system(db_path, tmp_path):
     db = Database(db_path)
     gateway = GatewayModule(bus, static_dir=str(tmp_path), auth_required=False,
                             templates_dir=str(tmp_path))
-    scan = ScanModule(bus, db, scheduler_tick=None)
+    scan = ScanModule(bus, db, scheduler=False)
     runner = Runner(bus, [gateway, CatalogModule(bus, db),
                           SettingsModule(bus, db), scan, Queues(bus)])
     await runner.start()
@@ -73,33 +73,37 @@ async def test_scanner_status_shape(system):
     _, _, client, _ = system
     resp = await client.get("/api/scanner/status")
     assert resp.status_code == 200
-    body = resp.json()
-    assert body == {"scanner_enabled": False, "scan_interval": 60,
-                    "is_scanning": False,
-                    "next_scan_time": None}
+    assert resp.json() == {"scanner_enabled": False, "is_scanning": False, "next_scan_time": None, "next_check_time": None,
+                           "schedule": {"syncs": [], "torrent_mode": "between", "torrent_free": [], "torrent_between": 1},
+                           "checks": []}
 
 
 @pytest.mark.asyncio
-async def test_settings_reschedule_instead_of_immediate_scan(system):
-    """Р-20: смена настроек НЕ запускает полный скан — пересчитывает
-    next_scan_timestamp от текущего момента."""
+async def test_a_new_schedule_sets_the_next_sync_and_check_by_the_times_of_day_and_scans_nothing_at_once(system):
+    """Р-20: a change of the settings scans nothing at once; the next sync is the first time of day of the schedule after
+    now, the next check the first of the checks (one between two syncs by default)."""
     bus, db, client, scan = system
     sub = bus.subscribe("scan.status.changed")
-    before = datetime.now(timezone.utc)
-    resp = await client.post("/api/scanner/settings",
-                             json={"enabled": True, "interval": 30})
+    local = datetime.now().astimezone()
+    soon, later = local + timedelta(minutes=30), local + timedelta(minutes=90)
+    times = sorted({soon.strftime("%H:%M"), later.strftime("%H:%M")})
+    resp = await client.post("/api/scanner/settings", json={"enabled": True})
     assert resp.status_code == 200
+    resp = await client.post("/api/schedule", json={"schedule": {"syncs": times}})
+    assert resp.status_code == 200 and resp.json()["schedule"]["syncs"] == times
 
     await settle(bus, scan)  # the recount is the reaction of scan to the event of the change
-    row = await db.fetch_one(
-        "SELECT value FROM settings WHERE key='next_scan_timestamp'")
-    assert row and row["value"]
+    row = await db.fetch_one("SELECT value FROM settings WHERE key='next_scan_timestamp'")
     next_ts = datetime.fromisoformat(row["value"])
-    delta = next_ts - before
-    assert timedelta(minutes=29) < delta < timedelta(minutes=31)
+    assert timedelta(minutes=28) < next_ts - local < timedelta(minutes=31)
     assert scan._scan_all_running is False  # немедленного скана нет
+    status = (await client.get("/api/scanner/status")).json()
+    check = datetime.fromisoformat(status["next_check_time"])
+    assert timedelta(minutes=58) < check - local < timedelta(minutes=61)
     env = await asyncio.wait_for(sub.queue.get(), 3)  # статус опубликован
     assert env.payload["scanner_enabled"] in (True, False)
+    refused = await client.post("/api/schedule", json={"schedule": {"syncs": ["25:00"]}})
+    assert refused.status_code == 400 and "schedule_invalid" in refused.json()["error"]
 
 
 @pytest.mark.asyncio

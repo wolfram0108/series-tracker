@@ -152,18 +152,18 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return reply["limits"]
         return await gw.request("downloads.limits.get", {})
 
-    @route_per_method(r, "/api/settings/sources_term", methods=["GET", "POST"], response_model=DynamicObject,
+    @route_per_method(r, "/api/settings/source_terms", methods=["GET", "POST"], response_model=DynamicObject,
                       responses=_ERR1)
-    async def sources_term(request: Request):
-        """The term of what the sources answered, whole hours (sources, term.py): {value} both ways; a value the sources
-        refuse is 400 with its reason."""
+    async def source_terms(request: Request):
+        """The terms of the sites the sources read (sources, term.py): GET {sites: [{site, app, sources, minutes}]}, POST
+        {site, minutes} sets one; a value the sources refuse is 400 with its reason."""
         if request.method == "POST":
             data = await request.json()
-            reply = await gw.request("sources.term.set", {"hours": data.get("value")})
+            reply = await gw.request("sources.terms.set", {"site": data.get("site"), "minutes": data.get("minutes")})
             if not reply.get("ok"):
                 return JSONResponse({"error": reply["reason"]}, status_code=400)
-            return {"success": True, "value": reply["hours"]}
-        return {"value": (await gw.request("sources.term.get", {}))["hours"]}
+            return {"success": True, "minutes": reply["minutes"]}
+        return await gw.request("sources.terms.get", {})
 
     @route_per_method(r, "/api/settings/torrent_staging", methods=["GET", "POST"], response_model=DynamicObject,
                       responses=_ERR1)

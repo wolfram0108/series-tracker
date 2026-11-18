@@ -36,12 +36,15 @@ Queries:
       A series the catalog does not have is refused with the catalog's own answer.
 
 Commands:
-  scan.all.start {} — a pass over all series with auto_scan_enabled (what the internal scheduler does by the
-      schedule from the settings).
+  scan.all.start {} — a pass over all series with auto_scan_enabled (what the internal scheduler does at the times of
+      day of the schedule, core/schedule.py).
+  scan.schedule.set {schedule} → {ok, schedule?, reason?}: the times of day of
+      the syncs and of the checks of the torrent releases (the setting `schedule`), refused (`schedule_invalid`) when
+      a time or the mode is not one; the scheduler and the torrents module take the new one from settings.changed.
 
 Events (outgoing):
-  scan.status.changed {scanner_enabled, scan_interval, is_scanning, next_scan_time} — the state
-      of the scheduler (the contract of the old scanner_status_update).
+  scan.status.changed {scanner_enabled, is_scanning, next_scan_time, next_check_time, schedule, checks} — the state of
+      the scheduler: the next sync and the next check of the releases by the schedule, and the times of the checks.
   series.status.contribution — the fold of scanning/error (R-11); the carrier of the error is scan_tasks.status='error'.
   series.purged {series_id, owner} — report: the tables of the series are cleaned.
   scan.run.changed (RunChanged) — a sync of the series opened or closed its run: open from the start of the sync until
@@ -66,7 +69,7 @@ import asyncio
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from core import NO_HANDLER, BaseModule, BusRequestError
 from core.deadlines import EDIT_STUCK_S, TABLE_WAIT_S
@@ -75,6 +78,7 @@ from core.db import Database
 from core.envelope import Envelope
 from core.ignored import parse_memory
 from core.reasons import describe, reason
+from core.schedule import SCHEDULE_KEY, checked, hhmm, next_at, parse
 from . import sync
 from .errors import ScanAborted, SyncFailed
 from .repository import ScanRepository
@@ -128,10 +132,11 @@ def _sources_of(series: dict) -> list[SeriesSource]:
 class ScanModule(BaseModule):
     name = "scan"
 
-    def __init__(self, bus, db: Database, *, scheduler_tick: float | None = 10.0,
-                 table_wait_s: float = TABLE_WAIT_S) -> None:
+    def __init__(self, bus, db: Database, *, scheduler: bool = True, table_wait_s: float = TABLE_WAIT_S) -> None:
         self.repo = ScanRepository(db)
-        self._tick = scheduler_tick  # None — без планировщика (тесты)
+        self._scheduler = scheduler  # False: no scheduled passes (tests)
+        # A change of the schedule or of the switch wakes the scheduler, which sleeps until the next sync of the day.
+        self._wake = asyncio.Event()
         self._table_wait_s = table_wait_s
         self._signals = TableSignals()
         self._locks: dict[int, asyncio.Lock] = {}
@@ -172,6 +177,7 @@ class ScanModule(BaseModule):
         self.handle("scan.edit.begin", self.on_edit_begin)
         self.handle("scan.edit.end", self.on_edit_end)
         self.handle("scan.status.get", self.on_status_get)
+        self.handle("scan.schedule.set", self.on_schedule_set)
         self.handle("system.started", self.on_system_started)
         self.handle("sources.table.ready", self.on_table_ready)
         self.handle("sources.table.failed", self.on_table_failed)
@@ -186,7 +192,7 @@ class ScanModule(BaseModule):
         # вклад при старте после reconcile).
         for task in await self.repo.error_tasks():
             self._contribute(task["series_id"], scanning=False, error=True)
-        if self._tick is not None:
+        if self._scheduler:
             self._spawn(self._scheduler_loop())
 
     async def on_runs_get(self, env: Envelope) -> dict:
@@ -328,8 +334,16 @@ class ScanModule(BaseModule):
         if self._scan_all_running:
             self.log.warning("полный проход уже идёт — повтор отклонён")
             return {"started": False}
+        self._scan_all_running = True
         self._spawn(self._scan_all())
         return {"started": True}
+
+    async def on_schedule_set(self, env: Envelope) -> dict:
+        found = checked(env.payload.get("schedule"))
+        if isinstance(found, str):
+            return {"ok": False, "reason": reason(found)}
+        await self.request("settings.value.set", {"key": SCHEDULE_KEY, "value": json.dumps(found.as_value())})
+        return {"ok": True, "schedule": found.as_value()}
 
     async def on_status_get(self, env: Envelope) -> dict:
         """Состояние планировщика (контракт GET /api/scanner/status)."""
@@ -340,12 +354,10 @@ class ScanModule(BaseModule):
         текущего момента (вместо немедленного полного скана старой
         системы — лишняя нагрузка на трекеры)."""
         key = env.payload.get("key")
-        if key not in ("scanner_agent_enabled", "scan_interval_minutes"):
+        if key not in ("scanner_agent_enabled", SCHEDULE_KEY):
             return
-        if await self._setting("scanner_agent_enabled", "false") == "true":
-            await self._schedule_next()
-        else:
-            await self._broadcast_status()
+        await self._schedule_next()
+        self._wake.set()
 
     async def on_sse_clients(self, env: Envelope) -> None:
         """Новый SSE-клиент: публикуем текущее состояние, чтобы вкладка
@@ -743,13 +755,34 @@ class ScanModule(BaseModule):
     # --- планировщик автосканирования ----------------------------------------------
 
     async def _scheduler_loop(self) -> None:
+        """Sleeps until the next sync of the schedule (the time of day is the subject of the wait); a change of the schedule
+        or of the switch wakes it to count again."""
         await self._broadcast_status()
         while True:
-            await asyncio.sleep(self._tick)
+            self._wake.clear()
+            delay = await self._until_next()
+            try:
+                await asyncio.wait_for(self._wake.wait(), delay)
+                continue
+            except TimeoutError:
+                pass
             try:
                 await self._scheduler_tick()
             except Exception:  # noqa: BLE001 — цикл не должен умирать
                 self.log.exception("ошибка такта планировщика")
+
+    async def _until_next(self) -> float | None:
+        """Seconds to the next sync of the schedule; None (no limit) while a pass goes, the switch is off or nothing is
+        scheduled: the end of the pass or a change of the settings wakes the loop."""
+        if self._scan_all_running or await self._setting("scanner_agent_enabled", "false") != "true":
+            return None
+        next_ts = await self._setting("next_scan_timestamp", None)
+        if not next_ts:
+            return None
+        next_time = datetime.fromisoformat(next_ts)
+        if next_time.tzinfo is None:
+            next_time = next_time.replace(tzinfo=timezone.utc)
+        return max(0.0, (next_time - datetime.now(timezone.utc)).total_seconds())
 
     async def _scheduler_tick(self) -> None:
         if self._scan_all_running:
@@ -764,6 +797,7 @@ class ScanModule(BaseModule):
             next_time = next_time.replace(tzinfo=timezone.utc)
         if datetime.now(timezone.utc) >= next_time:
             self.log.info("настало время планового сканирования")
+            self._scan_all_running = True
             self._spawn(self._scan_all())
 
     async def _scan_all(self) -> None:
@@ -792,13 +826,17 @@ class ScanModule(BaseModule):
             self._scan_all_running = False
             if not stopped:
                 await self._schedule_next()
+                # The next sync may be the one it was: the end of the pass wakes the scheduler by itself.
+                self._wake.set()
 
     async def _schedule_next(self) -> None:
-        interval = int(await self._setting("scan_interval_minutes", "60"))
-        next_time = datetime.now(timezone.utc) + timedelta(minutes=interval)
-        await self.request("settings.value.set", {
-            "key": "next_scan_timestamp", "value": next_time.isoformat()})
-        self.log.info("следующее сканирование: %s", next_time.isoformat())
+        """The next sync is the first time of day of the schedule after now; a schedule of none leaves no next."""
+        schedule = parse(await self._setting(SCHEDULE_KEY, None))
+        next_time = next_at(schedule.syncs, datetime.now(timezone.utc))
+        value = next_time.astimezone(timezone.utc).isoformat() if next_time is not None else ""
+        if value != (await self._setting("next_scan_timestamp", None) or ""):
+            await self.request("settings.value.set", {"key": "next_scan_timestamp", "value": value})
+            self.log.info("следующее сканирование: %s", value or "нет в расписании")
         await self._broadcast_status()
 
     async def _setting(self, key: str, default: str | None) -> str | None:
@@ -807,14 +845,18 @@ class ScanModule(BaseModule):
         return value if value is not None else default
 
     async def _status_payload(self) -> dict:
-        """Форма старого scanner_status_update / GET /api/scanner/status."""
+        """The state of the scheduler (GET /api/scanner/status): the switch, the schedule, the next sync and the next check
+        of the torrent releases."""
+        schedule = parse(await self._setting(SCHEDULE_KEY, None))
+        next_check = next_at(schedule.checks(), datetime.now(timezone.utc))
         return {
-            "scanner_enabled":
-                await self._setting("scanner_agent_enabled", "false") == "true",
-            "scan_interval":
-                int(await self._setting("scan_interval_minutes", "60")),
+            "scanner_enabled": await self._setting("scanner_agent_enabled", "false") == "true",
             "is_scanning": self._scan_all_running or bool(self._running),
-            "next_scan_time": await self._setting("next_scan_timestamp", None),
+            "next_scan_time": await self._setting("next_scan_timestamp", None) or None,
+            "next_check_time": next_check.astimezone(timezone.utc).isoformat() if next_check is not None else None,
+            "schedule": schedule.as_value(),
+            # The times the releases are checked, as the schedule makes them (free, or between the syncs).
+            "checks": [hhmm(each) for each in schedule.checks()],
         }
 
     async def _broadcast_status(self) -> None:

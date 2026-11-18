@@ -71,7 +71,7 @@ class World(BaseModule):
         self.pages: dict[str, Page] = {}
         self.blocked: dict[str, str] = {}
         self.recompute_error: str | None = None
-        self.settings_values = {"scan_interval_minutes": "60"}
+        self.settings_values: dict[str, str] = {}
         # Whether each executor has work of the series when a run asks (`<owner>.work.get`); none by default.
         self.work: dict[str, bool] = {}
         # The episodes each executor works on, as its states name them (WorkState.busy).

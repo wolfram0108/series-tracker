@@ -84,7 +84,9 @@ torrent_release_files, torrent_release_versions), keyed by the page and the id o
   torrents.release.check {url} → {releases} — the page is read now: a watched release it lists in another version (another
       infohash, else another date) begins its update — the old version leaves the client without its files, the new one
       comes started into the same folder, the client checks the files there and downloads the rest; while a sync of a
-      series with the page runs (scan.run.changed) the update waits for its end. Also once a term of the sources.
+      series with the page runs (scan.run.changed) the update waits for its end. The check sets `checked_at` of every
+      watched release of the page. The pages are also checked at the times of the schedule (core/schedule.py), and a
+      time missed while the service was down at the start; «Перечитать» of the source checks them too (trackers.py).
   torrents.release.watch {url, release, watched} → ReleaseView — the automatic update on or off
   torrents.staging.get {} → {value} and torrents.staging.set {value} → {ok, value, reason?} — the folder the releases download
       into (the setting torrents.staging_dir); a value that is no absolute path is refused (`staging_dir_not_absolute`); the
@@ -93,7 +95,8 @@ torrent_release_files, torrent_release_versions), keyed by the page and the id o
   Event torrents.release.changed ReleaseView — state, version or files changed; `ready` once every wanted file is there
   (an update ends by removing the files of the old version the new one does not list). A page no source lists any more
   (series.source.removed, series.deleted) leaves the client with its files and its folder. settings.changed
-  {key: torrents.staging_dir} moves every release to the new folder (setLocation).
+  {key: torrents.staging_dir} moves every release to the new folder (setLocation); {key: schedule} sets the times of the
+  checks and tells every release again (its `fresh_until` moved).
 
 Переименование файлов — query renaming.process_torrent (зона renaming);
 мониторинг прогресса — адаптивный опрос qBit (часто при активности,
@@ -105,6 +108,7 @@ import asyncio
 import base64
 import json
 import os
+from datetime import datetime, timezone
 
 from core import BaseModule, BusRequestError, storage, torrent_profile_id
 from core.contracts import RUN_CHANGED, RunChanged
@@ -113,6 +117,7 @@ from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason, relayed
 from core.retry import UNTIMED, Budget, retrying
+from core.schedule import SCHEDULE_KEY, last_at, next_at, parse
 
 from . import pipeline, selection
 from .infohash import (TorrentParseError, infohash_candidates,
@@ -181,6 +186,8 @@ class TorrentsModule(BaseModule):
         self._monitor_idle = monitor_idle
         # The releases of the torrent sources (stage 15), beside the pipeline of the torrent series until those are gone.
         self._release_wake = asyncio.Event()
+        # A change of the schedule wakes the loop of the checks of the releases (_watch_loop).
+        self._schedule_wake = asyncio.Event()
         self.releases = Releases(
             ReleaseStore(db), client=lambda: self.qbt, request=lambda topic, payload: self.request(topic, payload),
             publish=lambda topic, payload: self.publish_event(topic, payload), wake=self._release_wake.set)
@@ -1345,6 +1352,10 @@ class TorrentsModule(BaseModule):
                 self._release_wake.set()  # releases moved when the service stopped: the client is asked at once
         except Exception:  # noqa: BLE001 - the next word of a release wakes the following
             self.log.exception("the releases of the torrent sources were not read at the start")
+        try:
+            self.releases.checks = parse((await self.request("settings.value.get", {"key": SCHEDULE_KEY})).get("value")).checks()
+        except Exception:  # noqa: BLE001 - without the schedule no page is checked until it changes
+            self.log.exception("the schedule of the checks of the releases was not read")
         self.spawn(self._release_loop(), lasting=True)
         self.spawn(self._watch_loop(), lasting=True)
 
@@ -1413,6 +1424,10 @@ class TorrentsModule(BaseModule):
             # Every open window of the settings shows the folder the core holds now, whichever window set it.
             self.publish_event("torrents.staging.changed", {"value": env.payload.get("value") or ""})
             await self.releases.relocate(env.payload.get("value") or "")
+        elif env.payload.get("key") == SCHEDULE_KEY:
+            self.releases.checks = parse(env.payload.get("value")).checks()
+            self._schedule_wake.set()
+            await self.releases.told_all()  # the next check of every release moved
 
     async def _release_loop(self) -> None:
         """Woken by a word (a release added, its priorities changed); while a release moves the client is asked again at
@@ -1438,15 +1453,20 @@ class TorrentsModule(BaseModule):
                 self._release_wake.set()
 
     async def _watch_loop(self) -> None:
-        """The watched pages are read again once a term of the sources (the time is the subject: how often a site is asked)."""
+        """The watched pages are checked at the times of the schedule (core/schedule.py; the time of day is the subject of
+        the wait): a page not checked since the last of them is checked now, so a time missed while the service was down
+        is made up at the start. A change of the schedule wakes the loop to count again."""
         while True:
-            try:
-                hours = float((await self.request("sources.term.get", {})).get("hours") or 1)
-            except Exception:  # noqa: BLE001 - the term of the sources at its default
-                hours = 1.0
-            await asyncio.sleep(hours * 3600)
-            for url in sorted({row["url"] for row in await self.releases.store.all() if row["watched"]}):
+            self._schedule_wake.clear()
+            now = datetime.now(timezone.utc)
+            for url in await self.releases.due(last_at(self.releases.checks, now)):
                 try:
                     await self.releases.check(url)
                 except Exception:  # noqa: BLE001 - one page that cannot be read leaves the others checked
                     self.log.exception("проверка обновления %s не удалась", url)
+            following = next_at(self.releases.checks, datetime.now(timezone.utc))
+            delay = None if following is None else max(0.0, (following - datetime.now(timezone.utc)).total_seconds())
+            try:
+                await asyncio.wait_for(self._schedule_wake.wait(), delay)
+            except TimeoutError:
+                pass

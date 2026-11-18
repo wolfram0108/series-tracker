@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -16,6 +18,7 @@ from core import BaseModule, Bus
 from core.contracts import RUN_CHANGED
 from core.contracts.torrent import RELEASE_CHANGED_TOPIC, PageRelease, PageReleases
 from core.db import Database
+from core.schedule import next_at
 from modules.torrents.module import TorrentsModule
 from modules.torrents.qbt_client import QbtClient
 from qbit_model import V1, V2, QbitModel, release
@@ -39,7 +42,7 @@ class World(BaseModule):
 
     def register(self) -> None:
         for topic, handler in (("sources.releases.get", self.on_releases), ("sources.torrent_file.get", self.on_file),
-                               ("sources.site.resolve", self.on_resolve), ("sources.term.get", self.on_term),
+                               ("sources.site.resolve", self.on_resolve),
                                ("catalog.series.get", self.on_series), ("catalog.series.list", self.on_list),
                                ("scan.runs.get", self.on_runs), ("settings.value.get", self.on_setting),
                                ("settings.value.set", self.on_set)):
@@ -53,9 +56,6 @@ class World(BaseModule):
 
     async def on_resolve(self, env):
         return {"site": "kinozal", "canonical_url": env.payload["url"], "source_type": "torrent"}
-
-    async def on_term(self, env):
-        return {"hours": 1}
 
     async def on_series(self, env):
         return {"id": env.payload["series_id"], "sources": [{"url": u} for u in self.series.get(env.payload["series_id"], [])]}
@@ -269,3 +269,27 @@ async def test_a_page_no_source_lists_leaves_the_client_with_its_files(stand):
             await asyncio.sleep(0.01)
     await asyncio.wait_for(gone(), LIMIT_S)
     assert h not in model.torrents
+
+
+async def test_a_check_tells_when_it_was_and_the_next_check_of_the_schedule_and_a_page_past_its_time_is_due(stand):
+    """«Перечитать» and the times of the schedule check the page: every watched release gets `checked_at`, and `fresh_until`
+    is the next check of the schedule after it; a change of the schedule tells every release again. A page not checked
+    since the last time of the schedule is due (the loop checks it at once, the start too)."""
+    model, world, torrents, told = stand
+    world.lists(model, release(V1), published="d1", link="L1")
+    await world.request("torrents.release.download", {"url": PAGE, "release": "page"})
+    ready = await until(told, "ready")
+    assert (ready["checked_at"], ready["fresh_until"]) == (None, None)
+
+    schedule = {"syncs": ["00:00", "12:00"], "torrent_mode": "between", "torrent_free": [], "torrent_between": 1}
+    world.publish_event("settings.changed", {"key": "schedule", "value": json.dumps(schedule)})
+    await until(told, "ready")
+    assert torrents.releases.checks == (360, 1080)
+    await world.request("torrents.release.check", {"url": PAGE})
+    checked = await until(told, "ready")
+    at = datetime.fromisoformat(checked["checked_at"])
+    assert datetime.fromisoformat(checked["fresh_until"]) == next_at((360, 1080), at)
+
+    assert await torrents.releases.due(None) == []
+    assert await torrents.releases.due(at - timedelta(minutes=1)) == []
+    assert await torrents.releases.due(at + timedelta(minutes=1)) == [PAGE]

@@ -68,7 +68,7 @@ async def system(db_path, tmp_path):
     gateway = GatewayModule(bus, static_dir=str(tmp_path), auth_required=False,
                             templates_dir=str(tmp_path))
     neighbours = Neighbours(bus)
-    scan = ScanModule(bus, db, scheduler_tick=None)
+    scan = ScanModule(bus, db, scheduler=False)
     runner = Runner(bus, [gateway, CatalogModule(bus, db), scan, neighbours])
     await runner.start()
     transport = httpx.ASGITransport(app=gateway.app)

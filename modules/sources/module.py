@@ -79,13 +79,18 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    A page of the provider's world is one a site of its manifest reads, or an address that
                                    is no web address and no site reads (modules/sources/provider/gate.py). Scan asks it
                                    before it opens a sync of a series, whatever else the series is made of
-  sources.term.get {} → {hours}: the term of what the sources answered (term.py), whole hours
-  sources.term.set {hours} → {ok, hours, reason?}: a whole number of hours from one is stored (`sources_term_hours` of the
-                                   settings) and is the term of every reader of the module at once; any other value is
-                                   refused (`sources_term_invalid`) and the term stays
+  sources.terms.get {} → {sites: [{site, app, sources, minutes}]}: every site some source of a series reads (not a
+                                   tracker: its table is the release `torrents` keeps), whether it is an application, how
+                                   many sources read it and the term of what it answered (term.py), minutes
+  sources.tables.fresh {urls} → {pages: [{url, read_at, fresh_until}]}: when the tables of the pages (canonical) were
+                                   read and until when their term holds; a page with no table read is left out
+  sources.terms.set {site, minutes} → {ok, minutes?, reason?}: the term of one site is stored (`sources.terms` of the
+                                   settings) and is the term of every reader of that site at once; minutes from one to a
+                                   month, any other value is refused (`sources_term_invalid`)
 Events (owner: sources):
   sources.table.progress {url, phase, current, total}   how far a read is
-  sources.table.ready {url, read_at}                    a complete table is stored and served
+  sources.table.ready {url, read_at, fresh_until}       a complete table is stored and served, current until fresh_until
+  sources.table.fresh {url, read_at, fresh_until}       the term of the site of the page changed: the end of its term moved
   sources.settings.changed SourcesSettingsView          the mirrors of a tracker were saved: every open settings
                                                         screen shows them without asking back
   sources.table.failed {url, reason}                    the read failed; the last complete table still serves
@@ -105,8 +110,9 @@ belong to the sources of the series: the module asks the catalog which pages its
 forgets the table of a page that was listed and is not any more at once, and of a page that never was (a preview, one left
 from before) when its table is past the term; a read of it that goes is stopped first. `series.deleted` is answered with
 `series.purged {owner: sources}` (the cascade of Р-19).
-settings.changed {key: sources_term_hours} — the term of what the sources answered (term.py): the tables of
-pages, the listings of VK channels and the addresses parsers of applications gave are current for that many hours.
+settings.changed {key: sources.terms} — the terms of the sites (term.py): the tables of pages, the listings of VK channels
+and the addresses parsers of applications gave are current for the term of their site; every stored table of a site whose
+term moved is told again (`sources.table.fresh`).
 settings.changed {key: voices.players_off} — the players the owner switched off for every source: a read asks none of
 them (ReadContext.off) and keeps their rows of the last read as they were; a player switched on is asked at the next
 read of a page (the term, or a read the user asks for).
@@ -140,6 +146,7 @@ from typing import Callable, Iterable
 from core import BaseModule, compute, ids
 from core import storage
 from core.contracts.torrent import PageReleases
+from core.contracts.release_table import site_of
 from core.contracts.voices import PLAYERS_OFF_KEY
 from core.contracts import (AppSearchReply, AppSearchRequest, NotAllowed, ParsedDomains, PlayerFacts, PlayerPlace,
                             PlayersListReply, PlayersListRequest, SiteResolveRequest,
@@ -159,14 +166,14 @@ from .provider import Connector, ProviderClient, ProviderHost, is_web_address, n
 from .provider import block as provider_block
 from .releases import page_release
 from .repository import SourcesRepository
-from .term import DEFAULT_HOURS, TERM_KEY, Term, hours_of
+from .term import DEFAULT_MINUTES, TERMS_KEY, Term, minutes_of, terms_of
 from .players.alloha_session import Profile as AllohaProfile
 from .players.contract import StreamUnavailable, TransferRefused
 from .players.registry import PlayerRegistry
 from .players.streams import resolve_stream
 from .sites import Site, SiteError, SiteRegistry
 from .sites.builtin import builtin_sites
-from .table import TableReader, utc_now
+from .table import FRESH_TOPIC, TableReader, utc_now
 
 REQUEST_MIN_INTERVAL = 3.0  # секунд между запросами к одному трекеру
 VK_API_BASE = "https://api.vk.com/method/"
@@ -211,7 +218,8 @@ class SourcesModule(BaseModule):
         self.players.get("alloha").configure(
             alloha_browser_getter=self.alloha_browsers.browser,
             alloha_profile_path=os.path.abspath(os.path.join(torrent_cache_dir, "alloha-profile.enc")))
-        # One term of what the sources answered for every reader of the module; the setting changes it for all at once.
+        # The terms of what the sources answered, by the site, for every reader of the module; the setting changes them for
+        # all at once.
         self.term = Term()
         # The pages some source lists, as the catalog said at the last change of the sources (None until it was asked), and
         # the lock that makes one such change one step: the topics of the change are taken by tasks of their own.
@@ -264,8 +272,9 @@ class SourcesModule(BaseModule):
         self.handle("sources.provider.get", self.on_provider_get)
         self.handle("sources.provider.set", self.on_provider_set)
         self.handle("sources.players.list", self.on_players_list)
-        self.handle("sources.term.get", self.on_term_get)
-        self.handle("sources.term.set", self.on_term_set)
+        self.handle("sources.terms.get", self.on_terms_get)
+        self.handle("sources.tables.fresh", self.on_tables_fresh)
+        self.handle("sources.terms.set", self.on_terms_set)
         self.handle("settings.changed", self.on_settings_changed)
         # The tables of pages belong to the sources of the series: a page no source lists any more is forgotten.
         for topic in ("system.started", "series.source.added", "series.source.updated", "series.source.removed"):
@@ -312,10 +321,10 @@ class SourcesModule(BaseModule):
     async def on_start(self) -> None:
         self._http = bounded_client(timeout=20.0, follow_redirects=True)
         try:
-            stored = (await self.request("settings.value.get", {"key": TERM_KEY})).get("value")
-        except Exception:  # noqa: BLE001 - a setting that cannot be read leaves the term at its default
+            stored = (await self.request("settings.value.get", {"key": TERMS_KEY})).get("value")
+        except Exception:  # noqa: BLE001 - a setting that cannot be read leaves every site at the default term
             stored = None
-        self._set_term(stored)
+        self.term.minutes = terms_of(stored)
         try:
             players_off = (await self.request("settings.value.get", {"key": PLAYERS_OFF_KEY})).get("value")
         except Exception:  # noqa: BLE001 - a setting that cannot be read leaves every player asked, as the term stays at its default
@@ -339,21 +348,44 @@ class SourcesModule(BaseModule):
         await self.browsers.shutdown()
         await self.alloha_browsers.shutdown()
 
-    async def on_term_get(self, env: Envelope) -> dict:
-        return {"hours": self.term.hours}
+    async def on_terms_get(self, env: Envelope) -> dict:
+        """Every site some source of a series reads, with how many sources read it and its term."""
+        counted: dict[str, int] = {}
+        apps: set[str] = set()
+        for series in await self.request("catalog.series.list", {}):
+            for source in series.get("sources") or []:
+                if source.get("source_type") == SourceType.TORRENT:
+                    continue
+                site = site_of(source["url"])
+                if site:
+                    counted[site] = counted.get(site, 0) + 1
+                    if not is_web_address(source["url"]):
+                        apps.add(site)
+        order = sorted(counted, key=lambda site: (site in apps, -counted[site], site))
+        return {"sites": [{"site": site, "app": site in apps, "sources": counted[site],
+                           "minutes": self.term.minutes.get(site, DEFAULT_MINUTES)} for site in order]}
 
-    async def on_term_set(self, env: Envelope) -> dict:
-        hours = hours_of(env.payload.get("hours"))
-        if hours is None:
-            return {"ok": False, "hours": self.term.hours,
-                    "reason": reason("sources_term_invalid", value=str(env.payload.get("hours")))}
-        await self.request("settings.value.set", {"key": TERM_KEY, "value": str(hours)})
-        self._set_term(hours)
-        return {"ok": True, "hours": hours}
+    async def on_tables_fresh(self, env: Envelope) -> dict:
+        """{urls} → {pages: [{url, read_at, fresh_until}]}: when the tables of the pages were read and until when they are
+        current (the window shows it on each source; the events ready and fresh carry it on)."""
+        pages = await self.tables.fresh_of([str(url) for url in env.payload.get("urls") or []])
+        return {"pages": [page.model_dump(mode="json") for page in pages]}
+
+    async def on_terms_set(self, env: Envelope) -> dict:
+        site, minutes = str(env.payload.get("site") or ""), minutes_of(env.payload.get("minutes"))
+        if not site or minutes is None:
+            return {"ok": False, "reason": reason("sources_term_invalid", value=str(env.payload.get("minutes")))}
+        await self.request("settings.value.set", {"key": TERMS_KEY,
+                                                   "value": json.dumps({**self.term.minutes, site: minutes}, sort_keys=True)})
+        return {"ok": True, "minutes": minutes}
 
     async def on_settings_changed(self, env: Envelope) -> None:
-        if env.payload.get("key") == TERM_KEY:
-            self._set_term(env.payload.get("value"))
+        if env.payload.get("key") == TERMS_KEY:
+            before, self.term.minutes = self.term.minutes, terms_of(env.payload.get("value"))
+            for site in {site for site in before.keys() | self.term.minutes.keys()
+                         if before.get(site, DEFAULT_MINUTES) != self.term.minutes.get(site, DEFAULT_MINUTES)}:
+                for fresh in await self.tables.fresh_of_site(site):
+                    self.publish_event(FRESH_TOPIC, fresh.model_dump(mode="json"))
         elif env.payload.get("key") == PLAYERS_OFF_KEY:
             self._set_players_off(env.payload.get("value"))
 
@@ -367,16 +399,6 @@ class SourcesModule(BaseModule):
             self.log.warning("отключённые плееры «%s»: не список имён, опрашиваются все", value)
             names = []
         self.players_off = frozenset(names)
-
-    def _set_term(self, value) -> None:
-        hours = hours_of(value) if value not in (None, "") else DEFAULT_HOURS
-        if hours is None:
-            self.log.warning("срок актуальности опроса источников «%s» не число часов от 1: остаётся %d ч", value,
-                             self.term.hours)
-            return
-        if hours != self.term.hours:
-            self.log.info("срок актуальности опроса источников: %d ч", hours)
-        self.term.hours = hours
 
     # --- бережный доступ к трекеру ------------------------------------------------
 

@@ -15,7 +15,8 @@ from core import BusRequestError
 from core.contracts import DownloadCard, PackCard
 from core.reasons import reason, relayed
 
-from .schemas import ConformJobChange, ErrorOnly, ErrorResponse, OkResponse, QueueTask, ScannerStatus
+from .schemas import (ConformJobChange, DynamicObject, ErrorOnly, ErrorResponse, OkResponse, QueueTask, ScannerStatus,
+                      ScheduleBody)
 
 
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
@@ -33,13 +34,18 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             await gw.request("settings.value.set", {
                 "key": "scanner_agent_enabled",
                 "value": str(data["enabled"]).lower()})
-        if "interval" in data:
-            await gw.request("settings.value.set", {
-                "key": "scan_interval_minutes",
-                "value": str(data["interval"])})
         # Пересчёт расписания делает scan по settings.changed (Р-20);
         # немедленный полный скан старой системы не воспроизводится.
         return {"success": True}
+
+    @r.post("/api/schedule", response_model=DynamicObject, responses={400: {"model": ErrorResponse}})
+    async def schedule(body: ScheduleBody):
+        """The times of day of the syncs and of the checks of the torrent releases; a schedule scan refuses is 400 with
+        its reason."""
+        reply = await gw.request("scan.schedule.set", body.model_dump(mode="json"))
+        if not reply.get("ok"):
+            return JSONResponse({"error": reply["reason"]}, status_code=400)
+        return {"schedule": reply["schedule"]}
 
     @r.post("/api/scanner/scan_all", response_model=OkResponse,
             response_model_exclude_none=True,

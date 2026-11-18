@@ -101,7 +101,7 @@ describe("useSourceDrafts", () => {
     const drafts = useSourceDrafts()
     await drafts.add(PAGE)
     preview.mockResolvedValueOnce(page({ state: "ready", summary }))
-    useSourceTablesStore().applyReady({ url: PAGE, read_at: "2026-11-01T10:00:00Z" })
+    useSourceTablesStore().applyReady({ url: PAGE, read_at: "2026-11-01T10:00:00Z", fresh_until: null })
     await flushPromises()
     expect(preview).toHaveBeenCalledTimes(2)
     expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ url: PAGE, refresh: false }))
@@ -123,7 +123,7 @@ describe("useSourceDrafts", () => {
   it("takes up a read that ended before the answer of the request arrived", async () => {
     site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockImplementationOnce(async () => {
-      useSourceTablesStore().applyReady({ url: PAGE, read_at: "2026-11-01T10:00:00Z" })
+      useSourceTablesStore().applyReady({ url: PAGE, read_at: "2026-11-01T10:00:00Z", fresh_until: null })
       return page()
     })
     preview.mockResolvedValueOnce(page({ state: "ready", summary }))
@@ -134,7 +134,7 @@ describe("useSourceDrafts", () => {
   })
 
   it("does not ask in a loop when the answer still says reading and no news came after it", async () => {
-    useSourceTablesStore().applyReady({ url: PAGE, read_at: "old" })
+    useSourceTablesStore().applyReady({ url: PAGE, read_at: "old", fresh_until: null })
     site({ site: "ruchime", canonical_url: PAGE, source_type: "web_video" })
     preview.mockResolvedValue(page())
     const drafts = useSourceDrafts()
@@ -206,7 +206,7 @@ describe("useSourceDrafts", () => {
     expect(readPageNow).toHaveBeenCalledWith(PAGE, "all")
     expect(drafts.items.value[0].view.state).toBe("reading")
     preview.mockResolvedValueOnce(page({ state: "ready", summary }))
-    useSourceTablesStore().applyReady({ url: PAGE, read_at: "2026-11-01T10:00:00Z" })
+    useSourceTablesStore().applyReady({ url: PAGE, read_at: "2026-11-01T10:00:00Z", fresh_until: null })
     await flushPromises()
     expect(preview).toHaveBeenLastCalledWith({ url: PAGE, profile_id: null, refresh: false, ...NO_CHOICES })
     expect(drafts.items.value[0].view.state).toBe("noProfile")

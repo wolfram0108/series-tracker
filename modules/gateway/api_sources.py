@@ -13,7 +13,8 @@ from core.contracts import (AppSearchReply, AppSearchRequest, CompositionPreview
                             SeriesSource, SourcesSettingsView, SiteResolveReply, SiteResolveRequest)
 
 from .routing import admitted, refusal
-from .schemas import (ChangedSource, CreatedSource, ErrorOnly, ErrorResponse, OkResponse, ReadCancelled,
+from .schemas import (ChangedSource, CreatedSource, DynamicObject, ErrorOnly, ErrorResponse, FreshRequest, OkResponse,
+                      ReadCancelled,
                       RulesTestRequest, SourceAdd, SourceChange, TableReadRequest)
 
 _ERR = {code: {"model": ErrorResponse} for code in (400, 404, 500, 503)}
@@ -107,6 +108,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """Read the page now, whatever the age of its table (the hour of a table is the term of a sync, not of a user)."""
         gw.send_command("sources.table.read", body.model_dump(mode="json", exclude_none=True))
         return {"success": True}
+
+    @r.post("/api/sources/fresh", response_model=DynamicObject, responses=_ERR1)
+    async def tables_fresh(body: FreshRequest):
+        """When the tables of the pages were read and until when they are current; the events `sources_table_ready` and
+        `sources_table_fresh` carry it on."""
+        return await gw.request("sources.tables.fresh", body.model_dump(mode="json"))
 
     @r.post("/api/sources/cancel", response_model=ReadCancelled, responses=_ERR1)
     async def cancel_read(body: TableReadRequest):
