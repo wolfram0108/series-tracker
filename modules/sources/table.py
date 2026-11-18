@@ -43,9 +43,13 @@ TRACE_TOPIC = TABLE_TRACE_TOPIC
 
 
 def _cause(exc: Exception) -> str:
-    """The cause of a failed read: a coded reason of ours travels as it is; any other error says its type and words."""
+    """The cause of a failed read: a coded reason of ours travels as it is; any other error says its type and words (an
+    error with no words, as a TimeoutError, says its type alone)."""
     text = str(exc)
-    return text if parse(text)["code"] != EXTERNAL else f"{type(exc).__name__}: {text}"
+    found = parse(text)
+    if found is None:
+        return type(exc).__name__
+    return text if found["code"] != EXTERNAL else f"{type(exc).__name__}: {text}"
 
 
 def read_summary(table: ReleaseTable) -> dict:
@@ -226,8 +230,9 @@ class TableReader:
     async def read(self, request: TableGetRequest, *, changed: bool = False) -> None:
         """Read the page now, term or not, unless a read of it is already going. The user asked for it: the read takes
         nothing that an earlier read left for sharing (`ReadContext.fresh`). `changed`: what the page is read from changed
-        (the tracks of a release laid out anew) — a read that goes may have begun before, so the page is read once more
-        when it ends; a second ask of the same matter makes no second read."""
+        (the tracks of a release laid out anew) — no one asked to read the site, so the read is not `fresh` (a tracker's
+        page is not checked on the tracker for a change of its layout); a read that goes may have begun before, so the
+        page is read once more when it ends; a second ask of the same matter makes no second read."""
         found = self._resolve(request.url)
         if found is None:
             self._publish(FAILED_TOPIC, TableFailed(url=request.url, reason=self._blocked(request.url) or reason("site_not_found"))
@@ -241,7 +246,7 @@ class TableReader:
         if (why := self._blocked(key)) is not None:
             self._publish(FAILED_TOPIC, TableFailed(url=key, reason=why).model_dump(mode="json"))
             return
-        self._launch(site, key, fresh=True, rows=request.rows)
+        self._launch(site, key, fresh=not changed, rows=request.rows)
 
     async def cancel(self, url: str) -> bool:
         """Stop the read of a page the user does not want any more: the read ends failed (`read_cancelled`), so it is
@@ -369,7 +374,7 @@ class TableReader:
             self._publish(FAILED_TOPIC, TableFailed(url=key, reason=problem or "").model_dump(mode="json"))
         again = self._again.pop(key, None)
         if again is not None and key not in self._reading:
-            self._launch(site, key, fresh=True, rows=again)
+            self._launch(site, key, rows=again)
 
     async def _read(self, site: Site, key: str, fresh: bool, spec: str = "all") -> ReleaseTable:
         pace = Pace()

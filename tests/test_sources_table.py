@@ -381,6 +381,19 @@ async def test_a_page_whose_matter_changed_while_a_read_went_is_read_once_more_w
     await system.next(system.ready)
     assert len(system.site.reads) == 2
     await assert_no_second_read(system.site)
+    assert system.site.fresh == [False, False]  # a change of the matter is no one's ask to read the site
+
+
+async def test_a_read_for_a_change_of_its_matter_is_not_one_the_user_asked_for(system):
+    """The tracks of a release laid out anew make the table again from them: a tracker's page is not checked on the tracker
+    for it (`ReadContext.fresh` is the user's «Перечитать»)."""
+    await system.warm()
+
+    await system.sources.tables.read(TableGetRequest(url=PAGE), changed=True)
+
+    assert await entry(system.site) == PAGE
+    await system.next(system.ready)
+    assert system.site.fresh == [False, False]
 
 
 async def test_the_command_to_read_reads_a_page_whose_table_is_still_good_and_takes_nothing_shared(system):
@@ -456,6 +469,18 @@ async def test_an_unexpected_exception_is_logged_as_an_error_and_is_a_failed_rea
     assert failure["url"] == PAGE and failure["reason"].startswith('{"code":"read_failed"')
     assert "the markup changed" in failure["reason"]
     assert [record.levelno for record in caplog.records if record.name == "sources"] == [logging.ERROR]
+    assert (await system.stored())["state"] == "failed"
+
+
+async def test_an_error_with_no_words_is_a_failed_read_named_by_its_type(system):
+    """A request of the read that ran out of its fuse raises a TimeoutError with no text: the read still ends, failed,
+    and the page is not left `reading`."""
+    system.site.failure = TimeoutError()
+
+    await system.get()
+    failure = await system.next(system.failed)
+
+    assert failure["url"] == PAGE and "TimeoutError" in failure["reason"]
     assert (await system.stored())["state"] == "failed"
 
 

@@ -1225,6 +1225,44 @@ def test_a_fuse_shorter_than_the_requests_the_handler_waits_for_is_a_violation(t
     assert not any("«event»" in reason for reason in found)  # nobody asks for an event with a request
 
 
+def test_a_fuse_shorter_than_the_requests_of_an_object_the_handler_awaits_is_a_violation(tmp_path):
+    """A handler that leaves the work to an object it holds (`self.releases.check(...)`) waits for its requests too; the
+    topic is asked through a wrapper of a request (`ctx.ask`, given as `ask=lambda topic, payload: self.request(...)`)."""
+    root = write_tree(tmp_path, {"core/deadlines.py": NESTED_TABLE, "modules/a/module.py": """
+        from .helper import Helper
+
+        class A:
+            def __init__(self):
+                self.helper = Helper(self.request)
+
+            def register(self):
+                self.handle("outer", self.on_outer)
+
+            async def on_outer(self, env):
+                return await self.helper.look()
+
+    """, "modules/b/site.py": """
+        async def read(ctx):
+            await ctx.ask("outer", {})
+    """, "modules/b/module.py": """
+        class B:
+            def start(self):
+                self.reader = Reader(ask=lambda topic, payload: self.request(topic, payload))
+    """, "modules/a/helper.py": """
+        class Helper:
+            def __init__(self, request):
+                self.request = request
+
+            async def look(self):
+                return await self.deeper()
+
+            async def deeper(self):
+                await self.request("inner", {})
+    """})
+    found = [v.reason for v in bus_deadlines.check_deadlines(root).violations]
+    assert any("«outer»" in reason and "короче суммы" in reason and "inner" in reason for reason in found), found
+
+
 def test_a_handler_that_waits_for_a_request_without_a_fuse_makes_its_topic_unbounded(tmp_path):
     table = NESTED_TABLE.replace('"forever": None', '"forever": 50.0, "scan.series.run": None')
     root = write_tree(tmp_path, {"core/deadlines.py": table, "modules/a/module.py": NESTED_MODULE})

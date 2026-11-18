@@ -5,8 +5,9 @@ the module) is a violation: the caller does not know the price of the answer, an
 different numbers. A `timeout` that is computed (an expression forwarded from outside) is not looked at here.
 In core/deadlines.py: a topic of the table that no module answers (`self.handle`) is a violation: the entry is a stale
 one, and a stale entry hides the topic that was renamed.
-Nesting: a topic that is asked for with `request` and whose handler awaits other requests (directly or through the methods of
-its class that it awaits) has a fuse of at least the sum of the fuses of those requests, each counted once where it is
+Nesting: a topic that is asked for with `request` and whose handler awaits other requests (directly, through the methods of
+its class that it awaits, or through the methods of an object of a class of modules/ it holds: `self.releases =
+Releases(...)`, `await self.releases.check(...)`) has a fuse of at least the sum of the fuses of those requests, each counted once where it is
 awaited; an asker that gave up before the answer finished would report a timeout for an action that was applied. A step
 that has no fuse makes the topic unbounded. A step in a loop counts once (a step repeated for every unit of the request
 is scaled with `units` in the table). Events and commands nobody waits for are not asked for with `request`, so not checked.
@@ -66,11 +67,37 @@ def table_topics(root: Path) -> frozenset[str] | None:
     return None if table is None else table.topics()
 
 
-def requested_topics(tree: ast.Module) -> set[str]:
+def _forwards(function: ast.AST) -> bool:
+    """Whether a function or a lambda passes its first parameter on as the topic of a request."""
+    params = [arg.arg for arg in function.args.args if arg.arg != "self"]
+    return bool(params) and any(
+        isinstance(node, ast.Call) and callee_name(node.func) in CALLEES and node.args
+        and isinstance(node.args[0], ast.Name) and node.args[0].id == params[0] for node in ast.walk(function))
+
+
+def asking_names(trees: list[ast.Module]) -> frozenset[str]:
+    """The names a request is made with: those of CALLEES and of every wrapper that hands its topic on to one (the gateway's
+    `asked(topic, payload)`, the `ask=lambda topic, payload: self.request(...)` a site is given as `ctx.ask`)."""
+    found = set(CALLEES)
+    for tree in trees:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _forwards(node):
+                found.add(node.name)
+            elif isinstance(node, ast.keyword) and isinstance(node.value, ast.Lambda) and node.arg and _forwards(node.value):
+                found.add(node.arg)
+            elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Lambda) and _forwards(node.value):
+                for target in node.targets:
+                    name = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", None)
+                    if name:
+                        found.add(name)
+    return frozenset(found)
+
+
+def requested_topics(tree: ast.Module, callees: frozenset[str] = CALLEES) -> set[str]:
     """The topics some call of this file asks for by literal name."""
     found = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and callee_name(node.func) in CALLEES and node.args:
+        if isinstance(node, ast.Call) and callee_name(node.func) in callees and node.args:
             first = node.args[0]
             if isinstance(first, ast.Constant) and isinstance(first.value, str):
                 found.add(first.value)
@@ -107,18 +134,39 @@ def _longest(options: list[Cost]) -> Cost:
     return max(options, key=lambda each: float("inf") if each[0] is None else each[0])
 
 
-class Waits:
-    """The steps a method waits for with `await self.request(...)` (or `_step`, ...), and those of the methods of its class that it
-    awaits. Branches count by their longest, a loop body once, requests gathered together by their longest; what is only
-    started (`create_task(self.work())`) is not waited for, so it is not a step."""
+def methods_of(cls: ast.ClassDef) -> dict[str, ast.AST]:
+    return {item.name: item for item in cls.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))}
 
-    def __init__(self, methods: dict[str, ast.AST], deadline_of) -> None:
-        self.methods, self.deadline_of = methods, deadline_of
+
+def held_objects(cls: ast.ClassDef, classes: dict[str, ast.ClassDef]) -> dict[str, str]:
+    """{attribute: class} for each `self.attribute = Class(...)` of the class whose Class is a class of modules/."""
+    found: dict[str, str] = {}
+    for node in ast.walk(cls):
+        if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                and node.value.func.id in classes):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == "self":
+                found[target.attr] = node.value.func.id
+    return found
+
+
+class Waits:
+    """The steps a method waits for with `await self.request(...)` (or `_step`, ...), those of the methods of its class that it
+    awaits, and those of the methods of the objects it holds (`await self.releases.check(...)`). Branches count by their
+    longest, a loop body once, requests gathered together by their longest; what is only started
+    (`create_task(self.work())`) is not waited for, so it is not a step."""
+
+    def __init__(self, cls: ast.ClassDef, deadline_of, classes: dict[str, ast.ClassDef] | None = None) -> None:
+        self.name, self.methods, self.deadline_of = cls.name, methods_of(cls), deadline_of
+        self.classes = classes or {}
+        self.held = held_objects(cls, self.classes)
 
     def method(self, name: str, seen: frozenset[str] = frozenset()) -> Cost:
-        if name in seen or name not in self.methods:
+        key = f"{self.name}.{name}"
+        if key in seen or name not in self.methods:
             return 0.0, []
-        return self.block(list(self.methods[name].body), seen | {name})
+        return self.block(list(self.methods[name].body), seen | {key})
 
     def block(self, statements: list[ast.stmt], seen: frozenset[str]) -> Cost:
         """The longest path through the statements: a branch that returns or raises does not go on to what follows it."""
@@ -158,11 +206,11 @@ class Waits:
             call = awaited.value
             if not isinstance(call, ast.Call):
                 continue
-            if self._is_self(call):
+            if self._is_self(call) or self._holder(call) is not None:
                 total = _plus(total, self.call(call, seen))
             else:
-                together = [self.call(argument, seen) for argument in call.args
-                            if isinstance(argument, ast.Call) and self._is_self(argument)]
+                together = [self.call(argument, seen) for argument in call.args if isinstance(argument, ast.Call)
+                            and (self._is_self(argument) or self._holder(argument) is not None)]
                 total = _plus(total, _longest(together))
         return total
 
@@ -183,7 +231,19 @@ class Waits:
     def _is_self(call: ast.Call) -> bool:
         return isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name) and call.func.value.id == "self"
 
+    def _holder(self, call: ast.Call) -> "Waits | None":
+        """The waits of the object the call is made on, when it is one the class holds (`self.releases.check(...)`)."""
+        func = call.func
+        if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Attribute)
+                and isinstance(func.value.value, ast.Name) and func.value.value.id == "self"):
+            return None
+        held = self.held.get(func.value.attr)
+        return Waits(self.classes[held], self.deadline_of, self.classes) if held is not None else None
+
     def call(self, call: ast.Call, seen: frozenset[str]) -> Cost:
+        holder = self._holder(call)
+        if holder is not None:
+            return holder.method(call.func.attr, seen)
         name = call.func.attr
         if name in CALLEES and call.args and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
             topic = call.args[0].value
@@ -195,15 +255,16 @@ def nesting_violations(root: Path, table, parsed: list[tuple[Path, ast.Module]])
     deadline_of = getattr(table, "deadline_of", None)
     if deadline_of is None:
         return []
-    asked = set().union(*(requested_topics(tree) for _, tree in parsed)) if parsed else set()
+    callees = asking_names([tree for _, tree in parsed])
+    asked = set().union(*(requested_topics(tree, callees) for _, tree in parsed)) if parsed else set()
+    classes = {node.name: node for _, tree in parsed for node in ast.walk(tree) if isinstance(node, ast.ClassDef)}
     found: list[Violation] = []
     for path, tree in parsed:
         for cls in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
-            methods = {item.name: item for item in cls.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))}
             for topic, method in handlers_of(cls).items():
                 if topic not in asked or deadline_of(topic) is None:
                     continue
-                total, steps = Waits(methods, deadline_of).method(method.name)
+                total, steps = Waits(cls, deadline_of, classes).method(method.name)
                 if not steps:
                     continue
                 if total is None:

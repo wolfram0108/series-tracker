@@ -64,8 +64,7 @@ _QUICK = (
 
 _FUSES: dict[str, float] = {
     **dict.fromkeys(_QUICK, QUICK_S),
-    **dict.fromkeys(("conform.submit", "rules.format_torrent_file", "torrents.db.active", "sources.table.get", "unpack.table.get",
-                     "unpack.editor.get"), SERVICE_S),
+    **dict.fromkeys(("conform.submit", "rules.format_torrent_file", "torrents.db.active", "sources.table.get"), SERVICE_S),
     # The search of the titles: the sources of the provider asked (a session opened, two requests, again after a refusal) and a page of the search.
     **dict.fromkeys(("sources.titles.search", "sources.video.stream", "torrents.add",
                      "torrents.db.deactivate_all", "torrents.drive_incomplete", "torrents.fs.verify"), HEAVY_S),
@@ -120,6 +119,18 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
     "scan.run.cancel": (QUICK_S, ("catalog.series.get", "planner.sync.cancel", "sources.table.cancel")),
     # The order of sources lists the players of the pages of every series.
     "voices.players.get": (QUICK_S, ("catalog.series.list", "sources.players.list")),
+    # The releases of a tracker's page: the page read on the tracker, a new version's file fetched, the client driven.
+    **dict.fromkeys(("torrents.release.check", "torrents.release.download"),
+                    (HEAVY_S, ("sources.site.resolve", "sources.releases.get", "sources.torrent_file.get"))),
+    # The layout of a tracker's page: its releases, then the profile of each of the five tabs applied, one after another
+    # (the editor makes the profiles of a page first opened).
+    "unpack.table.get": (QUICK_S, ("sources.site.resolve", "torrents.releases.get") + ("rules.apply",) * 5),
+    "unpack.editor.get": (QUICK_S, ("sources.site.resolve",) + ("rules.profiles.create",) * 5
+                          + ("torrents.releases.get",) + ("rules.apply",) * 5),
+    # The socket of the provider: its settings with the sources of the series, and the provider asked.
+    "sources.provider.get": (SERVICE_S, ("catalog.series.list", "conform.workspace")),
+    "sources.provider.set": (SERVICE_S, ("catalog.series.list", "conform.workspace", "settings.value.get",
+                                         "settings.values.set_many")),
 }
 
 # The topics whose request has no fuse of its own (see the top).
