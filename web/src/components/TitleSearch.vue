@@ -107,25 +107,24 @@ function lineText(line: TitleLine): string {
       <header v-if="titles.length" class="ts-head"><span class="muted">{{ found }}</span></header>
     </template>
 
-    <article
-      v-for="card in titles" :key="card.id" class="ts-card" :class="{ 'is-added': card.url in added }" :data-card="card.id"
-    >
+    <article v-for="card in titles" :key="card.id" class="ts-card" :data-card="card.id">
       <img v-if="card.pic" class="ts-poster" :src="card.pic" alt="" loading="lazy" referrerpolicy="no-referrer" />
       <div v-else class="ts-poster" />
       <div class="ts-body">
-        <div class="ts-title"><span class="ts-name-text">{{ card.name }}</span></div>
+        <div class="ts-title"><span class="ts-name-text">{{ card.name }}</span><span class="muted">{{ card.year }}</span></div>
         <div v-if="card.sub" class="ts-sub">{{ card.sub }}</div>
         <div v-if="meta(card)" class="ts-meta">{{ meta(card) }}</div>
         <div v-if="card.remarks"><span class="ts-chip ts-remarks">{{ card.remarks }}</span></div>
-        <div v-if="card.lines?.length" class="ts-lines">
-          <span v-for="line in card.lines" :key="line.code" class="ts-chip ts-line" :data-line="line.code">{{ lineText(line) }}</span>
-        </div>
         <p v-if="card.blurb" class="ts-blurb">{{ card.blurb }}</p>
-      </div>
-      <div class="ts-act">
-        <span v-if="card.url in added" class="ts-added">{{ t("sources.titles.added", { n: added[card.url] }) }}</span>
-        <FoldButton v-else :label="t('sources.add.button')" icon="pi pi-plus" severity="success" fold="sm" class="ts-add"
-                    :disabled="busy" @click="emit('add', card.url)" />
+        <!-- A title is no source: each line of it is, and each has its own button. -->
+        <div class="ts-lines">
+          <div v-for="line in card.lines" :key="line.code" class="ts-line" :class="{ 'is-added': line.url in added }" :data-line="line.code">
+            <span class="ts-chip">{{ lineText(line) }}</span>
+            <span v-if="line.url in added" class="ts-added">{{ t("sources.titles.added", { n: added[line.url] }) }}</span>
+            <FoldButton v-else :label="t('sources.add.button')" icon="pi pi-plus" severity="success" fold="sm" class="ts-add"
+                        :disabled="busy" @click="emit('add', line.url)" />
+          </div>
+        </div>
       </div>
     </article>
     <FoldButton v-if="more" :label="t('sources.titles.more')" icon="pi pi-angle-down" severity="info" fold="sm" class="ts-more"
@@ -149,7 +148,6 @@ function lineText(line: TitleLine): string {
   display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-start; padding: 0.6rem;
   border: var(--border-width) solid var(--border-color); border-radius: var(--card-border-radius); background: var(--bg-white);
 }
-.ts-card.is-added { border-color: var(--color-green-1); background: color-mix(in srgb, var(--color-green-1) 10%, var(--bg-white)); }
 .ts-poster {
   flex: none; inline-size: 4rem; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 0.375rem; background: var(--bg-light);
   max-inline-size: 100%; overflow: hidden;
@@ -159,7 +157,9 @@ function lineText(line: TitleLine): string {
 .ts-name-text { font-weight: 700; overflow-wrap: anywhere; }
 .ts-sub { font-size: 0.875rem; overflow-wrap: anywhere; }
 .ts-meta { color: var(--text-muted); font-size: 0.8rem; overflow-wrap: anywhere; }
-.ts-lines { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.ts-lines { display: grid; gap: 0.35rem; margin-block-start: 0.25rem; }
+.ts-line { display: flex; flex-wrap: wrap; gap: 0.4rem 0.75rem; align-items: center; }
+.ts-line.is-added .ts-chip { border-color: var(--color-green-1); }
 .ts-chip {
   display: inline-block; border: var(--border-width) solid var(--border-color); background: var(--bg-light); border-radius: 999px;
   padding: 0.05rem 0.55rem; font-size: 0.8rem; overflow-wrap: anywhere;
@@ -168,7 +168,6 @@ function lineText(line: TitleLine): string {
   margin: 0; color: var(--text-muted); font-size: 0.8rem; line-height: 1.45; overflow: hidden;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
-.ts-act { flex: none; margin-inline-start: auto; display: grid; gap: 0.375rem; justify-items: end; }
 .ts-added {
   border: var(--border-width) solid var(--color-green-1); color: var(--color-green-1); border-radius: 999px; padding: 0.05rem 0.6rem;
   font-size: 0.8rem; font-weight: 600; white-space: nowrap;

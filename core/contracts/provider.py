@@ -167,13 +167,20 @@ class AdoptRequest(BaseModel):
     urls: list[str] = Field(default_factory=list)
 
 
+class AdoptTarget(BaseModel):
+    """The address of the source of protocol 2 (a line of a title) that a line of the old card comes to."""
+
+    line: str
+    to: str
+
+
 class AdoptItem(BaseModel):
-    """What the provider makes of one address of protocol 1: the address of the title of protocol 2 it came to (None when it
-    did not), the codes of the lines of the card it plays, and the reason it came to none."""
+    """What the provider makes of one address of protocol 1 (a card with many lines): a source of protocol 2 for each line of it the
+    provider plays, the codes of the lines it does not play, and the reason it came to none."""
 
     url: str
-    to: str | None = None
-    lines: list[str] = Field(default_factory=list)
+    targets: list[AdoptTarget] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
     reason: str | None = None
 
 

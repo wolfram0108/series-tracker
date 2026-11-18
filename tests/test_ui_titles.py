@@ -19,8 +19,8 @@ CARD_LAYOUT = """() => {
   const box = (el) => el.getBoundingClientRect();
   const cross = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
   document.querySelectorAll('.ts-card').forEach((card) => {
-    const frame = box(card), words = card.querySelector('.ts-body'), act = card.querySelector('.ts-act');
-    if (cross(box(words), box(act))) bad.push('action over words');
+    const frame = box(card), words = card.querySelector('.ts-body');
+    card.querySelectorAll('.ts-line').forEach((line) => { if (box(line).right > box(words).right + 1) bad.push('line out of its words'); });
     card.querySelectorAll('*').forEach((el) => {
       const part = box(el);
       if (part.width && (part.right > frame.right + 1 || part.left < frame.left - 1)) bad.push(`${el.className} out`);
@@ -35,7 +35,7 @@ async def test_a_title_found_by_the_search_of_the_provider_is_added_read_by_its_
     mock = MockProvider()
     mock.add_site("chines", "Чинес")
     mock.title("chines", "k3f9a1", ["万界独尊"], [("第1集", "BLU", "1", [1080])], title="万界独尊 (2021)")
-    mock.sites["chines"].found = [{"id": "k3f9a1", "name": "万界独尊", "lines": [{"code": "BLU", "label": "BLU", "rows": 1, "routes": 3}]}]
+    mock.sites["chines"].found = [{"id": "k3f9a1", "name": "万界独尊"}]
     await ui.first_run()
     await ui.set_up([ORIGINAL], languages={ORIGINAL: "chi"})
     await ui.profile("серии 半日", [{"name": "серия", "if": LABEL,
@@ -58,7 +58,7 @@ async def test_a_title_found_by_the_search_of_the_provider_is_added_read_by_its_
                 faults[width] = found_here
         await page.set_viewport_size(size)
         assert not faults, faults
-        await found.locator(".ts-add").click()
+        await found.locator(".ts-line[data-line='BLU'] .ts-add").click()
 
         source = page.locator(".source-card").first
         # A title of the provider is read when the user asks (its button), not when it is added.
@@ -67,8 +67,8 @@ async def test_a_title_found_by_the_search_of_the_provider_is_added_read_by_its_
         await source.locator(".source-reread").click()
         # The head names the source as its site does (the title); its field is its address, the one
         # writing a field of an address takes.
-        await expect(source.locator(".source-place")).to_have_text("万界独尊 (2021)")
-        await expect(source.locator(".source-title .item-value")).to_have_text("title://chines/k3f9a1")
+        await expect(source.locator(".source-place")).to_have_text("万界独尊 (2021) · BLU")
+        await expect(source.locator(".source-title .item-value")).to_have_text("title://chines/k3f9a1/BLU")
         await _pick(page, source.locator(".item-select").first, "серии 半日")
         await expect(source.locator(".source-state")).to_have_text(state("readDone"), timeout=60_000)
         await expect(source.locator(".player-tab")).to_have_text(["BLU1"])  # a line is named by its code
@@ -77,5 +77,5 @@ async def test_a_title_found_by_the_search_of_the_provider_is_added_read_by_its_
         sources = page.locator(".sources")
         await sources.locator(".source-mode .st-tab", has_text=text("sources.mode.titles")).click()
         await sources.locator(".ts-find").click()
-        await expect(sources.locator(".ts-card[data-card='k3f9a1'] .ts-added")).to_have_text(text("sources.titles.added", n=1))
+        await expect(sources.locator(".ts-card[data-card='k3f9a1'] .ts-line[data-line='BLU'] .ts-added")).to_have_text(text("sources.titles.added", n=1))
         await ui.shot("a2-added")

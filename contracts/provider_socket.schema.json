@@ -1,15 +1,29 @@
 {
  "messages": {
   "AdoptItem": {
-   "description": "What the provider makes of one address of protocol 1: the address of the title of protocol 2 it came to (None when it\ndid not), the codes of the lines of the card it plays, and the reason it came to none.",
-   "properties": {
-    "lines": {
-     "items": {
-      "type": "string"
+   "$defs": {
+    "AdoptTarget": {
+     "description": "The address of the source of protocol 2 (a line of a title) that a line of the old card comes to.",
+     "properties": {
+      "line": {
+       "title": "Line",
+       "type": "string"
+      },
+      "to": {
+       "title": "To",
+       "type": "string"
+      }
      },
-     "title": "Lines",
-     "type": "array"
-    },
+     "required": [
+      "line",
+      "to"
+     ],
+     "title": "AdoptTarget",
+     "type": "object"
+    }
+   },
+   "description": "What the provider makes of one address of protocol 1 (a card with many lines): a source of protocol 2 for each line of it the\nprovider plays, the codes of the lines it does not play, and the reason it came to none.",
+   "properties": {
     "reason": {
      "anyOf": [
       {
@@ -22,17 +36,19 @@
      "default": null,
      "title": "Reason"
     },
-    "to": {
-     "anyOf": [
-      {
-       "type": "string"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null,
-     "title": "To"
+    "skipped": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Skipped",
+     "type": "array"
+    },
+    "targets": {
+     "items": {
+      "$ref": "#/$defs/AdoptTarget"
+     },
+     "title": "Targets",
+     "type": "array"
     },
     "url": {
      "title": "Url",
@@ -48,15 +64,8 @@
   "AdoptReply": {
    "$defs": {
     "AdoptItem": {
-     "description": "What the provider makes of one address of protocol 1: the address of the title of protocol 2 it came to (None when it\ndid not), the codes of the lines of the card it plays, and the reason it came to none.",
+     "description": "What the provider makes of one address of protocol 1 (a card with many lines): a source of protocol 2 for each line of it the\nprovider plays, the codes of the lines it does not play, and the reason it came to none.",
      "properties": {
-      "lines": {
-       "items": {
-        "type": "string"
-       },
-       "title": "Lines",
-       "type": "array"
-      },
       "reason": {
        "anyOf": [
         {
@@ -69,17 +78,19 @@
        "default": null,
        "title": "Reason"
       },
-      "to": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "default": null,
-       "title": "To"
+      "skipped": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Skipped",
+       "type": "array"
+      },
+      "targets": {
+       "items": {
+        "$ref": "#/$defs/AdoptTarget"
+       },
+       "title": "Targets",
+       "type": "array"
       },
       "url": {
        "title": "Url",
@@ -90,6 +101,25 @@
       "url"
      ],
      "title": "AdoptItem",
+     "type": "object"
+    },
+    "AdoptTarget": {
+     "description": "The address of the source of protocol 2 (a line of a title) that a line of the old card comes to.",
+     "properties": {
+      "line": {
+       "title": "Line",
+       "type": "string"
+      },
+      "to": {
+       "title": "To",
+       "type": "string"
+      }
+     },
+     "required": [
+      "line",
+      "to"
+     ],
+     "title": "AdoptTarget",
      "type": "object"
     }
    },
@@ -117,6 +147,25 @@
     }
    },
    "title": "AdoptRequest",
+   "type": "object"
+  },
+  "AdoptTarget": {
+   "description": "The address of the source of protocol 2 (a line of a title) that a line of the old card comes to.",
+   "properties": {
+    "line": {
+     "title": "Line",
+     "type": "string"
+    },
+    "to": {
+     "title": "To",
+     "type": "string"
+    }
+   },
+   "required": [
+    "line",
+    "to"
+   ],
+   "title": "AdoptTarget",
    "type": "object"
   },
   "DownloadFrame": {
@@ -1022,7 +1071,7 @@
   "TitleCard": {
    "$defs": {
     "TitleLine": {
-     "description": "A line of a title: the archive its episodes come from. `rows` is how many it holds when the provider knows, `routes` how\nmany independent ways to it the provider has (a reserve: nothing in the tracker depends on it).",
+     "description": "A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it\nis a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider\nhas (a reserve: nothing in the tracker depends on it).",
      "properties": {
       "code": {
        "title": "Code",
@@ -1049,16 +1098,21 @@
        ],
        "default": null,
        "title": "Rows"
+      },
+      "url": {
+       "title": "Url",
+       "type": "string"
       }
      },
      "required": [
-      "code"
+      "code",
+      "url"
      ],
      "title": "TitleLine",
      "type": "object"
     }
    },
-   "description": "A title as the search of its provider gives it; `url` is the address it is a source by.",
+   "description": "A title as the search of its provider gives it. A title is no source: each of its `lines` is.",
    "properties": {
     "area": {
      "default": "",
@@ -1106,10 +1160,6 @@
      "title": "Sub",
      "type": "string"
     },
-    "url": {
-     "title": "Url",
-     "type": "string"
-    },
     "year": {
      "default": "",
      "title": "Year",
@@ -1117,14 +1167,13 @@
     }
    },
    "required": [
-    "id",
-    "url"
+    "id"
    ],
    "title": "TitleCard",
    "type": "object"
   },
   "TitleLine": {
-   "description": "A line of a title: the archive its episodes come from. `rows` is how many it holds when the provider knows, `routes` how\nmany independent ways to it the provider has (a reserve: nothing in the tracker depends on it).",
+   "description": "A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it\nis a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider\nhas (a reserve: nothing in the tracker depends on it).",
    "properties": {
     "code": {
      "title": "Code",
@@ -1151,10 +1200,15 @@
      ],
      "default": null,
      "title": "Rows"
+    },
+    "url": {
+     "title": "Url",
+     "type": "string"
     }
    },
    "required": [
-    "code"
+    "code",
+    "url"
    ],
    "title": "TitleLine",
    "type": "object"
@@ -1162,7 +1216,7 @@
   "TitleSearchReply": {
    "$defs": {
     "TitleCard": {
-     "description": "A title as the search of its provider gives it; `url` is the address it is a source by.",
+     "description": "A title as the search of its provider gives it. A title is no source: each of its `lines` is.",
      "properties": {
       "area": {
        "default": "",
@@ -1210,10 +1264,6 @@
        "title": "Sub",
        "type": "string"
       },
-      "url": {
-       "title": "Url",
-       "type": "string"
-      },
       "year": {
        "default": "",
        "title": "Year",
@@ -1221,14 +1271,13 @@
       }
      },
      "required": [
-      "id",
-      "url"
+      "id"
      ],
      "title": "TitleCard",
      "type": "object"
     },
     "TitleLine": {
-     "description": "A line of a title: the archive its episodes come from. `rows` is how many it holds when the provider knows, `routes` how\nmany independent ways to it the provider has (a reserve: nothing in the tracker depends on it).",
+     "description": "A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it\nis a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider\nhas (a reserve: nothing in the tracker depends on it).",
      "properties": {
       "code": {
        "title": "Code",
@@ -1255,10 +1304,15 @@
        ],
        "default": null,
        "title": "Rows"
+      },
+      "url": {
+       "title": "Url",
+       "type": "string"
       }
      },
      "required": [
-      "code"
+      "code",
+      "url"
      ],
      "title": "TitleLine",
      "type": "object"

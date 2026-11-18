@@ -106,8 +106,8 @@ class MockProvider:
 
     def manifest(self) -> Manifest:
         sites = [ManifestSite(name=site.name, label=site.label, domains=[site.name], first_read_by_user=True,
-                              address=SiteAddress(schemes=["title"], path=r"^/(?P<title>[0-9a-z]{1,32})/?$",
-                                                  canonical=f"title://{site.name}/{{title}}"))
+                              address=SiteAddress(schemes=["title"], path=r"^/(?P<title>[0-9a-z]{1,32})/(?P<line>[A-Za-z0-9_]+)/?$",
+                                                  canonical=f"title://{site.name}/{{title}}/{{line}}"))
                  for site in self.sites.values()]
         families = [ManifestFamily(name=FAMILY, label="Линии", video="video",
                                    owns=r"^line://(?P<line>[A-Za-z0-9_]+)/(?P<video>[A-Za-z0-9._~%-]+)$")] if self.sites else []
@@ -179,8 +179,13 @@ class MockProvider:
             self.requests.append(("search", body))
             if self.search_status != 200:
                 raise HTTPException(status_code=self.search_status)
-            titles = [{"id": str(each["id"]), "url": f"title://{site.name}/{each['id']}", "name": each.get("name", ""),
-                       "lines": each.get("lines", [])} for site in self.sites.values() for each in site.found]
+            def lines_of(site: MockSite, each: dict) -> list[dict]:
+                held = site.titles.get(str(each["id"]))
+                codes = list(dict.fromkeys(row["site_fields"]["line"] for row in held["rows"])) if held else each.get("lines", [])
+                return [{"code": code, "url": f"title://{site.name}/{each['id']}/{code}", "label": code, "routes": 3} for code in codes]
+
+            titles = [{"id": str(each["id"]), "name": each.get("name", ""), "lines": lines_of(site, each)}
+                      for site in self.sites.values() for each in site.found]
             return {"titles": titles, "page": body.get("page", 1), "pages": 1, "total": len(titles)}
 
         @api.post("/v1/adopt")
@@ -189,7 +194,7 @@ class MockProvider:
             body = await request.json()
             self.requests.append(("adopt", body))
             return AdoptReply(items=[AdoptItem.model_validate(self.adoptions.get(url) or {
-                "url": url, "to": None, "reason": json.dumps({"code": "not_a_link_of_the_provider"})})
+                "url": url, "reason": json.dumps({"code": "not_a_link_of_the_provider"})})
                 for url in body.get("urls", [])]).model_dump(mode="json")
 
         @api.post("/v1/download")
@@ -237,13 +242,17 @@ class MockProvider:
                         return
                     if self.read_breaks:
                         return
-                    match = re.fullmatch(r"title://([^/]+)/([0-9a-z]+)", body["url"])
+                    match = re.fullmatch(r"title://([^/]+)/([0-9a-z]+)/([A-Za-z0-9_]+)/?", body["url"])
                     card = self.sites[match.group(1)].titles.get(match.group(2)) if match and match.group(1) in self.sites else None
                     if card is None:
                         yield json.dumps({"type": "error", "reason": json.dumps({"code": "title_unknown"})}) + "\n"
                         return
-                    yield json.dumps({"type": "draft", "draft": {"names": card["names"], "title": card["title"],
-                                                                  "rows": card["rows"]}}, ensure_ascii=False) + "\n"
+                    rows = [row for row in card["rows"] if row["site_fields"]["line"] == match.group(3)]
+                    if not rows:
+                        yield json.dumps({"type": "error", "reason": json.dumps({"code": "title_no_lines", "line": match.group(3)})}) + "\n"
+                        return
+                    yield json.dumps({"type": "draft", "draft": {"names": card["names"], "title": f"{card['title']} · {match.group(3)}",
+                                                                  "rows": rows}}, ensure_ascii=False) + "\n"
                 except asyncio.CancelledError:
                     self.reads_cancelled += 1
                     self.cancelled.set()

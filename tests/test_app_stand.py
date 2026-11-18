@@ -438,8 +438,8 @@ async def _series_of_an_application(stand, server) -> int:
         "conditions": [{"condition_type": "contains", "pattern": label, "logical_operator": "AND"}]})
     series = await stand.call("POST", "/api/series", {
         "name": "Сериал", "name_en": "Serial", "site": "banri", "save_path": stand.library,
-        "sources": [{"url": "title://banri/219017", "source_type": "web_video", "parser_profile_id": made["id"]}]})
-    await stand.read_card("title://banri/219017")
+        "sources": [{"url": "title://banri/219017/BLU", "source_type": "web_video", "parser_profile_id": made["id"]}]})
+    await stand.read_card("title://banri/219017/BLU")
     return series["series_id"]
 
 
@@ -456,9 +456,9 @@ async def test_with_the_provider_down_every_try_of_the_user_is_refused_in_words_
     refused = await stand.api.post(f"/api/series/{series_id}/scan")
     assert refused.status_code == 409 and "provider_not_connected" in refused.text, (refused.status_code, refused.text)
     ended = stand.bus.subscribe("sources.table.failed")
-    await stand.call("POST", "/api/sources/read", {"url": "title://banri/219017"})
+    await stand.call("POST", "/api/sources/read", {"url": "title://banri/219017/BLU"})
     packet = (await asyncio.wait_for(ended.queue.get(), STAND_LIMIT_S)).payload
-    assert packet["url"] == "title://banri/219017" and json.loads(packet["reason"])["code"] == "provider_not_connected"
+    assert packet["url"] == "title://banri/219017/BLU" and json.loads(packet["reason"])["code"] == "provider_not_connected"
     searched = await stand.api.post("/api/sources/search", json={"query": "万界独尊", "page": 1})
     assert searched.status_code == 409 and "provider_not_connected" in searched.text, (searched.status_code, searched.text)
 

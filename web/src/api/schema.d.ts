@@ -1966,23 +1966,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/favicon.svg": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Favicon */
-        get: operations["favicon_favicon_svg_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3452,7 +3435,7 @@ export interface components {
         /**
          * PlayerFacts
          * @description A player of the order of sources as the sources know it: a player of the pages of sites or a line of the
-         *     applications, the best height its rows of the sources asked about were measured at (None when none was), and where
+         *     provider, the best height its rows of the sources asked about were measured at (None when none was), and where
          *     it is, the place with the most sources first.
          */
         PlayerFacts: {
@@ -3472,8 +3455,8 @@ export interface components {
         };
         /**
          * PlayerPlace
-         * @description A site or an application where a player is: `sources` is how many of the sources asked about are its pages with rows
-         *     of the player (0 for an application that admits the line while none of those sources is a card of it).
+         * @description A site where a player is (of the tracker, or of the provider): `sources` is how many of the sources asked about are its pages
+         *     with rows of the player (0 for a site of the provider that admits the line while none of those sources is a title of it).
          */
         PlayerPlace: {
             /** Name */
@@ -4308,13 +4291,11 @@ export interface components {
         TargetKind: "none" | "group" | "variant";
         /**
          * TitleCard
-         * @description A title as the search of its provider gives it; `url` is the address it is a source by.
+         * @description A title as the search of its provider gives it. A title is no source: each of its `lines` is.
          */
         TitleCard: {
             /** Id */
             id: string;
-            /** Url */
-            url: string;
             /**
              * Name
              * @default
@@ -4360,12 +4341,15 @@ export interface components {
         };
         /**
          * TitleLine
-         * @description A line of a title: the archive its episodes come from. `rows` is how many it holds when the provider knows, `routes` how
-         *     many independent ways to it the provider has (a reserve: nothing in the tracker depends on it).
+         * @description A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it
+         *     is a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider
+         *     has (a reserve: nothing in the tracker depends on it).
          */
         TitleLine: {
             /** Code */
             code: string;
+            /** Url */
+            url: string;
             /**
              * Label
              * @default
@@ -10530,26 +10514,6 @@ export interface operations {
         };
     };
     v2_redirect_v2_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    favicon_favicon_svg_get: {
         parameters: {
             query?: never;
             header?: never;

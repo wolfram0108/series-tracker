@@ -19,7 +19,7 @@ from modules.sources.provider import ProviderClient, RemoteFamily
 from provider_mock import MockProvider, link_of, serving
 from schema_db import migrated
 
-CARD = "title://mock/7"
+CARD = "title://mock/7/X"
 LINK = link_of("X", "tok 1")
 WAIT_S = 10.0  # the most a test waits for what the code under test ends by itself: a longer wait is a red test, not a hang
 
@@ -100,9 +100,9 @@ async def system(tmp_path):
 
 async def test_the_sites_and_the_player_of_the_manifest_join_the_registries_with_no_network_after_that(system):
     sources = system.sources
-    found = sources.tables.resolve("title://mock/7/")
+    found = sources.tables.resolve("title://mock/7/X/")
     assert (found.site, found.canonical_url, found.source_type) == ("mock", CARD, "web_video")
-    assert sources.tables.resolve("title://mock/X").site is None and sources.tables.resolve("title://other/7").site is None
+    assert sources.tables.resolve("title://mock/X").site is None and sources.tables.resolve("title://other/7/X").site is None
     player = sources.players.get("line:X")
     assert isinstance(player, RemoteFamily) and "line:X" in sources.players and "other:X" not in sources.players
     # The video of a row is what its link names for the host: the item, decoded.
@@ -131,18 +131,18 @@ def _stored(url: str, player: str, heights: list[int]):
 async def test_a_manifest_that_changes_adds_a_site_and_one_that_drops_it_takes_it_out(system):
     system.mock.add_site("second", "Второй (Second)")
     assert (await nxt(system.applied))["revision"] == system.mock.manifest().revision
-    assert system.sources.tables.resolve("title://second/1").site == "second"
+    assert system.sources.tables.resolve("title://second/1/X").site == "second"
     del system.mock.sites["second"]
     system.mock.changed()
     await nxt(system.applied)
-    assert system.sources.tables.resolve("title://second/1").site is None and system.sources.tables.resolve(CARD).site == "mock"
+    assert system.sources.tables.resolve("title://second/1/X").site is None and system.sources.tables.resolve(CARD).site == "mock"
 
 
 async def test_a_site_that_takes_the_name_of_a_site_the_module_reads_is_skipped_and_the_others_join(system, caplog):
     system.mock.add_site("maccms", "Чужой")
     with caplog.at_level("WARNING", logger="sources"):
         await nxt(system.applied)
-    assert system.sources.sites.find("title://maccms/1") is None and system.sources.tables.resolve(CARD).site == "mock"
+    assert system.sources.sites.find("title://maccms/1/X") is None and system.sources.tables.resolve(CARD).site == "mock"
     assert any("сайт поставщика maccms пропущен" in record.getMessage() for record in caplog.records)
 
 
@@ -179,10 +179,9 @@ async def test_a_card_is_read_into_a_table_from_frames_and_every_row_says_which_
         phases.append((await nxt(system.progress))["phase"])
     assert phases and set(phases) == {"release"}
     table = (await system.table())["table"]
-    assert (table["title"], table["names"], table["site"]) == ("名", ["名"], "mock")
+    assert (table["title"], table["names"], table["site"]) == ("名 · X", ["名"], "mock")
     assert [(row["key"], row["player"], row["state"], row["heights"], row["video"]) for row in table["rows"]] == [
-        ("X:1", "line:X", "playable", [1080], "tok 1"), ("X:2", "line:X", "playable", [2160], "tok 2"),
-        ("Y:3", "line:Y", "absent", [], "tok 3")]
+        ("X:1", "line:X", "playable", [1080], "tok 1"), ("X:2", "line:X", "playable", [2160], "tok 2")]
     (_path, sent), = [request for request in system.mock.requests if request[0] == "read"]
     assert sent == {"url": CARD, "rows": "all", "recent": None, "fresh": True, "off": [], "last_rows": [], "term_hours": 1}
 
@@ -197,7 +196,7 @@ async def test_a_page_that_waits_for_the_user_is_not_begun_by_a_window_and_the_n
     await nxt(system.table_end)
     sent = [body for path, body in system.mock.requests if path == "read"][-1]
     assert sent["rows"] == "-2" and sent["off"] == ["line:Y"] and sent["fresh"] is True
-    assert [row["key"] for row in sent["last_rows"]] == ["X:1", "X:2", "Y:3"]
+    assert [row["key"] for row in sent["last_rows"]] == ["X:1", "X:2"]  # the page is the line X: the rows of Y are another page's
 
 
 async def test_a_read_the_provider_refuses_fails_with_its_reason_and_the_last_table_still_serves(system):
@@ -206,7 +205,7 @@ async def test_a_read_the_provider_refuses_fails_with_its_reason_and_the_last_ta
     failed = await system.read()
     assert failed == {"url": CARD, "reason": system.mock.read_error}
     again = await system.table()
-    assert again["state"] == "failed" and again["reason"] == system.mock.read_error and len(again["table"]["rows"]) == 3
+    assert again["state"] == "failed" and again["reason"] == system.mock.read_error and len(again["table"]["rows"]) == 2
 
 
 async def test_a_read_that_ends_with_no_outcome_is_a_broken_stream_and_never_a_part_of_a_table(system):
@@ -294,7 +293,8 @@ async def test_a_download_that_is_stopped_closes_the_connection_and_the_provider
 
 async def test_the_search_gives_the_titles_of_the_provider_or_its_reason(system):
     got = await system.probe.request("sources.titles.search", {"query": "名", "page": 1})
-    assert [title["url"] for title in got["titles"]] == [CARD] and got["page"] == 1 and got["reason"] is None
+    assert [line["url"] for title in got["titles"] for line in title["lines"]] == [CARD, "title://mock/7/Y"]  # a line is the source
+    assert got["page"] == 1 and got["reason"] is None and "url" not in got["titles"][0]
     system.mock.search_status = 500
     failed = await system.probe.request("sources.titles.search", {"query": "名"})
     assert failed["titles"] == [] and json.loads(failed["reason"])["code"] == "provider_unavailable"
@@ -315,7 +315,7 @@ async def test_a_provider_that_goes_down_is_a_state_and_a_reason_and_keeps_its_s
     # A read the user asks for is not begun: the module says the provider is not connected, and the last table serves.
     failed = await system.read()
     assert json.loads(failed["reason"]) == {"code": "provider_not_connected", "state": "down"}
-    assert len((await system.table())["table"]["rows"]) == 3
+    assert len((await system.table())["table"]["rows"]) == 2
     fetched = await fetch(system, target=str(tmp_path / "e.mp4"))
     assert fetched["ok"] is False and fetched["kind"] == "unasked" and "provider_unavailable" in fetched["error"]
     with pytest.raises(BusRequestError) as searched:
@@ -369,8 +369,8 @@ async def test_with_no_provider_every_try_of_the_user_at_its_world_says_it_is_no
         got = await nxt(ended)
         assert got["url"] == CARD and json.loads(got["reason"]) == {"code": "provider_not_connected", "state": "none"}
         # What a synchronization asks before it opens: the pages of the provider's world, whether or not a site was ever heard of.
-        asked = [CARD, "https://example.org/p/1", "title://other/3/"]
-        assert [each["url"] for each in (await probe.request("sources.pages.check", {"urls": asked}))["blocked"]] == [CARD, "title://other/3/"]
+        asked = [CARD, "https://example.org/p/1", "title://other/3/X/"]
+        assert [each["url"] for each in (await probe.request("sources.pages.check", {"urls": asked}))["blocked"]] == [CARD, "title://other/3/X/"]
         # A link of that world is nobody's failure and never goes to the generic downloader; a web address is the downloader's.
         link = await probe.request("sources.video.stream", {"url": LINK})
         assert link["handled"] and link["unasked"] and link["transient"] and json.loads(link["error"])["code"] == "provider_not_connected"
@@ -429,10 +429,10 @@ async def test_a_page_some_source_lists_keeps_its_table_while_no_site_reads_its_
         try:
             assert sources.tables.resolve(CARD).site is None
             await sources.repo.save_table(_stored(CARD, "line:X", [1080]))
-            await sources.repo.save_table(_stored("title://mock/8", "line:X", [1080]))
+            await sources.repo.save_table(_stored("title://mock/8/X", "line:X", [1080]))
             assert await sources._forget_unlisted_pages() is True
             assert (await sources.repo.stored(CARD)).table is not None
-            assert (await sources.repo.stored("title://mock/8")).table is None
+            assert (await sources.repo.stored("title://mock/8/X")).table is None
         finally:
             await sources.stop()
             await catalog.stop()
@@ -466,7 +466,7 @@ async def test_a_page_no_site_reads_now_still_serves_the_table_it_had_so_a_sourc
                 got = await sources.on_table_get(type("Env", (), {"payload": {"url": CARD, "refresh": refresh}})())
                 assert got["state"] == "failed" and json.loads(got["reason"])["code"] == "provider_not_connected"
                 assert [row["player"] for row in got["table"]["rows"]] == ["line:X"]
-            never = await sources.on_table_get(type("Env", (), {"payload": {"url": "title://mock/99"}})())
+            never = await sources.on_table_get(type("Env", (), {"payload": {"url": "title://mock/99/X"}})())
             assert never["state"] == "failed" and never["table"] is None
         finally:
             await sources.stop()

@@ -1,5 +1,5 @@
 """The search of the titles a provider of the socket reads (contracts/provider_socket.md): a title has no page of its own, it is found
-by the search of the provider, and the title the user picks is a source by its address (`title://<site>/<id>`).
+by the search of the provider, and the line of a title the user picks is a source by its address (`title://<site>/<id>/<line>`).
 
 The titles come as the provider gives them, in its order: nothing is chosen, ranked or left out here. What reaches the title
 (which doors, which protocols) is the provider's own business: nothing of it is in these messages.
@@ -15,20 +15,21 @@ class TitleSearchRequest(BaseModel):
 
 
 class TitleLine(BaseModel):
-    """A line of a title: the archive its episodes come from. `rows` is how many it holds when the provider knows, `routes` how
-    many independent ways to it the provider has (a reserve: nothing in the tracker depends on it)."""
+    """A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it
+    is a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider
+    has (a reserve: nothing in the tracker depends on it)."""
 
     code: str
+    url: str
     label: str = ""
     rows: int | None = None
     routes: int = 0
 
 
 class TitleCard(BaseModel):
-    """A title as the search of its provider gives it; `url` is the address it is a source by."""
+    """A title as the search of its provider gives it. A title is no source: each of its `lines` is."""
 
     id: str
-    url: str
     name: str = ""
     sub: str = ""          # the other name of the title the provider gives (an English one, a slogan)
     year: str = ""

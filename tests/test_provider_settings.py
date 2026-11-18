@@ -65,7 +65,7 @@ class World:
         return (await self.probe.request("settings.value.get", {"key": key}))["value"]
 
 
-async def build(tmp_path, *, default: ProviderClient | None = None, addresses=("title://mock/7",)) -> World:
+async def build(tmp_path, *, default: ProviderClient | None = None, addresses=("title://mock/7/X",)) -> World:
     kept = tmp_path / "p.db"  # a world built again in the same folder is the same database: a restart
     db, bus = Database(str(kept if kept.exists() else migrated(kept))), Bus()
     settings = SettingsModule(bus, db)
@@ -103,7 +103,7 @@ async def test_with_no_address_the_picture_is_none_and_has_no_sites(tmp_path):
 async def test_the_picture_of_a_provider_that_is_up_is_its_manifest_with_the_sources_and_lines_of_each_site(tmp_path):
     mock = mock_of("mock", "Мок (Mock)")
     async with serving(mock) as server:
-        world = await build(tmp_path, default=ProviderClient(server.url, "secret"), addresses=("title://mock/7", "title://mock/8", "https://x.test/p"))
+        world = await build(tmp_path, default=ProviderClient(server.url, "secret"), addresses=("title://mock/7/X", "title://mock/8/X", "https://x.test/p"))
         try:
             view = await world.until(lambda each: each["state"] == "up" and each["sites"])
             assert view["url"] == server.url and view["has_token"] is True and view["protocol"] == 2
@@ -122,14 +122,14 @@ async def test_an_address_saved_is_taken_at_once_and_the_sites_of_the_old_provid
             saved = await world.save(one.url)
             assert saved["saved"] is True and saved["problems"] == []
             await world.until(lambda each: each["state"] == "up" and [a["name"] for a in each["sites"]] == ["one"])
-            assert world.sources.tables.resolve("title://one/7").site == "one"
+            assert world.sources.tables.resolve("title://one/7/X").site == "one"
             await world.save(two.url)
             view = await world.until(lambda each: each["state"] == "up" and [a["name"] for a in each["sites"]] == ["two"])
             assert view["url"] == two.url
-            assert world.sources.tables.resolve("title://one/7").site is None and world.sources.tables.resolve("title://two/7").site == "two"
+            assert world.sources.tables.resolve("title://one/7/X").site is None and world.sources.tables.resolve("title://two/7/X").site == "two"
             await world.save("")
             gone = await world.until(lambda each: each["state"] == "none")
-            assert gone["sites"] == [] and world.sources.tables.resolve("title://two/7").site is None
+            assert gone["sites"] == [] and world.sources.tables.resolve("title://two/7/X").site is None
             assert await world.stored("provider.url") == ""  # stored empty: the owner's «none», not the environment's address
         finally:
             await stop(world)
@@ -199,7 +199,7 @@ async def test_of_two_pictures_the_one_taken_later_has_the_greater_number_and_sh
     above it."""
     mock = mock_of("mock", "Мок (Mock)")
     async with serving(mock) as server:
-        world = await build(tmp_path, default=ProviderClient(server.url), addresses=("title://mock/7",))
+        world = await build(tmp_path, default=ProviderClient(server.url), addresses=("title://mock/7/X",))
         try:
             await world.until(lambda each: each["state"] == "up" and each["sites"])
             host, gate, real = world.sources.provider, asyncio.Event(), world.sources.provider._sources_by_app

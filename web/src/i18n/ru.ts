@@ -884,7 +884,7 @@ export const ru = {
   "sources.titles.more": "Ещё",
   "sources.titles.empty": "Ничего не найдено",
   "sources.titles.added": "Источник № {n}",
-  "sources.titles.card": "Название поставщика",
+  "sources.titles.card": "Линия поставщика",
   "sources.add.button": "Добавить источник",
   "sources.add.notSite": "Этот адрес не читает ни один сайт",
   "sources.add.duplicate": "Этот источник уже в списке",
