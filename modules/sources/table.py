@@ -23,6 +23,7 @@ import httpx
 from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress,
                             TableReady, TableRow, TableState, UnreadPart)
 from core.contracts.release_table import TABLE_TRACE_TOPIC, site_of
+from core.contracts.torrent import order_name
 from core.deadlines import TABLE_READ_S
 from core.logging import get_logger
 from core.reasons import EXTERNAL, describe, parse, reason
@@ -111,7 +112,7 @@ def _merged(old: list[TableRow], new: list[TableRow], off: frozenset[str], limit
     for row in old:
         if row.key in taken:
             merged.append(taken.pop(row.key))
-        elif limited_read or row.player in off:
+        elif limited_read or order_name(row.player) in off:
             merged.append(row)
     return merged + [row for row in new if row.key in taken]
 

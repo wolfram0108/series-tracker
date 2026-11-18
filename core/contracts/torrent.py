@@ -97,6 +97,13 @@ class PageReleases(BaseModel):
     releases: list[PageRelease] = Field(default_factory=list)
 
 
+def order_name(player: str) -> str:
+    """The name a player of a row takes in the order of sources of the settings (its place, its switch for every source, its
+    group of players): every release of every tracker's page is one place, the torrent's — a release is a line of one page
+    only, nothing to set for every series. Any other player is its own name."""
+    return TORRENT_PLAYER if player.startswith(_SCHEME) else player
+
+
 def player_of(release: str, tag: str = "") -> str:
     """The player a row of a release's track names: the release is a line of the player `torrent`; a version of the episode
     with a tag of its video (DIR) is a line of its own (`torrent:<release>#DIR`), a variant of the output apart."""

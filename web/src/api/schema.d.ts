@@ -1966,6 +1966,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/favicon.svg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Favicon */
+        get: operations["favicon_favicon_svg_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3434,8 +3451,8 @@ export interface components {
         };
         /**
          * PlayerFacts
-         * @description A player of the order of sources as the sources know it: a player of the pages of sites or a line of the
-         *     provider, the best height its rows of the sources asked about were measured at (None when none was), and where
+         * @description A player of the order of sources as the sources know it: a player of the pages of sites, a line of the provider, or
+         *     the torrent (every release of every tracker's page, one place: `torrent.order_name`), the best height its rows of the sources asked about were measured at (None when none was), and where
          *     it is, the place with the most sources first.
          */
         PlayerFacts: {
@@ -3447,7 +3464,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "site" | "line";
+            kind: "site" | "line" | "torrent";
             /** Height */
             height?: number | null;
             /** Places */
@@ -10514,6 +10531,26 @@ export interface operations {
         };
     };
     v2_redirect_v2_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    favicon_favicon_svg_get: {
         parameters: {
             query?: never;
             header?: never;

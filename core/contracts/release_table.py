@@ -262,13 +262,13 @@ class PlayerPlace(BaseModel):
 
 
 class PlayerFacts(BaseModel):
-    """A player of the order of sources as the sources know it: a player of the pages of sites or a line of the
-    provider, the best height its rows of the sources asked about were measured at (None when none was), and where
+    """A player of the order of sources as the sources know it: a player of the pages of sites, a line of the provider, or
+    the torrent (every release of every tracker's page, one place: `torrent.order_name`), the best height its rows of the sources asked about were measured at (None when none was), and where
     it is, the place with the most sources first."""
 
     name: str
     label: str
-    kind: Literal["site", "line"]
+    kind: Literal["site", "line", "torrent"]
     height: int | None = None
     places: list[PlayerPlace] = Field(default_factory=list)
 

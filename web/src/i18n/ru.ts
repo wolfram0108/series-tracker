@@ -1117,6 +1117,8 @@ export const ru = {
   "voices.settings.priority.col.on": "Вкл.",
   "voices.settings.priority.kind.site": "Плеер сайта",
   "voices.settings.priority.kind.line": "Линия",
+  "voices.settings.priority.kind.torrent": "Раздачи трекеров",
+  "voices.settings.priority.torrent": "Торрент",
   "voices.settings.priority.height": "{height}p",
   "voices.settings.priority.upTo": "до {height}p",
   "voices.settings.priority.noSources": "нет источников",

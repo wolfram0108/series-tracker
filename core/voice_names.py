@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
+from core.contracts.torrent import order_name
+
 _NOISE = re.compile(r"[\W_]+", re.UNICODE)
 
 
@@ -67,5 +69,5 @@ def rank(player: str, priority: Sequence[str], players: Groups = NO_GROUPS) -> i
     """Place of a player in the order of the settings; players the user put into one group take one place and an
     unknown player comes last."""
     order = [players.canonical(kind) for kind in priority]
-    wanted = players.canonical(player)
+    wanted = players.canonical(order_name(player))
     return order.index(wanted) if wanted in order else len(order)

@@ -8,7 +8,7 @@ from core.contracts import (CompositionRow, Exclusion, PlayerSummary, ReleaseTab
                             RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, UnreadPart, line_of)
 from core.voice_names import fold_name
 from sources_support import json_of, text_of
-from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, group_renames, layout_episodes, lines_for,
+from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, group_renames, layout_episodes, left_out, lines_for,
                                          project, selected_rows, touched_episodes, voice_name_of, voice_names)
 
 def source(id=1, position=0, profile=7, **fields) -> SeriesSource:
@@ -253,6 +253,12 @@ def test_a_switched_off_player_is_not_asked_about_and_is_in_the_layout_as_left_o
     assert project([item(src, table(*[r for r in tbl.rows if r.player == "kodik"]), results)], {}, {}).unknown_voices == {}
     assert alone.unknown_voices != {}  # the same row in play does take one
     assert [p.player for p in out.sources[0].players] == ["vibix", "kodik"]
+
+
+def test_the_torrent_switched_off_in_the_settings_leaves_out_every_release_and_the_source_switches_off_its_own():
+    tbl = table(row("a", player="torrent:page"), row("b", player="torrent:1080p • AVC"), row("k", player="kodik"))
+    assert left_out(source(), tbl, ["torrent"]) == {"a": Exclusion.SETTINGS, "b": Exclusion.SETTINGS}
+    assert left_out(source(players_off=["torrent:page"]), tbl) == {"a": Exclusion.SOURCE}
 
 
 @pytest.mark.parametrize("chosen", [None, 0, 1, 2, 3])

@@ -92,7 +92,8 @@ function switchPlayer(name: string, on: boolean) {
   const rest = (view.value?.players_off ?? []).filter((each) => each !== name)
   void commit({ players_off: on ? rest : [...rest, name] })
 }
-const nameOf = (name: string): string => view.value?.player_labels?.[name] ?? facts.value[name]?.label ?? name
+const nameOf = (name: string): string => facts.value[name]?.kind === "torrent" ? t("voices.settings.priority.torrent")
+  : view.value?.player_labels?.[name] ?? facts.value[name]?.label ?? name
 
 onMounted(gate.run)
 </script>
@@ -190,6 +191,7 @@ onMounted(gate.run)
 .kind { display: inline-block; font-size: 0.75rem; padding: 0.1rem 0.5rem; border-radius: 4px; white-space: nowrap; }
 .kind-site { background: #cfe2ff; color: #084298; }
 .kind-line { background: #e2d9f3; color: #432874; }
+.kind-torrent { background: #ffe5d0; color: #7a3300; }
 .place { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; padding: 0.15rem 0.5rem; border-radius: 4px; background: var(--color-gray-200); border: 1px solid #dee2e6; white-space: nowrap; }
 .place b { font-variant-numeric: tabular-nums; }
 .place.zero { background: transparent; border-style: dashed; color: var(--text-muted); }

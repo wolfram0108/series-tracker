@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from core.contracts import ReleaseTable, RowState, RowVoice, TableRow, UnreadPart
 from core.contracts.provider import Manifest
+from core.contracts.torrent import order_name
 from core.db import Database
 
 from . import hosts
@@ -166,13 +167,19 @@ class SourcesRepository:
         marks = ", ".join("?" for _ in urls)
 
         def read(conn) -> tuple[dict[tuple[str, str], int], dict[str, int]]:
-            pages = {(player, site): count for player, site, count in conn.execute(
-                f"SELECT r.player, t.site, COUNT(DISTINCT t.url) FROM release_rows r JOIN release_tables t ON t.url = r.url"
-                f" WHERE t.url IN ({marks}) GROUP BY r.player, t.site", urls)}
-            heights = {player: height for player, height in conn.execute(
-                f"SELECT r.player, MAX(CAST(j.value AS INTEGER)) FROM release_rows r, json_each(r.heights) j"
-                f" WHERE r.url IN ({marks}) GROUP BY r.player", urls) if height}
-            return pages, heights
+            # By the name of the order of sources: the releases of the torrent are one player there (order_name).
+            held: dict[tuple[str, str], set[str]] = {}
+            for player, site, url in conn.execute(
+                    f"SELECT DISTINCT r.player, t.site, t.url FROM release_rows r JOIN release_tables t ON t.url = r.url"
+                    f" WHERE t.url IN ({marks})", urls):
+                held.setdefault((order_name(player), site), set()).add(url)
+            heights: dict[str, int] = {}
+            for player, height in conn.execute(
+                    f"SELECT r.player, MAX(CAST(j.value AS INTEGER)) FROM release_rows r, json_each(r.heights) j"
+                    f" WHERE r.url IN ({marks}) GROUP BY r.player", urls):
+                if height:
+                    heights[order_name(player)] = max(height, heights.get(order_name(player), 0))
+            return {key: len(pages) for key, pages in held.items()}, heights
 
         return await self._db.transaction(read)
 

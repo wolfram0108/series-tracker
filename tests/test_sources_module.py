@@ -129,6 +129,22 @@ async def test_every_player_says_where_it_is_among_the_pages_asked_about_and_the
     assert set(bare) == set(facts) and bare["kodik"]["places"] == [] and bare["line:NBY"]["places"][0]["sources"] == 0
 
 
+async def test_the_torrent_is_one_player_of_the_order_with_the_trackers_of_its_pages(with_lines):
+    """Every release of every tracker's page (`torrent:<release>`) is the one player `torrent`: a page counts once on its
+    tracker however many releases it has, and the best height is of all of them."""
+    sources, probe = with_lines
+    kinozal, rutracker = "https://kinozal.tv/details.php?id=1", "https://rutracker.org/forum/viewtopic.php?t=2"
+    await sources.repo.save_table(page(kinozal, "kinozal", ("a", "torrent:page", [1080]), ("b", "torrent:page#DIR", [2160])))
+    await sources.repo.save_table(page(rutracker, "rutracker", ("a", "torrent:1080p • AVC", [720]),
+                                       ("b", "torrent:720p", [720])))
+
+    facts = {each["name"]: each for each in (await probe.request(
+        "sources.players.list", {"urls": [kinozal, rutracker]}, timeout=5))["players"]}
+    assert not [name for name in facts if name.startswith("torrent:")]
+    assert facts["torrent"]["kind"] == "torrent" and facts["torrent"]["height"] == 2160
+    assert [(each["name"], each["sources"]) for each in facts["torrent"]["places"]] == [("kinozal", 1), ("rutracker", 1)]
+
+
 # --- the stream of a candidate ------------------------------------------------------------------------------------------------
 
 async def test_the_module_resolves_the_stream_of_a_link_a_player_owns_and_leaves_any_other_address(stand):

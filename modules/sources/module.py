@@ -144,7 +144,7 @@ from typing import Callable, Iterable
 
 from core import BaseModule, compute, ids
 from core import storage
-from core.contracts.torrent import PageReleases
+from core.contracts.torrent import TORRENT_PLAYER, PageReleases
 from core.contracts.release_table import site_of
 from core.contracts.voices import PLAYERS_OFF_KEY
 from core.contracts import (NotAllowed, ParsedDomains, PlayerFacts, PlayerPlace,
@@ -611,9 +611,11 @@ class SourcesModule(BaseModule):
                     found[site] = PlayerPlace(name=site, label=labels.get(site, site), sources=count)
             return sorted(found.values(), key=lambda place: (-place.sources, place.label))
 
-        players = [PlayerFacts(name=each.name, label=getattr(each, "label", "") or each.name, kind="site",
+        # A player with lines is listed by its lines (the provider's manifest), but the torrent: its releases take its one place.
+        players = [PlayerFacts(name=each.name, label=getattr(each, "label", "") or each.name,
+                               kind="torrent" if each.name == TORRENT_PLAYER else "site",
                                height=heights.get(each.name), places=places(each.name))
-                   for each in self.players if not getattr(each, "lines", False)]
+                   for each in self.players if not getattr(each, "lines", False) or each.name == TORRENT_PLAYER]
         for each in (self.connector.players() if self.connector else ()):
             players.append(PlayerFacts(name=each.name, label=each.label or each.name, kind=each.kind,
                                        height=heights.get(each.name), places=places(each.name, each.places)))

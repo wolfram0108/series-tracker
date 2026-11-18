@@ -12,6 +12,7 @@ from typing import Iterable, Iterator, Mapping, Sequence
 from core.contracts.composition import LEFT_BEFORE_RULES
 from core.contracts import (CompositionRow, Exclusion, PlayerSummary, SeasonVoiceOrder, VoiceSpan, ReleaseTable, RowState, RowTrack, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, line_of, place_of)
+from core.contracts.torrent import order_name
 from core.voice_names import fold_name
 
 # One template for the name of a voice-over that belongs to no user group.
@@ -60,7 +61,7 @@ def left_out(source: SeriesSource, table: ReleaseTable, everywhere: Iterable[str
     chosen = groups[position] if position is not None and 0 <= position < len(groups) else None
     out = {}
     for row in table.rows:
-        if row.player in settings:
+        if order_name(row.player) in settings:
             out[row.key] = Exclusion.SETTINGS
         elif row.player in off or (row.player == CATALOG_PLAYER and position is not None
                                    and (chosen is None or row.group != chosen)):

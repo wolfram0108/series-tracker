@@ -19,8 +19,8 @@ Queries:
       when a run took them.
   voices.settings.export {} -> {values}: the stored settings as they are, for the snapshot of a run.
   voices.players.get {} -> PlayersListReply: every player of the order with where it is among the sources of the series
-      (the sources of every series of `catalog.series.list` but torrents, asked of `sources.players.list`); for the screen
-      of the order, not for a count.
+      (the sources of every series of `catalog.series.list`, asked of `sources.players.list`; the torrent is one player of
+      the order, its releases one place); for the screen of the order, not for a count.
 Command:
   voices.settings.set VoiceSettingsDraft -> VoiceSettingsSaved: groups, their languages and order are checked
       (editor.check: a known language or none; a player must be one the sources know unless it is stored already) and

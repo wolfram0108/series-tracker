@@ -39,3 +39,12 @@ def test_a_player_takes_the_place_of_its_name_or_of_its_group_and_an_unknown_one
     order = ["vk", "mirror", "allvideo"]
     assert [rank(p, order, groups) for p in ("vk", "cvh", "kodik", "allvideo", "other")] == [0, 1, 1, 2, 3]
     assert [rank(p, ["vk", "cvh"], NO_GROUPS) for p in ("vk", "cvh", "kodik")] == [0, 1, 2]
+
+
+def test_every_release_of_every_page_takes_the_one_place_of_the_torrent_and_its_group():
+    """A release is a line of one page (`torrent:<release>`): the order of the settings names the torrent once."""
+    order = ["vk", "torrent", "kodik"]
+    assert [rank(p, order) for p in ("torrent:page", "torrent:1080p • AVC", "torrent:page#DIR", "kodik")] == [1, 1, 1, 2]
+    assert rank("torrent:page", ["vk", "kodik"]) == 2  # not in the order: last, as any player
+    assert rank("torrent:page", ["vk", "files", "kodik"], Groups.of({"files": ["torrent"]})) == 1
+    assert rank("line:NBY", ["line", "line:NBY"]) == 1  # a line of the provider is its own place
