@@ -409,6 +409,8 @@ export const ru = {
   "reason.search_cooling": "Источник поиска просит подождать {wait} с",
   "reason.app_unreachable": "{app} не отвечает: {error}",
   "reason.app_status": "{app}: ответ со статусом {status}",
+  "reason.app_word": "{app}: {words}",
+  "reason.route_defect": "Сбой пути {route}: {error}",
   "reason.app_answer_broken": "{app}: ответ на {step} не расшифрован",
   "reason.app_refused": "{app}: отказ на {step}: {message}",
   "reason.app_title_absent": "{app}: карточки № {card} нет",
