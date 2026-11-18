@@ -15,7 +15,7 @@
 .torrent-pane-head.is-off { visibility: hidden; }
 /* The panes side by side (one under the other where the frame is narrow); the line between them is the gap of the grid. */
 .torrent-panes-body {
-  flex: 1 1 auto; min-block-size: 0; display: grid; gap: 1px; background: var(--color-gray-200);
+  flex: 1 1 auto; min-block-size: 0; display: grid; gap: 0.0625rem; background: var(--color-gray-200);
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
 }
 .torrent-pane { display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; overflow: hidden; background: var(--bg-white); }
@@ -162,7 +162,7 @@
 .torrent-folders-table td.torrent-folder-head { padding-inline-start: 0.5rem; }
 /* Where it comes from: a mark or a word, at the start of its cell. */
 .torrent-folders-table td.torrent-folders-origin { padding-inline: 0.25rem; }
-/* The type a track of subtitles has (П, Н): what the rule or the folder gave it; «—» none. */
+/* The type a track of subtitles has (full or signs): what the rule or the folder gave it; «—» none. */
 .torrent-type-mark {
   display: inline-flex; align-items: center; justify-content: center; min-inline-size: 1.25rem; block-size: 1.125rem;
   padding-inline: 0.25rem; border-radius: 4px; background: var(--color-blue); color: var(--bg-white); font-size: 0.7rem; font-weight: 700;
