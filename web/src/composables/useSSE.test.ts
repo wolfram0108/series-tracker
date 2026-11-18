@@ -102,6 +102,18 @@ describe("useSSE", () => {
     expect(sse.lost.value).toBe(false)
   })
 
+  it("asks whether the server serves another build when the stream comes back after a loss, not at the first open", async () => {
+    const reload = vi.fn(async () => {})
+    vi.doMock("../lib/build", () => ({ reloadIfRebuilt: reload }))
+    const { source } = await freshSSE()
+    source.onopen!()
+    expect(reload).not.toHaveBeenCalled()
+    source.onerror!()
+    source.onopen!()
+    expect(reload).toHaveBeenCalledTimes(1)
+    vi.doUnmock("../lib/build")
+  })
+
   it("opens a stream the server closed for good again, once the owner of the login allows it, at growing spaces", async () => {
     vi.useFakeTimers()
     const { sse, source } = await freshSSE()

@@ -10,6 +10,10 @@ describe("t", () => {
     expect(t("sources.add.button")).toBe("Добавить источник")
   })
 
+  it("shows a key the catalog lacks as the key, never failing the screen", () => {
+    expect(t("voices.settings.priority.kind.newer" as MessageKey)).toBe("voices.settings.priority.kind.newer")
+  })
+
   it("renders a missing param as an empty string", () => {
     expect(t("sources.progress", { phase: "Каталог плеера" })).toBe("Каталог плеера:  из ")
   })

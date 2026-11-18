@@ -2,9 +2,15 @@ import { ru, type MessageKey } from "./ru"
 
 export type { MessageKey }
 
-/** Text of a catalog key; `{name}` placeholders are filled from `params`. Language is the only runtime parameter. */
+/** Text of a catalog key; `{name}` placeholders are filled from `params`. Language is the only runtime parameter. A key built at
+ *  run time that the catalog lacks (a value the core added after this build) is shown as the key: one word, not a broken screen. */
 export function t(key: MessageKey, params: Record<string, string | number> = {}): string {
-  return ru[key].replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? ""))
+  const text: string | undefined = ru[key]
+  if (text === undefined) {
+    console.error(`no text in the catalog for the key ${key}`)
+    return key
+  }
+  return text.replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? ""))
 }
 
 /** Text of a key cut at its placeholder `{slot}`: what goes before and after it, so that a screen sets the fact in its own

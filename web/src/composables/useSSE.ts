@@ -1,5 +1,6 @@
 import { ref } from "vue"
 import type { components } from "../api/schema"
+import { reloadIfRebuilt } from "../lib/build"
 
 /** The events of the stream are named by the one table of the gateway (SSE_MAP) and reach this type through the schema
  *  of the API. The stream is read in frames of a turn (`frames=batch`): `event: batch\ndata: [{event, data}, ...]`, the
@@ -57,6 +58,8 @@ function connect() {
   source = new EventSource("/api/stream?frames=batch")
   source.onopen = () => {
     connected.value = true
+    // The stream came back after a loss: the server may have been restarted with another build of this page.
+    if (lost.value) void reloadIfRebuilt()
     lost.value = false
     retryWait = RETRY_FIRST_MS
   }
