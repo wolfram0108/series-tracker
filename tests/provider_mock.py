@@ -80,11 +80,11 @@ class MockProvider:
 
     def title(self, site: str, ident: str | int, names: list[str], rows: list[tuple[str, str, str, list[int]]],
               title: str = "") -> None:
-        """A title of a site: its rows are (text, line, token, heights); a row without a height is absent. The key of a row
+        """A title of a site: its rows are (the episode as the door names it, line, token, heights); a row without a height is absent. The key of a row
         is `<line>:<place>`, its part the line (the socket, appendix A.2)."""
         made = []
         for place, (text, line, item, heights) in enumerate(rows, start=1):
-            made.append(TableRow(key=f"{line}:{place}", player=f"{FAMILY}:{line}", player_label=line, text=text, part=line,
+            made.append(TableRow(key=f"{line}:{place}", player=f"{FAMILY}:{line}", player_label=line, episode=text, part=line,
                                  state=RowState.PLAYABLE if heights else RowState.ABSENT, heights=heights,
                                  link=link_of(line, item), site_fields={"line": line}).model_dump(mode="json"))
         self.sites[site].titles[str(ident)] = {"names": names, "title": title or f"{names[0]}", "rows": made}
