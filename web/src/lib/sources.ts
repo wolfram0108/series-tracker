@@ -295,6 +295,13 @@ export function pageHost(url: string): string {
   }
 }
 
+/** The parts of the address of a line of a title of the provider (`title://<site>/<title>/<line>`): the site of the provider, the
+ *  title and the line, which is the source; null for any other address. */
+export function lineAddress(url: string): { site: string; title: string; line: string } | null {
+  const found = /^title:\/\/([^/]+)\/([^/]+)\/([^/?#]+)\/?$/.exec(url)
+  return found ? { site: found[1], title: found[2], line: found[3] } : null
+}
+
 /** Where a source is, as every tab names it: the site, and the channel of a VK channel (`vkvideo.ru @name`); a title of
  *  the provider of external sources is its address itself (`title://chines/k3f9a1`), the one written everywhere the source is. */
 export function placeOf(url: string): string {

@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 import FoldButton from "./FoldButton.vue"
 import SheetField from "./SheetField.vue"
 import StInput from "./StInput.vue"
-import { t } from "../i18n"
+import { t, tn } from "../i18n"
 import { searchTitles } from "../composables/sourceCalls"
 import { reasonText } from "../lib/reason"
-import type { TitleCard, TitleLine, TitleSearchReply } from "../lib/sources"
+import { lineAddress, type TitleCard, type TitleLine, type TitleSearchReply } from "../lib/sources"
+import { useProviderStore } from "../stores/provider"
 
 // The search of the titles of the provider of external sources: the user's words (the names of the series offered as buttons),
 // a page of the titles as the provider gives them, in its order, and a title added as a source by its address. Nothing is chosen
@@ -14,8 +15,8 @@ import type { TitleCard, TitleLine, TitleSearchReply } from "../lib/sources"
 const props = withDefaults(defineProps<{
   /** The names of the series the user may search by: its own, the original one of TMDB, those its pages write. */
   names: { text: string; mark?: string }[]
-  /** The addresses already sources of the series, with their place in the list. */
-  added: Record<string, number>
+  /** The addresses already sources of the series, with their place in the list and the colour of their mark. */
+  added: Record<string, { n: number; color: number | null }>
   busy?: boolean
 }>(), { busy: false })
 const emit = defineEmits<{ (e: "add", url: string): void }>()
@@ -79,9 +80,23 @@ function meta(card: TitleCard): string {
   return [card.year, card.area, (card.genres ?? "").split(",").filter(Boolean).join(", ")].filter(Boolean).join(" · ")
 }
 
-function lineText(line: TitleLine): string {
-  return [line.label || line.code, line.rows != null ? String(line.rows) : ""].filter(Boolean).join(" · ")
+// A line is named by its code, the name of the source; how many rows it holds is said in words, and when the provider does not
+// know it, that is said, never a bare number or a zero.
+function rowsText(line: TitleLine): string {
+  return line.rows != null ? tn("sources.titles.rows", line.rows) : t("sources.titles.rowsUnknown")
 }
+
+// Whose titles these are: the sites of the lines found, named as the provider's manifest names them for people.
+const provider = useProviderStore()
+onMounted(() => { void provider.ensure() })
+const providerName = computed(() => {
+  const sites = new Set(titles.value.flatMap((card) => card.lines.map((line) => lineAddress(line.url)?.site ?? "")).filter(Boolean))
+  const named = [...sites].map((site) => provider.labelOf(site))
+  return named.length ? named.join(", ") : (provider.view?.sites[0]?.label ?? "")
+})
+
+// The mark of a source added: its number in the colour the series gave it.
+const markStyle = (color: number | null) => ({ backgroundColor: color === null ? "var(--text-muted)" : `var(--source-${color % 16})` })
 </script>
 
 <template>
@@ -108,7 +123,9 @@ function lineText(line: TitleLine): string {
       <div v-if="last.reason" class="ts-reason">{{ reasonText(last.reason) }}</div>
       <div v-for="note in last.notes ?? []" :key="note" class="ts-reason">{{ reasonText(note) }}</div>
       <div v-if="!titles.length && !last.reason" class="muted">{{ t("sources.titles.empty") }}</div>
-      <header v-if="titles.length || withoutLines" class="ts-head"><span class="muted">{{ found }}</span></header>
+      <header v-if="titles.length || withoutLines" class="ts-head">
+        <span v-if="providerName" class="sheet-caption ts-provider">{{ providerName }}</span><span class="muted">{{ found }}</span>
+      </header>
     </template>
 
     <article v-for="card in titles" :key="card.id" class="ts-card" :data-card="card.id">
@@ -120,13 +137,22 @@ function lineText(line: TitleLine): string {
         <div v-if="meta(card)" class="ts-meta">{{ meta(card) }}</div>
         <div v-if="card.remarks"><span class="ts-chip ts-remarks">{{ card.remarks }}</span></div>
         <p v-if="card.blurb" class="ts-blurb">{{ card.blurb }}</p>
-        <!-- A title is no source: each line of it is, and each has its own button. -->
-        <div class="ts-lines">
-          <div v-for="line in card.lines" :key="line.code" class="ts-line" :class="{ 'is-added': line.url in added }" :data-line="line.code">
-            <span class="ts-chip">{{ lineText(line) }}</span>
-            <span v-if="line.url in added" class="ts-added">{{ t("sources.titles.added", { n: added[line.url] }) }}</span>
-            <FoldButton v-else :label="t('sources.add.button')" icon="pi pi-plus" severity="success" fold="sm" class="ts-add"
-                        :disabled="busy" @click="emit('add', line.url)" />
+        <!-- A title is no source: each line of it is, a row of its own with its name, how much it holds and its button. -->
+        <div v-if="card.lines.length" class="ts-lines">
+          <p class="sheet-caption">{{ t("sources.titles.lines", { n: card.lines.length }) }}</p>
+          <div v-for="line in card.lines" :key="line.code" class="input-constructor-group ts-line" :data-line="line.code"
+               :class="{ 'is-added': line.url in added }">
+            <div class="constructor-item item-label-text-icon"><i class="pi pi-video" aria-hidden="true" /><b class="ts-code">{{ line.code }}</b></div>
+            <div class="constructor-item item-value ts-rows" :class="{ 'is-unknown': line.rows == null }">{{ rowsText(line) }}</div>
+            <div v-if="line.url in added" class="constructor-item ts-added">
+              <span class="figure-mark" :style="markStyle(added[line.url].color)">{{ added[line.url].n }}</span>{{ t("sources.titles.added", { n: added[line.url].n }) }}
+            </div>
+            <div v-else class="item-button-group">
+              <button type="button" class="btn-icon btn-add btn-text-icon ts-add" :disabled="busy" :title="t('sources.add.button')"
+                      :aria-label="t('sources.add.button')" @click="emit('add', line.url)">
+                <i class="pi pi-plus" aria-hidden="true" /><span class="ts-add-word">{{ t("sources.add.button") }}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -161,9 +187,23 @@ function lineText(line: TitleLine): string {
 .ts-name-text { font-weight: 700; overflow-wrap: anywhere; }
 .ts-sub { font-size: 0.875rem; overflow-wrap: anywhere; }
 .ts-meta { color: var(--text-muted); font-size: 0.8rem; overflow-wrap: anywhere; }
-.ts-lines { display: grid; gap: 0.35rem; margin-block-start: 0.25rem; }
-.ts-line { display: flex; flex-wrap: wrap; gap: 0.4rem 0.75rem; align-items: center; }
-.ts-line.is-added .ts-chip { border-color: var(--color-green-1); }
+.ts-lines { display: grid; gap: 0.35rem; margin-block-start: 0.4rem; }
+/* A line is a group of the sheet: its name, how much it holds, and what can be done with it (add it, or its place as a source). */
+.ts-line { min-block-size: 2.5rem; flex-wrap: wrap; }
+.ts-code { font-weight: 700; color: var(--color-text); }
+.ts-rows { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ts-rows.is-unknown { color: var(--text-muted); }
+.ts-added {
+  gap: 0.5rem; padding: 0 0.9rem; color: color-mix(in srgb, var(--color-green-1) 85%, black); font-weight: 600;
+  background: color-mix(in srgb, var(--color-green-1) 10%, transparent); white-space: nowrap;
+}
+.ts-provider { margin: 0; }
+/* Where the room is short (a phone) the button of a line is its icon alone, and the mark of a source added takes the row under the line. */
+@container fold-room (inline-size < 30rem) {
+  .ts-add-word { display: none; }
+  .ts-add { inline-size: 2.75rem; padding: 0; gap: 0; }
+  .ts-added { flex: 1 1 100%; }
+}
 .ts-chip {
   display: inline-block; border: var(--border-width) solid var(--border-color); background: var(--bg-light); border-radius: 999px;
   padding: 0.05rem 0.55rem; font-size: 0.8rem; overflow-wrap: anywhere;
@@ -171,10 +211,6 @@ function lineText(line: TitleLine): string {
 .ts-blurb {
   margin: 0; color: var(--text-muted); font-size: 0.8rem; line-height: 1.45; overflow: hidden;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-}
-.ts-added {
-  border: var(--border-width) solid var(--color-green-1); color: var(--color-green-1); border-radius: 999px; padding: 0.05rem 0.6rem;
-  font-size: 0.8rem; font-weight: 600; white-space: nowrap;
 }
 .ts-reason { color: var(--color-red-1); overflow-wrap: anywhere; }
 .ts-more { align-self: flex-start; }

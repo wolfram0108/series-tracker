@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 import StTab from "./StTab.vue"
 import { useToast } from "primevue/usetoast"
 import Skeleton from "primevue/skeleton"
@@ -15,11 +15,12 @@ import ReleaseFresh from "./ReleaseFresh.vue"
 import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
-  joinVkAddress, vkQuery, placeOf, profileOptions, progressText, seasonPositions, sourceCaption, spanText, splitVkAddress,
+  joinVkAddress, lineAddress, vkQuery, placeOf, profileOptions, progressText, seasonPositions, sourceCaption, spanText, splitVkAddress,
   stepsLines, togglePlayer, type SourceItem,
 } from "../lib/sources"
 import type { DraftPatch } from "../composables/useSourceDrafts"
 import { SOURCE_STATES, stateLabel } from "../lib/states"
+import { useProviderStore } from "../stores/provider"
 
 // One source of a series: a head with its mark, its place, its state and its actions; its address and its constructor
 // profile; and its players as tabs, each with the table of the voice-overs the rules of the profile made of its rows.
@@ -37,6 +38,15 @@ const isChannel = computed(() => props.item.sourceType === "vk_video")
 // A title of the provider has no page a browser opens: its address is shown and copied, with no link to open.
 const titleSource = computed(() => props.item.url.startsWith("title://"))
 const view = computed(() => props.item.view)
+// A line of a title is written by what it is made of: whose it is (the site of the provider by the name its manifest gives for
+// people), which line it is and the name of the title as its source gives it; the address is for copying, not for reading.
+const provider = useProviderStore()
+onMounted(() => { if (titleSource.value) void provider.ensure() })
+const lineParts = computed(() => lineAddress(props.item.url))
+const providerName = computed(() => (lineParts.value ? provider.labelOf(lineParts.value.site) : ""))
+const headText = computed(() => (lineParts.value
+  ? [providerName.value, lineParts.value.line, view.value.title].filter(Boolean).join(" · ")
+  : view.value.title || placeOf(props.item.url)))
 const options = computed(() => profileOptions(props.profiles))
 const seasonOptions = (groups: number) => [
   { label: t("sources.vibix.none"), value: null as number | null },
@@ -101,7 +111,7 @@ async function copyAddress(): Promise<void> {
     <header class="source-head">
       <span class="source-title">
         <SourceMark v-if="place !== undefined && item.color !== null" :mark="{ n: place, color: item.color, place: '' }" />
-        <span class="source-place">{{ view.title || placeOf(item.url) }}</span>
+        <span class="source-place">{{ headText }}</span>
       </span>
       <span v-if="waiting" class="source-state" data-state="read"><i class="pi pi-spin pi-spinner" />{{ t("sources.tableLoading") }}</span>
       <span v-else class="source-state" :data-state="SOURCE_STATES[view.state]">
@@ -135,14 +145,22 @@ async function copyAddress(): Promise<void> {
         </div>
         <small v-if="!vkQuery(query)" class="source-reason">{{ t("sources.vk.queryMissing") }}</small>
       </div>
-      <SheetField v-else-if="titleSource" class="source-title is-readonly" :label="t('sources.titles.card')" icon="pi pi-video">
-        <StValue :value="item.url" mono />
-        <div class="constructor-item url-actions">
-          <button type="button" class="url-action-btn" :title="t('sources.address.copy')" @click="copyAddress">
-            <i class="pi pi-clipboard" />
-          </button>
-        </div>
-      </SheetField>
+      <div v-else-if="titleSource" class="sheet-pair source-line">
+        <SheetField class="is-readonly source-provider" :label="t('sources.provider.label')" icon="pi pi-building">
+          <StValue :value="providerName" />
+        </SheetField>
+        <SheetField class="is-readonly source-line-code" :label="t('sources.line.label')" icon="pi pi-video">
+          <StValue :value="lineParts?.line ?? ''" />
+          <div class="constructor-item url-actions">
+            <button type="button" class="url-action-btn" :title="t('sources.address.copy')" :aria-label="t('sources.address.copy')" @click="copyAddress">
+              <i class="pi pi-clipboard" />
+            </button>
+          </div>
+        </SheetField>
+        <SheetField v-if="view.title" class="is-readonly source-name" :label="t('sources.name.label')" icon="pi pi-align-left" wide>
+          <StValue :value="view.title" />
+        </SheetField>
+      </div>
       <div v-if="titleSource" class="stack source-rows" @focusout="commitRows" @keyup.enter="commitRows">
         <SheetField :label="t('sources.rows.label')" icon="pi pi-list">
           <StInput v-model="rows" />
@@ -262,6 +280,8 @@ async function copyAddress(): Promise<void> {
 /* The buttons of the head are those of the main screen at the height of the head of a season. */
 .source-body { padding: var(--space); }
 .source-reason { color: var(--color-red-1); overflow-wrap: anywhere; }
+/* The line is the source's own name: it stands out among the facts of where the source comes from. */
+.source-line-code .item-value { font-weight: 700; color: var(--color-text); }
 .muted { color: var(--text-muted); font-size: smaller; }
 .player-tab { padding-block: 0.3rem; font-size: 0.85rem; }
 .player-rows { color: var(--text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }

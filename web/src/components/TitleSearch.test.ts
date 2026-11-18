@@ -2,11 +2,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import ToastService from "primevue/toastservice"
+import { createPinia, setActivePinia, type Pinia } from "pinia"
 import SourcesEditor from "./SourcesEditor.vue"
 import * as address from "../composables/sourceAddress"
 import * as calls from "../composables/sourceCalls"
-import { t } from "../i18n"
+import { t, tn } from "../i18n"
 import { itemOfSource, type SeriesSource, type TitleCard, type TitleSearchReply } from "../lib/sources"
+import { useProviderStore } from "../stores/provider"
 
 vi.mock("../composables/sourceAddress")
 vi.mock("../composables/sourceCalls", async (original) => ({
@@ -30,12 +32,12 @@ beforeEach(() => {
   vi.mocked(calls.searchTitles).mockReset()
 })
 
-const mountEditor = (props: Record<string, unknown> = {}) => mount(SourcesEditor, {
+const mountEditor = (props: Record<string, unknown> = {}, pinia: Pinia = createPinia()) => mount(SourcesEditor, {
   props: {
     items: [itemOfSource(stored(), null, null)], profiles: [], adder: vi.fn().mockResolvedValue(true),
     names: [{ text: "万界独尊", mark: "TMDB" }, { text: "Ten Thousand Worlds" }], ...props,
   },
-  global: { plugins: [ToastService] },
+  global: { plugins: [ToastService, pinia] },
 })
 
 describe("the search of the titles of the provider in the sources", () => {
@@ -65,13 +67,16 @@ describe("the search of the titles of the provider in the sources", () => {
     await flushPromises()
 
     expect(calls.searchTitles).toHaveBeenCalledWith("万界独尊", 1)
-    expect(w.find(".ts-head").text()).toBe(t("sources.titles.found", { total: 3, page: 1, pages: 2 }))
+    expect(w.find(".ts-head .muted").text()).toBe(t("sources.titles.found", { total: 3, page: 1, pages: 2 }))
     const cards = w.findAll(".ts-card")
     expect(cards.map((each) => each.attributes("data-card"))).toEqual(["819312", "k3f9a1"])
     expect(cards[0].find(".ts-meta").text()).toBe("2013 · 内地 · 动画, 国漫")
     expect(cards[0].find(".ts-blurb").text()).toBe("《我是大医生》")
     expect(cards[0].find("img").attributes("src")).toBe("https://img.model/1.jpg")
-    expect(cards[0].findAll(".ts-line").map((each) => each.find(".ts-chip").text())).toEqual(["4K · 480", "duanju"])
+    // a line is named by its code, how much it holds is said in words, and a count the provider does not know is said so, never a zero
+    expect(cards[0].findAll(".ts-line").map((each) => [each.find(".ts-code").text(), each.find(".ts-rows").text()]))
+      .toEqual([["CO4K", tn("sources.titles.rows", 480)], ["duanju", t("sources.titles.rowsUnknown")]])
+    expect(cards[0].find(".sheet-caption").text()).toBe(t("sources.titles.lines", { n: 2 }))
     expect(cards[0].findAll(".ts-add")).toHaveLength(2)  // a title is no source: each of its lines is
     expect(cards[1].find(".ts-remarks").text()).toBe("更新至第499集")
     // the line of the second title is the source the series already has
@@ -99,7 +104,8 @@ describe("the search of the titles of the provider in the sources", () => {
     await flushPromises()
     const done = w.find(".ts-line[data-line='CO4K']")
     expect(done.classes()).toContain("is-added")
-    expect(done.find(".ts-added").text()).toBe(t("sources.titles.added", { n: 1 }))
+    expect(done.find(".ts-added").text()).toContain(t("sources.titles.added", { n: 1 }))
+    expect(done.find(".ts-added .figure-mark").text()).toBe("1")
     expect(done.find(".ts-add").exists()).toBe(false)
     expect(w.find(".ts-line[data-line='duanju'] .ts-add").exists()).toBe(true)
   })
@@ -111,7 +117,7 @@ describe("the search of the titles of the provider in the sources", () => {
     await w.findAll(".source-mode .st-tab")[1].trigger("click")
     await w.find(".ts-find").trigger("click")
     await flushPromises()
-    expect(w.find(".ts-head").text()).toBe(`${t("sources.titles.page", { page: 1 })} · ${t("sources.titles.withoutLines", { n: 3 })}`)
+    expect(w.find(".ts-head .muted").text()).toBe(`${t("sources.titles.page", { page: 1 })} · ${t("sources.titles.withoutLines", { n: 3 })}`)
     expect(w.find(".ts-more").exists()).toBe(true)
 
     const line = { code: "CO4K", url: "title://chines/9/CO4K", label: "4K", rows: 482, routes: 3 }
@@ -120,7 +126,7 @@ describe("the search of the titles of the provider in the sources", () => {
     await flushPromises()
     expect(calls.searchTitles).toHaveBeenLastCalledWith("万界独尊", 2)
     expect(w.find(".ts-more").exists()).toBe(false)  // the provider said it is the last, though it gave no count of pages
-    expect(w.find(".ts-head").text()).toBe(t("sources.titles.page", { page: 2 }))  // what it left out is that of the page it gave last
+    expect(w.find(".ts-head .muted").text()).toBe(t("sources.titles.page", { page: 2 }))  // what it left out is that of the page it gave last
   })
 
   it("a provider that gave no title says why, worded from its reason, and what a part of its sources lacked from its notes", async () => {
@@ -136,12 +142,34 @@ describe("the search of the titles of the provider in the sources", () => {
     expect(w.find(".ts-more").exists()).toBe(false)
   })
 
-  it("a source of the provider is headed by the name its site gives it; its field is its address, with no page to open", async () => {
-    const summary = { source_id: 7, url: "title://chines/k3f9a1/CO4K", status: "no_profile" as const, title: "万界独尊 (2021)", players: [] }
-    const w = mountEditor({ items: [itemOfSource(stored(), summary, null)] })
+  it("names the provider over its titles by the name its manifest gives the site of their lines, and the site by its own name until it is known", async () => {
+    vi.mocked(calls.searchTitles).mockResolvedValue({ ok: true, data: page([
+      card({ id: "k3f9a1", lines: [{ code: "CO4K", url: "title://chines/k3f9a1/CO4K", label: "CO4K", rows: 482, routes: 3 }] })]) })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useProviderStore().apply({ url: "http://p", has_token: true, state: "up", reason: null, provider: "chinese_sources", version: "2", protocol: 2,
+      revision: "1", sites: [{ name: "chines", label: "Чинес", sources: 1, lines: 1 }], downloads_dir: "", seq: 1 })
+    const w = mountEditor({}, pinia)
+    await w.findAll(".source-mode .st-tab")[1].trigger("click")
+    await w.find(".ts-find").trigger("click")
     await flushPromises()
-    expect(w.find(".source-place").text()).toBe("万界独尊 (2021)")
-    expect(w.find(".source-title .item-value").text()).toBe("title://chines/k3f9a1/CO4K")
-    expect(w.find(".source-title a").exists()).toBe(false)
+    expect(w.find(".ts-provider").text()).toBe("Чинес")
+  })
+
+  it("a line of a title of the provider is headed by its provider, its line and the name of the title; its fields say where it comes from, and its address is copied, never opened", async () => {
+    const summary = { source_id: 7, url: "title://chines/k3f9a1/CO4K", status: "no_profile" as const, title: "万界独尊 (2021)", players: [] }
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useProviderStore().apply({ url: "http://p", has_token: true, state: "up", reason: null, provider: "chinese_sources", version: "2", protocol: 2,
+      revision: "1", sites: [{ name: "chines", label: "Чинес", sources: 1, lines: 1 }], downloads_dir: "", seq: 1 })
+    const w = mountEditor({ items: [itemOfSource(stored(), summary, null)] }, pinia)
+    await flushPromises()
+    expect(w.find(".source-place").text()).toBe("Чинес · CO4K · 万界独尊 (2021)")
+    expect(w.find(".source-provider .item-value").text()).toBe("Чинес")
+    expect(w.find(".source-line-code .item-value").text()).toBe("CO4K")
+    expect(w.find(".source-name .item-value").text()).toBe("万界独尊 (2021)")
+    expect(w.find(".source-line .url-action-btn").exists()).toBe(true)
+    expect(w.find(".source-line a").exists()).toBe(false)
+    expect(w.text()).not.toContain("title://")  // the address is the machine's: it is not written where a person reads
   })
 })

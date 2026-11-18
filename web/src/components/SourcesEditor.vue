@@ -38,7 +38,7 @@ const emit = defineEmits<{
 
 // How a source is added: by the address of a page, or by a title the search of the provider found.
 const mode = ref<"address" | "titles">("address")
-const added = computed(() => Object.fromEntries(props.items.map((item, index) => [item.url, index + 1])))
+const added = computed(() => Object.fromEntries(props.items.map((item, index) => [item.url, { n: index + 1, color: item.color }])))
 const loaded = ref<{ text: string; mark?: string }[]>([])
 let loading = false
 watch(mode, async (now) => {

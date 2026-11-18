@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import ToastService from "primevue/toastservice"
+import { createPinia } from "pinia"
 import SourcesEditor from "./SourcesEditor.vue"
 import * as address from "../composables/sourceAddress"
 import { t } from "../i18n"
@@ -24,7 +25,7 @@ const summary: SourceSummary = {
 const mountEditor = (items = [itemOfSource(stored(), summary, null)], props: Record<string, unknown> = {}) =>
   mount(SourcesEditor, {
     props: { items, profiles: [{ id: 4, name: "ruchime" }], adder: vi.fn().mockResolvedValue(true), ...props },
-    global: { plugins: [ToastService] },
+    global: { plugins: [ToastService, createPinia()] },
   })
 
 // What the core says of a typed address: a channel of VK for the addresses of vkvideo.ru, a page of a site for the rest.
