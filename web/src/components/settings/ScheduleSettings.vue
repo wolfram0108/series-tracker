@@ -141,7 +141,7 @@ const nextCheck = computed(() => scanner.status?.next_check_time ? shortDate(sca
     <div class="schedule-actions">
       <Button :label="t('schedule.addSync')" icon="pi pi-plus" severity="info" outlined @click="add('sync')" />
       <Button v-if="free" :label="t('schedule.addCheck')" icon="pi pi-plus" severity="warn" outlined @click="add('check')" />
-      <SheetField v-else :label="t('schedule.between')" control>
+      <SheetField v-else class="schedule-between" :label="t('schedule.between')" control>
         <StNumber v-model="between" @change="setBetween" />
       </SheetField>
       <span class="schedule-next">
@@ -177,5 +177,6 @@ const nextCheck = computed(() => scanner.status?.next_check_time ? shortDate(sca
 .schedule-dot.is-check { border-radius: 50%; background: var(--check-color); }
 .schedule-x { margin-inline-start: auto; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; padding: 0.4rem; }
 .schedule-actions { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.schedule-actions > .schedule-between { flex: 0 1 22rem; }
 .schedule-next { margin-inline-start: auto; display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.9rem; color: var(--text-muted); }
 </style>
