@@ -30,7 +30,9 @@ Queries / commands (a page is named by any mirror of its tracker; the module kee
   unpack.auto {url, tabs} — «Авто»: the automatic layout makes its deleted folders of these tabs again and places again the
       tracks taken out of folders; the hand's placements stay
 Events out:
-  unpack.table.changed {url} — the rows of the page changed (`sources` reads its table again)
+  unpack.table.changed {url} — the rows of the page changed (`sources` reads its table again); told of every page the
+      module keeps when it starts: a read of a tracker's page begun before it (resumed by `sources` at the start) found
+      no one to ask
   unpack.editor.changed {url} — the editor of the page changed (a window shows it again)
   unpack.read.progress {url, release, done, total} — the files of a version read so far, while they are read; the editor
       gives the same as `reading` of a release, for a window opened in the middle of a read
@@ -90,6 +92,9 @@ class UnpackModule(BaseModule):
             await self._forget_unlisted()
         except Exception:  # noqa: BLE001 - what no source lists any more is forgotten at the next change of the sources
             self.log.exception("the pages no source lists were not forgotten")
+        # The rows of the pages can be asked now: a read of one that began before (a start) is made again from them.
+        for url in await self.repo.pages():
+            self.publish_event(TABLE_CHANGED_TOPIC, {"url": url})
 
     async def _forget_unlisted(self) -> None:
         """A page no torrent source of any series lists any more: what the module kept of it goes, its profiles too."""

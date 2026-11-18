@@ -433,6 +433,19 @@ async def test_a_page_no_source_lists_is_forgotten_with_the_profiles_of_its_tabs
     assert not left & set(profiles.values())
 
 
+async def test_a_start_tells_the_rows_of_every_page_it_keeps_can_be_asked(bus_stand):
+    """`sources` resumes the reads of the pages at its start, before `unpack` answers: they are made again once it does."""
+    torrents, unpack, bus, root = bus_stand
+    torrents.releases = [release(["Show/Show - 01.mkv"])]
+    await torrents.request("unpack.editor.get", {"url": URL})
+    changed = bus.subscribe("unpack.table.changed")
+
+    await unpack.stop()
+    await unpack.start()
+
+    assert (await asyncio.wait_for(changed.queue.get(), 10)).payload == {"url": URL}
+
+
 async def test_files_dropped_on_a_season_take_its_episodes_from_the_one_given_in_the_order_sent(bus_stand):
     torrents, unpack, bus, root = bus_stand
     ova = ["Bonus/OVA 1.mkv", "Bonus/OVA 2.mkv", "Bonus/OVA 3.mkv"]
