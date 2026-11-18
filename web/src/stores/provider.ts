@@ -33,7 +33,7 @@ export const useProviderStore = defineStore("provider", () => {
 
   /** The name of a site of the provider as its manifest gives it for people; the site's own name when it is not known. */
   function labelOf(site: string): string {
-    return view.value?.sites.find((each) => each.name === site)?.label || site
+    return view.value?.sites?.find((each) => each.name === site)?.label || site
   }
 
   return { view, apply, ensure, labelOf }

@@ -90,9 +90,9 @@ function rowsText(line: TitleLine): string {
 const provider = useProviderStore()
 onMounted(() => { void provider.ensure() })
 const providerName = computed(() => {
-  const sites = new Set(titles.value.flatMap((card) => card.lines.map((line) => lineAddress(line.url)?.site ?? "")).filter(Boolean))
+  const sites = new Set(titles.value.flatMap((card) => (card.lines ?? []).map((line) => lineAddress(line.url)?.site ?? "")).filter(Boolean))
   const named = [...sites].map((site) => provider.labelOf(site))
-  return named.length ? named.join(", ") : (provider.view?.sites[0]?.label ?? "")
+  return named.length ? named.join(", ") : (provider.view?.sites?.[0]?.label ?? "")
 })
 
 // The mark of a source added: its number in the colour the series gave it.
@@ -138,8 +138,8 @@ const markStyle = (color: number | null) => ({ backgroundColor: color === null ?
         <div v-if="card.remarks"><span class="ts-chip ts-remarks">{{ card.remarks }}</span></div>
         <p v-if="card.blurb" class="ts-blurb">{{ card.blurb }}</p>
         <!-- A title is no source: each line of it is, a row of its own with its name, how much it holds and its button. -->
-        <div v-if="card.lines.length" class="ts-lines">
-          <p class="sheet-caption">{{ t("sources.titles.lines", { n: card.lines.length }) }}</p>
+        <div v-if="card.lines?.length" class="ts-lines">
+          <p class="sheet-caption">{{ t("sources.titles.lines", { n: card.lines?.length ?? 0 }) }}</p>
           <div v-for="line in card.lines" :key="line.code" class="input-constructor-group ts-line" :data-line="line.code"
                :class="{ 'is-added': line.url in added }">
             <div class="constructor-item item-label-text-icon"><i class="pi pi-video" aria-hidden="true" /><b class="ts-code">{{ line.code }}</b></div>
