@@ -11,8 +11,8 @@ from pydantic import BaseModel, ValidationError
 
 from core.contracts import TitleSearchReply, TitleSearchRequest
 from core.deadlines import deadline_of
-from core.contracts.provider import (PROVIDER_BAD_ANSWER, PROVIDER_REFUSED, PROVIDER_UNAVAILABLE, SILENCE_S, DownloadFrame,
-                                     DownloadRequest, Manifest, ReadFrame, ReadRequest)
+from core.contracts.provider import (PROVIDER_BAD_ANSWER, PROVIDER_REFUSED, PROVIDER_UNAVAILABLE, SILENCE_S, AdoptReply, AdoptRequest,
+                                     DownloadFrame, DownloadRequest, Manifest, ReadFrame, ReadRequest)
 from core.reasons import reason
 
 # What a short request of the socket may take (a safeguard): the manifest, the connection of the feed. A silent stream is
@@ -21,6 +21,8 @@ REQUEST_TIMEOUT_S = 10.0
 # How much shorter than the fuse of the bus request the wait for the provider is: the answer of a provider that is too slow
 # is its reason, not the silence of a fuse that fired first.
 FUSE_MARGIN_S = 5.0
+# What the transfer of the old addresses may take (a safeguard): the provider reads a card of every one of them.
+ADOPT_S = 600.0
 
 
 class ProviderError(RuntimeError):
@@ -96,6 +98,10 @@ class ProviderClient:
 
     async def search(self, request: TitleSearchRequest) -> TitleSearchReply:
         return await self._post("/v1/search", request, self._search_s, TitleSearchReply, "search")
+
+    async def adopt(self, request: AdoptRequest) -> AdoptReply:
+        """The addresses of protocol 1 the provider turns into titles (transitional, appendix B): it reads each card, so it takes its time."""
+        return await self._post("/v1/adopt", request, ADOPT_S, AdoptReply, "adopt")
 
     async def _frames(self, path: str, body: BaseModel, frame: type[BaseModel], what: str) -> AsyncIterator[Any]:
         """The frames of a request the provider answers line by line. Closing the generator (the work is stopped) closes the
