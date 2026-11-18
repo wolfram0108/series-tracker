@@ -403,6 +403,7 @@ export const ru = {
   "reason.line_no_route": "Линия {line}: ни один путь к ней сейчас не отвечает",
   "reason.line_word": "Линия {line}: {words}",
   "reason.line_hole": "Линия {line}: в архиве нет части серии ({holes})",
+  "reason.line_height": "Линия {line}: высота картинки {height} выше заданного предела {limit}",
   "reason.line_stream_status": "Линия {line}: хост {host} ответил статусом {status}",
   "reason.search_unavailable": "Поиск названий не дал ответа: ни один источник не отозвался",
   "reason.search_cooling": "Источник поиска просит подождать {wait} с",

@@ -301,7 +301,7 @@
 `reason.*`) со своими фактами. Заведены для линий: `title_unknown` (`title`: поставщик не знает такого названия),
 `title_no_lines` (у названия нет линии, которую поставщик отдаёт), `line_no_route` (`line`: ни один путь к линии сейчас не
 отвечает), `line_word` (`line`, `words`: последнее слово источника, как он его сказал), `line_hole` (`line`, `holes`: в архиве
-линии нет части серии), `line_stream_status` (`line`, `host`, `status`: хост потока ответил статусом), `search_unavailable`
+линии нет части серии), `line_height` (`line`, `height`, `limit`: высота картинки линии выше предела `max_height`, файл не взят), `line_stream_status` (`line`, `host`, `status`: хост потока ответил статусом), `search_unavailable`
 (поиск не дал ничего: ни один источник не ответил), `search_cooling` (`wait`: источник поиска просит подождать), а также общие
 `player_failed`, `player_video_missing`, `player_unconfirmed`, `player_status`, `player_no_answer`, `no_players_empty`,
 `not_a_title_page`, `not_a_link_of_the_provider`, `download_stopped`, `save_path_relative`, `internal_error`. Новый код поставщик
