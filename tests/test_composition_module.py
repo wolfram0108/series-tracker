@@ -306,6 +306,21 @@ async def test_the_whole_layout_holds_every_field_and_a_part_exactly_the_fields_
 # --- M-14: whatever the cause, the layout is counted without the user, and counting twice changes nothing -----------
 
 @pytest.mark.asyncio
+async def test_every_write_of_the_content_of_a_series_raises_its_counter_and_a_read_of_the_same_table_does_not(system):
+    """The counter of the writes tells a reader whether anything of the layout was written since: a table read again
+    with the same rows moves only the time it was read, which is no content of the layout; other rows are."""
+    s = system
+    series_id = await laid_out(s, page(*season_rows(1, range(1, 4))))
+    written = (await s.get(series_id)).writes
+    assert written > 0
+    await s.counted(lambda: s.sources.finish(PAGE, page(*season_rows(1, range(1, 4))), read_at="2026-11-02T12:00:00+00:00"))
+    again = await s.get(series_id)
+    assert again.writes == written and again.sources[0].read_at == "2026-11-02T12:00:00+00:00"
+    await s.counted(lambda: s.sources.finish(PAGE, page(*season_rows(1, range(1, 5)))))
+    assert (await s.get(series_id)).writes == written + 1
+
+
+@pytest.mark.asyncio
 async def test_a_new_table_is_counted_and_names_the_episodes_that_differ(system):
     s = system
     series_id = await laid_out(s, page(*season_rows(1, range(1, 4))))

@@ -131,6 +131,11 @@ def _row_of(row: sqlite3.Row) -> CompositionRow:
 
 def _write(conn: sqlite3.Connection, series_id: int, rows, sources, numbering, records, rev, orders=None,
            titles=None) -> None:
+    # The time a table of a source was read is no content of the layout (a window is not told it either): sources that
+    # differ from the stored ones by it alone are written without raising the counter.
+    moved = any(part is not None for part in (rows, numbering or None, records, orders, titles)) or rev is not None or (
+        sources is not None and _content(_stored_sources(conn, series_id)) != _content(
+            [(each.source_id, each.position, each.table_url, each.summary.model_dump_json()) for each in sources]))
     if titles is not None:
         conn.execute("DELETE FROM voice_titles WHERE series_id = ?", (series_id,))
         conn.executemany("INSERT INTO voice_titles (series_id, label, title) VALUES (?, ?, ?)",
@@ -162,9 +167,25 @@ def _write(conn: sqlite3.Connection, series_id: int, rows, sources, numbering, r
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
             [(series_id, each.season, each.episode, each.compilation, each.lever, each.target,
               json.dumps(each.value, ensure_ascii=False)) for each in records])
-    # The one place a series is written: every write raises its counter, in the transaction of the write.
-    conn.execute("INSERT INTO composition_state (series_id, rev, writes) VALUES (?, ?, 1) ON CONFLICT (series_id) DO UPDATE"
-                 " SET writes = writes + 1, rev = COALESCE(?, rev)", (series_id, rev or 0, rev))
+    # The one place a series is written: every write of its content raises its counter, in the transaction of the write.
+    if moved:
+        conn.execute("INSERT INTO composition_state (series_id, rev, writes) VALUES (?, ?, 1) ON CONFLICT (series_id) DO "
+                     "UPDATE SET writes = writes + 1, rev = COALESCE(?, rev)", (series_id, rev or 0, rev))
+
+
+def _stored_sources(conn: sqlite3.Connection, series_id: int) -> list[tuple]:
+    return [tuple(row) for row in conn.execute(
+        "SELECT source_id, position, table_url, summary FROM composition_sources WHERE series_id = ?", (series_id,))]
+
+
+def _content(sources: list[tuple]) -> list[tuple]:
+    """Sources as the layout tells them, without the time their tables were read, in one order."""
+    out = []
+    for source_id, position, table_url, summary in sources:
+        told = json.loads(summary)
+        told.pop("read_at", None)
+        out.append((source_id, position, table_url, json.dumps(told, sort_keys=True, ensure_ascii=False)))
+    return sorted(out)
 
 
 def _row_values(seq: int, row: CompositionRow) -> tuple:
