@@ -117,7 +117,7 @@ from typing import Any, Iterable
 
 from core import BaseModule, compute
 from core.code_print import code_print
-from core.contracts.series_card import CARD_LIVE
+from core.contracts.series_card import card_version
 from core.contracts import (LAYOUT_PARTS, COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ORDER, REFERENCE_SAME, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
@@ -163,9 +163,7 @@ def layout_print(seen: _Seen) -> str:
     """The print of the inputs of a count of a layout: each of them as its version tells it, and the print of the code.
     Two counts with one print count one layout: what the layout holds besides (the levers, the orders the user set) a
     count carries over as it is, so a command of the user needs no count and moves no print."""
-    card = {key: value for key, value in seen.card.items() if key not in CARD_LIVE}
-    card["sources"] = sorted(card.get("sources", []), key=lambda each: each["id"])
-    text = json.dumps({"card": card, "voices": seen.voices, "rules": seen.rules, "pages": sorted(seen.pages.items()),
+    text = json.dumps({"card": card_version(seen.card), "voices": seen.voices, "rules": seen.rules, "pages": sorted(seen.pages.items()),
                        "code": code_print()}, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode()).hexdigest()
 

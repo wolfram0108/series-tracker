@@ -62,6 +62,7 @@ class Neighbours(BaseModule):
 
     def register(self) -> None:
         self.handle("catalog.series.get", self.on_series)
+        self.handle("catalog.series.list", self.on_series_list)
         self.handle("composition.layout", self.on_composition)
         self.handle("composition.writes", self.on_writes)
         self.handle("voices.settings.get", self.on_voices)
@@ -82,6 +83,9 @@ class Neighbours(BaseModule):
                 "ignored_episodes": "{}", "sources": [
                     {"id": source, "series_id": SERIES, "url": f"https://site/{source}", "source_type": "web_video"}
                     for source in (1, 2, 3, 4)], **self.card}
+
+    async def on_series_list(self, env: Envelope) -> list[dict]:
+        return [await self.on_series(env)]
 
     async def on_composition(self, env: Envelope) -> CompositionReply:
         return CompositionReply(series_id=SERIES, rev=1, writes=self.writes, rows=self.site.rows, settings=self.site.settings)

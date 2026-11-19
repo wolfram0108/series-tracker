@@ -12,6 +12,13 @@ from core.plan.files import container_of
 from core.plan.tables import Container
 
 
+# What the module keeps of a series, as its print reads it.
+_OWN = ("SELECT name, data FROM plan_assets WHERE series_id=? ORDER BY name",
+        "SELECT key FROM plan_failures WHERE series_id=? ORDER BY key",
+        "SELECT command FROM plan_commands WHERE series_id=? ORDER BY command",
+        "SELECT data FROM plan_outcomes WHERE series_id=?")
+
+
 def _key(value) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -143,16 +150,20 @@ class PlannerRepository:
     async def own_print(self, series_id: int) -> str:
         """The print of what the module keeps of a series (the asset, the failures, the commands, the outcome of the last
         sync), as it is stored, in one transaction."""
-        def read(conn) -> str:
-            digest = hashlib.sha256()
-            for query in ("SELECT name, data FROM plan_assets WHERE series_id=? ORDER BY name",
-                          "SELECT key FROM plan_failures WHERE series_id=? ORDER BY key",
-                          "SELECT command FROM plan_commands WHERE series_id=? ORDER BY command",
-                          "SELECT data FROM plan_outcomes WHERE series_id=?"):
-                digest.update(query.encode())
-                for row in conn.execute(query, (series_id,)):
-                    digest.update(json.dumps(list(row), ensure_ascii=False).encode())
-            return digest.hexdigest()
+        return (await self.own_prints([series_id]))[series_id]
+
+    async def own_prints(self, series_ids: list[int]) -> dict[int, str]:
+        """`own_print` of every series named, in one transaction."""
+        def read(conn) -> dict[int, str]:
+            out = {}
+            for series_id in series_ids:
+                digest = hashlib.sha256()
+                for query in _OWN:
+                    digest.update(query.encode())
+                    for row in conn.execute(query, (series_id,)):
+                        digest.update(json.dumps(list(row), ensure_ascii=False).encode())
+                out[series_id] = digest.hexdigest()
+            return out
         return await self._db.transaction(read)
 
     async def pack_cards(self) -> list[PackCard]:

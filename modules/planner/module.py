@@ -113,7 +113,7 @@ from core.code_print import code_print
 from core.dump import plain
 from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView, SyncScope, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
-from core.contracts.series_card import CARD_LIVE
+from core.contracts.series_card import card_version
 from core.contracts.torrent import fonts_of, parse_link
 from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
 from core.envelope import Envelope
@@ -239,8 +239,7 @@ class ViewInput:
 # are written by the module itself, which counts the view again after it writes them. The tests of the module check that a
 # count asks nothing that is not here.
 VIEW_INPUTS: dict[str, ViewInput] = {
-    "catalog.series.get": ViewInput("series.updated",
-                                    lambda seen: {key: value for key, value in seen.card.items() if key not in CARD_LIVE}),
+    "catalog.series.get": ViewInput("series.updated", lambda seen: card_version(seen.card)),
     # The layout is megabytes: the counter of its writes stands for it (every write raises it).
     "composition.layout": ViewInput("composition.changed", lambda seen: seen.writes),
     "voices.settings.get": ViewInput("voices.settings.changed", lambda seen: seen.voices),
@@ -1158,13 +1157,13 @@ class PlannerModule(BaseModule):
             self.log.warning("входы сериалов на старте не сверены, пересчитываются все: %s", exc)
             writes, voices = None, None
         asked = clock() - began
-        counted, checking, counting = 0, 0.0, 0.0
+        moment = clock()
+        standing = await self._still(series_ids, writes, voices) if writes is not None else set()
+        checking = clock() - moment
+        counted, counting = 0, 0.0
         for series_id in series_ids:
             try:
-                moment = clock()
-                still = writes is not None and await self._still(series_id, writes, voices)
-                checking += clock() - moment
-                if still:
+                if series_id in standing:
                     continue
                 counted += 1
                 moment = clock()
@@ -1175,17 +1174,22 @@ class PlannerModule(BaseModule):
         self.log.info("старт: сверено сериалов %d, пересчитано %d, за %.2f с (общие входы %.2f с, сверка %.2f с, "
                       "пересчёт %.2f с)", len(series_ids), counted, clock() - began, asked, checking, counting)
 
-    async def _still(self, series_id: int, writes: dict[int, int], voices: dict) -> bool:
-        """Whether the inputs of the series are those its standing was counted from."""
-        kept = self._prints.get(series_id)
-        if kept is None:
-            return False
+    async def _still(self, series_ids: list[int], writes: dict[int, int], voices: dict) -> set[int]:
+        """The series whose inputs are those their standing was counted from: the cards in one answer of the catalog,
+        the module's own tables in one read, the prints in the pool."""
+        kept = {series_id: self._prints.get(series_id) for series_id in series_ids if self._prints.get(series_id)}
+        if not kept:
+            return set()
         try:
-            card = await self.request("catalog.series.get", {"series_id": series_id})
+            cards = {card["id"]: card for card in await self.request("catalog.series.list", {})}
         except (BusRequestError, asyncio.TimeoutError):
-            return False
-        own = await self.repo.own_print(series_id)
-        return inputs_print(_Seen(card, writes.get(series_id, 0), voices), own) == kept
+            return set()
+        own = await self.repo.own_prints(list(kept))
+
+        def matching() -> set[int]:
+            return {series_id for series_id, printed in kept.items() if series_id in cards and inputs_print(
+                _Seen(cards[series_id], writes.get(series_id, 0), voices), own[series_id]) == printed}
+        return await compute.run(matching)
 
     def names_of(self, series: dict) -> dict:
         """The names of files the rule of names gave a series, kept while its card stays the same: the rule reads what it is
