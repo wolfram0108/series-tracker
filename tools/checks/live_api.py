@@ -1,7 +1,7 @@
 """A check on the running service through its API, as the window does it (docs/deployment.md, «Проверка на живом сервисе»).
 
     .venv/bin/python tools/checks/live_api.py preview <address of a page> [--now]
-    .venv/bin/python tools/checks/live_api.py sync <series id>
+    .venv/bin/python tools/checks/live_api.py sync <series id> [--season N [--episode M]] [--no-wait]
     .venv/bin/python tools/checks/live_api.py source <series id> <address of a page>
     .venv/bin/python tools/checks/live_api.py read <address of a page>
 
@@ -11,8 +11,8 @@ window of a new series reads it (`POST /api/sources/preview`), or at once whatev
 and prints the table: its state, the names, the players and the first lines with their heights. The requests the service
 made to the hosts of the files meanwhile are counted in its log (`logs/info.log`, lines of httpx): `ranges` is how many
 heads of segments it fetched, the cost of measuring frames. `sync` presses «Синхронизировать» of a series (`POST
-/api/series/<id>/scan`), waits for its end as the window does (the status «scanning» of the series comes and goes in
-`series_updated`) and prints the files of its plan and its failures. `source` adds a source to a series as the area of
+/api/series/<id>/scan`; with `--season` (and `--episode`) the button of that season or episode: the body names the scope), waits for its end as the window does (the status «scanning» of the series comes and goes in
+`series_updated`) and prints the files of its plan and its failures; `--no-wait` only presses and returns (a sync that runs longer than a run of a check). `source` adds a source to a series as the area of
 its sources does: the table of the address is read as the window reads it, then the address becomes a source of the
 series (`POST /api/series/<id>/sources`), and the sources of the series are printed. `read` only asks for the read of a
 page now (`POST /api/sources/read`, the button «Перечитать») and does not wait for it: a read longer than the run of a
@@ -145,15 +145,16 @@ async def series_end(http: httpx.AsyncClient, series_id: int, listening: asyncio
     return ["stream closed"]
 
 
-async def sync(series_id: int) -> None:
+async def sync(series_id: int, season: int | None = None, episode: int | None = None, wait: bool = True) -> None:
+    scope = {key: value for key, value in (("season", season), ("episode", episode)) if value is not None}
     async with httpx.AsyncClient(base_url=BASE, timeout=30) as http:
         await signed_in(http)
         started, listening = time.perf_counter(), asyncio.Event()
         ending = asyncio.create_task(series_end(http, series_id, listening))
         await listening.wait()
-        pressed = await http.post(f"/api/series/{series_id}/scan")
+        pressed = await http.post(f"/api/series/{series_id}/scan", **({"json": scope} if scope else {}))
         print("sync", pressed.status_code, pressed.text[:200])
-        if pressed.status_code >= 400:
+        if pressed.status_code >= 400 or not wait:
             ending.cancel()  # a refused sync never goes «scanning»: nothing to wait for
             return
         statuses = await ending
@@ -193,6 +194,9 @@ def main() -> None:
     shown.add_argument("--join", action="store_true", help="wait for the end of the read under way, ask for none")
     synced = commands.add_parser("sync", help="a sync of a series to its end, and the files of its plan")
     synced.add_argument("series_id", type=int)
+    synced.add_argument("--season", type=int, help="the sync of this season alone")
+    synced.add_argument("--episode", type=int, help="the sync of this episode of the season alone")
+    synced.add_argument("--no-wait", action="store_true", help="press and return: the end is looked at in the log")
     added = commands.add_parser("source", help="a source added to a series, as the area of its sources adds it")
     added.add_argument("series_id", type=int)
     added.add_argument("url")
@@ -201,7 +205,8 @@ def main() -> None:
     args = parser.parse_args()
     asyncio.run(preview(args.url, args.now, args.join) if args.command == "preview"
                 else source(args.series_id, args.url) if args.command == "source"
-                else read(args.url) if args.command == "read" else sync(args.series_id))
+                else read(args.url) if args.command == "read"
+                else sync(args.series_id, args.season, args.episode, not args.no_wait))
     print("LIVE_API_DONE")
 
 
