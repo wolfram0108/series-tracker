@@ -1,7 +1,8 @@
 """The native core against the module it replaces, on a copy of the base of the service (docs/missions/rust-core).
 
 For every series of the copy: the data the core holds is the data the module makes, field by field, and the time of
-each way of making it (best of three). The stage of the mission is the subcommand; `levers` — the levers of every episode and the headers of every level
+each way of making it (best of three). The stage of the mission is the subcommand; `derived` — the parts of the layout besides its rows (levels,
+levers of the episodes, compilations, orders of the voice-overs) against the module's answer; `levers` — the levers of every episode and the headers of every level
 (the core counts them from the module's records); `rows` — the rows of the layout:
 
   python  — the module's own read (modules/composition/repository: the rows as models);
@@ -130,14 +131,43 @@ def levers_stage(path: str, wanted: list[int]) -> None:
           f"records itself; python counts compilations too), differ {differ_all}")
 
 
+def derived_stage(path: str, wanted: list[int]) -> None:
+    """The parts of the layout besides its rows — the headers of the levels, the levers of every episode, the compilations,
+    the order of the voice-overs of every season — counted by the core from the module's tables, against the answer of
+    the module (modules/composition/module.layout_of), byte by byte."""
+    import json
+    from core.contracts import CompositionGetRequest
+    from modules.composition.module import layout_of
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    series = wanted or [row[0] for row in conn.execute("SELECT DISTINCT series_id FROM composition_state ORDER BY 1")]
+    parts = ("levels", "settings", "compilations", "voice_orders")
+    totals = {"python": 0.0, "core": 0.0}
+    differ_all = 0
+    for series_id in series:
+        def python():
+            return layout_of(CompositionGetRequest(series_id=series_id), repository._read(conn, series_id)).model_dump(mode="json")
+        answer, python_ms = best(python)
+        mine, core_ms = best(_native.layout_derived, path, series_id)
+        differ = [name for name, text in zip(parts, mine)
+                  if text != json.dumps(answer[name], ensure_ascii=False, separators=(",", ":"))]
+        differ_all += len(differ)
+        totals["python"] += python_ms
+        totals["core"] += core_ms
+        print(f"series {series_id:4}: python layout {python_ms:7.1f} ms | core parts {core_ms:6.1f} ms | "
+              f"differ {', '.join(differ) or 0}", flush=True)
+    print(f"all {len(series)} series: python {totals['python']:.0f} ms (the whole layout from its rows), core {totals['core']:.0f} "
+          f"ms (the four parts, reading the tables itself), parts that differ {differ_all}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("stage", choices=["rows", "levers"])
+    parser.add_argument("stage", choices=["rows", "levers", "derived"])
     parser.add_argument("series", nargs="*", type=int)
     options = parser.parse_args()
     with tempfile.TemporaryDirectory() as folder:
         path = copy_db(os.path.join(folder, "app.db"))
-        (rows_stage if options.stage == "rows" else levers_stage)(path, options.series)
+        {"rows": rows_stage, "levers": levers_stage, "derived": derived_stage}[options.stage](path, options.series)
     print("NATIVE_CHECK_DONE")
 
 

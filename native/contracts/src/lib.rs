@@ -5,6 +5,30 @@
 
 use serde_json::Value;
 
+/// The names of the levers of the output: the one place of them (core/contracts takes them from here).
+pub mod names {
+    pub const REFERENCE_ORDER: &str = "reference.order";
+    pub const REFERENCE_ALLOW: &str = "reference.allow";
+    pub const VOICE_ORDER: &str = "voice.order";
+    pub const VOICE_ALLOW: &str = "voice.allow";
+    pub const VOICE_TAKE: &str = "voice.take";
+    pub const COMPILATION_MEMBER: &str = "compilation.member";
+    pub const COMPILATION_TAKE: &str = "compilation.take";
+    pub const MARKUP_ORDER: &str = "markup.order";
+    pub const MARKUP_ALLOW: &str = "markup.allow";
+    pub const REFERENCE_SAME: &str = "reference.same";
+    pub const MARKUP_SAME: &str = "markup.same";
+    pub const SUBTITLES_ORDER: &str = "subtitles.order";
+    pub const SUBTITLES_ALLOW: &str = "subtitles.allow";
+    pub const ALL: &[(&str, &str)] = &[
+        ("REFERENCE_ORDER", REFERENCE_ORDER), ("REFERENCE_ALLOW", REFERENCE_ALLOW), ("VOICE_ORDER", VOICE_ORDER),
+        ("VOICE_ALLOW", VOICE_ALLOW), ("VOICE_TAKE", VOICE_TAKE), ("COMPILATION_MEMBER", COMPILATION_MEMBER),
+        ("COMPILATION_TAKE", COMPILATION_TAKE), ("MARKUP_ORDER", MARKUP_ORDER), ("MARKUP_ALLOW", MARKUP_ALLOW),
+        ("REFERENCE_SAME", REFERENCE_SAME), ("MARKUP_SAME", MARKUP_SAME), ("SUBTITLES_ORDER", SUBTITLES_ORDER),
+        ("SUBTITLES_ALLOW", SUBTITLES_ALLOW),
+    ];
+}
+
 const VARIANT: &str = "variant:";
 const GROUP: &str = "group:";
 const COMPILATION: &str = "compilation:";

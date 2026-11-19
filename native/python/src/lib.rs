@@ -169,9 +169,21 @@ fn layout_levers(py: Python<'_>, path: String, series_id: i64, seasons: Vec<i64>
     }).map_err(PyValueError::new_err)
 }
 
+/// What the layout tells of a series besides its rows, counted by the core from the module's tables: the JSON of
+/// (`levels`, `settings`, `compilations`, `voice_orders`).
+#[pyfunction]
+fn layout_derived(py: Python<'_>, path: String, series_id: i64) -> PyResult<(String, String, String, String)> {
+    py.allow_threads(move || st_composition::derived(&path, series_id))
+        .map(|each| (each.levels, each.settings, each.compilations, each.voice_orders)).map_err(PyValueError::new_err)
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("COLUMNS", st_composition::COLUMNS)?;
+    m.add("UNKNOWN_VOICE_LABEL", st_composition::compilations::UNKNOWN_VOICE_LABEL)?;
+    for (name, value) in st_contracts::names::ALL {
+        m.add(*name, *value)?;
+    }
     m.add_class::<Rows>()?;
     for function in [wrap_pyfunction!(layout_rows, m)?, wrap_pyfunction!(layout_rows_given, m)?,
                      wrap_pyfunction!(variant_target, m)?, wrap_pyfunction!(parse_variant_target, m)?,
@@ -179,7 +191,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
                      wrap_pyfunction!(compilation_key, m)?, wrap_pyfunction!(parse_compilation_key, m)?,
                      wrap_pyfunction!(lever_register, m)?, wrap_pyfunction!(lever_unregister, m)?,
                      wrap_pyfunction!(lever_accepts, m)?, wrap_pyfunction!(lever_accepts_target, m)?,
-                     wrap_pyfunction!(lever_problem, m)?, wrap_pyfunction!(layout_levers, m)?] {
+                     wrap_pyfunction!(lever_problem, m)?, wrap_pyfunction!(layout_levers, m)?,
+                     wrap_pyfunction!(layout_derived, m)?] {
         m.add_function(function)?;
     }
     Ok(())

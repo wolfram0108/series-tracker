@@ -2,10 +2,12 @@
 //! constructor gave it. The table `composition_rows` is the module's own memory (Р-7): its SQL lives here, in the
 //! module's part of the core, and nowhere else.
 
+pub mod compilations;
 pub mod levers;
 pub mod settings;
 
 use rusqlite::{Connection, OpenFlags};
+use std::collections::{BTreeMap, HashMap};
 
 /// A row of the layout, one column of `composition_rows` per field (core/contracts/composition.py CompositionRow).
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +79,53 @@ pub fn rows_of(path: &str, series_id: i64) -> Result<Vec<Row>, String> {
         row.heights = heights_of(&heights)?;
         Ok(row)
     }).collect()
+}
+
+/// What the layout tells of a series besides its rows, counted from the module's tables (the JSON of each part of
+/// `CompositionReply`): the headers of the levels, the levers of every episode, the compilations, the order of the
+/// voice-overs of every season.
+pub struct Derived {
+    pub levels: String,
+    pub settings: String,
+    pub compilations: String,
+    pub voice_orders: String,
+}
+
+pub fn derived(path: &str, series_id: i64) -> Result<Derived, String> {
+    let rows = rows_of(path, series_id)?;
+    let sound: Vec<&Row> = rows.iter().filter(|row| row.track == "sound").collect();
+    let conn = settings::open(path)?;
+    let records = settings::settings_of(&conn, series_id)?;
+    let index = settings::index(&records);
+    let mut order = HashMap::new();
+    let mut query = conn.prepare_cached(
+        "SELECT source_id FROM composition_sources WHERE series_id = ?1 ORDER BY position, source_id")
+        .map_err(|exc| exc.to_string())?;
+    for (place, each) in query.query_map([series_id], |row| row.get::<_, i64>(0)).map_err(|exc| exc.to_string())?.enumerate() {
+        order.insert(each.map_err(|exc| exc.to_string())?, place);
+    }
+    let mut previous = BTreeMap::new();
+    let mut query = conn.prepare_cached("SELECT season, labels FROM voice_orders WHERE series_id = ?1 ORDER BY season")
+        .map_err(|exc| exc.to_string())?;
+    for each in query.query_map([series_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|exc| exc.to_string())? {
+        let (season, labels) = each.map_err(|exc| exc.to_string())?;
+        let labels: Vec<String> = serde_json::from_str(&labels).map_err(|exc| exc.to_string())?;
+        previous.insert(season, labels);
+    }
+    let episodes = compilations::layout_episodes(&sound);
+    let outcome = compilations::resolve_compilations(&sound, &index, &records, &order);
+    let seasons: Vec<i64> = episodes.iter().map(|(season, _)| *season).collect();
+    let given: Vec<(i64, i64, Option<String>, String)> = episodes.iter().map(|slot| {
+        let member = outcome.members.get(slot).map(|place| &outcome.refs[*place]);
+        (slot.0, slot.1, member.map(|each| each.key.clone()), member.map_or("null".to_string(), |each| each.json()))
+    }).collect();
+    Ok(Derived {
+        levels: settings::levels(&index, &seasons, &outcome.view_keys),
+        settings: settings::episode_settings(&index, &given),
+        compilations: outcome.views,
+        voice_orders: compilations::season_voices(&compilations::season_orders(&previous, &sound), &sound),
+    })
 }
 
 #[cfg(test)]
