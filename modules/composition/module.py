@@ -222,14 +222,22 @@ class CompositionModule(BaseModule):
             self.log.exception("пересчёт раскладок при старте не начат")
 
     async def _resume(self) -> None:
+        began = asyncio.get_running_loop().time()
         listing = await self._ask("catalog.series.list", {})
         known = set(await self.repo.series_ids())
         present = {each["id"] for each in listing}
+        scheduled = 0
         for each in listing:
             if each["id"] in known or each.get("sources"):
                 self._schedule(each["id"])
+                scheduled += 1
         for series_id in known - present:
             await self._purge(series_id)
+        self.spawn(self._resumed(began, scheduled), name="composition:resumed")
+
+    async def _resumed(self, began: float, scheduled: int) -> None:
+        await self.idle()
+        self.log.info("старт: пересчитано раскладок %d, за %.2f с", scheduled, asyncio.get_running_loop().time() - began)
 
     async def idle(self) -> None:
         """Returns when no series is being counted; the signal of completion for whoever stops or checks the module."""
