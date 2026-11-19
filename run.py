@@ -24,6 +24,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -31,6 +32,7 @@ from assembly import Options, assemble
 from core import Bus, Envelope, Runner
 from core.db import Database
 from core.logging import configure, get_logger
+from core.loopwatch import LoopWatch, logged
 from core.schema import require_head
 from modules.sources.players.alloha_session import profile_of as alloha_profile_of
 
@@ -80,6 +82,8 @@ runner = Runner(bus, modules)
 
 @asynccontextmanager
 async def _lifespan(_app):
+    watch = LoopWatch(asyncio.get_running_loop(), logged(get_logger("loopwatch")))
+    watch.start()  # before the modules: the stalls of their start are seen too
     await runner.start()
     # Whoever needs the whole system (the gateway reads the debug groups of logging) acts on this, not on a pause.
     bus.publish(Envelope(topic="system.started", kind="event"))
@@ -88,6 +92,7 @@ async def _lifespan(_app):
         yield
     finally:
         await runner.stop()
+        watch.stop()
         log.info("система остановлена")
 
 
