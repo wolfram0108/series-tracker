@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, model_validator
 from core import BusRequestError
 from core.contracts import SubtitleType
 
-from .routing import refusal
+from .routing import as_made, refusal
 from .schemas import DynamicObject, ErrorResponse, OkResponse
 
 _ERR = {code: {"model": ErrorResponse} for code in (400, 404, 409, 500, 503)}
@@ -103,7 +103,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     async def asked(topic: str, payload: dict):
         try:
-            return await gw.request(topic, payload)
+            return await as_made(await gw.request(topic, payload))
         except BusRequestError as exc:
             return refusal(exc)
 

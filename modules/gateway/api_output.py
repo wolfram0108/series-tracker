@@ -19,7 +19,7 @@ from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitc
                             PlanRowRef, QueuesGet, QueuesReply, Reference, SettingsReset, SettingsSet, SettingsSetMany,
                             VoiceOrderSet, VoiceTitleSet)
 
-from .routing import admitted, refusal
+from .routing import admitted, as_made, refusal
 from .schemas import (ErrorOnly, ErrorResponse, OkResponse, OutputSettingsBatch, OutputSettingsReset,
                       OutputSettingsSet, OutputSwitchBody, VoiceOrderBody, VoiceTitleBody)
 
@@ -54,9 +54,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return JSONResponse({"error": reason("series_not_found")}, status_code=404)
         try:
-            return await gw.request("composition.get", CompositionGetRequest(
+            return await as_made(await gw.request("composition.get", CompositionGetRequest(
                 series_id=series_id, include_excluded=include_excluded,
-                sources_only=sources_only).model_dump(mode="json"))
+                sources_only=sources_only).model_dump(mode="json")))
         except BusRequestError as exc:
             return JSONResponse({"error": relayed(str(exc))}, status_code=500)
 
@@ -65,7 +65,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The reference of every episode of the series and why it is that one (the mark)."""
         try:
             # The reference a video series has is the one its plan takes (modules/planner).
-            return await gw.request("planner.references.get", {"series_id": series_id})
+            return await as_made(await gw.request("planner.references.get", {"series_id": series_id}))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 
@@ -77,7 +77,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         level say of each."""
         query = _contract(QueuesGet, series_id=series_id, season=season, episode=episode, compilation=compilation)
         try:
-            return await gw.request("composition.queues.get", query.model_dump(mode="json"))
+            return await as_made(await gw.request("composition.queues.get", query.model_dump(mode="json")))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 
@@ -86,7 +86,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The plan of a video series (modules/planner): the asset with the provenance of every file and whether its row is
         online, the goal of every episode as the last sync counted it, the failures and the commands «Удалить» that wait."""
         try:
-            return await gw.request("planner.series.get", {"series_id": series_id})
+            return await as_made(await gw.request("planner.series.get", {"series_id": series_id}))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 

@@ -12,7 +12,7 @@ from core import BusRequestError
 from core.contracts import (TitleSearchReply, TitleSearchRequest, CompositionPreviewReply, CompositionPreviewRequest,
                             SeriesSource, SourcesSettingsView, SiteResolveReply, SiteResolveRequest)
 
-from .routing import admitted, refusal
+from .routing import admitted, as_made, refusal
 from .schemas import (ChangedSource, CreatedSource, DynamicObject, ErrorOnly, ErrorResponse, FreshRequest, OkResponse,
                       ReadCancelled,
                       RulesTestRequest, SourceAdd, SourceChange, TableReadRequest)
@@ -68,7 +68,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     async def _preview(request: CompositionPreviewRequest):
         try:
-            return await gw.request("composition.preview", request.model_dump(mode="json"))
+            return await as_made(await gw.request("composition.preview", request.model_dump(mode="json")))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 

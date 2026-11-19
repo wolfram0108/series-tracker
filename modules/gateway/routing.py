@@ -1,19 +1,32 @@
 """Route registration and answer helpers shared by the gateway API blocks."""
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, Response
 
-from core import NO_HANDLER, BusRequestError
+from core import NO_HANDLER, BusRequestError, compute
 from core.admission import Admission
 from core.admission import current as current_admission
 from core.reasons import code_of, relayed
 
+
+def _text(answer: Any) -> bytes:
+    # A value JSON has no form for (a date, a set) is written the way the framework writes it.
+    return json.dumps(answer, ensure_ascii=False, allow_nan=False, separators=(",", ":"),
+                      default=jsonable_encoder).encode("utf-8")
+
+
+async def as_made(answer: Any) -> Response:
+    """The answer of a module as it came. The module made it of the model of the route, so it is not checked and written
+    again by the framework (four passes over megabytes on the loop); its text is made in the pool of computation."""
+    return Response(await compute.run(_text, answer), media_type="application/json")
 
 
 def route_per_method(router: APIRouter, path: str, *, methods: list[str], **options: Any) -> Callable:
