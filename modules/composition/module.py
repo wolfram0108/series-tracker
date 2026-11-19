@@ -105,12 +105,10 @@ purged, and a failure there is logged, not raised.
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Iterable
 
-from core import BaseModule, _native, compute
+from core import BaseModule, compute
 from core.contracts import (LAYOUT_PARTS, COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ORDER, REFERENCE_SAME, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
@@ -119,7 +117,6 @@ from core.contracts import (LAYOUT_PARTS, COMPILATION_MEMBER, MARKUP_ALLOW, MARK
                             VoiceOrderSet, VoiceSettingsView, VoiceTitleSet, SeriesReadProgress, TableProgress)
 from core.db import Database
 from core.envelope import Envelope
-from core.made_json import MadeJson
 from core.reasons import reason
 from core.variant_queue import Order
 from core.voice_names import Groups
@@ -239,13 +236,11 @@ class CompositionModule(BaseModule):
 
     # --- queries and commands ------------------------------------------------------------------
 
-    async def on_get(self, env: Envelope) -> MadeJson:
-        """The layout of a series, or the part asked, as the JSON of `CompositionReply`: the core counts it from the module's
-        tables (native/composition) and lets go of the interpreter while it does; the module gives it the parts only the
-        module knows the models of. Its text goes to the window as it is."""
+    async def on_get(self, env: Envelope) -> dict:
         request = CompositionGetRequest.model_validate(env.payload)
-        return MadeJson(await compute.run(_native.layout_json, self.repo.path, request.series_id,
-                                          *layout_asked(request, await self.repo.summaries(request.series_id))))
+        stored = await self.repo.stored(request.series_id)
+        # The layout of a series is thousands of rows: the reply is made off the loop.
+        return await compute.run(layout_reply, request, stored)
 
     async def on_layout(self, env: Envelope) -> CompositionReply:
         """The whole layout as the model itself, for a consumer in this process (the planner): the answer of
@@ -790,36 +785,10 @@ class CompositionModule(BaseModule):
             raise _Unavailable(topic) from exc
 
 
-def layout_asked(request: CompositionGetRequest, summaries) -> tuple:
-    """What the core is asked for the layout of a request: the part, its fields in the order of the reply (`LAYOUT_PARTS`),
-    the episodes a part `levers` holds (none: all), whether excluded rows come, and the parts only the module knows the
-    models of, as their JSON."""
-    part = "sources" if request.sources_only else request.part
-    wanted = CompositionReply.model_fields.keys() - {"series_id", "rev", "part"} if part == "whole" else LAYOUT_PARTS[part]
-    fields = [name for name in CompositionReply.model_fields if name in wanted]
-    given = {"levers": _specs_text(), "availability": _availability_text(),
-             "sources": json.dumps([each.model_dump(mode="json") for each in summaries], ensure_ascii=False,
-                                   separators=(",", ":"))}
-    episodes = [(each.season, each.episode) for each in request.episodes] if part == "levers" and request.episodes else None
-    return part, fields, episodes, request.include_excluded, given
-
-
-def _specs_text() -> str:
-    """The descriptions of the levers as the layout gives them (a lever may be registered while the process runs)."""
-    return json.dumps([each.model_dump(mode="json") for each in levers.specs()], ensure_ascii=False, separators=(",", ":"))
-
-
-@lru_cache(maxsize=1)
-def _availability_text() -> str:
-    return json.dumps(availability.table(), ensure_ascii=False, separators=(",", ":"))
-
-
 def layout_reply(request: CompositionGetRequest, stored) -> dict:
     """`composition.get` answered from what is stored; pure, it runs in the pool of computation. A part holds its own
     fields only: what it leaves out is not in the answer, so a window keeps what it holds of it."""
-    reply = layout_of(request, stored)
-    # Only the fields of the reply itself: what the fields hold is written whole (a header of a season has no compilation, null).
-    return reply.model_dump(mode="json", include=reply.model_fields_set)
+    return layout_of(request, stored).model_dump(mode="json", exclude_unset=True)
 
 
 def layout_of(request: CompositionGetRequest, stored) -> CompositionReply:

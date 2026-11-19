@@ -7,7 +7,6 @@ is the absence of a record, so it is asked for by a reset of the lever, never by
 """
 from __future__ import annotations
 
-import json
 from copy import deepcopy
 from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 
@@ -15,7 +14,6 @@ from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, SUBTITLES_ALLO
                             SUBTITLES_ORDER, CompilationRef, EffectiveLever, EpisodeSettings, Level,
                             LevelSettings, Queue, SettingRecord, SettingsReset, ValueShape, compilation_key, group_target,
                             parse_compilation_key, parse_group_target, parse_variant_target, variant_target)
-from core import _native
 from core.reasons import reason
 
 from . import levers
@@ -23,18 +21,30 @@ from . import levers
 # The scope of a record: (season, episode, compilation key).
 _Scope = tuple[int | None, int | None, str | None]
 _Index = dict[str, dict[str | None, dict[_Scope, Any]]]
+# The levels a lever may be set on, where it is not every level: the subtitles have a table on the series, on a season and on
+# an episode, none of a compilation of its own (DESIGN.md 7.1.1).
+_ONLY_ON = {COMPILATION_MEMBER: {Level.EPISODE}, COMPILATION_TAKE: {Level.COMPILATION},
+            **{lever: {Level.SERIES, Level.SEASON, Level.EPISODE}
+               for lever in (SUBTITLES_ORDER, SUBTITLES_ALLOW)}}
+
+
 def validate(record: SettingRecord) -> str | None:
-    """None when the lever, its target, its value and its level are in the registry's terms; else the reason to refuse.
-    The core tells it (native/composition levers), as it tells the records it reads."""
-    try:
-        written = json.dumps(record.value, ensure_ascii=False)
-    except (TypeError, ValueError):
-        written = None
-    found = "bad_value" if written is None else _native.lever_problem(
-        record.lever, record.target, written, record.season, record.episode, record.compilation)
-    if found == "unknown_lever" or (found == "bad_value" and levers.get(record.lever) is None):
+    """None when the lever, its target and its value are in the registry's terms; else the reason to refuse."""
+    lever = levers.get(record.lever)
+    if lever is None:
         return reason("unknown_lever", lever=record.lever)
-    return reason(found, lever=record.lever) if found is not None else None
+    if not lever.accepts_target(record.target):
+        return reason("bad_target", lever=record.lever)
+    if not lever.accepts(record.value):
+        return reason("bad_value", lever=record.lever)
+    if record.compilation is not None and parse_compilation_key(record.compilation) is None:
+        return reason("bad_target", lever=record.lever)
+    if record.compilation is not None and parse_compilation_key(record.compilation)[3] != record.season:
+        return reason("bad_target", lever=record.lever)
+    only = _ONLY_ON.get(record.lever)
+    if only is not None and record.level not in only:
+        return reason("bad_level", lever=record.lever)
+    return None
 
 
 def validate_reset(scope: SettingsReset) -> str | None:

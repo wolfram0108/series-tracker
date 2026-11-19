@@ -50,20 +50,10 @@ class CompositionRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    @property
-    def path(self) -> str:
-        """The file of the base: the module's part of the core reads its tables there itself."""
-        return self._db.path
-
     # --- reads ----------------------------------------------------------------------------
 
     async def stored(self, series_id: int) -> Stored:
         return await self._db.transaction(lambda conn: _read(conn, series_id))
-
-    async def summaries(self, series_id: int) -> list[SourceSummary]:
-        """What the window shows about the sources of a series, in their order."""
-        return await self._db.transaction(lambda conn: [SourceSummary.model_validate_json(row[0]) for row in conn.execute(
-            "SELECT summary FROM composition_sources WHERE series_id = ? ORDER BY position, source_id", (series_id,))])
 
     async def pages(self) -> list[tuple[int, int, str]]:
         """(series id, source id, canonical page address) of every source whose page is known."""

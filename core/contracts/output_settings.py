@@ -10,38 +10,39 @@ order, and a flag of a variant leaves it out of one queue.
 """
 from __future__ import annotations
 
+import json
+from functools import lru_cache
+import re
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from .. import _native
 from .compilation import CompilationRef
 
 
-# The levers every consumer reads by name (named in the core, native/contracts: the one place of the names); the
-# registry that gives them meaning is the composition module's.
-REFERENCE_ORDER = _native.REFERENCE_ORDER
-REFERENCE_ALLOW = _native.REFERENCE_ALLOW
-VOICE_ORDER = _native.VOICE_ORDER
-VOICE_ALLOW = _native.VOICE_ALLOW
-VOICE_TAKE = _native.VOICE_TAKE
+# The levers every consumer reads by name; the registry that gives them meaning is the composition module's.
+REFERENCE_ORDER = "reference.order"
+REFERENCE_ALLOW = "reference.allow"
+VOICE_ORDER = "voice.order"
+VOICE_ALLOW = "voice.allow"
+VOICE_TAKE = "voice.take"
 # Stage 12: the compilation an episode stands in (its key, or "" for none), and whether a compilation takes episodes at all.
-COMPILATION_MEMBER = _native.COMPILATION_MEMBER
-COMPILATION_TAKE = _native.COMPILATION_TAKE
+COMPILATION_MEMBER = "compilation.member"
+COMPILATION_TAKE = "compilation.take"
 # Stage 14: the queue of the markup reference — the variant whose single video gives an episode its timeline. With no
 # `markup.order` on the episode's chain of levels the markup reference follows the reference.
-MARKUP_ORDER = _native.MARKUP_ORDER
-MARKUP_ALLOW = _native.MARKUP_ALLOW
+MARKUP_ORDER = "markup.order"
+MARKUP_ALLOW = "markup.allow"
 # Variants the user declared equal (Р-99): the variants of a group take one place in the queue of the reference (of the
 # markup reference), so that what the file holds stays while it is as good as the queue's first.
-REFERENCE_SAME = _native.REFERENCE_SAME
-MARKUP_SAME = _native.MARKUP_SAME
+REFERENCE_SAME = "reference.same"
+MARKUP_SAME = "markup.same"
 # Stage 15 (DESIGN.md 7.1.1): the order of the subtitles of the container (the first variant is its first subtitles track)
 # and the flag of a variant that leaves it out; set on the series, a season and an episode. How a track lies in the
 # container is no lever: the first full track taken is the default one, the first of signs the forced one.
-SUBTITLES_ORDER = _native.SUBTITLES_ORDER
-SUBTITLES_ALLOW = _native.SUBTITLES_ALLOW
+SUBTITLES_ORDER = "subtitles.order"
+SUBTITLES_ALLOW = "subtitles.allow"
 
 
 class Level(StrEnum):
@@ -90,24 +91,40 @@ LEVER_FORMS: frozenset[tuple[TargetKind, ValueShape]] = frozenset({
     (TargetKind.GROUP, ValueShape.FLAG), (TargetKind.VARIANT, ValueShape.FLAG),
     (TargetKind.NONE, ValueShape.FLAG), (TargetKind.NONE, ValueShape.COMPILATION), (TargetKind.NONE, ValueShape.VARIANT_SETS)})
 
-# The targets of levers are made and read by the core (native/contracts): one writing of each, in one place.
+_GROUP_TARGET = re.compile(r"group:(.+)", re.DOTALL)
+
+
 def group_target(name: str) -> str:
-    return _native.group_target(name)
+    return f"group:{name}"
 
 
 def variant_target(group: str, source_id: int, player: str) -> str:
     """The target of a variant: a JSON array, so that no name, however odd, can be taken for a part of another."""
-    return _native.variant_target(group, source_id, player)
+    return "variant:" + json.dumps([group, source_id, player], ensure_ascii=False, separators=(",", ":"))
 
 
+@lru_cache(maxsize=1 << 16)  # the targets of a series are few and read for every episode: each is parsed once
 def parse_variant_target(target: str) -> tuple[str, int, str] | None:
     """(group, source id, player) of a target made by `variant_target`; None for anything else."""
-    return _native.parse_variant_target(target)
+    if not target.startswith("variant:"):
+        return None
+    try:
+        found = json.loads(target[len("variant:"):])
+    except ValueError:
+        return None
+    if (not isinstance(found, list) or len(found) != 3 or not isinstance(found[0], str) or not found[0]
+            or isinstance(found[1], bool) or not isinstance(found[1], int) or not isinstance(found[2], str)
+            or not found[2]):
+        return None
+    group, source_id, player = found
+    return (group, source_id, player) if variant_target(group, source_id, player) == target else None
 
 
+@lru_cache(maxsize=1 << 16)
 def parse_group_target(target: str) -> str | None:
     """The group name of a target made by `group_target`; None for anything else."""
-    return _native.parse_group_target(target)
+    found = _GROUP_TARGET.fullmatch(target)
+    return found.group(1) if found is not None and group_target(found.group(1)) == target else None
 
 
 class _Scope(BaseModel):

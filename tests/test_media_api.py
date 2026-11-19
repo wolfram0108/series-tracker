@@ -85,8 +85,7 @@ async def test_the_composition_of_a_series_is_the_layout_of_composition_whatever
         resp = await client.get(f"/api/series/{series_id}/composition")
         assert resp.status_code == 200
         assert ("composition.get",
-                {"series_id": series_id, "include_excluded": False, "sources_only": False, "part": "whole",
-                 "episodes": []}) in neighbours.calls
+                {"series_id": series_id, "include_excluded": False, "sources_only": False}) in neighbours.calls
 
 
 @pytest.mark.asyncio

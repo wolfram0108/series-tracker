@@ -44,11 +44,6 @@ class Database:
         while self._inflight:
             await asyncio.wait(set(self._inflight))
 
-    @property
-    def path(self) -> str:
-        """The file of the base."""
-        return str(self._path)
-
     def _connect(self, *, enforce_fk: bool = True) -> sqlite3.Connection:
         conn = sqlite3.connect(self._path, timeout=30)
         conn.row_factory = sqlite3.Row

@@ -20,8 +20,6 @@
 - `voice-alignment` — несколько источников на сериал (ruchime + dunhuatv.ru),
   парсер dunhuatv.ru (Kodik-озвучки) и автоматическое выравнивание озвучек
   по референсу через сервис `track-muxer` — `docs/missions/voice-alignment/`
-- `rust-core` — цепочка пересчёта сериала (раскладка → план → вид, затем правила)
-  с её данными в ядре на Rust, многоядерный пересчёт — `docs/missions/rust-core/`
 - (завершённые — в `docs/missions/_done/`, напр.
   `torrent-naming-preview` — предпросмотр нейминга в окне добавления)
 
@@ -145,7 +143,6 @@ HTTP/SSE-точка; событие шины → SSE по таблице `SSE_MA
 | Миграции БД | `.venv/bin/alembic upgrade head` |
 | Запуск (dev) | `.venv/bin/uvicorn run:app --port 5000` (без `ST_QBIT_URL` модуль torrents не стартует) |
 | Сборка фронта | `cd web && npm run build` |
-| Сборка ядра на Rust | `native/build.sh` (→ `core/_native.so`, вне git; тесты ядра — `native/test.sh`; ядро связано с той же SQLite, что и Python) |
 | Браузерная доставка (astar/anilibria_tv) | `.venv/bin/playwright install firefox` |
 | Антибот-челлендж rutracker (Cloudflare) | `.venv/bin/python -m camoufox fetch` |
 | Рестарт прода | `sudo systemctl restart series-tracker` (или `./restart.sh`) |

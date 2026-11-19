@@ -13,7 +13,6 @@ from fastapi.responses import JSONResponse, Response
 
 from core import NO_HANDLER, BusRequestError, compute
 from core.admission import Admission
-from core.made_json import MadeJson
 from core.admission import current as current_admission
 from core.reasons import code_of, relayed
 
@@ -26,10 +25,7 @@ def _text(answer: Any) -> bytes:
 
 async def as_made(answer: Any) -> Response:
     """The answer of a module as it came. The module made it of the model of the route, so it is not checked and written
-    again by the framework (four passes over megabytes on the loop); its text is made in the pool of computation, or is the
-    text the module made already (`MadeJson`)."""
-    if isinstance(answer, MadeJson):
-        return Response(answer.text.encode("utf-8"), media_type="application/json")
+    again by the framework (four passes over megabytes on the loop); its text is made in the pool of computation."""
     return Response(await compute.run(_text, answer), media_type="application/json")
 
 
