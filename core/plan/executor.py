@@ -284,6 +284,9 @@ class SeriesSync:
         """A group is applied — `staged` is what its `stage` made: the journal of its files, the table written — one
         group at a time; and, with nothing staged, the end of the sync: what it recorded is written."""
 
+    async def placed(self, made: Plan, group: Group) -> None:
+        """A group is put in place and written: what only its building needed (the results of steps kept for it) may go."""
+
     async def left(self, made: Plan, group: Group, missing: list[str]) -> None:
         """A group not applied: a step of it did not succeed (`missing`); its files stay as they are."""
 
@@ -498,6 +501,7 @@ class SeriesSync:
                 self.containers, self.commands = table, commands
                 if changed:
                     await self.commit(before, staged)
+                await self.placed(plan_, group)
             return True
 
         def take_news() -> bool:

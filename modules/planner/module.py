@@ -27,6 +27,13 @@ Steps of the graph, each through its owner:
       cache) goes; its folder with what it wrote (tracks, plots) stays while its record is in the service's history
       (conform.job.keys), and goes with the record (conform.job.removed, the end of a sync, the start). The setting
       conform.clear_finished takes a job that ended with every result out of the history at the end of its sync.
+  A result of the service is also kept (modules/planner/kept.py): a hard link of the file its job wrote, under
+      `<work folder of the service>/conform/kept/<series>/<episode>/` with the timeline it was aligned to and the row of its
+      voice-over. A sync that falls before its container is in place (the build fails, the process stops) or a job that is
+      taken out of the history would lose what hours of the service's work made; a sync that asks the same alignment takes
+      it from the keep — the job is not sent and the voice-over not downloaded. The set of an episode goes once its container
+      is in place (core/plan/executor `placed`), when a sync that covers the episode has no container to build for it, and with
+      the series. Nothing is copied: the data is the file of the job while it lasts and the keep's alone after.
   build and apply: here, by core/plan/files (the container with its provenance, the journal in the folder of the series).
 A failure the service judged is recorded and the plan is counted again from the same snapshot; a failure of the moment
 (the network, a service that is down, an answer that never came) is no record and is tried at the next sync. A pair the
@@ -94,7 +101,7 @@ import hashlib
 import json
 import os
 import shutil
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 from core import NO_HANDLER, BaseModule, BusRequestError, compute, storage
 from core import container as mkv
@@ -115,6 +122,7 @@ from core.plan.marks import references_of
 from core.plan.planner import Plan, cut_video, name_of, video_op
 from core.plan.tables import RowId, Track, Video
 
+from .kept import Kept
 from .packing import PackBook, card_id
 from .repository import PlannerRepository
 from .view import placed, view_of
@@ -124,9 +132,15 @@ PLANNER = "planner"
 COPY_TIMEOUT_S = 1800.0
 ENDED = ("done", "failed", "cancelled", "gone")  # the states of a job that ended (conform.job.get)
 WORK = "planner"  # the folder of the planner's work inside the work folder of the alignment service
+KEPT = "kept"  # beside it: the alignments kept until their containers are built (modules/planner/kept.py)
 # The containers built at one time, whatever series they are of: the episodes of a sync are built as each is ready, the
 # machine of the service holds 4 GB and the library lies on a network disk. A container that waits is `queued` in its card.
 BUILDS_AT_ONCE = 2
+
+
+def kept_of(conform: str, series_id: int) -> Kept:
+    """The alignments kept for a series, beside the folders of the jobs (which the sweep of the planner clears)."""
+    return Kept(os.path.join(conform, KEPT, str(series_id)))
 
 
 def _fate_of(passing: Passing) -> str:
@@ -190,6 +204,8 @@ class BusSync(SeriesSync):
         self.files = Library(series["save_path"])
         self.downloads_dir = ""
         self.conform_dir = ""
+        self.kept: Kept | None = None  # the alignments this series keeps until their containers are in place
+        self.made: Plan | None = None  # the plan in force: what a step asks about its neighbours
         self.download_names: dict[str, str] = {}  # the name of the file of a download, by the step that took it
         self.names: dict[tuple, str] = {}
         self.told = False  # the window was shown the plan this sync froze
@@ -212,7 +228,7 @@ class BusSync(SeriesSync):
 
     async def plan_of(self, inputs):
         """The plan of the sync; the first one of it is the plan the window shows while the sync runs."""
-        made = await super().plan_of(inputs)
+        made = self.made = await super().plan_of(inputs)
         if self.download and not self.told:
             self.told = True
             await self.m._publish_view(self.series["id"], self, made, inputs)
@@ -236,6 +252,7 @@ class BusSync(SeriesSync):
         if folders.get("downloads") and folders.get("conform"):
             self.downloads_dir = os.path.join(folders["downloads"], WORK, str(self.series["id"]))
             self.conform_dir = os.path.join(folders["conform"], WORK, str(self.series["id"]))
+            self.kept = kept_of(folders["conform"], self.series["id"])
 
     async def namer_for(self, made: Plan):
         """The series' own rule of names (`rules.format_filename`), asked once for every goal of the plan."""
@@ -362,6 +379,8 @@ class BusSync(SeriesSync):
 
     async def _download(self, op):
         row = op.subject
+        if op.kind == "download_dub" and await self._aligned_kept(op):
+            return Made(row)  # every alignment it is for is kept: its file is not needed
         if parse_link(row.link) is not None:
             return await self._take(op, row)
         key = self._key(op.id)
@@ -466,13 +485,93 @@ class BusSync(SeriesSync):
         return job_key(self.series["id"], hashlib.md5("|".join(map(str, (self.series["id"], self.run_mark, *what))).encode()).hexdigest()[:12])
 
     async def _align(self, ops, results):
+        """The alignment of an episode: what an earlier sync kept (modules/planner/kept.py) is taken as it is, the rest is one
+        job of the service."""
+        goal = ops[0].subject[0]
+        timeline = video_of(goal, results).timeline
+        outcomes, rest = {}, []
+        for op in ops:
+            way = op.subject[1]
+            path = await self._kept_path(goal, way, timeline)
+            if path is None:
+                rest.append(op)
+            else:
+                outcomes[op.id] = Made(Track(way.dub, way.snapshot, goal.slot, timeline), path)
+        if outcomes:
+            self.m.log.info("сериал %d %s: выравнивание взято из сохранённого, сервису не отдаётся: %s", self.series["id"],
+                            label_of(goal.slot), ", ".join(op.subject[1].voice for op in ops if op.id in outcomes))
+        return {**outcomes, **(await self._make_aligned(rest, results) if rest else {})}
+
+    async def _kept_path(self, goal, way, timeline) -> str | None:
+        if self.kept is None:
+            return None
+        return await storage.call(self.kept.find, goal.slot, asdict(timeline), way.voice, asdict(way.dub))
+
+    async def _aligned_kept(self, op) -> bool:
+        """Whether every alignment a voice-over is downloaded for is kept (a sync that fell after the service's job): the
+        file of the voice-over is then no step's input."""
+        if self.made is None:
+            return False
+        needers = [each for each in self.made.ops if op.id in each.needs and each.kind == "align"]
+        for each in needers:
+            goal, way = each.subject
+            if await self._kept_path(goal, way, goal.video.timeline) is None:
+                return False
+        return bool(needers)
+
+    async def _keep(self, goal, way, timeline, path: str) -> None:
+        """A result of the service is kept at once: its job goes with its folder when a sync stops or the setting says so. No
+        link is a loss of the safety, not of the sync: the result is used as it is."""
+        if self.kept is None:
+            return
+        try:
+            await storage.call(self.kept.keep, goal.slot, asdict(timeline), way.voice, asdict(way.dub), path,
+                               owns=self.kept.folder(goal.slot))
+        except OSError as exc:
+            self.m.log.warning("сериал %d %s %s: выравнивание не сохранено про запас (жёсткая ссылка не сделана): %s",
+                               self.series["id"], label_of(goal.slot), way.voice, exc)
+
+    async def _retire(self, slot) -> None:
+        try:
+            if await storage.call(self.kept.retire, slot, owns=self.kept.folder(slot), timeout=storage.REMOVE_TIMEOUT_S):
+                self.m.log.info("сериал %d %s: сохранённые выравнивания убраны", self.series["id"], label_of(slot))
+        except OSError as exc:
+            self.m.log.warning("сериал %d %s: сохранённые выравнивания не убраны: %s", self.series["id"], label_of(slot), exc)
+
+    async def placed(self, made, group) -> None:
+        """The containers of a group are in place: the alignments kept for them have done their work."""
+        if self.kept is not None:
+            for slot in group.built:
+                await self._retire(slot)
+
+    async def release(self, synced) -> None:
+        """The end of a sync: the alignments kept for an episode of its scope that it had no container to build for are of no
+        use (the file is as it is to be, or no voice-over of it is wanted any more)."""
+        if self.kept is None:
+            return
+        building = {op.slot for op in synced.plan.ops if op.kind == "build"}
+        try:
+            slots = await storage.call(self.kept.slots)
+        except OSError as exc:
+            self.m.log.warning("сериал %d: сохранённые выравнивания не прочитаны: %s", self.series["id"], exc)
+            return
+        for slot in slots:
+            if slot not in building and (self.holds is None or self.holds(slot)):
+                await self._retire(slot)
+
+    async def _make_aligned(self, ops, results):
+        lost = [op for op in ops if op.subject[1].kind == "download" and not results[f"dub:{op.subject[1].dub}"].file]
+        if lost:  # its download was skipped for an alignment kept then and not kept now: the next sync downloads it
+            rest = [op for op in ops if op not in lost]
+            outcomes = await self._make_aligned(rest, results) if rest else {}
+            return {**outcomes, **{op.id: Passing(reason("kept_alignment_lost")) for op in lost}}
         # A sound lying in its own file beside the video of a torrent release cannot be given to the service now: it takes
         # a voice-over as a file of a picture and a number of its sound (stage 15, И-5; the task Т-13 of track-muxer). Such
         # a pair is passed over for this sync with the next source taken; no copy of the video is made to carry it.
         apart = [op for op in ops if op.subject[1].kind == "download" and results[f"dub:{op.subject[1].dub}"].sound]
         if apart:
             rest = [op for op in ops if op not in apart]
-            outcomes = await self._align(rest, results) if rest else {}
+            outcomes = await self._make_aligned(rest, results) if rest else {}
             return {**outcomes, **{op.id: Crashed(reason("conform_pair_unsupported")) for op in apart}}
         goal = ops[0].subject[0]
         timeline = video_of(goal, results).timeline
@@ -515,6 +614,7 @@ class BusSync(SeriesSync):
                 outcomes[op.id] = None
             else:
                 outcomes[op.id] = Made(Track(way.dub, way.snapshot, goal.slot, timeline), made)
+                await self._keep(goal, way, timeline, made)
         clean = ended.get("status") == "done" and all(isinstance(each, Made) for each in outcomes.values())
         self.jobs.append((job_id, clean))
         return outcomes
@@ -742,6 +842,7 @@ class PlannerModule(BaseModule):
                           len(synced.replanned))
             await self.count_changed(series_id)
             if download:
+                await sync.release(synced)
                 await self._archive_releases(series, synced)
             try:
                 await self.clear_finished(sync.jobs)
@@ -928,6 +1029,12 @@ class PlannerModule(BaseModule):
         if task is not None:
             task.cancel()
         await self.repo.purge(series_id)
+        try:
+            root = (await self.request("conform.workspace", {})).get("conform")
+            if root:
+                await storage.call(kept_of(root, series_id).drop, timeout=storage.REMOVE_TIMEOUT_S)
+        except (BusRequestError, asyncio.TimeoutError, OSError):
+            self.log.warning("сериал %d: сохранённые выравнивания не убраны с удалением сериала", series_id)
         self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})
 
     # --- the workers' signals ------------------------------------------------------------------------------------

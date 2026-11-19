@@ -1545,6 +1545,7 @@ export const ru = {
   "reason.daemon_job_lost": "задачу не удалось ни поставить, ни найти: {cause}",
   "reason.daemon_job_removed": "задача {job} снята в демоне",
   "reason.daemon_no_result": "демон не дал результата",
+  "reason.kept_alignment_lost": "сохранённое выравнивание пропало, озвучка скачается при следующей синхронизации",
   "reason.download_not_done": "загрузка не удалась: {cause}",
   "reason.download_stopped": "загрузка остановлена",
   "reason.episode_file_too_short": "источник отдал файл длиной {seconds} с — серия не бывает короче {minimum} с, файл сломан",

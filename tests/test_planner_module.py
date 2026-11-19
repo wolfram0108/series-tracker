@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 from dataclasses import dataclass, field
 
@@ -18,7 +19,7 @@ from core.contracts import (VOICE_TAKE, CompositionReply, CompositionRow, Effect
                             RowState, SyncScope, group_target)
 from core.db import Database
 from core.envelope import Envelope
-from core.plan.files import container_json, container_of
+from core.plan.files import BuildFailed, Library, container_json, container_of
 from modules.conform.module import finished_view, job_label
 from modules.downloads import ytdlp
 from modules.planner import PlannerModule
@@ -710,3 +711,117 @@ async def test_only_the_video_of_the_reference_is_downloaded_whole_the_rest_not_
         job = (await asked.queue.get()).payload
         caps["dub" if "озвучка" in job["path"] else "video"] = job.get("max_height")
     assert caps == {"video": None, "dub": 720}, caps
+
+
+def kept_root(neighbours: Neighbours) -> str:
+    return os.path.join(neighbours.root, "work", "conform", "kept", str(SERIES))
+
+
+def fail_the_build_once(monkeypatch) -> None:
+    """The build of the first container that is asked falls (the machine stops, the check of the file read back says no)."""
+    real, left = Library.build, [1]
+
+    async def build(self, made, group, results, report_for=None):
+        if left[0]:
+            left[0] -= 1
+            raise BuildFailed(made.goal(group.built[0]).name, "container_length_wrong")
+        return await real(self, made, group, results, report_for)
+
+    monkeypatch.setattr(Library, "build", build)
+
+
+def tapped(planner) -> tuple[list[Envelope], callable]:
+    seen: list[Envelope] = []
+    return seen, planner.bus.tap(seen.append)
+
+
+def sent(seen: list[Envelope], topic: str, kind: str | None = None) -> list[dict]:
+    return [each.payload for each in seen if each.topic == topic
+            and (kind is None or each.payload["need"]["kind"] == kind)]
+
+
+async def test_a_build_that_falls_keeps_the_alignments_and_the_next_sync_builds_from_them_without_the_service(world, monkeypatch):
+    """The results of the alignment service outlive its job: a container that could not be built does not cost the work of the
+    service again. The job is gone by then (the setting, the owner's hand): the next sync takes the alignments from the keep —
+    no job, no download of the voice-overs — and puts them in the file; once it is in place the keep goes."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 2)
+    fail_the_build_once(monkeypatch)
+    await sync(world)
+    assert not [name for name in os.listdir(neighbours.library) if not name.startswith(".")]
+    folder = os.path.join(kept_root(neighbours), "s01e01")
+    files = sorted(name for name in os.listdir(folder) if name != "manifest.json")
+    assert len(files) == 2 and all(os.stat(os.path.join(folder, name)).st_nlink >= 2 for name in files), "links, not copies"
+    neighbours.daemon.jobs.clear()
+    shutil.rmtree(os.path.join(neighbours.root, "work", "conform", "planner"))
+    seen, untap = tapped(planner)
+    try:
+        await sync(world)
+    finally:
+        untap()
+    stored = await check(world)
+    assert [track["snapshot"]["group"] for track in next(iter(stored.values()))["tracks"]] == ["G1", "G2"]
+    assert not sent(seen, "conform.submit") and not sent(seen, "downloads.fetch", "dub")
+    assert [job["need"]["kind"] for job in sent(seen, "downloads.fetch")] == ["video"]
+    assert not os.path.exists(kept_root(neighbours))
+
+
+async def test_only_what_is_not_kept_goes_to_the_service_and_is_downloaded(world, monkeypatch):
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 2)
+    fail_the_build_once(monkeypatch)
+    await sync(world)
+    neighbours.put(2, "g3e1", 1, group="G3", player="kodik")
+    seen, untap = tapped(planner)
+    try:
+        await sync(world)
+    finally:
+        untap()
+    stored = await check(world)
+    assert sorted(track["snapshot"]["group"] for track in next(iter(stored.values()))["tracks"]) == ["G1", "G2", "G3"]
+    (job,) = sent(seen, "conform.submit")
+    assert [os.path.basename(path) for path in job["dubs"]] == ["G3.mp4"]
+    assert [each["need"]["group"] for each in sent(seen, "downloads.fetch", "dub")] == ["G3"]
+    assert not os.path.exists(kept_root(neighbours))
+
+
+async def test_an_alignment_kept_to_another_video_is_not_used(world, monkeypatch):
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    fail_the_build_once(monkeypatch)
+    await sync(world)
+    neighbours.put(3, "hd1", 1, group=REF, height=1080)  # a better reference: another timeline
+    seen, untap = tapped(planner)
+    try:
+        await sync(world)
+    finally:
+        untap()
+    stored = await check(world)
+    assert [each["video"]["id"]["row_key"] for each in stored.values()] == ["hd1"]
+    assert len(sent(seen, "conform.submit")) == 1 and len(sent(seen, "downloads.fetch", "dub")) == 1
+    assert not os.path.exists(kept_root(neighbours))
+
+
+async def test_the_keep_of_an_episode_the_sync_has_no_container_for_goes_with_that_sync_and_only_with_one_that_covers_it(world, monkeypatch):
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    fail_the_build_once(monkeypatch)
+    await sync(world)
+    assert os.path.isdir(kept_root(neighbours))
+    await sync(world, season=2)  # the scope does not hold the episode: what is kept for it stays
+    assert os.path.isdir(kept_root(neighbours))
+    neighbours.drop(1, "ref1")
+    neighbours.drop(2, "g1e1")
+    await sync(world)  # the episode has no rows now: nothing is to be built of what is kept
+    assert not os.path.exists(kept_root(neighbours))
+
+
+async def test_the_keep_goes_with_the_series(world, monkeypatch):
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    fail_the_build_once(monkeypatch)
+    await sync(world)
+    assert os.path.isdir(kept_root(neighbours))
+    neighbours.publish_event("series.deleted", {"series_id": SERIES})
+    await settle(planner.bus, planner, neighbours)
+    assert not os.path.exists(kept_root(neighbours))
