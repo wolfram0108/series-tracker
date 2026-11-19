@@ -1062,6 +1062,12 @@ class PlannerModule(BaseModule):
         await storage.call(files.finish)
 
     async def on_system_started(self, env: Envelope) -> None:
+        # The status of a series lives in memory (catalog): what each stood at when it was last counted is told first of
+        # all, and the full recount of every view goes after it, apart from the work of the module, and puts right what it
+        # counts otherwise (the tables, the code of a new release).
+        for series_id, flags in (await self.repo.standing()).items():
+            self._standing[series_id] = flags
+            self._tell_status(series_id)
         resumed = set()
         for run in await self.repo.runs():
             self.log.info("сериал %d: синхронизация плана, прерванная остановкой, продолжается", run["series_id"])
@@ -1072,12 +1078,6 @@ class PlannerModule(BaseModule):
             await self.sweep()
         except Exception:  # noqa: BLE001 - the folders wait for the next sweep; the start goes on
             self.log.exception("папки задач сервиса выравнивания не разобраны")
-        # The status of a series lives in memory (catalog): what each stood at when it was last counted is told at once,
-        # and the full recount of every view goes after it, apart from the work of the module, and puts right what it
-        # counts otherwise (the tables, the code of a new release).
-        for series_id, flags in (await self.repo.standing()).items():
-            self._standing[series_id] = flags
-            self._tell_status(series_id)
         self.spawn(self._recount_all([series_id for series_id in await self.repo.series_with_assets()
                                       if series_id not in resumed]), name="planner.recount_all")
 
