@@ -4,6 +4,7 @@
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use std::collections::HashMap;
 use pyo3::types::PyTuple;
 use st_composition::{levers, rows_of, Row};
 
@@ -177,6 +178,20 @@ fn layout_derived(py: Python<'_>, path: String, series_id: i64) -> PyResult<(Str
         .map(|each| (each.levels, each.settings, each.compilations, each.voice_orders)).map_err(PyValueError::new_err)
 }
 
+/// The layout of a series (or the part asked) as the JSON of `CompositionReply`, counted by the core from the module's
+/// tables: `fields` in the order of the reply, `episodes` the ones a part `levers` holds (none: all), `given` the parts the
+/// module gives as they are.
+#[pyfunction]
+#[pyo3(signature = (path, series_id, part, fields, episodes, include_excluded, given))]
+fn layout_json(py: Python<'_>, path: String, series_id: i64, part: String, fields: Vec<String>,
+               episodes: Option<Vec<(i64, i64)>>, include_excluded: bool, given: HashMap<String, String>) -> PyResult<String> {
+    py.allow_threads(move || {
+        let asked = st_composition::Asked { part: &part, fields: &fields, episodes: episodes.map(|each| each.into_iter().collect()),
+                                            include_excluded, given: &given };
+        st_composition::layout_json(&path, series_id, &asked)
+    }).map_err(PyValueError::new_err)
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("COLUMNS", st_composition::COLUMNS)?;
@@ -192,7 +207,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
                      wrap_pyfunction!(lever_register, m)?, wrap_pyfunction!(lever_unregister, m)?,
                      wrap_pyfunction!(lever_accepts, m)?, wrap_pyfunction!(lever_accepts_target, m)?,
                      wrap_pyfunction!(lever_problem, m)?, wrap_pyfunction!(layout_levers, m)?,
-                     wrap_pyfunction!(layout_derived, m)?] {
+                     wrap_pyfunction!(layout_derived, m)?, wrap_pyfunction!(layout_json, m)?] {
         m.add_function(function)?;
     }
     Ok(())

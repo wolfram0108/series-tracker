@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable, Iterator, Mapping, Sequence
 
+from core import _native
 from core.contracts.composition import LEFT_BEFORE_RULES
 from core.contracts import (CompositionRow, Exclusion, PlayerSummary, SeasonVoiceOrder, VoiceSpan, ReleaseTable, RowState, RowTrack, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, line_of, place_of)
@@ -16,7 +17,8 @@ from core.contracts.torrent import order_name
 from core.voice_names import fold_name
 
 # One template for the name of a voice-over that belongs to no user group.
-UNKNOWN_VOICE_LABEL = "Неизвестная озвучка {number}"
+# The label of a voice-over nobody named: the core keeps its template (the one place of it), the layout numbers them.
+UNKNOWN_VOICE_LABEL = _native.UNKNOWN_VOICE_LABEL
 _UNKNOWN = re.compile("^" + re.escape(UNKNOWN_VOICE_LABEL).replace(re.escape("{number}"), r"\d+") + "$")
 
 # The only player whose list holds several seasons of a catalog, one of which the user may pick for the source.

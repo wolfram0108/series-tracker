@@ -76,7 +76,7 @@ class System:
 
     async def get(self, series_id: int, **more) -> CompositionReply:
         reply = await self.probe.request("composition.get", {"series_id": series_id, **more}, timeout=STUCK_S)
-        return CompositionReply.model_validate(reply)
+        return CompositionReply.model_validate_json(reply.text)  # the layout is JSON made by the core
 
     async def set(self, series_id: int, lever: str, value, *, season=None, episode=None, target=None) -> dict:
         command = SettingsSet(series_id=series_id, season=season, episode=episode, lever=lever, target=target,
@@ -294,11 +294,11 @@ async def test_the_whole_layout_holds_every_field_and_a_part_exactly_the_fields_
     s = system
     series_id = await laid_out(s)
     fields = set(CompositionReply.model_fields) - {"series_id", "rev", "part"}
-    whole = await s.probe.request("composition.get", {"series_id": series_id}, timeout=STUCK_S)
+    whole = (await s.probe.request("composition.get", {"series_id": series_id}, timeout=STUCK_S)).parsed()
     assert set(whole) - {"series_id", "rev", "part"} == fields
     for part, held in LAYOUT_PARTS.items():
         assert held <= fields, part
-        reply = await s.probe.request("composition.get", {"series_id": series_id, "part": part}, timeout=STUCK_S)
+        reply = (await s.probe.request("composition.get", {"series_id": series_id, "part": part}, timeout=STUCK_S)).parsed()
         assert set(reply) - {"series_id", "rev", "part"} == held, part
 
 
@@ -355,7 +355,7 @@ async def test_the_choice_made_for_a_source_is_counted(system):
     assert off.rows == [] and event["episodes"] == season_one(1, 2, 3)
     # The rows the choice left out stay in the layout, excluded by the source: their videos are there and not wanted.
     left = (await s.probe.request("composition.get", {"series_id": series_id, "include_excluded": True},
-                                  timeout=STUCK_S))["rows"]
+                                  timeout=STUCK_S)).parsed()["rows"]
     assert [(row["excluded"], row["exclusion"]) for row in left] == [(True, "source")] * 3
     assert [player.rows for player in off.sources[0].players] == [3]
     await s.counted(lambda: s.catalog.update_source(source_id, players_off=[]))
@@ -859,7 +859,7 @@ class Consumer(BaseModule):
 
     async def on_changed(self, env) -> None:
         reply = await self.request("composition.get", {"series_id": env.payload["series_id"]}, timeout=STUCK_S)
-        self.seen.put_nowait((env.payload, CompositionReply.model_validate(reply)))
+        self.seen.put_nowait((env.payload, CompositionReply.model_validate_json(reply.text)))
 
 
 @pytest.mark.asyncio

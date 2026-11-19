@@ -54,6 +54,7 @@ cp .env.example .env
 cd web && npm ci && npm run build && cd ..
 
 # 6. Ядро пересчёта на Rust (docs/missions/rust-core): rustc и cargo из apt, сборка в core/_native.so
+#    (ядро связывается с libsqlite3 интерпретатора — своей копии SQLite в процессе нет)
 sudo apt-get install -y --no-install-recommends rustc cargo
 native/build.sh
 ```

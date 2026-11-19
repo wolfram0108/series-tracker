@@ -1,7 +1,8 @@
 """The native core against the module it replaces, on a copy of the base of the service (docs/missions/rust-core).
 
 For every series of the copy: the data the core holds is the data the module makes, field by field, and the time of
-each way of making it (best of three). The stage of the mission is the subcommand; `derived` — the parts of the layout besides its rows (levels,
+each way of making it (best of three). The stage of the mission is the subcommand; `layout` — the whole answer of the layout to a window (and its parts),
+byte by byte; `derived` — the parts of the layout besides its rows (levels,
 levers of the episodes, compilations, orders of the voice-overs) against the module's answer; `levers` — the levers of every episode and the headers of every level
 (the core counts them from the module's records); `rows` — the rows of the layout:
 
@@ -160,14 +161,52 @@ def derived_stage(path: str, wanted: list[int]) -> None:
           f"ms (the four parts, reading the tables itself), parts that differ {differ_all}")
 
 
+def layout_stage(path: str, wanted: list[int]) -> None:
+    """The answer of the layout to a window as the core makes it (modules/composition `on_get`) against the module's own
+    (`layout_reply`), byte by byte: the whole, the whole with the excluded rows, the part `sources`, the part `levers` of
+    every episode and of some."""
+    import json
+    from core.contracts import CompositionGetRequest
+    from modules.composition.module import layout_asked, layout_reply
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    series = wanted or [row[0] for row in conn.execute("SELECT DISTINCT series_id FROM composition_state ORDER BY 1")]
+    totals = {"python": 0.0, "core": 0.0}
+    differ_all = 0
+    for series_id in series:
+        stored = repository._read(conn, series_id)
+        some = [{"season": row.season, "episode": row.episode_start} for row in stored.rows[:3] if row.season is not None
+                and row.episode_start is not None]
+        asks = [{}, {"include_excluded": True}, {"part": "sources"}, {"part": "levers"}, {"part": "levers", "episodes": some}]
+        differ = []
+        for ask in asks:
+            request = CompositionGetRequest(series_id=series_id, **ask)
+            theirs, python_ms = best(lambda: json.dumps(layout_reply(request, repository._read(conn, series_id)),
+                                                        ensure_ascii=False, separators=(",", ":")))
+            summaries = [each.summary for each in stored.sources]
+            mine, core_ms = best(_native.layout_json, path, series_id, *layout_asked(request, summaries))
+            if mine != theirs:
+                differ.append(ask.get("part", "whole") + ("+excluded" if ask.get("include_excluded") else ""))
+            if not ask:
+                totals["python"] += python_ms
+                totals["core"] += core_ms
+                print(f"series {series_id:4}: whole {len(mine) / 1e6:5.2f} MB  python {python_ms:7.1f} ms | core {core_ms:6.1f} ms",
+                      end="", flush=True)
+        differ_all += len(differ)
+        print(f" | differ {', '.join(differ) or 0}", flush=True)
+    print(f"all {len(series)} series, the whole layout: python {totals['python']:.0f} ms, core {totals['core']:.0f} ms; "
+          f"answers that differ {differ_all}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("stage", choices=["rows", "levers", "derived"])
+    parser.add_argument("stage", choices=["rows", "levers", "derived", "layout"])
     parser.add_argument("series", nargs="*", type=int)
     options = parser.parse_args()
     with tempfile.TemporaryDirectory() as folder:
         path = copy_db(os.path.join(folder, "app.db"))
-        {"rows": rows_stage, "levers": levers_stage, "derived": derived_stage}[options.stage](path, options.series)
+        {"rows": rows_stage, "levers": levers_stage, "derived": derived_stage, "layout": layout_stage}[options.stage](
+            path, options.series)
     print("NATIVE_CHECK_DONE")
 
 

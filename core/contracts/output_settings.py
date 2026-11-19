@@ -16,32 +16,32 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from .. import _native
-
 from .compilation import CompilationRef
 
 
-# The levers every consumer reads by name; the registry that gives them meaning is the composition module's.
-REFERENCE_ORDER = "reference.order"
-REFERENCE_ALLOW = "reference.allow"
-VOICE_ORDER = "voice.order"
-VOICE_ALLOW = "voice.allow"
-VOICE_TAKE = "voice.take"
+# The levers every consumer reads by name (named in the core, native/contracts: the one place of the names); the
+# registry that gives them meaning is the composition module's.
+REFERENCE_ORDER = _native.REFERENCE_ORDER
+REFERENCE_ALLOW = _native.REFERENCE_ALLOW
+VOICE_ORDER = _native.VOICE_ORDER
+VOICE_ALLOW = _native.VOICE_ALLOW
+VOICE_TAKE = _native.VOICE_TAKE
 # Stage 12: the compilation an episode stands in (its key, or "" for none), and whether a compilation takes episodes at all.
-COMPILATION_MEMBER = "compilation.member"
-COMPILATION_TAKE = "compilation.take"
+COMPILATION_MEMBER = _native.COMPILATION_MEMBER
+COMPILATION_TAKE = _native.COMPILATION_TAKE
 # Stage 14: the queue of the markup reference — the variant whose single video gives an episode its timeline. With no
 # `markup.order` on the episode's chain of levels the markup reference follows the reference.
-MARKUP_ORDER = "markup.order"
-MARKUP_ALLOW = "markup.allow"
+MARKUP_ORDER = _native.MARKUP_ORDER
+MARKUP_ALLOW = _native.MARKUP_ALLOW
 # Variants the user declared equal (Р-99): the variants of a group take one place in the queue of the reference (of the
 # markup reference), so that what the file holds stays while it is as good as the queue's first.
-REFERENCE_SAME = "reference.same"
-MARKUP_SAME = "markup.same"
+REFERENCE_SAME = _native.REFERENCE_SAME
+MARKUP_SAME = _native.MARKUP_SAME
 # Stage 15 (DESIGN.md 7.1.1): the order of the subtitles of the container (the first variant is its first subtitles track)
 # and the flag of a variant that leaves it out; set on the series, a season and an episode. How a track lies in the
 # container is no lever: the first full track taken is the default one, the first of signs the forced one.
-SUBTITLES_ORDER = "subtitles.order"
-SUBTITLES_ALLOW = "subtitles.allow"
+SUBTITLES_ORDER = _native.SUBTITLES_ORDER
+SUBTITLES_ALLOW = _native.SUBTITLES_ALLOW
 
 
 class Level(StrEnum):

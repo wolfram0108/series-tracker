@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 
 from core import BaseModule, compute, storage
+from core.made_json import MadeJson
 from core.secrets import redacted
 from core.contracts.release_table import TABLE_TRACE_TOPIC
 from core.contracts.work import RUN_CHANGED
@@ -74,6 +75,8 @@ def _now() -> str:
 def _written(payload):
     """What of a payload goes into a dump: a model handed over in the process whole (the layout, megabytes) is told by its
     kind and the size of its lists; its rows are in the dump as the planner's trace of the inputs of its plan."""
+    if isinstance(payload, MadeJson):
+        return {"json_chars": len(payload.text)}
     if isinstance(payload, BaseModel):
         return {"model": type(payload).__name__, **{name: (len(value) if isinstance(value, (list, dict)) else value)
                                                     for name, value in payload.__dict__.items()}}

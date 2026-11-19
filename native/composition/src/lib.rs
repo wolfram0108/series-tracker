@@ -7,7 +7,7 @@ pub mod levers;
 pub mod settings;
 
 use rusqlite::{Connection, OpenFlags};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// A row of the layout, one column of `composition_rows` per field (core/contracts/composition.py CompositionRow).
 #[derive(Debug, Clone, PartialEq)]
@@ -97,22 +97,8 @@ pub fn derived(path: &str, series_id: i64) -> Result<Derived, String> {
     let conn = settings::open(path)?;
     let records = settings::settings_of(&conn, series_id)?;
     let index = settings::index(&records);
-    let mut order = HashMap::new();
-    let mut query = conn.prepare_cached(
-        "SELECT source_id FROM composition_sources WHERE series_id = ?1 ORDER BY position, source_id")
-        .map_err(|exc| exc.to_string())?;
-    for (place, each) in query.query_map([series_id], |row| row.get::<_, i64>(0)).map_err(|exc| exc.to_string())?.enumerate() {
-        order.insert(each.map_err(|exc| exc.to_string())?, place);
-    }
-    let mut previous = BTreeMap::new();
-    let mut query = conn.prepare_cached("SELECT season, labels FROM voice_orders WHERE series_id = ?1 ORDER BY season")
-        .map_err(|exc| exc.to_string())?;
-    for each in query.query_map([series_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
-        .map_err(|exc| exc.to_string())? {
-        let (season, labels) = each.map_err(|exc| exc.to_string())?;
-        let labels: Vec<String> = serde_json::from_str(&labels).map_err(|exc| exc.to_string())?;
-        previous.insert(season, labels);
-    }
+    let order = source_order(&conn, series_id)?;
+    let previous = voice_orders_of(&conn, series_id)?;
     let episodes = compilations::layout_episodes(&sound);
     let outcome = compilations::resolve_compilations(&sound, &index, &records, &order);
     let seasons: Vec<i64> = episodes.iter().map(|(season, _)| *season).collect();
@@ -126,6 +112,141 @@ pub fn derived(path: &str, series_id: i64) -> Result<Derived, String> {
         compilations: outcome.views,
         voice_orders: compilations::season_voices(&compilations::season_orders(&previous, &sound), &sound),
     })
+}
+
+/// A row as the layout writes it (core/contracts CompositionRow, its fields in their order, then `in_output`).
+pub fn write_row(row: &Row, out: &mut String) {
+    use st_contracts::json_text as text;
+    let opt_text = |value: &Option<String>| value.as_deref().map_or("null".to_string(), text);
+    let opt_int = |value: Option<i64>| value.map_or("null".to_string(), |each| each.to_string());
+    let heights: Vec<String> = row.heights.iter().map(|each| each.to_string()).collect();
+    out.push_str(&format!(
+        "{{\"series_id\":{},\"source_id\":{},\"row_key\":{},\"excluded\":{},\"exclusion\":{},\"season\":{},\
+         \"episode_start\":{},\"episode_end\":{},\"part\":{},\"voice_group\":{},\"voice_label\":{},\"voice_name\":{},\
+         \"voice_unknown\":{},\"player\":{},\"player_label\":{},\"group\":{},\"text\":{},\"heights\":[{}],\"state\":{},\
+         \"published\":{},\"link\":{},\"video\":{},\"timeline\":{},\"track\":{},\"language\":{},\"subtitle_type\":{},\
+         \"stale\":{},\"in_output\":{}}}",
+        row.series_id, row.source_id, text(&row.row_key), row.excluded, opt_text(&row.exclusion), opt_int(row.season),
+        opt_int(row.episode_start), opt_int(row.episode_end), opt_int(row.part), opt_text(&row.voice_group),
+        text(&row.voice_label), text(&row.voice_name), opt_int(row.voice_unknown), text(&row.player),
+        text(&row.player_label), text(&row.group), text(&row.text), heights.join(","), text(&row.state),
+        opt_text(&row.published), text(&row.link), text(&row.video), text(&row.timeline), text(&row.track),
+        text(&row.language), text(&row.subtitle_type), row.stale, compilations::in_output(row)));
+}
+
+fn write_rows<'a>(rows: impl Iterator<Item = &'a Row>, out: &mut String) {
+    out.push('[');
+    for (at, row) in rows.enumerate() {
+        if at > 0 {
+            out.push(',');
+        }
+        write_row(row, out);
+    }
+    out.push(']');
+}
+
+/// What the layout of a series is asked for: its fields in the order of the reply (the module says which, by its table
+/// of the parts), the episodes whose levers a part `levers` holds (none: all), the rows the constructor excluded or not,
+/// and the parts the module gives as they are (by the name of their field).
+pub struct Asked<'a> {
+    pub part: &'a str,
+    pub fields: &'a [String],
+    pub episodes: Option<BTreeSet<compilations::Episode>>,
+    pub include_excluded: bool,
+    pub given: &'a HashMap<String, String>,
+}
+
+/// The layout of a series, or the part asked, as the JSON of `CompositionReply`: counted from the module's tables.
+pub fn layout_json(path: &str, series_id: i64, asked: &Asked) -> Result<String, String> {
+    let wants = |name: &str| asked.fields.iter().any(|each| each == name);
+    let conn = settings::open(path)?;
+    let rev: i64 = conn.query_row("SELECT rev FROM composition_state WHERE series_id = ?1", [series_id], |row| row.get(0))
+        .unwrap_or(0);
+    let needs_rows = ["rows", "subtitles", "levels", "settings", "compilations", "voice_orders"].iter().any(|each| wants(each));
+    let rows = if needs_rows { rows_of(path, series_id)? } else { Vec::new() };
+    let sound: Vec<&Row> = rows.iter().filter(|row| row.track == "sound").collect();
+    let counted = if ["levels", "settings", "compilations"].iter().any(|each| wants(each)) {
+        let records = settings::settings_of(&conn, series_id)?;
+        let index = settings::index(&records);
+        let order = source_order(&conn, series_id)?;
+        let outcome = compilations::resolve_compilations(&sound, &index, &records, &order);
+        Some((index, outcome))
+    } else {
+        None
+    };
+    let mut out = format!("{{\"series_id\":{series_id},\"rev\":{rev},\"part\":{}", st_contracts::json_text(asked.part));
+    for name in asked.fields {
+        out.push_str(&format!(",{}:", st_contracts::json_text(name)));
+        match name.as_str() {
+            "rows" | "subtitles" => {
+                let track = if name == "rows" { "sound" } else { "subtitles" };
+                write_rows(rows.iter().filter(|row| row.track == track && (asked.include_excluded || !row.excluded)), &mut out);
+            }
+            "levels" | "settings" | "compilations" => {
+                let (index, outcome) = counted.as_ref().unwrap();
+                let episodes = compilations::layout_episodes(&sound);
+                match name.as_str() {
+                    "levels" => {
+                        let seasons: Vec<i64> = episodes.iter().map(|(season, _)| *season).collect();
+                        out.push_str(&settings::levels(index, &seasons, &outcome.view_keys));
+                    }
+                    "settings" => {
+                        let given: Vec<(i64, i64, Option<String>, String)> = episodes.iter()
+                            .filter(|slot| asked.episodes.as_ref().map_or(true, |named| named.contains(slot)))
+                            .map(|slot| {
+                                let member = outcome.members.get(slot).map(|place| &outcome.refs[*place]);
+                                (slot.0, slot.1, member.map(|each| each.key.clone()),
+                                 member.map_or("null".to_string(), |each| each.json()))
+                            }).collect();
+                        out.push_str(&settings::episode_settings(index, &given));
+                    }
+                    _ => out.push_str(&outcome.views),
+                }
+            }
+            "voice_orders" => {
+                let previous = voice_orders_of(&conn, series_id)?;
+                out.push_str(&compilations::season_voices(&compilations::season_orders(&previous, &sound), &sound));
+            }
+            "voice_titles" => out.push_str(&voice_titles_of(&conn, series_id)?),
+            other => out.push_str(asked.given.get(other).ok_or_else(|| format!("the layout has no part {other}"))?),
+        }
+    }
+    out.push('}');
+    Ok(out)
+}
+
+fn source_order(conn: &Connection, series_id: i64) -> Result<HashMap<i64, usize>, String> {
+    let mut query = conn.prepare_cached(
+        "SELECT source_id FROM composition_sources WHERE series_id = ?1 ORDER BY position, source_id")
+        .map_err(|exc| exc.to_string())?;
+    let mut order = HashMap::new();
+    for (place, each) in query.query_map([series_id], |row| row.get::<_, i64>(0)).map_err(|exc| exc.to_string())?.enumerate() {
+        order.insert(each.map_err(|exc| exc.to_string())?, place);
+    }
+    Ok(order)
+}
+
+fn voice_orders_of(conn: &Connection, series_id: i64) -> Result<BTreeMap<i64, Vec<String>>, String> {
+    let mut previous = BTreeMap::new();
+    let mut query = conn.prepare_cached("SELECT season, labels FROM voice_orders WHERE series_id = ?1 ORDER BY season")
+        .map_err(|exc| exc.to_string())?;
+    for each in query.query_map([series_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|exc| exc.to_string())? {
+        let (season, labels) = each.map_err(|exc| exc.to_string())?;
+        previous.insert(season, serde_json::from_str::<Vec<String>>(&labels).map_err(|exc| exc.to_string())?);
+    }
+    Ok(previous)
+}
+
+/// The user's names of the tracks of the voice-over groups, by the label of the group (a JSON object).
+fn voice_titles_of(conn: &Connection, series_id: i64) -> Result<String, String> {
+    let mut query = conn.prepare_cached("SELECT label, title FROM voice_titles WHERE series_id = ?1 ORDER BY label")
+        .map_err(|exc| exc.to_string())?;
+    let pairs: Vec<String> = query.query_map([series_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|exc| exc.to_string())?
+        .map(|each| each.map(|(label, title)| format!("{}:{}", st_contracts::json_text(&label), st_contracts::json_text(&title))))
+        .collect::<Result<_, _>>().map_err(|exc| exc.to_string())?;
+    Ok(format!("{{{}}}", pairs.join(",")))
 }
 
 #[cfg(test)]
