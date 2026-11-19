@@ -199,6 +199,32 @@ async def test_fetch_downloads_a_stream_without_touching_the_media_tables(system
 
 
 @pytest.mark.asyncio
+async def test_the_same_fetch_asked_again_takes_the_file_it_ended_with_and_a_changed_file_is_fetched_again(system, tmp_path):
+    """A sync taken up after a stop asks again for what it had: the file a fetch ended well with, lying where it was as it
+    was, is the answer at once — no ask of the source, no download. The same fetch with another link, or a file that
+    changed since, is fetched as any."""
+    bus, fake, dl, probe = system
+    link = "https://site/#cvh=7"
+    fake.stream_replies[link] = {"handled": True, "stream_url": "https://cdn/7.mp4", "headers": {"User-Agent": "A/1"}}
+    path = str(tmp_path / "temp" / "s01e07" / "voice.mp4")
+    job = {"key": "dub:7", "url": link, "path": path, "max_height": 720, "series_id": 3}
+    (first,) = await _fetch(probe, bus, 1, jobs=[job])
+    assert first["ok"] and dl.started == ["https://cdn/7.mp4"] and len(fake.stream_payloads) == 1
+
+    (again,) = await _fetch(probe, bus, 1, jobs=[job])
+    assert again["ok"] is True and again["path"] == path
+    assert dl.started == ["https://cdn/7.mp4"] and len(fake.stream_payloads) == 1  # the source is not asked
+
+    (other,) = await _fetch(probe, bus, 1, jobs=[{**job, "max_height": 1080}])  # another cap: another fetch
+    assert other["ok"] and len(dl.started) == 2
+
+    with open(path, "ab") as file:
+        file.write(b" changed")
+    (changed,) = await _fetch(probe, bus, 1, jobs=[{**job, "max_height": 1080}])
+    assert changed["ok"] and len(dl.started) == 3  # the file is not the one the fetch ended with: fetched again
+
+
+@pytest.mark.asyncio
 async def test_fetch_of_a_page_no_player_resolves_keeps_its_cap_for_the_downloader(system, tmp_path):
     """A page the downloader reads itself is fetched under the cap of the job, as a player picks its file;
     a job without a cap asks for no cap."""

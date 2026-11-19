@@ -2,8 +2,11 @@
 
 What is downloaded and where it goes is the plan of a video series (modules/planner, stage 12): it asks for one file at a
 time with `downloads.fetch` and hears its end. This module resolves the stream behind a link (`sources.video.stream`),
-fetches it under a fuse of silence, retries a failure of the moment and tells the window what is under way. It keeps no
-record of a fetch: the owner of the work asks again after a stop.
+fetches it under a fuse of silence, retries a failure of the moment and tells the window what is under way. The owner of the
+work asks again after a stop; of a fetch that ended well the module keeps its file (download_done: the path, the link, the
+cap, the size and the time of change of the file), and the same fetch asked again while that file lies there as it was is
+answered at once, ended well — no ask of its source, no card, no place in the queue. A file that changed or went is
+fetched as any.
 
 Queries / commands:
   downloads.fetch {key, url, path, max_height?, series_id?, whole?, ytdlp?, need?, variant?} - the stream behind the link
@@ -75,6 +78,15 @@ from .repository import DownloadsRepository
 SILENCE_FUSE_S = 900.0
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
+def _stat_of(path: str) -> tuple[int, int] | None:
+    """The size and the time of change (nanoseconds) of a file; none when there is no file."""
+    try:
+        found = os.stat(path)
+    except FileNotFoundError:
+        return None
+    return found.st_size, found.st_mtime_ns
+
+
 async def _always() -> bool:
     return True
 
@@ -171,6 +183,10 @@ class DownloadsModule(BaseModule):
     async def on_start(self) -> None:
         for card in await self.repo.cards():
             self.cards.kept(card)
+        # The files of a sync go with its folder when it ends: their records go with them.
+        for path in await self.repo.done_paths():
+            if await storage.call(_stat_of, path) is None:
+                await self.repo.forget_done(path)
         self.spawn(self._ticker(), name="downloads:cards", lasting=True)
         default = Limits()
         await self.places.set(Limits(**{name: await self._read_setting(key, getattr(default, name)) for name, key in KEYS.items()}))
@@ -363,6 +379,11 @@ class DownloadsModule(BaseModule):
             return
         if job["key"] in self._fetch_active or any(queued["key"] == job["key"] for queued in self._fetch_queue):
             return
+        if await self._kept(job):
+            self.log.info("загрузка %s: файл уже скачан и проверен этой же загрузкой — взят без обращения к источнику",
+                          job["key"])
+            self._finished(job, True, "", False)
+            return
         # What the fetch is for and which variant it takes, as its owner tells it; a fetch that names no need is one.
         need = DownloadNeed.model_validate(env.payload["need"]) if env.payload.get("need") else DownloadNeed(
             key=job["key"], series_id=job["series_id"] or 0, kind="video" if job.get("whole") else "dub",
@@ -374,6 +395,17 @@ class DownloadsModule(BaseModule):
         self._fetch_queue.append(job)
         self._fetch_pump()
         self._announce_queue()
+
+    async def _kept(self, job: dict) -> bool:
+        """Whether the file at the path of the job is the one the same fetch (its link and its cap) ended well with: it
+        lies there with the size and the time of change it had then. A record the file no longer answers goes."""
+        done = await self.repo.done_of(job["path"])
+        if done is None or (done["url"], done["max_height"]) != (job["url"], job.get("max_height")):
+            return False
+        if await storage.call(_stat_of, job["path"]) == (done["size"], done["mtime_ns"]):
+            return True
+        await self.repo.forget_done(job["path"])
+        return False
 
     def background(self) -> set[asyncio.Task]:
         """The workers of the fetches belong to what a waiter for quiet waits for."""
@@ -516,6 +548,11 @@ class DownloadsModule(BaseModule):
             self._cancelled.discard(key)
             if not stopped:
                 size = await storage.call(os.path.getsize, path) if ok and await storage.call(os.path.isfile, path) else None
+                if size:
+                    # Kept for the same fetch asked again (a sync taken up after a stop): the file is taken as it lies.
+                    stat = await storage.call(_stat_of, path)
+                    if stat is not None:
+                        await self.repo.keep_done(path, job["url"], job.get("max_height"), *stat)
                 # The height of what came, read from the header of the file (no frame is decoded).
                 film = film_stream(await streams_of(path) or []) if size else None
                 self.cards.finished(need_key, ok, size_mb=round(size / 1024 ** 2, 1) if size else None,
