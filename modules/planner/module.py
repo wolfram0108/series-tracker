@@ -1159,7 +1159,8 @@ class PlannerModule(BaseModule):
     async def _recount_all(self, series_ids: list[int]) -> None:
         """A series whose inputs are those its standing was counted from stands as it was told; the others are counted
         again. The view of a series not counted is counted when a window asks for it, as after any change."""
-        began = asyncio.get_running_loop().time()
+        clock = asyncio.get_running_loop().time
+        began = clock()
         await compute.run(code_print)
         try:
             writes = {int(key): value for key, value in
@@ -1168,17 +1169,23 @@ class PlannerModule(BaseModule):
         except (BusRequestError, asyncio.TimeoutError) as exc:
             self.log.warning("входы сериалов на старте не сверены, пересчитываются все: %s", exc)
             writes, voices = None, None
-        counted = 0
+        asked = clock() - began
+        counted, checking, counting = 0, 0.0, 0.0
         for series_id in series_ids:
             try:
-                if writes is not None and await self._still(series_id, writes, voices):
+                moment = clock()
+                still = writes is not None and await self._still(series_id, writes, voices)
+                checking += clock() - moment
+                if still:
                     continue
                 counted += 1
+                moment = clock()
                 await self._publish_view(series_id)
+                counting += clock() - moment
             except Exception:  # noqa: BLE001 - one series must not keep the others from telling theirs
                 self.log.exception("сериал %d: статус при старте не посчитан", series_id)
-        self.log.info("старт: сверено сериалов %d, пересчитано %d, за %.2f с", len(series_ids), counted,
-                      asyncio.get_running_loop().time() - began)
+        self.log.info("старт: сверено сериалов %d, пересчитано %d, за %.2f с (общие входы %.2f с, сверка %.2f с, "
+                      "пересчёт %.2f с)", len(series_ids), counted, clock() - began, asked, checking, counting)
 
     async def _still(self, series_id: int, writes: dict[int, int], voices: dict) -> bool:
         """Whether the inputs of the series are those its standing was counted from."""
