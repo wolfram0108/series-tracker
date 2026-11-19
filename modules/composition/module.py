@@ -109,7 +109,7 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from core import BaseModule, compute
-from core.contracts import (COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ORDER, REFERENCE_SAME, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+from core.contracts import (LAYOUT_PARTS, COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ORDER, REFERENCE_SAME, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet, SettingsSetMany,
@@ -786,42 +786,56 @@ class CompositionModule(BaseModule):
 
 
 def layout_reply(request: CompositionGetRequest, stored) -> dict:
-    """`composition.get` answered from what is stored; pure, it runs in the pool of computation."""
-    return layout_of(request, stored).model_dump(mode="json")
+    """`composition.get` answered from what is stored; pure, it runs in the pool of computation. A part holds its own
+    fields only: what it leaves out is not in the answer, so a window keeps what it holds of it."""
+    return layout_of(request, stored).model_dump(mode="json", exclude_unset=True)
 
 
 def layout_of(request: CompositionGetRequest, stored) -> CompositionReply:
-    """The layout, or the part of it asked, as the model."""
-    if request.sources_only or request.part == "sources":
-        return CompositionReply(series_id=request.series_id, rev=stored.rev, part="sources",
-                                sources=[each.summary for each in stored.sources])
-    records = settings.canonical(stored.records)
-    episodes = project.layout_episodes(stored.rows)
-    outcome = compilations.resolve(stored.rows, records, _source_order(stored))
-    orders = project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows)
-    if request.part == "levers":
-        # The rows are as they were: the levers of the episodes named, and what the headers and the tracks show.
-        named = {(each.season, each.episode) for each in request.episodes}
-        chosen = {each for each in episodes if not named or each in named}
-        return CompositionReply(
-            series_id=request.series_id, rev=stored.rev, part="levers", sources=[each.summary for each in stored.sources],
-            levels=settings.levels(records, {season for season, _ in episodes},
-                                   [(view.season, view.ref.key) for view in outcome.views]),
-            settings=settings.episode_settings(records, chosen, outcome.members), compilations=outcome.views,
-            voice_orders=orders, voice_titles=stored.titles)
-    reply = CompositionReply(
-        series_id=request.series_id, rev=stored.rev,
-        rows=[row for row in stored.rows if request.include_excluded or not row.excluded],
-        subtitles=[row for row in stored.subtitles if request.include_excluded or not row.excluded],
-        sources=[each.summary for each in stored.sources],
-        levels=settings.levels(records, {season for season, _ in episodes},
-                               [(view.season, view.ref.key) for view in outcome.views]),
-        settings=settings.episode_settings(records, episodes, outcome.members),
-        compilations=outcome.views,
-        levers=levers.specs(), availability=availability.table(),
+    """The layout, or the part of it asked (`LAYOUT_PARTS`), as the model: every field is made one way, for the whole and
+    for a part, and only the fields asked are made."""
+    part = "sources" if request.sources_only else request.part
+    known: dict[str, object] = {}
+
+    def once(name: str, make):
+        if name not in known:
+            known[name] = make()
+        return known[name]
+
+    def shown(rows):
+        return [row for row in rows if request.include_excluded or not row.excluded]
+
+    def records():
+        return once("records", lambda: settings.canonical(stored.records))
+
+    def episodes():
+        return once("episodes", lambda: project.layout_episodes(stored.rows))
+
+    def outcome():
+        return once("outcome", lambda: compilations.resolve(stored.rows, records(), _source_order(stored)))
+
+    def chosen():
+        # The levers of the episodes named (a part `levers` after a change of some), of all in any other case.
+        named = {(each.season, each.episode) for each in request.episodes} if part == "levers" else set()
+        return {each for each in episodes() if not named or each in named}
+
+    fields = {
+        "rows": lambda: shown(stored.rows),
+        "subtitles": lambda: shown(stored.subtitles),
+        "sources": lambda: [each.summary for each in stored.sources],
+        "levels": lambda: settings.levels(records(), {season for season, _ in episodes()},
+                                          [(view.season, view.ref.key) for view in outcome().views]),
+        "settings": lambda: settings.episode_settings(records(), chosen(), outcome().members),
+        "compilations": lambda: outcome().views,
+        "levers": levers.specs,
+        "availability": availability.table,
         # A series counted before the orders were kept shows its default order until its next count writes it.
-        voice_orders=orders, voice_titles=stored.titles)
-    return reply
+        "voice_orders": lambda: project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows),
+        "voice_titles": lambda: stored.titles,
+    }
+    wanted = fields.keys() if part == "whole" else LAYOUT_PARTS[part]
+    return CompositionReply(series_id=request.series_id, rev=stored.rev, part=part,
+                            **{name: fields[name]() for name in wanted})
 
 
 def _rules_request(source: SeriesSource, table: ReleaseTable, season, rules,

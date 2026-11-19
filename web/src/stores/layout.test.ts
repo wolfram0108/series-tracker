@@ -85,7 +85,7 @@ describe("the layout of a series in its window", () => {
     const release = store.hold(1)
     vi.mocked(calls.fetchComposition).mockReset().mockResolvedValueOnce(ok(held(1)))
     await store.ensure(1)
-    vi.mocked(calls.fetchComposition).mockResolvedValueOnce(ok({ ...held(2), part: "levers", rows: [],
+    vi.mocked(calls.fetchComposition).mockResolvedValueOnce(ok({ series_id: 1, rev: 2, part: "levers",
       settings: settingsOf([2], "new"), sources: [{ source_id: 1, state: "x" }] } as unknown as Composition))
     told(2, "levers", [2])
     const answer = await store.catchUp(1)

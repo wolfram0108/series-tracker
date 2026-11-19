@@ -156,6 +156,14 @@ class EpisodeRef(BaseModel):
 # `sources` — the summaries of the sources alone. Each part holds the narrower ones, so news of both are one read.
 LayoutPart = Literal["whole", "levers", "sources"]
 
+# The fields of the layout each part holds besides `series_id`, `rev` and `part` — the one table of it: the core makes a part
+# of these fields, the window puts into what it holds whatever fields a part brings. The whole holds every field; a field
+# that a change of a lever, an order or a summary can move is in `levers`, the rows are in the whole only.
+LAYOUT_PARTS: dict[str, frozenset[str]] = {
+    "sources": frozenset({"sources"}),
+    "levers": frozenset({"sources", "levels", "settings", "compilations", "voice_orders", "voice_titles"}),
+}
+
 
 class CompositionGetRequest(BaseModel):
     """Excluded rows are for the window that counts what a source gave; no consumer of the layout asks for them."""

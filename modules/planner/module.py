@@ -198,6 +198,32 @@ def _inputs_of(layout: CompositionReply, series: dict, voices: dict) -> tuple:
     return online, choices, {(each.ref.source_id, each.ref.row_key): each.ref for each in layout.compilations}
 
 
+def _item_of(slot, video) -> dict:
+    """The episode as the rule of names is asked about it (`media_item` of `rules.format_filename`)."""
+    snapshot = video.snapshot
+    item = {"season": slot[0], "episode_start": slot[1], "episode_end": None, "part": slot[2] if len(slot) > 2 else None,
+            "resolution": snapshot.height, "voiceover_tag": snapshot.group, "source_url": snapshot.link}
+    if video.kind == "cut" or (video.container is not None and video.container.video.cut_of is not None):
+        item["cut"] = json.dumps({"height": snapshot.height, "voice_group": snapshot.group})
+    return item
+
+
+def _key_of(item: dict) -> str:
+    return json.dumps(item, sort_keys=True, ensure_ascii=False)
+
+
+# What the view of a series is counted from — the questions the planner asks its neighbours while it counts it — and the
+# event that tells that the answer changed: one table, so that an input added to the view is an input whose change counts
+# the view again. Its own tables (the asset, the failures, the commands) are written by the module itself, which counts the
+# view again after it writes them. The tests of the module check that a count asks nothing that is not here.
+VIEW_INPUTS: dict[str, str] = {
+    "catalog.series.get": "series.updated",
+    "composition.layout": "composition.changed",
+    "voices.settings.get": "voices.settings.changed",
+    "rules.format_filename": "series.updated",  # the rule of names reads the card and the numbers of the episode
+}
+
+
 @dataclass(frozen=True)
 class _Held:
     """What the view reads of a sync: its table, its failures and its commands at one moment."""
@@ -292,34 +318,29 @@ class BusSync(SeriesSync):
 
     async def namer_for(self, made: Plan):
         """The series' own rule of names (`rules.format_filename`), asked once for every goal the names do not hold yet.
-        The namer of the sync when no name was added (the plan made with it stands); a new one when names came."""
+        The namer of the sync when no name was added (the plan made with it stands); a new one when names came. A name is
+        kept by the request it answered, whole (the card and the item): what the rule is given is what tells two names
+        apart, and nothing else."""
         wanted = {}
         for goal in made.goals:
-            video = goal.video
-            cut = video.kind == "cut" or (video.container is not None and video.container.video.cut_of is not None)
-            key = (goal.slot, video.snapshot.group, video.snapshot.height, cut, goal.off)
+            item = _item_of(goal.slot, goal.video)
+            key = (_key_of(item), goal.off)
             if key not in self.names:
-                wanted[key] = (goal.slot, video, cut)
-        for key, (slot, video, cut) in wanted.items():
-            item = {"season": slot[0], "episode_start": slot[1], "episode_end": None,
-                    "part": slot[2] if len(slot) > 2 else None, "resolution": video.snapshot.height,
-                    "voiceover_tag": video.snapshot.group, "source_url": video.snapshot.link}
-            if cut:
-                item["cut"] = json.dumps({"height": video.snapshot.height, "voice_group": video.snapshot.group})
+                wanted[key] = (goal.slot, goal.video, item)
+        for key, (slot, video, item) in wanted.items():
+            off = key[-1]
             try:
                 made_name = (await self.m.request("rules.format_filename", {"series": self.series, "media_item": item}))["filename"]
-                self.names[key] = os.path.splitext(made_name)[0] + ".mkv" + (".off" if key[-1] else "")
+                self.names[key] = os.path.splitext(made_name)[0] + ".mkv" + (".off" if off else "")
             except (BusRequestError, KeyError):
-                self.names[key] = name_of(slot, video.snapshot, key[-1])  # the rule refused: the planner's own name
+                self.names[key] = name_of(slot, video.snapshot, off)  # the rule refused: the planner's own name
             except asyncio.TimeoutError:
                 continue  # no answer is no word of the rule: its own name stands for now, and the rule is asked again
         return self._namer() if wanted else self.namer
 
     def _namer(self):
         def namer(slot, video, off):
-            cut = video.kind == "cut" or (video.container is not None and video.container.video.cut_of is not None)
-            return self.names.get((slot, video.snapshot.group, video.snapshot.height, cut, off)) or \
-                name_of(slot, video.snapshot, off)
+            return self.names.get((_key_of(_item_of(slot, video)), off)) or name_of(slot, video.snapshot, off)
         return namer
 
     # --- the steps -------------------------------------------------------------------------------------------------
@@ -850,9 +871,8 @@ class PlannerModule(BaseModule):
         self.handle("conform.job.removed", self.on_job_removed)
         self.handle("system.started", self.on_system_started)
         self.handle("series.deleted", self.on_series_deleted)
-        self.handle("composition.changed", self.on_layout_changed)
-        self.handle("series.updated", self.on_series_updated)
-        self.handle("voices.settings.changed", self.on_voice_settings_changed)
+        for changed in sorted(set(VIEW_INPUTS.values())):
+            self.handle(changed, self.on_view_input_changed)
         self.handle("gateway.sse.clients", self.on_sse_clients)
         self.handle("planner.pack.get", self.on_pack_get)
         self.handle("planner.pack.remove", self.on_pack_remove)
@@ -1089,8 +1109,8 @@ class PlannerModule(BaseModule):
                 self.log.exception("сериал %d: статус при старте не посчитан", series_id)
 
     def names_of(self, series: dict) -> dict:
-        """The names of files the rule of names gave a series, kept while its card stays the same (the rule reads only the
-        card and the numbers of the episode): another card is another set."""
+        """The names of files the rule of names gave a series, kept while its card stays the same: the rule reads what it is
+        given (the card and the item of the episode, the key of each name), so another card is another set."""
         card = json.dumps(series, sort_keys=True, ensure_ascii=False, default=str)
         held = self._names.get(series["id"])
         if held is None or held[0] != card:
@@ -1469,18 +1489,18 @@ class PlannerModule(BaseModule):
         """The reference of every episode of a series, and why it is that one (core/plan/marks)."""
         return (await self._shown_view(int(env.payload["series_id"])))["references"]
 
-    async def on_layout_changed(self, env: Envelope) -> None:
-        """The layout or the levers of a series changed: its plan is counted again from the tables, and the window told."""
-        if not env.payload.get("summary_only"):
-            self._ask_recount(int(env.payload["series_id"]))
-
-    async def on_series_updated(self, env: Envelope) -> None:
-        """The card of the series changed (the episodes switched off, the names of its files): the plan is counted again."""
-        self._ask_recount(int(env.payload["series_id"]))
-
-    async def on_voice_settings_changed(self, env: Envelope) -> None:
-        for series_id in await self.repo.series_with_assets():
-            self._ask_recount(series_id)
+    async def on_view_input_changed(self, env: Envelope) -> None:
+        """An input of the view changed (VIEW_INPUTS): the view of its series is counted again, the views of every series
+        for an input of all of them (the settings of the voice-overs). A change that says it moved only the summaries of
+        the sources moves nothing the plan reads."""
+        payload = env.payload if isinstance(env.payload, dict) else {}
+        if payload.get("summary_only"):
+            return
+        series_id = payload.get("series_id")
+        targets = [int(series_id)] if series_id is not None else sorted(
+            set(await self.repo.series_with_assets()) | set(self._shown))
+        for each in targets:
+            self._ask_recount(each)
 
     async def on_series_get(self, env: Envelope) -> dict:
         return await self._shown_view(int(env.payload["series_id"]))

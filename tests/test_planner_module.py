@@ -601,6 +601,38 @@ async def test_a_start_tells_what_every_series_stood_at_before_its_recount_and_t
     counted.set()
 
 
+async def test_the_view_asks_nothing_whose_change_does_not_count_it_again(world):
+    """The inputs of the view are one table with the event of each change (VIEW_INPUTS): a question the count of the view
+    asks a neighbour and the table does not name would leave the view standing when its answer changes."""
+    from modules.planner.module import VIEW_INPUTS
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    seen, untap = tapped(planner)
+    try:
+        await neighbours.request("planner.series.get", {"series_id": SERIES})  # asked from outside, as a window does
+    finally:
+        untap()
+    asked = {each.topic for each in seen if each.kind == "query" and each.reply_to == planner._reply_topic}
+    assert asked and asked <= set(VIEW_INPUTS), asked - set(VIEW_INPUTS)
+    for changed in set(VIEW_INPUTS.values()):
+        assert changed in {pattern for pattern, _handler, _concurrent in planner._handlers}, changed
+
+
+async def test_a_change_of_any_input_of_the_view_counts_it_again(world, monkeypatch):
+    """Every event of VIEW_INPUTS counts the view of its series again, an event of all of them every view."""
+    from modules.planner.module import VIEW_INPUTS
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    await planner.request("planner.series.get", {"series_id": SERIES})
+    asked: list[int] = []
+    monkeypatch.setattr(planner, "_ask_recount", lambda series_id: asked.append(series_id))
+    for changed in sorted(set(VIEW_INPUTS.values())):
+        asked.clear()
+        payload = {} if changed == "voices.settings.changed" else {"series_id": SERIES}
+        await planner.on_view_input_changed(Envelope(topic=changed, kind="event", payload=payload))
+        assert asked == [SERIES], changed
+
+
 def drain_queue(subscription) -> list[Envelope]:
     found = []
     while not subscription.queue.empty():

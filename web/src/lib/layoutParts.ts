@@ -35,16 +35,17 @@ export function noted(held: LayoutNews | undefined, packet: Schemas["Composition
   return joined(held, { part, episodes })
 }
 
-/** The layout held with a part of it the core gave: what the part holds replaces what is held, the rest stands. */
+/** The layout held with a part of it the core gave: every field the part brings replaces what is held (the core's table
+ *  `LAYOUT_PARTS` says which fields a part holds; nothing is listed here), the levers of the episodes it names among them. */
 export function merged(held: Composition, reply: Composition, episodes: Set<string> | null): Composition {
-  if (reply.part === "sources") return { ...held, rev: reply.rev, sources: reply.sources }
-  if (reply.part !== "levers") return reply
-  const settings = episodes === null ? reply.settings : [
-    ...(held.settings ?? []).filter((each) => !episodes.has(episodeKey(each.season, each.episode))),
-    ...(reply.settings ?? []),
-  ].sort((one, two) => one.season - two.season || one.episode - two.episode)
-  return {
-    ...held, rev: reply.rev, settings, levels: reply.levels, compilations: reply.compilations,
-    voice_orders: reply.voice_orders, voice_titles: reply.voice_titles, sources: reply.sources,
+  if (reply.part !== "levers" && reply.part !== "sources") return reply
+  const { series_id: _id, part: _part, settings, ...brought } = reply
+  const next: Composition = { ...held, ...brought }
+  if (settings !== undefined) {
+    next.settings = episodes === null ? settings : [
+      ...(held.settings ?? []).filter((each) => !episodes.has(episodeKey(each.season, each.episode))),
+      ...settings,
+    ].sort((one, two) => one.season - two.season || one.episode - two.episode)
   }
+  return next
 }

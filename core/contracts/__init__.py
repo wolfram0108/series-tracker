@@ -8,7 +8,7 @@ from .alignment import (AlignmentJob, DubResult, JobKind, JobStatus, ReverseEpis
                         SubmitReply, job_dir, job_key, series_of_job_key)
 from .composition import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                           CompositionPreviewRequest, CompositionReply, PreviewLine, SeasonVoiceOrder, VoiceOrderSet, VoiceSpan, VoiceTitleSet,
-                          CompositionRow, EpisodeRef, Exclusion, LayoutPart, PlayerSummary, SourceStatus, SourceSummary)
+                          CompositionRow, EpisodeRef, Exclusion, LAYOUT_PARTS, LayoutPart, PlayerSummary, SourceStatus, SourceSummary)
 from .compilation import (Absence, CompilationEpisode, CompilationRef, CompilationView, compilation_key,
                           parse_compilation_key)
 from .downloads import (STAGES, AttemptLine, DownloadCard, DownloadNeed, DownloadVariant, Figures, StageView)
@@ -44,7 +44,7 @@ __all__ = ["TitleCard", "TitleLine", "TitleSearchReply", "TitleSearchRequest", "
            "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan", "VoiceTitleSet",
-           "EpisodeRef", "Exclusion", "LayoutPart", "PlayerSummary", "SourceStatus", "SourceSummary",
+           "EpisodeRef", "Exclusion", "LAYOUT_PARTS", "LayoutPart", "PlayerSummary", "SourceStatus", "SourceSummary",
            "MARKUP_ALLOW", "MARKUP_ORDER", "MARKUP_SAME", "REFERENCE_ALLOW", "REFERENCE_ORDER", "REFERENCE_SAME", "SUBTITLES_ALLOW", "SUBTITLES_ORDER", "VOICE_ALLOW", "VOICE_ORDER", "VOICE_TAKE", "GroupQueue", "GroupVariant", "PlayerVariant", "Queue", "QueueRow", "QueueView", "QueuesGet", "QueuesReply", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "SettingRecord", "SettingsReset", "SettingsSet", "SettingsSetMany",
            "TargetKind", "ValueShape",
            "group_target", "parse_group_target", "parse_variant_target", "variant_target",
