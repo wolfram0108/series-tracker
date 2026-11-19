@@ -2,7 +2,7 @@
 
 Nothing is encoded again: the video and every audio track are copied as they are (`-c copy`), the way track-muxer
 builds its containers (`mux/build.py`): the first track is the default one, the others are not; the tracks interleave
-evenly (`-max_interleave_delta 0`). The container says what it holds by its own tags, so that the file is its own
+evenly, the interleave bounded (`INTERLEAVE_DELTA_US`). The container says what it holds by its own tags, so that the file is its own
 ledger: `ST_VIDEO` (the identity of the video), and for every audio track `ST_VOICE` (the name of the voice-over group),
 the title the player shows (the user's name of the track, else the name of the group), `ST_DUB` (the key of the voice-over, which a rename of its group does not change: the track is known by it),
 `ST_ALIGNED_TO` (the identity of the video the track was aligned to) and `ST_OWN` (1 for the video's own sound), the
@@ -43,6 +43,9 @@ def identity(source_id: int | None, row_key: str | None) -> str:
 # A build copies streams and a read looks at the head of the file; both end in seconds even for a 2160p episode, so these
 # are safeguards: a build or a read past them is a failure, not "done".
 BUILD_TIMEOUT_S = 600.0
+# How far apart the packets of the streams may lie in the output (ffmpeg's own default, 10 s). Never unbounded: a stream with a few
+# packets (the signs of an episode are one event in all of it) would hold the muxer, and everything else would pile up in memory.
+INTERLEAVE_DELTA_US = 10_000_000
 READ_TIMEOUT_S = 60.0
 # The video of a container is the video it was built from: the durations differ only by the rounding of the streams.
 DURATION_SLACK_S = 1.0
@@ -175,7 +178,7 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     fonts = await _fonts([each.path for each in subtitles])
     for path, stream in fonts:
         cmd += ["-map", f"{index_of[path]}:{stream['index']}"]
-    cmd += ["-map_metadata", "-1", "-map_chapters", "0", "-c", "copy", "-max_interleave_delta", "0",
+    cmd += ["-map_metadata", "-1", "-map_chapters", "0", "-c", "copy", "-max_interleave_delta", str(INTERLEAVE_DELTA_US),
             "-metadata", f"ST_VIDEO={video_identity}", "-metadata", f"ST_PUBLICATION={publication}"]
     for number, each in enumerate(subtitles):
         cmd += [*([f"-metadata:s:s:{number}", f"language={each.language}"] if each.language else []),

@@ -195,6 +195,29 @@ def test_the_chosen_subtitles_go_in_their_order_with_the_fonts_of_their_file_and
     assert layout["chapters"] == 2
 
 
+def test_a_stream_with_one_event_in_the_whole_episode_does_not_hold_the_muxer(media, monkeypatch):
+    """The signs of an episode may be one event in all of it. The interleave was unbounded (`-max_interleave_delta 0`): the muxer
+    waited for the next packet of that stream and kept everything else in memory to the end of the file, so an episode of 48
+    minutes with 31 voice-overs filled the machine and ffmpeg was killed with no word. The interleave is bounded now."""
+    tmp, _video, dubs, _ = media
+    cmds = []
+    real = container.run_lines
+
+    async def seen(cmd, **kwargs):
+        cmds.append(cmd)
+        return await real(cmd, **kwargs)
+
+    monkeypatch.setattr(container, "run_lines", seen)
+    video = _torrent_video(tmp)  # its signs are one event of 1 s in 3 s
+    out = str(tmp / "sparse.mkv")
+    tracks = [AudioIn("Оригинал", video, 0, "1:E01", own=True), AudioIn("ruchime", dubs["ruchime"], 0, "1:E01")]
+    chosen = [SubtitleIn(video, 0, "1:signs:", "Надписи", "rus", forced=True)]
+    assert asyncio.run(container.build(out, video, "1:E01", tracks, provenance={"video": "E01"}, subtitles=chosen)) is None
+    (cmd,) = [each for each in cmds if "-max_interleave_delta" in each]
+    assert 0 < int(cmd[cmd.index("-max_interleave_delta") + 1]) <= container.INTERLEAVE_DELTA_US
+    assert [each.key for each in asyncio.run(container.contents(out)).subtitles] == ["1:signs:"]
+
+
 def test_a_video_of_another_container_carries_its_chapters_and_no_subtitles(media):
     tmp, video, dubs, _ = media
     out = str(tmp / "plain.mkv")
