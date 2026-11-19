@@ -112,6 +112,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+
+import orjson
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -887,15 +889,31 @@ class CompositionModule(BaseModule):
             raise _Unavailable(topic) from exc
 
 
+# The fields of the layout a window is given as they are stored: thousands of rows, not made into models to be written out.
+_STORED_ROWS = {"rows": "rows_json", "subtitles": "subtitles_json"}
+
+
 def layout_reply(request: CompositionGetRequest, stored) -> dict:
     """`composition.get` answered from what is stored; pure, it runs in the pool of computation. A part holds its own
-    fields only: what it leaves out is not in the answer, so a window keeps what it holds of it."""
-    return layout_of(request, stored).model_dump(mode="json", exclude_unset=True)
+    fields only: what it leaves out is not in the answer, so a window keeps what it holds of it. The rows are the JSON
+    they are stored as, the excluded ones left out unless asked."""
+    reply = layout_of(request, stored, skip=frozenset(_STORED_ROWS)).model_dump(mode="json", exclude_unset=True)
+    for name in _STORED_ROWS.keys() & _wanted(request):
+        rows = orjson.loads(getattr(stored, _STORED_ROWS[name]))
+        reply[name] = rows if request.include_excluded else [row for row in rows if not row["excluded"]]
+    return reply
 
 
-def layout_of(request: CompositionGetRequest, stored) -> CompositionReply:
+def _wanted(request: CompositionGetRequest) -> set[str]:
+    """The fields of the layout a request asks for (`LAYOUT_PARTS`; the whole: every one)."""
+    part = "sources" if request.sources_only else request.part
+    return set(CompositionReply.model_fields) - {"series_id", "rev", "writes", "part"} if part == "whole" \
+        else set(LAYOUT_PARTS[part])
+
+
+def layout_of(request: CompositionGetRequest, stored, skip: frozenset[str] = frozenset()) -> CompositionReply:
     """The layout, or the part of it asked (`LAYOUT_PARTS`), as the model: every field is made one way, for the whole and
-    for a part, and only the fields asked are made."""
+    for a part, and only the fields asked are made (`skip`: those its caller gives otherwise)."""
     part = "sources" if request.sources_only else request.part
     known: dict[str, object] = {}
 
@@ -935,9 +953,8 @@ def layout_of(request: CompositionGetRequest, stored) -> CompositionReply:
         "voice_orders": lambda: project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows),
         "voice_titles": lambda: stored.titles,
     }
-    wanted = fields.keys() if part == "whole" else LAYOUT_PARTS[part]
     return CompositionReply(series_id=request.series_id, rev=stored.rev, writes=stored.writes, part=part,
-                            **{name: fields[name]() for name in wanted})
+                            **{name: fields[name]() for name in _wanted(request) - skip})
 
 
 def _rules_request(source: SeriesSource, table: ReleaseTable, season, rules,

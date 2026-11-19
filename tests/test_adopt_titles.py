@@ -35,26 +35,30 @@ def make_db(path: str) -> sqlite3.Connection:
     for source_id, series_id, position, url in sources:
         conn.execute("INSERT INTO series_sources (id, series_id, position, url, source_type, color, rows_per_line, players_off) "
                      "VALUES (?, ?, ?, ?, 'web_video', ?, '-10', '[\"line:Z\"]')", (source_id, series_id, position, url, source_id))
+    tables: dict[str, list[dict]] = {"app://alpha/101": [], "app://beta/201": []}
     for url, door in (("app://alpha/101", "alpha"), ("app://beta/201", "beta")):
-        conn.execute("INSERT INTO release_tables (url, site, names, state, complete, title) VALUES (?, ?, '[\"t\"]', 'ready', 1, ?)", (url, door, door))
-        seq = 0
         for line in LINES:
             if door == "beta" and line == "Y":
                 continue  # the second door does not carry the line Y
             for n in range(1, 4):
-                seq += 1
-                conn.execute('INSERT INTO release_rows (url, seq, "key", player, text, state, link, video) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                             (url, seq, f"{door}:{line}:{n}", f"line:{line}", str(n), "playable",
-                              f"app://{door}/1#line={line}&item={token(line, n)}", token(line, n)))
+                tables[url].append(table_row(f"{door}:{line}:{n}", f"line:{line}", str(n),
+                                             f"app://{door}/1#line={line}&item={token(line, n)}", token(line, n)))
     # two old rows the provider has no video for: the line Z it does not play at all, a row of Y its table does not have
-    for seq, key, player, video in ((98, "alpha:Y:9", "line:Y", "gone"), (99, "alpha:Z:1", "line:Z", "z1")):
-        conn.execute('INSERT INTO release_rows (url, seq, "key", player, text, state, link, video) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                     ("app://alpha/101", seq, key, player, "1", "playable", f"app://alpha/101#item={video}", video))
+    for key, player, video in (("alpha:Y:9", "line:Y", "gone"), ("alpha:Z:1", "line:Z", "z1")):
+        tables["app://alpha/101"].append(table_row(key, player, "1", f"app://alpha/101#item={video}", video))
+    for url, door in (("app://alpha/101", "alpha"), ("app://beta/201", "beta")):
+        conn.execute("INSERT INTO release_tables (url, site, names, state, complete, title, rows) VALUES (?, ?, '[\"t\"]', 'ready', 1, ?, ?)",
+                     (url, door, door, json.dumps(tables[url])))
+    layouts: dict[int, list[dict]] = {}
     for source_id, series_id, _p, url in sources:
         conn.execute("INSERT INTO composition_sources (source_id, series_id, position, table_url, summary) VALUES (?, ?, 0, ?, ?)",
                      (source_id, series_id, url, json.dumps({"source_id": source_id, "url": url, "canonical_url": url})))
-        conn.execute("INSERT INTO composition_rows (series_id, source_id, row_key, seq, player, state, link, video) VALUES (?, ?, ?, ?, 'line:X', 'playable', ?, ?)",
-                     (series_id, source_id, "alpha:X:1" if "alpha" in url else "beta:X:1", source_id, f"{url}#item={token('X', 1)}", token("X", 1)))
+        layouts.setdefault(series_id, []).append({
+            "series_id": series_id, "source_id": source_id, "row_key": "alpha:X:1" if "alpha" in url else "beta:X:1",
+            "player": "line:X", "state": "playable", "link": f"{url}#item={token('X', 1)}", "video": token("X", 1)})
+    for series_id, rows in layouts.items():
+        conn.execute("INSERT INTO composition_state (series_id, rev, rows, subtitles, inputs) VALUES (?, 1, ?, '[]', 'print')",
+                     (series_id, json.dumps(rows)))
 
     def asset(source_id: int, row_key: str, line: str, n: int) -> dict:
         ident = {"source_id": source_id, "row_key": row_key, "video": token(line, n)}
@@ -85,13 +89,25 @@ def plan_of(conn: sqlite3.Connection) -> adopt.Plan:
     return adopt.build_plan(adopt.old_rows(conn), targets(), tables())
 
 
+def table_row(key: str, player: str, text: str, link: str, video: str) -> dict:
+    """A row of a table as its record keeps it."""
+    return {"key": key, "player": player, "text": text, "state": "playable", "link": link, "video": video}
+
+
+def rows_of(conn: sqlite3.Connection, query: str, *params) -> list[dict]:
+    """The rows the fields the query names hold, one after another."""
+    return [row for (rows,) in conn.execute(query, params) if rows is not None for row in json.loads(rows)]
+
+
 def leftovers(conn: sqlite3.Connection) -> dict[str, int]:
     found = {}
-    for table, column in (("series_sources", "url"), ("release_tables", "url"), ("release_rows", "url"), ("release_rows", "link"),
-                          ("composition_sources", "table_url"), ("composition_rows", "link"), ("plan_assets", "data"), ("plan_failures", "key")):
+    for table, column in (("series_sources", "url"), ("release_tables", "url"), ("composition_sources", "table_url"),
+                          ("plan_assets", "data"), ("plan_failures", "key")):
         found[f"{table}.{column}"] = conn.execute(f'SELECT COUNT(*) FROM {table} WHERE "{column}" LIKE \'%app://%\'').fetchone()[0]
-    for table, column in (("release_rows", "key"), ("composition_rows", "row_key")):
-        found[f"{table}.{column}"] = conn.execute(f'SELECT COUNT(*) FROM {table} WHERE "{column}" LIKE \'alpha:%\' OR "{column}" LIKE \'beta:%\'').fetchone()[0]
+    for name, rows, key in (("release_tables.rows", rows_of(conn, "SELECT rows FROM release_tables"), "key"),
+                            ("composition_state.rows", rows_of(conn, "SELECT rows FROM composition_state"), "row_key")):
+        found[f"{name}.link"] = sum("app://" in row["link"] for row in rows)
+        found[f"{name}.{key}"] = sum(row[key].startswith(("alpha:", "beta:")) for row in rows)
     return {key: n for key, n in found.items() if n}
 
 
@@ -128,13 +144,12 @@ def test_a_card_becomes_a_source_for_each_of_its_lines_keeping_the_settings_and_
     assert {each[0] for each in conn.execute("SELECT url FROM release_tables")} == {X, Y}
     assert conn.execute("SELECT site, state, title FROM release_tables WHERE url = ?", (Y,)).fetchone() == ("chines", "ready", "名 · Y")
     for url, line in ((X, "X"), (Y, "Y")):
-        keys = [each[0] for each in conn.execute('SELECT "key" FROM release_rows WHERE url = ? ORDER BY seq', (url,))]
+        keys = [row["key"] for row in rows_of(conn, "SELECT rows FROM release_tables WHERE url = ?", url)]
         assert keys == [f"{line}:{n}" for n in (1, 2, 3)]  # the rows of both old tables are one table of the line; the lost rows are not there
-        seqs = [each[0] for each in conn.execute("SELECT seq FROM release_rows WHERE url = ?", (url,))]
-        assert len(seqs) == len(set(seqs))
-    assert conn.execute("SELECT COUNT(*) FROM release_rows WHERE link LIKE 'line://%'").fetchone()[0] == 6
+    assert sum(row["link"].startswith("line://") for row in rows_of(conn, "SELECT rows FROM release_tables")) == 6
     assert (report.tables, report.rows_moved, report.rows_lost) == (2, 6, 2)
-    assert conn.execute("SELECT COUNT(*) FROM composition_rows").fetchone()[0] == 0  # derived: the service counts them again at its start
+    # Derived: with no rows and no print of their inputs, the service counts the layouts again at its start.
+    assert conn.execute("SELECT COUNT(*) FROM composition_state WHERE rows IS NOT NULL OR inputs IS NOT NULL").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM composition_sources").fetchone()[0] == 0
 
 
@@ -180,7 +195,7 @@ def test_a_file_that_stands_on_a_row_the_provider_has_no_video_for_is_refused_an
     with pytest.raises(adopt.Refused, match="1 files of the plan"):
         adopt.apply(conn, targets(), plan_of(conn), tables())
     assert [tuple(each) for each in conn.execute("SELECT id, url FROM series_sources ORDER BY id")] == before
-    assert conn.execute("SELECT COUNT(*) FROM composition_rows").fetchone()[0] == 3 and leftovers(conn) != {}
+    assert len(rows_of(conn, "SELECT rows FROM composition_state")) == 3 and leftovers(conn) != {}
     report = adopt.apply(conn, targets(), plan_of(conn), tables(), allow_orphans=True)  # the owner took it
     assert report.orphaned and leftovers(conn).get("series_sources.url") is None
 

@@ -2,7 +2,8 @@
 output settings.
 
 A series is read and written whole and in one transaction, so a reader never sees rows of one revision with the
-revision number of another.
+revision number of another. Its rows are two fields of its record (composition_state.rows and .subtitles, the JSON of their
+models in the order of the layout): ten thousand rows are read and written as one value each.
 """
 from __future__ import annotations
 
@@ -10,13 +11,12 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 
-from core.contracts import CompositionRow, RowTrack, SettingRecord, SourceSummary
+from pydantic import TypeAdapter
+
+from core.contracts import CompositionRow, SettingRecord, SourceSummary
 from core.db import Database
 
-_ROW_COLUMNS = ("series_id", "source_id", "row_key", "seq", "excluded", "exclusion", "season", "episode_start",
-                "episode_end", "part", "voice_group", "voice_label", "voice_name", "voice_unknown", "player",
-                "player_label", "grp", "text", "heights", "state", "published", "link", "video", "stale", "timeline", "track",
-                "language", "subtitle_type")
+ROWS = TypeAdapter(list[CompositionRow])
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,9 @@ class Stored:
     """A series as the module last wrote it; a series never counted has revision 0 and nothing else."""
 
     rev: int = 0
+    # The rows as they are stored (the JSON of their models), for a reader that gives them on with no model made.
+    rows_json: bytes = b"[]"
+    subtitles_json: bytes = b"[]"
     # Every write of the series raises it, whatever it changes (`rev` moves only with what a window shows): a reader that
     # counted from the series at one count knows whether anything was written since.
     writes: int = 0
@@ -80,7 +83,7 @@ class CompositionRepository:
         # The rows of sound and of subtitles are one table: written together (the caller gives both or neither).
         if (rows is None) != (subtitles is None):
             raise ValueError("the rows of sound and of subtitles are written together")
-        both = None if rows is None else [*rows, *subtitles]
+        both = None if rows is None else (rows, subtitles)
         await self._db.transaction(lambda conn: _write(conn, series_id, both, sources, numbering, records, rev, orders,
                                                        titles))
 
@@ -106,8 +109,10 @@ class CompositionRepository:
 
 
 def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
-    state = conn.execute("SELECT rev, writes FROM composition_state WHERE series_id = ?", (series_id,)).fetchone()
-    rows = conn.execute("SELECT * FROM composition_rows WHERE series_id = ? ORDER BY seq", (series_id,)).fetchall()
+    state = conn.execute("SELECT rev, writes, rows, subtitles FROM composition_state WHERE series_id = ?",
+                         (series_id,)).fetchone()
+    rows_json = (state["rows"] if state is not None else None) or b"[]"
+    subtitles_json = (state["subtitles"] if state is not None else None) or b"[]"
     sources = conn.execute(
         "SELECT source_id, position, table_url, summary FROM composition_sources WHERE series_id = ?"
         " ORDER BY position, source_id", (series_id,)).fetchall()
@@ -117,14 +122,13 @@ def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
         " ORDER BY IFNULL(season, -1), IFNULL(episode, -1), lever, IFNULL(target, '')", (series_id,)).fetchall()
     orders = conn.execute("SELECT season, labels FROM voice_orders WHERE series_id = ? ORDER BY season", (series_id,)).fetchall()
     titles = conn.execute("SELECT label, title FROM voice_titles WHERE series_id = ? ORDER BY label", (series_id,)).fetchall()
-    built = [_row_of(row) for row in rows]  # one pass over the thousands of rows, then split by their track
     return Stored(
         orders={row["season"]: json.loads(row["labels"]) for row in orders},
         titles={row["label"]: row["title"] for row in titles},
         rev=state["rev"] if state is not None else 0,
         writes=state["writes"] if state is not None else 0,
-        rows=[each for each in built if each.track == RowTrack.SOUND],
-        subtitles=[each for each in built if each.track == RowTrack.SUBTITLES],
+        rows_json=rows_json, subtitles_json=subtitles_json,
+        rows=ROWS.validate_json(rows_json), subtitles=ROWS.validate_json(subtitles_json),
         sources=[StoredSource(row["source_id"], row["position"], row["table_url"],
                               SourceSummary.model_validate_json(row["summary"])) for row in sources],
         numbering={row["name_key"]: row["number"] for row in numbering},
@@ -134,14 +138,9 @@ def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
                  for row in records])
 
 
-def _row_of(row: sqlite3.Row) -> CompositionRow:
-    fields = {name: row[name] for name in _ROW_COLUMNS if name not in ("seq", "grp", "excluded", "heights", "stale")}
-    return CompositionRow(**fields, group=row["grp"], excluded=bool(row["excluded"]), stale=bool(row["stale"]),
-                          heights=json.loads(row["heights"]))
-
-
-def _write(conn: sqlite3.Connection, series_id: int, rows, sources, numbering, records, rev, orders=None,
-           titles=None) -> None:
+def _write(conn: sqlite3.Connection, series_id: int, rows: tuple[list, list] | None, sources, numbering, records, rev,
+           orders=None, titles=None) -> None:
+    """`rows`: the rows of sound and of subtitles, written out here, on the thread of the query."""
     # The time a table of a source was read is no content of the layout (a window is not told it either): sources that
     # differ from the stored ones by it alone are written without raising the counter.
     moved = any(part is not None for part in (rows, numbering or None, records, orders, titles)) or rev is not None or (
@@ -156,10 +155,9 @@ def _write(conn: sqlite3.Connection, series_id: int, rows, sources, numbering, r
         conn.executemany("INSERT INTO voice_orders (series_id, season, labels) VALUES (?, ?, ?)",
                          [(series_id, season, json.dumps(labels, ensure_ascii=False)) for season, labels in orders.items()])
     if rows is not None:
-        conn.execute("DELETE FROM composition_rows WHERE series_id = ?", (series_id,))
-        conn.executemany(
-            f"INSERT INTO composition_rows ({', '.join(_ROW_COLUMNS)}) VALUES ({', '.join('?' for _ in _ROW_COLUMNS)})",
-            [_row_values(seq, row) for seq, row in enumerate(rows)])
+        conn.execute("INSERT INTO composition_state (series_id, rows, subtitles) VALUES (?, ?, ?) ON CONFLICT (series_id)"
+                     " DO UPDATE SET rows = excluded.rows, subtitles = excluded.subtitles",
+                     (series_id, ROWS.dump_json(rows[0]), ROWS.dump_json(rows[1])))
     if sources is not None:
         conn.execute("DELETE FROM composition_sources WHERE series_id = ?", (series_id,))
         conn.executemany(
@@ -199,16 +197,10 @@ def _content(sources: list[tuple]) -> list[tuple]:
     return sorted(out)
 
 
-def _row_values(seq: int, row: CompositionRow) -> tuple:
-    values = {**row.model_dump(mode="json"), "seq": seq, "grp": row.group, "excluded": int(row.excluded),
-              "heights": json.dumps(row.heights)}
-    return tuple(values[name] for name in _ROW_COLUMNS)
-
-
 def _purge(conn: sqlite3.Connection, series_id: int) -> list[int]:
     sources = [row["source_id"] for row in conn.execute(
         "SELECT source_id FROM composition_sources WHERE series_id = ?", (series_id,))]
-    for table in ("composition_rows", "composition_sources", "composition_state", "unknown_voices", "output_settings",
-                  "voice_orders", "voice_titles"):
+    for table in ("composition_sources", "composition_state", "unknown_voices", "output_settings", "voice_orders",
+                  "voice_titles"):
         conn.execute(f"DELETE FROM {table} WHERE series_id = ?", (series_id,))
     return sources

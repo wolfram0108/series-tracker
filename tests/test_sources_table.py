@@ -4,6 +4,7 @@ The site here is a fake that the module knows through the registry alone (M-34);
 real. Time comes from a clock the test moves, and the order of events from the signals of the fake site, never from waits.
 """
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -137,9 +138,13 @@ class System:
     async def stored(self, url: str = PAGE) -> dict | None:
         return await self.db.fetch_one("SELECT state, reason, complete, read_at FROM release_tables WHERE url = ?", (url,))
 
+    async def stored_rows(self, url: str = PAGE) -> list[dict]:
+        """The rows of the stored table of the page, as the record keeps them (one field of their JSON)."""
+        record = await self.db.fetch_one("SELECT rows FROM release_tables WHERE url = ?", (url,))
+        return json.loads(record["rows"]) if record is not None and record["rows"] is not None else []
+
     async def stored_texts(self, url: str = PAGE) -> list[str]:
-        records = await self.db.fetch_all("SELECT text FROM release_rows WHERE url = ? ORDER BY seq", (url,))
-        return [record["text"] for record in records]
+        return [row["text"] for row in await self.stored_rows(url)]
 
     async def stop(self) -> None:
         await self.probe.stop()
@@ -179,8 +184,7 @@ async def test_each_row_of_a_table_says_which_video_it_is_as_its_player_reads_th
     await system.next(system.ready)
     stored = await system.get()
     assert [each["video"] for each in stored["table"]["rows"]] == ["-1_2", "777", ""]
-    records = await system.db.fetch_all("SELECT video FROM release_rows WHERE url = ? ORDER BY seq", (PAGE,))
-    assert [record["video"] for record in records] == ["-1_2", "777", ""]
+    assert [row["video"] for row in await system.stored_rows()] == ["-1_2", "777", ""]
 
 
 async def test_a_read_tells_its_beginning_and_its_end_with_what_every_player_gave(system):

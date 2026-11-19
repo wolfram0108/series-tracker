@@ -98,6 +98,11 @@ class System:
         with closing(sqlite3.connect(self.db_path)) as conn:
             return conn.execute(query, params).fetchall()
 
+    def stored_rows(self, series_id: int) -> list[dict]:
+        """The rows of sound of the layout as its record keeps them (one field of their JSON)."""
+        found = self.sql("SELECT rows FROM composition_state WHERE series_id = ?", series_id)
+        return json.loads(found[0][0]) if found and found[0][0] is not None else []
+
 
 @pytest.fixture
 async def system(db_path):
@@ -194,8 +199,7 @@ async def test_every_number_comes_from_the_answer_of_the_constructor_and_is_stor
     assert call.profile_id == 7 and call.series_season is None
     assert call.lines[0].key == "vk-1-1" and call.lines[0].text == "PID:fake.test | P:VK | Асура | Серия 1 | G:Сезон 1 | V:Ruchime | R:1080p"
     given = [(line.key, lecturer(line.text)) for line in call.lines]
-    stored = s.sql("SELECT row_key, season, episode_start, episode_end FROM composition_rows WHERE series_id = ?"
-                   " ORDER BY seq", series_id)
+    stored = [(row["row_key"], row["season"], row["episode_start"], row["episode_end"]) for row in s.stored_rows(series_id)]
     assert stored == [(key, found["season"], found["episode"], found["episode"]) for key, found in given]
 
 
@@ -511,8 +515,7 @@ async def test_the_name_the_constructor_assigned_beats_the_one_of_the_player_and
     assert [r.voice_group for r in reply.rows] == ["Моя", "Стар"]
     assert set(s.voices.asked[-1]) == {"AniStar", "Мой дубляж"}
     assert [r.voice_name for r in reply.rows] == ["Мой дубляж", "AniStar"]
-    assert s.sql("SELECT voice_name FROM composition_rows WHERE series_id = ? ORDER BY seq", series_id) == [
-        ("Мой дубляж",), ("AniStar",)]
+    assert [row["voice_name"] for row in s.stored_rows(series_id)] == ["Мой дубляж", "AniStar"]
 
 
 @pytest.mark.asyncio
@@ -978,7 +981,7 @@ async def test_a_series_that_is_deleted_during_a_count_is_taken_whole_after_it_a
     s.catalog.delete_series(series_id)
     s.rules.release()
     assert await s.next(s.purged) == {"series_id": series_id, "owner": "composition"}
-    for table in ("composition_rows", "composition_state", "composition_sources", "unknown_voices", "output_settings"):
+    for table in ("composition_state", "composition_sources", "unknown_voices", "output_settings"):
         assert s.sql(f"SELECT COUNT(*) FROM {table}") == [(0,)], table
     assert s.taken(s.changed) == [] and s.taken(s.failed) == []
     assert (await s.get(series_id)).rev == 0
@@ -1437,7 +1440,7 @@ async def test_a_series_deleted_while_a_request_waits_refuses_the_request(system
 
 # --- composition.preview: an address before it is a source of a series -------------------------------------------------------
 
-COMPOSITION_TABLES = ("composition_rows", "composition_state", "composition_sources", "unknown_voices", "output_settings")
+COMPOSITION_TABLES = ("composition_state", "composition_sources", "unknown_voices", "output_settings")
 
 
 async def preview(s: System, url: str = PAGE, **more) -> CompositionPreviewReply:

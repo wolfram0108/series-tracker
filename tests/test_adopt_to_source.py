@@ -25,10 +25,8 @@ def make_db(path: str) -> sqlite3.Connection:
     conn.execute("INSERT INTO series (id, name, name_en, site, save_path, auto_scan_enabled) VALUES (1, 'S', 'S', 'x', '/lib', 0)")
     for sid, position, url in ((10, 0, "app://alpha/101"), (11, 1, "app://beta/201"), (9, 2, "https://site.example/voices"), (30, 3, NEW)):
         conn.execute("INSERT INTO series_sources (id, series_id, position, url, source_type) VALUES (?, 1, ?, ?, 'web_video')", (sid, position, url))
-    conn.execute("INSERT INTO release_tables (url, site, names, state, complete, title) VALUES (?, 'chines', '[]', 'ready', 1, 'T')", (NEW,))
-    for n in range(1, 5):
-        conn.execute('INSERT INTO release_rows (url, seq, "key", player, text, state, link, video) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                     (NEW, n, f"X:{n}", "line:X", str(n), "playable", f"line://X/{TOKENS[n]}", TOKENS[n]))
+    conn.execute("INSERT INTO release_tables (url, site, names, state, complete, title, rows) VALUES (?, 'chines', '[]', 'ready', 1, 'T', ?)",
+                 (NEW, table_rows([(f"X:{n}", "line:X", str(n), f"line://X/{TOKENS[n]}", TOKENS[n]) for n in range(1, 5)])))
 
     def ref(source_id: int, key: str, video: str) -> dict:
         return {"source_id": source_id, "row_key": key, "video": video}
@@ -60,8 +58,22 @@ def make_db(path: str) -> sqlite3.Connection:
     for lever, target, value in settings:
         conn.execute("INSERT INTO output_settings (series_id, season, lever, target, value) VALUES (1, 1, ?, ?, ?)", (lever, target, value))
     conn.execute("INSERT INTO composition_sources (source_id, series_id, position, table_url, summary) VALUES (10, 1, 0, 'app://alpha/101', '{}')")
-    conn.execute("INSERT INTO composition_rows (series_id, source_id, row_key, seq, player, state, link, video) VALUES (1, 10, 'alpha:X:1', 1, 'line:X', 'playable', 'l', 'v')")
+    conn.execute("INSERT INTO composition_state (series_id, rev, rows, subtitles, inputs) VALUES (1, 3, ?, '[]', 'print')",
+                 (json.dumps([{"series_id": 1, "source_id": 10, "row_key": "alpha:X:1", "player": "line:X", "state": "playable",
+                               "link": "l", "video": "v"}]),))
     return conn
+
+
+def table_rows(rows: list[tuple[str, str, str, str, str]]) -> str:
+    """The rows of a table as its record keeps them: (key, player, text, link, video) each."""
+    return json.dumps([{"key": key, "player": player, "text": text, "state": "playable", "link": link, "video": video}
+                       for key, player, text, link, video in rows])
+
+
+def layout_held(conn: sqlite3.Connection) -> bool:
+    """The layout of the series is kept with the print of its inputs: a start does not count it again."""
+    rows, inputs = conn.execute("SELECT rows, inputs FROM composition_state WHERE series_id = 1").fetchone()
+    return rows is not None and inputs is not None
 
 
 def data_of(conn: sqlite3.Connection, name: str) -> dict:
@@ -96,7 +108,7 @@ def test_a_failure_of_the_plan_names_the_new_row_and_the_derived_tables_of_the_c
     report = adopt.apply(conn, 1, [30])
     (failure,) = conn.execute("SELECT key FROM plan_failures").fetchall()
     assert json.loads(failure[0]) == ["align", [30, "X:4", TOKENS[4]], [9, "cvh:u4", "cvh4"]] and report.failures_rewritten == 1
-    assert conn.execute("SELECT COUNT(*) FROM composition_rows").fetchone()[0] == 0  # the service counts them again at its start
+    assert not layout_held(conn)  # the service counts the layout again at its start
     assert conn.execute("SELECT COUNT(*) FROM composition_sources").fetchone()[0] == 0
 
 
@@ -112,7 +124,7 @@ def test_the_transfer_run_again_changes_nothing(tmp_path):
 @pytest.mark.parametrize("source, spoil, expected", [
     (99, "", "is no source of the series"),
     (30, "UPDATE release_tables SET state = 'reading'", "no table that is ready"),
-    (30, "DELETE FROM release_rows", "holds no row"),
+    (30, "UPDATE release_tables SET rows = '[]'", "holds no row"),
     (30, "INSERT INTO plan_runs (series_id, download) VALUES (1, 0)", "under way"),
 ])
 def test_a_transfer_that_would_rest_on_a_wrong_ground_is_refused_and_nothing_is_written(tmp_path, source, spoil, expected):
@@ -123,7 +135,7 @@ def test_a_transfer_that_would_rest_on_a_wrong_ground_is_refused_and_nothing_is_
     with pytest.raises(adopt.Refused, match=expected):
         adopt.apply(conn, 1, [source])
     assert [tuple(each) for each in conn.execute("SELECT name, data FROM plan_assets ORDER BY name")] == before
-    assert conn.execute("SELECT COUNT(*) FROM composition_rows").fetchone()[0] == 1
+    assert layout_held(conn)
 
 
 def settings_of(conn: sqlite3.Connection) -> dict:
@@ -148,9 +160,8 @@ def test_a_file_stands_on_the_new_source_of_its_own_line_when_a_series_is_given_
     conn = make_db(str(tmp_path / "a.db"))
     other = "title://mock/abc123/Y"
     conn.execute("INSERT INTO series_sources (id, series_id, position, url, source_type) VALUES (31, 1, 4, ?, 'web_video')", (other,))
-    conn.execute("INSERT INTO release_tables (url, site, names, state, complete, title) VALUES (?, 'chines', '[]', 'ready', 1, 'T')", (other,))
-    conn.execute('INSERT INTO release_rows (url, seq, "key", player, text, state, link, video) VALUES (?, 1, ?, ?, ?, ?, ?, ?)',
-                 (other, "Y:1", "line:Y", "1", "playable", "line://Y/y1", "y1"))
+    conn.execute("INSERT INTO release_tables (url, site, names, state, complete, title, rows) VALUES (?, 'chines', '[]', 'ready', 1, 'T', ?)",
+                 (other, table_rows([("Y:1", "line:Y", "1", "line://Y/y1", "y1")])))
     asset = {"name": "y.mkv", "video": {"id": {"source_id": 10, "row_key": "alpha:Y:7", "video": "y1"},
                                          "snapshot": {"source": "alpha", "player": "line:Y", "group": "G", "height": 2160, "link": "", "label": "G"}}}
     conn.execute("INSERT INTO plan_assets (series_id, name, data) VALUES (1, 'y.mkv', ?)", (json.dumps(asset),))

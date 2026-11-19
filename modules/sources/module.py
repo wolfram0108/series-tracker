@@ -569,9 +569,8 @@ class SourcesModule(BaseModule):
 
     async def on_table_get(self, env: Envelope) -> dict:
         """payload: TableGetRequest; reply: TableGetReply. Never waits for a read: the end of it comes as an event."""
-        reply = await self.tables.get(TableGetRequest.model_validate(env.payload))
-        # The table of a page is thousands of rows: it is made into the message off the loop of the service.
-        return await compute.run(reply.model_dump, mode="json")
+        # The table of a page is thousands of rows: given as it is stored, its rows parsed in one pass.
+        return await self.tables.get(TableGetRequest.model_validate(env.payload))
 
     async def on_tables_writes(self, env: Envelope) -> dict:
         return {"writes": await self.repo.writes()}

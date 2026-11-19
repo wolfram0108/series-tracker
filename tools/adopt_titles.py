@@ -9,7 +9,7 @@ What it does, in order:
      its link change;
   3. rewrites, in ONE transaction, everything the tracker keeps of the old addresses and keys: `series_sources` (a card with several
      lines becomes several sources: the one with most rows keeps the number of the old source, the others are new with the same
-     settings), `release_tables`, `release_rows`, `plan_assets` (the rows the library's files stand on), `plan_failures`. The derived
+     settings), `release_tables` (with the rows of each table), `plan_assets` (the rows the library's files stand on), `plan_failures`. The derived
      tables of the composition of the series are dropped: the service counts them again at its start. Two old sources of one series
      that come to one line become one (the first stays); the files that stood on the other are re-pointed to it.
 A row of the old table the provider does not play (a line it has no target for, or a row its line has no video for) is LOST: the files
@@ -81,8 +81,9 @@ class Refused(RuntimeError):
 
 def old_rows(conn: sqlite3.Connection) -> dict[str, list[dict]]:
     found: dict[str, list[dict]] = {}
-    for url, key, player, video in conn.execute("SELECT url, key, player, video FROM release_rows WHERE url LIKE ?", (OLD,)):
-        found.setdefault(url, []).append({"key": key, "player": player, "video": video})
+    for url, rows in conn.execute("SELECT url, rows FROM release_tables WHERE url LIKE ? AND rows IS NOT NULL", (OLD,)):
+        for row in json.loads(rows):
+            found.setdefault(url, []).append({"key": row["key"], "player": row["player"], "video": row["video"]})
     return found
 
 
@@ -206,7 +207,6 @@ def apply(conn: sqlite3.Connection, targets: Targets, plan: Plan, tables: dict[s
         if orphans and not allow_orphans:
             raise Refused(f"{len(orphans)} files of the plan stand on rows the provider has no video for: {orphans[:3]}")
 
-        columns = [row[1] for row in conn.execute("PRAGMA table_info(release_rows)")]
         table_columns = [row[1] for row in conn.execute("PRAGMA table_info(release_tables)")]
         for old_url, lines in by_old.items():
             old = conn.execute("SELECT * FROM release_tables WHERE url = ?", (old_url,)).fetchone()
@@ -217,28 +217,32 @@ def apply(conn: sqlite3.Connection, targets: Targets, plan: Plan, tables: dict[s
                 if conn.execute("SELECT 1 FROM release_tables WHERE url = ?", (move.new_url,)).fetchone() is None:
                     draft = tables.get(move.new_url, {})
                     names = draft.get("names") or json.loads(old_table.get("names") or "[]")
+                    # A new record of a page takes the next number of the writes of the module and no row yet.
+                    conn.execute("UPDATE release_writes SET last = last + 1")
                     made = {**old_table, "url": move.new_url, "site": site, "title": draft.get("title") or old_table.get("title", ""),
-                            "names": json.dumps(names, ensure_ascii=False)}
+                            "names": json.dumps(names, ensure_ascii=False), "rows": "[]",
+                            "writes": conn.execute("SELECT last FROM release_writes").fetchone()[0]}
                     conn.execute(f'INSERT INTO release_tables ({", ".join(f"{chr(34)}{name}{chr(34)}" for name in table_columns)}) '
                                  f'VALUES ({", ".join("?" * len(table_columns))})', [made[name] for name in table_columns])
                     report.tables += 1
-                for row in conn.execute("SELECT * FROM release_rows WHERE url = ?", (old_url,)).fetchall():
-                    record = dict(zip(columns, row))
-                    hit = move.keys.get(record["key"])
-                    if hit is None:
-                        continue
-                    if conn.execute('SELECT 1 FROM release_rows WHERE url = ? AND "key" = ?', (move.new_url, hit[0])).fetchone():
-                        continue  # the table of the line already holds this row (another old address came to the same line first)
-                    if conn.execute("SELECT 1 FROM release_rows WHERE url = ? AND seq = ?", (move.new_url, record["seq"])).fetchone():
-                        record["seq"] = conn.execute("SELECT MAX(seq) + 1 FROM release_rows WHERE url = ?", (move.new_url,)).fetchone()[0]
-                    record.update(url=move.new_url, key=hit[0], link=hit[1])
-                    conn.execute(f'INSERT INTO release_rows ({", ".join(f"{chr(34)}{name}{chr(34)}" for name in columns)}) '
-                                 f'VALUES ({", ".join("?" * len(columns))})', [record[name] for name in columns])
+                held = json.loads(conn.execute("SELECT rows FROM release_tables WHERE url = ?", (move.new_url,)).fetchone()[0]
+                                  or "[]")
+                keys = {row["key"] for row in held}
+                for row in json.loads(old_table.get("rows") or "[]"):
+                    hit = move.keys.get(row["key"])
+                    if hit is None or hit[0] in keys:
+                        continue  # not of this line, or the table of the line holds it (another old address came first)
+                    held.append({**row, "key": hit[0], "link": hit[1]})
+                    keys.add(hit[0])
                     report.rows_moved += 1
+                conn.execute("UPDATE release_writes SET last = last + 1")
+                conn.execute("UPDATE release_tables SET rows = ?, writes = (SELECT last FROM release_writes) WHERE url = ?",
+                             (json.dumps(held, ensure_ascii=False, separators=(",", ":")), move.new_url))
             conn.execute("DELETE FROM release_tables WHERE url = ?", (old_url,))  # its old rows go with it
 
         for series_id in series_touched:  # derived tables: the service counts them again at its start
-            conn.execute("DELETE FROM composition_rows WHERE series_id = ?", (series_id,))
+            conn.execute("UPDATE composition_state SET rows = NULL, subtitles = NULL, inputs = NULL WHERE series_id = ?",
+                         (series_id,))
             conn.execute("DELETE FROM composition_sources WHERE series_id = ?", (series_id,))
         for series_id, name, data in conn.execute("SELECT series_id, name, data FROM plan_assets").fetchall():
             text = json.dumps(_walk(json.loads(data), mapping, lost, []), ensure_ascii=False)
