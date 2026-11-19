@@ -80,6 +80,27 @@ async def test_a_secret_that_goes_round_the_bus_in_a_run_is_in_its_dump_as_a_mas
     assert got["trackerauth.credentials.set"] == {"service": "kinozal", "password": "***"} and got["settings.value.get"]["value"] == "***"
 
 
+async def test_a_model_handed_over_in_the_process_is_in_the_dump_by_its_kind_and_sizes_not_whole(tmp_path):
+    """The layout goes to the planner as the model itself, megabytes of rows: the dump tells what it was, not its rows."""
+    from core.contracts import CompositionReply, CompositionRow
+    bus = Bus()
+    module = RunlogModule(bus, str(tmp_path))
+    runner = Runner(bus, [module])
+    await runner.start()
+    rows = [CompositionRow(series_id=5, source_id=1, row_key=f"r{n}", player="vk", heights=[1080], state="playable")
+            for n in range(3)]
+    try:
+        bus.publish(run_changed(5, True))
+        bus.publish(Envelope(topic="composition.layout", kind="reply", payload=CompositionReply(series_id=5, rev=7, rows=rows)))
+        bus.publish(run_changed(5, False))
+        await module.written()
+    finally:
+        await runner.stop()
+    (path,) = dumps(tmp_path, 5)
+    told = next(each["payload"] for each in lines(path) if each["e"] == "bus" and each["topic"] == "composition.layout")
+    assert told["model"] == "CompositionReply" and (told["series_id"], told["rev"], told["rows"]) == (5, 7, 3)
+
+
 async def test_a_run_the_process_stops_in_is_closed_as_stopped_and_old_dumps_go(tmp_path):
     bus = Bus()
     module = RunlogModule(bus, str(tmp_path), keep=2)

@@ -185,6 +185,7 @@ class CompositionModule(BaseModule):
 
     def register(self) -> None:
         self.handle("composition.get", self.on_get)
+        self.handle("composition.layout", self.on_layout)
         self.handle("composition.queues.get", self.on_queues_get)
         # Waits for a whole count, so the requests for different series must not queue behind each other.
         self.handle("composition.recompute", self.on_recompute, concurrent=True)
@@ -240,6 +241,14 @@ class CompositionModule(BaseModule):
         stored = await self.repo.stored(request.series_id)
         # The layout of a series is thousands of rows: the reply is made off the loop.
         return await compute.run(layout_reply, request, stored)
+
+    async def on_layout(self, env: Envelope) -> CompositionReply:
+        """The whole layout as the model itself, for a consumer in this process (the planner): the answer of
+        `composition.get` before it is written out — megabytes are not turned into a dict and checked again on the other
+        side. It is made for the one who asks and is his: no other holds it."""
+        request = CompositionGetRequest(series_id=int(env.payload["series_id"]))
+        stored = await self.repo.stored(request.series_id)
+        return await compute.run(layout_of, request, stored)
 
     async def on_queues_get(self, env: Envelope) -> dict:
         """The queues of a level in the order the core tries their variants: the same rule, the same order of players and
@@ -778,9 +787,14 @@ class CompositionModule(BaseModule):
 
 def layout_reply(request: CompositionGetRequest, stored) -> dict:
     """`composition.get` answered from what is stored; pure, it runs in the pool of computation."""
+    return layout_of(request, stored).model_dump(mode="json")
+
+
+def layout_of(request: CompositionGetRequest, stored) -> CompositionReply:
+    """The layout, or the part of it asked, as the model."""
     if request.sources_only or request.part == "sources":
         return CompositionReply(series_id=request.series_id, rev=stored.rev, part="sources",
-                                sources=[each.summary for each in stored.sources]).model_dump(mode="json")
+                                sources=[each.summary for each in stored.sources])
     records = settings.canonical(stored.records)
     episodes = project.layout_episodes(stored.rows)
     outcome = compilations.resolve(stored.rows, records, _source_order(stored))
@@ -794,7 +808,7 @@ def layout_reply(request: CompositionGetRequest, stored) -> dict:
             levels=settings.levels(records, {season for season, _ in episodes},
                                    [(view.season, view.ref.key) for view in outcome.views]),
             settings=settings.episode_settings(records, chosen, outcome.members), compilations=outcome.views,
-            voice_orders=orders, voice_titles=stored.titles).model_dump(mode="json")
+            voice_orders=orders, voice_titles=stored.titles)
     reply = CompositionReply(
         series_id=request.series_id, rev=stored.rev,
         rows=[row for row in stored.rows if request.include_excluded or not row.excluded],
@@ -807,7 +821,7 @@ def layout_reply(request: CompositionGetRequest, stored) -> dict:
         levers=levers.specs(), availability=availability.table(),
         # A series counted before the orders were kept shows its default order until its next count writes it.
         voice_orders=orders, voice_titles=stored.titles)
-    return reply.model_dump(mode="json")
+    return reply
 
 
 def _rules_request(source: SeriesSource, table: ReleaseTable, season, rules,

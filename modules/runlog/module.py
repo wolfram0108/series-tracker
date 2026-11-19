@@ -34,6 +34,8 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from pydantic import BaseModel
+
 from core import BaseModule, compute, storage
 from core.secrets import redacted
 from core.contracts.release_table import TABLE_TRACE_TOPIC
@@ -69,11 +71,20 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _written(payload):
+    """What of a payload goes into a dump: a model handed over in the process whole (the layout, megabytes) is told by its
+    kind and the size of its lists; its rows are in the dump as the planner's trace of the inputs of its plan."""
+    if isinstance(payload, BaseModel):
+        return {"model": type(payload).__name__, **{name: (len(value) if isinstance(value, (list, dict)) else value)
+                                                    for name, value in payload.__dict__.items()}}
+    return redacted(payload)
+
+
 def _line(entry) -> str:
     kind, at, body = entry
     if kind == "bus":
         body = {"kind": body.kind, "topic": body.topic, "cid": body.correlation_id, "reply_to": body.reply_to,
-                "admission": body.admission, "payload": redacted(body.payload)}
+                "admission": body.admission, "payload": _written(body.payload)}
     return json.dumps({"t": at, "e": kind, **body}, ensure_ascii=False, default=repr)
 
 

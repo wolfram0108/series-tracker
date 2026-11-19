@@ -191,10 +191,9 @@ def _sizes(files: Library, names: list[str]) -> dict[str, float]:
     return out
 
 
-def _inputs_of(answer: dict, series: dict, voices: dict) -> tuple:
-    """The rows and the choices of a series from the answer of the layout, and its compilations by their row: thousands
-    of rows (the pool)."""
-    layout = CompositionReply.model_validate(answer)
+def _inputs_of(layout: CompositionReply, series: dict, voices: dict) -> tuple:
+    """The rows and the choices of a series from its layout (the model `composition.layout` gives), and its compilations by
+    their row: thousands of rows (the pool)."""
     online, choices = planner_inputs(layout, series, voices)
     return online, choices, {(each.ref.source_id, each.ref.row_key): each.ref for each in layout.compilations}
 
@@ -987,9 +986,9 @@ class PlannerModule(BaseModule):
 
     async def _inputs(self, series: dict):
         series_id = series["id"]
-        answer = await self.request("composition.get", {"series_id": series_id})
+        layout = await self.request("composition.layout", {"series_id": series_id})
         voices = await self.request("voices.settings.get", {})
-        online, choices, self._members[series_id] = await compute.run(_inputs_of, answer, series, voices)
+        online, choices, self._members[series_id] = await compute.run(_inputs_of, layout, series, voices)
         return online, choices
 
     # --- the picture of the packing ------------------------------------------------------------------------------

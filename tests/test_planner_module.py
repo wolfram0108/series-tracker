@@ -57,7 +57,7 @@ class Neighbours(BaseModule):
 
     def register(self) -> None:
         self.handle("catalog.series.get", self.on_series)
-        self.handle("composition.get", self.on_composition)
+        self.handle("composition.layout", self.on_composition)
         self.handle("voices.settings.get", self.on_voices)
         self.handle("conform.workspace", self.on_workspace)
         self.handle("downloads.fetch", self.on_fetch, concurrent=True)
@@ -77,8 +77,8 @@ class Neighbours(BaseModule):
                     {"id": source, "series_id": SERIES, "url": f"https://site/{source}", "source_type": "web_video"}
                     for source in (1, 2, 3, 4)]}
 
-    async def on_composition(self, env: Envelope) -> dict:
-        return CompositionReply(series_id=SERIES, rev=1, rows=self.site.rows, settings=self.site.settings).model_dump()
+    async def on_composition(self, env: Envelope) -> CompositionReply:
+        return CompositionReply(series_id=SERIES, rev=1, rows=self.site.rows, settings=self.site.settings)
 
     async def on_voices(self, env: Envelope) -> dict:
         return {"priority": ["vk", "cvh", "kodik"], "player_groups": {}}
