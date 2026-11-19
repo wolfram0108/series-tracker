@@ -90,7 +90,9 @@ Events out:
       and the plan made of them, every round; `step` / `done` — a step of the graph begins / ends with its outcome
       (made, failed, passing with its reason, left behind a failed step); `apply` — a group applied or left, and why.
 Events in: gateway.sse.clients, downloads.fetch.finished, conform.job.finished, conform.job.removed, system.started (syncs under way are taken up
-  again, a journal a stop cut short is carried out), series.deleted, composition.changed, voices.settings.changed and
+  again, a journal a stop cut short is carried out; what every series stood at is told, and only a series whose inputs are
+  not those it was counted from — the print of VIEW_INPUTS, of the module's tables and of the code, plan_standing.inputs —
+  is counted again), series.deleted, composition.changed, voices.settings.changed and
   series.updated with the episodes switched off (the plan is counted again from the tables and the window told: nothing on
   disk changes between syncs).
 """
