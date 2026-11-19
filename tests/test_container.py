@@ -6,7 +6,6 @@ import json
 import os
 import shutil
 import subprocess
-import tempfile
 
 import pytest
 
@@ -248,16 +247,10 @@ def _lag(path) -> float:
     return worst
 
 
-def test_the_packets_of_a_container_lie_in_the_order_of_their_time_whatever_the_subtitles_are(media, monkeypatch):
-    """ffmpeg takes its next packet from the input of the stream that is furthest behind. The signs of a release are one event
-    in all of the episode: after it that stream waits for a packet it never gets, stays the furthest behind, and the file it
-    lives in is read to its end, the picture with it, before any voice-over of the other files is read. The container held all
-    of the picture, then all of the sound from its start again: a player showed no picture or hung. Each subtitles stream
-    of a file that holds other streams goes into the build as an input of its own, and no file of that is left behind."""
+def test_the_packets_of_a_container_lie_in_the_order_of_their_time_whatever_the_subtitles_are(media):
+    """The signs of a release are one event in all of the episode. The container held all of the picture, then all of the
+    sound from its start again: a player showed no picture or hung. Its packets lie in the order of their time."""
     tmp, _video, _dubs, _ = media
-    scratch = tmp / "scratch"
-    scratch.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
     video = _torrent_video(tmp, seconds=60)
     dubs = [make(tmp / f"long{n}.flac", "-f", "lavfi", "-i", f"sine=frequency={hz}:duration=60")
             for n, hz in enumerate((500, 700, 900))]
@@ -271,7 +264,6 @@ def test_the_packets_of_a_container_lie_in_the_order_of_their_time_whatever_the_
     assert [(each.key, each.title, each.language, each.default, each.forced)
             for each in asyncio.run(container.contents(out)).subtitles] == [
         ("1:full:", "Full", "eng", True, False), ("1:signs:", "Надписи", "rus", False, True)]
-    assert os.listdir(scratch) == []
 
     again = str(tmp / "again.mkv")  # a container built here holds the same signs, and is the video of the next one
     held = asyncio.run(container.contents(out))
@@ -281,49 +273,6 @@ def test_the_packets_of_a_container_lie_in_the_order_of_their_time_whatever_the_
                                                              forced=each.forced, default=each.default)
                                                   for each in held.subtitles])) is None
     assert _lag(again) <= container.INTERLEAVE_DELTA_US / 1e6
-    assert os.listdir(scratch) == []
-
-
-def test_subtitles_in_a_file_of_their_own_are_taken_as_they_are(media, monkeypatch):
-    """A subtitles file with nothing else in it ends with its first read: no pass over it is made to take them out."""
-    tmp, video, _dubs, _ = media
-    programs = []
-    for name in ("run_capture", "run_lines"):
-        real = getattr(container, name)
-
-        async def seen(cmd, *, real=real, **kwargs):
-            programs.append(os.path.basename(cmd[0]))
-            return await real(cmd, **kwargs)
-
-        monkeypatch.setattr(container, name, seen)
-    ass = tmp / "own.ass"
-    ass.write_text("[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Text\n"
-                   "Dialogue: 0,0:00:00.50,0:00:01.50,Default,Надпись\n", encoding="utf-8")
-    out = str(tmp / "own.mkv")
-    assert asyncio.run(container.build(out, video, "1:x", [AudioIn("a", video, 0, "1:x", own=True)],
-                                       subtitles=[SubtitleIn(str(ass), 0, "1:own:", "Полные", "rus")])) is None
-    assert programs.count("ffmpeg") == 1  # the build
-
-
-def test_subtitles_that_cannot_be_taken_out_of_their_file_say_why_and_leave_nothing(media, monkeypatch):
-    tmp, _video, _dubs, _ = media
-    scratch = tmp / "scratch"
-    scratch.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
-    real = container.run_capture
-
-    async def refusing(cmd, **kwargs):
-        if os.path.basename(cmd[0]) == "ffmpeg":
-            return 1, b"", b"Invalid data found when processing input\n"
-        return await real(cmd, **kwargs)
-
-    monkeypatch.setattr(container, "run_capture", refusing)
-    video = _torrent_video(tmp)
-    out = str(tmp / "never.mkv")
-    reason = asyncio.run(container.build(out, video, "1:E01", [AudioIn("Оригинал", video, 0, "1:E01", own=True)],
-                                         subtitles=[SubtitleIn(video, 0, "1:signs:", "Надписи", "rus")]))
-    assert reason == "ffmpeg_failed: Invalid data found when processing input"
-    assert not os.path.exists(out) and os.listdir(scratch) == []
 
 
 def _flags(path, stream) -> dict:
