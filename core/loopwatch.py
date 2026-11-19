@@ -21,12 +21,14 @@ from typing import Callable
 BEAT_S = 0.02
 STALL_S = 0.1
 SAMPLE_S = 0.005
+# The watch gets the interpreter every few milliseconds while Python code runs; rarer than this, one call of C code kept it.
+STARVED_S = 0.05
 CHAIN_DEPTH = 8
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
 _OUTSIDE = (os.sep + ".venv" + os.sep, os.sep + "site-packages" + os.sep)
 
-Report = Callable[[float, tuple[str, ...], int, int], None]
+Report = Callable[[float, tuple[str, ...], int, int, tuple[str, ...]], None]
 
 
 def project_chain(frame, depth: int = CHAIN_DEPTH) -> tuple[str, ...]:
@@ -34,6 +36,8 @@ def project_chain(frame, depth: int = CHAIN_DEPTH) -> tuple[str, ...]:
     chain = []
     while frame is not None and len(chain) < depth:
         path = frame.f_code.co_filename
+        if frame.f_code.co_name == "_run_once" and path.endswith(os.path.join("asyncio", "base_events.py")):
+            break  # what lies below is whoever runs the loop, not the work of one turn of it
         if path.startswith(ROOT) and not any(part in path for part in _OUTSIDE) and path != __file__:
             chain.append(f"{path[len(ROOT):]}:{frame.f_lineno} {frame.f_code.co_name}")
         frame = frame.f_back
@@ -41,7 +45,9 @@ def project_chain(frame, depth: int = CHAIN_DEPTH) -> tuple[str, ...]:
 
 
 class LoopWatch:
-    """The watch of one running loop; `report(seconds, chain, samples_of_chain, samples)` is told of every stall."""
+    """The watch of one running loop; `report(seconds, chain, samples_of_chain, samples, other)` is told of every stall.
+    `other` is the thread that held the interpreter in one call of C code meanwhile (the loop's own chain is then only
+    where it waited for it), with its chain; empty when the loop ran its own code."""
 
     def __init__(self, loop: asyncio.AbstractEventLoop, report: Report) -> None:
         self.loop = loop
@@ -71,25 +77,35 @@ class LoopWatch:
     def _watch(self) -> None:
         stalled_beat: float | None = None
         samples: Counter = Counter()
+        others: Counter = Counter()
         while not self._stop.wait(SAMPLE_S):
             beat = self._beat_at
             if stalled_beat is not None and beat != stalled_beat:
                 held = beat - stalled_beat - BEAT_S
                 if held >= STALL_S and samples:
                     chain, count = samples.most_common(1)[0]
-                    self.report(held, chain, count, sum(samples.values()))
-                stalled_beat, samples = None, Counter()
+                    starved = sum(samples.values()) < held / STARVED_S
+                    other = others.most_common(1)[0][0] if starved and others else ()
+                    self.report(held, chain, count, sum(samples.values()), other)
+                stalled_beat, samples, others = None, Counter(), Counter()
             if time.monotonic() - beat - BEAT_S < STALL_S:
                 continue
             stalled_beat = beat
-            frame = sys._current_frames().get(self._loop_thread)
+            frames = sys._current_frames()
+            frame = frames.get(self._loop_thread)
             if frame is not None:
                 samples[project_chain(frame)] += 1
+            names = {thread.ident: thread.name for thread in threading.enumerate()}
+            for ident, other in frames.items():
+                chain = project_chain(other) if ident not in (self._loop_thread, threading.get_ident()) else ()
+                if chain:
+                    others[(f"поток {names.get(ident, ident)}",) + chain] += 1
 
 
 def logged(log) -> Report:
     """The report of a stall as a line of the journal."""
-    def report(held: float, chain: tuple[str, ...], count: int, samples: int) -> None:
-        log.warning("цикл событий стоял %d мс; держал (%d из %d замеров): %s", round(held * 1000), count, samples,
-                    " ← ".join(chain) or "код вне проекта")
+    def report(held: float, chain: tuple[str, ...], count: int, samples: int, other: tuple[str, ...]) -> None:
+        log.warning("цикл событий стоял %d мс; держал (%d из %d замеров): %s%s", round(held * 1000), count, samples,
+                    " ← ".join(chain) or "код вне проекта",
+                    f"; интерпретатор в это время держал {other[0]}: {' ← '.join(other[1:])}" if other else "")
     return report

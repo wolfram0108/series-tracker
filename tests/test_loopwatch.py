@@ -30,10 +30,27 @@ def test_a_stall_is_told_with_the_function_that_held_the_loop():
 
     reports = asyncio.run(_watched(work))
     assert len(reports) == 1
-    held, chain, count, samples = reports[0]
+    held, chain, count, samples, other = reports[0]
     assert 0.3 <= held <= 0.6
     assert chain and "_holds_the_loop" in chain[0] and chain[0].startswith("tests/test_loopwatch.py:")
     assert count >= samples // 2 > 0
+    assert other == ()  # the loop ran its own code: no other thread is blamed
+
+
+def test_a_thread_that_keeps_the_interpreter_in_one_call_of_c_code_is_named():
+    import threading
+
+    def held_by_another_thread():
+        sum(range(60_000_000))  # one call of C code that keeps the interpreter for its whole length
+
+    async def work():
+        worker = threading.Thread(target=held_by_another_thread, name="compute_0")
+        worker.start()
+        await asyncio.get_running_loop().run_in_executor(None, worker.join)
+
+    reports = asyncio.run(_watched(work))
+    assert reports, "the sum holds the interpreter for longer than a stall"
+    assert any(other[:1] == ("поток compute_0",) and "held_by_another_thread" in other[1] for *_, other in reports)
 
 
 def test_a_loop_that_waits_is_not_a_stall():
