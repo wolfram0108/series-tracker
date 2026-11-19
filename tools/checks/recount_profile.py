@@ -1,0 +1,138 @@
+"""Where the time of a count of a series goes, link by link, on a copy of the service's base: the real modules of the path
+of the data (catalog, settings, rules, sources, voices, composition, planner) on one bus, no network (every request goes
+to a proxy that does not exist), no sync, no download. A series is counted as the service counts it after a change: its
+layout (`composition.recompute`, from the stored tables), then its plan and view (`composition.changed` → the planner).
+
+Told: the wall time of each count, every request over the bus by topic (count, total, longest), and the steps inside the
+modules (reading and writing the tables, the projection, the plan, the view), each by its total.
+
+    systemd-run --scope -q -p MemoryMax=1500M .venv/bin/python tools/checks/recount_profile.py 46 40
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import os
+import sys
+import tempfile
+import time
+from collections import defaultdict
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, ROOT)
+# No request leaves the machine: a stored table is all a count reads.
+for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+    os.environ[name] = "http://127.0.0.1:9"
+os.environ.pop("NO_PROXY", None)
+os.environ.pop("no_proxy", None)
+
+from core import BaseModule, Bus, Runner  # noqa: E402
+from core.db import Database  # noqa: E402
+from tools.checks.plan_real import copy_db  # noqa: E402
+
+STEPS: dict[str, list[float]] = defaultdict(list)
+
+
+def timed(owner, name: str, label: str) -> None:
+    """`owner.name` (a function or a coroutine function) counted under `label` each time it is called."""
+    original = getattr(owner, name)
+    if asyncio.iscoroutinefunction(original):
+        async def wrapper(*args, **kwargs):
+            start = time.perf_counter()
+            try:
+                return await original(*args, **kwargs)
+            finally:
+                STEPS[label].append(time.perf_counter() - start)
+    else:
+        def wrapper(*args, **kwargs):
+            start = time.perf_counter()
+            try:
+                return original(*args, **kwargs)
+            finally:
+                STEPS[label].append(time.perf_counter() - start)
+    setattr(owner, name, wrapper)
+
+
+class Probe(BaseModule):
+    name = "probe"
+
+
+async def main(series: list[int]) -> None:
+    import core.plan.executor as executor
+    import modules.composition.module as composition_module
+    import modules.planner.module as planner_module
+    from modules.catalog import CatalogModule
+    from modules.composition import CompositionModule
+    from modules.planner import PlannerModule
+    from modules.rules import RulesModule
+    from modules.settings import SettingsModule
+    from modules.sources import SourcesModule
+    from modules.voices import VoicesModule
+
+    folder = tempfile.mkdtemp(prefix="recount_profile_")
+    path = copy_db(os.path.join(folder, "app.db"))
+    db = Database(path)
+    bus = Bus()
+    probe = Probe(bus)
+    composition, planner = CompositionModule(bus, db), PlannerModule(bus, db)
+    modules = [CatalogModule(bus, db), SettingsModule(bus, db), RulesModule(bus, db),
+               SourcesModule(bus, db, torrent_cache_dir=os.path.join(folder, "torrent_cache")), VoicesModule(bus, db),
+               composition, planner, probe]
+    # The steps inside the modules.
+    timed(composition.repo, "stored", "composition: read the stored layout (sqlite + models)")
+    timed(composition.repo, "write", "composition: write the layout")
+    timed(composition_module, "_derive", "composition: projection and comparison (pool)")
+    timed(composition_module, "layout_of", "composition: the layout as the model for the planner (pool)")
+    timed(planner_module, "_inputs_of", "planner: the inputs of the plan from the layout (pool)")
+    timed(executor, "plan", "planner: the plan (pool)")
+    timed(planner_module, "_view_body", "planner: the view (pool)")
+    timed(planner.repo, "containers", "planner: read the asset")
+    runner = Runner(bus, modules)
+    await runner.start()
+    await composition.idle()
+    links: dict[str, list[float]] = defaultdict(list)
+    asked: dict[str, tuple[str, float]] = {}
+
+    def seen(env) -> None:
+        if env.kind == "query":
+            asked[env.correlation_id] = (env.topic, time.perf_counter())
+        elif env.kind == "reply" and env.correlation_id in asked:
+            topic, start = asked.pop(env.correlation_id)
+            links[topic].append(time.perf_counter() - start)
+
+    untap = bus.tap(seen)
+    told = bus.subscribe("planner.series.changed")
+    try:
+        for series_id in series:
+            STEPS.clear()
+            links.clear()
+            start = time.perf_counter()
+            await probe.request("composition.recompute", {"series_id": series_id}, timeout=170)
+            layout = time.perf_counter() - start
+            while not told.queue.empty():
+                told.queue.get_nowait()
+            start = time.perf_counter()
+            probe.publish_event("composition.changed", {"series_id": series_id, "rev": 0, "summary_only": False,
+                                                        "part": "whole", "episodes": []})
+            while True:
+                env = await asyncio.wait_for(told.queue.get(), 170)
+                if env.payload.get("series_id") == series_id:
+                    break
+            plan = time.perf_counter() - start
+            print(f"SERIES {series_id}: layout counted in {layout * 1000:.0f} ms, plan and view in {plan * 1000:.0f} ms")
+            print("  requests over the bus (count, total ms, longest ms):")
+            for topic, times in sorted(links.items(), key=lambda item: -sum(item[1])):
+                print(f"    {topic:34} {len(times):4} {sum(times) * 1000:8.1f} {max(times) * 1000:8.1f}")
+            print("  steps inside the modules (count, total ms):")
+            for label, times in sorted(STEPS.items(), key=lambda item: -sum(item[1])):
+                print(f"    {label:62} {len(times):4} {sum(times) * 1000:8.1f}")
+    finally:
+        untap()
+        await runner.stop()
+    print("RECOUNT_PROFILE_DONE")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("series", type=int, nargs="+")
+    asyncio.run(main(parser.parse_args().series))
