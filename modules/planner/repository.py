@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 
 from core.contracts import PackCard
 from core.db import Database
+from core.plan.files import container_of
+from core.plan.tables import Container
 
 
 def _key(value) -> str:
@@ -18,8 +20,14 @@ class PlannerRepository:
         self._db = db
 
     async def assets(self, series_id: int) -> list[dict]:
-        return [json.loads(row["data"]) for row in await self._db.fetch_all(
-            "SELECT data FROM plan_assets WHERE series_id=? ORDER BY name", (series_id,))]
+        """The rows of the asset of a series; read on the thread of the query (hundreds of files with their tracks)."""
+        return await self._db.transaction(lambda conn: [json.loads(row[0]) for row in conn.execute(
+            "SELECT data FROM plan_assets WHERE series_id=? ORDER BY name", (series_id,))])
+
+    async def containers(self, series_id: int) -> list[Container]:
+        """The files of a series as the planner reads them, made on the thread of the query."""
+        return await self._db.transaction(lambda conn: [container_of(json.loads(row[0])) for row in conn.execute(
+            "SELECT data FROM plan_assets WHERE series_id=? ORDER BY name", (series_id,))])
 
     async def series_with_assets(self) -> list[int]:
         return [row["series_id"] for row in await self._db.fetch_all("SELECT DISTINCT series_id FROM plan_assets")]

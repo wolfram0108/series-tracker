@@ -559,7 +559,29 @@ async def test_the_names_of_the_files_are_asked_of_the_rule_once_for_a_card_and_
     finally:
         untap()
     assert asked >= 1 and plans == 2  # the first view: names asked, then the plan made again with them
-    assert again == 0 and len(made) - plans == 1
+    assert again == 0 and len(made) == plans  # nothing changed: the second read takes the view as it was counted
+
+
+async def test_the_view_is_counted_once_for_changes_that_come_together_and_every_window_is_told_the_last(world, monkeypatch):
+    """The view of a series is a projection of its inputs: changes that come while it is counted make one more count with
+    all of them, not one count each, and the view every window is told last is the one a read then gives."""
+    import core.plan.executor as executor
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    await planner.request("planner.series.get", {"series_id": SERIES})
+    made = []
+    counted = executor.plan
+    monkeypatch.setattr(executor, "plan", lambda *args: made.append(1) or counted(*args))
+    told = planner.bus.subscribe("planner.series.changed")
+    for _ in range(5):
+        planner.bus.publish(Envelope(topic="composition.changed", kind="event", payload={"series_id": SERIES}))
+    last = (await asyncio.wait_for(told.queue.get(), 30)).payload
+    while (task := planner._counting.get(SERIES)) is not None and not task.done():
+        await asyncio.shield(task)
+    while not told.queue.empty():
+        last = (await told.queue.get()).payload
+    assert 1 <= len(made) <= 2
+    assert last == await planner.request("planner.series.get", {"series_id": SERIES})
 
 
 async def test_a_failure_is_told_with_the_episodes_and_the_voice_over_of_its_row(world):

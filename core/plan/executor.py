@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, replace
 from collections.abc import Mapping
 from typing import Callable
 
+from .. import compute
 from ..reasons import reason
 from .planner import Goal, Group, Op, Plan, plan, restricted, video_op
 from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
@@ -348,9 +349,9 @@ class SeriesSync:
                                     if track.aligned_to in self.retimed else track for track in container.tracks))
 
     async def plan_of(self, inputs: Inputs) -> Plan:
-        first = plan(inputs, self.namer)
+        first = await compute.run(plan, inputs, self.namer)
         namer = await self.namer_for(first)
-        made = first if namer is self.namer else plan(inputs, namer)
+        made = first if namer is self.namer else await compute.run(plan, inputs, namer)
         return made if self.holds is None else restricted(made, self.holds)
 
     async def sync(self, online: tuple[OnlineRow, ...], choices: Choices) -> Synced:

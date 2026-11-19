@@ -101,7 +101,7 @@ import hashlib
 import json
 import os
 import shutil
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 
 from core import NO_HANDLER, BaseModule, BusRequestError, compute, storage
 from core import container as mkv
@@ -191,6 +191,35 @@ def _sizes(files: Library, names: list[str]) -> dict[str, float]:
     return out
 
 
+def _inputs_of(answer: dict, series: dict, voices: dict) -> tuple:
+    """The rows and the choices of a series from the answer of the layout, and its compilations by their row: thousands
+    of rows (the pool)."""
+    layout = CompositionReply.model_validate(answer)
+    online, choices = planner_inputs(layout, series, voices)
+    return online, choices, {(each.ref.source_id, each.ref.row_key): each.ref for each in layout.compilations}
+
+
+@dataclass(frozen=True)
+class _Held:
+    """What the view reads of a sync: its table, its failures and its commands at one moment."""
+
+    containers: dict
+    failed: frozenset
+    commands: frozenset
+
+
+def _view_body(series_id: int, held: _Held, made: Plan | None, inputs, members: dict, running: bool,
+               problems: list) -> dict:
+    """The view of the window from what the tables and the plan give: pure work over thousands of rows (the pool)."""
+    # Online is what the sources give now: a row that stands from an earlier read is not.
+    online = frozenset(row.id for row in inputs.online if row.current) if inputs is not None else None
+    references = references_of(inputs, made, members) if inputs is not None and made is not None else []
+    view = {**view_of(series_id, held, made, running=running, online=online,
+                      rows=inputs.online if inputs is not None else ()),
+            "problems": problems, "references": [each.model_dump(mode="json") for each in references]}
+    return PlannerView.model_validate(view).model_dump(mode="json")
+
+
 class BusSync(SeriesSync):
     """The sync of one series with the service's workers (see the module)."""
 
@@ -236,6 +265,10 @@ class BusSync(SeriesSync):
         if self.download and not self.told:
             self.told = True
             await self.m._publish_view(self.series["id"], self, made, inputs)
+        elif self.download:
+            # A plan made again (a failure, a length): the window shows the plan the sync works by now.
+            self.m._views[self.series["id"]] = (made, inputs)
+            self.m._ask_recount(self.series["id"])
         if self.download:
             self.m.packing.planned(self.series, self.run_mark, made, self.containers, self.voice_order, self.source_marks)
             self.m.pack_going()
@@ -760,6 +793,7 @@ class BusSync(SeriesSync):
             self.m.pack_publish()
         await self.m.save(self.series["id"], self)
         await storage.call(self.files.finish)
+        self.m._ask_recount(self.series["id"])  # the files of the series changed: every window is told now, not at the end
         if staged and any(step[0] == "publish" for step in staged):
             # A new file of the series: the card shows when the series last got one (catalog: last_scan_time).
             self.m.send_command("catalog.series.touch_scan_time", {"series_id": self.series["id"]})
@@ -779,6 +813,11 @@ class PlannerModule(BaseModule):
         self._ended: dict[str, dict] = {}  # jobs that ended before anyone waited for them
         self._views: dict[int, tuple] = {}
         self._names: dict[int, tuple[str, dict]] = {}  # the names the rule gave each series, with the card they are of
+        # The projection of the view of each series: the last view counted, the series whose inputs changed since it,
+        # and the count under way.
+        self._shown: dict[int, dict] = {}
+        self._stale: set[int] = set()
+        self._counting: dict[int, asyncio.Task] = {}
         self._members: dict[int, dict] = {}  # the compilations of the layout of a series by their row
         self._loaded: dict[int, tuple] = {}  # the failures and commands a running sync started from
         self._forgot: set[int] = set()  # series whose failures the user reset while their sync ran
@@ -911,8 +950,7 @@ class PlannerModule(BaseModule):
     async def _load(self, series_id: int, sync: SeriesSync) -> None:
         """The asset of the series as the table holds it; a file the disk has not any more is gone from the table."""
         containers = {}
-        for data in await self.repo.assets(series_id):
-            container = container_of(data)
+        for container in await self.repo.containers(series_id):
             if await storage.call(os.path.exists, os.path.join(sync.files.root, container.name)):
                 containers[container.name] = await as_in_file(sync.files, container)
             else:
@@ -944,11 +982,9 @@ class PlannerModule(BaseModule):
 
     async def _inputs(self, series: dict):
         series_id = series["id"]
-        layout = await compute.run(CompositionReply.model_validate,
-                                   await self.request("composition.get", {"series_id": series_id}))
-        self._members[series_id] = {(each.ref.source_id, each.ref.row_key): each.ref for each in layout.compilations}
+        answer = await self.request("composition.get", {"series_id": series_id})
         voices = await self.request("voices.settings.get", {})
-        online, choices = planner_inputs(layout, series, voices)
+        online, choices, self._members[series_id] = await compute.run(_inputs_of, answer, series, voices)
         return online, choices
 
     # --- the picture of the packing ------------------------------------------------------------------------------
@@ -1331,15 +1367,57 @@ class PlannerModule(BaseModule):
 
     async def _publish_view(self, series_id: int, sync: SeriesSync | None = None, made: Plan | None = None,
                             inputs=None) -> dict:
-        view = PlannerView.model_validate(await self._view(series_id, sync, made, inputs)).model_dump(mode="json")
-        self.publish_event("planner.series.changed", view)
-        self._stand(series_id, view)
+        """The view of a series told to every window. With the plan a sync froze, that plan is shown as it is; else the
+        view is counted again from the tables, once for every change however many come meanwhile (`_recount`)."""
+        if made is None:
+            return await self._recount(series_id)
+        view = await self._counted(series_id, sync, made, inputs)
+        self._told(series_id, view)
         return view
 
-    async def _view(self, series_id: int, sync: SeriesSync | None = None, made: Plan | None = None, inputs=None) -> dict:
+    def _told(self, series_id: int, view: dict) -> None:
+        self._shown[series_id] = view
+        self.publish_event("planner.series.changed", view)
+        self._stand(series_id, view)
+
+    def _ask_recount(self, series_id: int) -> asyncio.Task:
+        """An input of the view of the series changed: the view is counted again. Changes that come while it is counted
+        make one more count, with all of them, when this one ends: the last view is always that of the last change."""
+        self._stale.add(series_id)
+        task = self._counting.get(series_id)
+        if task is None or task.done():
+            task = self._counting[series_id] = asyncio.ensure_future(self._count(series_id))
+            task.add_done_callback(self._count_ended)
+        return task
+
+    async def _recount(self, series_id: int) -> dict:
+        return await asyncio.shield(self._ask_recount(series_id))
+
+    async def _count(self, series_id: int) -> dict:
+        view = None
+        while series_id in self._stale:
+            self._stale.discard(series_id)
+            view = await self._counted(series_id)
+            self._told(series_id, view)
+        return view
+
+    def _count_ended(self, task: asyncio.Task) -> None:
+        if not task.cancelled() and task.exception() is not None:
+            self.log.error("вид плана не посчитан: %s", task.exception(), exc_info=task.exception())
+
+    async def _shown_view(self, series_id: int) -> dict:
+        """The view as it was last counted; counted now when there is none or an input changed since."""
+        counting = self._counting.get(series_id)
+        idle = counting is None or counting.done()
+        if idle and series_id in self._shown and series_id not in self._stale:
+            return self._shown[series_id]
+        return await self._recount(series_id) if idle else await asyncio.shield(counting)
+
+    async def _counted(self, series_id: int, sync: SeriesSync | None = None, made: Plan | None = None, inputs=None) -> dict:
         """The view of a series: the asset, the failures and the commands as the table holds them now, and the plan as
         the tables give it now (between syncs only the tables change, and the plan is counted again from them); while a
-        sync runs, the plan it froze. The reference of every episode, and why, is told by that plan."""
+        sync runs, the plan it froze. The reference of every episode, and why, is told by that plan. Thousands of rows:
+        everything but the reading of the tables is counted in the pool of computation."""
         running = series_id in self._runs and not self._runs[series_id].done()
         if made is not None:
             self._views[series_id] = (made, inputs)
@@ -1351,48 +1429,45 @@ class PlannerModule(BaseModule):
             except (BusRequestError, asyncio.TimeoutError):
                 series = None
             fresh = BusSync(self, series, False) if series is not None else SeriesSync()
-            fresh.containers = {data["name"]: container_of(data) for data in await self.repo.assets(series_id)}
+            fresh.containers = {each.name: each for each in await self.repo.containers(series_id)}
             fresh.failed = {_failure_decoded(each) for each in await self.repo.failures(series_id)}
             fresh.commands = frozenset(_decoded(each) for each in await self.repo.commands(series_id))
             if made is None and series is not None:
                 try:
                     rows, choices = await self._inputs(series)
-                    fresh.containers = {each.name: each for each in assets_against(fresh.containers.values(), rows)}
+                    held = list(fresh.containers.values())
+                    fresh.containers = await compute.run(
+                        lambda: {each.name: each for each in assets_against(held, rows)})
                     inputs = fresh.inputs(rows, choices)
                     made = await fresh.plan_of(inputs)
                 except (BusRequestError, asyncio.TimeoutError) as exc:
                     self.log.warning("сериал %d: план для окна не посчитан: %s", series_id, exc)
             sync = sync or fresh
-        # Online is what the sources give now: a row that stands from an earlier read is not.
-        online = frozenset(row.id for row in inputs.online if row.current) if inputs is not None else None
-        references = references_of(inputs, made, self._members.get(series_id, {})) \
-            if inputs is not None and made is not None else []
-        return {**view_of(series_id, sync, made, running=running, online=online,
-                          rows=inputs.online if inputs is not None else ()),
-                "problems": await self.repo.outcome(series_id),
-                "references": [each.model_dump(mode="json") for each in references]}
+        # What the view reads of the sync, as it is now: the sync goes on while the view is counted in the pool.
+        held_now = _Held(dict(sync.containers), frozenset(sync.failed), frozenset(sync.commands))
+        problems = await self.repo.outcome(series_id)
+        return await compute.run(_view_body, series_id, held_now, made, inputs, dict(self._members.get(series_id, {})),
+                                 running, problems)
 
     async def on_references_get(self, env: Envelope) -> list[dict]:
         """The reference of every episode of a series, and why it is that one (core/plan/marks)."""
-        return (await self._view(int(env.payload["series_id"])))["references"]
+        return (await self._shown_view(int(env.payload["series_id"])))["references"]
 
     async def on_layout_changed(self, env: Envelope) -> None:
         """The layout or the levers of a series changed: its plan is counted again from the tables, and the window told."""
-        if env.payload.get("summary_only"):
-            return
-        await self._publish_view(int(env.payload["series_id"]))
+        if not env.payload.get("summary_only"):
+            self._ask_recount(int(env.payload["series_id"]))
 
     async def on_series_updated(self, env: Envelope) -> None:
-        """The user switched an episode or a season off or on (the memory of the series): the plan is counted again."""
-        if {"ignored_seasons", "ignored_episodes"} & set(env.payload or {}):
-            await self._publish_view(int(env.payload["series_id"]))
+        """The card of the series changed (the episodes switched off, the names of its files): the plan is counted again."""
+        self._ask_recount(int(env.payload["series_id"]))
 
     async def on_voice_settings_changed(self, env: Envelope) -> None:
         for series_id in await self.repo.series_with_assets():
-            await self._publish_view(series_id)
+            self._ask_recount(series_id)
 
     async def on_series_get(self, env: Envelope) -> dict:
-        return PlannerView.model_validate(await self._view(int(env.payload["series_id"]))).model_dump(mode="json")
+        return await self._shown_view(int(env.payload["series_id"]))
 
     async def on_delete(self, env: Envelope) -> dict:
         command = PlanDelete.model_validate(env.payload)
