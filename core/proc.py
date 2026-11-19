@@ -36,7 +36,7 @@ PROGRAM_MEMORY_MAX = 2 << 30
 _groups: str | None = None  # the service's own group, given over to it (`isolate`); None: the programs share its group
 _numbers = itertools.count(1)
 SHELL = "/bin/sh"
-_BECOME = 'echo 1000 > /proc/self/oom_score_adj; exec "$@"'  # the first the kernel takes; then the shell is the program
+_BECOME = 'echo 1000 2>/dev/null > /proc/self/oom_score_adj; exec "$@"'  # first the kernel takes; then the program
 # The code of a program whose end is known but whose status is not (asyncio reports a lost child the same way).
 LOST = 255
 
@@ -121,7 +121,8 @@ async def spawn(*cmd: str, memory_max: int = PROGRAM_MEMORY_MAX, **kwargs) -> as
     goes into its own group of memory (`isolate`) and is the first the kernel takes when the machine runs out of memory:
     the shell that starts it puts itself there, then becomes the program (`exec`), so the program never runs outside."""
     group = _group_for(memory_max)
-    enter = 'echo $$ > "$0/cgroup.procs" && ' if group is not None else ""
+    # Each step stands alone: a program that could not enter its group still runs, first in line for the kernel.
+    enter = 'echo $$ 2>/dev/null > "$0/cgroup.procs"; ' if group is not None else ""
     wrapped = (SHELL, "-c", enter + _BECOME, group or "program", *cmd)
     proc = await asyncio.create_subprocess_exec(*wrapped, **kwargs)
     proc._st_group, proc._st_name, proc._st_limit = group, os.path.basename(cmd[0]) if cmd else "?", memory_max
