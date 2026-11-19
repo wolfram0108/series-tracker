@@ -2,6 +2,7 @@
 again, the order and the default track are those given, a container is rebuilt from itself, and a build that is not
 what was asked says why."""
 import asyncio
+import json
 import os
 import shutil
 import subprocess
@@ -323,6 +324,29 @@ def test_subtitles_that_cannot_be_taken_out_of_their_file_say_why_and_leave_noth
                                          subtitles=[SubtitleIn(video, 0, "1:signs:", "Надписи", "rus")]))
     assert reason == "ffmpeg_failed: Invalid data found when processing input"
     assert not os.path.exists(out) and os.listdir(scratch) == []
+
+
+def _flags(path, stream) -> dict:
+    """The flags a stream of a file carries (`v:0`, `a:1`), the ones that are on."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", stream, "-show_entries", "stream_disposition", "-of", "json",
+                          path], check=True, capture_output=True, text=True).stdout
+    return {name: on for name, on in json.loads(out)["streams"][0]["disposition"].items() if on}
+
+
+def test_the_flags_of_every_stream_are_the_builds_own_whatever_the_release_says(media):
+    """`-c copy` passes the flags of an input on to the output: a release that marks its picture «forced» would have the container
+    say so. What the container says is decided by the build: the picture is the default one and nothing else, the first
+    voice-over is the default one, the others carry no flag."""
+    tmp, _video, dubs, _ = media
+    release = make(tmp / "flagged.mkv", "-f", "lavfi", "-i", "testsrc=duration=3:size=160x90:rate=10",
+                   "-f", "lavfi", "-i", "sine=frequency=300:duration=3", "-c:v", "mpeg4", "-c:a", "aac",
+                   "-disposition:v:0", "default+forced", "-disposition:a:0", "forced")
+    assert _flags(release, "v:0") == {"default": 1, "forced": 1}  # the release does say so
+    out = str(tmp / "flagged-out.mkv")
+    tracks = [AudioIn("Оригинал", release, 0, "1:x", own=True), AudioIn("ruchime", dubs["ruchime"], 0, "1:x")]
+    assert asyncio.run(container.build(out, release, "1:x", tracks)) is None
+    assert _flags(out, "v:0") == {"default": 1}
+    assert [_flags(out, f"a:{number}") for number in range(2)] == [{"default": 1}, {}]
 
 
 def test_a_video_of_another_container_carries_its_chapters_and_no_subtitles(media):

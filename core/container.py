@@ -2,7 +2,8 @@
 
 Nothing is encoded again: the video and every audio track are copied as they are (`-c copy`), the way track-muxer
 builds its containers (`mux/build.py`): the first track is the default one, the others are not; the tracks interleave
-evenly, the interleave bounded (`INTERLEAVE_DELTA_US`). The container says what it holds by its own tags, so that the file is its own
+evenly, the interleave bounded (`INTERLEAVE_DELTA_US`). The flags of every stream are the build's own, none passes from an
+input (the picture: default; the voice-overs: the first; the subtitles: as the plan says). The container says what it holds by its own tags, so that the file is its own
 ledger: `ST_VIDEO` (the identity of the video), and for every audio track `ST_VOICE` (the name of the voice-over group),
 the title the player shows (the user's name of the track, else the name of the group), `ST_DUB` (the key of the voice-over, which a rename of its group does not change: the track is known by it),
 `ST_ALIGNED_TO` (the identity of the video the track was aligned to) and `ST_OWN` (1 for the video's own sound), the
@@ -195,8 +196,10 @@ async def _build(output: str, video: str, video_identity: str, tracks: Sequence[
         cmd += ["-map", f"{index_of[each.path]}:s:{each.stream}"]
     for path, stream in fonts:
         cmd += ["-map", f"{index_of[path]}:{stream['index']}"]
+    # `-c copy` passes the flags of an input on, so the build says them for every kind of stream itself: the picture is the
+    # default one and nothing else (below the voice-overs and the subtitles).
     cmd += ["-map_metadata", "-1", "-map_chapters", "0", "-c", "copy", "-max_interleave_delta", str(INTERLEAVE_DELTA_US),
-            "-metadata", f"ST_VIDEO={video_identity}", "-metadata", f"ST_PUBLICATION={publication}"]
+            "-disposition:v:0", "default", "-metadata", f"ST_VIDEO={video_identity}", "-metadata", f"ST_PUBLICATION={publication}"]
     for number, each in enumerate(subtitles):
         cmd += [*([f"-metadata:s:s:{number}", f"language={each.language}"] if each.language else []),
                 *([f"-metadata:s:s:{number}", f"title={each.title}"] if each.title else []),
