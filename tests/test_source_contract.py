@@ -71,7 +71,8 @@ async def test_every_row_of_every_kind_of_source_has_the_frame_of_its_own_episod
         for row in rows:
             # Condition 1: a row with no frame of its own episode cannot reach the constructor: the source is not fit.
             assert row["state"] == "playable" and row["heights"], (url, row["key"], row["state"], row.get("reason"))
-            got[int(re.search(r"\d+", row["text"]).group())] = max(row["heights"])
+            # The episode is the row's own property where the player has one (a line of the provider), else in its text.
+            got[int(re.search(r"\d+", row["episode"] or row["text"]).group())] = max(row["heights"])
             # Obligation 3: the user can put the player of the row above or below the others, by its words.
             assert fold_name(row["player"]) in placed, (url, row["player"], order["priority"])
             assert order["player_labels"].get(row["player"]), (url, row["player"])
