@@ -10,13 +10,12 @@ order, and a flag of a variant leaves it out of one queue.
 """
 from __future__ import annotations
 
-import json
-from functools import lru_cache
-import re
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
+
+from .. import _native
 
 from .compilation import CompilationRef
 
@@ -91,40 +90,24 @@ LEVER_FORMS: frozenset[tuple[TargetKind, ValueShape]] = frozenset({
     (TargetKind.GROUP, ValueShape.FLAG), (TargetKind.VARIANT, ValueShape.FLAG),
     (TargetKind.NONE, ValueShape.FLAG), (TargetKind.NONE, ValueShape.COMPILATION), (TargetKind.NONE, ValueShape.VARIANT_SETS)})
 
-_GROUP_TARGET = re.compile(r"group:(.+)", re.DOTALL)
-
-
+# The targets of levers are made and read by the core (native/contracts): one writing of each, in one place.
 def group_target(name: str) -> str:
-    return f"group:{name}"
+    return _native.group_target(name)
 
 
 def variant_target(group: str, source_id: int, player: str) -> str:
     """The target of a variant: a JSON array, so that no name, however odd, can be taken for a part of another."""
-    return "variant:" + json.dumps([group, source_id, player], ensure_ascii=False, separators=(",", ":"))
+    return _native.variant_target(group, source_id, player)
 
 
-@lru_cache(maxsize=1 << 16)  # the targets of a series are few and read for every episode: each is parsed once
 def parse_variant_target(target: str) -> tuple[str, int, str] | None:
     """(group, source id, player) of a target made by `variant_target`; None for anything else."""
-    if not target.startswith("variant:"):
-        return None
-    try:
-        found = json.loads(target[len("variant:"):])
-    except ValueError:
-        return None
-    if (not isinstance(found, list) or len(found) != 3 or not isinstance(found[0], str) or not found[0]
-            or isinstance(found[1], bool) or not isinstance(found[1], int) or not isinstance(found[2], str)
-            or not found[2]):
-        return None
-    group, source_id, player = found
-    return (group, source_id, player) if variant_target(group, source_id, player) == target else None
+    return _native.parse_variant_target(target)
 
 
-@lru_cache(maxsize=1 << 16)
 def parse_group_target(target: str) -> str | None:
     """The group name of a target made by `group_target`; None for anything else."""
-    found = _GROUP_TARGET.fullmatch(target)
-    return found.group(1) if found is not None and group_target(found.group(1)) == target else None
+    return _native.parse_group_target(target)
 
 
 class _Scope(BaseModel):

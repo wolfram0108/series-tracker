@@ -2,6 +2,8 @@
 //! constructor gave it. The table `composition_rows` is the module's own memory (Р-7): its SQL lives here, in the
 //! module's part of the core, and nowhere else.
 
+pub mod levers;
+
 use rusqlite::{Connection, OpenFlags};
 
 /// A row of the layout, one column of `composition_rows` per field (core/contracts/composition.py CompositionRow).

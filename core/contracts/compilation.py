@@ -7,36 +7,21 @@ the timeline of the single episode chosen as the reference (REF 2), and that cut
 """
 from __future__ import annotations
 
-import json
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-_PREFIX = "compilation:"
-
+from .. import _native
 
 def compilation_key(group: str, source_id: int, player: str, season: int, start: int, end: int) -> str:
-    """The key of a compilation: a JSON array, so that no name, however odd, can be taken for a part of another."""
-    return _PREFIX + json.dumps([group, source_id, player, season, start, end], ensure_ascii=False, separators=(",", ":"))
+    """The key of a compilation: a JSON array, so that no name, however odd, can be taken for a part of another. Made and
+    read by the core (native/contracts)."""
+    return _native.compilation_key(group, source_id, player, season, start, end)
 
 
 def parse_compilation_key(key: object) -> tuple[str, int, str, int, int, int] | None:
     """(group, source id, player, season, start, end) of a key made by `compilation_key`; None for anything else."""
-    if not isinstance(key, str) or not key.startswith(_PREFIX):
-        return None
-    try:
-        found = json.loads(key[len(_PREFIX):])
-    except ValueError:
-        return None
-    if not isinstance(found, list) or len(found) != 6:
-        return None
-    group, source_id, player, season, start, end = found
-    if (not isinstance(group, str) or not isinstance(player, str) or not player
-            or any(isinstance(each, bool) or not isinstance(each, int) for each in (source_id, season, start, end))
-            or end <= start):
-        return None
-    return (group, source_id, player, season, start, end) if compilation_key(group, source_id, player, season, start,
-                                                                             end) == key else None
+    return _native.parse_compilation_key(key) if isinstance(key, str) else None
 
 
 class Absence(StrEnum):

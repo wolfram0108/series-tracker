@@ -5,7 +5,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
-use st_composition::{rows_of, Row};
+use st_composition::{levers, rows_of, Row};
 
 /// The rows of the layout of a series, held by the core.
 #[pyclass(frozen, module = "core._native")]
@@ -72,11 +72,98 @@ fn layout_rows_given(given: Vec<Bound<'_, PyAny>>) -> PyResult<Rows> {
     Ok(Rows { rows })
 }
 
+// --- the forms of the contracts: made and read in the core only ---------------------------------------------------------
+
+#[pyfunction]
+fn variant_target(group: &str, source_id: i64, player: &str) -> String {
+    st_contracts::variant_target(group, source_id, player)
+}
+
+#[pyfunction]
+fn parse_variant_target(target: &str) -> Option<(String, i64, String)> {
+    st_contracts::parse_variant_target(target)
+}
+
+#[pyfunction]
+fn group_target(name: &str) -> String {
+    st_contracts::group_target(name)
+}
+
+#[pyfunction]
+fn parse_group_target(target: &str) -> Option<String> {
+    st_contracts::parse_group_target(target)
+}
+
+#[pyfunction]
+fn compilation_key(group: &str, source_id: i64, player: &str, season: i64, start: i64, end: i64) -> String {
+    st_contracts::compilation_key(group, source_id, player, season, start, end)
+}
+
+#[pyfunction]
+fn parse_compilation_key(key: &str) -> Option<st_contracts::CompilationKey> {
+    st_contracts::parse_compilation_key(key)
+}
+
+// --- the forms of the levers: the module declares a lever, the core tells its records --------------------------------
+
+fn kinds(target: &str, shape: &str) -> PyResult<(levers::Target, levers::Shape)> {
+    let target = levers::Target::of(target).ok_or_else(|| PyValueError::new_err(format!("no target kind {target}")))?;
+    let shape = levers::Shape::of(shape).ok_or_else(|| PyValueError::new_err(format!("no value shape {shape}")))?;
+    Ok((target, shape))
+}
+
+fn json_of(value: &str) -> PyResult<serde_json::Value> {
+    serde_json::from_str(value).map_err(|exc| PyValueError::new_err(exc.to_string()))
+}
+
+#[pyfunction]
+#[pyo3(signature = (name, target, shape, levels=None))]
+fn lever_register(name: &str, target: &str, shape: &str, levels: Option<Vec<String>>) -> PyResult<()> {
+    let (target, shape) = kinds(target, shape)?;
+    levers::register(name, levers::Form { target, shape, levels });
+    Ok(())
+}
+
+#[pyfunction]
+fn lever_unregister(name: &str) {
+    levers::unregister(name);
+}
+
+/// Whether a value (its JSON) is one of the values of a lever of this shape and target.
+#[pyfunction]
+fn lever_accepts(target: &str, shape: &str, value: &str) -> PyResult<bool> {
+    let (target, shape) = kinds(target, shape)?;
+    Ok(levers::accepts(shape, target, &json_of(value)?))
+}
+
+#[pyfunction]
+#[pyo3(signature = (kind, target=None))]
+fn lever_accepts_target(kind: &str, target: Option<&str>) -> PyResult<bool> {
+    let kind = levers::Target::of(kind).ok_or_else(|| PyValueError::new_err(format!("no target kind {kind}")))?;
+    Ok(levers::accepts_target(kind, target))
+}
+
+/// None when a record (its value as JSON) is in the registry's terms; else the code of the refusal.
+#[pyfunction]
+#[pyo3(signature = (lever, target, value, season=None, episode=None, compilation=None))]
+fn lever_problem(lever: &str, target: Option<&str>, value: &str, season: Option<i64>, episode: Option<i64>,
+                 compilation: Option<&str>) -> PyResult<Option<&'static str>> {
+    let value = json_of(value)?;
+    Ok(levers::problem(&levers::Record { lever, target, value: &value, season, episode, compilation }))
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("COLUMNS", st_composition::COLUMNS)?;
     m.add_class::<Rows>()?;
-    m.add_function(wrap_pyfunction!(layout_rows, m)?)?;
-    m.add_function(wrap_pyfunction!(layout_rows_given, m)?)?;
+    for function in [wrap_pyfunction!(layout_rows, m)?, wrap_pyfunction!(layout_rows_given, m)?,
+                     wrap_pyfunction!(variant_target, m)?, wrap_pyfunction!(parse_variant_target, m)?,
+                     wrap_pyfunction!(group_target, m)?, wrap_pyfunction!(parse_group_target, m)?,
+                     wrap_pyfunction!(compilation_key, m)?, wrap_pyfunction!(parse_compilation_key, m)?,
+                     wrap_pyfunction!(lever_register, m)?, wrap_pyfunction!(lever_unregister, m)?,
+                     wrap_pyfunction!(lever_accepts, m)?, wrap_pyfunction!(lever_accepts_target, m)?,
+                     wrap_pyfunction!(lever_problem, m)?] {
+        m.add_function(function)?;
+    }
     Ok(())
 }

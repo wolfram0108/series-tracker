@@ -2,7 +2,7 @@
 # here. One crate per owner of the data, in pure Rust with its own tests; `python` is the only binding to the interpreter.
 [workspace]
 resolver = "2"
-members = ["composition", "python"]
+members = ["contracts", "composition", "python"]
 
 [profile.release]
 opt-level = 3
