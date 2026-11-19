@@ -236,10 +236,17 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
     voices_order = {season: {voice: place for place, voice in enumerate(order)} for season, order in choices.groups.items()}
     last = len(inputs.online)
 
+    known: dict[tuple, tuple] = {}
+
     def criteria(ranking, height: int, player: str, source_id: int) -> tuple:
-        """The service's own criteria (core/variant_queue), the place of the row aside: it is the last tie-break."""
-        item = Ranked(Line(height, player, source_id), 0)
-        return tuple(each(item, order) for each in ranking)
+        """The service's own criteria (core/variant_queue), the place of the row aside: it is the last tie-break. The
+        variants of a series are few and every episode asks them: each is ranked once a plan."""
+        key = (ranking, height, player, source_id)
+        found = known.get(key)
+        if found is None:
+            item = Ranked(Line(height, player, source_id), 0)
+            found = known[key] = tuple(each(item, order) for each in ranking)
+        return found
 
     def position(row_id: RowId) -> int:
         row = online.get(row_id)

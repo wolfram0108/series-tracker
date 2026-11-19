@@ -275,12 +275,14 @@ def canonical(records: Sequence[SettingRecord]) -> list[SettingRecord]:
 
 
 def _index(records: Sequence[SettingRecord]) -> _Index:
-    """lever -> target -> (season, episode, compilation) -> value, over the records the registry still accepts."""
+    """lever -> target -> (season, episode, compilation) -> value, over the records the registry still accepts. A value
+    is copied here, once: the levers every episode inherits share it (an order of the series stands in all its episodes),
+    and nobody changes a value read."""
     index: _Index = {}
     for record in records:
         if validate(record) is None:
             index.setdefault(record.lever, {}).setdefault(record.target, {})[
-                (record.season, record.episode, record.compilation)] = record.value
+                (record.season, record.episode, record.compilation)] = deepcopy(record.value)
     return index
 
 
@@ -302,7 +304,8 @@ def _resolve(index: _Index, season: int | None, episode: int | None, compilation
             target for target, values in by_target.items() if scopes & set(values))
         for target in targets:
             values = by_target.get(target, {})
-            level, value = next(((level, values[scope]) for level, scope in chain if scope in values),
-                                (Level.DEFAULT, lever.default))
-            result.append(EffectiveLever(lever=lever.name, target=target, value=deepcopy(value), level=level))
+            level, value = next(((level, values[scope]) for level, scope in chain if scope in values), (Level.DEFAULT, None))
+            # The default is the registry's own: each lever gets a copy of it.
+            value = deepcopy(lever.default) if level == Level.DEFAULT else value
+            result.append(EffectiveLever(lever=lever.name, target=target, value=value, level=level))
     return result

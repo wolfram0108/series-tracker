@@ -11,6 +11,7 @@ order, and a flag of a variant leaves it out of one queue.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 import re
 from enum import StrEnum
 from typing import Any
@@ -102,6 +103,7 @@ def variant_target(group: str, source_id: int, player: str) -> str:
     return "variant:" + json.dumps([group, source_id, player], ensure_ascii=False, separators=(",", ":"))
 
 
+@lru_cache(maxsize=1 << 16)  # the targets of a series are few and read for every episode: each is parsed once
 def parse_variant_target(target: str) -> tuple[str, int, str] | None:
     """(group, source id, player) of a target made by `variant_target`; None for anything else."""
     if not target.startswith("variant:"):
@@ -118,6 +120,7 @@ def parse_variant_target(target: str) -> tuple[str, int, str] | None:
     return (group, source_id, player) if variant_target(group, source_id, player) == target else None
 
 
+@lru_cache(maxsize=1 << 16)
 def parse_group_target(target: str) -> str | None:
     """The group name of a target made by `group_target`; None for anything else."""
     found = _GROUP_TARGET.fullmatch(target)
