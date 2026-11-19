@@ -13,12 +13,17 @@ build is done is told by reading the result back (`contents`), never by the code
 
 Subtitles (stage 15, DESIGN.md 7.1.1) are the tracks the plan chose, in its order, each with `ST_SUB` (the key of the row
 it came from), its name as title, its language and the flag «forced»; the fonts of the files they come from go with them.
+Each of them comes into the build as an input of its own (`_taken_out`): ffmpeg takes its next packet from the input of the
+stream that is furthest behind, and the signs of an episode (one event in all of it) stay the furthest behind for good, so the
+file they share with the picture would be read to its end before any voice-over of the other files; the container would hold
+all of its picture and then all of its sound from the start again, and a player shows no picture or hangs.
 """
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
+import tempfile
+from dataclasses import dataclass, field, replace
 from typing import Awaitable, Callable, Sequence
 
 from .ffprobe import film_stream, layout_of, streams_of
@@ -155,6 +160,15 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     """Write the container at `output` (an .mkv the caller puts in place); None when it was built and reads back as asked,
     else the reason. The video is the film of `video` (core.ffprobe.film_stream); a track of the same file is taken
     from it."""
+    with tempfile.TemporaryDirectory(prefix="st-subtitles-") as scratch:
+        return await _build(output, video, video_identity, tracks, publication=publication, timeout=timeout,
+                            provenance=provenance, report=report, subtitles=subtitles, scratch=scratch)
+
+
+async def _build(output: str, video: str, video_identity: str, tracks: Sequence[AudioIn], *, publication: str,
+                 timeout: float, provenance: dict | None, report: Report, subtitles: Sequence[SubtitleIn],
+                 scratch: str) -> str | None:
+    """`build`, with `scratch`, the directory the subtitles taken out of their files wait in, which the caller removes."""
     executable = program("ffmpeg")
     if executable is None:
         return "ffmpeg_missing"
@@ -162,8 +176,14 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     if film is None:
         return "no_video"  # the file has no film to build of (no video stream, or only a picture it carries)
     expected = await contents(video)
-    sources = [video] + [path for path in dict.fromkeys([*(track.path for track in tracks),
-                                                          *(each.path for each in subtitles)]) if path != video]
+    taken = await _taken_out(executable, subtitles, scratch, timeout)
+    if isinstance(taken, str):
+        return taken
+    # The fonts the chosen subtitles are drawn with: the attachments of the Matroska files they come from (DESIGN.md 7.1);
+    # the chapters are the video's. The table of a container built here is no font: it is written anew below.
+    fonts = await _fonts([each.path for each in subtitles])
+    sources = [video] + [path for path in dict.fromkeys([*(track.path for track in tracks), *(each.path for each in taken),
+                                                          *(path for path, _stream in fonts)]) if path != video]
     index_of = {path: number for number, path in enumerate(sources)}
     cmd = [executable, "-y", "-hide_banner", "-loglevel", "error"]
     for path in sources:
@@ -171,11 +191,8 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     cmd += ["-map", f"0:{film['index']}"]
     for track in tracks:
         cmd += ["-map", f"{index_of[track.path]}:a:{track.stream}"]
-    for each in subtitles:
+    for each in taken:
         cmd += ["-map", f"{index_of[each.path]}:s:{each.stream}"]
-    # The fonts the chosen subtitles are drawn with: the attachments of the Matroska files they come from (DESIGN.md 7.1);
-    # the chapters are the video's. The table of a container built here is no font: it is written anew below.
-    fonts = await _fonts([each.path for each in subtitles])
     for path, stream in fonts:
         cmd += ["-map", f"{index_of[path]}:{stream['index']}"]
     cmd += ["-map_metadata", "-1", "-map_chapters", "0", "-c", "copy", "-max_interleave_delta", str(INTERLEAVE_DELTA_US),
@@ -236,9 +253,7 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
             os.remove(attached)
     # An end whose status was lost tells nothing: the container that was written is what is judged.
     if code not in (0, LOST):
-        # A program the system killed (no memory) says nothing: its code is all the reason there is.
-        said = err.decode(errors="replace").strip()[-300:]
-        return f"ffmpeg_failed: {said or (f'killed by signal {-code}' if code < 0 else f'exit code {code}')}"
+        return _failure(code, err)
     await report("verify", {})
     made = await contents(output)
     if made is not None and made.publication != publication:
@@ -247,6 +262,44 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     if problem is None and made is not None and [each.key for each in made.subtitles] != [each.key for each in subtitles]:
         return "container_subtitles_wrong"
     return problem
+
+
+def _failure(code: int, err: bytes) -> str:
+    """Why an ffmpeg that ended with `code` failed. A program the system killed (no memory) says nothing: its code is all
+    the reason there is."""
+    said = err.decode(errors="replace").strip()[-300:]
+    return f"ffmpeg_failed: {said or (f'killed by signal {-code}' if code < 0 else f'exit code {code}')}"
+
+
+async def _taken_out(executable: str, subtitles: Sequence[SubtitleIn], scratch: str, timeout: float) -> list[SubtitleIn] | str:
+    """The subtitles of a build, each in a file of its own, so that each is an input of its own (the module's docstring says
+    why). A track of a file that holds other streams is taken out of it into `scratch`, every such track of one file in one
+    pass over it; a track that is the only stream of its file (the ASS file of a release) is taken as it is. The reason when
+    a pass fails."""
+    holds: dict[str, bool] = {}
+    for each in subtitles:
+        if each.path not in holds:
+            streams = await streams_of(each.path, timeout=READ_TIMEOUT_S) or []
+            holds[each.path] = sum(1 for stream in streams if stream.get("codec_type") != "attachment") > 1
+    taken = list(subtitles)
+    for pass_number, path in enumerate(path for path, shared in holds.items() if shared):
+        cmd = [executable, "-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", path]
+        files: dict[int, str] = {}
+        for number, each in enumerate(subtitles):
+            if each.path == path:
+                files[number] = os.path.join(scratch, f"{pass_number}-{number}.mks")
+                cmd += ["-map", f"0:s:{each.stream}", "-c", "copy", "-f", "matroska", files[number]]
+        try:
+            code, _out, err = await run_capture(cmd, timeout=timeout)
+        except (OSError, TimeoutError) as exc:
+            return f"ffmpeg_failed: {type(exc).__name__}"
+        if code not in (0, LOST):
+            return _failure(code, err)
+        for number, name in files.items():
+            if not os.path.exists(name):  # an end whose status was lost tells nothing: the file that was written is judged
+                return f"ffmpeg_failed: no subtitles came out of {os.path.basename(path)}"
+            taken[number] = replace(subtitles[number], path=name, stream=0)
+    return taken
 
 
 _FONT_TYPES = {".ttf": "application/x-truetype-font", ".otf": "application/vnd.ms-opentype", ".ttc": "application/x-font-ttf"}
