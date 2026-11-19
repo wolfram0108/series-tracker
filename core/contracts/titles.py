@@ -19,13 +19,15 @@ class TitleSearchRequest(BaseModel):
 class TitleLine(BaseModel):
     """A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it
     is a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider
-    has (a reserve: nothing in the tracker depends on it)."""
+    has (a reserve: nothing in the tracker depends on it). `aka` are the other addresses the same line was issued under: a title merged
+    into this one keeps its old identifier, so a source stored under it is this line too (a line is compared by `url` and `aka`)."""
 
     code: str
     url: str
     label: str = ""
     rows: int | None = None
     routes: int = 0
+    aka: list[str] = Field(default_factory=list)
 
 
 class TitleCard(BaseModel):

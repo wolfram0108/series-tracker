@@ -3,8 +3,15 @@
   "AdoptItem": {
    "$defs": {
     "AdoptTarget": {
-     "description": "The address of the source of protocol 2 (a line of a title) that a line of the old card comes to.",
+     "description": "The address of the source of protocol 2 (a line of a title) that a line of the old card comes to; `aka` are the other addresses\nthe same line was issued under (a merged title's old identifiers).",
      "properties": {
+      "aka": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Aka",
+       "type": "array"
+      },
       "line": {
        "title": "Line",
        "type": "string"
@@ -104,8 +111,15 @@
      "type": "object"
     },
     "AdoptTarget": {
-     "description": "The address of the source of protocol 2 (a line of a title) that a line of the old card comes to.",
+     "description": "The address of the source of protocol 2 (a line of a title) that a line of the old card comes to; `aka` are the other addresses\nthe same line was issued under (a merged title's old identifiers).",
      "properties": {
+      "aka": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Aka",
+       "type": "array"
+      },
       "line": {
        "title": "Line",
        "type": "string"
@@ -150,8 +164,15 @@
    "type": "object"
   },
   "AdoptTarget": {
-   "description": "The address of the source of protocol 2 (a line of a title) that a line of the old card comes to.",
+   "description": "The address of the source of protocol 2 (a line of a title) that a line of the old card comes to; `aka` are the other addresses\nthe same line was issued under (a merged title's old identifiers).",
    "properties": {
+    "aka": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Aka",
+     "type": "array"
+    },
     "line": {
      "title": "Line",
      "type": "string"
@@ -1071,8 +1092,15 @@
   "TitleCard": {
    "$defs": {
     "TitleLine": {
-     "description": "A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it\nis a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider\nhas (a reserve: nothing in the tracker depends on it).",
+     "description": "A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it\nis a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider\nhas (a reserve: nothing in the tracker depends on it). `aka` are the other addresses the same line was issued under: a title merged\ninto this one keeps its old identifier, so a source stored under it is this line too (a line is compared by `url` and `aka`).",
      "properties": {
+      "aka": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Aka",
+       "type": "array"
+      },
       "code": {
        "title": "Code",
        "type": "string"
@@ -1173,8 +1201,15 @@
    "type": "object"
   },
   "TitleLine": {
-   "description": "A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it\nis a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider\nhas (a reserve: nothing in the tracker depends on it).",
+   "description": "A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it\nis a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider\nhas (a reserve: nothing in the tracker depends on it). `aka` are the other addresses the same line was issued under: a title merged\ninto this one keeps its old identifier, so a source stored under it is this line too (a line is compared by `url` and `aka`).",
    "properties": {
+    "aka": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Aka",
+     "type": "array"
+    },
     "code": {
      "title": "Code",
      "type": "string"
@@ -1277,8 +1312,15 @@
      "type": "object"
     },
     "TitleLine": {
-     "description": "A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it\nis a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider\nhas (a reserve: nothing in the tracker depends on it).",
+     "description": "A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it\nis a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider\nhas (a reserve: nothing in the tracker depends on it). `aka` are the other addresses the same line was issued under: a title merged\ninto this one keeps its old identifier, so a source stored under it is this line too (a line is compared by `url` and `aka`).",
      "properties": {
+      "aka": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Aka",
+       "type": "array"
+      },
       "code": {
        "title": "Code",
        "type": "string"

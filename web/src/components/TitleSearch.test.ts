@@ -110,6 +110,23 @@ describe("the search of the titles of the provider in the sources", () => {
     expect(w.find(".ts-line[data-line='duanju'] .ts-add").exists()).toBe(true)
   })
 
+  it("marks the line stored under an address the provider issued it under before: a title it merged keeps its old identifier", async () => {
+    vi.mocked(calls.searchTitles).mockResolvedValue({ ok: true, data: page([
+      card({ id: "324959e909", lines: [
+        { code: "CO4K", url: "title://chines/324959e909/CO4K", label: "", rows: null, routes: 3, aka: ["title://chines/8fe75a5055/CO4K"] },
+        { code: "duanju", url: "title://chines/324959e909/duanju", label: "", rows: null, routes: 3, aka: ["title://chines/8fe75a5055/duanju"] }] }),
+    ]) })
+    const w = mountEditor({ items: [itemOfSource(stored({ url: "title://chines/8fe75a5055/CO4K" }), null, null)] })
+    await w.findAll(".source-mode .st-tab")[1].trigger("click")
+    await w.find(".ts-find").trigger("click")
+    await flushPromises()
+    const done = w.find(".ts-line[data-line='CO4K']")
+    expect(done.classes()).toContain("is-added")
+    expect(done.find(".ts-added .figure-mark").text()).toBe("1")
+    expect(done.find(".ts-add").exists()).toBe(false)  // no second source of the same line
+    expect(w.find(".ts-line[data-line='duanju'] .ts-add").exists()).toBe(true)
+  })
+
   it("believes the provider that says whether a page follows, and says how many titles it left out of the page", async () => {
     // a page of nothing the provider could give is no end of the search: it says another follows, and what it left out
     vi.mocked(calls.searchTitles).mockResolvedValue({ ok: true, data: page([], { pages: null, total: null, more: true, without_lines: 3 }) })

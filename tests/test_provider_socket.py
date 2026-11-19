@@ -304,6 +304,17 @@ async def test_the_search_gives_the_titles_of_the_provider_or_its_reason(system)
     assert failed["titles"] == [] and json.loads(failed["reason"])["code"] == "provider_unavailable"
 
 
+async def test_a_line_the_provider_issued_under_other_addresses_names_them_in_the_search(system):
+    site = next(iter(system.mock.sites.values()))
+    site.found[0]["aliases"] = ["old1", "old2"]  # the first title had two others merged into it
+    site.found.append({"id": 8, "name": "他", "lines": ["Z"]})  # a title never merged
+    got = await system.probe.request("sources.titles.search", {"query": "名", "page": 1})
+    merged, plain = got["titles"]
+    assert [line["aka"] for line in merged["lines"]] == [[line["url"].replace("/7/", "/old1/"), line["url"].replace("/7/", "/old2/")]
+                                                        for line in merged["lines"]] and len(merged["lines"]) == 2
+    assert [line["aka"] for line in plain["lines"]] == [[]]
+
+
 # --- a provider that is down ------------------------------------------------------------------------------------------------------------
 
 async def test_a_provider_that_goes_down_is_a_state_and_a_reason_and_keeps_its_sites_and_comes_back_by_itself(system, tmp_path):

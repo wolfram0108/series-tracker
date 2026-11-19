@@ -6,7 +6,7 @@ import StInput from "./StInput.vue"
 import { t, tn } from "../i18n"
 import { searchTitles } from "../composables/sourceCalls"
 import { reasonText } from "../lib/reason"
-import { lineAddress, type TitleCard, type TitleLine, type TitleSearchReply } from "../lib/sources"
+import { addedLine, lineAddress, type TitleCard, type TitleLine, type TitleSearchReply } from "../lib/sources"
 import { useProviderStore } from "../stores/provider"
 
 // The search of the titles of the provider of external sources: the user's words (the names of the series offered as buttons),
@@ -141,11 +141,11 @@ const markStyle = (color: number | null) => ({ backgroundColor: color === null ?
         <div v-if="card.lines?.length" class="ts-lines">
           <p class="sheet-caption">{{ t("sources.titles.lines", { n: card.lines?.length ?? 0 }) }}</p>
           <div v-for="line in card.lines" :key="line.code" class="input-constructor-group ts-line" :data-line="line.code"
-               :class="{ 'is-added': line.url in added }">
+               :class="{ 'is-added': addedLine(line, added) }">
             <div class="constructor-item item-label-text-icon"><i class="pi pi-video" aria-hidden="true" /><b class="ts-code">{{ line.code }}</b></div>
             <div class="constructor-item item-value ts-rows" :class="{ 'is-unknown': line.rows == null }">{{ rowsText(line) }}</div>
-            <div v-if="line.url in added" class="constructor-item ts-added">
-              <span class="figure-mark" :style="markStyle(added[line.url].color)">{{ added[line.url].n }}</span>{{ t("sources.titles.added", { n: added[line.url].n }) }}
+            <div v-if="addedLine(line, added)" class="constructor-item ts-added">
+              <span class="figure-mark" :style="markStyle(addedLine(line, added)!.color)">{{ addedLine(line, added)!.n }}</span>{{ t("sources.titles.added", { n: addedLine(line, added)!.n }) }}
             </div>
             <div v-else class="item-button-group">
               <button type="button" class="btn-icon btn-add btn-text-icon ts-add" :disabled="busy" :title="t('sources.add.button')"

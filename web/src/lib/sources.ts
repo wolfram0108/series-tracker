@@ -24,6 +24,13 @@ export type TitleCard = Schemas["TitleCard"]
 export type TitleLine = Schemas["TitleLine"]
 export type LayoutRow = Schemas["CompositionRow"]
 
+/** What the series holds under this line of a title: found by the address the provider issues the line under now, or by one it issued
+ * it under before (a title the provider merged into another keeps its old identifier, and a source stored under it is the same line). */
+export function addedLine<T>(line: TitleLine, added: Record<string, T>): T | undefined {
+  for (const url of [line.url, ...(line.aka ?? [])]) if (url in added) return added[url]
+  return undefined
+}
+
 /** The player whose list holds several seasons of a catalog; the user picks the one that belongs to the source. */
 export const CATALOG_PLAYER = "vibix"
 /** The site of a VK channel is the only one whose source is of the type `vk_video`; any other site is `web_video`. */

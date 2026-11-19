@@ -184,7 +184,9 @@ class MockProvider:
             def lines_of(site: MockSite, each: dict) -> list[dict]:
                 held = site.titles.get(str(each["id"]))
                 codes = list(dict.fromkeys(row["site_fields"]["line"] for row in held["rows"])) if held else each.get("lines", [])
-                return [{"code": code, "url": f"title://{site.name}/{each['id']}/{code}", "label": code, "routes": 3} for code in codes]
+                # `aliases`: the identifiers of the titles the provider merged into this one; each line names the addresses issued under them
+                return [{"code": code, "url": f"title://{site.name}/{each['id']}/{code}", "label": code, "routes": 3,
+                         "aka": [f"title://{site.name}/{old}/{code}" for old in each.get("aliases", [])]} for code in codes]
 
             titles = [{"id": str(each["id"]), "name": each.get("name", ""), "lines": lines_of(site, each)}
                       for site in self.sites.values() for each in site.found]

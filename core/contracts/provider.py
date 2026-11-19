@@ -168,10 +168,12 @@ class AdoptRequest(BaseModel):
 
 
 class AdoptTarget(BaseModel):
-    """The address of the source of protocol 2 (a line of a title) that a line of the old card comes to."""
+    """The address of the source of protocol 2 (a line of a title) that a line of the old card comes to; `aka` are the other addresses
+    the same line was issued under (a merged title's old identifiers)."""
 
     line: str
     to: str
+    aka: list[str] = Field(default_factory=list)
 
 
 class AdoptItem(BaseModel):
