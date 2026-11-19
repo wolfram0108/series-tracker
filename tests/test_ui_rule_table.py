@@ -148,8 +148,9 @@ async def test_a_season_assigned_by_a_table_and_by_a_rule_is_saved_as_typed_and_
     assert await _season_of_the_first_line(page) == ["Сезон: 7", "Серия: 1"]
 
 
-async def test_cells_joined_in_the_table_are_saved_joined_and_give_their_one_value_to_each_row(ui):
-    """«ТО» of two rows joined into one cell: both conditions give its value; the table is read back with the cell joined."""
+async def _table_of_two_rows(ui):
+    """A table of voice-overs of two rows (the quick template «V:» over the pages of both sources) in the rules of a new
+    profile; returns the page, the table, the step of the test and the step of the rules."""
     for slug, (voice, height) in VOICES.items():
         ui.site.release(slug, voice)
         ui.site.episode(slug, 1, height=height)
@@ -176,6 +177,12 @@ async def test_cells_joined_in_the_table_are_saved_joined_and_give_their_one_val
         await rules_step.click()
         await table.locator(".template-chip", has_text="V:").click()
     await expect(table.locator("tbody td.col-then")).to_have_count(2)
+    return page, table, test_step, rules_step
+
+
+async def test_cells_joined_in_the_table_are_saved_joined_and_give_their_one_value_to_each_row(ui):
+    """«ТО» of two rows joined into one cell: both conditions give its value; the table is read back with the cell joined."""
+    page, table, test_step, rules_step = await _table_of_two_rows(ui)
 
     # The two cells «ТО» are chosen together (a click, then Shift+click) and made one by the tool over the table.
     join = table.locator(".cell-tools .cell-join")
@@ -200,3 +207,37 @@ async def test_cells_joined_in_the_table_are_saved_joined_and_give_their_one_val
     await test_step.click()
     assert await _season_of_the_first_line(page) == ["Сезон: 1", f"{text('rulesTest.pill.voiceover')}: AnimeVost"]
     await expect(page.locator(".card-test-result .fired-rules").first).to_have_text(re.compile("Озвучки · 2"))
+
+
+async def test_a_row_under_a_joined_cell_is_dragged_without_the_table_falling_apart(ui):
+    """The second row has no «ТО» of its own under the joined cell: dragged over the first, the table keeps its columns and
+    rows, a line shows where the row will stand, and the row stands there when it is dropped (the cell stays one)."""
+    page, table, _test_step, _rules_step = await _table_of_two_rows(ui)
+    await table.locator("tbody td.col-then").nth(0).click()
+    await table.locator("tbody td.col-then").nth(1).click(modifiers=["Shift"])
+    await table.locator(".cell-tools .cell-join").click()
+    await expect(table.locator("tbody td.col-then")).to_have_attribute("rowspan", "2")
+
+    rows = table.locator("tbody tr:has(.row-handle)")
+    shape = """table => [...table.querySelectorAll('thead th')].map((th) => Math.round(th.getBoundingClientRect().width))
+        .concat([...table.querySelectorAll('tbody tr')].flatMap((tr) => [Math.round(tr.getBoundingClientRect().height)]))"""
+    before = await table.locator("tbody td.col-if").all_inner_texts()
+    standing = await table.locator(".rule-table").evaluate(shape)
+
+    handle = await table.locator(".row-handle").nth(1).bounding_box()
+    top = (await rows.nth(0).bounding_box())["y"]
+    x, y = handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.mouse.move(x + 3, y - 4, steps=3)
+    await page.mouse.move(x + 30, top + 2, steps=10)
+    await page.mouse.move(x + 31, top + 2)
+    line = table.locator(".row-line")
+    await expect(line).to_be_visible()
+    assert abs((await line.bounding_box())["y"] - top) <= 3, "the line is not over the first row"
+    assert await table.locator(".rule-table").evaluate(shape) == standing, "the table changed while a row was dragged"
+    await ui.shot("t4-row-dragged-under-a-joined-cell")
+    await page.mouse.up()
+    await expect(line).to_have_count(0)
+    assert await table.locator("tbody td.col-if").all_inner_texts() == before[::-1]
+    await expect(table.locator("tbody td.col-then")).to_have_attribute("rowspan", "2")

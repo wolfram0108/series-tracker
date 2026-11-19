@@ -230,8 +230,9 @@
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
-  /* one line is x2 high; a long text wraps and the block grows with it */
+  /* one line is x2 high; a long text wraps and the block grows with it, but never wider than the area it stands in */
   min-block-size: var(--pattern-block);
+  max-width: 100%;
   padding: 0.125rem 0.375rem;
   border-radius: 4px;
   font-size: 0.9rem;
@@ -259,13 +260,14 @@
 .block-type-start_of_line,
 .block-type-end_of_line { background-color: #d1e7dd; color: #0f5132; }
 
-/* Glued pair: the attachment suffix touches the number it modifies. */
+/* Glued pair: the attachment suffix touches the number it modifies. The gap is taken back by the block that carries, not
+   by the glued one: a glued block that wraps to a new line would start left of the edge of its area. */
 .pattern-block.is-glued {
-  margin-left: calc(var(--pattern-gap) * -1);
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
 .pattern-block.carries-attachment {
+  margin-right: calc(var(--pattern-gap) * -1);
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }

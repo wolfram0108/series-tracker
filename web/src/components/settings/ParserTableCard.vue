@@ -157,7 +157,47 @@ function splitPicked(): void {
   splitRange(table.value.rows, chosen.first, chosen.end, chosen.side)
   upto.value = table.value.rows[chosen.end - 1].key
 }
-function moved(): void {
+// A row is dragged without leaving its place: a row of a joined cell cannot be moved in a table live (the cell stays behind
+// and the columns collapse). The line between two rows shows where it will stand; the row moves when it is dropped.
+const scroll = ref<HTMLElement | null>(null)
+const lifted = ref<number | null>(null)
+const line = ref<{ slot: number; top: number; width: number } | null>(null)
+
+function lift(event: { oldIndex?: number }): void {
+  lifted.value = event.oldIndex ?? null
+}
+/** The line the lifted row will stand at for the pointer at `y`: before the first row whose middle is below the pointer. */
+function aim(y: number): void {
+  const from = lifted.value
+  const box = scroll.value
+  const body = box?.querySelector("tbody")
+  if (from === null || !box || !body) return
+  const rects = Array.from(body.children).slice(0, table.value.rows.length).map((each) => each.getBoundingClientRect())
+  let slot = rects.findIndex((rect) => y < rect.top + rect.height / 2)
+  if (slot < 0) slot = rects.length
+  // The line right beside the row itself changes nothing.
+  if (slot === from || slot === from + 1) {
+    line.value = null
+    return
+  }
+  const edge = slot < rects.length ? rects[slot].top : rects[rects.length - 1].bottom
+  line.value = { slot, top: edge - box.getBoundingClientRect().top + box.scrollTop, width: body.parentElement?.offsetWidth ?? 0 }
+}
+/** The engine asks to move the row in the DOM: it does not (the pointer of a touch drag reaches `aim` only through here). */
+function hold(_event: unknown, original?: { clientY?: number }): false {
+  if (original?.clientY !== undefined) aim(original.clientY)
+  return false
+}
+function drop(): void {
+  const from = lifted.value
+  const slot = line.value?.slot ?? null
+  lifted.value = null
+  line.value = null
+  if (from !== null && slot !== null) {
+    const rows = table.value.rows
+    const [row] = rows.splice(from, 1)
+    rows.splice(slot > from ? slot - 1 : slot, 0, row)
+  }
   settle(table.value.rows)
   selected.value = null
   upto.value = null
@@ -227,7 +267,8 @@ function setRowAction(row: TableRow, value: string): void {
         </div>
       </div>
 
-      <div class="table-scroll">
+      <!-- Captured: the lists of blocks inside the cells stop the bubbling of a drag over them. -->
+      <div ref="scroll" class="table-scroll" @dragover.capture="aim($event.clientY)">
       <table class="rule-table" :class="{ 'is-folders': folders }">
         <thead>
           <tr>
@@ -261,7 +302,7 @@ function setRowAction(row: TableRow, value: string): void {
             <th class="col-remove" />
           </tr>
         </thead>
-        <draggable :list="table.rows" item-key="key" tag="tbody" handle=".row-handle" :animation="150" @end="moved">
+        <draggable :list="table.rows" item-key="key" tag="tbody" handle=".row-handle" ghost-class="is-lifted" :move="hold" @start="lift" @end="drop">
           <template #item="{ element: row, index: at }">
             <tr :class="{ 'is-fresh': fresh.has(row.key) }">
               <td class="col-handle row-handle" :title="t('rules.table.drag')">
@@ -341,6 +382,7 @@ function setRowAction(row: TableRow, value: string): void {
           </template>
         </draggable>
       </table>
+      <div v-if="line" class="row-line" :style="{ top: `${line.top}px`, width: `${line.width}px` }" />
       </div>
     </div>
   </div>
@@ -358,7 +400,11 @@ function setRowAction(row: TableRow, value: string): void {
 /* One grid with one frame: the columns line up through the whole table, a row is one line. */
 /* The table keeps its columns at any width: on a card narrower than the table can be, it scrolls in its own box, and
    the window around it does not. */
-.table-scroll { overflow-x: auto; }
+.table-scroll { overflow-x: auto; position: relative; }
+/* The place a dragged row will stand at: a line between two rows (the row itself stays where it is, dimmed). */
+.rule-table tr.is-lifted { opacity: 0.45; }
+.row-line { position: absolute; left: 0; height: 0; border-top: 2px solid #0d6efd; pointer-events: none; z-index: 1; }
+.row-line::before { content: ""; position: absolute; left: 0; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: #0d6efd; }
 .rule-table {
   width: 100%; min-width: 34rem; table-layout: fixed; border-collapse: separate; border-spacing: 0;
   border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;
