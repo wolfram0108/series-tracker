@@ -1,7 +1,8 @@
 """The native core against the module it replaces, on a copy of the base of the service (docs/missions/rust-core).
 
 For every series of the copy: the data the core holds is the data the module makes, field by field, and the time of
-each way of making it (best of three). The stage of the mission is the subcommand; `rows` — the rows of the layout:
+each way of making it (best of three). The stage of the mission is the subcommand; `levers` — the levers of every episode and the headers of every level
+(the core counts them from the module's records); `rows` — the rows of the layout:
 
   python  — the module's own read (modules/composition/repository: the rows as models);
   given   — the module reads the table with sqlite3 and hands the core the tuples of its query;
@@ -88,14 +89,55 @@ def rows_stage(path: str, wanted: list[int]) -> None:
           f"{together * 1000:.0f} ms")
 
 
+def levers_stage(path: str, wanted: list[int]) -> None:
+    """The levers of every episode and the headers of every level, counted by the core from the module's records against
+    the module's own count (modules/composition/settings), as JSON and byte by byte."""
+    import json
+    from modules.composition import compilations, levers, project, settings  # noqa: F401 - levers registers in the core
+    from modules.composition.module import _source_order
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    series = wanted or [row[0] for row in conn.execute("SELECT DISTINCT series_id FROM composition_state ORDER BY 1")]
+    differ_all = 0
+    totals = {"python": 0.0, "core": 0.0}
+    for series_id in series:
+        stored = repository._read(conn, series_id)
+
+        def python():
+            records = settings.canonical(stored.records)
+            episodes = project.layout_episodes(stored.rows)
+            outcome = compilations.resolve(stored.rows, records, _source_order(stored))
+            views = [(view.season, view.ref.key) for view in outcome.views]
+            return (settings.levels(records, {season for season, _ in episodes}, views),
+                    settings.episode_settings(records, episodes, outcome.members), episodes, outcome, views)
+        (levels, settings_of, episodes, outcome, views), python_ms = best(python)
+        given = [(season, episode, member.key if member else None, json.dumps(
+            member.model_dump(mode="json") if member else None, ensure_ascii=False, separators=(",", ":")))
+            for (season, episode), member in ((each, outcome.members.get(each)) for each in episodes)]
+        (core_levels, core_settings), core_ms = best(
+            _native.layout_levers, path, series_id, sorted({season for season, _ in episodes}), views, given)
+        theirs_levels = json.dumps([each.model_dump(mode="json") for each in levels], ensure_ascii=False, separators=(",", ":"))
+        theirs_settings = json.dumps([each.model_dump(mode="json") for each in settings_of], ensure_ascii=False,
+                                     separators=(",", ":"))
+        differ = (json.loads(core_levels) != json.loads(theirs_levels)) + (json.loads(core_settings) != json.loads(theirs_settings))
+        bytes_differ = (core_levels != theirs_levels) + (core_settings != theirs_settings)
+        differ_all += differ + bytes_differ
+        totals["python"] += python_ms
+        totals["core"] += core_ms
+        print(f"series {series_id:4}: episodes {len(episodes):4} records {len(stored.records):4}  python {python_ms:7.1f} ms | "
+              f"core {core_ms:6.1f} ms | differ {differ}, bytes differ {bytes_differ}", flush=True)
+    print(f"all {len(series)} series: python {totals['python']:.0f} ms, core {totals['core']:.0f} ms (the core reads its "
+          f"records itself; python counts compilations too), differ {differ_all}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("stage", choices=["rows"])
+    parser.add_argument("stage", choices=["rows", "levers"])
     parser.add_argument("series", nargs="*", type=int)
     options = parser.parse_args()
     with tempfile.TemporaryDirectory() as folder:
         path = copy_db(os.path.join(folder, "app.db"))
-        rows_stage(path, options.series)
+        (rows_stage if options.stage == "rows" else levers_stage)(path, options.series)
     print("NATIVE_CHECK_DONE")
 
 

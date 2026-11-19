@@ -93,7 +93,7 @@ def register(lever: Lever) -> None:
     if (lever.target, lever.shape) not in LEVER_FORMS:
         raise ValueError(f"lever {lever.name!r}: no window draws a lever with the target {lever.target} and the value {lever.shape}")
     _levers[lever.name] = lever
-    _native.lever_register(lever.name, str(lever.target), str(lever.shape),
+    _native.lever_register(lever.name, str(lever.target), str(lever.shape), json.dumps(lever.default, ensure_ascii=False),
                            sorted(str(each) for each in lever.levels) if lever.levels is not None else None)
 
 

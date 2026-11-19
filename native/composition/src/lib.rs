@@ -3,6 +3,7 @@
 //! module's part of the core, and nowhere else.
 
 pub mod levers;
+pub mod settings;
 
 use rusqlite::{Connection, OpenFlags};
 

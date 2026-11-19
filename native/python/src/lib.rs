@@ -116,11 +116,12 @@ fn json_of(value: &str) -> PyResult<serde_json::Value> {
     serde_json::from_str(value).map_err(|exc| PyValueError::new_err(exc.to_string()))
 }
 
+/// A lever the module declares: its form, its default (JSON) and the levels it may be set on (none: all).
 #[pyfunction]
-#[pyo3(signature = (name, target, shape, levels=None))]
-fn lever_register(name: &str, target: &str, shape: &str, levels: Option<Vec<String>>) -> PyResult<()> {
+#[pyo3(signature = (name, target, shape, default, levels=None))]
+fn lever_register(name: &str, target: &str, shape: &str, default: &str, levels: Option<Vec<String>>) -> PyResult<()> {
     let (target, shape) = kinds(target, shape)?;
-    levers::register(name, levers::Form { target, shape, levels });
+    levers::register(levers::Form { name: name.to_string(), target, shape, default: json_of(default)?, levels });
     Ok(())
 }
 
@@ -152,6 +153,22 @@ fn lever_problem(lever: &str, target: Option<&str>, value: &str, season: Option<
     Ok(levers::problem(&levers::Record { lever, target, value: &value, season, episode, compilation }))
 }
 
+// --- the levers of a series: read and counted by the core --------------------------------------------------------------
+
+/// The levers of a series as the core counts them from the module's records: the headers of the series, of the seasons
+/// and of the compilations given (JSON of `levels`), and the levers of each episode given with the compilation it stands
+/// in (its key and its JSON as the layout tells it; JSON of `settings`).
+#[pyfunction]
+fn layout_levers(py: Python<'_>, path: String, series_id: i64, seasons: Vec<i64>, compilations: Vec<(i64, String)>,
+                 episodes: Vec<(i64, i64, Option<String>, String)>) -> PyResult<(String, String)> {
+    py.allow_threads(move || {
+        let conn = st_composition::settings::open(&path)?;
+        let index = st_composition::settings::index(&st_composition::settings::settings_of(&conn, series_id)?);
+        Ok::<_, String>((st_composition::settings::levels(&index, &seasons, &compilations),
+                         st_composition::settings::episode_settings(&index, &episodes)))
+    }).map_err(PyValueError::new_err)
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("COLUMNS", st_composition::COLUMNS)?;
@@ -162,7 +179,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
                      wrap_pyfunction!(compilation_key, m)?, wrap_pyfunction!(parse_compilation_key, m)?,
                      wrap_pyfunction!(lever_register, m)?, wrap_pyfunction!(lever_unregister, m)?,
                      wrap_pyfunction!(lever_accepts, m)?, wrap_pyfunction!(lever_accepts_target, m)?,
-                     wrap_pyfunction!(lever_problem, m)?] {
+                     wrap_pyfunction!(lever_problem, m)?, wrap_pyfunction!(layout_levers, m)?] {
         m.add_function(function)?;
     }
     Ok(())

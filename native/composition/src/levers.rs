@@ -4,7 +4,7 @@
 
 use serde_json::{Map, Value};
 use st_contracts::{integer, parse_compilation_key, parse_group_target, parse_variant_target};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
 /// What a lever's value is about.
@@ -102,29 +102,41 @@ pub fn accepts_target(kind: Target, target: Option<&str>) -> bool {
     }
 }
 
-/// A lever as the core needs it to tell its records: its target, its shape and the levels it may be set on (none: all).
+/// A lever as the core needs it: its name, its target, its shape, its default and the levels it may be set on (none:
+/// all). The registry keeps the levers in the order of registration: the order every lever of a level is told in.
 #[derive(Debug, Clone)]
 pub struct Form {
+    pub name: String,
     pub target: Target,
     pub shape: Shape,
+    pub default: Value,
     pub levels: Option<Vec<String>>,
 }
 
-fn registry() -> &'static Mutex<HashMap<String, Form>> {
-    static FORMS: OnceLock<Mutex<HashMap<String, Form>>> = OnceLock::new();
-    FORMS.get_or_init(|| Mutex::new(HashMap::new()))
+fn registry() -> &'static Mutex<Vec<Form>> {
+    static FORMS: OnceLock<Mutex<Vec<Form>>> = OnceLock::new();
+    FORMS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-pub fn register(name: &str, form: Form) {
-    registry().lock().unwrap().insert(name.to_string(), form);
+pub fn register(form: Form) {
+    let mut forms = registry().lock().unwrap();
+    match forms.iter_mut().find(|each| each.name == form.name) {
+        Some(held) => *held = form,
+        None => forms.push(form),
+    }
 }
 
 pub fn unregister(name: &str) {
-    registry().lock().unwrap().remove(name);
+    registry().lock().unwrap().retain(|each| each.name != name);
 }
 
 pub fn form_of(name: &str) -> Option<Form> {
-    registry().lock().unwrap().get(name).cloned()
+    registry().lock().unwrap().iter().find(|each| each.name == name).cloned()
+}
+
+/// Every lever in the order of registration.
+pub fn all() -> Vec<Form> {
+    registry().lock().unwrap().clone()
 }
 
 /// A record of a lever: where it is set and what it says.
