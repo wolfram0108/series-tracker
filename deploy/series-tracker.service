@@ -16,6 +16,10 @@ WorkingDirectory=/home/user/series-tracker
 ExecStart=/home/user/series-tracker/start.sh
 Restart=always
 RestartSec=3
+# The service puts each program it starts (ffmpeg, ffprobe, yt-dlp) into a group of its own with a limit of memory
+# (core/proc.py isolate): a program killed for memory is the failure of its step, not the end of the service.
+Delegate=memory pids
+OOMPolicy=continue
 
 [Install]
 WantedBy=multi-user.target

@@ -217,3 +217,25 @@ async def test_the_code_of_an_ended_program_is_written_into_its_record_so_no_lat
     lost = Record()
     proc._settle(Child(), proc.LOST)
     assert lost.returncode == proc.LOST
+
+
+@pytest.mark.asyncio
+async def test_a_program_is_the_first_the_kernel_takes_when_memory_runs_out():
+    code, out, _ = await proc.run_capture(["cat", "/proc/self/oom_score_adj"], timeout=10)
+    assert (code, out.strip()) == (0, b"1000")
+
+
+@pytest.mark.asyncio
+async def test_in_the_service_a_program_lives_in_its_own_group_with_its_limit_and_a_kill_for_memory_is_said(
+        tmp_path, monkeypatch, caplog):
+    """The groups of control are files under the service's group (a folder here): the program writes itself into its own
+    group before it runs, the group holds its limit, and once it ends a kill for memory there is told with the program."""
+    monkeypatch.setattr(proc, "_groups", str(tmp_path))
+    script = 'cat "$1/memory.max" > "$1/seen"; printf "oom 1\\noom_kill 1\\n" > "$1/memory.events"'
+    group = tmp_path / "program-next"
+    monkeypatch.setattr(proc, "_numbers", iter(["next"]))
+    code, _, _ = await proc.run_capture(["sh", "-c", script, "sh", str(group)], timeout=10)
+    assert code == 0
+    assert (group / "cgroup.procs").read_text().strip().isdigit()
+    assert (group / "seen").read_text().strip() == str(proc.PROGRAM_MEMORY_MAX)
+    assert any("не хватило памяти" in record.getMessage() for record in caplog.records)

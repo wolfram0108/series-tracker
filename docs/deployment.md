@@ -89,6 +89,13 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now series-tracker
 ```
 
+Юнит передаёт сервису его группу памяти (`Delegate=memory pids`): каждая
+программа, которую запускает сервис (ffmpeg, ffprobe, yt-dlp), живёт в своей
+группе `program-N` с пределом памяти (`core/proc.py`), и нехватка памяти у
+неё — отказ её шага, а не падение сервиса (`OOMPolicy=continue`). После
+правки юнита — снова `cp`, `daemon-reload` и рестарт; в журнале старта строка
+«программы запускаются каждая в своей группе памяти».
+
 ### Проверка
 
 ```bash

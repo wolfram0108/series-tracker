@@ -29,7 +29,7 @@ import os
 from contextlib import asynccontextmanager
 
 from assembly import Options, assemble
-from core import Bus, Envelope, Runner
+from core import Bus, Envelope, Runner, proc
 from core.db import Database
 from core.logging import configure, get_logger
 from core.loopwatch import LoopWatch, logged
@@ -84,6 +84,7 @@ runner = Runner(bus, modules)
 async def _lifespan(_app):
     watch = LoopWatch(asyncio.get_running_loop(), logged(get_logger("loopwatch")))
     watch.start()  # before the modules: the stalls of their start are seen too
+    proc.isolate()  # before any program starts: each lives in its own group of memory under the service
     await runner.start()
     # Whoever needs the whole system (the gateway reads the debug groups of logging) acts on this, not on a pause.
     bus.publish(Envelope(topic="system.started", kind="event"))

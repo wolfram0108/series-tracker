@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from core import proc
 from core.proc import program
 from core.reasons import code_of, parse
 from modules.downloads import ytdlp
@@ -207,7 +208,7 @@ async def test_the_stream_length_is_probed_again_after_a_failed_look(fake, tmp_p
     real = ytdlp.asyncio.create_subprocess_exec
 
     async def flaky(*cmd, **kw):
-        if "ffprobe" in cmd[0] and cmd[-1].startswith("http") and len(calls) < 2:
+        if "ffprobe" in proc.program_argv(cmd)[0] and cmd[-1].startswith("http") and len(calls) < 2:
             calls.append(1)
             return await real("bash", "-c", "exit 1", **kw)
         return await real(*cmd, **kw)
@@ -312,7 +313,7 @@ class StartedSpy(Spy):
 
     async def __call__(self, *args, **kwargs):
         process = await super().__call__(*args, **kwargs)
-        if os.path.basename(args[0]) == "ffmpeg":
+        if os.path.basename(proc.program_argv(args)[0]) == "ffmpeg":
             self.writer = process
             self.writing.set()
         return process
