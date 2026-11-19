@@ -56,3 +56,7 @@ backups/
 
 # Local agent settings and keys
 /.claude/
+
+# The native core is built on the server from git (native/build.sh), as web/dist is
+/native/target/
+/core/_native*.so

@@ -1,0 +1,8 @@
+[package]
+name = "st-composition"
+version = "0.1.0"
+edition = "2021"
+description = "The layout of a series (module composition): its rows as the module keeps them, read from its own table."
+
+[dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }

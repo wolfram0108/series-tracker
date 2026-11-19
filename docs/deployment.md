@@ -52,6 +52,10 @@ cp .env.example .env
 
 # 5. Фронт: сборка (отдаётся бэкендом с корня /)
 cd web && npm ci && npm run build && cd ..
+
+# 6. Ядро пересчёта на Rust (docs/missions/rust-core): rustc и cargo из apt, сборка в core/_native.so
+sudo apt-get install -y --no-install-recommends rustc cargo
+native/build.sh
 ```
 
 Учётки трекеров, VK, TMDB-токен вносятся **через UI** (Настройки → авторизация)
@@ -116,13 +120,14 @@ git pull origin main
 .venv/bin/pip install -r requirements.txt          # если менялись зависимости
 .venv/bin/alembic upgrade head                     # если есть новые миграции
 cd web && npm ci && npm run build && cd ..          # пересобрать фронт
+native/build.sh                                     # пересобрать ядро, если менялось native/
 sudo systemctl restart series-tracker
 ```
 
-Рабочие данные (`app.db`, `.venv`, `logs/`, `web/dist`) — вне git
-(см. `.gitignore`), при `git pull` сохраняются. `web/dist` собирается на месте
-и в репозиторий не коммитится — **не забыть `npm run build`** после правок
-фронта, иначе UI останется старым.
+Рабочие данные (`app.db`, `.venv`, `logs/`, `web/dist`, `core/_native.so`, `native/target`) — вне git
+(см. `.gitignore`), при `git pull` сохраняются. `web/dist` и `core/_native.so` собираются на месте
+и в репозиторий не коммитятся — **не забыть `npm run build` и `native/build.sh`** после правок
+фронта и ядра, иначе останется старое.
 
 **Владелец файлов проекта — пользователь сервиса (`user`).** Всё, что пишет в каталог проекта, запускается от него:
 
@@ -130,6 +135,7 @@ sudo systemctl restart series-tracker
 |---|---|
 | git | `runuser -u user -- git …`; от root git отказывается («detected dubious ownership») |
 | Сборка фронта | `runuser -u user -- bash -c "cd web && npm run build"` |
+| Сборка ядра | `runuser -u user -- native/build.sh` (кэш crates.io — в `~user/.cargo`) |
 | Зависимости, миграции | `runuser -u user -- .venv/bin/pip …`, `runuser -u user -- .venv/bin/alembic upgrade head` |
 | Проверка | `find . -xdev \( -user root -o ! -group user \) \| wc -l` даёт 0; иначе `find . -xdev \( -user root -o ! -group user \) -exec chown -h user:user {} +` |
 
@@ -154,6 +160,7 @@ runuser -u user -- sqlite3 app.db ".backup 'backups/app.db.before-<что>-$(dat
 git checkout <предыдущий-коммит-или-тег>
 .venv/bin/alembic downgrade <ревизия>              # если откатывали миграцию
 cd web && npm ci && npm run build && cd ..
+native/build.sh
 sudo systemctl restart series-tracker
 ```
 
