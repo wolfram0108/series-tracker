@@ -236,7 +236,9 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
             os.remove(attached)
     # An end whose status was lost tells nothing: the container that was written is what is judged.
     if code not in (0, LOST):
-        return f"ffmpeg_failed: {err.decode(errors='replace').strip()[-300:]}"
+        # A program the system killed (no memory) says nothing: its code is all the reason there is.
+        said = err.decode(errors="replace").strip()[-300:]
+        return f"ffmpeg_failed: {said or (f'killed by signal {-code}' if code < 0 else f'exit code {code}')}"
     await report("verify", {})
     made = await contents(output)
     if made is not None and made.publication != publication:

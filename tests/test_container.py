@@ -107,6 +107,20 @@ def test_a_build_that_is_not_what_was_asked_says_why(media, case, expected):
     assert container.problem_of(made, identity, signature, duration) == expected
 
 
+@pytest.mark.parametrize("code, said, expected", [
+    (-9, b"", "ffmpeg_failed: killed by signal 9"), (1, b"", "ffmpeg_failed: exit code 1"),
+    (1, b"Invalid argument\n", "ffmpeg_failed: Invalid argument")])
+def test_an_ffmpeg_that_fails_says_what_it_said_or_how_it_ended(media, monkeypatch, code, said, expected):
+    """A build the system killed (no memory) leaves no word of ffmpeg's: the reason in the log is how it ended, not an empty text."""
+    tmp, video, _dubs, _ = media
+
+    async def failing(cmd, **kwargs):
+        return code, said
+
+    monkeypatch.setattr(container, "run_lines", failing)
+    assert asyncio.run(container.build(str(tmp / "ep.mkv"), video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a")])) == expected
+
+
 def test_a_file_not_built_here_reads_with_no_identity_and_its_tracks_by_title(media):
     _, video, _, _ = media
     found = asyncio.run(container.contents(video))
