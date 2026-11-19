@@ -246,44 +246,13 @@ class CompositionModule(BaseModule):
         of sources, and the same levers the choice of the reference and the plan of voice-overs read."""
         request = QueuesGet.model_validate(env.payload)
         stored = await self.repo.stored(request.series_id)
-        lines, levers, order, groups = await self._level_of(stored, settings.canonical(stored.records), request)
-        reference, by_group = queues.build(lines, levers, order, groups, request.episode)
-        markup, follows = queues.markup(lines, levers, order, request.episode)
-        # The subtitles have a table on the series, on a season and on an episode, each with its own levers over those above it;
-        # a compilation has none of its own: it shows the series'.
-        records = settings.canonical(stored.records)
-        season = None if request.compilation else request.season
-        subtitles = queues.subtitles(
-            availability.lines_of_level(stored.subtitles, season, request.episode),
-            settings.effective(records, season, request.episode), _source_order(stored), request.episode)
-        return QueuesReply(series_id=request.series_id, season=request.season, episode=request.episode,
-                           compilation=request.compilation, reference=reference, groups=by_group, markup=markup,
-                           markup_follows=follows, subtitles=subtitles).model_dump(mode="json")
+        voices = VoiceSettingsView.model_validate(await self.request("voices.settings.get", {}))
+        # The queues walk the rows and the levers of the level: counted off the loop.
+        return await compute.run(_queues_reply, stored, voices, request)
 
     async def _level_of(self, stored, records, scope) -> tuple[list, list, Order, list[str]]:
-        """The lines of a level, its levers as it inherits them, the order of players and sources and the groups of its
-        tracks: what its queues are made of."""
         voices = VoiceSettingsView.model_validate(await self.request("voices.settings.get", {}))
-        order = Order(tuple(voices.priority), {each.summary.source_id: place for place, each in enumerate(stored.sources)},
-                      Groups.of(voices.player_groups))
-        orders = project.season_orders(stored.orders, stored.rows, {})
-        groups = (orders.get(scope.season, []) if scope.season is not None
-                  else [label for season in sorted(orders) for label in orders[season]])
-        lines = availability.lines_of_level(stored.rows, scope.season, scope.episode)
-        compilation = scope.compilation
-        if scope.episode is not None and compilation is None:
-            # An episode inherits from the compilation it stands in: its queues read the levers of that level.
-            member = compilations.resolve(stored.rows, records, _source_order(stored)).members.get(
-                (scope.season, scope.episode))
-            compilation = member.key if member is not None else None
-        elif compilation is not None:
-            found = parse_compilation_key(compilation)
-            if found is None or found[3] != scope.season:
-                raise ValueError(reason("bad_target", lever=""))
-            lines = [row for row in lines if row.episode_start is not None and found[4] <= row.episode_start <= found[5]
-                     and not row.is_compilation]
-        return (lines, settings.effective(records, scope.season, scope.episode, compilation), order,
-                list(dict.fromkeys(groups)))
+        return await compute.run(_level, stored, records, scope, voices)
 
     async def on_voice_order_set(self, env: Envelope) -> dict:
         """The user's order of the voice-overs of a season: the order of the tracks in its containers (ЭТАП_11). It is a
@@ -678,7 +647,7 @@ class CompositionModule(BaseModule):
             if table is not None and source.parser_profile_id is not None:
                 answer = await self._answer(source, table, card.get("season"), snapshot, off)
             inputs.append(SourceInput(source, table, answer, failure, url, players_off=off))
-        names = project.voice_names(inputs)
+        names = await compute.run(project.voice_names, inputs)
         return inputs, await self._groups(names, snapshot) if names else {}
 
     async def _table(self, series_id: int, flight: _Flight, source: SeriesSource, begin: bool
@@ -887,9 +856,9 @@ def _derive(series_id: int, inputs: list[SourceInput], groups: dict[str, str | N
         records = settings.within_episodes(records, layout)
     order = {item.source.id: item.source.position for item in inputs}
     # The membership of an episode follows the rows as well as the levers: what it changes is a change of the episode.
-    moved = settings.affected(_settings_of(stored.rows, before, layout, order),
-                              _settings_of(result.rows, records, layout, order))
-    headers_changed = _headers(stored.rows, before, layout, order) != _headers(result.rows, records, layout, order)
+    was, now = _shape(stored.rows, before, layout, order), _shape(result.rows, records, layout, order)
+    moved = settings.affected(was[0], now[0])
+    headers_changed = was[1] != now[1]
     rows_changed = result.rows != stored.rows or result.subtitles != stored.subtitles
     # The time of a reading is stored with the summary but is no change of it: a page read again is no news.
     shown = [summary.model_copy(update={"read_at": None}) for summary in result.sources]
@@ -897,6 +866,48 @@ def _derive(series_id: int, inputs: list[SourceInput], groups: dict[str, str | N
     touched = project.touched_episodes(stored.rows, result.rows) if rows_changed else set()
     return _Derived(result, gone, records, records != before, orders, moved, headers_changed, rows_changed,
                     summaries_changed, touched)
+
+
+def _level(stored, records, scope, voices) -> tuple[list, list, Order, list[str]]:
+    """The lines of a level, its levers as it inherits them, the order of players and sources and the groups of its
+    tracks: what its queues are made of (pure, in the pool of computation)."""
+    order = Order(tuple(voices.priority), {each.summary.source_id: place for place, each in enumerate(stored.sources)},
+                  Groups.of(voices.player_groups))
+    orders = project.season_orders(stored.orders, stored.rows, {})
+    groups = (orders.get(scope.season, []) if scope.season is not None
+              else [label for season in sorted(orders) for label in orders[season]])
+    lines = availability.lines_of_level(stored.rows, scope.season, scope.episode)
+    compilation = scope.compilation
+    if scope.episode is not None and compilation is None:
+        # An episode inherits from the compilation it stands in: its queues read the levers of that level.
+        member = compilations.resolve(stored.rows, records, _source_order(stored)).members.get(
+            (scope.season, scope.episode))
+        compilation = member.key if member is not None else None
+    elif compilation is not None:
+        found = parse_compilation_key(compilation)
+        if found is None or found[3] != scope.season:
+            raise ValueError(reason("bad_target", lever=""))
+        lines = [row for row in lines if row.episode_start is not None and found[4] <= row.episode_start <= found[5]
+                 and not row.is_compilation]
+    return (lines, settings.effective(records, scope.season, scope.episode, compilation), order,
+            list(dict.fromkeys(groups)))
+
+
+def _queues_reply(stored, voices, request) -> dict:
+    """The queues of a level, as `composition.queues.get` answers them (pure, in the pool of computation)."""
+    records = settings.canonical(stored.records)
+    lines, levers, order, groups = _level(stored, records, request, voices)
+    reference, by_group = queues.build(lines, levers, order, groups, request.episode)
+    markup, follows = queues.markup(lines, levers, order, request.episode)
+    # The subtitles have a table on the series, on a season and on an episode, each with its own levers over those above it;
+    # a compilation has none of its own: it shows the series'.
+    season = None if request.compilation else request.season
+    subtitles = queues.subtitles(
+        availability.lines_of_level(stored.subtitles, season, request.episode),
+        settings.effective(records, season, request.episode), _source_order(stored), request.episode)
+    return QueuesReply(series_id=request.series_id, season=request.season, episode=request.episode,
+                       compilation=request.compilation, reference=reference, groups=by_group, markup=markup,
+                       markup_follows=follows, subtitles=subtitles).model_dump(mode="json")
 
 
 def _applied(records: list[SettingRecord], writes: list[SettingRecord]) -> list[SettingRecord]:
@@ -917,19 +928,15 @@ def _effect_of(stored, before, after) -> tuple[set[tuple[int, int]], bool]:
     windows, not to consumers."""
     episodes = project.layout_episodes(stored.rows)
     order = _source_order(stored)
-    touched = settings.affected(_settings_of(stored.rows, before, episodes, order),
-                                _settings_of(stored.rows, after, episodes, order))
-    shown = bool(touched) or _headers(stored.rows, before, episodes, order) != _headers(stored.rows, after, episodes, order)
-    return touched, shown
+    was, now = _shape(stored.rows, before, episodes, order), _shape(stored.rows, after, episodes, order)
+    touched = settings.affected(was[0], now[0])
+    return touched, bool(touched) or was[1] != now[1]
 
 
-def _settings_of(rows, records, episodes, order) -> list[EpisodeSettings]:
-    """The levers and the compilation of every episode of the layout."""
-    return settings.episode_settings(records, episodes, compilations.resolve(rows, records, order).members)
-
-
-def _headers(rows, records, episodes, order) -> tuple:
-    """What the headers of the levels and the blocks of compilations show: told to windows when it changes."""
+def _shape(rows, records, episodes, order) -> tuple[list[EpisodeSettings], tuple]:
+    """The levers and the compilation of every episode of the layout, and what the headers of the levels and the blocks
+    of compilations show (told to windows when it changes): of one resolution of the compilations."""
     outcome = compilations.resolve(rows, records, order)
-    return (settings.levels(records, {season for season, _ in episodes}, [(view.season, view.ref.key) for view in outcome.views]),
-            outcome.views)
+    return (settings.episode_settings(records, episodes, outcome.members),
+            (settings.levels(records, {season for season, _ in episodes},
+                             [(view.season, view.ref.key) for view in outcome.views]), outcome.views))

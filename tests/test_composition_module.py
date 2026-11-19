@@ -729,13 +729,13 @@ async def test_the_levers_of_every_episode_are_counted_again_off_the_loop_for_a_
     import threading
     from modules.composition import module as composition_module
     threads: list[str] = []
-    counted = composition_module._settings_of
+    counted = composition_module._shape
 
     def watched(*args):
         threads.append(threading.current_thread().name)
         return counted(*args)
 
-    monkeypatch.setattr(composition_module, "_settings_of", watched)
+    monkeypatch.setattr(composition_module, "_shape", watched)
     s = system
     series_id = await laid_out(s, rich_standard())
     source_id = only_source(s, series_id)
@@ -745,6 +745,25 @@ async def test_the_levers_of_every_episode_are_counted_again_off_the_loop_for_a_
     threads.clear()
     assert await s.set_many(series_id, allow_items(source_id, ("kodik", "allvideo"), False, season=1)) == {"ok": True}
     assert threads and all(name.startswith("compute") for name in threads), threads
+
+
+@pytest.mark.asyncio
+async def test_the_queues_of_a_level_are_counted_off_the_loop(system, monkeypatch):
+    """The queues walk the rows and the levers of the level, thousands of them for a big series."""
+    import threading
+    from modules.composition import queues
+    threads: list[str] = []
+    counted = queues.build
+
+    def watched(*args):
+        threads.append(threading.current_thread().name)
+        return counted(*args)
+
+    monkeypatch.setattr(queues, "build", watched)
+    s = system
+    series_id = await laid_out(s, rich_standard())
+    reply = await s.probe.request("composition.queues.get", {"series_id": series_id, "season": 1}, timeout=STUCK_S)
+    assert reply["reference"] and threads and all(name.startswith("compute") for name in threads), threads
 
 
 def test_a_command_of_several_levers_has_levers_of_its_series_only_and_at_least_one():

@@ -98,12 +98,13 @@ def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
         " ORDER BY IFNULL(season, -1), IFNULL(episode, -1), lever, IFNULL(target, '')", (series_id,)).fetchall()
     orders = conn.execute("SELECT season, labels FROM voice_orders WHERE series_id = ? ORDER BY season", (series_id,)).fetchall()
     titles = conn.execute("SELECT label, title FROM voice_titles WHERE series_id = ? ORDER BY label", (series_id,)).fetchall()
+    built = [_row_of(row) for row in rows]  # one pass over the thousands of rows, then split by their track
     return Stored(
         orders={row["season"]: json.loads(row["labels"]) for row in orders},
         titles={row["label"]: row["title"] for row in titles},
         rev=state["rev"] if state is not None else 0,
-        rows=[each for each in (_row_of(row) for row in rows) if each.track == RowTrack.SOUND],
-        subtitles=[each for each in (_row_of(row) for row in rows) if each.track == RowTrack.SUBTITLES],
+        rows=[each for each in built if each.track == RowTrack.SOUND],
+        subtitles=[each for each in built if each.track == RowTrack.SUBTITLES],
         sources=[StoredSource(row["source_id"], row["position"], row["table_url"],
                               SourceSummary.model_validate_json(row["summary"])) for row in sources],
         numbering={row["name_key"]: row["number"] for row in numbering},
