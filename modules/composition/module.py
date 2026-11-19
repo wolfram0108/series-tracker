@@ -101,16 +101,23 @@ names in one request). A source without a table or without a profile does not st
 after the modules it asks; a request that gets no answer fails the recount, not the start.
 
 Resumability: the layout, the numbers of unknown voice-overs and the settings are in the database before an event
-goes out. At start every series is counted again, a series the catalog no longer has is
-purged, and a failure there is logged, not raised.
+goes out. Every count keeps beside the layout the print of the inputs it read (composition_state.inputs: the card, the
+settings of the voice-overs, the rules of the profiles of its sources — `rules.profiles.export` —, the number of the last
+write of the page of every source — `sources.tables.writes` — and the code); a count of a run's snapshot keeps none. At
+start a series whose inputs are those of its print stands as it is stored, the others are counted again; a series the
+catalog no longer has is purged, and a failure there is logged, not raised.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Any, Iterable
 
 from core import BaseModule, compute
+from core.code_print import code_print
+from core.contracts.series_card import CARD_LIVE
 from core.contracts import (LAYOUT_PARTS, COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ORDER, REFERENCE_SAME, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
@@ -138,6 +145,29 @@ class _Unavailable(Exception):
     def __init__(self, topic: str) -> None:
         self.reason = reason("composition_request_failed", topic=topic)
         super().__init__(self.reason)
+
+
+@dataclass
+class _Seen:
+    """What a count of a layout read of its neighbours, as their versions tell it: the card, the settings of the
+    voice-overs, the rules of the profiles of its sources, and the page of every source with the number of its last
+    write (`sources.tables.writes`)."""
+
+    card: dict
+    voices: dict
+    rules: Any
+    pages: dict[int, tuple[str | None, int | None]]
+
+
+def layout_print(seen: _Seen) -> str:
+    """The print of the inputs of a count of a layout: each of them as its version tells it, and the print of the code.
+    Two counts with one print count one layout: what the layout holds besides (the levers, the orders the user set) a
+    count carries over as it is, so a command of the user needs no count and moves no print."""
+    card = {key: value for key, value in seen.card.items() if key not in CARD_LIVE}
+    card["sources"] = sorted(card.get("sources", []), key=lambda each: each["id"])
+    text = json.dumps({"card": card, "voices": seen.voices, "rules": seen.rules, "pages": sorted(seen.pages.items()),
+                       "code": code_print()}, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 @dataclass
@@ -222,22 +252,50 @@ class CompositionModule(BaseModule):
             self.log.exception("пересчёт раскладок при старте не начат")
 
     async def _resume(self) -> None:
+        """A layout whose inputs are those it was counted from stands as it is stored; the others are counted again."""
         began = asyncio.get_running_loop().time()
         listing = await self._ask("catalog.series.list", {})
         known = set(await self.repo.series_ids())
         present = {each["id"] for each in listing}
+        kept = await self.repo.prints()
+        wanted = [each for each in listing if each["id"] in known or each.get("sources")]
+        current = await self._current_seen(wanted) if kept else {}
         scheduled = 0
-        for each in listing:
-            if each["id"] in known or each.get("sources"):
-                self._schedule(each["id"])
-                scheduled += 1
+        for each in wanted:
+            seen = current.get(each["id"])
+            if seen is not None and layout_print(seen) == kept.get(each["id"]):
+                continue
+            self._schedule(each["id"])
+            scheduled += 1
         for series_id in known - present:
             await self._purge(series_id)
-        self.spawn(self._resumed(began, scheduled), name="composition:resumed")
+        self.spawn(self._resumed(began, len(wanted), scheduled), name="composition:resumed")
 
-    async def _resumed(self, began: float, scheduled: int) -> None:
+    async def _current_seen(self, cards: list[dict]) -> dict[int, _Seen]:
+        """What a count of each of these layouts would read now, as the versions of its inputs tell it; none at all when
+        a neighbour does not answer (every layout is counted then)."""
+        try:
+            pages = await self._page_writes()
+            voices = (await self._voices_view()).model_dump(mode="json")
+            profiles = sorted({each["parser_profile_id"] for card in cards for each in card.get("sources", [])
+                               if each.get("parser_profile_id") is not None})
+            rules = (await self.request("rules.profiles.export", {"profile_ids": profiles}))["profiles"] if profiles else {}
+        except Exception as exc:  # noqa: BLE001 — every layout is counted, as before the prints
+            self.log.warning("входы раскладок на старте не сверены, пересчитываются все: %s", exc)
+            return {}
+        out = {}
+        for card in cards:
+            own = sorted({each["parser_profile_id"] for each in card.get("sources", [])
+                          if each.get("parser_profile_id") is not None})
+            out[card["id"]] = _Seen(card, voices, {str(each): rules.get(str(each), rules.get(each)) for each in own},
+                                    {each["id"]: (self._page_of.get(each["id"]), pages.get(self._page_of.get(each["id"])))
+                                     for each in card.get("sources", [])})
+        return out
+
+    async def _resumed(self, began: float, checked: int, scheduled: int) -> None:
         await self.idle()
-        self.log.info("старт: пересчитано раскладок %d, за %.2f с", scheduled, asyncio.get_running_loop().time() - began)
+        self.log.info("старт: сверено раскладок %d, пересчитано %d, за %.2f с", checked, scheduled,
+                      asyncio.get_running_loop().time() - began)
 
     async def idle(self) -> None:
         """Returns when no series is being counted; the signal of completion for whoever stops or checks the module."""
@@ -641,8 +699,12 @@ class CompositionModule(BaseModule):
 
     async def _recount(self, series_id: int, flight: _Flight, refresh: set[int]) -> _Outcome:
         try:
-            inputs, groups = await self._gather(series_id, flight, refresh)
-            return await self._settle(series_id, inputs, groups)
+            inputs, groups, seen = await self._gather(series_id, flight, refresh)
+            outcome = await self._settle(series_id, inputs, groups)
+            if series_id not in self._deleted:
+                # Kept beside the layout: a start counts it again only if its inputs are no longer these.
+                await self.repo.save_print(series_id, await compute.run(layout_print, seen) if seen else None)
+            return outcome
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — a failed count is a signal, not the end of the module
@@ -658,21 +720,45 @@ class CompositionModule(BaseModule):
             return _Outcome(failure=failure)
 
     async def _gather(self, series_id: int, flight: _Flight, refresh: set[int]
-                      ) -> tuple[list[SourceInput], dict[str, str | None]]:
-        """What the neighbours say about the series; nothing is written here."""
+                      ) -> tuple[list[SourceInput], dict[str, str | None], _Seen | None]:
+        """What the neighbours say about the series, with the versions of what it read (none for a count of a run's
+        snapshot: its inputs are not the current ones); nothing is written here."""
+        # Asked before the tables they stand for: a page written between the two makes the print older than the layout,
+        # and the next start counts the layout again rather than keeping one the print does not tell.
+        pages = await self._page_writes()
         card = await self._ask("catalog.series.get", {"series_id": series_id})
         sources = [SeriesSource.model_validate(each) for each in card.get("sources", [])]
         snapshot = self._snapshots.get(series_id)
-        off = await self._players_off(snapshot)
-        inputs = []
+        view = await self._voices_view(snapshot)
+        off = frozenset(view.players_off)
+        rules = await self._rules_of(sources) if snapshot is None else None
+        inputs, read = [], {}
         for source in sources:
             table, failure, url = await self._table(series_id, flight, source, source.id in refresh)
+            read[source.id] = (url, pages.get(url))
             answer = None
             if table is not None and source.parser_profile_id is not None:
                 answer = await self._answer(source, table, card.get("season"), snapshot, off)
             inputs.append(SourceInput(source, table, answer, failure, url, players_off=off))
         names = await compute.run(project.voice_names, inputs)
-        return inputs, await self._groups(names, snapshot) if names else {}
+        groups = await self._groups(names, snapshot) if names else {}
+        seen = None if snapshot is not None or rules is None else _Seen(card, view.model_dump(mode="json"), rules, read)
+        return inputs, groups, seen
+
+    async def _page_writes(self) -> dict[str, int]:
+        return (await self._ask("sources.tables.writes", {}))["writes"]
+
+    async def _rules_of(self, sources: list[SeriesSource]) -> dict | None:
+        """The stored rules of the profiles of the sources (as `rules.apply` reads them); none when the rules do not
+        give them — the layout is counted all the same, with no print."""
+        profiles = sorted({each.parser_profile_id for each in sources if each.parser_profile_id is not None})
+        if not profiles:
+            return {}
+        try:
+            found = (await self.request("rules.profiles.export", {"profile_ids": profiles}))["profiles"]
+        except Exception:  # noqa: BLE001 — the print waits for the next count
+            return None
+        return {str(each): found.get(str(each), found.get(each)) for each in profiles}
 
     async def _table(self, series_id: int, flight: _Flight, source: SeriesSource, begin: bool
                      ) -> tuple[ReleaseTable | None, str | None, str]:
@@ -694,10 +780,14 @@ class CompositionModule(BaseModule):
         request = TableGetRequest(url=source.url, refresh=begin, rows=source.rows_per_line)
         return await self._ask("sources.table.get", request.model_dump(mode="json"), model=TableGetReply)
 
+    async def _voices_view(self, snapshot: RunSnapshot | None = None) -> VoiceSettingsView:
+        """The settings of the voice-overs, as they are now or as the run took them."""
+        values = snapshot.voices if snapshot is not None else None
+        return await self._ask("voices.settings.get", {"values": values}, model=VoiceSettingsView)
+
     async def _players_off(self, snapshot: RunSnapshot | None = None) -> frozenset[str]:
         """The players switched off in the settings for every source, as they are now or as the run took them."""
-        values = snapshot.voices if snapshot is not None else None
-        view = await self._ask("voices.settings.get", {"values": values}, model=VoiceSettingsView)
+        view = await self._voices_view(snapshot)
         return frozenset(view.players_off)
 
     async def _answer(self, source: SeriesSource, table: ReleaseTable, season,

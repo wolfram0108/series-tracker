@@ -1145,22 +1145,46 @@ async def test_a_count_that_a_stop_cut_short_is_made_again_at_the_next_start_fro
 
 
 @pytest.mark.asyncio
-async def test_a_restart_with_nothing_changed_counts_everything_again_and_publishes_nothing(system):
+async def test_a_restart_with_nothing_changed_counts_nothing_and_a_change_of_any_input_counts_the_layout_again(
+        system, monkeypatch):
+    """A layout stands as it is stored while its inputs are those it was counted from, a lever the user set since
+    included; a change of any of them while the service was stopped — the card, the settings of the voice-overs, the
+    rules of a profile, the page of a source, the code — counts it again, and the start after that count counts nothing."""
+    import modules.composition.module as composition_module
     s = system
     series_id = await laid_out(s)
     await s.set(series_id, "voice.take", False, season=1, target=group_target("Рутина"))
     before = await s.get(series_id)
     s.taken(s.changed)
-    await s.composition.stop()
-    again = CompositionModule(s.bus, Database(str(s.db_path)))
-    await again.start()
-    try:
+    running = [s.composition]
+
+    async def restarted() -> int:
+        """The tables a start asks for: a count of the layout reads them, a layout that stands does not."""
+        await running[-1].stop()
+        again = CompositionModule(s.bus, Database(str(s.db_path)))
+        running.append(again)
+        asked = len(s.sources.requests)
+        await again.start()
         await again.idle()
-        assert s.taken(s.changed) == [] and s.taken(s.failed) == []
-        assert await s.get(series_id) == before
-        assert s.sources.requests[-1].refresh is False
+        return len(s.sources.requests) - asked
+
+    def code_changed() -> None:
+        monkeypatch.setattr(composition_module, "code_print", lambda: "another code")
+
+    try:
+        assert await restarted() == 0
+        assert s.taken(s.changed) == [] and s.taken(s.failed) == [] and await s.get(series_id) == before
+        changes = [lambda: s.catalog.series[series_id].update(season=2),
+                   lambda: setattr(s.voices, "priority", ["kodik", "vk", "cvh"]),
+                   lambda: s.rules.versions.update({7: 1}),
+                   lambda: s.sources._written(PAGE), code_changed]
+        for change in changes:
+            change()
+            assert await restarted() > 0, change
+            assert await restarted() == 0, change
     finally:
-        await again.stop()
+        for each in running[1:]:
+            await each.stop()
 
 
 @pytest.mark.asyncio

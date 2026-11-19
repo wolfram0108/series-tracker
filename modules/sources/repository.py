@@ -27,13 +27,20 @@ _LAST_TABLE = (
     " r.season, r.episode"
     " FROM release_tables t LEFT JOIN release_rows r ON r.url = t.url WHERE t.url = ? ORDER BY r.seq")
 
+# Every write of the record of a page takes the next number of the module (`_COUNT`, then `_NEXT_WRITE` in the same
+# transaction): a page written, forgotten and written again never has a number it had, so a reader that kept the number
+# of a page knows whether it was written since.
+_COUNT = ("UPDATE release_writes SET last = last + 1", ())
+_NEXT_WRITE = "(SELECT last FROM release_writes)"
+
 _SAVE_HEAD = (
     "INSERT INTO release_tables (url, site, names, title, site_voice, channel, read_at, unread, complete, state, reason,"
-    " reading_since) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'ready', NULL, NULL)"
+    " reading_since, writes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'ready', NULL, NULL, " + _NEXT_WRITE + ")"
     " ON CONFLICT (url) DO UPDATE SET site = excluded.site, names = excluded.names, title = excluded.title,"
     " site_voice = excluded.site_voice,"
     " channel = excluded.channel, unread = excluded.unread,"
-    " read_at = excluded.read_at, complete = 1, state = 'ready', reason = NULL, reading_since = NULL")
+    " read_at = excluded.read_at, complete = 1, state = 'ready', reason = NULL, reading_since = NULL,"
+    " writes = excluded.writes")
 
 _SAVE_ROW = (
     'INSERT INTO release_rows (url, seq, "key", player, player_label, grp, text, voice_name, voice_kind, heights,'
@@ -122,6 +129,7 @@ class SourcesRepository:
         if not table.complete or not table.read_at:
             raise ValueError("only a complete table is stored")
         statements: list[tuple[str, tuple]] = [
+            _COUNT,
             (_SAVE_HEAD, (table.url, table.site, json.dumps(table.names, ensure_ascii=False), table.title, table.site_voice,
                           table.channel, table.read_at,
                           json.dumps([each.model_dump(mode="json") for each in table.unread], ensure_ascii=False))),
@@ -133,6 +141,10 @@ class SourcesRepository:
                 row.link, row.video, json.dumps(row.site_fields, ensure_ascii=False), row.part, row.timeline, row.track.value,
                 row.language, row.subtitle_type, row.season, row.episode)))
         await self._db.execute_many(statements)
+
+    async def writes(self) -> dict[str, int]:
+        """The number of the last write of the record of every page."""
+        return {row["url"]: row["writes"] for row in await self._db.fetch_all("SELECT url, writes FROM release_tables")}
 
     async def pages(self) -> list[dict]:
         """Every page the module holds a record of: its address, the end of its last complete table (none while it was
@@ -146,17 +158,19 @@ class SourcesRepository:
 
     async def mark_reading(self, url: str, site: str, since: str) -> None:
         """Record that a read of the page began; the last complete table stays as it is."""
-        await self._db.execute(
-            "INSERT INTO release_tables (url, site, state, reading_since) VALUES (?, ?, 'reading', ?)"
-            " ON CONFLICT (url) DO UPDATE SET state = 'reading', reading_since = excluded.reading_since, reason = NULL",
-            (url, site, since))
+        await self._db.execute_many([_COUNT, (
+            "INSERT INTO release_tables (url, site, state, reading_since, writes) VALUES (?, ?, 'reading', ?, "
+            + _NEXT_WRITE + ") ON CONFLICT (url) DO UPDATE SET state = 'reading', reading_since = excluded.reading_since,"
+            " reason = NULL, writes = excluded.writes",
+            (url, site, since))])
 
     async def mark_failed(self, url: str, site: str, reason: str) -> None:
         """Record that the read failed; the last complete table stays as it is."""
-        await self._db.execute(
-            "INSERT INTO release_tables (url, site, state, reason) VALUES (?, ?, 'failed', ?)"
-            " ON CONFLICT (url) DO UPDATE SET state = 'failed', reason = excluded.reason, reading_since = NULL",
-            (url, site, reason))
+        await self._db.execute_many([_COUNT, (
+            "INSERT INTO release_tables (url, site, state, reason, writes) VALUES (?, ?, 'failed', ?, " + _NEXT_WRITE + ")"
+            " ON CONFLICT (url) DO UPDATE SET state = 'failed', reason = excluded.reason, reading_since = NULL,"
+            " writes = excluded.writes",
+            (url, site, reason))])
 
 
     async def players_of_pages(self, urls: list[str]) -> tuple[dict[tuple[str, str], int], dict[str, int]]:

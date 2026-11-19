@@ -134,10 +134,20 @@ class FakeSources(BaseModule):
         self.gate = asyncio.Event()
         self.gate.set()
         self.asked: asyncio.Queue[str] = asyncio.Queue()
+        # The number of the last write of the record of every page, as the module numbers them: never one twice.
+        self.writes: dict[str, int] = {}
+        self._writes = itertools.count(1)
         super().__init__(bus)
 
     def register(self) -> None:
         self.handle("sources.table.get", self.on_get, concurrent=True)
+        self.handle("sources.tables.writes", self.on_writes)
+
+    async def on_writes(self, env) -> dict:
+        return {"writes": dict(self.writes)}
+
+    def _written(self, key: str) -> None:
+        self.writes[key] = next(self._writes)
 
     def hold(self) -> None:
         while not self.asked.empty():
@@ -174,6 +184,7 @@ class FakeSources(BaseModule):
             state = TableState.READING
             if key not in self.reading:
                 self.reading.add(key)
+                self._written(key)
                 self.reads_begun.append(key)
                 self.verdicts.pop(key, None)
                 if key in self.finish_at_once:
@@ -186,6 +197,7 @@ class FakeSources(BaseModule):
         key = canonical(url)
         read_at = read_at or datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc).isoformat()
         self.tables[key] = table.model_copy(update={"url": key, "complete": True, "read_at": read_at})
+        self._written(key)
         self.reading.discard(key)
         self.verdicts.pop(key, None)
         self.publish_event("sources.table.ready", TableReady(url=key, read_at=read_at).model_dump())
@@ -193,6 +205,7 @@ class FakeSources(BaseModule):
     def fail(self, url: str, why: str) -> None:
         key = canonical(url)
         self.reading.discard(key)
+        self._written(key)
         self.verdicts[key] = why
         self.publish_event("sources.table.failed", TableFailed(url=key, reason=why).model_dump())
 
@@ -232,10 +245,17 @@ class FakeRules(BaseModule):
         self.gate = asyncio.Event()
         self.gate.set()
         self.broken = False
+        # What `rules.profiles.export` tells of a profile: its stored rules, a version here; a test that edits a
+        # profile moves it.
+        self.versions: dict[int, int] = {}
         super().__init__(bus)
 
     def register(self) -> None:
         self.handle("rules.apply", self.on_apply, concurrent=True)
+        self.handle("rules.profiles.export", self.on_export)
+
+    async def on_export(self, env) -> dict:
+        return {"profiles": {each: self.versions.get(each, 0) for each in env.payload.get("profile_ids", [])}}
 
     def hold(self) -> None:
         """From now on every answer waits for `release`; `entered` tells when one is held."""

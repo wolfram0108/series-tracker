@@ -104,13 +104,12 @@ import json
 import os
 import shutil
 from dataclasses import asdict, dataclass, replace
-from functools import lru_cache
-from pathlib import Path
 from typing import Any, Callable
 
 from core import NO_HANDLER, BaseModule, BusRequestError, compute, storage
 from core import container as mkv
 from core.clock import beat_while
+from core.code_print import code_print
 from core.dump import plain
 from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView, SyncScope, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
@@ -248,19 +247,6 @@ VIEW_INPUTS: dict[str, ViewInput] = {
     # The rule of names is a function of the card and of the numbers of the episode alone: the card stands for it.
     "rules.format_filename": ViewInput("series.updated", lambda seen: None),
 }
-
-
-@lru_cache(maxsize=1)
-def code_print() -> str:
-    """The print of the code of the service (its modules, its core, its migrations): a view counted by another code is
-    counted again, whatever its inputs."""
-    root = Path(__file__).resolve().parents[2]
-    digest = hashlib.sha256()
-    for folder in ("core", "modules", "alembic/versions"):
-        for path in sorted((root / folder).rglob("*.py")):
-            digest.update(str(path.relative_to(root)).encode())
-            digest.update(path.read_bytes())
-    return digest.hexdigest()
 
 
 def inputs_print(seen: _Seen, own: str) -> str:

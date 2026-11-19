@@ -10,6 +10,9 @@ Queries:
   sources.trackers.list          → [{...}] (владелец таблицы trackers)
 
 Tables of site pages (the one way to read a site page; sites are registered in `sites`, the core is `table.py`):
+  sources.tables.writes {} → {writes: {url: n}}: the number of the last write of the record of every page (its table, a read
+                                   begun, a read failed); a page written again never has a number it had, so a reader
+                                   that kept the number knows whether the page was written since.
   sources.table.get {url, refresh?, rows?, by_sync?} → TableGetReply {url, state: ready | reading | failed | absent,
                                    table?, reason?}. A complete table within the term (term.py) is `ready`. Otherwise the page is read — by one
                                    task however many ask — and the reply is `reading` at once, with the last
@@ -262,6 +265,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.video.fetch", self.on_video_fetch, concurrent=True)
         self.handle("sources.video.fetch.stop", self.on_video_fetch_stop)
         self.handle("sources.table.get", self.on_table_get)
+        self.handle("sources.tables.writes", self.on_tables_writes)
         self.handle("sources.table.read", self.on_table_read)
         self.handle("sources.table.cancel", self.on_table_cancel)
         self.handle("sources.site.resolve", self.on_site_resolve)
@@ -568,6 +572,9 @@ class SourcesModule(BaseModule):
         reply = await self.tables.get(TableGetRequest.model_validate(env.payload))
         # The table of a page is thousands of rows: it is made into the message off the loop of the service.
         return await compute.run(reply.model_dump, mode="json")
+
+    async def on_tables_writes(self, env: Envelope) -> dict:
+        return {"writes": await self.repo.writes()}
 
     async def on_table_read(self, env: Envelope) -> None:
         await self.tables.read(TableGetRequest.model_validate(env.payload))

@@ -84,6 +84,17 @@ class CompositionRepository:
         await self._db.transaction(lambda conn: _write(conn, series_id, both, sources, numbering, records, rev, orders,
                                                        titles))
 
+    async def prints(self) -> dict[int, str]:
+        """The print of the inputs every layout was last counted from (core: none for a layout counted otherwise)."""
+        return {row["series_id"]: row["inputs"] for row in await self._db.fetch_all(
+            "SELECT series_id, inputs FROM composition_state WHERE inputs IS NOT NULL")}
+
+    async def save_print(self, series_id: int, inputs: str | None) -> None:
+        """The print of the inputs the layout was counted from, kept beside it; it is no content of the layout and raises
+        no counter."""
+        await self._db.execute("INSERT INTO composition_state (series_id, inputs) VALUES (?, ?) ON CONFLICT (series_id)"
+                               " DO UPDATE SET inputs = excluded.inputs", (series_id, inputs))
+
     async def writes(self) -> dict[int, int]:
         """The counter of the writes of every series that has one."""
         return {row["series_id"]: row["writes"]
