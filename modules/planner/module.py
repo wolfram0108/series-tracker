@@ -206,8 +206,12 @@ class BusSync(SeriesSync):
         self.conform_dir = ""
         self.kept: Kept | None = None  # the alignments this series keeps until their containers are in place
         self.made: Plan | None = None  # the plan in force: what a step asks about its neighbours
+        self._aligners: tuple[Plan | None, dict] = (None, {})
         self.download_names: dict[str, str] = {}  # the name of the file of a download, by the step that took it
-        self.names: dict[tuple, str] = {}
+        # The names the rule of the series gave, kept by the module for the card they were given for: a view of the window
+        # and a sync of the same card ask none of them again.
+        self.names: dict[tuple, str] = module.names_of(series)
+        self.namer = self._namer()
         self.told = False  # the window was shown the plan this sync froze
         self.flags: dict[str, int] = {}  # the steps under way by what they are, for the card of the series
         self.run_mark = ""  # when the sync under way began (plan_runs): the same after a stop, so its jobs are found again
@@ -255,15 +259,16 @@ class BusSync(SeriesSync):
             self.kept = kept_of(folders["conform"], self.series["id"])
 
     async def namer_for(self, made: Plan):
-        """The series' own rule of names (`rules.format_filename`), asked once for every goal of the plan."""
+        """The series' own rule of names (`rules.format_filename`), asked once for every goal the names do not hold yet.
+        The namer of the sync when no name was added (the plan made with it stands); a new one when names came."""
         wanted = {}
         for goal in made.goals:
             video = goal.video
             cut = video.kind == "cut" or (video.container is not None and video.container.video.cut_of is not None)
-            wanted[(goal.slot, video.snapshot.group, video.snapshot.height, cut, goal.off)] = (goal.slot, video, cut)
+            key = (goal.slot, video.snapshot.group, video.snapshot.height, cut, goal.off)
+            if key not in self.names:
+                wanted[key] = (goal.slot, video, cut)
         for key, (slot, video, cut) in wanted.items():
-            if key in self.names:
-                continue
             item = {"season": slot[0], "episode_start": slot[1], "episode_end": None,
                     "part": slot[2] if len(slot) > 2 else None, "resolution": video.snapshot.height,
                     "voiceover_tag": video.snapshot.group, "source_url": video.snapshot.link}
@@ -271,11 +276,14 @@ class BusSync(SeriesSync):
                 item["cut"] = json.dumps({"height": video.snapshot.height, "voice_group": video.snapshot.group})
             try:
                 made_name = (await self.m.request("rules.format_filename", {"series": self.series, "media_item": item}))["filename"]
-                name = os.path.splitext(made_name)[0] + ".mkv" + (".off" if key[-1] else "")
-            except (BusRequestError, KeyError, asyncio.TimeoutError):
-                name = name_of(slot, video.snapshot, key[-1])
-            self.names[key] = name
+                self.names[key] = os.path.splitext(made_name)[0] + ".mkv" + (".off" if key[-1] else "")
+            except (BusRequestError, KeyError):
+                self.names[key] = name_of(slot, video.snapshot, key[-1])  # the rule refused: the planner's own name
+            except asyncio.TimeoutError:
+                continue  # no answer is no word of the rule: its own name stands for now, and the rule is asked again
+        return self._namer() if wanted else self.namer
 
+    def _namer(self):
         def namer(slot, video, off):
             cut = video.kind == "cut" or (video.container is not None and video.container.video.cut_of is not None)
             return self.names.get((slot, video.snapshot.group, video.snapshot.height, cut, off)) or \
@@ -512,7 +520,15 @@ class BusSync(SeriesSync):
         file of the voice-over is then no step's input."""
         if self.made is None:
             return False
-        needers = [each for each in self.made.ops if op.id in each.needs and each.kind == "align"]
+        if self._aligners[0] is not self.made:
+            # The alignments of each voice-over in the plan in force, indexed once per plan rather than per voice-over.
+            index: dict[str, list] = {}
+            for each in self.made.ops:
+                if each.kind == "align":
+                    for need in each.needs:
+                        index.setdefault(need, []).append(each)
+            self._aligners = (self.made, index)
+        needers = self._aligners[1].get(op.id, [])
         for each in needers:
             goal, way = each.subject
             if await self._kept_path(goal, way, goal.video.timeline) is None:
@@ -762,6 +778,7 @@ class PlannerModule(BaseModule):
         self._jobs: dict[str, asyncio.Future] = {}
         self._ended: dict[str, dict] = {}  # jobs that ended before anyone waited for them
         self._views: dict[int, tuple] = {}
+        self._names: dict[int, tuple[str, dict]] = {}  # the names the rule gave each series, with the card they are of
         self._members: dict[int, dict] = {}  # the compilations of the layout of a series by their row
         self._loaded: dict[int, tuple] = {}  # the failures and commands a running sync started from
         self._forgot: set[int] = set()  # series whose failures the user reset while their sync ran
@@ -1023,8 +1040,18 @@ class PlannerModule(BaseModule):
                 except Exception:  # noqa: BLE001 - one series must not keep the others from telling theirs
                     self.log.exception("сериал %d: статус при старте не посчитан", series_id)
 
+    def names_of(self, series: dict) -> dict:
+        """The names of files the rule of names gave a series, kept while its card stays the same (the rule reads only the
+        card and the numbers of the episode): another card is another set."""
+        card = json.dumps(series, sort_keys=True, ensure_ascii=False, default=str)
+        held = self._names.get(series["id"])
+        if held is None or held[0] != card:
+            held = self._names[series["id"]] = (card, {})
+        return held[1]
+
     async def on_series_deleted(self, env: Envelope) -> None:
         series_id = int(env.payload["series_id"])
+        self._names.pop(series_id, None)
         task = self._runs.pop(series_id, None)
         if task is not None:
             task.cancel()

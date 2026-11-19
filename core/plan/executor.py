@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field, replace
+from collections.abc import Mapping
 from typing import Callable
 
 from ..reasons import reason
@@ -170,6 +171,33 @@ def attempt_of(op: Op, results: dict[str, Made]) -> tuple | None:
     if op.kind == "cut":
         return ("cut", op.subject.row.id, op.subject.timeline)
     return None
+
+
+class Results(Mapping):
+    """What the steps of a plan have made, read from a step when it is asked for: a step reads the results of a few
+    others, and a table of all of them made again each time a step ends grows with the square of the plan."""
+
+    def __init__(self, steps: dict[str, "Work"]) -> None:
+        self._steps = steps
+
+    @staticmethod
+    def _made(entry: "Work") -> Made | None:
+        task = entry.task
+        if task is None or not task.done() or task.cancelled() or task.exception() is not None:
+            return None
+        return task.result()
+
+    def __getitem__(self, key: str) -> Made:
+        made = self._made(self._steps[key])
+        if made is None:
+            raise KeyError(key)
+        return made
+
+    def __iter__(self):
+        return (key for key, entry in self._steps.items() if self._made(entry) is not None)
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
 
 
 def table_after(containers: dict[str, Container], made: Plan, group: Group, results: dict[str, Made]) -> dict[str, Container]:
@@ -352,11 +380,9 @@ class SeriesSync:
         made: Plan | None = None
         inputs = self.inputs(online, choices)
 
-        def results_of(steps: dict[str, Work]) -> dict[str, Made]:
+        def results_of(steps: dict[str, Work]) -> "Results":
             """What the steps of a plan have made by now."""
-            return {key: entry.task.result() for key, entry in steps.items()
-                    if entry.task is not None and entry.task.done() and not entry.task.cancelled()
-                    and entry.task.exception() is None and entry.task.result() is not None}
+            return Results(steps)
 
         def begin(plan_: Plan) -> dict[str, Work]:
             """The steps of a plan: one that asks the work a step of this sync does or did (a plan in between may not have
@@ -389,11 +415,14 @@ class SeriesSync:
             failed): the ready ones go as one piece of work, and each step takes its own outcome out of it. A batch not
             sent yet takes the steps of the new plan that no batch sent; the steps of one sent have their outcome there and
             join no other, and the new steps of its key make the next batch."""
-            for key in dict.fromkeys(op.batch for op in plan_.ops if op.batch):
+            by_batch: dict[str, list[Op]] = {}
+            for op in plan_.ops:
+                if op.batch:
+                    by_batch.setdefault(op.batch, []).append(op)
+            for key, ops in by_batch.items():
                 # A step a batch sent has its outcome in that batch: it is no member of the batch that waits for the
                 # download of another source (it would never arrive there, and the batch would never be sent).
-                members = [each for each in (steps[op.id] for op in plan_.ops if op.batch == key)
-                           if each.batch is None or not each.batch.sent]
+                members = [each for each in (steps[op.id] for op in ops) if each.batch is None or not each.batch.sent]
                 batch = batches.get(key)
                 if batch is None or batch.sent:
                     if not members:

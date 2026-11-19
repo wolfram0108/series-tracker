@@ -1,7 +1,7 @@
 """The names and groups of voice-overs and players (core/voice_names.py): one form to compare, one order of players."""
 import pytest
 
-from core.voice_names import NO_GROUPS, Groups, fold_name, rank, usable_groups
+from core.voice_names import NO_GROUPS, Groups, PlayerOrder, fold_name, usable_groups
 
 
 @pytest.mark.parametrize("name, folded", [("Red Head Sound", "redheadsound"), ("  AniStar ", "anistar"),
@@ -37,14 +37,14 @@ def test_data_that_is_not_a_group_is_not_trusted():
 def test_a_player_takes_the_place_of_its_name_or_of_its_group_and_an_unknown_one_comes_last():
     groups = Groups.of({"mirror": ["cvh", "kodik"]})
     order = ["vk", "mirror", "allvideo"]
-    assert [rank(p, order, groups) for p in ("vk", "cvh", "kodik", "allvideo", "other")] == [0, 1, 1, 2, 3]
-    assert [rank(p, ["vk", "cvh"], NO_GROUPS) for p in ("vk", "cvh", "kodik")] == [0, 1, 2]
+    assert [PlayerOrder.of(order, groups).place(p) for p in ("vk", "cvh", "kodik", "allvideo", "other")] == [0, 1, 1, 2, 3]
+    assert [PlayerOrder.of(["vk", "cvh"], NO_GROUPS).place(p) for p in ("vk", "cvh", "kodik")] == [0, 1, 2]
 
 
 def test_every_release_of_every_page_takes_the_one_place_of_the_torrent_and_its_group():
     """A release is a line of one page (`torrent:<release>`): the order of the settings names the torrent once."""
     order = ["vk", "torrent", "kodik"]
-    assert [rank(p, order) for p in ("torrent:page", "torrent:1080p • AVC", "torrent:page#DIR", "kodik")] == [1, 1, 1, 2]
-    assert rank("torrent:page", ["vk", "kodik"]) == 2  # not in the order: last, as any player
-    assert rank("torrent:page", ["vk", "files", "kodik"], Groups.of({"files": ["torrent"]})) == 1
-    assert rank("line:NBY", ["line", "line:NBY"]) == 1  # a line of the provider is its own place
+    assert [PlayerOrder.of(order).place(p) for p in ("torrent:page", "torrent:1080p • AVC", "torrent:page#DIR", "kodik")] == [1, 1, 1, 2]
+    assert PlayerOrder.of(["vk", "kodik"]).place("torrent:page") == 2  # not in the order: last, as any player
+    assert PlayerOrder.of(["vk", "files", "kodik"], Groups.of({"files": ["torrent"]})).place("torrent:page") == 1
+    assert PlayerOrder.of(["line", "line:NBY"]).place("line:NBY") == 1  # a line of the provider is its own place

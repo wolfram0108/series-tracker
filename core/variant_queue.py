@@ -16,10 +16,11 @@ only for a better one), and with nothing held the first of them by the rule is t
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Callable, Hashable, Iterable, Sequence
 
 from core.contracts import CompositionRow
-from core.voice_names import NO_GROUPS, Groups, rank
+from core.voice_names import NO_GROUPS, Groups, PlayerOrder
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,11 @@ class Order:
 
     def player_place(self, player: str) -> int:
         """Place in the order of the settings; players of one group of the user take one place, an unknown one is last."""
-        return rank(player, self.players, self.player_groups)
+        return self._players.place(player)
+
+    @cached_property
+    def _players(self) -> PlayerOrder:
+        return PlayerOrder.of(self.players, self.player_groups)
 
     def source_place(self, source_id: int) -> int:
         return self.sources.get(source_id, len(self.sources))

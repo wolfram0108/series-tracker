@@ -3,12 +3,13 @@
 A group is a name with a list of triggers. A name belongs to a group when, folded (`fold_name`: no case, no spaces,
 no punctuation), it equals the folded name of the group or one of its triggers. A combined credit "A / B" is one name:
 it is not split, so it joins neither the group of "A" nor the group of "B" (law Z-6). The same groups are kept for
-players, and `rank` is the one order of players that the reference and the voice-overs both follow.
+players, and `PlayerOrder` is the one order of players that the reference and the voice-overs both follow.
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Mapping, Sequence
 
 from core.contracts.torrent import order_name
@@ -16,6 +17,7 @@ from core.contracts.torrent import order_name
 _NOISE = re.compile(r"[\W_]+", re.UNICODE)
 
 
+@lru_cache(maxsize=1 << 16)  # the names of a layout are few and asked many times over: each is folded once
 def fold_name(name: str) -> str:
     """No case, no spaces, no punctuation: the form a group trigger and a voice-over name are compared in."""
     return _NOISE.sub("", name.casefold())
@@ -65,9 +67,27 @@ class Groups:
 NO_GROUPS = Groups()
 
 
-def rank(player: str, priority: Sequence[str], players: Groups = NO_GROUPS) -> int:
-    """Place of a player in the order of the settings; players the user put into one group take one place and an
-    unknown player comes last."""
-    order = [players.canonical(kind) for kind in priority]
-    wanted = players.canonical(order_name(player))
-    return order.index(wanted) if wanted in order else len(order)
+@dataclass(frozen=True)
+class PlayerOrder:
+    """The order of players of the settings in the form two players are compared in, folded once: a plan asks the place
+    of a player tens of thousands of times, and the order does not change while it is counted."""
+
+    places: Mapping[str, int]
+    size: int
+    players: Groups = NO_GROUPS
+    _known: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
+
+    @classmethod
+    def of(cls, priority: Sequence[str], players: Groups = NO_GROUPS) -> "PlayerOrder":
+        places: dict[str, int] = {}
+        for place, kind in enumerate(priority):
+            places.setdefault(players.canonical(kind), place)
+        return cls(places, len(priority), players)
+
+    def place(self, player: str) -> int:
+        """Place of a player in the order of the settings; players the user put into one group take one place and an
+        unknown player comes last."""
+        found = self._known.get(player)
+        if found is None:
+            found = self._known[player] = self.places.get(self.players.canonical(order_name(player)), self.size)
+        return found

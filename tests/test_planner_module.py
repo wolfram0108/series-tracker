@@ -539,6 +539,29 @@ async def test_the_window_is_told_the_end_of_a_sync_with_the_view_the_tables_giv
     assert {track["kind"] for each in last["episodes"] for track in each["tracks"]} == {"reuse"}
 
 
+async def test_the_names_of_the_files_are_asked_of_the_rule_once_for_a_card_and_the_plan_is_made_once(world, monkeypatch):
+    """A view of the window and a sync of the same card do not ask the rule of names again: what the rule reads (the card and
+    the numbers of the episode) did not change. Names known before the plan, the plan made with them stands."""
+    import core.plan.executor as executor
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    episode(neighbours, 1, 2)
+    seen, untap = tapped(planner)
+    made = []
+    counted = executor.plan
+    monkeypatch.setattr(executor, "plan", lambda *args: made.append(1) or counted(*args))
+    try:
+        await planner.request("planner.series.get", {"series_id": SERIES})
+        asked = len([each for each in seen if each.topic == "rules.format_filename" and each.kind == "query"])
+        plans = len(made)
+        await planner.request("planner.series.get", {"series_id": SERIES})
+        again = len([each for each in seen if each.topic == "rules.format_filename" and each.kind == "query"]) - asked
+    finally:
+        untap()
+    assert asked >= 1 and plans == 2  # the first view: names asked, then the plan made again with them
+    assert again == 0 and len(made) - plans == 1
+
+
 async def test_a_failure_is_told_with_the_episodes_and_the_voice_over_of_its_row(world):
     """The plan passes over a failed attempt, so the window learns where it belongs from the failure itself."""
     neighbours, planner, _ = world

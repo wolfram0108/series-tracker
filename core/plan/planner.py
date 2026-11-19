@@ -791,14 +791,27 @@ def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, take
     members: dict[str, list[str]] = {}
     for node in list(parent):
         members.setdefault(find(node), []).append(node)
+    parts = [(sorted(slot_of[node] for node in nodes if node in slot_of), nodes) for nodes in members.values()]
+    # The ops of a group: those of its episodes, and those of no episode that an op of its episodes needs — each op is
+    # placed once by an index of the plan, not looked for again in every group.
+    part_of = {slot: place for place, (slots, _nodes) in enumerate(parts) for slot in slots}
+    needers: dict[str, set] = {}
+    for each in ops:
+        for need in each.needs or ():
+            needers.setdefault(need, set()).add(each.slot)
+    mine_of: list[list[str]] = [[] for _ in parts]
+    for op in ops:
+        if op.slot is not None:
+            if op.slot in part_of:
+                mine_of[part_of[op.slot]].append(op.id)
+        else:
+            for place in sorted({part_of[slot] for slot in needers.get(op.id, ()) if slot in part_of}):
+                mine_of[place].append(op.id)
     groups = []
-    for nodes in members.values():
-        slots = sorted(slot_of[node] for node in nodes if node in slot_of)
+    for (slots, nodes), mine in zip(parts, mine_of):
         files = {node[5:] for node in nodes if node.startswith("file:")}
-        mine = tuple(op.id for op in ops if op.slot in slots or (op.slot is None and any(
-            each.needs and op.id in each.needs for each in ops if each.slot in slots)))
         groups.append(Group(
-            slots=tuple(slots), ops=mine,
+            slots=tuple(slots), ops=tuple(mine),
             kept=tuple((slot, kept[slot].name) for slot in slots if slot in kept),
             built=tuple(slot for slot in slots if slot in by_slot and slot not in kept),
             remove=tuple(sorted(files & remove)), hide=tuple((name, hidden[name]) for name in sorted(files & hide))))
