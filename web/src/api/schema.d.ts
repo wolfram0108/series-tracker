@@ -566,7 +566,9 @@ export interface paths {
         /**
          * Composition
          * @description The composition window: the layout of the series (`composition`, rows the constructor excluded only with
-         *     `include_excluded`; `sources_only` leaves out the rows, levels and settings).
+         *     `include_excluded`; `sources_only` leaves out the rows, levels and settings). `part` is what of it is asked
+         *     (`LayoutPart`: a window reads again only what a change touched), `episodes` — `season:episode` of the part
+         *     `levers`.
          */
         get: operations["composition_api_series__series_id__composition_get"];
         put?: never;
@@ -2211,6 +2213,12 @@ export interface components {
             series_id: number;
             /** Rev */
             rev: number;
+            /**
+             * Part
+             * @default whole
+             * @enum {string}
+             */
+            part: "whole" | "levers" | "sources";
             /** Rows */
             rows?: components["schemas"]["CompositionRow"][];
             /** Subtitles */
@@ -4701,6 +4709,12 @@ export interface components {
              * @default false
              */
             summary_only: boolean;
+            /**
+             * Part
+             * @default whole
+             * @enum {string}
+             */
+            part: "whole" | "levers" | "sources";
         };
         /** CompositionFailed */
         CompositionFailed: {
@@ -6392,6 +6406,8 @@ export interface operations {
             query?: {
                 include_excluded?: boolean;
                 sources_only?: boolean;
+                part?: "whole" | "levers" | "sources";
+                episodes?: string[];
             };
             header?: never;
             path: {

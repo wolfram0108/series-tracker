@@ -15,6 +15,13 @@ describe("the calls to the output of the core", () => {
     expect(client.GET).toHaveBeenCalledWith("/api/series/{series_id}/composition", { params: { path: { series_id: 1 } } })
   })
 
+  it("asks for the part of the layout a change touched by its name and episodes", async () => {
+    client.GET.mockResolvedValueOnce({ data: { series_id: 1, rev: 4, part: "levers" } })
+    await fetchComposition(1, "levers", ["1:2", "1:3"])
+    expect(client.GET).toHaveBeenCalledWith("/api/series/{series_id}/composition",
+      { params: { path: { series_id: 1 }, query: { part: "levers", episodes: ["1:2", "1:3"] } } })
+  })
+
   it("sends a lever to the settings of the series with its body as it is", async () => {
     const body = { season: 2, episode: 5, lever: "voice.take", target: "group:AniStar", value: false }
     client.PUT.mockResolvedValueOnce({ data: { success: true } })

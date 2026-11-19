@@ -36,7 +36,7 @@ const summary: SourceSummary = {
   players: [{ player: "vk", player_label: "VK", rows: 3, groups: 0 }],
 }
 const composition = (over: Partial<Composition> = {}): Composition => ({
-  series_id: 1, rev: 1, rows: [row()], sources: [summary],
+  series_id: 1, rev: 1, part: "whole", rows: [row()], sources: [summary],
   levels: [{ season: 1, levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: false, level: "season" }] }],
   settings: [{ season: 1, episode: 2, levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: true, level: "episode" }] }],
   levers: SPECS,
@@ -103,7 +103,7 @@ describe("useSeriesOutput", () => {
     givePlan(planned, [reference()])
     const output = setup()
     await flushPromises()
-    expect(calls.fetchComposition).toHaveBeenCalledWith(1)
+    expect(calls.fetchComposition).toHaveBeenCalledWith(1, "whole", [])
     expect(calls.fetchPlan).toHaveBeenCalledWith(1)
     expect(output.views.value).toEqual([{
       season: 1, episode: 2, references: [reference()], rows: [row()],
@@ -142,16 +142,16 @@ describe("useSeriesOutput", () => {
     const before = vi.mocked(calls.fetchComposition).mock.calls.length
     const plansBefore = vi.mocked(calls.fetchPlan).mock.calls.length
     const store = useCompositionStore()
-    store.applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false })
+    store.applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false, part: "whole" })
     await flushPromises()
     expect(calls.fetchComposition).toHaveBeenCalledTimes(before + 1)
-    store.applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false })
+    store.applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false, part: "whole" })
     await flushPromises()
     expect(calls.fetchComposition).toHaveBeenCalledTimes(before + 1)
-    store.applyChanged({ series_id: 2, rev: 5, episodes: [], summary_only: false })
+    store.applyChanged({ series_id: 2, rev: 5, episodes: [], summary_only: false, part: "whole" })
     await flushPromises()
     expect(calls.fetchComposition).toHaveBeenCalledTimes(before + 1)
-    store.applyChanged({ series_id: 1, rev: 2, episodes: [], summary_only: false })
+    store.applyChanged({ series_id: 1, rev: 2, episodes: [], summary_only: false, part: "whole" })
     await flushPromises()
     expect(calls.fetchComposition).toHaveBeenCalledTimes(before + 2)
     expect(calls.fetchPlan).toHaveBeenCalledTimes(plansBefore) // the plan of the change comes as a packet, counted once
@@ -163,7 +163,7 @@ describe("useSeriesOutput", () => {
     await flushPromises()
     expect(output.ready.value).toBe(false)
     expect(output.failure.value).toBe("План не посчитан")
-    useCompositionStore().applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false })
+    useCompositionStore().applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false, part: "whole" })
     await flushPromises()
     expect(calls.fetchPlan).toHaveBeenCalledTimes(2)
     expect(output.ready.value).toBe(true)
@@ -174,11 +174,11 @@ describe("useSeriesOutput", () => {
     vi.mocked(calls.fetchPlan).mockResolvedValue({ ok: false, text: "План не посчитан" })
     const output = setup()
     await flushPromises()
-    useCompositionStore().applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false })
+    useCompositionStore().applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false, part: "whole" })
     await flushPromises()
     expect(output.failure.value).toBe("План не посчитан")
     vi.mocked(calls.fetchComposition).mockResolvedValue({ ok: false, text: "Выход не построен" })
-    useCompositionStore().applyChanged({ series_id: 1, rev: 2, episodes: [], summary_only: false })
+    useCompositionStore().applyChanged({ series_id: 1, rev: 2, episodes: [], summary_only: false, part: "whole" })
     await flushPromises()
     expect(output.failure.value).toBe("Выход не построен") // the layout's words first
   })
@@ -191,7 +191,7 @@ describe("useSeriesOutput", () => {
     vi.mocked(calls.fetchPlan).mockReturnValueOnce(new Promise((resolve) => { land = resolve }))
     useSSE().connected.value = true // the connection came back: both are read
     await flushPromises()
-    useCompositionStore().applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false }) // a layout read overtakes
+    useCompositionStore().applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false, part: "whole" }) // a layout read overtakes
     await flushPromises()
     land(ok({ ...planned, references: [reference({ mark: "own", height: 720 })] }))
     await flushPromises()

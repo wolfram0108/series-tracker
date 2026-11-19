@@ -69,11 +69,13 @@ export function useSeriesSources(seriesId: number, initial: SeriesSource[]) {
 
   // Only the newest read may write: an older reply that comes late would show sources the core already changed.
   let asked = 0
-  async function load(fresh = true): Promise<void> {
+  // `open`: what is held, or the whole; `fresh`: the whole again; `news`: the part the news of the core touched.
+  async function load(how: "open" | "fresh" | "news" = "fresh"): Promise<void> {
     const ask = ++asked
     tablesLoading.value = true
     // The layout is asked for together with the sources: an ask of the output made by the same news is the same read.
-    const read = fresh ? layouts.refresh(seriesId) : layouts.ensure(seriesId)
+    const read = how === "fresh" ? layouts.refresh(seriesId)
+      : how === "news" ? layouts.catchUp(seriesId) : layouts.ensure(seriesId)
     const listed = await fetchSources(seriesId)
     if (ask !== asked) return
     if (listed.ok) sources.value = listed.data
@@ -162,11 +164,11 @@ export function useSeriesSources(seriesId: number, initial: SeriesSource[]) {
 
   onUnmounted(layouts.hold(seriesId))
   // What the window already read is shown as it is; the news since then come as events.
-  onMounted(() => void load(false))
-  // The layout of the series changed (a summary of a source too): the sources are read again.
-  watch(() => composition.layoutChanged[seriesId]?.rev, () => void load())
+  onMounted(() => void load("open"))
+  // The layout of the series changed (a summary of a source too): the sources and the part of the layout it touched.
+  watch(() => composition.layoutChanged[seriesId]?.rev, () => void load("news"))
   // The sources themselves changed (a profile, a disabled player, a season of a catalog): the other window sees it too.
-  watch(() => composition.sourcesChanged[seriesId], () => void load())
+  watch(() => composition.sourcesChanged[seriesId], () => void load("news"))
   // A connection that came back may have missed events: the sources are read again.
   watch(useSSE().connected, (up) => {
     if (up) void load()

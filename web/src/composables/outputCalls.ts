@@ -1,6 +1,7 @@
 import { api } from "../api/client"
 import type { components } from "../api/schema"
 import { call, type Answer, type CallWords } from "./sourceCalls"
+import type { LayoutPart } from "../lib/layoutParts"
 
 type Schemas = components["schemas"]
 
@@ -9,8 +10,12 @@ export type Composition = Schemas["CompositionReply"]
 
 const OUTPUT_WORDS: CallWords = { refused: "output.error.refused", network: "output.error.network" }
 
-export function fetchComposition(seriesId: number): Promise<Answer<Composition>> {
-  return call(() => api.GET("/api/series/{series_id}/composition", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
+/** The layout of a series, or the part of it a change touched (`part`; `episodes` — `season:episode` of the part `levers`). */
+export function fetchComposition(seriesId: number, part: LayoutPart = "whole", episodes: string[] = []): Promise<Answer<Composition>> {
+  const path = { series_id: seriesId }
+  return call(() => api.GET("/api/series/{series_id}/composition", {
+    params: part === "whole" ? { path } : { path, query: { part, episodes } },
+  }), OUTPUT_WORDS)
 }
 
 /** What the video of a container is cut of (stage 12): the key of its compilation and the seconds taken from it and from

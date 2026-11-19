@@ -63,7 +63,7 @@ describe("the stores the core pushes by key", () => {
     tables.applyReady({ url: "https://site/other", read_at: "2026-11-01T10:00:00Z", fresh_until: null })
     reads.apply({ series_id: 40, source_id: 1, url: "https://site/other", phase: "players", current: 1, total: 9 })
     reads.apply({ series_id: 40, source_id: 1, url: "https://site/other", active: false })
-    layout.applyChanged({ series_id: 40, rev: 2, episodes: [], summary_only: false })
+    layout.applyChanged({ series_id: 40, rev: 2, episodes: [], summary_only: false, part: "whole" })
     layout.applyFailed({ series_id: 40, reason: "{}" })
     layout.applySourcesChanged({ series_id: 40 } as never)
     expect(mine.value).toEqual([null, null, 0, null, null, 0])

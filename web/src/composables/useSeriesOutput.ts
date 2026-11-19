@@ -113,11 +113,13 @@ export function useSeriesOutput(seriesId: number) {
   const failed: { layout: string | null; plan: string | null } = { layout: null, plan: null }
   const reported = (): void => { failure.value = failed.layout ?? failed.plan }
 
-  async function readLayout(fresh: boolean): Promise<void> {
+  // `open`: what is held, or the whole; `fresh`: the whole again; `news`: the part the news of the core touched.
+  async function readLayout(how: "open" | "fresh" | "news"): Promise<void> {
     const ask = ++layoutAsked
     reading += 1
     loading.value = true
-    const answer = await (fresh ? layouts.refresh(seriesId) : layouts.ensure(seriesId))
+    const answer = await (how === "fresh" ? layouts.refresh(seriesId)
+      : how === "news" ? layouts.catchUp(seriesId) : layouts.ensure(seriesId))
     reading -= 1
     loading.value = reading > 0
     if (ask !== layoutAsked) return
@@ -140,7 +142,7 @@ export function useSeriesOutput(seriesId: number) {
 
   /** Reads both: when the window opens, when its connection came back, and for the button that tries again. */
   const load = async (fresh = true): Promise<void> => {
-    await Promise.all([readLayout(fresh), readPlan()])
+    await Promise.all([readLayout(fresh ? "fresh" : "open"), readPlan()])
   }
 
   // A refusal stays in `failure` until the next action; the words are also returned for the caller. What the user ticked in
@@ -365,7 +367,7 @@ export function useSeriesOutput(seriesId: number) {
   // The layout moved to a newer revision: the layout is read again, and so are the queues. The same or an older revision changes
   // nothing. The plan is the core's push (plan_update), counted once for the change: it is read only if the window has none yet.
   watch(() => store.layoutChanged[seriesId]?.rev, () => {
-    void readLayout(true)
+    void readLayout("news")
     if (plan.forSeries(seriesId) == null) void readPlan()
     reloadQueues()
   })

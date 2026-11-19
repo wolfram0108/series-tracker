@@ -272,7 +272,7 @@ class CompositionModule(BaseModule):
             await self.repo.write(command.series_id, orders=orders, rev=rev)
             episodes = sorted(number for season, number in project.layout_episodes(stored.rows) if season == command.season)
             self._publish_changed(command.series_id, rev, {(command.season, number) for number in episodes},
-                                  summary_only=False)
+                                  summary_only=False, part="levers")
         return {"ok": True}
 
     async def on_voice_title_set(self, env: Envelope) -> dict:
@@ -292,7 +292,8 @@ class CompositionModule(BaseModule):
                 return {"ok": True}
             rev = stored.rev + 1
             await self.repo.write(command.series_id, titles=titles, rev=rev)
-            self._publish_changed(command.series_id, rev, set(project.layout_episodes(stored.rows)), summary_only=False)
+            self._publish_changed(command.series_id, rev, set(project.layout_episodes(stored.rows)), summary_only=False,
+                                  part="levers")
         return {"ok": True}
 
     async def on_preview(self, env: Envelope) -> dict:
@@ -475,7 +476,7 @@ class CompositionModule(BaseModule):
             rev = stored.rev + 1 if shown else None
             await self.repo.write(series_id, records=after, rev=rev)
             if shown:
-                self._publish_changed(series_id, rev, touched, summary_only=not touched)
+                self._publish_changed(series_id, rev, touched, summary_only=not touched, part="levers")
         return {"ok": True}
 
     # --- events -----------------------------------------------------------------------------
@@ -723,14 +724,16 @@ class CompositionModule(BaseModule):
             if layout_changed:
                 touched = derived.touched
                 whole = touched is None or not (touched | derived.moved)
-                self._publish_changed(series_id, rev, set() if whole else touched | derived.moved)
+                self._publish_changed(series_id, rev, set() if whole else touched | derived.moved,
+                                      part="whole" if derived.rows_changed else "levers")
             else:
-                self._publish_changed(series_id, rev, set(), summary_only=True)
+                self._publish_changed(series_id, rev, set(), summary_only=True,
+                                      part="levers" if derived.headers_changed else "sources")
             return _Outcome(rev=rev, changed=True)
 
     def _publish_changed(self, series_id: int, rev: int, episodes: set[tuple[int, int]], *,
-                         summary_only: bool = False) -> None:
-        changed = CompositionChanged(series_id=series_id, rev=rev, summary_only=summary_only, episodes=[
+                         summary_only: bool = False, part: str = "whole") -> None:
+        changed = CompositionChanged(series_id=series_id, rev=rev, summary_only=summary_only, part=part, episodes=[
             EpisodeRef(season=season, episode=episode) for season, episode in sorted(episodes)])
         self.publish_event("composition.changed", changed.model_dump(mode="json"))
 
@@ -775,12 +778,23 @@ class CompositionModule(BaseModule):
 
 def layout_reply(request: CompositionGetRequest, stored) -> dict:
     """`composition.get` answered from what is stored; pure, it runs in the pool of computation."""
-    if request.sources_only:
-        return CompositionReply(series_id=request.series_id, rev=stored.rev,
+    if request.sources_only or request.part == "sources":
+        return CompositionReply(series_id=request.series_id, rev=stored.rev, part="sources",
                                 sources=[each.summary for each in stored.sources]).model_dump(mode="json")
     records = settings.canonical(stored.records)
     episodes = project.layout_episodes(stored.rows)
     outcome = compilations.resolve(stored.rows, records, _source_order(stored))
+    orders = project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows)
+    if request.part == "levers":
+        # The rows are as they were: the levers of the episodes named, and what the headers and the tracks show.
+        named = {(each.season, each.episode) for each in request.episodes}
+        chosen = {each for each in episodes if not named or each in named}
+        return CompositionReply(
+            series_id=request.series_id, rev=stored.rev, part="levers", sources=[each.summary for each in stored.sources],
+            levels=settings.levels(records, {season for season, _ in episodes},
+                                   [(view.season, view.ref.key) for view in outcome.views]),
+            settings=settings.episode_settings(records, chosen, outcome.members), compilations=outcome.views,
+            voice_orders=orders, voice_titles=stored.titles).model_dump(mode="json")
     reply = CompositionReply(
         series_id=request.series_id, rev=stored.rev,
         rows=[row for row in stored.rows if request.include_excluded or not row.excluded],
@@ -792,8 +806,7 @@ def layout_reply(request: CompositionGetRequest, stored) -> dict:
         compilations=outcome.views,
         levers=levers.specs(), availability=availability.table(),
         # A series counted before the orders were kept shows its default order until its next count writes it.
-        voice_orders=project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows),
-        voice_titles=stored.titles)
+        voice_orders=orders, voice_titles=stored.titles)
     return reply.model_dump(mode="json")
 
 

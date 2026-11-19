@@ -34,7 +34,7 @@ async def test_the_composition_of_a_series_is_the_layout_of_composition(tmp_path
         response = await client.get("/api/series/1/composition")
     assert response.status_code == 200
     assert CompositionReply.model_validate(response.json()) == CompositionReply.model_validate(LAYOUT)
-    assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": False, "sources_only": False}]
+    assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": False, "sources_only": False, "part": "whole", "episodes": []}]
     # Nothing is merged in: the layout is asked for alone, the references have their own point.
     assert [t for t in topics(spy) if t not in ("catalog.series.get", "composition.get")] == []
 
@@ -43,7 +43,7 @@ async def test_the_rows_the_constructor_excluded_come_only_when_asked_for(tmp_pa
     answers = {"catalog.series.get": card_of, "composition.get": LAYOUT}
     async with serving(tmp_path, answers) as (client, owners, _, _):
         await client.get("/api/series/1/composition?include_excluded=true")
-    assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": True, "sources_only": False}]
+    assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": True, "sources_only": False, "part": "whole", "episodes": []}]
 
 
 async def test_a_scan_of_a_series_downloads_unless_the_window_asks_for_the_status_alone(tmp_path):
@@ -95,7 +95,7 @@ async def test_a_series_with_a_torrent_source_has_the_layout_of_composition_too(
     answers = {"catalog.series.get": card_of, "composition.get": LAYOUT}
     async with serving(tmp_path, answers) as (client, owners, _, _):
         assert (await client.get("/api/series/2/composition")).status_code == 200
-    assert owners.asked("composition.get") == [{"series_id": 2, "include_excluded": False, "sources_only": False}]
+    assert owners.asked("composition.get") == [{"series_id": 2, "include_excluded": False, "sources_only": False, "part": "whole", "episodes": []}]
 
 
 async def test_the_composition_of_an_unknown_series_is_not_found(tmp_path):
@@ -286,7 +286,7 @@ async def test_a_request_for_the_sources_only_reaches_composition_as_it_is(tmp_p
     answers = {"catalog.series.get": card_of, "composition.get": LAYOUT}
     async with serving(tmp_path, answers) as (client, owners, _, _):
         await client.get("/api/series/1/composition?sources_only=true")
-    assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": False, "sources_only": True}]
+    assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": False, "sources_only": True, "part": "whole", "episodes": []}]
 
 
 

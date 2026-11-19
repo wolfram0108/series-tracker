@@ -22,6 +22,9 @@ class FakeSource {
   }
 }
 
+// A stream that comes back asks the server whether it serves another build: the page of a test has no build to ask about.
+vi.mock("../lib/build", () => ({ reloadIfRebuilt: vi.fn(async () => {}) }))
+
 async function freshSSE() {
   vi.resetModules()
   const { useSSE } = await import("./useSSE")

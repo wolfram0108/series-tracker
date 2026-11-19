@@ -6,7 +6,7 @@ does not merge them.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from typing import Literal
@@ -15,7 +15,7 @@ from pydantic import BaseModel, ValidationError
 
 from core import BusRequestError
 from core.reasons import reason, relayed
-from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitch, PlanDelete, PlannerView,
+from core.contracts import (CompositionGetRequest, CompositionReply, LayoutPart, OutputSwitch, PlanDelete, PlannerView,
                             PlanRowRef, QueuesGet, QueuesReply, Reference, SettingsReset, SettingsSet, SettingsSetMany,
                             VoiceOrderSet, VoiceTitleSet)
 
@@ -46,17 +46,21 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     r = APIRouter()
 
     @r.get("/api/series/{series_id}/composition", response_model=CompositionReply, responses=_ERR1)
-    async def composition(series_id: int, include_excluded: bool = False, sources_only: bool = False):
+    async def composition(series_id: int, include_excluded: bool = False, sources_only: bool = False,
+                          part: LayoutPart = "whole", episodes: list[str] = Query(default=[])):
         """The composition window: the layout of the series (`composition`, rows the constructor excluded only with
-        `include_excluded`; `sources_only` leaves out the rows, levels and settings)."""
+        `include_excluded`; `sources_only` leaves out the rows, levels and settings). `part` is what of it is asked
+        (`LayoutPart`: a window reads again only what a change touched), `episodes` — `season:episode` of the part
+        `levers`."""
+        named = [dict(zip(("season", "episode"), each.partition(":")[::2])) for each in episodes]
+        query = _contract(CompositionGetRequest, series_id=series_id, include_excluded=include_excluded,
+                          sources_only=sources_only, part=part, episodes=named)
         try:
             await gw.request("catalog.series.get", {"series_id": series_id})
         except BusRequestError:
             return JSONResponse({"error": reason("series_not_found")}, status_code=404)
         try:
-            return await as_made(await gw.request("composition.get", CompositionGetRequest(
-                series_id=series_id, include_excluded=include_excluded,
-                sources_only=sources_only).model_dump(mode="json")))
+            return await as_made(await gw.request("composition.get", query.model_dump(mode="json")))
         except BusRequestError as exc:
             return JSONResponse({"error": relayed(str(exc))}, status_code=500)
 

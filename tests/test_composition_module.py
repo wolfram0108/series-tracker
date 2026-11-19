@@ -169,14 +169,15 @@ def only_source(s: System, series_id: int) -> int:
 async def test_a_new_series_is_counted_waiting_and_laid_out_when_its_table_is_ready(system):
     s = system
     series_id = await s.counted(lambda: s.catalog.add_series([source()]))
-    assert s.taken(s.changed) == [{"series_id": series_id, "rev": 1, "episodes": [], "summary_only": True}]
+    assert s.taken(s.changed) == [{"series_id": series_id, "rev": 1, "episodes": [], "summary_only": True,
+                                   "part": "sources"}]
     waiting = await s.get(series_id)
     assert (waiting.rev, waiting.rows, waiting.settings) == (1, [], [])
     assert [(each.status, each.players) for each in waiting.sources] == [(SourceStatus.WAITING, [])]
     assert [request.refresh for request in s.sources.requests] == [True] and s.rules.calls == []
 
     await s.counted(lambda: s.sources.finish(PAGE, standard()))
-    assert s.taken(s.changed) == [{"series_id": series_id, "rev": 2, "summary_only": False,
+    assert s.taken(s.changed) == [{"series_id": series_id, "rev": 2, "summary_only": False, "part": "whole",
                                    "episodes": refs(*[(1, n) for n in range(1, 6)], (2, 1), (2, 2))}]
     ready = await s.get(series_id)
     assert ready.rev == 2 and ready.sources[0].status == SourceStatus.READY
@@ -264,6 +265,27 @@ async def test_a_source_without_a_profile_is_only_a_summary_until_a_profile_is_a
     assert len((await s.get(series_id)).rows) == 7 and s.rules.calls
 
 
+@pytest.mark.asyncio
+async def test_a_window_is_told_what_part_of_the_layout_to_read_again_and_the_part_holds_only_that(system):
+    """The projection of the layout in a window: a change of a lever names the part `levers` and its episodes, and that part
+    holds their levers and the headers, not the rows; a change of the summaries alone names `sources`."""
+    s = system
+    series_id = await laid_out(s)
+    whole = await s.get(series_id)
+    await s.set(series_id, "voice.take", False, season=2, episode=1, target=group_target("Рутина"))
+    [event] = s.taken(s.changed)
+    assert event["part"] == "levers" and event["episodes"] == refs((2, 1))
+    part = await s.get(series_id, part="levers", episodes=event["episodes"])
+    assert part.part == "levers" and part.rows == []
+    assert [(each.season, each.episode) for each in part.settings] == [(2, 1)]
+    after = await s.get(series_id)
+    assert part.settings == [each for each in after.settings if (each.season, each.episode) == (2, 1)]
+    assert (part.levels, part.compilations, part.sources) == (after.levels, after.compilations, after.sources)
+    assert after.rows == whole.rows  # a lever moves no row: the rows the window holds stand
+    sources = await s.get(series_id, part="sources")
+    assert sources.part == "sources" and sources.sources == after.sources and sources.settings == []
+
+
 # --- M-14: whatever the cause, the layout is counted without the user, and counting twice changes nothing -----------
 
 @pytest.mark.asyncio
@@ -273,7 +295,7 @@ async def test_a_new_table_is_counted_and_names_the_episodes_that_differ(system)
     rev = (await s.get(series_id)).rev
     await s.counted(lambda: s.sources.finish(PAGE, page(*season_rows(1, range(1, 5)))))
     assert s.taken(s.changed) == [{"series_id": series_id, "rev": rev + 1, "episodes": season_one(4),
-                                   "summary_only": False}]
+                                   "summary_only": False, "part": "whole"}]
 
 
 @pytest.mark.asyncio
@@ -1246,7 +1268,8 @@ async def test_a_header_that_no_episode_follows_changes_on_the_screen_and_is_tol
     s.taken(s.changed)
     rev = (await s.get(series_id)).rev
     await s.set(series_id, "voice.take", True, season=2, target=group_target("Рутина"))
-    assert s.taken(s.changed) == [{"series_id": series_id, "rev": rev + 1, "episodes": [], "summary_only": True}]
+    assert s.taken(s.changed) == [{"series_id": series_id, "rev": rev + 1, "episodes": [], "summary_only": True,
+                                   "part": "levers"}]
     assert headers(await s.get(series_id))[2]["voice.take"] == (True, Level.SEASON)
 
 

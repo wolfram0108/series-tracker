@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
 import { useLayoutStore } from "./layout"
+import { useCompositionStore } from "./composition"
 import * as calls from "../composables/outputCalls"
 import type { Composition } from "../composables/outputCalls"
 
@@ -69,6 +70,65 @@ describe("the layout of a series in its window", () => {
     vi.mocked(calls.fetchComposition).mockResolvedValueOnce({ ok: false, text: "Нет связи с сервером" })
     expect(await store.refresh(1)).toEqual({ ok: false, text: "Нет связи с сервером" })
     expect(store.forSeries(1)?.rev).toBe(1)
+    release()
+  })
+
+  const settingsOf = (episodes: number[], value: string) =>
+    episodes.map((episode) => ({ season: 1, episode, levers: [{ lever: value }] })) as unknown as Composition["settings"]
+  const held = (rev: number) => ({ series_id: 1, rev, part: "whole", rows: [{ row_key: "r" }], sources: [{ source_id: 1 }],
+    settings: settingsOf([1, 2, 3], "old"), levels: [], compilations: [], voice_orders: [], voice_titles: {} }) as unknown as Composition
+  const told = (rev: number, part: string, episodes: number[] = []) => useCompositionStore().applyChanged(
+    { series_id: 1, rev, part, summary_only: part === "sources", episodes: episodes.map((episode) => ({ season: 1, episode })) } as never)
+
+  it("reads after a change of levers only the levers of the episodes it touched and keeps the rows it holds", async () => {
+    const store = useLayoutStore()
+    const release = store.hold(1)
+    vi.mocked(calls.fetchComposition).mockReset().mockResolvedValueOnce(ok(held(1)))
+    await store.ensure(1)
+    vi.mocked(calls.fetchComposition).mockResolvedValueOnce(ok({ ...held(2), part: "levers", rows: [],
+      settings: settingsOf([2], "new"), sources: [{ source_id: 1, state: "x" }] } as unknown as Composition))
+    told(2, "levers", [2])
+    const answer = await store.catchUp(1)
+    expect(vi.mocked(calls.fetchComposition).mock.calls.at(-1)).toEqual([1, "levers", ["1:2"]])
+    const now = store.forSeries(1)!
+    expect(answer.ok && answer.data).toBe(now)
+    expect(now.rev).toBe(2)
+    expect(now.rows).toEqual([{ row_key: "r" }])
+    expect((now.settings ?? []).map((each) => [each.episode, (each.levers?.[0] as unknown as { lever: string }).lever]))
+      .toEqual([[1, "old"], [2, "new"], [3, "old"]])
+    release()
+  })
+
+  it("takes the news of every change since the last read at once, the widest part of them, and the whole for a change of rows", async () => {
+    const store = useLayoutStore()
+    const release = store.hold(1)
+    vi.mocked(calls.fetchComposition).mockReset().mockResolvedValue(ok(held(1)))
+    await store.ensure(1)
+    told(2, "sources")
+    told(3, "levers", [1])
+    told(4, "levers", [3])
+    await store.catchUp(1)
+    expect(vi.mocked(calls.fetchComposition).mock.calls.at(-1)).toEqual([1, "levers", ["1:1", "1:3"]])
+    told(5, "levers", [1])
+    told(6, "whole")
+    await store.catchUp(1)
+    expect(vi.mocked(calls.fetchComposition).mock.calls.at(-1)).toEqual([1, "whole", []])
+    await store.catchUp(1)  // no news since: nothing is read
+    expect(calls.fetchComposition).toHaveBeenCalledTimes(3)
+    release()
+  })
+
+  it("gives the news back when the read of a part is refused, so the next read takes them", async () => {
+    const store = useLayoutStore()
+    const release = store.hold(1)
+    vi.mocked(calls.fetchComposition).mockReset().mockResolvedValueOnce(ok(held(1)))
+      .mockResolvedValueOnce({ ok: false, text: "Нет связи с сервером" }).mockResolvedValue(ok(held(3)))
+    await store.ensure(1)
+    told(2, "levers", [2])
+    expect((await store.catchUp(1)).ok).toBe(false)
+    told(3, "levers", [3])
+    await store.catchUp(1)
+    expect(vi.mocked(calls.fetchComposition).mock.calls.at(-1)).toEqual([1, "levers", ["1:2", "1:3"]])
     release()
   })
 })

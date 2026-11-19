@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
@@ -144,6 +145,18 @@ class SourceSummary(BaseModel):
     title: str = ""
 
 
+class EpisodeRef(BaseModel):
+    season: int
+    episode: int
+
+
+# What of the layout a change touched, and so what a window that holds the layout reads again (the projection of the
+# layout in the window, CQRS): `whole` — everything; `levers` — the levers of the episodes named (all with none), the levels,
+# the compilations, the orders and names of the voice-overs and the summaries of the sources, the rows being as they were;
+# `sources` — the summaries of the sources alone. Each part holds the narrower ones, so news of both are one read.
+LayoutPart = Literal["whole", "levers", "sources"]
+
+
 class CompositionGetRequest(BaseModel):
     """Excluded rows are for the window that counts what a source gave; no consumer of the layout asks for them."""
 
@@ -151,6 +164,9 @@ class CompositionGetRequest(BaseModel):
     include_excluded: bool = False
     # Only the summaries of the sources: no rows, levels or settings (a window that lists the sources needs no more).
     sources_only: bool = False
+    # The part of the layout asked (`LayoutPart`); `episodes` names the episodes of the part `levers` (none: all of them).
+    part: LayoutPart = "whole"
+    episodes: list[EpisodeRef] = Field(default_factory=list)
 
 
 # The longest name of a track the user may give: a title a player shows on one line.
@@ -208,6 +224,8 @@ class VoiceTitleSet(BaseModel):
 class CompositionReply(BaseModel):
     series_id: int
     rev: int
+    # The part of the layout the reply holds (`LayoutPart`): what is not in the part is left out, not empty.
+    part: LayoutPart = "whole"
     rows: list[CompositionRow] = Field(default_factory=list)
     # The rows of subtitles (DESIGN.md 7.1.1), apart from the rows of sound: no voice-over, no variant of the reference.
     subtitles: list[CompositionRow] = Field(default_factory=list)
@@ -227,11 +245,6 @@ class CompositionReply(BaseModel):
     compilations: list[CompilationView] = Field(default_factory=list)
 
 
-class EpisodeRef(BaseModel):
-    season: int
-    episode: int
-
-
 class CompositionChanged(BaseModel):
     """`episodes` are the episodes the change touched; empty means the whole series.
 
@@ -242,6 +255,8 @@ class CompositionChanged(BaseModel):
     rev: int
     episodes: list[EpisodeRef] = Field(default_factory=list)
     summary_only: bool = False
+    # What a window that holds the layout reads again for this change (`LayoutPart`).
+    part: LayoutPart = "whole"
 
 
 class CompositionFailed(BaseModel):
