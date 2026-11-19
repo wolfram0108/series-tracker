@@ -34,6 +34,9 @@ class Stored:
     """A series as the module last wrote it; a series never counted has revision 0 and nothing else."""
 
     rev: int = 0
+    # Every write of the series raises it, whatever it changes (`rev` moves only with what a window shows): a reader that
+    # counted from the series at one count knows whether anything was written since.
+    writes: int = 0
     rows: list[CompositionRow] = field(default_factory=list)
     # The rows of subtitles, apart from the rows of sound (DESIGN.md 7.1.1); one table keeps both.
     subtitles: list[CompositionRow] = field(default_factory=list)
@@ -81,13 +84,18 @@ class CompositionRepository:
         await self._db.transaction(lambda conn: _write(conn, series_id, both, sources, numbering, records, rev, orders,
                                                        titles))
 
+    async def writes(self) -> dict[int, int]:
+        """The counter of the writes of every series that has one."""
+        return {row["series_id"]: row["writes"]
+                for row in await self._db.fetch_all("SELECT series_id, writes FROM composition_state")}
+
     async def purge(self, series_id: int) -> list[int]:
         """Takes everything the module keeps of a series; returns the sources it had."""
         return await self._db.transaction(lambda conn: _purge(conn, series_id))
 
 
 def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
-    state = conn.execute("SELECT rev FROM composition_state WHERE series_id = ?", (series_id,)).fetchone()
+    state = conn.execute("SELECT rev, writes FROM composition_state WHERE series_id = ?", (series_id,)).fetchone()
     rows = conn.execute("SELECT * FROM composition_rows WHERE series_id = ? ORDER BY seq", (series_id,)).fetchall()
     sources = conn.execute(
         "SELECT source_id, position, table_url, summary FROM composition_sources WHERE series_id = ?"
@@ -103,6 +111,7 @@ def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
         orders={row["season"]: json.loads(row["labels"]) for row in orders},
         titles={row["label"]: row["title"] for row in titles},
         rev=state["rev"] if state is not None else 0,
+        writes=state["writes"] if state is not None else 0,
         rows=[each for each in built if each.track == RowTrack.SOUND],
         subtitles=[each for each in built if each.track == RowTrack.SUBTITLES],
         sources=[StoredSource(row["source_id"], row["position"], row["table_url"],
@@ -153,9 +162,9 @@ def _write(conn: sqlite3.Connection, series_id: int, rows, sources, numbering, r
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
             [(series_id, each.season, each.episode, each.compilation, each.lever, each.target,
               json.dumps(each.value, ensure_ascii=False)) for each in records])
-    if rev is not None:
-        conn.execute("INSERT INTO composition_state (series_id, rev) VALUES (?, ?)"
-                     " ON CONFLICT (series_id) DO UPDATE SET rev = excluded.rev", (series_id, rev))
+    # The one place a series is written: every write raises its counter, in the transaction of the write.
+    conn.execute("INSERT INTO composition_state (series_id, rev, writes) VALUES (?, ?, 1) ON CONFLICT (series_id) DO UPDATE"
+                 " SET writes = writes + 1, rev = COALESCE(?, rev)", (series_id, rev or 0, rev))
 
 
 def _row_values(seq: int, row: CompositionRow) -> tuple:

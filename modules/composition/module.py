@@ -22,7 +22,9 @@ Queries:
       show them (`levels`, the series first), and the levers of every episode of the layout with the level each comes
       from, with the compilation it stands in (`EpisodeSettings.compilation`), and the compilations of every season with
       the episodes each holds and why the others are not in it (`compilations`). A series not counted yet has revision 0
-      and nothing else.
+      and nothing else. `writes` is the counter of the writes of the series: every write raises it, whatever it changes.
+  composition.writes {} → {writes: {series_id: n}}: the counter of the writes of every series, without its layout — a
+      reader that keeps what it counted from a layout tells by it whether anything was written since.
   composition.recompute {series_id} → {rev, changed}: counts the series now, with the tables as they are stored (no
       read of a site), and answers when a count that began no earlier than the request has ended, its record is
       written and its event is out. `changed` tells whether that count published. A count already running is
@@ -186,6 +188,7 @@ class CompositionModule(BaseModule):
     def register(self) -> None:
         self.handle("composition.get", self.on_get)
         self.handle("composition.layout", self.on_layout)
+        self.handle("composition.writes", self.on_writes)
         self.handle("composition.queues.get", self.on_queues_get)
         # Waits for a whole count, so the requests for different series must not queue behind each other.
         self.handle("composition.recompute", self.on_recompute, concurrent=True)
@@ -249,6 +252,9 @@ class CompositionModule(BaseModule):
         request = CompositionGetRequest(series_id=int(env.payload["series_id"]))
         stored = await self.repo.stored(request.series_id)
         return await compute.run(layout_of, request, stored)
+
+    async def on_writes(self, env: Envelope) -> dict:
+        return {"writes": {str(series_id): count for series_id, count in (await self.repo.writes()).items()}}
 
     async def on_queues_get(self, env: Envelope) -> dict:
         """The queues of a level in the order the core tries their variants: the same rule, the same order of players and
@@ -834,7 +840,7 @@ def layout_of(request: CompositionGetRequest, stored) -> CompositionReply:
         "voice_titles": lambda: stored.titles,
     }
     wanted = fields.keys() if part == "whole" else LAYOUT_PARTS[part]
-    return CompositionReply(series_id=request.series_id, rev=stored.rev, part=part,
+    return CompositionReply(series_id=request.series_id, rev=stored.rev, writes=stored.writes, part=part,
                             **{name: fields[name]() for name in wanted})
 
 

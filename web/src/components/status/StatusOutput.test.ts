@@ -35,7 +35,7 @@ const reference = (season: number, episode: number, over: Partial<Reference> = {
   voice_group: "Ruchime", height: 1080, reason: null, picture: null, markup: false, ...over,
 })
 const composition = (): Composition => ({
-  series_id: 1, rev: 1, part: "whole", sources: [], settings: [],
+  series_id: 1, rev: 1, writes: 1, part: "whole", sources: [], settings: [],
   rows: [row(1, 1), row(1, 2), row(2, 1), row(1, 1, { row_key: "k1", source_id: 8, player: "kodik", player_label: "Kodik", voice_label: "AniStar" })],
   levels: [{ season: null, levers: [] }, { season: 1, levers: [] }, { season: 2, levers: [] }],
   levers: SPECS, availability: AVAILABILITY,

@@ -2,6 +2,7 @@
 failed, the commands «Удалить» that wait, and the syncs under way (taken up again after a stop)."""
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 
@@ -128,14 +129,31 @@ class PlannerRepository:
                                      ("plan_assets", "plan_failures", "plan_commands", "plan_runs", "plan_outcomes",
                                       "plan_standing")])
 
-    async def standing(self) -> dict[int, dict[str, bool]]:
-        """What every series stood at when its view was last counted (ready, waiting, error)."""
-        return {row["series_id"]: json.loads(row["flags"])
-                for row in await self._db.fetch_all("SELECT series_id, flags FROM plan_standing")}
+    async def standing(self) -> dict[int, tuple[dict[str, bool], str | None]]:
+        """What every series stood at when its view was last counted (ready, waiting, error), and the print of the inputs
+        it was counted from."""
+        return {row["series_id"]: (json.loads(row["flags"]), row["inputs"])
+                for row in await self._db.fetch_all("SELECT series_id, flags, inputs FROM plan_standing")}
 
-    async def save_standing(self, series_id: int, flags: dict[str, bool]) -> None:
-        await self._db.execute("INSERT INTO plan_standing (series_id, flags) VALUES (?, ?) ON CONFLICT (series_id) "
-                               "DO UPDATE SET flags=excluded.flags", (series_id, json.dumps(flags, sort_keys=True)))
+    async def save_standing(self, series_id: int, flags: dict[str, bool], inputs: str | None) -> None:
+        await self._db.execute("INSERT INTO plan_standing (series_id, flags, inputs) VALUES (?, ?, ?) ON CONFLICT "
+                               "(series_id) DO UPDATE SET flags=excluded.flags, inputs=excluded.inputs",
+                               (series_id, json.dumps(flags, sort_keys=True), inputs))
+
+    async def own_print(self, series_id: int) -> str:
+        """The print of what the module keeps of a series (the asset, the failures, the commands, the outcome of the last
+        sync), as it is stored, in one transaction."""
+        def read(conn) -> str:
+            digest = hashlib.sha256()
+            for query in ("SELECT name, data FROM plan_assets WHERE series_id=? ORDER BY name",
+                          "SELECT key FROM plan_failures WHERE series_id=? ORDER BY key",
+                          "SELECT command FROM plan_commands WHERE series_id=? ORDER BY command",
+                          "SELECT data FROM plan_outcomes WHERE series_id=?"):
+                digest.update(query.encode())
+                for row in conn.execute(query, (series_id,)):
+                    digest.update(json.dumps(list(row), ensure_ascii=False).encode())
+            return digest.hexdigest()
+        return await self._db.transaction(read)
 
     async def pack_cards(self) -> list[PackCard]:
         return [PackCard.model_validate(json.loads(row["data"]))

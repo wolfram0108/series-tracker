@@ -36,7 +36,7 @@ const summary: SourceSummary = {
   players: [{ player: "vk", player_label: "VK", rows: 3, groups: 0 }],
 }
 const composition = (over: Partial<Composition> = {}): Composition => ({
-  series_id: 1, rev: 1, part: "whole", rows: [row()], sources: [summary],
+  series_id: 1, rev: 1, writes: 1, part: "whole", rows: [row()], sources: [summary],
   levels: [{ season: 1, levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: false, level: "season" }] }],
   settings: [{ season: 1, episode: 2, levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: true, level: "episode" }] }],
   levers: SPECS,

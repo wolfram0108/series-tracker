@@ -2214,6 +2214,11 @@ export interface components {
             /** Rev */
             rev: number;
             /**
+             * Writes
+             * @default 0
+             */
+            writes: number;
+            /**
              * Part
              * @default whole
              * @enum {string}

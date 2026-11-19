@@ -293,13 +293,14 @@ async def test_the_whole_layout_holds_every_field_and_a_part_exactly_the_fields_
     from core.contracts import LAYOUT_PARTS
     s = system
     series_id = await laid_out(s)
-    fields = set(CompositionReply.model_fields) - {"series_id", "rev", "part"}
+    head = {"series_id", "rev", "writes", "part"}  # what every reply carries
+    fields = set(CompositionReply.model_fields) - head
     whole = await s.probe.request("composition.get", {"series_id": series_id}, timeout=STUCK_S)
-    assert set(whole) - {"series_id", "rev", "part"} == fields
+    assert set(whole) - head == fields
     for part, held in LAYOUT_PARTS.items():
         assert held <= fields, part
         reply = await s.probe.request("composition.get", {"series_id": series_id, "part": part}, timeout=STUCK_S)
-        assert set(reply) - {"series_id", "rev", "part"} == held, part
+        assert set(reply) - head == held, part
 
 
 # --- M-14: whatever the cause, the layout is counted without the user, and counting twice changes nothing -----------

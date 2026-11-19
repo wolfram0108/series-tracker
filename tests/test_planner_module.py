@@ -53,11 +53,17 @@ class Neighbours(BaseModule):
         # The service keeps a job under way and never ends it while `holding`; `submitted` tells that one was given.
         self.holding = False
         self.submitted = asyncio.Event()
+        # What the inputs of the view answer besides the rows: the counter of the writes of the layout, a field of the
+        # card, the settings of the voice-overs.
+        self.writes = 1
+        self.card: dict = {}
+        self.voices = {"priority": ["vk", "cvh", "kodik"], "player_groups": {}}
         super().__init__(bus)
 
     def register(self) -> None:
         self.handle("catalog.series.get", self.on_series)
         self.handle("composition.layout", self.on_composition)
+        self.handle("composition.writes", self.on_writes)
         self.handle("voices.settings.get", self.on_voices)
         self.handle("conform.workspace", self.on_workspace)
         self.handle("downloads.fetch", self.on_fetch, concurrent=True)
@@ -75,13 +81,16 @@ class Neighbours(BaseModule):
         return {"id": SERIES, "name": "Сериал", "save_path": self.library, "ignored_seasons": "[]",
                 "ignored_episodes": "{}", "sources": [
                     {"id": source, "series_id": SERIES, "url": f"https://site/{source}", "source_type": "web_video"}
-                    for source in (1, 2, 3, 4)]}
+                    for source in (1, 2, 3, 4)], **self.card}
 
     async def on_composition(self, env: Envelope) -> CompositionReply:
-        return CompositionReply(series_id=SERIES, rev=1, rows=self.site.rows, settings=self.site.settings)
+        return CompositionReply(series_id=SERIES, rev=1, writes=self.writes, rows=self.site.rows, settings=self.site.settings)
+
+    async def on_writes(self, env: Envelope) -> dict:
+        return {"writes": {str(SERIES): self.writes}}
 
     async def on_voices(self, env: Envelope) -> dict:
-        return {"priority": ["vk", "cvh", "kodik"], "player_groups": {}}
+        return dict(self.voices)
 
     async def on_workspace(self, env: Envelope) -> dict:
         if env.payload.get("dub_folder"):
@@ -590,7 +599,7 @@ async def test_a_start_tells_what_every_series_stood_at_before_its_recount_and_t
     episode(neighbours, 1, 1)
     await sync(world)
     stood = await planner.repo.standing()
-    assert stood[SERIES]["ready"]
+    assert stood[SERIES][0]["ready"]
     again = PlannerModule(Bus(), Database(db_path))
     told: list[dict] = []
     again.publish_event = lambda topic, payload: told.append(payload) if topic == "series.status.contribution" else None
@@ -614,7 +623,7 @@ async def test_the_view_asks_nothing_whose_change_does_not_count_it_again(world)
         untap()
     asked = {each.topic for each in seen if each.kind == "query" and each.reply_to == planner._reply_topic}
     assert asked and asked <= set(VIEW_INPUTS), asked - set(VIEW_INPUTS)
-    for changed in set(VIEW_INPUTS.values()):
+    for changed in {each.changed for each in VIEW_INPUTS.values()}:
         assert changed in {pattern for pattern, _handler, _concurrent in planner._handlers}, changed
 
 
@@ -626,11 +635,58 @@ async def test_a_change_of_any_input_of_the_view_counts_it_again(world, monkeypa
     await planner.request("planner.series.get", {"series_id": SERIES})
     asked: list[int] = []
     monkeypatch.setattr(planner, "_ask_recount", lambda series_id: asked.append(series_id))
-    for changed in sorted(set(VIEW_INPUTS.values())):
+    for changed in sorted({each.changed for each in VIEW_INPUTS.values()}):
         asked.clear()
         payload = {} if changed == "voices.settings.changed" else {"series_id": SERIES}
         await planner.on_view_input_changed(Envelope(topic=changed, kind="event", payload=payload))
         assert asked == [SERIES], changed
+
+
+async def test_a_start_counts_again_only_a_series_whose_inputs_changed_since_it_was_counted(world, monkeypatch):
+    """What a series stood at is told at a start and stands while its inputs are those it was counted from; a change of any
+    of them while the service was stopped — the card, a write of the layout, the settings of the voice-overs, a table of
+    the module, the code — counts it again, and a start after that count counts nothing."""
+    import core.plan.executor as executor
+    import modules.planner.module as planner_module
+    neighbours, planner, db_path = world
+    episode(neighbours, 1, 1)
+    await sync(world)
+    await planner.request("planner.series.get", {"series_id": SERIES})  # the view of the tables after the sync
+    made = []
+    counted = executor.plan
+    monkeypatch.setattr(executor, "plan", lambda *args: made.append(1) or counted(*args))
+    running = [planner]
+
+    async def restarted() -> int:
+        """The plans a start makes: the module stopped, made again over the same base and started."""
+        await running[-1].stop()
+        again = PlannerModule(planner.bus, Database(db_path))
+        running.append(again)
+        await again.start()
+        made.clear()
+        await again.on_system_started(Envelope(topic="system.started", kind="event"))
+        await asyncio.gather(*again._bg)
+        return len(made)
+
+    async def table_changed() -> None:
+        await running[-1].repo.add_command(SERIES, ["video", "x.mkv", None])
+
+    def code_changed() -> None:
+        planner_module.code_print.cache_clear()
+        monkeypatch.setattr(planner_module, "code_print", lambda: "another code")
+
+    try:
+        assert await restarted() == 0  # nothing changed while it was stopped
+        for change in (lambda: neighbours.card.update(name="Другое имя"), lambda: setattr(neighbours, "writes", 2),
+                       lambda: neighbours.voices.update(priority=["kodik", "vk", "cvh"]), table_changed, code_changed):
+            done = change()
+            if asyncio.iscoroutine(done):
+                await done
+            assert await restarted() > 0, change
+            assert await restarted() == 0, change  # counted after the change: the next start counts nothing
+    finally:
+        for each in running[1:]:
+            await each.stop()
 
 
 def drain_queue(subscription) -> list[Envelope]:

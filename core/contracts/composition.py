@@ -232,6 +232,8 @@ class VoiceTitleSet(BaseModel):
 class CompositionReply(BaseModel):
     series_id: int
     rev: int
+    # The counter of the writes of the series (every write raises it): what a reader counted from it is of this write.
+    writes: int = 0
     # The part of the layout the reply holds (`LayoutPart`): what is not in the part is left out, not empty.
     part: LayoutPart = "whole"
     rows: list[CompositionRow] = Field(default_factory=list)
