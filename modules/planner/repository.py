@@ -125,7 +125,17 @@ class PlannerRepository:
 
     async def purge(self, series_id: int) -> None:
         await self._db.execute_many([(f"DELETE FROM {table} WHERE series_id=?", (series_id,)) for table in
-                                     ("plan_assets", "plan_failures", "plan_commands", "plan_runs", "plan_outcomes")])
+                                     ("plan_assets", "plan_failures", "plan_commands", "plan_runs", "plan_outcomes",
+                                      "plan_standing")])
+
+    async def standing(self) -> dict[int, dict[str, bool]]:
+        """What every series stood at when its view was last counted (ready, waiting, error)."""
+        return {row["series_id"]: json.loads(row["flags"])
+                for row in await self._db.fetch_all("SELECT series_id, flags FROM plan_standing")}
+
+    async def save_standing(self, series_id: int, flags: dict[str, bool]) -> None:
+        await self._db.execute("INSERT INTO plan_standing (series_id, flags) VALUES (?, ?) ON CONFLICT (series_id) "
+                               "DO UPDATE SET flags=excluded.flags", (series_id, json.dumps(flags, sort_keys=True)))
 
     async def pack_cards(self) -> list[PackCard]:
         return [PackCard.model_validate(json.loads(row["data"]))

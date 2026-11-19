@@ -1072,13 +1072,21 @@ class PlannerModule(BaseModule):
             await self.sweep()
         except Exception:  # noqa: BLE001 - the folders wait for the next sweep; the start goes on
             self.log.exception("папки задач сервиса выравнивания не разобраны")
-        # The status of a series lives in memory (catalog): every series with files tells it again at the start.
-        for series_id in await self.repo.series_with_assets():
-            if series_id not in resumed:
-                try:
-                    await self._publish_view(series_id)
-                except Exception:  # noqa: BLE001 - one series must not keep the others from telling theirs
-                    self.log.exception("сериал %d: статус при старте не посчитан", series_id)
+        # The status of a series lives in memory (catalog): what each stood at when it was last counted is told at once,
+        # and the full recount of every view goes after it, apart from the work of the module, and puts right what it
+        # counts otherwise (the tables, the code of a new release).
+        for series_id, flags in (await self.repo.standing()).items():
+            self._standing[series_id] = flags
+            self._tell_status(series_id)
+        self.spawn(self._recount_all([series_id for series_id in await self.repo.series_with_assets()
+                                      if series_id not in resumed]), name="planner.recount_all")
+
+    async def _recount_all(self, series_ids: list[int]) -> None:
+        for series_id in series_ids:
+            try:
+                await self._publish_view(series_id)
+            except Exception:  # noqa: BLE001 - one series must not keep the others from telling theirs
+                self.log.exception("сериал %d: статус при старте не посчитан", series_id)
 
     def names_of(self, series: dict) -> dict:
         """The names of files the rule of names gave a series, kept while its card stays the same (the rule reads only the
@@ -1332,15 +1340,18 @@ class PlannerModule(BaseModule):
         self._activity.setdefault(series_id, {}).update(flags)
         self._tell_status(series_id)
 
-    def _stand(self, series_id: int, view: dict) -> None:
+    async def _stand(self, series_id: int, view: dict) -> None:
         """What the series stands at, told by its view: ready — a file of it is in the library; waiting — the plan has
         work for the next sync; error — an episode lacks what a recorded attempt was for (`covered` of the view: another
         source that gave it leaves no error), or work of the last sync failed for the moment and nothing gave it."""
         work = any(goal["video"]["kind"] != "asset" or any(track["kind"] != "reuse" for track in goal["tracks"])
                    for goal in view["episodes"]) or bool(view["commands"])
-        self._standing[series_id] = {"ready": bool(view["assets"]), "waiting": work and not view["running"],
-                                     "error": any(not each["covered"] for each in view["failures"])
-                                     or bool(view["problems"])}
+        flags = {"ready": bool(view["assets"]), "waiting": work and not view["running"],
+                 "error": any(not each["covered"] for each in view["failures"]) or bool(view["problems"])}
+        if flags != self._standing.get(series_id):
+            # Kept for the next start: it tells the cards at once, before its recount reaches the series.
+            await self.repo.save_standing(series_id, flags)
+        self._standing[series_id] = flags
         self._tell_status(series_id)
 
     def _tell_status(self, series_id: int) -> None:
@@ -1377,13 +1388,13 @@ class PlannerModule(BaseModule):
         if made is None:
             return await self._recount(series_id)
         view = await self._counted(series_id, sync, made, inputs)
-        self._told(series_id, view)
+        await self._told(series_id, view)
         return view
 
-    def _told(self, series_id: int, view: dict) -> None:
+    async def _told(self, series_id: int, view: dict) -> None:
         self._shown[series_id] = view
         self.publish_event("planner.series.changed", view)
-        self._stand(series_id, view)
+        await self._stand(series_id, view)
 
     def _ask_recount(self, series_id: int) -> asyncio.Task:
         """An input of the view of the series changed: the view is counted again. Changes that come while it is counted
@@ -1403,7 +1414,7 @@ class PlannerModule(BaseModule):
         while series_id in self._stale:
             self._stale.discard(series_id)
             view = await self._counted(series_id)
-            self._told(series_id, view)
+            await self._told(series_id, view)
         return view
 
     def _count_ended(self, task: asyncio.Task) -> None:

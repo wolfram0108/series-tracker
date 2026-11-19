@@ -583,6 +583,24 @@ async def test_a_sync_that_breaks_tells_the_end_of_its_work_with_why_and_the_nex
     assert (await planner.request("planner.work.get", {"series_id": SERIES}))["failure"] is None
 
 
+async def test_a_start_tells_what_every_series_stood_at_before_its_recount_and_the_recount_puts_it_right(world, monkeypatch):
+    """The card of a series is not grey for the whole recount of a start: what the series stood at when its view was last
+    counted is told at once; the recount, which goes after it whatever the tables say, tells what it counts."""
+    neighbours, planner, db_path = world
+    episode(neighbours, 1, 1)
+    await sync(world)
+    stood = await planner.repo.standing()
+    assert stood[SERIES]["ready"]
+    again = PlannerModule(Bus(), Database(db_path))
+    told: list[dict] = []
+    again.publish_event = lambda topic, payload: told.append(payload) if topic == "series.status.contribution" else None
+    counted = asyncio.Event()
+    monkeypatch.setattr(again, "_recount_all", lambda ids: counted.wait())  # the recount is held: what is told is the stored
+    await again.on_system_started(Envelope(topic="system.started", kind="event"))
+    assert [(each["series_id"], each["flags"]["ready"]) for each in told] == [(SERIES, True)]
+    counted.set()
+
+
 def drain_queue(subscription) -> list[Envelope]:
     found = []
     while not subscription.queue.empty():
