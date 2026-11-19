@@ -101,6 +101,7 @@ class _RunWork:
     seen: dict[str, int]
     polling: bool = True
     busy: dict[str, set[Slot]] = field(default_factory=dict)
+    failures: dict[str, str] = field(default_factory=dict)  # the executors whose work ended in failure, with why
 
     def apply(self, state: WorkState) -> set[Slot]:
         """Takes the state in; the episodes it leaves with no work of any executor."""
@@ -113,7 +114,14 @@ class _RunWork:
             self.working.add(state.owner)
         else:
             self.working.discard(state.owner)
+            if state.failure:
+                self.failures[state.owner] = state.failure
         return before - self.slots
+
+    @property
+    def failure(self) -> str | None:
+        """Why the run failed: the failure of the first executor that told one; None when every work ended well."""
+        return next((self.failures[owner] for owner in sorted(self.failures)), None)
 
     @property
     def slots(self) -> set[Slot]:
@@ -674,9 +682,9 @@ class ScanModule(BaseModule):
         the run was open is done now (a plan; the disk follows it at the next sync)."""
         if series_id not in self._runs or series_id in self._closing:
             return  # the run is closing already: one end
-        failure = None
         intent = self._runs.pop(series_id, None)
-        self._working.pop(series_id, None)
+        run = self._working.pop(series_id, None)
+        failure = run.failure if run is not None else None
         # The series is free either way; a failed last step ends the run as failed, with its reason kept as the error
         # of the series until the next sync, not as a success.
         if intent is not None:

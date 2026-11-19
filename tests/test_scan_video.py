@@ -601,8 +601,22 @@ def runs_of(events: list[dict]) -> list[bool]:
     return [each["active"] for each in events]
 
 
-def work_state(rig: "Rig", owner: str, active: bool, busy: list[list] | None = None) -> None:
-    rig.world.tell_work(rig.series_id, owner, active, busy)
+def work_state(rig: "Rig", owner: str, active: bool, busy: list[list] | None = None, failure: str | None = None) -> None:
+    rig.world.tell_work(rig.series_id, owner, active, busy, failure)
+
+
+async def test_a_run_whose_executor_broke_ends_as_failed_with_its_reason_not_as_a_success(rig):
+    """The work of the executor ended with a failure: the run is not a success — its command stays as the error of the
+    series with the reason the executor told, and the series shows the error until the next sync."""
+    rig.world.work = {"planner": True}
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    await rig.run()
+    assert runs_of(drain(runs)) == [True]
+    work_state(rig, "planner", False, failure=reason("planner_sync_failed", cause="RuntimeError: boom"))
+    assert runs_of([await next_event(runs)]) == [False]
+    [task] = tasks_of(rig)
+    assert task["status"] == "error"
+    assert json.loads(json.loads(task["results_data"])["error"])["code"] == "planner_sync_failed"
 
 
 async def test_a_sync_is_one_run_and_the_series_is_busy_until_every_work_it_gave_out_has_ended(rig):

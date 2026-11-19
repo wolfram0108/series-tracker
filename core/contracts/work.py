@@ -50,6 +50,9 @@ class WorkState(BaseModel):
     active: bool
     busy: list[Slot] = Field(default_factory=list)
     seq: int = 0
+    # Why the last work of the owner ended in failure (a reason, core/reasons), told once it is not active; None when it
+    # ended well. The run that waited for it ends as failed with this reason, not as a success.
+    failure: str | None = None
 
 
 class WorkWithdrawn(BaseModel):

@@ -562,6 +562,34 @@ async def test_the_names_of_the_files_are_asked_of_the_rule_once_for_a_card_and_
     assert again == 0 and len(made) == plans  # nothing changed: the second read takes the view as it was counted
 
 
+async def test_a_sync_that_breaks_tells_the_end_of_its_work_with_why_and_the_next_sync_starts_clean(world, monkeypatch):
+    """The run that waits for the planner learns that its work broke, not that it ended well (work.series.state failure)."""
+    from modules.planner.module import BusSync
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    told = planner.bus.subscribe("work.series.state")
+
+    async def broken(self):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(BusSync, "prepare", broken)
+    await sync(world)
+    ended = [each.payload for each in drain_queue(told) if not each.payload["active"]]
+    assert ended and json.loads(ended[-1]["failure"])["code"] == "planner_sync_failed"
+    assert "boom" in json.loads(ended[-1]["failure"])["cause"]
+    assert (await planner.request("planner.work.get", {"series_id": SERIES}))["failure"] == ended[-1]["failure"]
+    monkeypatch.undo()
+    await sync(world)
+    assert (await planner.request("planner.work.get", {"series_id": SERIES}))["failure"] is None
+
+
+def drain_queue(subscription) -> list[Envelope]:
+    found = []
+    while not subscription.queue.empty():
+        found.append(subscription.queue.get_nowait())
+    return found
+
+
 async def test_the_view_is_counted_once_for_changes_that_come_together_and_every_window_is_told_the_last(world, monkeypatch):
     """The view of a series is a projection of its inputs: changes that come while it is counted make one more count with
     all of them, not one count each, and the view every window is told last is the one a read then gives."""

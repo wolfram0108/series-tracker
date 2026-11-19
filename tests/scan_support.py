@@ -154,13 +154,14 @@ class World(BaseModule):
             await gate.wait()
         return counted
 
-    def tell_work(self, series_id: int, owner: str, active: bool, busy: list[list] | None = None) -> None:
+    def tell_work(self, series_id: int, owner: str, active: bool, busy: list[list] | None = None,
+                  failure: str | None = None) -> None:
         """An executor's state changed: a later count than any reply given before."""
         self.seq += 1
         self.work[owner] = active
         self.busy[owner] = busy if busy is not None else []
         self.publish_event("work.series.state", {"owner": owner, "series_id": series_id, "active": active,
-                                                 "busy": self.busy[owner], "seq": self.seq})
+                                                 "busy": self.busy[owner], "seq": self.seq, "failure": failure})
 
     async def on_profiles_export(self, env) -> dict:
         return {"profiles": {key: value for key, value in self.profiles_export.items()

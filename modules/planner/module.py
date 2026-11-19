@@ -813,6 +813,7 @@ class PlannerModule(BaseModule):
         self._jobs: dict[str, asyncio.Future] = {}
         self._ended: dict[str, dict] = {}  # jobs that ended before anyone waited for them
         self._views: dict[int, tuple] = {}
+        self._failures: dict[int, str] = {}  # why the last sync of a series broke, told with the end of its work
         self._names: dict[int, tuple[str, dict]] = {}  # the names the rule gave each series, with the card they are of
         # The projection of the view of each series: the last view counted, the series whose inputs changed since it,
         # and the count under way.
@@ -875,6 +876,7 @@ class PlannerModule(BaseModule):
         return {"accepted": True}
 
     def _start(self, series_id: int, download: bool, scope: SyncScope | None = None) -> None:
+        self._failures.pop(series_id, None)  # the failure told is of the sync before: this one has none yet
         self._runs[series_id] = self.spawn(self._sync(series_id, download, scope), name=f"planner.sync:{series_id}")
         self._announce_work(series_id, True)
 
@@ -929,8 +931,9 @@ class PlannerModule(BaseModule):
             await self._discard(stopped)
             self.log.info("сериал %d: синхронизация остановлена пользователем; применённые до остановки серии остаются",
                           series_id)
-        except Exception:  # noqa: BLE001 - the run ends either way: the error is in the log, the sync can be asked again
+        except Exception as exc:  # noqa: BLE001 - the run ends either way: the error is in the log, the sync can be asked again
             self.log.exception("сериал %d: синхронизация плана прервана", series_id)
+            self._failures[series_id] = reason("planner_sync_failed", cause=f"{type(exc).__name__}: {exc}")
         await self.repo.end_run(series_id)
         stay, gone = self.packing.sync_ended(series_id)
         await self.repo.keep_pack_cards(stay)
@@ -1348,12 +1351,13 @@ class PlannerModule(BaseModule):
     def _state(self, series_id: int) -> WorkState:
         self._seq += 1
         running = series_id in self._runs and not self._runs[series_id].done()
-        return WorkState(owner=PLANNER, series_id=series_id, active=running, busy=[], seq=self._seq)
+        return WorkState(owner=PLANNER, series_id=series_id, active=running, busy=[], seq=self._seq,
+                         failure=None if running else self._failures.get(series_id))
 
     def _announce_work(self, series_id: int, active: bool) -> None:
         self._seq += 1
-        self.publish_event(WORK_STATE, WorkState(owner=PLANNER, series_id=series_id, active=active, busy=[],
-                                                 seq=self._seq).model_dump())
+        self.publish_event(WORK_STATE, WorkState(owner=PLANNER, series_id=series_id, active=active, busy=[], seq=self._seq,
+                                                 failure=None if active else self._failures.get(series_id)).model_dump())
 
     async def on_work_get(self, env: Envelope) -> dict:
         """Whether the series has work: a sync written down is work even before this process takes it up again at its
