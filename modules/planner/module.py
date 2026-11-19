@@ -779,7 +779,8 @@ class BusSync(SeriesSync):
         staged, the table and what the sync recorded are written. One at a time (the executor's lock): a stop of the
         sync waits for the one under way."""
         self.committing = staged is None
-        table = [container_json(each) for each in sorted(self.containers.values(), key=lambda each: each.name)]
+        held = sorted(self.containers.values(), key=lambda each: each.name)
+        table = await compute.run(lambda: [container_json(each) for each in held])
         if staged:
             steps = await storage.call(self.files.write_journal, staged, table)
             self.m.packing.journal(self.series["id"], steps)
@@ -974,7 +975,8 @@ class PlannerModule(BaseModule):
             self._shed.setdefault(series_id, set()).update(loaded_failures)
             self._forgot.discard(series_id)
         failed = set(sync.failed) - self._shed.get(series_id, set())
-        await self.repo.save(series_id, [container_json(each) for each in sync.containers.values()],
+        held = list(sync.containers.values())
+        await self.repo.save(series_id, await compute.run(lambda: [container_json(each) for each in held]),
                              [_failure_encoded(each) for each in sorted(failed, key=repr)],
                              [_encoded(each) for each in sorted(commands, key=repr)])
         # A sync writes after every group it applies: what it wrote is what the next writing of it starts from.
@@ -1491,8 +1493,9 @@ class PlannerModule(BaseModule):
 
     async def count_changed(self, series_id: int) -> None:
         """The series holds another number of files: told to whoever shows it."""
-        counts = (await self.on_downloaded_counts(env=None))["counts"]
-        self.publish_event("series.downloaded.changed", {"series_id": series_id, "count": counts.get(series_id, 0)})
+        held = (await self.repo.episodes(series_id)).get(series_id, set())
+        self.publish_event("series.downloaded.changed",
+                           {"series_id": series_id, "count": sum(1 for season, _ in held if season != 0)})
 
     async def on_downloaded_counts(self, env: Envelope) -> dict:
         """{counts: {series_id: n}}: the episodes of every series the library holds and shows, specials (season 0) aside."""

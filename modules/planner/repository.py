@@ -33,27 +33,35 @@ class PlannerRepository:
         return [row["series_id"] for row in await self._db.fetch_all("SELECT DISTINCT series_id FROM plan_assets")]
 
     async def save(self, series_id: int, assets: list[dict], failures: list, commands: list) -> None:
-        """The table of the asset, the failures and the commands of a series, in one transaction."""
-        statements = [("DELETE FROM plan_assets WHERE series_id=?", (series_id,)),
-                      ("DELETE FROM plan_failures WHERE series_id=?", (series_id,)),
-                      ("DELETE FROM plan_commands WHERE series_id=?", (series_id,))]
-        statements += [("INSERT INTO plan_assets (series_id, name, data) VALUES (?, ?, ?)",
-                        (series_id, each["name"], json.dumps(each, ensure_ascii=False))) for each in assets]
-        statements += [("INSERT INTO plan_failures (series_id, key) VALUES (?, ?)", (series_id, _key(each)))
-                       for each in failures]
-        statements += [("INSERT INTO plan_commands (series_id, command) VALUES (?, ?)", (series_id, _key(each)))
-                       for each in commands]
-        await self._db.execute_many(statements)
+        """The table of the asset, the failures and the commands of a series, in one transaction. The rows are written
+        out on the thread of the query: hundreds of files with their tracks."""
+        def write(conn) -> None:
+            conn.execute("DELETE FROM plan_assets WHERE series_id=?", (series_id,))
+            conn.execute("DELETE FROM plan_failures WHERE series_id=?", (series_id,))
+            conn.execute("DELETE FROM plan_commands WHERE series_id=?", (series_id,))
+            conn.executemany("INSERT INTO plan_assets (series_id, name, data) VALUES (?, ?, ?)",
+                             [(series_id, each["name"], json.dumps(each, ensure_ascii=False)) for each in assets])
+            conn.executemany("INSERT INTO plan_failures (series_id, key) VALUES (?, ?)",
+                             [(series_id, _key(each)) for each in failures])
+            conn.executemany("INSERT INTO plan_commands (series_id, command) VALUES (?, ?)",
+                             [(series_id, _key(each)) for each in commands])
+        await self._db.transaction(write)
 
-    async def episodes(self) -> dict[int, set[tuple[int, int]]]:
-        """The episodes every series holds a file of that the media server sees (not switched off)."""
-        found: dict[int, set[tuple[int, int]]] = {}
-        for row in await self._db.fetch_all("SELECT series_id, data FROM plan_assets"):
-            data = json.loads(row["data"])
-            if not data.get("off"):
-                season, episode = data["video"]["episode"][:2]
-                found.setdefault(row["series_id"], set()).add((season, episode))
-        return found
+    async def episodes(self, series_id: int | None = None) -> dict[int, set[tuple[int, int]]]:
+        """The episodes every series (or the one given) holds a file of that the media server sees (not switched off);
+        read on the thread of the query."""
+        def read(conn) -> dict[int, set[tuple[int, int]]]:
+            found: dict[int, set[tuple[int, int]]] = {}
+            rows = conn.execute("SELECT series_id, data FROM plan_assets" + (" WHERE series_id=?" if series_id is not None
+                                                                              else ""),
+                                () if series_id is None else (series_id,))
+            for held, data in rows:
+                data = json.loads(data)
+                if not data.get("off"):
+                    season, episode = data["video"]["episode"][:2]
+                    found.setdefault(held, set()).add((season, episode))
+            return found
+        return await self._db.transaction(read)
 
     async def failures(self, series_id: int) -> list:
         return [json.loads(row["key"]) for row in await self._db.fetch_all(

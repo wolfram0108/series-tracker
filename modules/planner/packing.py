@@ -229,14 +229,16 @@ class PackBook:
         now = self._clock()
         out = []
         for key, card in sorted(self.cards.items(), key=lambda item: (item[1].series_id, item[1].episode)):
+            if card.status in ENDED:
+                out.append(card)  # nothing of an ended card counts on: it is shown as it is, not copied on every beat
+                continue
             shown = card.model_copy(deep=True)
-            if card.status not in ENDED:
-                shown.seconds = now - self._since.get(key, now)
-                active = next((each for each in shown.stages if each.state == "active"), None)
-                if active is not None:
-                    active.seconds += now - self._stage_since.get(key, now)
-                if card.status == "built":
-                    shown.figures.wait_s = now - self._wait_since.get(key, now)
+            shown.seconds = now - self._since.get(key, now)
+            active = next((each for each in shown.stages if each.state == "active"), None)
+            if active is not None:
+                active.seconds += now - self._stage_since.get(key, now)
+            if card.status == "built":
+                shown.figures.wait_s = now - self._wait_since.get(key, now)
             out.append(shown)
         return out
 
