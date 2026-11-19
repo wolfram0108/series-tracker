@@ -256,7 +256,7 @@ sudo systemctl restart series-tracker
 
 ```bash
 .venv/bin/python tools/checks/live_api.py preview "<адрес страницы>" [--now]
-.venv/bin/python tools/checks/live_api.py sync <номер сериала>
+.venv/bin/python tools/checks/live_api.py sync <номер сериала> [--season N [--episode M]] [--no-wait]
 .venv/bin/python tools/checks/live_api.py source <номер сериала> "<адрес страницы>"
 ```
 
