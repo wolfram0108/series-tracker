@@ -227,7 +227,7 @@ class ConformModule(BaseModule):
         """The daemon is looked at before anything is said of it: the address is read at the start and the feed makes its first
         attempt to connect after that, so until the attempt ends the daemon is not down, it is not known. A request that comes
         meanwhile waits for the end of the attempt (its fuse is that of its topic) and is answered by what it found."""
-        if self._looked.is_set() or self._daemon.get("up"):
+        if self._looked.is_set():
             return
         self.log.info("conform: запрос ждёт окончания первой попытки подключения к демону")
         while not self._looked.is_set():  # another address starts the look over

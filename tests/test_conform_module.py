@@ -255,6 +255,7 @@ async def test_a_failure_to_read_the_list_of_jobs_is_no_answer_not_no_job():
         http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request, body=body: httpx.Response(200, text=body)))
         bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
         bridge._daemon["up"] = True
+        bridge._looked.set()
         try:
             assert await bridge.on_job_find(Envelope("conform.job.find", "query", {"key": "k1"})) == {
                 "reachable": False, "job_id": None}
@@ -267,6 +268,7 @@ async def test_only_the_not_found_of_the_contract_says_that_a_job_is_gone():
     http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(404)))
     bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
     bridge._daemon["up"] = True
+    bridge._looked.set()
     try:
         reply = await bridge.on_job_get(Envelope("conform.job.get", "query", {"job_id": "lost"}))
         assert reply["status"] == "gone"
