@@ -6,7 +6,8 @@ from __future__ import annotations
 import asyncio
 
 
-from core import BaseModule, Bus
+from core.bus import Bus
+from core.module import BaseModule
 from core.db import Database
 from modules.settings import SettingsModule
 from modules.sources.module import SourcesModule

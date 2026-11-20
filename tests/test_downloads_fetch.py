@@ -10,7 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from core import BaseModule, Bus, Runner
+from core.bus import Bus
+from core.module import BaseModule
+from core.runner import Runner
 from core.db import Database
 from core.reasons import parse, reason
 from modules.downloads import DownloadsModule

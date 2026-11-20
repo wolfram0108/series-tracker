@@ -2,7 +2,9 @@
 
 import pytest
 
-from core import BaseModule, Bus, Envelope
+from core.bus import Bus
+from core.envelope import Envelope
+from core.module import BaseModule
 
 
 # --- сопоставление топиков ---------------------------------------------------

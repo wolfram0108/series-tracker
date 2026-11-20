@@ -8,7 +8,9 @@ from datetime import datetime, timedelta
 import httpx
 import pytest
 
-from core import BaseModule, Bus, Runner
+from core.bus import Bus
+from core.module import BaseModule
+from core.runner import Runner
 from core.reasons import reason
 from core.db import Database
 from modules.catalog import CatalogModule

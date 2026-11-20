@@ -6,7 +6,8 @@ import json
 
 import pytest
 
-from core import BaseModule, Bus
+from core.bus import Bus
+from core.module import BaseModule
 from core.contracts import RowState
 from core.db import Database
 from core.reasons import parse, reason

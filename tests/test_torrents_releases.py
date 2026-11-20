@@ -14,7 +14,8 @@ from datetime import datetime, timedelta
 import pytest
 
 from app_stand import Served
-from core import BaseModule, Bus
+from core.bus import Bus
+from core.module import BaseModule
 from core.contracts import RUN_CHANGED
 from core.contracts.torrent import RELEASE_CHANGED_TOPIC, PageRelease, PageReleases
 from core.db import Database

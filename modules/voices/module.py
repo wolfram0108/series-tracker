@@ -34,7 +34,7 @@ Events out:
 """
 from __future__ import annotations
 
-from core import BaseModule
+from core.module import BaseModule
 from core.contracts import (GroupsResolveReply, GroupsResolveRequest, PlayersListReply, PlayersListRequest,
                             VoiceSettingsDraft, VoiceSettingsSaved)
 from core.envelope import Envelope

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from core import BusRequestError
+from core.module import BusRequestError
 from core.contracts import (TitleSearchReply, TitleSearchRequest, CompositionPreviewReply, CompositionPreviewRequest,
                             SeriesSource, SourcesSettingsView, SiteResolveReply, SiteResolveRequest)
 

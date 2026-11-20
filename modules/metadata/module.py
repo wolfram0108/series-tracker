@@ -17,7 +17,7 @@ import json
 
 import httpx
 
-from core import BaseModule, BusRequestError
+from core.module import BaseModule, BusRequestError
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason

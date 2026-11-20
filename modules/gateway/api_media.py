@@ -7,7 +7,7 @@ import os
 
 from fastapi import APIRouter
 
-from core import BusRequestError
+from core.module import BusRequestError
 from core.reasons import reason
 
 from .routing import refusal

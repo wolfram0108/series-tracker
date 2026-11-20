@@ -42,7 +42,9 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from starlette.routing import Mount, Route  # noqa: E402
 
 from assembly import Options, assemble  # noqa: E402
-from core import Bus, Envelope, Runner  # noqa: E402
+from core.bus import Bus  # noqa: E402
+from core.envelope import Envelope  # noqa: E402
+from core.runner import Runner  # noqa: E402
 from core.db import Database  # noqa: E402
 from qbit_model import QbitModel, _File, _Release, _Torrent, bdecode, bencode, magnet_of  # noqa: E402
 

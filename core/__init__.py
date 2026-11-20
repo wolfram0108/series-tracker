@@ -1,10 +1,3 @@
-from .bus import Bus
-from .envelope import Envelope, topic_matches
-from .fsnames import sanitize_name, sanitize_path
-from .module import NO_HANDLER, BaseModule, BusRequestError
-from .runner import Runner
-from .source_types import is_video_source, torrent_profile_id, torrent_source
-
-__all__ = ["Bus", "Envelope", "topic_matches", "BaseModule", "NO_HANDLER",
-           "BusRequestError", "Runner", "sanitize_name", "sanitize_path",
-           "is_video_source", "torrent_profile_id", "torrent_source"]
+"""The infrastructure of the process. Every name is imported from the file that defines it (core.bus, core.module,
+core.runner, ...): the package re-exports nothing, so a leaf of it (core.contracts, core.reasons) can be imported without
+loading the bus and the module wrapper."""

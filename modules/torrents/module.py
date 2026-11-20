@@ -115,7 +115,9 @@ import json
 import os
 from datetime import datetime, timezone
 
-from core import BaseModule, BusRequestError, storage, torrent_profile_id
+from core import storage
+from core.module import BaseModule, BusRequestError
+from core.source_types import torrent_profile_id
 from core.contracts import RUN_CHANGED, RunChanged
 from core.contracts.torrent import RELEASE_CHANGED_TOPIC, STAGING_DIR_KEY
 from core.db import Database

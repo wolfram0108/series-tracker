@@ -11,7 +11,7 @@ import base64
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
-from core import BusRequestError
+from core.module import BusRequestError
 from core.contracts import DownloadCard, PackCard
 from core.reasons import reason, relayed
 

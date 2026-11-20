@@ -5,7 +5,8 @@
 """
 from __future__ import annotations
 
-from core import BaseModule, sanitize_path
+from core.fsnames import sanitize_path
+from core.module import BaseModule
 from core.db import Database
 from core.envelope import Envelope
 

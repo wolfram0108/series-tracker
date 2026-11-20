@@ -12,7 +12,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from core import NO_HANDLER, BusRequestError, compute
+from core import compute
+from core.module import NO_HANDLER, BusRequestError
 from core.admission import Admission
 from core.admission import current as current_admission
 from core.reasons import code_of, relayed

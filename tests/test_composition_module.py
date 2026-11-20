@@ -14,7 +14,9 @@ from pathlib import Path
 import pytest
 
 from composition_fakes import (PAGE, FakeCatalog, FakeRules, FakeSources, FakeVoices, source)
-from core import BaseModule, Bus, BusRequestError, Runner
+from core.bus import Bus
+from core.module import BaseModule, BusRequestError
+from core.runner import Runner
 from core.contracts import (CompositionPreviewReply, CompositionReply, Level, QueuesReply, ReleaseTable, RowState, RowVoice,
                             SettingsReset, SettingsSet, SettingsSetMany,
                             SourceStatus, TableRow, TableState, group_target, variant_target)

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core import Bus
+from core.bus import Bus
 from core.contracts import RowState, TableRow
 from core.contracts.voices import PLAYERS_OFF_KEY
 from core.db import Database

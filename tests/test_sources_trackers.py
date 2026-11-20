@@ -6,7 +6,8 @@ import os
 
 import pytest
 
-from core import BaseModule, Bus
+from core.bus import Bus
+from core.module import BaseModule
 from core.contracts import TableGetRequest
 from core.contracts.torrent import player_of, track_link
 from core.db import Database

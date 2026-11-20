@@ -16,7 +16,8 @@ import asyncio
 import os
 import re
 
-from core import BaseModule, BusRequestError, torrent_profile_id
+from core.module import BaseModule, BusRequestError
+from core.source_types import torrent_profile_id
 from core.envelope import Envelope
 
 _VIDEO_EXT = (".mkv", ".avi", ".mp4", ".mov", ".wmv", ".webm", ".ts", ".m4v")

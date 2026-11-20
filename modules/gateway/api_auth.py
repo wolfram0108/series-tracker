@@ -11,7 +11,7 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from core import BusRequestError
+from core.module import BusRequestError
 from core.reasons import reason
 
 # Защита от перебора: на IP — окно неудач и временный бан (in-memory;

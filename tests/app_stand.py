@@ -30,7 +30,9 @@ import uvicorn
 from fastapi.responses import StreamingResponse
 
 from assembly import Options, assemble
-from core import Bus, Envelope, Runner
+from core.bus import Bus
+from core.envelope import Envelope
+from core.runner import Runner
 from core import container as mkv
 from core.db import Database
 from alloha_model import PROFILE as ALLOHA_PROFILE, AllohaModel

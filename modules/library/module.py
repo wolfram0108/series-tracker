@@ -27,7 +27,9 @@ from __future__ import annotations
 import asyncio
 import os
 
-from core import BaseModule, sanitize_path, storage
+from core import storage
+from core.fsnames import sanitize_path
+from core.module import BaseModule
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason

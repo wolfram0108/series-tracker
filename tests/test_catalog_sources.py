@@ -5,7 +5,9 @@ import sqlite3
 
 import pytest
 
-from core import BaseModule, Bus, BusRequestError, Runner
+from core.bus import Bus
+from core.module import BaseModule, BusRequestError
+from core.runner import Runner
 from core.db import Database
 from core.reasons import code_of, parse, relayed
 from modules.catalog import CatalogModule

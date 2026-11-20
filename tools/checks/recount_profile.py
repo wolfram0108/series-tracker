@@ -37,7 +37,9 @@ for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_prox
 os.environ.pop("NO_PROXY", None)
 os.environ.pop("no_proxy", None)
 
-from core import BaseModule, Bus, Runner  # noqa: E402
+from core.bus import Bus  # noqa: E402
+from core.module import BaseModule  # noqa: E402
+from core.runner import Runner  # noqa: E402
 from core.db import Database  # noqa: E402
 
 STEPS: dict[str, list[float]] = defaultdict(list)

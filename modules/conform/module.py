@@ -88,7 +88,7 @@ from typing import Any
 
 import httpx
 
-from core import BaseModule, BusRequestError
+from core.module import BaseModule, BusRequestError
 from core.contracts import (AlignmentJob, series_of_job_key, ConformParams, ConformSettingsDraft, ConformSettingsSaved, DubResult, JobKind,
                             JobStatus,
                             ReverseReply, ReverseSubmit, SubmitOutcome,

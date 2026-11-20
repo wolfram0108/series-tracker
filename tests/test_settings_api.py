@@ -6,7 +6,9 @@ import sqlite3
 import httpx
 import pytest
 
-from core import BaseModule, Bus, Runner
+from core.bus import Bus
+from core.module import BaseModule
+from core.runner import Runner
 from core import logging as core_logging
 from core.db import Database
 from modules.catalog import CatalogModule

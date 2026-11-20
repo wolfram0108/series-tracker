@@ -11,7 +11,7 @@ import asyncio
 from collections import Counter
 from typing import Awaitable, Callable
 
-from core import BusRequestError
+from core.module import BusRequestError
 from core.contracts import ProviderSaved, ProviderSettingsDraft, ProviderSite, ProviderView
 from core.logging import get_logger
 

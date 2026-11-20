@@ -5,7 +5,8 @@ import gzip
 import json
 import os
 
-from core import Bus, Runner
+from core.bus import Bus
+from core.runner import Runner
 from core.contracts.work import RUN_CHANGED
 from core.envelope import Envelope
 from modules.runlog import RunlogModule

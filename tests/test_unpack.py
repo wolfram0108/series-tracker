@@ -13,7 +13,8 @@ import subprocess
 
 import pytest
 
-from core import BaseModule, Bus
+from core.bus import Bus
+from core.module import BaseModule
 from core.ffprobe import subtitle_events
 from core.envelope import Envelope
 from core.contracts import RowTrack

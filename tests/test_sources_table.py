@@ -12,7 +12,8 @@ from urllib.parse import urlparse
 
 import pytest
 
-from core import BaseModule, Bus
+from core.bus import Bus
+from core.module import BaseModule
 from core.contracts import RowState, TableRow, UnreadPart
 from core.contracts.release_table import site_of
 from core.db import Database

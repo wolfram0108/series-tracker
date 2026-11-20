@@ -10,7 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from core import Bus, ids
+from core import ids
+from core.bus import Bus
 from modules.sources import parsers
 from modules.sources.module import SourcesModule
 

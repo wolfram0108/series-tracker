@@ -142,7 +142,8 @@ from datetime import datetime
 from typing import Callable, Iterable
 
 
-from core import BaseModule, compute, ids
+from core import compute, ids
+from core.module import BaseModule
 from core import storage
 from core.contracts.torrent import TORRENT_PLAYER, PageReleases
 from core.contracts.release_table import site_of

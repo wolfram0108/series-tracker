@@ -11,7 +11,7 @@ import json
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from core import BusRequestError
+from core.module import BusRequestError
 from core.reasons import code_of, reason, relayed
 from .routing import admitted
 

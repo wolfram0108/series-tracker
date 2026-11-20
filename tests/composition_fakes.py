@@ -12,7 +12,7 @@ import re
 from datetime import datetime, timezone
 from typing import Callable
 
-from core import BaseModule
+from core.module import BaseModule
 from core.contracts import (GroupsResolveReply, GroupsResolveRequest, ReleaseTable, RuleResult, RulesApplyReply,
                             RulesApplyRequest, TableFailed, TableGetReply, TableGetRequest, TableReady, TableState,
                             VoiceSettingsView)

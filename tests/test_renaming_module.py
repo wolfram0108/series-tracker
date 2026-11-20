@@ -4,7 +4,9 @@ import sqlite3
 
 import pytest
 
-from core import BaseModule, Bus, Runner
+from core.bus import Bus
+from core.module import BaseModule
+from core.runner import Runner
 from modules.renaming import RenamingModule
 from series_factory import insert_series
 from schema_db import migrated

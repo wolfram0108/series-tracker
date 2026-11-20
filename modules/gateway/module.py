@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from core import BaseModule, BusRequestError
+from core.module import BaseModule, BusRequestError
 from core.reasons import reason
 from core.contracts import (CompositionChanged, CompositionFailed, PackJournal, PlannerView,
                             SeriesReadProgress, SourceChanged, TableFailed, TableProgress, TableReady)

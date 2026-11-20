@@ -72,7 +72,8 @@ from __future__ import annotations
 import sqlite3
 from collections import Counter
 
-from core import BaseModule, compute
+from core import compute
+from core.module import BaseModule
 from core.contracts import (RuleResult, RulesApplyReply, RulesApplyRequest,
                             RulesProfileChanged)
 from core.db import Database

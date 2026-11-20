@@ -27,7 +27,7 @@ import os
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
-from core import BaseModule
+from core.module import BaseModule
 from core.db import Database
 from core.envelope import Envelope
 

@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 
 os.environ.setdefault("ST_DOCS_ENABLED", "true")
 
-from core import Bus  # noqa: E402
+from core.bus import Bus  # noqa: E402
 from modules.gateway import GatewayModule  # noqa: E402
 
 # Краткое назначение эндпоинтов: ключ — "МЕТОД путь", значение — одна строка.

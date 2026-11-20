@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core import BaseModule
+from core.module import BaseModule
 from core.contracts import (CompositionRow, ReleaseTable, RowState, TableFailed, TableGetReply, TableGetRequest,
                             TableReady, TableState)
 from core.reasons import reason

@@ -75,7 +75,8 @@ from __future__ import annotations
 import asyncio
 import os
 
-from core import BaseModule, sanitize_name, sanitize_path
+from core.fsnames import sanitize_name, sanitize_path
+from core.module import BaseModule
 from core.contracts import SourceEvent, availability
 from core.db import Database
 from core.envelope import Envelope

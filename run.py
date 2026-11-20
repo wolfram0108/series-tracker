@@ -29,7 +29,10 @@ import os
 from contextlib import asynccontextmanager
 
 from assembly import Options, assemble
-from core import Bus, Envelope, Runner, proc
+from core import proc
+from core.bus import Bus
+from core.envelope import Envelope
+from core.runner import Runner
 from core.db import Database
 from core.logging import configure, get_logger
 from core.loopwatch import LoopWatch, logged

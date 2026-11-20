@@ -3,7 +3,8 @@ import asyncio
 
 import pytest
 
-from core import BaseModule, Bus
+from core.bus import Bus
+from core.module import BaseModule
 from core.contracts import ReleaseTable, RowState, TableRow
 from core.db import Database
 from provider_mock import MockProvider, serving

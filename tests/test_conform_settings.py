@@ -4,7 +4,9 @@ import asyncio
 
 import pytest
 
-from core import BaseModule, Bus, Runner
+from core.bus import Bus
+from core.module import BaseModule
+from core.runner import Runner
 from core.contracts import ConformSettingsDraft
 from modules.conform import ConformModule
 from conform_fakes import FakeClient

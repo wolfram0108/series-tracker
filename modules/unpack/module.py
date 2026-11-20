@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import os
 
-from core import BaseModule
+from core.module import BaseModule
 from core.contracts.torrent import (RELEASE_CHANGED_TOPIC, EditorTab, FileKind, ReleaseState, ReleaseView, kind_of)
 from core.db import Database
 from core.envelope import Envelope

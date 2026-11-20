@@ -12,7 +12,9 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from core import BaseModule, Bus, Runner
+from core.bus import Bus
+from core.module import BaseModule
+from core.runner import Runner
 from core import container as mkv
 from core.contracts import (VOICE_TAKE, CompositionReply, CompositionRow, EffectiveLever, EpisodeSettings, Level,
                             RowState, group_target)

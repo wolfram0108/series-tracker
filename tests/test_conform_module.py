@@ -6,7 +6,9 @@ import json
 import httpx
 import pytest
 
-from core import BaseModule, Bus, BusRequestError, Runner
+from core.bus import Bus
+from core.module import BaseModule, BusRequestError
+from core.runner import Runner
 from core.envelope import Envelope
 from modules.conform import ConformModule, DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
 from conform_fakes import FakeClient

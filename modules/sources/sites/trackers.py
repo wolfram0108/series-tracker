@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
 
-from core import NO_HANDLER, BusRequestError
+from core.module import NO_HANDLER, BusRequestError
 from core.contracts import SourceType
 from core.reasons import code_of, reason
 

@@ -36,7 +36,8 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel
 
-from core import BaseModule, compute, storage
+from core import compute, storage
+from core.module import BaseModule
 from core.secrets import redacted
 from core.contracts.release_table import TABLE_TRACE_TOPIC
 from core.contracts.work import RUN_CHANGED

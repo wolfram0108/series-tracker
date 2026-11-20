@@ -12,7 +12,10 @@ from contextlib import asynccontextmanager
 
 import httpx
 
-from core import BaseModule, Bus, Envelope, Runner
+from core.bus import Bus
+from core.envelope import Envelope
+from core.module import BaseModule
+from core.runner import Runner
 from modules.gateway import GatewayModule
 
 

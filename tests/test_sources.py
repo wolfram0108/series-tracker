@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from core import Bus
+from core.bus import Bus
 from modules.sources import SourcesModule, dates, parsers
 
 FIX = os.path.join(os.path.dirname(__file__), "samples", "trackers")

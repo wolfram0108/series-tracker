@@ -9,7 +9,9 @@ import sqlite3
 
 import pytest
 
-from core import BaseModule, Bus, Runner
+from core.bus import Bus
+from core.module import BaseModule
+from core.runner import Runner
 from core.db import Database
 from modules.catalog import CatalogModule
 from series_factory import insert_series

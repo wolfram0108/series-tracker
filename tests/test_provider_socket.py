@@ -11,7 +11,8 @@ import os
 
 import pytest
 
-from core import BaseModule, Bus
+from core.bus import Bus
+from core.module import BaseModule
 from core.db import Database
 from modules.sources.module import SourcesModule
 from modules.sources.provider import ProviderClient

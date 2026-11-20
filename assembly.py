@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
 
-from core import Bus
+from core.bus import Bus
 from core.db import Database
 from core.logging import log_file
 from modules.auth import AuthModule

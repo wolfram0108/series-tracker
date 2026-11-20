@@ -8,7 +8,9 @@ import pytest
 import requests
 import requests.adapters
 
-from core import Bus, BaseModule, BusRequestError, Runner
+from core.bus import Bus
+from core.module import BaseModule, BusRequestError
+from core.runner import Runner
 from core.db import Database
 from modules.trackerauth import TrackerauthModule
 from modules.trackerauth import module as ta_module

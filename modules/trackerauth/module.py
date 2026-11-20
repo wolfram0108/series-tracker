@@ -46,7 +46,7 @@ from typing import Any
 
 import requests
 
-from core import BaseModule
+from core.module import BaseModule
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason

@@ -7,7 +7,9 @@ cookie_secure=False — иначе SessionMiddleware ставит Secure-кук�
 import httpx
 import pytest
 
-from core import BaseModule, Bus, Runner
+from core.bus import Bus
+from core.module import BaseModule
+from core.runner import Runner
 from core.db import Database
 from modules.auth import AuthModule
 from modules.gateway import GatewayModule

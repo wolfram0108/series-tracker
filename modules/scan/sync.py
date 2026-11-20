@@ -10,7 +10,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Sequence
 
-from core import BusRequestError
+from core.module import BusRequestError
 from core.topics import TABLE_WAIT_S
 from core.contracts import SeriesSource, TableGetReply, TableGetRequest, TableState
 from core.logging import get_logger

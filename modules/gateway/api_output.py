@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
-from core import BusRequestError
+from core.module import BusRequestError
 from core.reasons import reason, relayed
 from core.contracts import (CompositionGetRequest, CompositionReply, LayoutPart, OutputSwitch, PlanDelete, PlannerView,
                             PlanRowRef, QueuesGet, QueuesReply, Reference, SettingsReset, SettingsSet, SettingsSetMany,

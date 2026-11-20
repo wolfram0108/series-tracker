@@ -57,7 +57,8 @@ import os
 import traceback
 from dataclasses import dataclass
 
-from core import BaseModule, notices, storage
+from core import notices, storage
+from core.module import BaseModule
 from core.clock import beat_while
 from core.ffprobe import duration_of, film_stream, streams_of
 from core.contracts import RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, WorkWithdrawn

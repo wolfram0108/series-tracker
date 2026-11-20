@@ -11,7 +11,7 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, model_validator
 
-from core import BusRequestError
+from core.module import BusRequestError
 from core.contracts import SubtitleType
 
 from .routing import as_made, refusal

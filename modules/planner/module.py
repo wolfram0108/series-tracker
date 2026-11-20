@@ -103,7 +103,8 @@ import os
 import shutil
 from dataclasses import asdict, dataclass, replace
 
-from core import NO_HANDLER, BaseModule, BusRequestError, compute, storage
+from core import compute, storage
+from core.module import NO_HANDLER, BaseModule, BusRequestError
 from core import container as mkv
 from core.clock import beat_while
 from core.dump import plain

@@ -4,7 +4,7 @@ import signal
 
 import pytest
 
-from core import Bus
+from core.bus import Bus
 from modules.gateway import GatewayModule
 
 

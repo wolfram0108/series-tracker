@@ -11,7 +11,9 @@ from dataclasses import dataclass
 
 import pytest
 
-from core import BaseModule, Bus, Runner
+from core.bus import Bus
+from core.module import BaseModule
+from core.runner import Runner
 from core.contracts import RUN_CHANGED, TableState
 from core.db import Database
 from core.envelope import Envelope
