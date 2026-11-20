@@ -1,30 +1,30 @@
-"""Провайдеры трекеров: логин-флоу, детект протухания, заголовки.
+"""Tracker providers: login flow, expiry detection, headers.
 
-Вся трекеро-специфика — здесь (решение Р-1): потребители видят только
-query `trackerauth.fetch`. Каждый провайдер отвечает на четыре вопроса:
-как войти, как понять по ответу, что нас разлогинило, какие заголовки
-нужны запросу и (необязательно) как распознать антибот-челлендж.
+All tracker-specific logic lives here (decision Р-1): consumers see only the
+`trackerauth.fetch` query. Each provider answers four questions: how to log
+in, how to tell from a response that we were logged out, which headers a
+request needs, and (optionally) how to recognise an anti-bot challenge.
 
-Челлендж — отдельное состояние, не путать с разлогином: сессия может
-быть жива, но защита сайта не пускает клиента вовсе. Распознаёт его
-транспорт (`cf_challenge.arm` на сессии), одинаково для всех трекеров;
-провайдер объявляет лишь `challenge_url`, если проходить челлендж нужно
-не на том URL, что запрашивали.
+A challenge is a separate state, not to be confused with a logout: the session
+can be alive while the site's protection does not let the client in at all.
+The transport recognises it (`cf_challenge.arm` on the session), the same way
+for all trackers; a provider declares only `challenge_url` if the challenge
+must be passed at a URL other than the one requested.
 
-`user_agent` — личность сессии: провайдер объявляет её данными, модуль
-ставит на сессию, и все запросы (включая логин) идут под одним UA. Иначе
-клирэнс антибот-защиты, действительный только в паре со «своим» UA,
-рвётся на первом же запросе, собранном мимо общей точки.
+`user_agent` is the session's identity: the provider declares it as data, the
+module sets it on the session, and all requests (including login) go out under
+one UA. Otherwise the anti-bot clearance, valid only together with its own UA,
+breaks on the first request built outside the common point.
 
-Маркеры выбраны детерминированными (вместо гадания по подстрокам
-«login/error/пароль» из старой системы — см. разбор auth.py):
-- Kinozal: разлогиненному показывают форму входа action=".../takelogin.php"
-  (на залогиненных страницах её нет вовсе); успех входа = редирект НЕ на
-  takelogin.php. Маркер устойчив к ведущему слешу и кавычкам формы
-  (находка 42).
-- RuTracker: признак живой сессии — кука `bb_session`; она появляется
-  только после успешного логина и пропадает с его смертью.
-- Astar: логина нет, есть Cloudflare — сессию делает cloudscraper.
+The markers are chosen to be deterministic (instead of guessing by substrings
+«login/error/пароль» from the old system, see the analysis of auth.py):
+- Kinozal: a logged-out user is shown a login form with action=".../takelogin.php"
+  (logged-in pages have no such form at all); a successful login is a redirect
+  NOT to takelogin.php. The marker holds up to a leading slash and the form's
+  quotes (finding 42).
+- RuTracker: the sign of a live session is the `bb_session` cookie; it appears
+  only after a successful login and vanishes when the session dies.
+- Astar: no login, but Cloudflare is present; the session is made by cloudscraper.
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ from bs4 import BeautifulSoup
 
 from core.reasons import reason
 
-# Форма входа Kinozal: action может быть со слешем и в любых кавычках.
+# Kinozal login form: action may carry a leading slash and any quote style.
 _LOGIN_FORM_RE = re.compile(r"""action=['"]?/?takelogin\.php""", re.I)
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -44,7 +44,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 
 class TrackerLoginError(RuntimeError):
-    """Логин не удался по содержательной причине (учётки и т.п.)."""
+    """Login failed for a substantive reason (bad credentials and the like)."""
 
 
 def _base(url: str, strip_prefixes: tuple[str, ...] = ("www.",)) -> tuple[str, str]:
@@ -60,7 +60,7 @@ class KinozalProvider:
     user_agent = UA
 
     def normalize_domain(self, url: str) -> str:
-        # dl.kinozal.me (скачивание) живёт на той же сессии, что kinozal.me
+        # dl.kinozal.me (downloads) shares the session with kinozal.me
         return _base(url, ("dl.", "www."))[0]
 
     def login(self, session: requests.Session, credentials: dict,
@@ -76,15 +76,15 @@ class KinozalProvider:
             raise TrackerLoginError(reason("kinozal_login_rejected", domain=domain))
 
     def is_logged_out(self, resp: requests.Response) -> bool:
-        # форма входа: action="/takelogin.php" | "takelogin.php" | '...'
-        # (на залогиненных страницах формы нет — находка 42)
+        # login form: action="/takelogin.php" | "takelogin.php" | '...'
+        # (logged-in pages have no such form, finding 42)
         if "takelogin.php" in resp.url:
             return True
         return bool(_LOGIN_FORM_RE.search(resp.text[:20000]))
 
     def request_headers(self, url: str) -> dict:
-        # Скачивание с dl.* требует Referer основного домена (из разбора
-        # старого qbittorrent.py — подтверждено как необходимость).
+        # Downloads from dl.* require the main domain as Referer (from the analysis
+        # of the old qbittorrent.py; confirmed as necessary).
         _, base = _base(url, ("dl.", "www."))
         return {"Referer": f"{base}/"}
 
@@ -104,7 +104,7 @@ class RutrackerProvider:
         form_data = {}
         form = BeautifulSoup(page.text, "html.parser").find(
             "form", {"method": "post"})
-        if form:  # скрытые поля формы (анти-CSRF и пр.)
+        if form:  # hidden form fields (anti-CSRF and the like)
             for field in form.find_all("input"):
                 name = field.get("name")
                 if name and name not in ("login_username", "login_password"):
@@ -116,27 +116,27 @@ class RutrackerProvider:
                             headers={"Referer": login_url})
         resp.raise_for_status()
         if "bb_session" not in session.cookies.get_dict():
-            # RuTracker включает капчу в форму входа (скрытое поле cap_sid
-            # и поле ввода cap_code_<хэш>). Автоматически её не решить —
-            # говорим об этом прямо, а не «логин не принят»: причина
-            # разная и лечение разное (проверить пароль ≠ войти руками).
+            # RuTracker puts a captcha into the login form (hidden cap_sid and input
+            # cap_code_<hash>). It cannot be solved automatically, so say so instead
+            # of a generic "login rejected": the cause and remedy differ (checking the
+            # password and logging in by hand are different fixes).
             if "cap_sid" in page.text or "cap_code" in page.text:
                 raise TrackerLoginError(reason("rutracker_captcha", domain=domain))
             raise TrackerLoginError(reason("rutracker_login_rejected", domain=domain))
 
     def is_logged_out(self, resp: requests.Response) -> bool:
         jar = getattr(resp, "cookies", None)
-        # bb_session живёт в сессии; на самом ответе её может не быть —
-        # надёжнее признак формы логина в теле.
+        # bb_session lives in the session and may be absent from the response
+        # itself, so the login form in the body is the more reliable sign.
         return "login.php" in resp.url or (
             'name="login_username"' in resp.text[:20000])
 
     def challenge_url(self, url: str) -> str:
-        """Где проходить челлендж для запроса к `url`.
+        """Where to pass the challenge for a request to `url`.
 
-        dl.php отдаёт файл .torrent — открывать его в браузере
-        бессмысленно (челлендж там не показать). Клирэнс общий на домен,
-        поэтому проходим на странице темы того же раздачи.
+        dl.php returns a .torrent file, which makes no sense to open in a browser
+        (the challenge cannot be shown there). Clearance is shared per domain, so
+        we pass it on the topic page of the same release.
         """
         if "/forum/dl.php" in url:
             return url.replace("/forum/dl.php", "/forum/viewtopic.php")
@@ -144,7 +144,7 @@ class RutrackerProvider:
 
     def request_headers(self, url: str) -> dict:
         headers: dict = {}
-        if "/forum/dl.php" in url:  # скачивание .torrent
+        if "/forum/dl.php" in url:  # .torrent download
             import re
             match = re.search(r"t=(\d+)", url)
             _, base = _base(url)
@@ -158,9 +158,9 @@ class RutrackerProvider:
 
 
 class AstarProvider:
-    """Логина нет; Cloudflare проходится cloudscraper'ом."""
+    """No login; Cloudflare is passed by cloudscraper."""
     service = "astar"
-    user_agent = None  # cloudscraper подбирает UA под свой обход сам
+    user_agent = None  # cloudscraper picks the UA for its own bypass itself
 
     def normalize_domain(self, url: str) -> str:
         return _base(url)[0]
@@ -171,23 +171,23 @@ class AstarProvider:
 
     def login(self, session: requests.Session, credentials: dict,
               url: str) -> None:
-        pass  # вход не требуется
+        pass  # no login required
 
     def is_logged_out(self, resp: requests.Response) -> bool:
-        return False  # сессии нет — протухать нечему (CF решает scraper)
+        return False  # no session, so nothing to expire (CF is handled by the scraper)
 
     def request_headers(self, url: str) -> dict:
         return {}
 
 
 class VkProvider:
-    """VK API: авторизация токеном в параметрах запроса; сессии и логина
-    нет — токен статичен (хранится в auth: auth_type='vk', поле password,
-    как в старой системе). Токен не покидает trackerauth."""
+    """VK API: auth by token in the request parameters; there is no session or
+    login, the token is static (stored in auth: auth_type='vk', the password
+    field, as in the old system). The token never leaves trackerauth."""
     service = "vk"
     needs_credential_params = True
-    # На браузерном UA VK API отдаёт video без поля files (прямые mp4 и
-    # разрешения вырезаются) — оставляем дефолтный UA requests (находка 44).
+    # With a browser UA the VK API returns video without the files field (direct
+    # mp4 and resolutions are dropped), so requests' default UA stays (finding 44).
     user_agent = None
 
     def normalize_domain(self, url: str) -> str:
@@ -198,7 +198,7 @@ class VkProvider:
         raise TrackerLoginError(reason("vk_token_static"))
 
     def is_logged_out(self, resp: requests.Response) -> bool:
-        return False  # ошибки API приходят JSON-ом, их разбирает sources
+        return False  # API errors arrive as JSON, and sources parses them
 
     def request_headers(self, url: str) -> dict:
         return {}

@@ -1,20 +1,15 @@
-"""Единственный выход sources наружу: доставка с перебором хостов.
+"""The only way out of `sources`: delivery with a walk over the hosts.
 
-Любое обращение к источнику идёт через `Delivery.fetch`, поэтому путь,
-забывший про переезд на живой хост или про проверку того, ЧТО приехало,
-в модуле не заводится (находка 68). Раньше инвариант «умей переехать»
-был только у разбора страниц, а скачивание .torrent и API anilibria
-ходили по хосту из ссылки — мёртвый хост означал отказ конвейера.
+Every call to a source goes through `Delivery.fetch`, so a path that forgot to move to a live host, or to check WHAT arrived,
+is not made in the module (finding 68). Earlier the invariant "be able to move" held only for the parsing of pages, while the
+download of a .torrent and the API of anilibria went to the host of the link: a dead host meant a refusal of the pipeline.
 
-Транспорты: `auth` — через trackerauth (сессии, антибот-челлендж),
-`http` — прямой httpx, `browser` — общий Playwright-пул.
+Transports: `auth` is through trackerauth (sessions, the anti-bot challenge), `http` is a direct httpx, `browser` is the shared
+Playwright pool.
 
-Ожидаемый вид результата объявляется явно (`expect`: page | torrent |
-json) и проверяется детерминированно: заглушка сайта с кодом 200
-ответом не считается. Попытка удачна, когда результат доставлен И
-принят — доменная проверка (`accept`) выполняется ВНУТРИ попытки,
-поэтому неразобранная страница ведёт к переезду на следующий хост, а не
-к отказу.
+The expected form of the result is declared (`expect`: page | torrent | json) and checked deterministically: a stub of a site
+with the code 200 is no answer. An attempt succeeds when the result is delivered AND accepted: the check of the domain
+(`accept`) runs INSIDE the attempt, so a page that cannot be parsed leads to a move to the next host, not to a refusal.
 """
 from __future__ import annotations
 
@@ -24,18 +19,20 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 from urllib.parse import urlparse
 
+from core.contracts import FetchRequest
 from core.reasons import describe, reason
+from core.topics import TRACKERAUTH_FETCH
 
 from . import hosts, parsers
 from .parsers import SourceParseError, SourceRefusedError
 
-TORRENT_TIMEOUT = 30       # секунд на запрос .torrent у трекера
-PAGE_TIMEOUT = 20          # секунд на запрос страницы
+TORRENT_TIMEOUT = 30       # seconds for a request of a .torrent to the tracker
+PAGE_TIMEOUT = 20          # seconds for a request of a page
 
 
 @dataclass(frozen=True)
 class Delivered:
-    """Что доехало и с какого URL (фактический хост — часть контракта)."""
+    """What arrived and from which URL (the host actually used is part of the contract)."""
     url: str
     value: Any
 
@@ -68,12 +65,11 @@ _ACCEPTORS: dict[str, Callable[[Any], Any]] = {
 
 
 class Delivery:
-    """Транспорт модуля sources. Зависимости передаются вызываемыми,
-    а не значениями: httpx-клиент и браузерный пул поднимаются позже
-    самого модуля."""
+    """The transport of the module sources. The dependencies are passed as callables, not values: the httpx client and the
+    browser pool come up later than the module itself. `reply` is `BaseModule.reply_of`: the answer of a neighbour as its model."""
 
-    def __init__(self, *, request, http, browser_html, log) -> None:
-        self._request = request
+    def __init__(self, *, reply, http, browser_html, log) -> None:
+        self._reply = reply
         self._http = http
         self._browser_html = browser_html
         self._log = log
@@ -110,16 +106,14 @@ class Delivery:
         if transport == "browser":
             return await self._browser_html(service, url)
         if transport == "auth":
-            payload: dict[str, Any] = {"service": service, "url": url,
-                                       "timeout": timeout}
-            if params is not None:
-                payload["params"] = params
-            reply = await self._request("trackerauth.fetch", payload)
-            if reply["status"] != 200:
-                raise SourceParseError(f"HTTP {reply['status']}")
-            if "text" in reply:
-                return reply["text"]
-            return base64.b64decode(reply["content_b64"])
+            # Only what was set goes: a service that is not VK takes no params.
+            asked = FetchRequest(service=service, url=url, timeout=timeout, **({} if params is None else {"params": params}))
+            reply = await self._reply(TRACKERAUTH_FETCH, asked.model_dump(mode="json", exclude_unset=True))
+            if reply.status != 200:
+                raise SourceParseError(f"HTTP {reply.status}")
+            if reply.text is not None:
+                return reply.text
+            return base64.b64decode(reply.content_b64)
         resp = await self._http().get(url)
         resp.raise_for_status()
         if "text/html" in resp.headers.get("content-type", ""):

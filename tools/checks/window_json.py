@@ -98,10 +98,20 @@ def plain(value):
     return value.model_dump(mode="json") if hasattr(value, "model_dump") else value
 
 
-def written(value) -> str:
-    """A reply or an event as text: a model as a module writes it for the window, a tuple as a list."""
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False,
+def written(value, drop_none: bool = False) -> str:
+    """A reply or an event as text: a model as a module writes it for the window, a tuple as a list. `drop_none` leaves out the fields
+    that are none: a reply a module keeps for the modules (not for a window) may be a model that names the fields of both its forms."""
+    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False,
                       default=lambda each: each.model_dump(mode="json"))
+    if not drop_none:
+        return text
+
+    def clean(each):
+        if isinstance(each, dict):
+            return {name: clean(part) for name, part in each.items() if part is not None}
+        return [clean(part) for part in each] if isinstance(each, list) else each
+
+    return json.dumps(clean(json.loads(text)), ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
 # The torrent page whose five profiles are made again by the first opening of its editor (they are removed from the copy first).
@@ -345,10 +355,10 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         record(name, response.status_code, response.content)
         return response
 
-    async def over_bus(name: str, topic: str, payload: dict) -> None:
+    async def over_bus(name: str, topic: str, payload: dict, drop_none: bool = False) -> None:
         """What a module answers another: the model or the dictionary, written as text; a refusal as its words."""
         try:
-            record(name, 200, written(await probe.request(topic, payload)).encode())
+            record(name, 200, written(await probe.request(topic, payload), drop_none).encode())
         except BusRequestError as exc:
             record(name, 500, str(exc).encode())
 
@@ -1089,10 +1099,10 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                                ("vk", {"service": "vk", "url": "https://api.vk.com/method/video.get", "params": {"owner_id": 1}}),
                                ("unknown-service", {"service": "nothing", "url": "https://example.invalid/x"}),
                                ("no-credentials", {"service": "astar", "url": "https://astar.example/x"}), ("no-url", {"service": "kinozal"})):
-            await over_bus(f"trackerauth:fetch:{label}", "trackerauth.fetch", payload)
+            await over_bus(f"trackerauth:fetch:{label}", "trackerauth.fetch", payload, drop_none=True)
             await done(f"trackerauth:fetch:{label}")
         trackers["kinozal_in"] = False  # the session of the tracker expired: the login is wanted again, within its rate limit
-        await over_bus("trackerauth:fetch:rate-limit", "trackerauth.fetch", {"service": "kinozal", "url": kz})
+        await over_bus("trackerauth:fetch:rate-limit", "trackerauth.fetch", {"service": "kinozal", "url": kz}, drop_none=True)
         await done("trackerauth:fetch:rate-limit")
         trackers["kinozal_in"] = True
 

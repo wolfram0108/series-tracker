@@ -71,24 +71,25 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _written(payload):
+def _written(payload, topic: str | None = None):
     """What of a payload goes into a dump: a model handed over in the process whole (the layout, megabytes) is told by its
-    kind and the size of its lists; its rows are in the dump as the planner's trace of the inputs of its plan."""
+    kind and the size of its lists; its rows are in the dump as the planner's trace of the inputs of its plan. `topic` is the
+    topic it goes to: some fields are a secret in the payload of one topic only (core/secrets.py)."""
     if isinstance(payload, BaseModel):
         # A model that carries a secret (a setting read, a password) is masked as its dictionary is: the dump keeps no secret.
         return redacted({"model": type(payload).__name__,
                          **{name: (len(value) if isinstance(value, (list, tuple, dict)) else value)
-                            for name, value in payload.__dict__.items()}})
+                            for name, value in payload.__dict__.items()}}, topic)
     if isinstance(payload, (list, tuple)) and any(isinstance(each, BaseModel) for each in payload):
-        return [_written(each) for each in payload]  # a reply that is a row of models (the references of a series)
-    return redacted(payload)
+        return [_written(each, topic) for each in payload]  # a reply that is a row of models (the references of a series)
+    return redacted(payload, topic)
 
 
 def _line(entry) -> str:
     kind, at, body = entry
     if kind == "bus":
         body = {"kind": body.kind, "topic": body.topic, "cid": body.correlation_id, "reply_to": body.reply_to,
-                "admission": body.admission, "payload": _written(body.payload)}
+                "admission": body.admission, "payload": _written(body.payload, body.topic)}
     return json.dumps({"t": at, "e": kind, **body}, ensure_ascii=False, default=repr)
 
 

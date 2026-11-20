@@ -21,7 +21,8 @@ from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, Co
                             VoiceSettingsSaved, VoiceSettingsView)
 from core.reasons import code_of, reason, relayed
 from core.topics import (SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST, SETTINGS_PATHS_REMOVE, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET,
-                         SETTINGS_VALUES_BY_PREFIX)
+                         SETTINGS_VALUES_BY_PREFIX, TRACKERAUTH_CREDENTIALS_GET, TRACKERAUTH_CREDENTIALS_SET,
+                         TRACKERAUTH_SECRET_GET)
 
 from .routing import refusal, route_per_method
 from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse
@@ -80,9 +81,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         # логин/URL и флаг has_password/configured (задан ли секрет).
         out = {}
         for service in AUTH_SERVICES:
-            reply = await gw.request("trackerauth.credentials.get",
-                                     {"service": service})
-            out[service] = reply["credentials"] or {}
+            reply = await gw.reply_of(TRACKERAUTH_CREDENTIALS_GET, {"service": service})
+            out[service] = reply.credentials.model_dump() if reply.credentials else {}
         tmdb = await gw.reply_of(SETTINGS_VALUE_GET, {"key": "tmdb_token"})
         out["tmdb"] = {"configured": bool(tmdb.value)}
         return out
@@ -94,7 +94,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         if service == "tmdb":
             secret = (await gw.reply_of(SETTINGS_VALUE_GET, {"key": "tmdb_token"})).value or ""
         elif service in AUTH_SERVICES:
-            secret = (await gw.request("trackerauth.secret.get", {"service": service}))["secret"]
+            secret = (await gw.reply_of(TRACKERAUTH_SECRET_GET, {"service": service})).secret
         else:
             raise HTTPException(status_code=404)
         return JSONResponse({"secret": secret}, headers={"Cache-Control": "no-store"})
@@ -106,14 +106,14 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         data = await request.json()
         for service in ("qbittorrent", "kinozal", "rutracker"):
             if creds := data.get(service):
-                await gw.request("trackerauth.credentials.set", {
+                await gw.request(TRACKERAUTH_CREDENTIALS_SET, {
                     "service": service,
                     "username": creds.get("username"),
                     "password": creds.get("password") or None,
                     "url": creds.get("url")})
         if vk := data.get("vk"):
-            # как в оригинале: токен VK — в поле password
-            await gw.request("trackerauth.credentials.set", {
+            # as in the original: the VK token goes in the field password
+            await gw.request(TRACKERAUTH_CREDENTIALS_SET, {
                 "service": "vk", "username": "vk_token",
                 "password": vk.get("token") or None})
         if (tmdb := data.get("tmdb")) and tmdb.get("token"):

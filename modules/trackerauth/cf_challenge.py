@@ -1,46 +1,47 @@
-"""Прохождение антибот-челленджа трекера настоящим браузером.
+"""Passing the tracker's anti-bot challenge with a real browser.
 
-Зачем это здесь. Часть трекеров закрыта Cloudflare в режиме managed
-challenge: сервер отвечает 403 с заголовком `cf-mitigated: challenge`
-и страницей-заглушкой «Один момент…», а настоящую страницу отдаёт лишь
-после того, как браузер выполнит JS-проверку. Проверка проверяет именно
-клиента, а не адрес: обычный браузер из этой же сети сайт открывает.
+Why it lives here. Some trackers sit behind Cloudflare in managed challenge
+mode: the server answers 403 with the header `cf-mitigated: challenge` and a
+stub page «Один момент…», and serves the real page only after the browser
+runs the JS check. The check targets the client, not the address: an ordinary
+browser from the same network opens the site.
 
-Что НЕ работает (проверено на живом rutracker, зафиксировано в
-contracts/findings.md, находка 64):
+What does NOT work (checked on live rutracker, recorded in
+contracts/findings.md, finding 64):
 
-| Способ                              | Результат          |
+| Method                              | Result             |
 |-------------------------------------|--------------------|
-| requests с браузерным User-Agent    | 403, челлендж      |
-| cloudscraper                        | 403, челлендж      |
-| curl_cffi (подмена TLS-отпечатка)   | 403, челлендж      |
-| Playwright Firefox/Chromium         | челлендж не решён  |
-| camoufox (антидетект-сборка Firefox)| 200 за ~6 секунд   |
+| requests with a browser User-Agent  | 403, challenge     |
+| cloudscraper                        | 403, challenge     |
+| curl_cffi (TLS fingerprint spoof)   | 403, challenge     |
+| Playwright Firefox/Chromium         | challenge not solved |
+| camoufox (anti-detect Firefox build)| 200 in ~6 seconds  |
 
-Отсюда выбор: челлендж не обходится подделкой отпечатка — его нужно
-РЕШАТЬ, и решает его браузер, которого защита не опознаёт как
-автоматизированный (camoufox — сборка Firefox с патчами против детекта).
+Hence the choice: the challenge is not bypassed by spoofing the fingerprint,
+it has to be SOLVED, and the browser that solves it is one the protection
+does not recognise as automated (camoufox is a Firefox build with patches
+against detection).
 
-Результат прохождения — кука `cf_clearance` плюс User-Agent, которым она
-получена: кука действительна только в паре с этим UA. Дальше обычная
-requests-сессия ходит на трекер сама, без браузера; браузер поднимается
-только когда защита снова показала челлендж (см. `module.on_fetch`).
+The result of passing is the `cf_clearance` cookie plus the User-Agent it was
+obtained with: the cookie is valid only together with that UA. After that a
+plain requests session talks to the tracker itself, without a browser; the
+browser is started only when the protection shows the challenge again (see
+`module.on_fetch`).
 
-Признак успеха выбран детерминированным — появление куки `cf_clearance`,
-а не подстрока в заголовке страницы («Один момент…»/«Just a moment…»
-зависят от языка и вёрстки).
+The success signal is deterministic: the appearance of the `cf_clearance`
+cookie, not a substring in the page title («Один момент…» / «Just a moment…»
+depend on language and markup).
 
-Распознаётся челлендж здесь же и одинаково для всех трекеров: маркер —
-служебный заголовок `cf-mitigated: challenge`, который ставит сам
-Cloudflare. Защита включается на стороне сайта в любой момент и трекеру
-не принадлежит, поэтому и умение её заметить не может быть свойством
-отдельного провайдера.
+The challenge is recognised here, the same way for all trackers: the marker
+is the service header `cf-mitigated: challenge`, set by Cloudflare itself.
+The protection is switched on by the site at any moment and does not belong
+to the tracker, so the ability to notice it cannot be a property of a single
+provider.
 
-`arm()` вешает распознавание на сессию: любой её запрос, получивший
-заглушку, поднимает `ChallengeSeen` вместо того чтобы вернуть её как
-ответ. Так «заглушку приняли за страницу» становится непредставимым
-состоянием — включая пути, которые ходят мимо общей обёртки запроса
-(логин провайдера).
+`arm()` hooks recognition onto the session: any of its requests that gets the
+stub raises `ChallengeSeen` instead of returning it as a response. This makes
+"the stub was taken for a page" an unrepresentable state, including paths
+that go around the common request wrapper (provider login).
 """
 from __future__ import annotations
 
@@ -54,20 +55,18 @@ from core.reasons import reason
 CLEARANCE_COOKIE = "cf_clearance"
 CHALLENGE_HEADER = "cf-mitigated"
 
-# На живом rutracker челлендж решается за ~6 с плюс старт браузера; 45 —
-# запас в разы. Верхняя граница не произвольна: она должна укладываться в
-# бюджет ожидания у потребителя (sources ждёт trackerauth.fetch), иначе
-# запрос отвалится по шине раньше, чем браузер закончит работу.
+# Live rutracker solves the challenge in ~6 s plus browser start, so 45 s is a
+# wide margin; the cap must fit the consumer's wait (sources awaits trackerauth.fetch).
 SOLVE_TIMEOUT = 45.0
 POLL_INTERVAL = 1.0
 
 
 class ChallengeError(RuntimeError):
-    """Челлендж не пройден: браузер не получил `cf_clearance` в срок."""
+    """Challenge not passed: the browser did not get `cf_clearance` in time."""
 
 
 class ChallengeSeen(RuntimeError):
-    """Ответ оказался заглушкой антибот-защиты, а не страницей."""
+    """The response was an anti-bot protection stub, not a page."""
 
     def __init__(self, url: str) -> None:
         super().__init__(reason("challenge_page", url=url))
@@ -75,13 +74,13 @@ class ChallengeSeen(RuntimeError):
 
 
 def is_challenge(resp: requests.Response) -> bool:
-    """Заглушка защиты — по заголовку самого Cloudflare, а не по телу:
-    текст «Один момент…» зависит от языка ответа, заголовок — нет."""
+    """The protection stub is detected by Cloudflare's own header, not the body:
+    the «Один момент…» text depends on the response language, the header does not."""
     return resp.headers.get(CHALLENGE_HEADER, "").lower() == "challenge"
 
 
 def arm(session: requests.Session) -> None:
-    """Научить сессию не выдавать заглушку защиты за ответ."""
+    """Make the session never hand a protection stub back as a response."""
     session.hooks["response"].append(_raise_on_challenge)
 
 
@@ -92,11 +91,11 @@ def _raise_on_challenge(resp: requests.Response, *args, **kwargs) -> None:
 
 async def solve(url: str, *, timeout: float = SOLVE_TIMEOUT
                 ) -> tuple[str, dict[str, str]]:
-    """Пройти челлендж на `url` браузером.
+    """Pass the challenge at `url` with a browser.
 
-    Возвращает `(user_agent, cookies)` — куки домена страницы вместе с
-    `cf_clearance` и UA, которым они получены (использовать их можно
-    только вместе). Бросает `ChallengeError`, если куки не появились.
+    Returns `(user_agent, cookies)`: the page domain's cookies including
+    `cf_clearance`, and the UA they were obtained with (use them only together).
+    Raises `ChallengeError` if the cookies never appear.
     """
     from camoufox.async_api import AsyncCamoufox
 
@@ -105,8 +104,8 @@ async def solve(url: str, *, timeout: float = SOLVE_TIMEOUT
     async with AsyncCamoufox(headless=True, humanize=True,
                              locale="ru-RU", os="windows") as browser:
         page = await browser.new_page()
-        # Челлендж отдаётся с кодом 403 — это ожидаемый ответ, не ошибка:
-        # страница сама себя заменит после выполнения проверки.
+        # The challenge comes back with 403 by design: the page replaces itself
+        # once the check runs, so that status is expected, not an error.
         await page.goto(url, timeout=int(timeout * 1000),
                         wait_until="domcontentloaded")
         while asyncio.get_running_loop().time() < deadline:

@@ -121,9 +121,9 @@ from core import storage
 from core.module import BaseModule, BusRequestError
 from core.source_types import torrent_profile_id
 from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, SERIES_PURGED, SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET,
-                         SETTINGS_VALUE_SET)
-from core.contracts import (RUN_CHANGED, RunChanged, SeriesCard, SeriesDeleted, SeriesPurged, SeriesUpdated, SettingValue,
-                            SourceType, StatusContribution)
+                         SETTINGS_VALUE_SET, TRACKERAUTH_CREDENTIALS_CHANGED, TRACKERAUTH_CREDENTIALS_GET)
+from core.contracts import (RUN_CHANGED, CredentialsChanged, RunChanged, SeriesCard, SeriesDeleted, SeriesPurged, SeriesUpdated,
+                            SettingValue, SourceType, StatusContribution)
 from core.contracts.torrent import RELEASE_CHANGED_TOPIC, STAGING_DIR_KEY
 from core.db import Database
 from core.envelope import Envelope
@@ -242,8 +242,7 @@ class TorrentsModule(BaseModule):
         self.handle(RUN_CHANGED, self.on_run_changed)
         self.handle("series.source.removed", self.on_source_removed)
         self.handle("settings.changed", self.on_settings_changed)
-        self.handle("trackerauth.credentials.changed",
-                    self.on_credentials_changed)
+        self.handle(TRACKERAUTH_CREDENTIALS_CHANGED, self.on_credentials_changed)
 
     async def _resolve_qbt_config(self) -> dict:
         """env имеет приоритет (стенд); без env — креды qbittorrent из
@@ -252,15 +251,15 @@ class TorrentsModule(BaseModule):
         if cfg.get("base_url"):
             return cfg
         try:
-            reply = await self.request("trackerauth.credentials.get",
-                                       {"service": "qbittorrent"})
+            reply = await self.reply_of(TRACKERAUTH_CREDENTIALS_GET, {"service": "qbittorrent"})
         except BusRequestError as exc:
             self.log.warning("креды qBittorrent не получены: %s", exc)
             return cfg
-        row = reply.get("credentials") or {}
-        return dict(base_url=row.get("url") or "",
-                    username=row.get("username") or "",
-                    password=row.get("password") or "")
+        # The reply never carries the password (docs/security.md), so none comes with it.
+        row = reply.credentials
+        return dict(base_url=(row.url if row else "") or "",
+                    username=(row.username if row else "") or "",
+                    password="")
 
     async def _connect_qbt(self) -> None:
         """Создание клиента и вход; любая ошибка (включая пустой URL —
@@ -292,7 +291,7 @@ class TorrentsModule(BaseModule):
             await self._looked.wait()
 
     async def on_credentials_changed(self, env: Envelope) -> None:
-        if env.payload.get("service") != "qbittorrent" or self._qbt_injected:
+        if CredentialsChanged.model_validate(env.payload).service != "qbittorrent" or self._qbt_injected:
             return
         self.log.info("креды qBittorrent изменились — пересоздаём клиент")
         await self._connect_qbt()

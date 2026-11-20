@@ -48,6 +48,7 @@ from typing import Final, Literal, Mapping
 from pydantic import BaseModel
 
 from .contracts import (
+    CredentialsChanged, CredentialsReply, CredentialsSaved, CredentialsSet, FetchReply, FetchRequest, SecretReply, ServiceRef,
     AdminState, AlignmentJob, BusyContribution, CompositionChanged, CompositionFailed, CompositionGetRequest,
     CompositionPreviewReply, CompositionPreviewRequest, CompositionReply, ConformParams, ConformSettingsDraft,
     ConformSettingsSaved, ConformSettingsView, GroupsResolveReply, GroupsResolveRequest, LoginReply, OutputSwitch,
@@ -480,12 +481,17 @@ TORRENTS_STAGING_GET = Topic("torrents.staging.get", QUERY, "torrents", fuse=STA
 TORRENTS_STAGING_SET = Topic("torrents.staging.set", COMMAND, "torrents", fuse=STANDARD_S)
 
 # --- trackerauth -------------------------------------------------------------------------------------------------
-TRACKERAUTH_CREDENTIALS_CHANGED = Topic("trackerauth.credentials.changed", EVENT, "trackerauth")
-TRACKERAUTH_CREDENTIALS_GET = Topic("trackerauth.credentials.get", QUERY, "trackerauth", fuse=QUICK_S)
-TRACKERAUTH_CREDENTIALS_SET = Topic("trackerauth.credentials.set", COMMAND, "trackerauth", fuse=QUICK_S)
+TRACKERAUTH_CREDENTIALS_CHANGED = Topic("trackerauth.credentials.changed", EVENT, "trackerauth", request=CredentialsChanged)
+# The credentials of a service without its password: whether one is set, never the password.
+TRACKERAUTH_CREDENTIALS_GET = Topic(
+    "trackerauth.credentials.get", QUERY, "trackerauth", request=ServiceRef, reply=CredentialsReply, fuse=QUICK_S)
+TRACKERAUTH_CREDENTIALS_SET = Topic(
+    "trackerauth.credentials.set", COMMAND, "trackerauth", request=CredentialsSet, reply=CredentialsSaved, fuse=QUICK_S)
 # The fetch of a page of a service with credentials; it covers an anti-bot challenge solved by a browser (up to 45 s).
-TRACKERAUTH_FETCH = Topic("trackerauth.fetch", COMMAND, "trackerauth", fuse=150.0)
-TRACKERAUTH_SECRET_GET = Topic("trackerauth.secret.get", QUERY, "trackerauth", fuse=QUICK_S)
+TRACKERAUTH_FETCH = Topic("trackerauth.fetch", COMMAND, "trackerauth", request=FetchRequest, reply=FetchReply, fuse=150.0)
+# The password of a service, to the eye of its field in the settings; masked in every dump of the bus (core/secrets.py).
+TRACKERAUTH_SECRET_GET = Topic(
+    "trackerauth.secret.get", QUERY, "trackerauth", request=ServiceRef, reply=SecretReply, fuse=QUICK_S)
 
 # --- unpack ------------------------------------------------------------------------------------------------------
 UNPACK_ASSIGN = Topic("unpack.assign", COMMAND, "unpack", fuse=STANDARD_S)

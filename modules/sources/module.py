@@ -250,8 +250,7 @@ class SourcesModule(BaseModule):
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(
-            request=lambda topic, payload, **kw: self.request(topic, payload,
-                                                              **kw),
+            reply=lambda topic, payload: self.reply_of(topic, payload),
             http=lambda: self._http,
             browser_html=lambda service, url: self._browser_html(service, url),
             log=self.log)

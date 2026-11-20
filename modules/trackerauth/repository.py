@@ -1,41 +1,27 @@
-"""Репозиторий trackerauth: свои таблицы — tracker_sessions и auth.
+"""trackerauth repository: its own tables, tracker_sessions and auth.
 
-Весь SQL модуля живёт здесь (решение Р-7): «как лежит» — приватное
-дело модуля, наружу — только методы предметного уровня.
+All of the module's SQL lives here (decision Р-7): how the data is laid out
+is the module's private business; only domain-level methods go outward.
 
-Секреты (пароль в auth, куки сессий) хранятся в БД зашифрованными
-(core.crypto, Этап 3Б); методы отдают/принимают открытый текст.
+Secrets (the password in auth, session cookies) are stored encrypted in the DB
+(core.crypto, Stage 3Б); methods take and return plain text.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 
 import requests
 
+from calc.trackerauth.session import applicable_cookies, client_cookies
 from core import crypto
 from core.db import Database
 
 from . import cf_challenge
 
-# Про клиента, а не про учётку: клирэнс антибот-защиты переживает смену
-# логина, иначе каждая смена тянула бы лишний прогон браузера.
+# The clearance belongs to the client, not the account: it must survive a
+# login change, or every change would force an extra browser run.
 CLIENT_COOKIES = frozenset({cf_challenge.CLEARANCE_COOKIE})
-
-
-def account_fingerprint(credentials: dict | None) -> str | None:
-    """Отпечаток учётных данных, под которыми получен вход на трекер.
-
-    Пароль входит хешем, а не открытым текстом. Смена логина ИЛИ пароля
-    даёт другой отпечаток — прежний вход становится неприменимым, и
-    следующий запрос входит заново.
-    """
-    if not credentials:
-        return None
-    raw = (f"{credentials.get('username') or ''}\0"
-           f"{credentials.get('password') or ''}")
-    return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
 def _now() -> str:
@@ -59,9 +45,9 @@ class TrackerAuthRepository:
     async def upsert_credentials(self, service: str, username: str | None,
                                  password: str | None,
                                  url: str | None = None) -> None:
-        # password=NULL → не менять существующий (COALESCE): фронт не присылает
-        # текущий пароль, пустое поле не должно его затирать (Этап 3А).
-        # Непустой — шифруем перед записью (Этап 3Б).
+        # password=NULL keeps the existing one (COALESCE): the front end never sends
+        # the current password, so an empty field must not wipe it (Stage 3А).
+        # A non-empty password is encrypted before writing (Stage 3Б).
         if username is not None:
             username = username.strip()
         await self._db.execute(
@@ -75,18 +61,18 @@ class TrackerAuthRepository:
     async def load_session(self, service: str, domain: str,
                            fingerprint: str | None = None
                            ) -> tuple[dict, str | None, bool]:
-        """Куки сессии, User-Agent и признак чужой учётки.
+        """Session cookies, User-Agent, and a flag for a foreign account.
 
-        Куки авторизации выдаются ТОЛЬКО если вход выполнен под теми же
-        учётными данными, что лежат в настройках сейчас. Иначе смена
-        учётки оставалась бы незамеченной: прежняя сессия жива,
-        протухания нет, релогин не запускается — и запросы идут под
-        прежним аккаунтом, с его лимитами и правами.
+        Auth cookies are returned ONLY if the login was done under the same
+        credentials that are in the settings now. Otherwise an account change
+        would go unnoticed: the old session stays alive, no expiry is detected,
+        no re-login is triggered, and requests keep going out under the old
+        account, with its limits and rights.
 
-        Клирэнс антибот-защиты и UA — про клиента, а не про учётку,
-        поэтому выдаются всегда. UA возвращается вместе с куками не для
-        красоты: клирэнс действителен только в паре с тем UA, под
-        которым выдан, — врозь они бесполезны.
+        The clearance and the UA are about the client, not the account, so they
+        are always returned. The UA comes back with the cookies not for show:
+        the clearance is valid only together with the UA it was issued under;
+        apart, they are useless.
         """
         row = await self._db.fetch_one(
             "SELECT cookies_json, user_agent, account_fingerprint "
@@ -94,17 +80,9 @@ class TrackerAuthRepository:
             (service, domain))
         if not row:
             return {}, None, False
-        cookies = json.loads(crypto.decrypt(row["cookies_json"]))
-        # NULL — «неизвестно, под какой учёткой получена» (запись старше
-        # привязки), и это НЕ то же, что «получена под другой». Куки
-        # отбрасываются только при явном несовпадении: иначе терялась бы
-        # рабочая сессия там, где автоматический вход невозможен —
-        # форма входа RuTracker содержит капчу (находка 65).
-        stored = row["account_fingerprint"]
-        foreign = stored is not None and stored != fingerprint
-        if foreign:
-            cookies = {name: value for name, value in cookies.items()
-                       if name in CLIENT_COOKIES}
+        # The rule of the binding (an unknown account is no mismatch, finding 65) is calc/trackerauth/session.py.
+        cookies, foreign = applicable_cookies(json.loads(crypto.decrypt(row["cookies_json"])),
+                                              row["account_fingerprint"], fingerprint, CLIENT_COOKIES)
         return cookies, row["user_agent"], foreign
 
     async def save_cookies(self, service: str, domain: str,
@@ -112,8 +90,8 @@ class TrackerAuthRepository:
                            logged_in: bool,
                            user_agent: str | None = None,
                            fingerprint: str | None = None) -> None:
-        # NULL → не менять существующее (COALESCE): обычный запрос не
-        # должен затирать ни UA от челленджа, ни отпечаток учётки входа.
+        # NULL keeps the existing value (COALESCE): a plain request must not overwrite
+        # the UA from the challenge or the login account fingerprint.
         now = _now()
         cookies = crypto.encrypt(json.dumps(session.cookies.get_dict()))
         await self._db.execute(
@@ -131,21 +109,18 @@ class TrackerAuthRepository:
              user_agent, fingerprint))
 
     async def drop_account_cookies(self, service: str) -> int:
-        """Выбросить куки авторизации сервиса, сохранив клиентские.
+        """Drop the service's auth cookies, keeping the client ones.
 
-        Вызывается при смене учётных данных: прежний вход больше не
-        применим, и БД обязана это отразить — иначе сессия
-        восстанавливается оттуда и запросы идут под прежним аккаунтом
-        (протухания нет, релогин не запускается). Клирэнс и UA остаются:
-        они про клиента, а не про учётку.
+        Called on a credentials change: the previous login no longer applies, and
+        the DB must reflect it, otherwise the session is restored from there and
+        requests keep going out under the old account (no expiry, no re-login).
+        The clearance and the UA stay: they are about the client, not the account.
         """
         rows = await self._db.fetch_all(
             "SELECT domain, cookies_json FROM tracker_sessions "
             "WHERE service=?", (service,))
         for row in rows:
-            cookies = json.loads(crypto.decrypt(row["cookies_json"]))
-            kept = {name: value for name, value in cookies.items()
-                    if name in CLIENT_COOKIES}
+            kept = client_cookies(json.loads(crypto.decrypt(row["cookies_json"])), CLIENT_COOKIES)
             await self._db.execute(
                 "UPDATE tracker_sessions SET cookies_json=?, "
                 "account_fingerprint=NULL, updated_at=? "
@@ -155,9 +130,9 @@ class TrackerAuthRepository:
         return len(rows)
 
     async def encrypt_legacy_secrets(self) -> int:
-        """Одноразовая миграция: зашифровать секреты, лежащие в открытом
-        виде (до Этапа 3Б). Идемпотентна — уже зашифрованные пропускает.
-        Возвращает число перешифрованных записей."""
+        """One-off migration: encrypt secrets stored in plain text (before Stage 3Б).
+        Idempotent: already encrypted values are skipped. Returns the number of
+        re-encrypted records."""
         migrated = 0
         for r in await self._db.fetch_all("SELECT auth_type, password FROM auth"):
             if r["password"] and not crypto.is_encrypted(r["password"]):

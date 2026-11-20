@@ -14,7 +14,7 @@ from core.runner import Runner
 from core.db import Database
 from modules.trackerauth import TrackerauthModule
 from modules.trackerauth import module as ta_module
-from modules.trackerauth.repository import account_fingerprint
+from calc.trackerauth.session import account_fingerprint
 
 KZ_URL = "https://kinozal.me/details.php?id=1"
 RT_URL = "https://rutracker.org/forum/viewtopic.php?t=1"
@@ -190,7 +190,7 @@ async def test_session_of_other_account_is_not_applied(system, transport):
     transport.handler = handler
     reply = await probe.request("trackerauth.fetch", {
         "service": "kinozal", "url": KZ_URL}, timeout=5)
-    assert reply["status"] == 200
+    assert reply.status == 200
 
     first_cookies = transport.sent[0].headers.get("Cookie") or ""
     assert "uid=OLDACCOUNT" not in first_cookies, \
