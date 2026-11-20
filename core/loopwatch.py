@@ -78,14 +78,17 @@ class LoopWatch:
         stalled_beat: float | None = None
         samples: Counter = Counter()
         others: Counter = Counter()
+        woke = time.monotonic()
         while not self._stop.wait(SAMPLE_S):
+            # This thread was kept from the interpreter between two wakes: whoever holds it now held it then.
+            now = time.monotonic()
+            starved, woke = now - woke >= STARVED_S, now
             beat = self._beat_at
             if stalled_beat is not None and beat != stalled_beat:
                 held = beat - stalled_beat - BEAT_S
                 if held >= STALL_S and samples:
                     chain, count = samples.most_common(1)[0]
-                    starved = sum(samples.values()) < held / STARVED_S
-                    other = others.most_common(1)[0][0] if starved and others else ()
+                    other = others.most_common(1)[0][0] if others else ()
                     self.report(held, chain, count, sum(samples.values()), other)
                 stalled_beat, samples, others = None, Counter(), Counter()
             if time.monotonic() - beat - BEAT_S < STALL_S:
@@ -95,6 +98,8 @@ class LoopWatch:
             frame = frames.get(self._loop_thread)
             if frame is not None:
                 samples[project_chain(frame)] += 1
+            if not starved:
+                continue
             names = {thread.ident: thread.name for thread in threading.enumerate()}
             for ident, other in frames.items():
                 chain = project_chain(other) if ident not in (self._loop_thread, threading.get_ident()) else ()
