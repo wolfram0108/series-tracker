@@ -373,10 +373,13 @@ class Daemon:
     def release(self) -> list[dict]:
         """The jobs held end now, with what they made."""
         ended = []
-        for job in self.jobs.values():
+        for job in list(self.jobs.values()):
             if "held" in job:
-                job.update(status="done", progress=1.0, results=self._end(job["id"], job.pop("held")))
-                ended.append(job)
+                # A new record in place of the old: a request that reads the jobs meanwhile sees one of them whole.
+                done = {key: value for key, value in job.items() if key != "held"}
+                done.update(status="done", progress=1.0, results=self._end(job["id"], job["held"]))
+                self.jobs[job["id"]] = done
+                ended.append(done)
         return ended
 
     def _answer(self, job: dict, label: str | None) -> dict:

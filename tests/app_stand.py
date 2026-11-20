@@ -49,53 +49,58 @@ KEEP_ALIVE_S = 15.0
 
 class StreamingDaemon(Daemon):
     """The model of the alignment service with the stream of its events (`/events`): the snapshot of its jobs when a
-    client connects, then every job that changed — what the real `conform` module mirrors."""
+    client connects, then every job that changed — what the real `conform` module mirrors. As the real hub
+    (track_muxer/events.py) does it: a connection has a queue of its own, taken in with the number of the last change and
+    the snapshot at once, so a change between the snapshot and the queue is never lost."""
 
     def __init__(self, codec: Codec) -> None:
         super().__init__(codec)
-        self.loop: asyncio.AbstractEventLoop | None = None
-        self.changed: asyncio.Event | None = None
+        # Jobs change in the threads of the requests and of the test; a change and its event are one step under the lock.
+        self._lock = threading.RLock()
         self.version = 0
-        self.sent: dict[str, int] = {}
+        self._subs: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = []
 
         @self.app.get("/events")
         async def events():
-            self.loop = asyncio.get_running_loop()
-            self.changed = asyncio.Event()
-
             async def stream():
-                yield _event("conform.snapshot", {"items": list(self.jobs.values())})
-                seen = self.version
-                while True:
-                    try:
-                        await asyncio.wait_for(self.changed.wait(), KEEP_ALIVE_S)
-                    except asyncio.TimeoutError:
-                        yield ": keep-alive\n\n"  # the service's heartbeat: a silent stream is a dead one to the client
-                        continue
-                    self.changed.clear()
-                    items = [job for job in self.jobs.values() if self.sent.get(job["id"], 0) > seen]
-                    seen = self.version
-                    if items:
-                        yield _event("conform.changed", {"items": items})
+                sub = (asyncio.get_running_loop(), asyncio.Queue())
+                with self._lock:
+                    self._subs.append(sub)
+                    horizon, snapshot = self.version, _event("conform.snapshot", {"items": list(self.jobs.values())})
+                try:
+                    yield snapshot
+                    while True:
+                        try:
+                            seq, frame = await asyncio.wait_for(sub[1].get(), KEEP_ALIVE_S)
+                        except asyncio.TimeoutError:
+                            yield ": keep-alive\n\n"  # the service's heartbeat: a silent stream is a dead one to the client
+                            continue
+                        if seq > horizon:
+                            yield frame
+                finally:
+                    with self._lock:
+                        self._subs.remove(sub)
             return StreamingResponse(stream(), media_type="text/event-stream")
 
     def _job(self, kind, label, dubs, results, sources=()):
-        job = super()._job(kind, label, dubs, results, sources)
-        self._tell(job)
+        with self._lock:
+            job = super()._job(kind, label, dubs, results, sources)
+            self._tell(job)
         return job
 
     def release(self) -> list[dict]:
-        ended = super().release()
-        for job in ended:
-            self._tell(job)
+        with self._lock:
+            ended = super().release()
+            for job in ended:
+                self._tell(job)
         return ended
 
     def _tell(self, job: dict) -> None:
-        """A job made or changed goes to the stream of events."""
+        """A job made or changed goes to every stream of events, as it is now."""
         self.version += 1
-        self.sent[job["id"]] = self.version
-        if self.loop is not None and self.changed is not None:
-            self.loop.call_soon_threadsafe(self.changed.set)
+        frame = _event("conform.changed", {"items": [job]})
+        for loop, queue in self._subs:
+            loop.call_soon_threadsafe(queue.put_nowait, (self.version, frame))
 
 
 def _event(name: str, payload: dict) -> str:
