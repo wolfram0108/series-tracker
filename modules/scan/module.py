@@ -72,7 +72,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from core import NO_HANDLER, BaseModule, BusRequestError
-from core.deadlines import EDIT_STUCK_S, TABLE_WAIT_S
+from core.topics import EDIT_STUCK_S, TABLE_WAIT_S
 from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, OutputSwitch, RunChanged, SeriesSource, Slot, SyncScope, WorkState)
 from core.db import Database
 from core.envelope import Envelope

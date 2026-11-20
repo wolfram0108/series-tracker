@@ -24,7 +24,7 @@ from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGe
                             TableReady, TableRow, TableState, UnreadPart)
 from core.contracts.release_table import TABLE_TRACE_TOPIC, site_of
 from core.contracts.torrent import order_name
-from core.deadlines import TABLE_READ_S
+from core.topics import TABLE_READ_S
 from core.logging import get_logger
 from core.reasons import EXTERNAL, describe, parse, reason
 from core.row_limit import limit_of

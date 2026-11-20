@@ -150,7 +150,7 @@ from core.contracts.voices import PLAYERS_OFF_KEY
 from core.contracts import (NotAllowed, ParsedDomains, PlayerFacts, PlayerPlace,
                             PlayersListReply, PlayersListRequest, SiteResolveRequest,
                             SourceType, SourcesSettingsView, TableGetRequest, TitleSearchReply, TitleSearchRequest, TrackerMirrors)
-from core.deadlines import TABLE_READ_S
+from core.topics import TABLE_READ_S
 from core.db import Database
 from core.envelope import Envelope
 from core.http_limits import bounded_client

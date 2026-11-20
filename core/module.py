@@ -22,10 +22,10 @@ from .admission import Admission
 from .admission import current as current_admission
 from .bus import Bus, Subscription, is_exact
 from .contracts.availability import NotAllowed
-from .deadlines import deadline_of
 from .envelope import Envelope
 from .logging import get_logger
 from .reasons import EXTERNAL, describe, parse, reason
+from .topics import deadline_of
 
 Handler = Callable[[Envelope], Awaitable[Any]]
 
@@ -46,7 +46,7 @@ def is_refusal(exc: BaseException) -> bool:
         return True
     return type(exc) is ValueError and (parse(str(exc)) or {}).get("code") not in (None, EXTERNAL)
 
-# `request` takes the fuse from the table of `core.deadlines` unless the caller names one (a test, a one-off wrapper).
+# `request` takes the fuse from the record of the topic (`core.topics`) unless the caller names one (a test, a one-off wrapper).
 _FROM_TABLE: Any = object()
 
 
@@ -150,7 +150,7 @@ class BaseModule:
 
     async def request(self, topic: str, payload: Any = None, timeout: float | None = _FROM_TABLE, *,
                       units: int = 1) -> Any:
-        """The answer of the owner of `topic`. The fuse is the owner's (`core.deadlines`), times `units` for a topic
+        """The answer of the owner of `topic`. The fuse is the owner's (`core.topics`), times `units` for a topic
         whose work is one step for each unit; `None` waits without one."""
         if timeout is _FROM_TABLE:
             timeout = deadline_of(topic, units)

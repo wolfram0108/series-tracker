@@ -10,7 +10,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from core.contracts import TitleSearchReply, TitleSearchRequest
-from core.deadlines import deadline_of
+from core.topics import deadline_of
 from core.contracts.provider import (PROVIDER_BAD_ANSWER, PROVIDER_REFUSED, PROVIDER_UNAVAILABLE, SILENCE_S, AdoptReply, AdoptRequest,
                                      DownloadFrame, DownloadRequest, Manifest, ReadFrame, ReadRequest)
 from core.reasons import reason
@@ -59,7 +59,7 @@ class ProviderClient:
         self.url = url.rstrip("/")
         self.token = token
         self._headers = {"Authorization": f"Bearer {token}"} if token else {}
-        # The fuse of the request that waits for the sources of the search: that of the topic it answers (core/deadlines.py).
+        # The fuse of the request that waits for the sources of the search: that of the topic it answers (core/topics.py).
         self._search_s = search_s or (deadline_of("sources.titles.search") or 0) - FUSE_MARGIN_S
         self._http = http or httpx.AsyncClient(timeout=httpx.Timeout(REQUEST_TIMEOUT_S, read=SILENCE_S))
 
