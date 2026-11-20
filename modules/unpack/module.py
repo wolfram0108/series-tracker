@@ -108,6 +108,7 @@ class UnpackModule(BaseModule):
                     if release.state == ReleaseState.READY and release.folder:
                         await self._read(release)
                 self._changed(url)
+            self.log.info("релизы, разобранные до подсчёта реплик субтитров, перечитаны")
         except Exception:  # noqa: BLE001 - what is not read now is read at the next change of its release
             self.log.exception("the releases read before the events were counted were not read again")
 
