@@ -4,6 +4,8 @@
 
 mod cols;
 mod layout;
+mod plan;
+mod plan_py;
 mod rows;
 mod rules;
 mod table;
@@ -784,6 +786,7 @@ fn native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(voice_names, m)?)?;
     m.add_function(wrap_pyfunction!(project, m)?)?;
     m.add_function(wrap_pyfunction!(preview_lines, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_py::plan_goals, m)?)?;
     m.add_class::<Profile>()?;
     m.add_class::<Rows>()?;
     m.add_class::<Row>()?;
