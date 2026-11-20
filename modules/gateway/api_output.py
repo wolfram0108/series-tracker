@@ -14,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from core.module import BusRequestError
 from core.reasons import reason, relayed
+from core.topics import CATALOG_SERIES_GET
 from core.contracts import (CompositionGetRequest, CompositionReply, LayoutPart, OutputSwitch, PlanDelete, PlannerView,
                             PlanRowRef, QueuesGet, QueuesReply, Reference, SettingsReset, SettingsSet, SettingsSetMany,
                             VoiceOrderSet, VoiceTitleSet)
@@ -55,7 +56,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         query = _contract(CompositionGetRequest, series_id=series_id, include_excluded=include_excluded,
                           sources_only=sources_only, part=part, episodes=named)
         try:
-            await gw.request("catalog.series.get", {"series_id": series_id})
+            await gw.request(CATALOG_SERIES_GET, {"series_id": series_id})
         except BusRequestError:
             return JSONResponse({"error": reason("series_not_found")}, status_code=404)
         try:

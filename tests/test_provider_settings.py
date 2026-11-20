@@ -64,7 +64,7 @@ class World:
         return await self.probe.request("sources.provider.set", {"url": url, **({} if token is None else {"token": token})})
 
     async def stored(self, key: str):
-        return (await self.probe.request("settings.value.get", {"key": key}))["value"]
+        return (await self.probe.request("settings.value.get", {"key": key})).value
 
 
 async def build(tmp_path, *, default: ProviderClient | None = None, addresses=("title://mock/7/X",)) -> World:
