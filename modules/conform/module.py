@@ -10,6 +10,11 @@ daemon is given or writes lies inside it, and the paths cross the boundary throu
 on Windows: its folder is written as `Z:\\...` or `\\\\server\\share\\...`, and a path of the daemon is read by its own syntax
 (`paths.py`), so it is the same location whatever separators and letter case the daemon writes it with.
 
+The daemon is not told down before it was looked at: a request that needs it (submit, reverse, cancel, plot, job.find, job.get of a
+job the mirror does not hold, job.keys, params.set) waits for the end of the first attempt to connect to the daemon of the address
+in force (the address is read at the start, the feed connects after it) and is answered by its outcome; its own fuse is the one
+of its topic. A daemon that was up and dropped is down at once, as before.
+
 Query:
   conform.submit {ref, dubs: [path], out_dir, cache_dir, label?, key?, ref_atrack?, dub_atracks?} -> SubmitReply
       (core/contracts):
@@ -199,6 +204,8 @@ class ConformModule(BaseModule):
         self._jobs: dict[str, dict[str, Any]] = {}
         self._announced: set[str] = set()
         self._daemon: dict[str, Any] = {"up": False, "error": None}
+        # Set when the first look at the daemon of the address in force is over: it answered, or did not, or there is none to ask.
+        self._looked = asyncio.Event()
         self._runner: asyncio.Task | None = None
         super().__init__(bus)
 
@@ -215,6 +222,16 @@ class ConformModule(BaseModule):
         self.handle("conform.job.find", self.on_job_find)
         self.handle("conform.job.keys", self.on_job_keys)
         self.handle("gateway.sse.clients", self.on_clients)
+
+    async def _known(self) -> None:
+        """The daemon is looked at before anything is said of it: the address is read at the start and the feed makes its first
+        attempt to connect after that, so until the attempt ends the daemon is not down, it is not known. A request that comes
+        meanwhile waits for the end of the attempt (its fuse is that of its topic) and is answered by what it found."""
+        if self._looked.is_set() or self._daemon.get("up"):
+            return
+        self.log.info("conform: запрос ждёт окончания первой попытки подключения к демону")
+        while not self._looked.is_set():  # another address starts the look over
+            await self._looked.wait()
 
     def snapshot(self) -> dict[str, Any]:
         tasks = sorted(self._jobs.values(), key=lambda job: job.get("seq") or 0)
@@ -260,6 +277,7 @@ class ConformModule(BaseModule):
         """How the daemon is asked to align, checked against what it says it accepts and written whole, or refused with
         coded problems and nothing written; the next job takes it."""
         params = ConformParams.model_validate(env.payload)
+        await self._known()
         problems = conform_settings.check_params(params, self._domain())
         if not problems:
             await self.request("settings.values.set_many", {"values": {
@@ -286,10 +304,15 @@ class ConformModule(BaseModule):
             self._client = self._client_factory(url) if url else None
             self._jobs.clear()
             self._daemon = {"up": False, "error": None}
+            self._looked.set()  # whoever waited for the old address looks again, at the new one
+            self._looked = asyncio.Event()
+            if self._client is None:
+                self._looked.set()
             self._publish()
             self._start_feed()
 
     async def on_submit(self, env: Envelope) -> dict:
+        await self._known()
         if self._client is None:
             return SubmitReply.unavailable(reason("conform_not_configured"), retry=False).model_dump()
         if not self._daemon.get("up"):
@@ -326,6 +349,7 @@ class ConformModule(BaseModule):
         episode, which carries the key that finds the job again. The outcome is told as for `conform.submit`."""
         request = ReverseSubmit.model_validate(env.payload)
         label = request.label or os.path.basename(request.compilation)
+        await self._known()
         if self._client is None:
             return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=reason("conform_not_configured")).model_dump()
         if not self._daemon.get("up"):
@@ -383,6 +407,7 @@ class ConformModule(BaseModule):
 
     async def on_cancel(self, env: Envelope) -> dict:
         job_id = env.payload["job_id"]
+        await self._known()
         if self._client is None or not self._daemon.get("up"):
             self.log.info("conform: задачу %s отменить некому — демон недоступен", job_id)
             return {"done": False}
@@ -407,6 +432,7 @@ class ConformModule(BaseModule):
         job_id, name = str(env.payload.get("job_id")), str(env.payload.get("name"))
         if not (_JOB_ID.fullmatch(job_id) and _PLOT_NAME.fullmatch(name)):
             return {"found": False}
+        await self._known()
         if self._client is None or not self._daemon.get("up"):
             raise RuntimeError(reason("conform_down", error=self._daemon.get("error") or ""))
         try:
@@ -418,6 +444,7 @@ class ConformModule(BaseModule):
         return {"found": True, "data": base64.b64encode(picture).decode("ascii")}
 
     async def on_job_find(self, env: Envelope) -> dict:
+        await self._known()
         if self._client is None or not self._daemon.get("up"):
             return {"reachable": False, "job_id": None}
         try:
@@ -431,6 +458,7 @@ class ConformModule(BaseModule):
     async def on_job_keys(self, env: Envelope) -> dict:
         """The keys of the jobs the daemon's history holds (`… #key` of their labels): what a caller keeps a folder of a
         job for."""
+        await self._known()
         if self._client is None or not self._daemon.get("up"):
             return {"reachable": False, "keys": []}
         try:
@@ -443,6 +471,7 @@ class ConformModule(BaseModule):
         job_id = env.payload["job_id"]
         job = self._jobs.get(job_id)
         if job is None:
+            await self._known()
             if self._client is None or not self._daemon.get("up"):
                 raise RuntimeError(reason("conform_down", error=self._daemon.get("error") or ""))  # not asked is not "gone"
             job = await self._client.job(job_id)
@@ -461,8 +490,11 @@ class ConformModule(BaseModule):
             url = self._default_url if stored is None else stored
             self._client = self._client_factory(url) if url else None
         self._start_feed()
+        if self._client is None:
+            self._looked.set()  # no address: there is no daemon to look at
 
     async def on_stop(self) -> None:
+        self._looked.set()  # nobody waits for a look that will not be made
         await self._stop_feed()
 
     def _start_feed(self) -> None:
@@ -488,6 +520,7 @@ class ConformModule(BaseModule):
         while True:
             try:
                 self._daemon = {"up": True, "error": None, **await self._client.info()}
+                self._looked.set()
                 self._publish()
                 self.publish_event("conform.daemon.up", {})
                 # What the daemon accepts is part of the settings screen: an open one learns it now.
@@ -504,6 +537,7 @@ class ConformModule(BaseModule):
             except Exception as exc:  # noqa: BLE001 - any transport failure means "daemon unreachable"
                 problem = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
             self._daemon = {"up": False, "error": problem}
+            self._looked.set()
             self._jobs.clear()
             self._publish()
             self.log.warning("conform: демон недоступен (%s), повтор через %.0f с", describe(problem), delay)

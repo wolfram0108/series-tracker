@@ -157,10 +157,14 @@ SUBMIT = {"ref": "/nas/lib/S/ep1.mp4", "dubs": ["/nas/torrents/series-tracker/7/
 
 @pytest.mark.asyncio
 async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_cannot():
-    client = FakeClient([ConnectionError("down")])
+    class Unreachable(FakeClient):
+        async def info(self):
+            raise ConnectionError("down")
+
+    client = Unreachable()
     _, probe, runner = await started(client)
     try:
-        await until(probe, lambda s: not s["daemon"]["up"])
+        await until(probe, lambda s: not s["daemon"]["up"] and s["daemon"]["error"])  # looked at, and not there
         down = await probe.request("conform.submit", SUBMIT, timeout=5)
         assert down["outcome"] == "unavailable" and parse(down["reason"])["code"] == "conform_down"
         assert down["retry"] is False
