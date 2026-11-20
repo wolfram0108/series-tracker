@@ -1,9 +1,9 @@
-"""Форматирование имён файлов медиатеки — чистые функции (Р-15).
+"""The names of the files of the library: pure functions (contracts/revision.md, R-15).
 
 Numbers arrive ready-made (from the constructor via the layout, or from the torrent card);
 the name never applies the rules a second time.
 
-Формат: "Name_EN sNNeMM [озвучка] качество 1080p.ext"
+Format: "Name_EN sNNeMM [voice-over] quality 1080p.ext"
 """
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ from . import season as season_rule
 
 def merge_series_defaults(series: dict, metadata: dict,
                           extracted: dict | None = None) -> dict:
-    """Карточка сериала — дефолт: правило, сработавшее на этом файле, важнее.
+    """The series card is a default: a rule that worked on this file wins.
 
-    Тот же принцип, что у сезона (calc/rules/season.py): извлечённое побеждает,
-    значение карточки используется, только если правило ничего не дало.
+    The same principle as for the season (calc/rules/season.py): what was extracted wins, the card's value is used only
+    when the rule gave nothing.
     """
     extracted = extracted or {}
     for key, override in (("quality", series.get("quality_override")),
@@ -72,10 +72,10 @@ def _season_number(series: dict, metadata: dict) -> int:
 def format_name(series: dict, metadata: dict,
                 original_filename: str | None = None,
                 target_directory: str | None = None) -> str:
-    """Полное воспроизведение старого FilenameFormatter.format_filename.
+    """The whole of the old FilenameFormatter.format_filename.
 
-    metadata — сводные метаданные файла; значения карточки сериала уже
-    подставлены в них (merge_series_defaults), здесь только форматирование.
+    `metadata` is the summary of the file; the values of the series card are already merged into it
+    (merge_series_defaults), so only the formatting is done here.
     """
     name_en = sanitize(series.get("name_en") or "Unknown Series")
     season_part = f"s{str(_season_number(series, metadata)).zfill(2)}"
@@ -123,14 +123,13 @@ def format_name(series: dict, metadata: dict,
 
 def torrent_season_folder(series: dict, extracted: dict,
                           original_path: str) -> int | None:
-    """Сезонная логика renaming_processor: номер сезона для папки
-    'Season NN' или None («сезон не определён, файл пропустить» —
-    возможно только у односезонника с нечитаемым series.season)."""
+    """The season for the folder 'Season NN', or None (the season is not known, the file is skipped: only for a
+    one-season series whose `series.season` cannot be read)."""
     season_number = season_rule.resolve(series.get("season"),
                                         (extracted or {}).get("season"))
     if season_number is not None:
         return season_number
-    if series.get("season"):  # односезонник с нечитаемым номером в карточке
+    if series.get("season"):  # a one-season series with an unreadable number on the card
         return None
     if "specials" in os.path.dirname(original_path).lower():
         return 0

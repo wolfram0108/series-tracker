@@ -1,12 +1,9 @@
-"""Движок правил — написан с нуля под существующий блочный формат (Р-8).
+"""The rules engine, written for the existing block format (contracts/revision.md, R-8).
 
-Формат данных (констрейнт): профиль → правила (по priority) → условия;
-шаблоны — JSON-списки блоков визуального конструктора. Семантика
-повторяет фактическую семантику старой системы, кроме трёх
-согласованных исправлений (А, Б, В — см. contracts/revision.md Р-8).
+The data format is a constraint: profile -> rules (by priority) -> conditions; templates are JSON lists of blocks of the
+visual constructor. The semantics follow the old system's actual behaviour, except three agreed fixes (same record).
 
-Профиль компилируется один раз (regex'ы — на этапе загрузки), дальше
-названия обрабатываются без повторной компиляции.
+A profile is compiled once (its regexes at load time); titles are then processed without compiling again.
 """
 from __future__ import annotations
 
@@ -24,9 +21,8 @@ EXTRACT_KEYS = {
     "extract_part": "part",
 }
 
-# Словарь конструктора: значения, которые понимает движок. Источник — сам
-# движок, а не списки панелей: панель предлагает подмножество, а клиент API
-# может прислать что угодно.
+# The vocabulary of the constructor: the values the engine understands. Its source is the engine, not the lists of the
+# panels: a panel offers a subset, and an API client may send anything.
 CONDITION_TYPES = ("contains", "not_contains")
 EXTRACT_TYPES = ("extract_single", "extract_range", "extract_season",
                  "extract_part")
@@ -64,7 +60,7 @@ MODIFIER_TYPES = ("add", "subtract")
 
 
 class ProfileValidationError(ValueError):
-    """Профиль содержит неисправные правила (решение Б — громко)."""
+    """The profile holds rules that cannot be compiled (said loudly, not skipped)."""
 
 
 # Video quality and resolution suffixes (Latin and Cyrillic)
@@ -138,7 +134,7 @@ def parse_range_spec(raw: str | None) -> list[tuple[int, int]]:
     return merged
 
 
-# --- блоки -> regex ------------------------------------------------------------
+# --- blocks -> regex -----------------------------------------------------------
 
 def _or_groups(blocks: list[dict]) -> dict[int, list[int]]:
     """The texts joined by «или», by the index of the first text of each group: «A» «или» «B» «или» «C» is one place
@@ -237,7 +233,7 @@ def _suffix_block_index(blocks: list[dict], kinds: tuple[str, ...], block: str,
     return idx
 
 
-# --- скомпилированная модель -----------------------------------------------------
+# --- the compiled model ----------------------------------------------------------
 
 @dataclass(slots=True)
 class ConditionRangeCheck:
@@ -248,17 +244,17 @@ class ConditionRangeCheck:
 class CompiledCondition:
     regex: re.Pattern
     negate: bool                 # not_contains
-    or_after: bool               # оператор OR закрывает И-группу ПОСЛЕ этого условия
+    or_after: bool               # an OR operator closes the AND group AFTER this condition
     range_check: ConditionRangeCheck | None = None
 
 
 @dataclass(slots=True)
 class CompiledAction:
     action_type: str
-    raw_value: str | None = None          # для assign_*
-    regex: re.Pattern | None = None       # для extract_*
+    raw_value: str | None = None          # for assign_*
+    regex: re.Pattern | None = None       # for extract_*
     modifiers: list[int | None] = field(default_factory=list)
-    # modifiers[i] — добавка к i-му числу шаблона (None = нет операции)
+    # modifiers[i] is the addend to the i-th number of the template (None: no operation)
 
 
 @dataclass(slots=True)
@@ -276,11 +272,11 @@ class CompiledRule:
 class CompiledProfile:
     profile_id: int
     rules: list[CompiledRule]
-    invalid_rules: list[dict]   # [{rule_id, name, error}] — решение Б
+    invalid_rules: list[dict]   # [{rule_id, name, error}]: the rules that cannot be compiled
 
 
 def compile_profile(profile_id: int, raw_rules: list[dict]) -> CompiledProfile:
-    """raw_rules — в формате таблиц parser_rules/parser_rule_conditions."""
+    """raw_rules are in the format of the tables parser_rules/parser_rule_conditions."""
     compiled, invalid = [], []
     for number, rule in enumerate(raw_rules, 1):
         try:
@@ -392,7 +388,7 @@ def _compile_rule(rule: dict) -> CompiledRule:
             else:
                 regex = _blocks_to_regex(blocks, capture_numbers=False, allow_range=True)
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
-            # Решение Б: битое условие делает НЕИСПРАВНЫМ всё правило.
+            # A broken condition makes the WHOLE rule invalid.
             raise ValueError(reason("condition_broken", detail=str(exc))) from exc
 
         conditions.append(CompiledCondition(
@@ -445,10 +441,10 @@ def _compile_rule(rule: dict) -> CompiledRule:
 
 
 def validate_rule(data: dict) -> None:
-    """Проверяет правило до записи: поднимает ValueError с причиной.
+    """Checks a rule before it is written: raises ValueError with the reason.
 
-    Компилирует правило тем же кодом, что и применение профиля, —
-    отдельного валидатора нет, чтобы проверка и исполнение не разошлись.
+    It compiles the rule with the same code that applies a profile: there is no separate validator, so that checking and
+    execution cannot drift apart.
     """
     rule = {
         "id": 0,
@@ -464,7 +460,7 @@ def validate_rule(data: dict) -> None:
         raise ValueError(reason("rule_json", detail=str(exc))) from exc
 
 
-# --- выполнение -----------------------------------------------------------------
+# --- execution ------------------------------------------------------------------
 
 def _match_condition(title: str, cond: CompiledCondition) -> bool:
     if not cond.range_check:
@@ -506,8 +502,8 @@ def _match_condition(title: str, cond: CompiledCondition) -> bool:
 def _conditions_match(title: str, conditions: list[CompiledCondition]) -> bool:
     if not conditions:
         return True
-    # Оператор OR у условия закрывает текущую И-группу; итог —
-    # «хотя бы одна И-группа целиком истинна» (семантика старой системы).
+    # An OR operator of a condition closes the current AND group; the result is "at least one AND group is wholly true"
+    # (the semantics of the old system).
     or_groups, current = [], []
     for cond in conditions:
         hit = _match_condition(title, cond)
@@ -523,7 +519,7 @@ def _apply_modifier(value: int, modifier: int | None) -> int:
     if modifier is None:
         return value
     result = value + modifier
-    # Именное правило пользователя: отрицательный результат — игнор операции.
+    # A rule the user wrote: a negative result means the operation is ignored.
     return result if result >= 0 else value
 
 
@@ -538,20 +534,18 @@ def _other_form(key: str) -> tuple[str, ...]:
 
 def _run_actions(title: str, rule: CompiledRule,
                  extracted: dict, errors: list[str]) -> str:
-    """Выполняет действия правила; возвращает 'exclude' | 'data' | 'nothing'.
+    """Runs the actions of a rule; returns 'exclude' | 'data' | 'nothing'.
 
-    Внутри одного правила извлечения работают по принципу «первый
-    успешный вариант побеждает»: каскад из нескольких extract-действий —
-    это альтернативы по приоритету, а не перезапись (фактическое
-    поведение старой системы, осмысленное как замысел). Между
-    правилами — наоборот: позднее правило перезаписывает раннее.
+    Within one rule extractions follow "the first successful variant wins": a cascade of several extract actions is a list
+    of alternatives by priority, not an overwrite (the old system's actual behaviour, read as its intent). Between rules it
+    is the opposite: a later rule overwrites an earlier one.
     """
     produced = False
     set_by_this_rule: set[str] = set()
 
     def put_extracted(key: str, value) -> bool:
         if key in set_by_this_rule:
-            return False  # первый успешный вариант уже победил
+            return False  # the first successful variant has already won
         if key in _SINGLE_KEYS + _RANGE_KEYS:
             if any(other in set_by_this_rule for other in _other_form(key)):
                 return False  # the first variant of this rule keeps its form of the number
@@ -607,7 +601,7 @@ def _run_actions(title: str, rule: CompiledRule,
                 produced = True
             except (ValueError, TypeError):
                 errors.append(reason("rule_number_bad", rule=rule.name, action=a_type, value=str(action.raw_value)))
-        else:  # extract_*: у каждого действия СВОЙ матч и СВОИ группы (фикс А)
+        else:  # extract_*: each action has its OWN match and its OWN groups
             if action.regex is None:
                 errors.append(reason("rule_no_template", rule=rule.name, action=a_type))
                 continue
@@ -632,7 +626,7 @@ def _run_actions(title: str, rule: CompiledRule,
 
 
 def process_title(profile: CompiledProfile, title: str) -> dict[str, Any]:
-    """Результат: {excluded, extracted, events, errors}."""
+    """The result: {excluded, extracted, events, errors}."""
     extracted: dict[str, Any] = {}
     events, errors = [], []
     # `order`: the place of the rule in its profile — what came first decides between rules that gave one thing to two lines.
@@ -649,7 +643,7 @@ def process_title(profile: CompiledProfile, title: str) -> dict[str, Any]:
             events.append({"rule": rule.name, "order": order, "number": rule.number, "action": "extract",
                            "extracted": {k: v for k, v in extracted.items()
                                          if before.get(k) != v}})
-            # Фикс В: остановка — только если правило ДАЛО результат.
+            # Stop only if the rule GAVE a result.
             if not rule.continue_after_match:
                 # The rules after this one were not tried: said in the event, so the test of a profile can show why a
                 # rule placed lower did nothing.
