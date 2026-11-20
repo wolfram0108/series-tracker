@@ -8,8 +8,9 @@ topic (`CATALOG_SERIES_GET` for `catalog.series.get`); `TOPICS` finds a record b
 Kind. `query` asks and changes nothing; `command` changes the state of its owner or of the world outside (a file, the
 torrent client, a service) and may be answered; `event` tells a fact that has happened, and nobody answers it. A topic
 that both reads and changes is a query when its change is a cache, a counter or a view counted on demand: the owner keeps
-what it needs and every reader gets the same answer. A read that also acts at the word of the caller (`refresh`) is a
-query here until its owner splits it into a query and a command; the notes of such records say so.
+what it needs and every reader gets the same answer. A read that also acts at the word of the caller (`refresh`) is split
+into a query and a command (`sources.table.get` and `sources.table.refresh`); a topic that still has such a word says so in
+its note.
 
 Owner. The module whose handler answers a query or a command, or whose fact an event tells. A protocol that several
 modules speak (`series.purged`, the contributions to a status, the work of a run) is owned by the module that gives it
@@ -326,8 +327,9 @@ COMPOSITION_FAILED = Topic("composition.failed", EVENT, "composition", request=C
 COMPOSITION_GET = Topic(
     "composition.get", QUERY, "composition", request=CompositionGetRequest, reply=CompositionReply,
     fuse=STANDARD_S)
-# Mixed as sources.table.get (`refresh`); with `lines` a pure query. A preview reads the table, applies the profile to
-# its lines and asks for the groups of the names, one after another.
+# Mixed (`refresh`): the table is asked by `sources.table.refresh`, which begins a read of the page when its table is not current
+# (the fuse of that command is the one of the query below); with `lines` a pure query. A preview reads the table, applies the
+# profile to its lines and asks for the groups of the names, one after another.
 COMPOSITION_PREVIEW = Topic(
     "composition.preview", QUERY, "composition", request=CompositionPreviewRequest, reply=CompositionPreviewReply,
     fuse=after(QUICK_S, SOURCES_TABLE_GET, RULES_APPLY, VOICES_GROUPS_RESOLVE, VOICES_SETTINGS_GET))

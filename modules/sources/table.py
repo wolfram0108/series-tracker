@@ -28,7 +28,6 @@ from calc.sources import pages
 from calc.sources.pages import Step
 from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableRead,
                             TableReady, TableRefresh, TableRow, TableState, UnreadPart)
-from core.contracts.release_table import site_of
 from core.logging import get_logger
 from core.reasons import EXTERNAL, describe, parse, reason
 from core.topics import (SOURCES_TABLE_FAILED, SOURCES_TABLE_PROGRESS, SOURCES_TABLE_READY, SOURCES_TABLE_TRACE, TABLE_READ_S,
