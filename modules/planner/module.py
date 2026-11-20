@@ -166,7 +166,7 @@ OTHER_MAX_HEIGHT = 720
 # What the view of a series is counted from — the questions the planner asks its neighbours while it counts it — and the
 # event that tells that the answer changed: one table, so that an input added to the view is an input whose change counts
 # the view again. Its own tables (the asset, the failures, the commands) are written by the module itself, which counts the
-# view again after it writes them. The tests of the module check that a count asks nothing that is not here.
+# view again after it writes them.
 VIEW_INPUTS: dict[Topic, Topic] = {
     CATALOG_SERIES_GET: SERIES_UPDATED,
     COMPOSITION_GET: COMPOSITION_CHANGED,
