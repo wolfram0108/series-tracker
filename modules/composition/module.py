@@ -206,7 +206,9 @@ class CompositionModule(BaseModule):
         super().__init__(bus)
 
     def register(self) -> None:
-        self.handle(COMPOSITION_GET, self.on_get)
+        # A read of the stored layout (one transaction) counted in the pool: it writes nothing and takes no order from the requests
+        # before it, so the window and the planner do not queue behind each other.
+        self.handle(COMPOSITION_GET, self.on_get, concurrent=True)
         self.handle(COMPOSITION_QUEUES_GET, self.on_queues_get)
         # Waits for a whole count, so the requests for different series must not queue behind each other.
         self.handle(COMPOSITION_RECOMPUTE, self.on_recompute, concurrent=True)
