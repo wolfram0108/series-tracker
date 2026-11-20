@@ -44,7 +44,7 @@ class Groups:
     index: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
-    def of(cls, groups: Mapping[str, list[str]]) -> "Groups":
+    def of(cls, groups: Mapping[str, Sequence[str]]) -> "Groups":
         index: dict[str, str] = {}
         for name in groups:
             index.setdefault(fold_name(name), name)
