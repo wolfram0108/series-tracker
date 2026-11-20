@@ -106,7 +106,8 @@ class VoicesModule(BaseModule):
         if not problems and keys:
             await self.request("settings.values.set_many", {"values": editor.stored(editor.clean(draft), keys)})
         view = editor.view(await self._settings(), players)
-        if not problems:
+        if not problems and keys:
+            # The event recounts the layout of every series: a save that wrote nothing changed nothing to recount.
             self.log.info("озвучки: настройки сохранены")
             self.publish_event("voices.settings.changed", view.model_dump(mode="json"))
         return VoiceSettingsSaved(saved=not problems, problems=problems, settings=view).model_dump(mode="json")
