@@ -129,8 +129,8 @@ from core.contracts import (CompositionChanged, CompositionFailed, CompositionGe
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, GroupsResolveRequest, QueuesGet,
                             QueuesReply, ReleaseTable, RulesApplyReply, RulesProfileChanged, RunChanged, RunSnapshot,
                             SeriesReadProgress, SeriesSource, SettingsReset, SettingsSet, SettingsSetMany, SourceEvent,
-                            TableGetReply, TableGetRequest, TableProgress, TableState, VoiceOrderSet, VoiceSettingsView,
-                            VoiceTitleSet, availability)
+                            TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableState, VoiceOrderSet,
+                            VoiceSettingsView, VoiceTitleSet, availability)
 from core.db import Database
 from core.envelope import Envelope
 from core.module import BaseModule
@@ -464,13 +464,15 @@ class CompositionModule(BaseModule):
                                    last.model_copy(update={"active": False}).model_dump(mode="json"))
 
     def on_table_ready(self, env: Envelope) -> None:
-        self._read_ended(env.payload["url"])
-        self._wake(env.payload["url"])
+        url = TableReady.model_validate(env.payload).url
+        self._read_ended(url)
+        self._wake(url)
 
     def on_table_failed(self, env: Envelope) -> None:
         # The verdict is in `sources` before the event goes out; the recount reads it there and asks for no new read.
-        self._read_ended(env.payload["url"])
-        self._wake(env.payload["url"])
+        url = TableFailed.model_validate(env.payload).url
+        self._read_ended(url)
+        self._wake(url)
 
     async def on_profile_changed(self, env: Envelope) -> None:
         profile_id = RulesProfileChanged.model_validate(env.payload).profile_id
