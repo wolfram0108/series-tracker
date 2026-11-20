@@ -18,7 +18,7 @@ from urllib.parse import quote, unquote, urlsplit
 import httpx
 
 from .contract import Answer, Kind, PlayerRef, Reading
-from .hls import Head, Measure, head_of, measure_head, measured  # noqa: F401 - Head and head_of are the player's words too
+from .hls import Measure, measure_head, measured
 from .streaming import listed_stream
 
 # The asks in flight to one host of the files: above it the hosts slow down (40 episodes of Lzi: 7.4 s at 8, 12.1 s at 16).

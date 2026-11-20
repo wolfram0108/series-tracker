@@ -1,7 +1,7 @@
 """What the settings screen of the alignment server sends and shows."""
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from .voices import SettingProblem
 
