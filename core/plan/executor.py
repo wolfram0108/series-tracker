@@ -17,7 +17,7 @@ from typing import Callable
 
 from .. import compute
 from ..reasons import reason
-from .planner import Goal, Group, Op, Plan, count, name_of, plan, restricted, video_op
+from .planner import Goal, Group, Op, Plan, plan, renamed, restricted, video_op
 from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
 
 # The steps that obtain a row; the take of a row of subtitles from its file is one of them (DESIGN.md 7.1.1).
@@ -270,7 +270,8 @@ class SeriesSync:
     # The places a sync covers (`holds(slot)`), none for the whole series: the plan of the sync keeps the groups that hold one.
     holds: Callable[[Slot], bool] | None = None
 
-    def __init__(self) -> None:
+    def __init__(self, namer: Callable | None = None) -> None:
+        self.namer = namer
         self.containers: dict[str, Container] = {}
         self.failed: set[tuple] = set()
         self.commands: frozenset = frozenset()
@@ -318,10 +319,9 @@ class SeriesSync:
     async def left(self, made: Plan, group: Group, missing: list[str]) -> None:
         """A group not applied: a step of it did not succeed (`missing`); its files stay as they are."""
 
-    async def names_for(self, counted) -> list[str]:
-        """The name of the file of every goal counted (`planner.count`): the service asks the rule of names of the series;
-        by default the planner's own."""
-        return [name_of(item) for item in counted.items()]
+    async def namer_for(self, made: Plan) -> Callable | None:
+        """The rule of names for the goals of a plan (the service asks it of the rules); None: the planner's own."""
+        return self.namer
 
     async def trace(self, kind: str, data: dict) -> None:
         """What the sync does, told as it happens for the dump of the run: `plan` (the inputs and the plan made of them),
@@ -332,7 +332,7 @@ class SeriesSync:
     def inputs(self, online: tuple[OnlineRow, ...], choices: Choices) -> Inputs:
         return Inputs(online, tuple(sorted((self._as_held(each) for each in self.containers.values()),
                                            key=lambda each: each.name)),
-                      choices.replaced(delete=self.commands), frozenset(self.failed | self.skipped))
+                      replace(choices, delete=self.commands), frozenset(self.failed | self.skipped))
 
     def _as_held(self, container: Container) -> Container:
         """A file as the plans of this sync see it: a track aligned to a row whose video came anew to another length is
@@ -349,9 +349,10 @@ class SeriesSync:
                                     if track.aligned_to in self.retimed else track for track in container.tracks))
 
     async def plan_of(self, inputs: Inputs) -> Plan:
-        # The names are of the goals and the steps and the groups read them: the goals are counted, named, then planned.
-        counted = await compute.run(count, inputs)
-        made = await compute.run(plan, inputs, await self.names_for(counted), counted)
+        first = await compute.run(plan, inputs, self.namer)
+        namer = await self.namer_for(first)
+        # The names came after the goals: the goals stay, their steps and groups are made again with the names.
+        made = first if namer is self.namer else await compute.run(renamed, inputs, first, namer)
         return made if self.holds is None else restricted(made, self.holds)
 
     async def sync(self, online: tuple[OnlineRow, ...], choices: Choices) -> Synced:

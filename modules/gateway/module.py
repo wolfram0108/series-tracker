@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from typing import Any, Callable, Literal, NamedTuple
 import os
 import secrets
@@ -28,8 +29,6 @@ from core import BaseModule, BusRequestError
 from core.reasons import reason
 from core.contracts import (CompositionChanged, CompositionFailed, PackJournal, PlannerView,
                             SeriesReadProgress, SourceChanged, TableFailed, TableProgress, TableReady)
-
-from .routing import json_text
 
 
 class AuthGateMiddleware:
@@ -507,8 +506,8 @@ class GatewayModule(BaseModule):
                 if not events:
                     yield ": keepalive\n\n"  # a comment keeps the connection alive through proxies
                 elif frames == "batch":
-                    data = json_text([{"event": name, "data": payload} for name, payload in events]).decode()
+                    data = json.dumps([{"event": name, "data": payload} for name, payload in events], ensure_ascii=False)
                     yield f"event: batch\ndata: {data}\n\n"
                 else:
                     for name, payload in events:
-                        yield f"event: {name}\ndata: {json_text(payload).decode()}\n\n"
+                        yield f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"

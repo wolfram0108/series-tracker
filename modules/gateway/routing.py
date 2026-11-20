@@ -17,21 +17,10 @@ from core.admission import current as current_admission
 from core.reasons import code_of, relayed
 
 
-def _written(value: Any) -> Any:
-    # A value kept as its text of JSON (`__json__`: the view of a plan, made by the core) goes as it is; any other value
-    # JSON has no form for (a date, a set) is written the way the framework writes it.
-    if hasattr(type(value), "__json__"):
-        return orjson.Fragment(value.__json__())
-    return jsonable_encoder(value)
-
-
-def json_text(answer: Any) -> bytes:
-    """The text of JSON of an answer or of an event of the stream: keys that are numbers are written as text, as JSON has
-    it. Ten megabytes of a layout are written in tens of milliseconds, not in a hundred."""
-    return orjson.dumps(answer, default=_written, option=orjson.OPT_NON_STR_KEYS)
-
-
-_text = json_text
+def _text(answer: Any) -> bytes:
+    # A value JSON has no form for (a date, a set) is written the way the framework writes it; keys that are numbers are
+    # written as text, as JSON has it. Ten megabytes of a layout are written in tens of milliseconds, not in a hundred.
+    return orjson.dumps(answer, default=jsonable_encoder, option=orjson.OPT_NON_STR_KEYS)
 
 
 async def as_made(answer: Any) -> Response:

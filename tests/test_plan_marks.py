@@ -20,7 +20,7 @@ def told(rows, settings=(), *, failed=frozenset(), off=()):
     choices = choices_of(rows, online, [(each.season, each.episode, each.levers) for each in settings], [],
                          players=PRIORITY, player_groups=NO_GROUPS, sources=SOURCES, voice_order={}, off_episodes=off)
     inputs = Inputs(online, (), choices, frozenset(failed))
-    return {(each.season, each.episode): each for each in references_of(plan(inputs))}
+    return {(each.season, each.episode): each for each in references_of(inputs, plan(inputs))}
 
 
 def order(level: Level, *variants, lever: str = REFERENCE_ORDER):

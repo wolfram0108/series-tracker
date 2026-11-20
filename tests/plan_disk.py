@@ -463,7 +463,7 @@ class DiskWorld(World):
         entry = next(each for each in self.site[source_id] if each.row.id.row_key == key)
         if not os.path.exists(os.path.join(self.root, "site", name)):
             self.codec.make(os.path.join(self.root, "site", name), list(entry.content))
-        entry.row = entry.row.replaced(link=self.host.url(name))
+        entry.row = replace(entry.row, link=self.host.url(name))
         return entry.row
 
     def lose_file(self, name: str) -> None:

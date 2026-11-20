@@ -55,9 +55,7 @@ Queries:
       nothing more of it is, and it is not taken up again at the start. A journal of the library under way is not cut:
       the stop waits for its end.
   planner.work.get {series_id} -> WorkState.
-  planner.series.get {series_id} -> PlannerView: the asset, the goal of every episode, the failures and the commands. The
-      view, its references and the event below are texts of JSON made by the core (native.JsonText): the gateway writes
-      them out as they are, a reader in this process reads them as the dict and the list they are.
+  planner.series.get {series_id} -> PlannerView: the asset, the goal of every episode, the failures and the commands.
   planner.delete {series_id, kind: video | track, name, dub?} -> {recorded}: the command «Удалить» of a file or of a track
       in it, carried out by the next sync (a video goes only for another video of its episode).
   planner.delete.cancel {series_id, kind, name, dub?} -> {dropped}.
@@ -113,7 +111,7 @@ from core import container as mkv
 from core.clock import beat_while
 from core.code_print import code_print
 from core.dump import plain
-from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, SyncScope, SeriesSource, SourceType, SubmitOutcome,
+from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView, SyncScope, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
 from core.contracts.series_card import card_version
 from core.contracts.torrent import fonts_of, parse_link
@@ -125,13 +123,14 @@ from core.reasons import describe, reason
 from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, judged, video_of
 from core.plan.files import Library, as_in_file, container_json, container_of, label_of
 from core.plan.inputs import assets_against, planner_inputs
-from core.plan.planner import Plan, count, cut_video, name_of, video_op
+from core.plan.marks import references_of
+from core.plan.planner import Plan, cut_video, name_of, video_op
 from core.plan.tables import RowId, Track, Video
 
 from .kept import Kept
 from .packing import PackBook, card_id
 from .repository import PlannerRepository
-from .view import CountedView, counted_view, placed, shown_of
+from .view import placed, view_of
 
 PLANNER = "planner"
 # A safeguard of the copy of a video into the work folder of the alignment service: a 4K episode over the network.
@@ -204,15 +203,18 @@ def _inputs_of(layout: CompositionReply, series: dict, voices: dict) -> tuple:
     return online, choices, {(each.ref.source_id, each.ref.row_key): each.ref for each in layout.compilations}
 
 
-def media_item_of(item: tuple) -> dict:
-    """The episode as the rule of names is asked about it (`media_item` of `rules.format_filenames`), of what the planner
-    tells of its goal (`count(...).items()`)."""
-    slot, height, group, link, cut, _off = item
-    made = {"season": slot[0], "episode_start": slot[1], "episode_end": None, "part": slot[2] if len(slot) > 2 else None,
-            "resolution": height, "voiceover_tag": group, "source_url": link}
-    if cut:
-        made["cut"] = json.dumps({"height": height, "voice_group": group})
-    return made
+def _item_of(slot, video) -> dict:
+    """The episode as the rule of names is asked about it (`media_item` of `rules.format_filename`)."""
+    snapshot = video.snapshot
+    item = {"season": slot[0], "episode_start": slot[1], "episode_end": None, "part": slot[2] if len(slot) > 2 else None,
+            "resolution": snapshot.height, "voiceover_tag": snapshot.group, "source_url": snapshot.link}
+    if video.kind == "cut" or (video.container is not None and video.container.video.cut_of is not None):
+        item["cut"] = json.dumps({"height": snapshot.height, "voice_group": snapshot.group})
+    return item
+
+
+def _key_of(item: dict) -> str:
+    return json.dumps(item, sort_keys=True, ensure_ascii=False)
 
 
 @dataclass(frozen=True)
@@ -242,7 +244,7 @@ VIEW_INPUTS: dict[str, ViewInput] = {
     "composition.layout": ViewInput("composition.changed", lambda seen: seen.writes),
     "voices.settings.get": ViewInput("voices.settings.changed", lambda seen: seen.voices),
     # The rule of names is a function of the card and of the numbers of the episode alone: the card stands for it.
-    "rules.format_filenames": ViewInput("series.updated", lambda seen: None),
+    "rules.format_filename": ViewInput("series.updated", lambda seen: None),
 }
 
 
@@ -264,10 +266,16 @@ class _Held:
     commands: frozenset
 
 
-def _view_body(series_id: int, held: _Held, shown: tuple | None, members: dict, running: bool, problems: list) -> CountedView:
-    """The view of the window (PlannerView, as a text of JSON) from what the tables and the plan give, counted by the core:
-    `shown` is the goals the plan counted (`count`) and the name of each, none when no plan was counted."""
-    return counted_view(series_id, held, shown, running=running, members=members, problems=problems)
+def _view_body(series_id: int, held: _Held, made: Plan | None, inputs, members: dict, running: bool,
+               problems: list) -> dict:
+    """The view of the window from what the tables and the plan give: pure work over thousands of rows (the pool)."""
+    # Online is what the sources give now: a row that stands from an earlier read is not.
+    online = frozenset(row.id for row in inputs.online if row.current) if inputs is not None else None
+    references = references_of(inputs, made, members) if inputs is not None and made is not None else []
+    view = {**view_of(series_id, held, made, running=running, online=online,
+                      rows=inputs.online if inputs is not None else ()),
+            "problems": problems, "references": [each.model_dump(mode="json") for each in references]}
+    return PlannerView.model_validate(view).model_dump(mode="json")
 
 
 class BusSync(SeriesSync):
@@ -290,6 +298,7 @@ class BusSync(SeriesSync):
         # The names the rule of the series gave, kept by the module for the card they were given for: a view of the window
         # and a sync of the same card ask none of them again.
         self.names: dict[tuple, str] = module.names_of(series)
+        self.namer = self._namer()
         self.told = False  # the window was shown the plan this sync froze
         self.flags: dict[str, int] = {}  # the steps under way by what they are, for the card of the series
         self.run_mark = ""  # when the sync under way began (plan_runs): the same after a stop, so its jobs are found again
@@ -313,10 +322,10 @@ class BusSync(SeriesSync):
         made = self.made = await super().plan_of(inputs)
         if self.download and not self.told:
             self.told = True
-            await self.m._publish_view(self.series["id"], self, made)
+            await self.m._publish_view(self.series["id"], self, made, inputs)
         elif self.download:
             # A plan made again (a failure, a length): the window shows the plan the sync works by now.
-            self.m._views[self.series["id"]] = made
+            self.m._views[self.series["id"]] = (made, inputs)
             self.m._ask_recount(self.series["id"])
         if self.download:
             self.m.packing.planned(self.series, self.run_mark, made, self.containers, self.voice_order, self.source_marks)
@@ -340,24 +349,32 @@ class BusSync(SeriesSync):
             self.conform_dir = os.path.join(folders["conform"], WORK, str(self.series["id"]))
             self.kept = kept_of(folders["conform"], self.series["id"])
 
-    async def names_for(self, counted) -> list[str]:
-        """The series' own rule of names (`rules.format_filenames`), asked once for the goals the names do not hold yet: one
-        request for all of them. A name is kept by what the rule is given of its goal (the item; the card stands for the rest,
-        `names_of`): what the rule is given is what tells two names apart, and nothing else."""
-        items = counted.items()
-        wanted = list(dict.fromkeys(item for item in items if item not in self.names))
-        if wanted:
+    async def namer_for(self, made: Plan):
+        """The series' own rule of names (`rules.format_filename`), asked once for every goal the names do not hold yet.
+        The namer of the sync when no name was added (the plan made with it stands); a new one when names came. A name is
+        kept by the request it answered, whole (the card and the item): what the rule is given is what tells two names
+        apart, and nothing else."""
+        wanted = {}
+        for goal in made.goals:
+            item = _item_of(goal.slot, goal.video)
+            key = (_key_of(item), goal.off)
+            if key not in self.names:
+                wanted[key] = (goal.slot, goal.video, item)
+        for key, (slot, video, item) in wanted.items():
+            off = key[-1]
             try:
-                made = (await self.m.request("rules.format_filenames", {
-                    "series": self.series, "items": [{"media_item": media_item_of(each)} for each in wanted]}))["filenames"]
-                for each, name in zip(wanted, made, strict=True):
-                    self.names[each] = os.path.splitext(name)[0] + ".mkv" + (".off" if each[-1] else "")
-            except (BusRequestError, KeyError, ValueError):
-                for each in wanted:
-                    self.names[each] = name_of(each)  # the rule refused: the planner's own names
+                made_name = (await self.m.request("rules.format_filename", {"series": self.series, "media_item": item}))["filename"]
+                self.names[key] = os.path.splitext(made_name)[0] + ".mkv" + (".off" if off else "")
+            except (BusRequestError, KeyError):
+                self.names[key] = name_of(slot, video.snapshot, off)  # the rule refused: the planner's own name
             except asyncio.TimeoutError:
-                pass  # no answer is no word of the rule: its own names stand for now, and the rule is asked again
-        return [self.names.get(item) or name_of(item) for item in items]
+                continue  # no answer is no word of the rule: its own name stands for now, and the rule is asked again
+        return self._namer() if wanted else self.namer
+
+    def _namer(self):
+        def namer(slot, video, off):
+            return self.names.get((_key_of(_item_of(slot, video)), off)) or name_of(slot, video.snapshot, off)
+        return namer
 
     # --- the steps -------------------------------------------------------------------------------------------------
 
@@ -848,12 +865,12 @@ class PlannerModule(BaseModule):
         self._fetches: dict[str, asyncio.Future] = {}
         self._jobs: dict[str, asyncio.Future] = {}
         self._ended: dict[str, dict] = {}  # jobs that ended before anyone waited for them
-        self._views: dict[int, Plan] = {}
+        self._views: dict[int, tuple] = {}
         self._failures: dict[int, str] = {}  # why the last sync of a series broke, told with the end of its work
         self._names: dict[int, tuple[str, dict]] = {}  # the names the rule gave each series, with the card they are of
         # The projection of the view of each series: the last view counted, the series whose inputs changed since it,
         # and the count under way.
-        self._shown: dict[int, CountedView] = {}
+        self._shown: dict[int, dict] = {}
         self._stale: set[int] = set()
         self._counting: dict[int, asyncio.Task] = {}
         self._members: dict[int, dict] = {}  # the compilations of the layout of a series by their row
@@ -1426,11 +1443,14 @@ class PlannerModule(BaseModule):
         self._activity.setdefault(series_id, {}).update(flags)
         self._tell_status(series_id)
 
-    async def _stand(self, series_id: int, shown: CountedView, inputs: str | None) -> None:
+    async def _stand(self, series_id: int, view: dict, inputs: str | None) -> None:
         """What the series stands at, told by its view: ready — a file of it is in the library; waiting — the plan has
         work for the next sync; error — an episode lacks what a recorded attempt was for (`covered` of the view: another
         source that gave it leaves no error), or work of the last sync failed for the moment and nothing gave it."""
-        flags = {"ready": shown.ready, "waiting": shown.work and not shown.running, "error": shown.error}
+        work = any(goal["video"]["kind"] != "asset" or any(track["kind"] != "reuse" for track in goal["tracks"])
+                   for goal in view["episodes"]) or bool(view["commands"])
+        flags = {"ready": bool(view["assets"]), "waiting": work and not view["running"],
+                 "error": any(not each["covered"] for each in view["failures"]) or bool(view["problems"])}
         if flags != self._standing.get(series_id) or inputs != self._prints.get(series_id):
             # Kept for the next start: it tells the cards at once, and with the print of the inputs it was counted from
             # a start counts again only the series whose inputs changed since.
@@ -1466,19 +1486,20 @@ class PlannerModule(BaseModule):
 
     # --- the view and the user's words ----------------------------------------------------------------------------
 
-    async def _publish_view(self, series_id: int, sync: SeriesSync | None = None, made: Plan | None = None) -> CountedView:
+    async def _publish_view(self, series_id: int, sync: SeriesSync | None = None, made: Plan | None = None,
+                            inputs=None) -> dict:
         """The view of a series told to every window. With the plan a sync froze, that plan is shown as it is; else the
         view is counted again from the tables, once for every change however many come meanwhile (`_recount`)."""
         if made is None:
             return await self._recount(series_id)
-        view, printed = await self._counted(series_id, sync, made)
+        view, printed = await self._counted(series_id, sync, made, inputs)
         await self._told(series_id, view, printed)
         return view
 
-    async def _told(self, series_id: int, shown: CountedView, inputs: str | None) -> None:
-        self._shown[series_id] = shown
-        self.publish_event("planner.series.changed", shown.view)
-        await self._stand(series_id, shown, inputs)
+    async def _told(self, series_id: int, view: dict, inputs: str | None) -> None:
+        self._shown[series_id] = view
+        self.publish_event("planner.series.changed", view)
+        await self._stand(series_id, view, inputs)
 
     def _ask_recount(self, series_id: int) -> asyncio.Task:
         """An input of the view of the series changed: the view is counted again. Changes that come while it is counted
@@ -1490,10 +1511,10 @@ class PlannerModule(BaseModule):
             task.add_done_callback(self._count_ended)
         return task
 
-    async def _recount(self, series_id: int) -> CountedView:
+    async def _recount(self, series_id: int) -> dict:
         return await asyncio.shield(self._ask_recount(series_id))
 
-    async def _count(self, series_id: int) -> CountedView:
+    async def _count(self, series_id: int) -> dict:
         view = None
         while series_id in self._stale:
             self._stale.discard(series_id)
@@ -1505,7 +1526,7 @@ class PlannerModule(BaseModule):
         if not task.cancelled() and task.exception() is not None:
             self.log.error("вид плана не посчитан: %s", task.exception(), exc_info=task.exception())
 
-    async def _shown_view(self, series_id: int) -> CountedView:
+    async def _shown_view(self, series_id: int) -> dict:
         """The view as it was last counted; counted now when there is none or an input changed since."""
         counting = self._counting.get(series_id)
         idle = counting is None or counting.done()
@@ -1513,8 +1534,8 @@ class PlannerModule(BaseModule):
             return self._shown[series_id]
         return await self._recount(series_id) if idle else await asyncio.shield(counting)
 
-    async def _counted(self, series_id: int, sync: SeriesSync | None = None,
-                       made: Plan | None = None) -> tuple[CountedView, str | None]:
+    async def _counted(self, series_id: int, sync: SeriesSync | None = None, made: Plan | None = None,
+                       inputs=None) -> tuple[dict, str | None]:
         """The view of a series: the asset, the failures and the commands as the table holds them now, and the plan as
         the tables give it now (between syncs only the tables change, and the plan is counted again from them); while a
         sync runs, the plan it froze. The reference of every episode, and why, is told by that plan. Thousands of rows:
@@ -1523,10 +1544,9 @@ class PlannerModule(BaseModule):
         running = series_id in self._runs and not self._runs[series_id].done()
         printed, problems = None, None
         if made is not None:
-            self._views[series_id] = made
+            self._views[series_id] = (made, inputs)
         elif running and series_id in self._views:
-            made = self._views[series_id]
-        shown = shown_of(made)
+            made, inputs = self._views[series_id]
         if sync is None or made is None:
             try:
                 series = await self.request("catalog.series.get", {"series_id": series_id})
@@ -1545,9 +1565,8 @@ class PlannerModule(BaseModule):
                     held = list(fresh.containers.values())
                     fresh.containers = await compute.run(
                         lambda: {each.name: each for each in assets_against(held, rows)})
-                    # The window reads the goals and their names: the steps and the groups are the sync's.
-                    counted = await compute.run(count, fresh.inputs(rows, choices))
-                    shown = (counted, await fresh.names_for(counted))
+                    inputs = fresh.inputs(rows, choices)
+                    made = await fresh.plan_of(inputs)
                     if sync is None and not running:
                         printed = inputs_print(seen, own)
                 except (BusRequestError, asyncio.TimeoutError) as exc:
@@ -1557,13 +1576,13 @@ class PlannerModule(BaseModule):
         held_now = _Held(dict(sync.containers), frozenset(sync.failed), frozenset(sync.commands))
         if problems is None:
             problems = await self.repo.outcome(series_id)
-        view = await compute.run(_view_body, series_id, held_now, shown, dict(self._members.get(series_id, {})), running,
-                                 problems)
+        view = await compute.run(_view_body, series_id, held_now, made, inputs, dict(self._members.get(series_id, {})),
+                                 running, problems)
         return view, printed
 
     async def on_references_get(self, env: Envelope) -> list[dict]:
         """The reference of every episode of a series, and why it is that one (core/plan/marks)."""
-        return (await self._shown_view(int(env.payload["series_id"]))).references
+        return (await self._shown_view(int(env.payload["series_id"])))["references"]
 
     async def on_view_input_changed(self, env: Envelope) -> None:
         """An input of the view changed (VIEW_INPUTS): the view of its series is counted again, the views of every series
@@ -1578,8 +1597,8 @@ class PlannerModule(BaseModule):
         for each in targets:
             self._ask_recount(each)
 
-    async def on_series_get(self, env: Envelope):
-        return (await self._shown_view(int(env.payload["series_id"]))).view
+    async def on_series_get(self, env: Envelope) -> dict:
+        return await self._shown_view(int(env.payload["series_id"]))
 
     async def on_delete(self, env: Envelope) -> dict:
         command = PlanDelete.model_validate(env.payload)

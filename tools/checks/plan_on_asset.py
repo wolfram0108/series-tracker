@@ -22,7 +22,7 @@ import plan_real  # noqa: E402
 
 from core.plan.files import Library, as_in_file  # noqa: E402
 from core.plan.inputs import assets_against  # noqa: E402
-from core.plan.planner import count, plan  # noqa: E402
+from core.plan.planner import plan  # noqa: E402
 from core.plan.tables import Inputs  # noqa: E402
 
 
@@ -34,9 +34,7 @@ async def series_report(real: plan_real.RealSeries, series_id: int) -> tuple[str
             for each in inputs.containers]
     missing = sum(1 for each in held if each is None)
     containers = assets_against([each for each in held if each is not None], inputs.online)
-    held_inputs = Inputs(inputs.online, tuple(containers), inputs.choices)
-    counted = count(held_inputs)
-    made = plan(held_inputs, plan_real.names_of(card, counted), counted)
+    made = plan(Inputs(inputs.online, tuple(containers), inputs.choices), plan_real.namer_of(card))
     kinds = Counter(op.kind for op in made.ops)
     builds = [op.slot for op in made.ops if op.kind == "build"]
     renames = [(old, made.goal(slot).name) for group in made.groups for slot, old in group.kept

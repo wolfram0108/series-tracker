@@ -6,7 +6,7 @@ import random
 import pytest
 
 from core.plan.tables import RowId
-from modules.planner.view import shown_of, view_of
+from modules.planner.view import view_of
 from plan_world import Chaos, World
 
 PVA, ORIGINAL = "ПВА", "Оригинал"
@@ -63,7 +63,7 @@ def row(source: int, key: str) -> RowId:
 # --- the window is told the variant of the markup reference the plan takes and the one the file lies on ---------------
 
 def told(world: World, step) -> dict:
-    return view_of(0, world, shown_of(step.plan), running=False)
+    return view_of(0, world, step.plan, running=False, rows=step.online)
 
 
 def test_the_window_is_told_the_variant_of_the_markup_reference_the_plan_takes_and_the_one_the_cut_file_lies_on():
