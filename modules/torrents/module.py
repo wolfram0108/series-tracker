@@ -13,6 +13,8 @@
   torrents.info.get {hashes?}           → список раздач клиента (все, если hashes не заданы)
   torrents.pause / .resume / .recheck {hashes} — команды клиенту
   torrents.delete {hashes, delete_files?} — убрать раздачи из клиента (файлы — по флагу)
+  Клиент создаётся при старте (креды читаются по шине) и делает первый вход: пока этого нет, запрос, которому нужен клиент,
+  ждёт его (предохранитель — у топика), а не отвечает «не настроен».
 
 Queries/commands конвейера (контракты Р-12, их ждёт scan):
   torrents.db.active {series_id}        → активные раздачи, сверенные с qBit
@@ -165,6 +167,11 @@ class TorrentsModule(BaseModule):
                                 password=qbt_password)
         self.qbt: QbtClient | None = qbt
         self._qbt_injected = qbt is not None
+        # Set when the client of qBittorrent is made and its first login tried (or it was given): until then there is no client
+        # to ask, and a request that needs it waits for it instead of answering that none is configured.
+        self._looked = asyncio.Event()
+        if self._qbt_injected:
+            self._looked.set()
         self._pipe: dict[str, dict] = {}  # hash -> задача конвейера
         self._wake = asyncio.Event()
         self._flags_cache: dict[int, dict] = {}
@@ -256,19 +263,30 @@ class TorrentsModule(BaseModule):
         """Создание клиента и вход; любая ошибка (включая пустой URL —
         креды ещё не настроены) не валит процесс: конвейер ждёт
         (находка 7 — модуль не замораживает и не роняет систему)."""
-        cfg = await self._resolve_qbt_config()
-        old, self.qbt = self.qbt, QbtClient(**cfg)
-        if old:
-            await old.close()
-        if not cfg.get("base_url"):
-            self.log.warning("креды qBittorrent не настроены (ни env, ни "
-                             "таблица auth) — конвейер ждёт настроек")
-            return
         try:
-            await self.qbt.login()
-        except Exception as exc:  # noqa: BLE001 — недоступность не фатальна
-            self.log.error("qBittorrent недоступен: %s — конвейер будет "
-                           "ждать", exc)
+            cfg = await self._resolve_qbt_config()
+            old, self.qbt = self.qbt, QbtClient(**cfg)
+            if old:
+                await old.close()
+            if not cfg.get("base_url"):
+                self.log.warning("креды qBittorrent не настроены (ни env, ни "
+                                 "таблица auth) — конвейер ждёт настроек")
+                return
+            try:
+                await self.qbt.login()
+            except Exception as exc:  # noqa: BLE001 — недоступность не фатальна
+                self.log.error("qBittorrent недоступен: %s — конвейер будет "
+                               "ждать", exc)
+        finally:
+            self._looked.set()
+
+    async def _known(self) -> None:
+        """The client of qBittorrent is looked at before anything is said of it: it is made at the start, after the credentials
+        are read over the bus, so until then there is none to ask, which is not «not configured». A request that needs it waits
+        for that (its fuse is that of its topic)."""
+        if not self._looked.is_set():
+            self.log.info("qBittorrent: запрос ждёт, пока будет создан клиент и сделан первый вход")
+            await self._looked.wait()
 
     async def on_credentials_changed(self, env: Envelope) -> None:
         if env.payload.get("service") != "qbittorrent" or self._qbt_injected:
@@ -308,6 +326,7 @@ class TorrentsModule(BaseModule):
             self._broadcast_queue()
 
     async def on_stop(self) -> None:
+        self._looked.set()  # nobody waits for a client that will not be made
         if self.qbt and not self._qbt_injected:
             await self.qbt.close()
 
@@ -339,6 +358,7 @@ class TorrentsModule(BaseModule):
         p = env.payload
         save_path = p["save_path"]
         paused = bool(p.get("paused", True))
+        await self._known()
 
         if "magnet" in p:
             candidates = [infohash_from_magnet(p["magnet"])]
@@ -366,10 +386,12 @@ class TorrentsModule(BaseModule):
                 "existed": existed}
 
     async def on_info(self, env: Envelope) -> list[dict]:
+        await self._known()
         return await self.qbt.torrents_info(
             (env.payload or {}).get("hashes"))
 
     async def on_files(self, env: Envelope) -> list[dict] | None:
+        await self._known()
         return await self.qbt.torrent_files(env.payload["hash"])
 
     # --- предпросмотр нейминга при добавлении (фоновый добор списка файлов) --------
@@ -440,6 +462,7 @@ class TorrentsModule(BaseModule):
     async def _preview_magnet_task(self, tid, magnet: str, ih: str) -> None:
         added = False
         try:
+            await self._known()
             if self.qbt is None:
                 self._emit_preview_failed(tid, ih, reason("qbt_not_configured"))
                 return
@@ -526,24 +549,30 @@ class TorrentsModule(BaseModule):
     # --- commands ------------------------------------------------------------------
 
     async def on_pause(self, env: Envelope) -> None:
+        await self._known()
         await self.qbt.pause(env.payload["hashes"])
 
     async def on_resume(self, env: Envelope) -> None:
+        await self._known()
         await self.qbt.resume(env.payload["hashes"])
 
     async def on_recheck(self, env: Envelope) -> None:
+        await self._known()
         await self.qbt.recheck(env.payload["hashes"])
 
     async def on_delete(self, env: Envelope) -> None:
+        await self._known()
         await self.qbt.delete(env.payload["hashes"],
                               delete_files=bool(
                                   env.payload.get("delete_files", False)))
 
     async def on_rename_file(self, env: Envelope) -> None:
         p = env.payload
+        await self._known()
         await self.qbt.rename_file(p["hash"], p["old_path"], p["new_path"])
 
     async def on_set_location(self, env: Envelope) -> None:
+        await self._known()
         await self.qbt.set_location(env.payload["hash"],
                                     env.payload["location"])
 
@@ -1402,18 +1431,22 @@ class TorrentsModule(BaseModule):
 
     async def on_release_download(self, env: Envelope) -> dict:
         """{url, release} → ReleaseView: «Скачать» — the release goes to the client; a refusal is NotAllowed with its reason."""
+        await self._known()
         return (await self.releases.download(await self._canonical(env.payload["url"]), env.payload["release"])
                 ).model_dump(mode="json")
 
     async def on_release_check(self, env: Envelope) -> dict:
         """{url} → {releases}: the page is read now; the watched releases it lists newer begin their update or wait."""
+        await self._known()
         return {"releases": await self.releases.check(await self._canonical(env.payload["url"]))}
 
     async def on_release_watch(self, env: Envelope) -> dict:
+        await self._known()
         url = await self._canonical(env.payload["url"])
         return (await self.releases.watch(url, env.payload["release"], bool(env.payload["watched"]))).model_dump(mode="json")
 
     async def on_release_drop_files(self, env: Envelope) -> None:
+        await self._known()
         url = await self._canonical(env.payload["url"])
         await self.releases.drop_files(url, env.payload["release"])
 
