@@ -5,7 +5,6 @@ from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
-from pydantic.json_schema import SkipJsonSchema
 
 from .compilation import CompilationView
 from .output_settings import EpisodeSettings, LeverSpec, LevelSettings
@@ -233,8 +232,6 @@ class VoiceTitleSet(BaseModel):
 class CompositionReply(BaseModel):
     series_id: int
     rev: int
-    # The counter of the writes of the series (every write raises it): what a reader counted from it is of this write.
-    writes: int = 0
     # The part of the layout the reply holds (`LayoutPart`): what is not in the part is left out, not empty.
     part: LayoutPart = "whole"
     rows: list[CompositionRow] = Field(default_factory=list)
@@ -254,11 +251,6 @@ class CompositionReply(BaseModel):
     voice_titles: dict[str, str] = Field(default_factory=dict)
     # The compilations of every season and the episodes each holds (stage 12): the blocks of the view «Компиляции».
     compilations: list[CompilationView] = Field(default_factory=list)
-    # The rows and the rows of subtitles as the layout keeps them, kept by columns (core.native.Rows reads them in place):
-    # what `composition.layout` gives a consumer in the process (the planner) instead of `rows` and `subtitles`. No window
-    # gets them: they are in no schema and in no JSON.
-    rows_field: SkipJsonSchema[bytes | None] = Field(default=None, exclude=True)
-    subtitles_field: SkipJsonSchema[bytes | None] = Field(default=None, exclude=True)
 
 
 class CompositionChanged(BaseModel):

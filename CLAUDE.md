@@ -20,6 +20,8 @@
 - `voice-alignment` — несколько источников на сериал (ruchime + dunhuatv.ru),
   парсер dunhuatv.ru (Kodik-озвучки) и автоматическое выравнивание озвучек
   по референсу через сервис `track-muxer` — `docs/missions/voice-alignment/`
+- `rust-core` — цепочка пересчёта сериала (раскладка → план → вид, затем правила)
+  с её данными в ядре на Rust, многоядерный пересчёт — `docs/missions/rust-core/`
 - (завершённые — в `docs/missions/_done/`, напр.
   `torrent-naming-preview` — предпросмотр нейминга в окне добавления)
 
@@ -143,7 +145,6 @@ HTTP/SSE-точка; событие шины → SSE по таблице `SSE_MA
 | Миграции БД | `.venv/bin/alembic upgrade head` |
 | Запуск (dev) | `.venv/bin/uvicorn run:app --port 5000` (без `ST_QBIT_URL` модуль torrents не стартует) |
 | Сборка фронта | `cd web && npm run build` |
-| Сборка ядра счёта | `native/build.sh` — крейт `native/` (Rust: движок правил, таблицы страниц и строки раскладок по столбцам, проекция раскладки) в модуль `core.native` (`core/native.abi3.so`, вне git); после правок `native/` и после `git pull`, до миграций и рестарта. Тесты крейта: `cd native && cargo test --release --no-default-features` |
 | Браузерная доставка (astar/anilibria_tv) | `.venv/bin/playwright install firefox` |
 | Антибот-челлендж rutracker (Cloudflare) | `.venv/bin/python -m camoufox fetch` |
 | Рестарт прода | `sudo systemctl restart series-tracker` (или `./restart.sh`) |

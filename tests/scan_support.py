@@ -12,10 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core import BaseModule
-from pydantic import TypeAdapter
-
-from core import native
-from core.contracts import (CompositionRow, ReleaseTable, RowState, StoredTable, TableFailed, TableGetReply, TableGetRequest,
+from core.contracts import (CompositionRow, ReleaseTable, RowState, TableFailed, TableGetReply, TableGetRequest,
                             TableReady, TableState)
 from core.reasons import reason
 from schema_db import migrated
@@ -184,8 +181,7 @@ class World(BaseModule):
         request = TableGetRequest.model_validate(env.payload)
         page = self.pages.setdefault(request.url, Page())
         self.order.append(f"sources.table.get {request.url}")
-        table = StoredTable.of(ReleaseTable(url=request.url, site="ruchime", complete=True, read_at=READ_AT)) \
-            if page.held else None
+        table = ReleaseTable(url=request.url, site="ruchime", complete=True, read_at=READ_AT) if page.held else None
         reply = TableGetReply(url=request.url, state=page.state, table=table, reason=page.why)
         if page.event_first:
             if page.why:
@@ -193,7 +189,7 @@ class World(BaseModule):
             else:
                 self.finish(request.url)
         self.asked.put_nowait(request.url)
-        return reply.model_dump()
+        return reply.model_dump(mode="json")
 
     async def on_pages_check(self, env) -> dict:
         """The pages `sources` says it cannot read now for want of a provider: `blocked` maps a page to its reason."""
@@ -221,8 +217,3 @@ class World(BaseModule):
 
     def failure(self, topic: str = "sources.table.get") -> str:
         return reason("composition_request_failed", topic=topic)
-
-
-def laid_out(rows) -> native.Rows:
-    """Rows of a layout as the layout keeps them (core.native.Rows), of their models."""
-    return native.Rows.from_json(TypeAdapter(list[CompositionRow]).dump_json(list(rows)))

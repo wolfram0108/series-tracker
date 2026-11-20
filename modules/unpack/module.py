@@ -46,7 +46,6 @@ import os
 
 from core import BaseModule
 from core.contracts.torrent import (RELEASE_CHANGED_TOPIC, EditorTab, FileKind, ReleaseState, ReleaseView, kind_of)
-from core.contracts import RuleLine, RulesApplyReply, RulesApplyRequest
 from core.db import Database
 from core.envelope import Envelope
 from core.ffprobe import layout_of
@@ -122,10 +121,9 @@ class UnpackModule(BaseModule):
     async def _apply(self, profile_id: int | None, keyed: dict[str, str]) -> dict[str, dict]:
         if not profile_id or not keyed:
             return {}
-        request = RulesApplyRequest(profile_id=profile_id,
-                                    lines=[RuleLine(key=key, text=text) for key, text in keyed.items()])
-        reply = RulesApplyReply.model_validate(await self.request("rules.apply", request.model_dump()))
-        return {key: result.model_dump(mode="json") for key, result in reply.by_key().items()}
+        reply = await self.request("rules.apply", {"profile_id": profile_id,
+                                                   "lines": [{"key": key, "text": text} for key, text in keyed.items()]})
+        return reply.get("results") or {}
 
     async def _inputs(self, url: str, releases: list[ReleaseView] | None = None) -> Inputs:
         releases = releases if releases is not None else await self._releases(url)

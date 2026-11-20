@@ -165,9 +165,7 @@ async def new_rule(probe, profile_id, name, actions, conditions=(), keep_going=F
 async def apply(probe, profile_id, lines, **extra) -> dict:
     reply = await probe.request("rules.apply", {
         "profile_id": profile_id, "lines": [{"key": k, "text": t} for k, t in lines.items()], **extra}, timeout=5)
-    answered = RulesApplyReply.model_validate(reply)
-    return {"results": {key: each.model_dump() for key, each in answered.by_key().items()},
-            "invalid_rules": answered.invalid_rules}
+    return RulesApplyReply.model_validate(reply).model_dump()
 
 
 # --- rules.apply: lines with keys in, answers by key out ----------------------------------------
@@ -240,7 +238,7 @@ async def test_a_single_without_a_part_is_part_one_where_the_player_and_the_voic
              {"key": "second", "text": "серия 1 часть 2", "player": "vk", "voice": "V"},
              {"key": "other", "text": "серия 1", "player": "kodik", "voice": "V"}]
     reply = await probe.request("rules.apply", {"profile_id": profile, "lines": lines}, timeout=5)
-    results = RulesApplyReply.model_validate(reply).by_key()
+    results = RulesApplyReply.model_validate(reply).results
     assert [(key, results[key].part) for key in ("whole", "second", "other")] == [("whole", 1), ("second", 2), ("other", None)]
 
 
@@ -436,13 +434,13 @@ async def test_the_layout_that_hears_the_event_gets_the_new_rules_at_once(system
     profile = await new_profile(probe)
     rule = await new_rule(probe, profile, "серия", [extract("extract_single", "серия ", "N")])
     await asyncio.wait_for(recounter.answered.wait(), 5)
-    assert recounter.answers[-1].by_key()["k"].episode == 4
+    assert recounter.answers[-1].results["k"].episode == 4
     recounter.answered.clear()
 
     await probe.request("rules.rules.update", {"rule_id": rule, "data": rule_data(
         "серия", [extract("extract_single", "серия ", "N", ("add", "10"))])}, timeout=5)
     await asyncio.wait_for(recounter.answered.wait(), 5)
-    assert recounter.answers[-1].by_key()["k"].episode == 14, "the event came after the write and the cache reset"
+    assert recounter.answers[-1].results["k"].episode == 14, "the event came after the write and the cache reset"
 
 
 # --- rules.format_filename: numbers are ready, no rule is applied ---------------------------------
@@ -786,7 +784,7 @@ async def test_the_rules_are_compiled_and_applied_off_the_loop_of_the_service(sy
         return call
 
     monkeypatch.setattr(module, "compile_profile", watched(module.compile_profile))
-    monkeypatch.setattr(module, "answer_lines", watched(module.answer_lines))
+    monkeypatch.setattr(module, "process_title", watched(module.process_title))
     probe = system.probe
     profile = await new_profile(probe)
     await new_rule(probe, profile, "серия", [extract("extract_single", "серия ", "N")])
@@ -794,6 +792,5 @@ async def test_the_rules_are_compiled_and_applied_off_the_loop_of_the_service(sy
     taken = (await probe.request("rules.profiles.export", {"profile_ids": [profile]}, timeout=5))["profiles"]
     by_run = await apply(probe, profile, {"a": "серия 4"}, rules=taken.get(str(profile), taken.get(profile)))
     assert stored["results"]["k40"]["episode"] == 40 and by_run["results"]["a"]["episode"] == 4
-    # Two compilations (the stored profile, the profile of the run) and two answers, each to all the lines of its request.
-    assert len(seen) == 2 + 2
+    assert len(seen) == 2 + 41  # two compilations (the stored profile, the profile of the run), 41 lines
     assert loop_thread not in seen and all(each.name.startswith("compute") for each in seen)

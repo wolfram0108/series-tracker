@@ -2,9 +2,7 @@
 
 The layout is the rows of the tables of all sources of a series, each with the numbers the constructor of rules gave it
 and the group of its voice-over; the pure rules are in `project.py`, the levers in `levers.py`, their inheritance in
-`settings.py`; the count itself is the compiled one of `core.native` (the rows are kept, compared and written out as
-columns, read in place). The module owns the tables `composition_state` (the rows of the layout as two fields of columns),
-`composition_sources`,
+`settings.py`. The module owns the tables `composition_rows`, `composition_state`, `composition_sources`,
 `unknown_voices` and `output_settings`. It reads no site, picks no reference and downloads nothing. Torrent sources of a series are not its business.
 
 Compilations (stage 12, `compilations.py`): a row whose video holds several episodes is a compilation, named by its key in
@@ -24,9 +22,7 @@ Queries:
       show them (`levels`, the series first), and the levers of every episode of the layout with the level each comes
       from, with the compilation it stands in (`EpisodeSettings.compilation`), and the compilations of every season with
       the episodes each holds and why the others are not in it (`compilations`). A series not counted yet has revision 0
-      and nothing else. `writes` is the counter of the writes of the series: every write raises it, whatever it changes.
-  composition.writes {} → {writes: {series_id: n}}: the counter of the writes of every series, without its layout — a
-      reader that keeps what it counted from a layout tells by it whether anything was written since.
+      and nothing else.
   composition.recompute {series_id} → {rev, changed}: counts the series now, with the tables as they are stored (no
       read of a site), and answers when a count that began no earlier than the request has ended, its record is
       written and its event is out. `changed` tells whether that count published. A count already running is
@@ -103,31 +99,20 @@ names in one request). A source without a table or without a profile does not st
 after the modules it asks; a request that gets no answer fails the recount, not the start.
 
 Resumability: the layout, the numbers of unknown voice-overs and the settings are in the database before an event
-goes out. Every count keeps beside the layout the print of the inputs it read (composition_state.inputs: the card, the
-settings of the voice-overs, the rules of the profiles of its sources — `rules.profiles.export` —, the number of the last
-write of the page of every source — `sources.tables.writes` — and the code); a count of a run's snapshot keeps none. At
-start a series whose inputs are those of its print stands as it is stored, the others are counted again; a series the
-catalog no longer has is purged, and a failure there is logged, not raised.
+goes out. At start every series is counted again, a series the catalog no longer has is
+purged, and a failure there is logged, not raised.
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
-
-import orjson
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Iterable
 
-from pydantic import TypeAdapter
-
-from core import BaseModule, compute, native
-from core.code_print import code_print
-from core.contracts.series_card import card_version
+from core import BaseModule, compute
 from core.contracts import (LAYOUT_PARTS, COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ORDER, REFERENCE_SAME, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
-                            CompositionRow, GroupsResolveReply, GroupsResolveRequest, RulesApplyReply,
-                            RuleLine, RulesApplyRequest, StoredTable, lines_of, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet, SettingsSetMany,
+                            GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
+                            RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet, SettingsSetMany,
                             QueuesGet, QueuesReply, SourceEvent, SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState,
                             VoiceOrderSet, VoiceSettingsView, VoiceTitleSet, SeriesReadProgress, TableProgress)
 from core.db import Database
@@ -151,27 +136,6 @@ class _Unavailable(Exception):
     def __init__(self, topic: str) -> None:
         self.reason = reason("composition_request_failed", topic=topic)
         super().__init__(self.reason)
-
-
-@dataclass
-class _Seen:
-    """What a count of a layout read of its neighbours, as their versions tell it: the card, the settings of the
-    voice-overs, the rules of the profiles of its sources, and the page of every source with the number of its last
-    write (`sources.tables.writes`)."""
-
-    card: dict
-    voices: dict
-    rules: Any
-    pages: dict[int, tuple[str | None, int | None]]
-
-
-def layout_print(seen: _Seen) -> str:
-    """The print of the inputs of a count of a layout: each of them as its version tells it, and the print of the code.
-    Two counts with one print count one layout: what the layout holds besides (the levers, the orders the user set) a
-    count carries over as it is, so a command of the user needs no count and moves no print."""
-    text = json.dumps({"card": card_version(seen.card), "voices": seen.voices, "rules": seen.rules, "pages": sorted(seen.pages.items()),
-                       "code": code_print()}, sort_keys=True, ensure_ascii=False, default=str)
-    return hashlib.sha256(text.encode()).hexdigest()
 
 
 @dataclass
@@ -222,7 +186,6 @@ class CompositionModule(BaseModule):
     def register(self) -> None:
         self.handle("composition.get", self.on_get)
         self.handle("composition.layout", self.on_layout)
-        self.handle("composition.writes", self.on_writes)
         self.handle("composition.queues.get", self.on_queues_get)
         # Waits for a whole count, so the requests for different series must not queue behind each other.
         self.handle("composition.recompute", self.on_recompute, concurrent=True)
@@ -256,50 +219,14 @@ class CompositionModule(BaseModule):
             self.log.exception("пересчёт раскладок при старте не начат")
 
     async def _resume(self) -> None:
-        """A layout whose inputs are those it was counted from stands as it is stored; the others are counted again."""
-        began = asyncio.get_running_loop().time()
         listing = await self._ask("catalog.series.list", {})
         known = set(await self.repo.series_ids())
         present = {each["id"] for each in listing}
-        kept = await self.repo.prints()
-        wanted = [each for each in listing if each["id"] in known or each.get("sources")]
-        current = await self._current_seen(wanted) if kept else {}
-        scheduled = 0
-        for each in wanted:
-            seen = current.get(each["id"])
-            if seen is not None and layout_print(seen) == kept.get(each["id"]):
-                continue
-            self._schedule(each["id"])
-            scheduled += 1
+        for each in listing:
+            if each["id"] in known or each.get("sources"):
+                self._schedule(each["id"])
         for series_id in known - present:
             await self._purge(series_id)
-        self.spawn(self._resumed(began, len(wanted), scheduled), name="composition:resumed")
-
-    async def _current_seen(self, cards: list[dict]) -> dict[int, _Seen]:
-        """What a count of each of these layouts would read now, as the versions of its inputs tell it; none at all when
-        a neighbour does not answer (every layout is counted then)."""
-        try:
-            pages = await self._page_writes()
-            voices = (await self._voices_view()).model_dump(mode="json")
-            profiles = sorted({each["parser_profile_id"] for card in cards for each in card.get("sources", [])
-                               if each.get("parser_profile_id") is not None})
-            rules = (await self.request("rules.profiles.export", {"profile_ids": profiles}))["profiles"] if profiles else {}
-        except Exception as exc:  # noqa: BLE001 — every layout is counted, as before the prints
-            self.log.warning("входы раскладок на старте не сверены, пересчитываются все: %s", exc)
-            return {}
-        out = {}
-        for card in cards:
-            own = sorted({each["parser_profile_id"] for each in card.get("sources", [])
-                          if each.get("parser_profile_id") is not None})
-            out[card["id"]] = _Seen(card, voices, {str(each): rules.get(str(each), rules.get(each)) for each in own},
-                                    {each["id"]: (self._page_of.get(each["id"]), pages.get(self._page_of.get(each["id"])))
-                                     for each in card.get("sources", [])})
-        return out
-
-    async def _resumed(self, began: float, checked: int, scheduled: int) -> None:
-        await self.idle()
-        self.log.info("старт: сверено раскладок %d, пересчитано %d, за %.2f с", checked, scheduled,
-                      asyncio.get_running_loop().time() - began)
 
     async def idle(self) -> None:
         """Returns when no series is being counted; the signal of completion for whoever stops or checks the module."""
@@ -316,17 +243,12 @@ class CompositionModule(BaseModule):
         return await compute.run(layout_reply, request, stored)
 
     async def on_layout(self, env: Envelope) -> CompositionReply:
-        """The whole layout as the model itself, for a consumer in this process (the planner): its rows the fields of
-        columns they are kept as (`rows_field`, `subtitles_field`), read in place by the consumer — no row is made into a
-        model, nothing is written out and read back. It is made for the one who asks and is his: no other holds it."""
+        """The whole layout as the model itself, for a consumer in this process (the planner): the answer of
+        `composition.get` before it is written out — megabytes are not turned into a dict and checked again on the other
+        side. It is made for the one who asks and is his: no other holds it."""
         request = CompositionGetRequest(series_id=int(env.payload["series_id"]))
         stored = await self.repo.stored(request.series_id)
-        reply = await compute.run(layout_of, request, stored, frozenset(_STORED_ROWS))
-        reply.rows_field, reply.subtitles_field = stored.rows.blob, stored.subtitles.blob
-        return reply
-
-    async def on_writes(self, env: Envelope) -> dict:
-        return {"writes": {str(series_id): count for series_id, count in (await self.repo.writes()).items()}}
+        return await compute.run(layout_of, request, stored)
 
     async def on_queues_get(self, env: Envelope) -> dict:
         """The queues of a level in the order the core tries their variants: the same rule, the same order of players and
@@ -357,7 +279,7 @@ class CompositionModule(BaseModule):
             orders[command.season] = wanted
             rev = stored.rev + 1
             await self.repo.write(command.series_id, orders=orders, rev=rev)
-            episodes = sorted(number for season, number in stored.rows.episodes() if season == command.season)
+            episodes = sorted(number for season, number in project.layout_episodes(stored.rows) if season == command.season)
             self._publish_changed(command.series_id, rev, {(command.season, number) for number in episodes},
                                   summary_only=False, part="levers")
         return {"ok": True}
@@ -379,7 +301,7 @@ class CompositionModule(BaseModule):
                 return {"ok": True}
             rev = stored.rev + 1
             await self.repo.write(command.series_id, titles=titles, rev=rev)
-            self._publish_changed(command.series_id, rev, stored.rows.episodes(), summary_only=False,
+            self._publish_changed(command.series_id, rev, set(project.layout_episodes(stored.rows)), summary_only=False,
                                   part="levers")
         return {"ok": True}
 
@@ -409,7 +331,7 @@ class CompositionModule(BaseModule):
                 names = await compute.run(project.voice_names, [item])
                 groups = await self._groups(names) if names else {}
                 # The page is thousands of rows: its projection and the reply are made off the loop.
-                return await compute.run(_page_preview, got, table, item, groups)
+                return await compute.run(_page_preview, got, table, source, item, answer, groups)
         except _Unavailable as exc:
             raise ValueError(exc.reason) from exc
         return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason,
@@ -418,19 +340,21 @@ class CompositionModule(BaseModule):
 
     async def _preview_lines(self, request: CompositionPreviewRequest, texts: list[str]) -> dict:
         """Lines the window holds itself: no page and no table, only the profile's answer to each line."""
-        lines = await compute.run(lines_of, [RuleLine(key=str(place), text=text) for place, text in enumerate(texts)])
-        answers = None
-        if request.profile_id is not None and texts:
+        lines = [RuleLine(key=str(place), text=text) for place, text in enumerate(texts)]
+        results = {}
+        if request.profile_id is not None and lines:
+            payload = await compute.run(lambda: RulesApplyRequest(
+                profile_id=request.profile_id, lines=lines, series_season=request.series_season).model_dump(mode="json"))
             try:
-                answers = (await self._ask("rules.apply", RulesApplyRequest(
-                    profile_id=request.profile_id, lines=lines, series_season=request.series_season).model_dump(),
-                    model=RulesApplyReply)).results
+                answer = await self._ask("rules.apply", payload, model=RulesApplyReply)
             except _Unavailable as exc:
                 raise ValueError(exc.reason) from exc
-        # The lines a window holds can be thousands: their JSON is written by the count, off the loop.
-        shown = await compute.run(native.preview_lines, lines, _NO_ROWS, answers)
-        return {"url": request.url, "state": TableState.READY.value, "reason": None, "names": [], "summary": None,
-                "lines": orjson.Fragment(shown), "rows": []}
+            results = answer.results
+        # The lines a window holds can be thousands: the reply is made off the loop.
+        return await compute.run(lambda: CompositionPreviewReply(
+            url=request.url, state=TableState.READY,
+            lines=[PreviewLine(key=line.key, line=line.text, result=results.get(line.key)) for line in lines],
+        ).model_dump(mode="json"))
 
     async def on_recompute(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
@@ -703,12 +627,8 @@ class CompositionModule(BaseModule):
 
     async def _recount(self, series_id: int, flight: _Flight, refresh: set[int]) -> _Outcome:
         try:
-            inputs, groups, seen = await self._gather(series_id, flight, refresh)
-            outcome = await self._settle(series_id, inputs, groups)
-            if series_id not in self._deleted:
-                # Kept beside the layout: a start counts it again only if its inputs are no longer these.
-                await self.repo.save_print(series_id, await compute.run(layout_print, seen) if seen else None)
-            return outcome
+            inputs, groups = await self._gather(series_id, flight, refresh)
+            return await self._settle(series_id, inputs, groups)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — a failed count is a signal, not the end of the module
@@ -724,55 +644,24 @@ class CompositionModule(BaseModule):
             return _Outcome(failure=failure)
 
     async def _gather(self, series_id: int, flight: _Flight, refresh: set[int]
-                      ) -> tuple[list[SourceInput], dict[str, str | None], _Seen | None]:
-        """What the neighbours say about the series, with the versions of what it read (none for a count of a run's
-        snapshot: its inputs are not the current ones); nothing is written here."""
-        # Asked before the tables they stand for: a page written between the two makes the print older than the layout,
-        # and the next start counts the layout again rather than keeping one the print does not tell.
-        pages = await self._page_writes()
+                      ) -> tuple[list[SourceInput], dict[str, str | None]]:
+        """What the neighbours say about the series; nothing is written here."""
         card = await self._ask("catalog.series.get", {"series_id": series_id})
         sources = [SeriesSource.model_validate(each) for each in card.get("sources", [])]
         snapshot = self._snapshots.get(series_id)
-        view = await self._voices_view(snapshot)
-        off = frozenset(view.players_off)
-        rules = await self._rules_of(sources) if snapshot is None else None
-        async def one(source: SeriesSource) -> tuple[SourceInput, tuple[str, int | None], list[str]]:
+        off = await self._players_off(snapshot)
+        inputs = []
+        for source in sources:
             table, failure, url = await self._table(series_id, flight, source, source.id in refresh)
             answer = None
             if table is not None and source.parser_profile_id is not None:
                 answer = await self._answer(source, table, card.get("season"), snapshot, off)
-            item = SourceInput(source, table, answer, failure, url, players_off=off)
-            names = await compute.run(project.voice_names, [item]) if answer is not None else []
-            return item, (url, pages.get(url)), names
-
-        # The sources are independent: their tables are asked, read by their profiles and their voice-overs named side by
-        # side; the names of all of them are those of each in the order of the sources.
-        made = await asyncio.gather(*(one(source) for source in sources))
-        inputs = [each for each, _, _ in made]
-        read = {source.id: page for source, (_, page, _) in zip(sources, made)}
-        order = sorted(range(len(sources)), key=lambda at: (sources[at].position, sources[at].id))
-        names = list(dict.fromkeys(name for at in order for name in made[at][2]))
-        groups = await self._groups(names, snapshot) if names else {}
-        seen = None if snapshot is not None or rules is None else _Seen(card, view.model_dump(mode="json"), rules, read)
-        return inputs, groups, seen
-
-    async def _page_writes(self) -> dict[str, int]:
-        return (await self._ask("sources.tables.writes", {}))["writes"]
-
-    async def _rules_of(self, sources: list[SeriesSource]) -> dict | None:
-        """The stored rules of the profiles of the sources (as `rules.apply` reads them); none when the rules do not
-        give them — the layout is counted all the same, with no print."""
-        profiles = sorted({each.parser_profile_id for each in sources if each.parser_profile_id is not None})
-        if not profiles:
-            return {}
-        try:
-            found = (await self.request("rules.profiles.export", {"profile_ids": profiles}))["profiles"]
-        except Exception:  # noqa: BLE001 — the print waits for the next count
-            return None
-        return {str(each): found.get(str(each), found.get(each)) for each in profiles}
+            inputs.append(SourceInput(source, table, answer, failure, url, players_off=off))
+        names = await compute.run(project.voice_names, inputs)
+        return inputs, await self._groups(names, snapshot) if names else {}
 
     async def _table(self, series_id: int, flight: _Flight, source: SeriesSource, begin: bool
-                     ) -> tuple[StoredTable | None, str | None, str]:
+                     ) -> tuple[ReleaseTable | None, str | None, str]:
         flight.pending += 1
         try:
             reply = await self._table_reply(source, begin)
@@ -791,22 +680,18 @@ class CompositionModule(BaseModule):
         request = TableGetRequest(url=source.url, refresh=begin, rows=source.rows_per_line)
         return await self._ask("sources.table.get", request.model_dump(mode="json"), model=TableGetReply)
 
-    async def _voices_view(self, snapshot: RunSnapshot | None = None) -> VoiceSettingsView:
-        """The settings of the voice-overs, as they are now or as the run took them."""
-        values = snapshot.voices if snapshot is not None else None
-        return await self._ask("voices.settings.get", {"values": values}, model=VoiceSettingsView)
-
     async def _players_off(self, snapshot: RunSnapshot | None = None) -> frozenset[str]:
         """The players switched off in the settings for every source, as they are now or as the run took them."""
-        view = await self._voices_view(snapshot)
+        values = snapshot.voices if snapshot is not None else None
+        view = await self._ask("voices.settings.get", {"values": values}, model=VoiceSettingsView)
         return frozenset(view.players_off)
 
-    async def _answer(self, source: SeriesSource, table: StoredTable, season,
+    async def _answer(self, source: SeriesSource, table: ReleaseTable, season,
                       snapshot: RunSnapshot | None = None, everywhere: frozenset[str] = frozenset()) -> RulesApplyReply:
         rules = snapshot.profiles.get(source.parser_profile_id) if snapshot is not None else None
         payload = await compute.run(_rules_request, source, table, season, rules, everywhere)
         if payload is None:
-            return RulesApplyReply()
+            return RulesApplyReply(results={})
         return await self._ask("rules.apply", payload, model=RulesApplyReply)
 
     async def _groups(self, names: list[str], snapshot: RunSnapshot | None = None) -> dict[str, str | None]:
@@ -893,45 +778,22 @@ class CompositionModule(BaseModule):
     async def _ask(self, topic: str, payload, *, model=None):
         try:
             answer = await self.request(topic, payload)
-            # The tables and the answers of the rules come as the fields of columns they are kept as: nothing to parse.
-            return model.model_validate(answer) if model is not None else answer
+            # The tables and the answers of the rules are thousands of rows: their check runs off the loop.
+            return await compute.run(model.model_validate, answer) if model is not None else answer
         except Exception as exc:  # noqa: BLE001 — any failure of a neighbour is one signal: the recount did not happen
             self.log.error("запрос %s не выполнен: %s: %s", topic, type(exc).__name__, exc)
             raise _Unavailable(topic) from exc
 
 
-# The fields of the layout a window is given as they are stored: thousands of rows, their JSON written by the count from the
-# columns they are kept as, with no model made.
-_STORED_ROWS = ("rows", "subtitles")
-ROWS = TypeAdapter(list[CompositionRow])
-# The rows of a table with none (lines a window holds itself).
-_NO_ROWS = native.encode_table(b"[]")
-
-
 def layout_reply(request: CompositionGetRequest, stored) -> dict:
     """`composition.get` answered from what is stored; pure, it runs in the pool of computation. A part holds its own
-    fields only: what it leaves out is not in the answer, so a window keeps what it holds of it. The rows are written by
-    the count as the model writes them, the excluded ones left out unless asked, and go on as written (`orjson.Fragment`)."""
-    reply = layout_of(request, stored, skip=frozenset(_STORED_ROWS)).model_dump(mode="json", exclude_unset=True)
-    for name in set(_STORED_ROWS) & _wanted(request):
-        reply[name] = orjson.Fragment(getattr(stored, name).json(request.include_excluded))
-    return reply
+    fields only: what it leaves out is not in the answer, so a window keeps what it holds of it."""
+    return layout_of(request, stored).model_dump(mode="json", exclude_unset=True)
 
 
-# The fields a window gets: those the model writes out (the fields of columns are the consumer's in the process alone).
-_WINDOW_FIELDS = frozenset(name for name, field in CompositionReply.model_fields.items() if not field.exclude)
-
-
-def _wanted(request: CompositionGetRequest) -> set[str]:
-    """The fields of the layout a request asks for (`LAYOUT_PARTS`; the whole: every one)."""
-    part = "sources" if request.sources_only else request.part
-    return _WINDOW_FIELDS - {"series_id", "rev", "writes", "part"} if part == "whole" \
-        else set(LAYOUT_PARTS[part])
-
-
-def layout_of(request: CompositionGetRequest, stored, skip: frozenset[str] = frozenset()) -> CompositionReply:
+def layout_of(request: CompositionGetRequest, stored) -> CompositionReply:
     """The layout, or the part of it asked (`LAYOUT_PARTS`), as the model: every field is made one way, for the whole and
-    for a part, and only the fields asked are made (`skip`: those its caller gives otherwise)."""
+    for a part, and only the fields asked are made."""
     part = "sources" if request.sources_only else request.part
     known: dict[str, object] = {}
 
@@ -941,13 +803,13 @@ def layout_of(request: CompositionGetRequest, stored, skip: frozenset[str] = fro
         return known[name]
 
     def shown(rows):
-        return ROWS.validate_json(rows.json(request.include_excluded))
+        return [row for row in rows if request.include_excluded or not row.excluded]
 
     def records():
         return once("records", lambda: settings.canonical(stored.records))
 
     def episodes():
-        return once("episodes", stored.rows.episodes)
+        return once("episodes", lambda: project.layout_episodes(stored.rows))
 
     def outcome():
         return once("outcome", lambda: compilations.resolve(stored.rows, records(), _source_order(stored)))
@@ -971,28 +833,33 @@ def layout_of(request: CompositionGetRequest, stored, skip: frozenset[str] = fro
         "voice_orders": lambda: project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows),
         "voice_titles": lambda: stored.titles,
     }
-    return CompositionReply(series_id=request.series_id, rev=stored.rev, writes=stored.writes, part=part,
-                            **{name: fields[name]() for name in _wanted(request) - skip})
+    wanted = fields.keys() if part == "whole" else LAYOUT_PARTS[part]
+    return CompositionReply(series_id=request.series_id, rev=stored.rev, part=part,
+                            **{name: fields[name]() for name in wanted})
 
 
-def _rules_request(source: SeriesSource, table: StoredTable, season, rules,
+def _rules_request(source: SeriesSource, table: ReleaseTable, season, rules,
                    everywhere: frozenset[str] = frozenset()) -> dict | None:
-    """The request of the rules for the lines of a table, kept by columns; None when the table has none for the source."""
-    lines = project.lines_for(SourceInput(source, table, players_off=everywhere))
-    if native.count(lines) == 0:
+    """The request of the rules for the lines of a table; None when the table has none for the source."""
+    lines = project.lines_for(source, table, everywhere)
+    if not lines:
         return None
     return RulesApplyRequest(profile_id=source.parser_profile_id, lines=lines, series_season=season,
-                             rules=rules).model_dump()
+                             rules=rules).model_dump(mode="json")
 
 
-def _page_preview(got: TableGetReply, table: StoredTable, item: SourceInput, groups: dict[str, str | None]) -> dict:
+def _page_preview(got: TableGetReply, table: ReleaseTable, source: SeriesSource, item: SourceInput,
+                  answer: RulesApplyReply | None, groups: dict[str, str | None]) -> dict:
     """The preview of a page with its table: the summary, the lines with their answers and the rows the profile makes;
-    pure, it runs in the pool of computation. The lines and the rows are thousands: their JSON is the count's."""
+    pure, it runs in the pool of computation."""
     projection = project.project([item], groups, {})
-    lines = native.preview_lines(project.lines_for(item), table.rows, item.reply.results if item.reply else None)
-    head = CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason, names=list(table.names),
-                                   summary=projection.sources[0]).model_dump(mode="json", exclude={"lines", "rows"})
-    return {**head, "lines": orjson.Fragment(lines), "rows": orjson.Fragment(projection.rows.json(False))}
+    results = answer.results if answer is not None else {}
+    heights = {row.key: list(row.heights) for row in table.rows if row.state == RowState.PLAYABLE}
+    lines = [PreviewLine(key=line.key, line=line.text, result=results.get(line.key), heights=heights.get(line.key, []))
+             for line in project.lines_for(source, table, item.players_off)]
+    return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason, names=list(table.names),
+                                   summary=projection.sources[0], lines=lines,
+                                   rows=[row for row in projection.rows if not row.excluded]).model_dump(mode="json")
 
 
 @dataclass
@@ -1015,7 +882,7 @@ def _derive(series_id: int, inputs: list[SourceInput], groups: dict[str, str | N
     result = project.project(inputs, groups, stored.numbering)
     gone = [each.source_id for each in stored.sources if each.source_id not in {i.source.id for i in inputs}]
     before = settings.canonical(stored.records)
-    renames = dict(result.rows.renames(stored.rows))
+    renames = project.group_renames(stored.rows, result.rows)
     orders = project.season_orders(stored.orders, result.rows, renames)
     # What was set for a voice-over group follows the voice-over when the user names it, renames it or dissolves its group.
     records = settings.retarget(
@@ -1024,20 +891,20 @@ def _derive(series_id: int, inputs: list[SourceInput], groups: dict[str, str | N
                                series_id, group[0].lever))
     for source_id in gone:
         records = settings.without_source(records, source_id)
-    layout = result.rows.episodes()
+    layout = project.layout_episodes(result.rows)
     if any(summary.status == SourceStatus.READY for summary in result.sources):
         # Without an answered source the layout says nothing of which episodes exist, so nothing is taken away.
         records = settings.within_episodes(records, layout)
     order = {item.source.id: item.source.position for item in inputs}
     # The membership of an episode follows the rows as well as the levers: what it changes is a change of the episode.
     was, now = _shape(stored.rows, before, layout, order), _shape(result.rows, records, layout, order)
-    moved = settings.affected(was[0](), now[0]()) if (records, was[2]) != (before, now[2]) else set()
+    moved = settings.affected(was[0], now[0])
     headers_changed = was[1] != now[1]
     rows_changed = result.rows != stored.rows or result.subtitles != stored.subtitles
     # The time of a reading is stored with the summary but is no change of it: a page read again is no news.
     shown = [summary.model_copy(update={"read_at": None}) for summary in result.sources]
     summaries_changed = shown != [each.summary.model_copy(update={"read_at": None}) for each in stored.sources]
-    touched = result.rows.touched(stored.rows) if rows_changed else set()
+    touched = project.touched_episodes(stored.rows, result.rows) if rows_changed else set()
     return _Derived(result, gone, records, records != before, orders, moved, headers_changed, rows_changed,
                     summaries_changed, touched)
 
@@ -1100,18 +967,17 @@ def _effect_of(stored, before, after) -> tuple[set[tuple[int, int]], bool]:
     """What a change of the records does: the episodes whose levers come out differently (told to consumers), and whether
     a window has anything new to show. A header that no episode follows still changes on the screen: that is told to
     windows, not to consumers."""
-    episodes = stored.rows.episodes()
+    episodes = project.layout_episodes(stored.rows)
     order = _source_order(stored)
     was, now = _shape(stored.rows, before, episodes, order), _shape(stored.rows, after, episodes, order)
-    touched = settings.affected(was[0](), now[0]())
+    touched = settings.affected(was[0], now[0])
     return touched, bool(touched) or was[1] != now[1]
 
 
-def _shape(rows, records, episodes, order) -> tuple:
-    """The levers and the compilation of every episode of the layout (made when asked: they are a function of the records
-    and the memberships, the third part, alone), and what the headers of the levels and the blocks of compilations show
-    (told to windows when it changes): of one resolution of the compilations."""
+def _shape(rows, records, episodes, order) -> tuple[list[EpisodeSettings], tuple]:
+    """The levers and the compilation of every episode of the layout, and what the headers of the levels and the blocks
+    of compilations show (told to windows when it changes): of one resolution of the compilations."""
     outcome = compilations.resolve(rows, records, order)
-    return (lambda: settings.episode_settings(records, episodes, outcome.members),
+    return (settings.episode_settings(records, episodes, outcome.members),
             (settings.levels(records, {season for season, _ in episodes},
-                             [(view.season, view.ref.key) for view in outcome.views]), outcome.views), outcome.members)
+                             [(view.season, view.ref.key) for view in outcome.views]), outcome.views))

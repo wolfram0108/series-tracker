@@ -199,9 +199,6 @@ class ConformModule(BaseModule):
         self._jobs: dict[str, dict[str, Any]] = {}
         self._announced: set[str] = set()
         self._daemon: dict[str, Any] = {"up": False, "error": None}
-        # Set once the feed has a word on the daemon since its address was set (it answered, or the request failed): before
-        # that its state is not known, which is no "down".
-        self._known = asyncio.Event()
         self._runner: asyncio.Task | None = None
         super().__init__(bus)
 
@@ -289,27 +286,13 @@ class ConformModule(BaseModule):
             self._client = self._client_factory(url) if url else None
             self._jobs.clear()
             self._daemon = {"up": False, "error": None}
-            self._known.clear()
             self._publish()
             self._start_feed()
-
-    async def _daemon_state(self) -> dict[str, Any]:
-        """How the daemon stands as its feed last told it; asked before the feed's first word since the address was set,
-        that word (the feed always gives one: the daemon answers, or the request fails)."""
-        runner = self._runner
-        if self._client is not None and runner is not None and not runner.done() and not self._known.is_set():
-            # The word of the feed, or its end (the module stops): whichever comes first.
-            told = asyncio.ensure_future(self._known.wait())
-            try:
-                await asyncio.wait({told, runner}, return_when=asyncio.FIRST_COMPLETED)
-            finally:
-                told.cancel()
-        return self._daemon
 
     async def on_submit(self, env: Envelope) -> dict:
         if self._client is None:
             return SubmitReply.unavailable(reason("conform_not_configured"), retry=False).model_dump()
-        if not (await self._daemon_state()).get("up"):
+        if not self._daemon.get("up"):
             return SubmitReply.unavailable(reason("conform_down", error=self._daemon.get("error") or ""),
                                            retry=False).model_dump()
         payload = env.payload
@@ -345,7 +328,7 @@ class ConformModule(BaseModule):
         label = request.label or os.path.basename(request.compilation)
         if self._client is None:
             return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=reason("conform_not_configured")).model_dump()
-        if not (await self._daemon_state()).get("up"):
+        if not self._daemon.get("up"):
             return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE,
                                 reason=reason("conform_down", error=self._daemon.get("error") or "")).model_dump()
         values = await self._values()
@@ -400,7 +383,7 @@ class ConformModule(BaseModule):
 
     async def on_cancel(self, env: Envelope) -> dict:
         job_id = env.payload["job_id"]
-        if self._client is None or not (await self._daemon_state()).get("up"):
+        if self._client is None or not self._daemon.get("up"):
             self.log.info("conform: задачу %s отменить некому — демон недоступен", job_id)
             return {"done": False}
         try:
@@ -424,7 +407,7 @@ class ConformModule(BaseModule):
         job_id, name = str(env.payload.get("job_id")), str(env.payload.get("name"))
         if not (_JOB_ID.fullmatch(job_id) and _PLOT_NAME.fullmatch(name)):
             return {"found": False}
-        if self._client is None or not (await self._daemon_state()).get("up"):
+        if self._client is None or not self._daemon.get("up"):
             raise RuntimeError(reason("conform_down", error=self._daemon.get("error") or ""))
         try:
             picture = await self._client.plot(job_id, name)
@@ -435,7 +418,7 @@ class ConformModule(BaseModule):
         return {"found": True, "data": base64.b64encode(picture).decode("ascii")}
 
     async def on_job_find(self, env: Envelope) -> dict:
-        if self._client is None or not (await self._daemon_state()).get("up"):
+        if self._client is None or not self._daemon.get("up"):
             return {"reachable": False, "job_id": None}
         try:
             jobs = await self._client.jobs()
@@ -448,7 +431,7 @@ class ConformModule(BaseModule):
     async def on_job_keys(self, env: Envelope) -> dict:
         """The keys of the jobs the daemon's history holds (`… #key` of their labels): what a caller keeps a folder of a
         job for."""
-        if self._client is None or not (await self._daemon_state()).get("up"):
+        if self._client is None or not self._daemon.get("up"):
             return {"reachable": False, "keys": []}
         try:
             jobs = await self._client.jobs()
@@ -460,7 +443,7 @@ class ConformModule(BaseModule):
         job_id = env.payload["job_id"]
         job = self._jobs.get(job_id)
         if job is None:
-            if self._client is None or not (await self._daemon_state()).get("up"):
+            if self._client is None or not self._daemon.get("up"):
                 raise RuntimeError(reason("conform_down", error=self._daemon.get("error") or ""))  # not asked is not "gone"
             job = await self._client.job(job_id)
         if job is None:
@@ -505,7 +488,6 @@ class ConformModule(BaseModule):
         while True:
             try:
                 self._daemon = {"up": True, "error": None, **await self._client.info()}
-                self._known.set()
                 self._publish()
                 self.publish_event("conform.daemon.up", {})
                 # What the daemon accepts is part of the settings screen: an open one learns it now.
@@ -522,7 +504,6 @@ class ConformModule(BaseModule):
             except Exception as exc:  # noqa: BLE001 - any transport failure means "daemon unreachable"
                 problem = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
             self._daemon = {"up": False, "error": problem}
-            self._known.set()
             self._jobs.clear()
             self._publish()
             self.log.warning("conform: демон недоступен (%s), повтор через %.0f с", describe(problem), delay)

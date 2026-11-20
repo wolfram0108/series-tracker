@@ -4,7 +4,6 @@ The site here is a fake that the module knows through the registry alone (M-34);
 real. Time comes from a clock the test moves, and the order of events from the signals of the fake site, never from waits.
 """
 import asyncio
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -12,8 +11,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
-
-from sources_support import readable, rows_of
 
 from core import BaseModule, Bus
 from core.contracts import ReleaseTable, RowState, RowVoice, TableGetRequest, TableRow, UnreadPart
@@ -126,7 +123,7 @@ class System:
     progress: object
 
     async def get(self, url: str = PAGE, **request) -> dict:
-        return readable(await self.probe.request("sources.table.get", {"url": url, **request}, timeout=STUCK_S))
+        return await self.probe.request("sources.table.get", {"url": url, **request}, timeout=STUCK_S)
 
     async def next(self, subscription) -> dict:
         return (await asyncio.wait_for(subscription.queue.get(), STUCK_S)).payload
@@ -140,13 +137,9 @@ class System:
     async def stored(self, url: str = PAGE) -> dict | None:
         return await self.db.fetch_one("SELECT state, reason, complete, read_at FROM release_tables WHERE url = ?", (url,))
 
-    async def stored_rows(self, url: str = PAGE) -> list[dict]:
-        """The rows of the stored table of the page, as the record keeps them (one field of columns), as JSON."""
-        record = await self.db.fetch_one("SELECT rows FROM release_tables WHERE url = ?", (url,))
-        return rows_of(record["rows"]) if record is not None else []
-
     async def stored_texts(self, url: str = PAGE) -> list[str]:
-        return [row["text"] for row in await self.stored_rows(url)]
+        records = await self.db.fetch_all("SELECT text FROM release_rows WHERE url = ? ORDER BY seq", (url,))
+        return [record["text"] for record in records]
 
     async def stop(self) -> None:
         await self.probe.stop()
@@ -186,7 +179,8 @@ async def test_each_row_of_a_table_says_which_video_it_is_as_its_player_reads_th
     await system.next(system.ready)
     stored = await system.get()
     assert [each["video"] for each in stored["table"]["rows"]] == ["-1_2", "777", ""]
-    assert [row["video"] for row in await system.stored_rows()] == ["-1_2", "777", ""]
+    records = await system.db.fetch_all("SELECT video FROM release_rows WHERE url = ? ORDER BY seq", (PAGE,))
+    assert [record["video"] for record in records] == ["-1_2", "777", ""]
 
 
 async def test_a_read_tells_its_beginning_and_its_end_with_what_every_player_gave(system):
@@ -646,24 +640,6 @@ async def test_a_table_replaces_the_rows_of_the_page_in_one_transaction(db_path)
         await repo.save_table(broken)
 
     assert await repo.last_table(PAGE) == old
-
-
-async def test_every_write_of_the_record_of_a_page_takes_a_number_the_page_never_had(db_path):
-    """A reader that kept the number of a page knows whether the page was written since: a table, a read begun, a read
-    failed each take the next number, and a page forgotten and written again does not come back to one it had."""
-    repo = SourcesRepository(Database(str(db_path)))
-    table = ReleaseTable(url=PAGE, site="fake", names=["Фейк"], read_at="2026-11-01T12:00:00+00:00", complete=True,
-                         rows=episodes(1))
-    seen = []
-    for write in (lambda: repo.save_table(table), lambda: repo.mark_reading(PAGE, "fake", "2026-11-01T13:00:00+00:00"),
-                  lambda: repo.mark_failed(PAGE, "fake", "boom"), lambda: repo.save_table(table)):
-        await write()
-        seen.append((await repo.writes())[PAGE])
-    await repo.forget_pages([PAGE])
-    assert PAGE not in await repo.writes()
-    await repo.save_table(table)
-    seen.append((await repo.writes())[PAGE])
-    assert len(set(seen)) == len(seen), seen
 
 
 async def test_only_a_complete_table_is_stored(db_path):

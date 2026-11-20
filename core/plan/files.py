@@ -24,22 +24,22 @@ STAGING = ".plan-staging"
 
 
 def row_json(row: RowId | None):
-    return None if row is None else row.fields()
+    return None if row is None else asdict(row)
 
 
 def container_json(container: Container) -> dict:
     return {"name": container.name, "off": container.off, "video": {
-        "id": container.video.id.fields(), "snapshot": container.video.snapshot.fields(),
-        "episode": list(container.video.episode), "timeline": container.video.timeline.fields(),
+        "id": asdict(container.video.id), "snapshot": asdict(container.video.snapshot),
+        "episode": list(container.video.episode), "timeline": asdict(container.video.timeline),
         "cut_of": row_json(container.video.cut_of),
-        **({"timeline_snapshot": container.video.timeline_snapshot.fields()} if container.video.timeline_snapshot else {})},
-        "tracks": [{"dub": track.dub.fields(), "snapshot": track.snapshot.fields(), "episode": list(track.episode),
-                    "aligned_to": track.aligned_to.fields(), **({"tag": track.tag} if track.tag else {}),
+        **({"timeline_snapshot": asdict(container.video.timeline_snapshot)} if container.video.timeline_snapshot else {})},
+        "tracks": [{"dub": asdict(track.dub), "snapshot": asdict(track.snapshot), "episode": list(track.episode),
+                    "aligned_to": asdict(track.aligned_to), **({"tag": track.tag} if track.tag else {}),
                     **({"file": track.file} if track.file else {})}
                    for track in container.tracks], **({"own_at": container.own_at} if container.own_at else {}),
         **({"titles": dict(container.titles)} if container.titles else {}),
         **({"languages": dict(container.languages)} if container.languages else {}),
-        **({"subtitles": [{**asdict(each), "row": each.row.fields(), "timeline": each.timeline.fields()}
+        **({"subtitles": [{**asdict(each), "row": asdict(each.row), "timeline": asdict(each.timeline)}
                           for each in container.subtitles]} if container.subtitles else {})}
 
 

@@ -56,7 +56,3 @@ backups/
 
 # Local agent settings and keys
 /.claude/
-
-# The compiled core (native/build.sh): built in place, never committed
-native/target/
-core/native*.so

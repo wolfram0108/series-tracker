@@ -4,13 +4,11 @@ rows give the consumers is checked: every row has the frame of its own episode (
 variants; a row without one cannot reach the constructor, and a source that leaves one is not fit), never the frame of
 another row; and the player of every row, as every player of the registry, has its place and its words in the order of sources."""
 import asyncio
-import json
 import re
 
 import pytest
 
 from app_stand import STAND_LIMIT_S, AppStand
-from core import native
 from core.voice_names import fold_name
 from provider_mock import MockProvider, serving
 
@@ -40,8 +38,7 @@ async def tables_of(stand: AppStand, urls: list[str]) -> list[dict]:
     for key in keys:
         got = await sources.request("sources.table.get", {"url": key})
         assert got["state"] == "ready", got
-        # The rows of the table are kept by columns: read as the JSON of their models.
-        tables.append({**got["table"], "rows": json.loads(native.table_json(got["table"]["rows"]))})
+        tables.append(got["table"])
     return tables
 
 

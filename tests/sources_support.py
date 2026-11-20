@@ -30,19 +30,6 @@ async def within(awaited, seconds: float, what: str):
         pytest.fail(f"{what} did not end in {seconds:g} s: it waits for something no fake of the test gives")
 
 
-def rows_of(field) -> list[dict]:
-    """The rows of a table kept by columns (core.native), as the JSON of their models."""
-    from core import native
-    return json.loads(native.table_json(field)) if field else []
-
-
-def readable(reply: dict) -> dict:
-    """A reply of `sources.table.get` with the rows of its table read."""
-    if isinstance(reply, dict) and reply.get("table") is not None:
-        return {**reply, "table": {**reply["table"], "rows": rows_of(reply["table"]["rows"])}}
-    return reply
-
-
 def text_of(name: str) -> str:
     """A synthetic answer by its name; a name that is not there is a failure that names it."""
     if name not in SAMPLES:

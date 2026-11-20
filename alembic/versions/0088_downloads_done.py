@@ -5,7 +5,7 @@ that still lies there as it was, with no ask of its source.
 from alembic import op
 
 revision = "0088"
-down_revision = "0087"
+down_revision = "0083"
 branch_labels = None
 depends_on = None
 

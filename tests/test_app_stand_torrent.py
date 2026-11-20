@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from core import container, native
+from core import container
 
 from app_stand import STAND_LIMIT_S, AppStand
 
@@ -63,8 +63,7 @@ async def until_table(stand: AppStand, url: str, rows: int) -> None:
     ready = stand.bus.subscribe("sources.table.ready")
     while True:
         got = await stand.module("sources").request("sources.table.get", {"url": key})
-        table = got.get("table")
-        if got.get("state") == "ready" and table is not None and native.count(table["rows"]) >= rows:
+        if got.get("state") == "ready" and len((got.get("table") or {}).get("rows") or []) >= rows:
             return
         await asyncio.wait_for(ready.queue.get(), STAND_LIMIT_S)
 

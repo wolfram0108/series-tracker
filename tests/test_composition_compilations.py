@@ -4,9 +4,6 @@ one that covers it, is switched on and is higher than its best single video."""
 import random
 
 import pytest
-from pydantic import TypeAdapter
-
-from core import native
 
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, Absence, CompositionRow, Level, RowState, SettingRecord,
                             compilation_key)
@@ -29,24 +26,10 @@ def rec(lever, value, season=1, episode=None, compilation=None):
 
 
 ORDER = {1: 0, 2: 1, 3: 2}
-_ROWS = TypeAdapter(list[CompositionRow])
-
-
-def layout(rows):
-    """The rows as the layout keeps them (core.native)."""
-    return native.Rows.from_json(_ROWS.dump_json(list(rows)))
-
-
-def resolve(rows, records, order):
-    return compilations.resolve(layout(rows), records, order)
-
-
-def fits(rows, records, season, episode, key, order):
-    return compilations.fits(layout(rows), records, season, episode, key, order)
 
 
 def members(rows, records=()):
-    return {slot: ref.key for slot, ref in resolve(rows, list(records), ORDER).members.items()}
+    return {slot: ref.key for slot, ref in compilations.resolve(rows, list(records), ORDER).members.items()}
 
 
 def singles(first, last, height=1080, source_id=2):
@@ -65,14 +48,14 @@ def test_a_compilation_of_a_voice_over_in_no_group_is_no_compilation_and_takes_n
     episode and the next compilation of a group takes them."""
     unknown = row(1, 1, 4, 2160).model_copy(update={"voice_group": None, "voice_label": "Неизвестная озвучка 1"})
     rows = singles(1, 4) + [unknown, row(3, 1, 13, 2160)]
-    found = resolve(rows, [], ORDER)
+    found = compilations.resolve(rows, [], ORDER)
     assert [view.ref.key for view in found.views] == [key(3, 1, 13)]
     assert set(members(rows).values()) == {key(3, 1, 13)}
 
 
 def test_a_compilation_no_higher_than_the_single_video_takes_nothing():
     rows = singles(1, 4, height=1080) + [row(1, 1, 4, 1080)]
-    view = resolve(rows, [], ORDER).views[0]
+    view = compilations.resolve(rows, [], ORDER).views[0]
     assert members(rows) == {}
     assert {each.absence for each in view.episodes} == {Absence.NOT_BETTER}
 
@@ -84,7 +67,7 @@ def test_an_episode_with_its_own_single_video_at_2160_is_not_taken():
 
 def test_an_episode_without_a_single_video_has_nothing_to_be_cut_by():
     rows = singles(1, 2) + [row(1, 1, 3, 2160)]
-    view = resolve(rows, [], ORDER).views[0]
+    view = compilations.resolve(rows, [], ORDER).views[0]
     assert (1, 3) not in members(rows)
     assert view.episodes[2].absence == Absence.NO_SINGLE
 
@@ -99,7 +82,7 @@ def test_on_equal_cover_the_higher_then_the_earlier_source_wins():
 def test_the_users_word_puts_an_episode_into_another_compilation_and_out_of_the_first():
     rows = singles(1, 20) + [row(1, 1, 20, 2160), row(1, 11, 13, 2160)]
     word = rec(COMPILATION_MEMBER, key(1, 1, 20), episode=12)
-    outcome = resolve(rows, [word], ORDER)
+    outcome = compilations.resolve(rows, [word], ORDER)
     assert outcome.members[(1, 12)].key == key(1, 1, 20)
     short = next(each for each in outcome.views if each.ref.key == key(1, 11, 13))
     twelve = next(each for each in short.episodes if each.episode == 12)
@@ -108,21 +91,21 @@ def test_the_users_word_puts_an_episode_into_another_compilation_and_out_of_the_
 
 def test_the_users_none_takes_the_episode_out_of_every_compilation():
     rows = singles(1, 4) + [row(1, 1, 4, 2160)]
-    outcome = resolve(rows, [rec(COMPILATION_MEMBER, "", episode=2)], ORDER)
+    outcome = compilations.resolve(rows, [rec(COMPILATION_MEMBER, "", episode=2)], ORDER)
     assert (1, 2) not in outcome.members
     assert outcome.views[0].episodes[1].absence == Absence.OWN and outcome.views[0].episodes[1].own
 
 
 def test_a_word_for_a_compilation_that_no_longer_fits_gives_the_episode_back_to_the_rule():
     rows = singles(1, 4) + [row(1, 1, 4, 2160), row(3, 1, 4, 1080, player="cvh")]
-    outcome = resolve(rows, [rec(COMPILATION_MEMBER, key(3, 1, 4, player="cvh"), episode=2)], ORDER)
+    outcome = compilations.resolve(rows, [rec(COMPILATION_MEMBER, key(3, 1, 4, player="cvh"), episode=2)], ORDER)
     assert outcome.members[(1, 2)].key == key(1, 1, 4)
 
 
 def test_a_compilation_switched_off_takes_nothing_and_its_episodes_go_to_the_next():
     rows = singles(1, 20) + [row(1, 1, 20, 2160), row(1, 11, 13, 2160)]
     off = rec(COMPILATION_TAKE, False, compilation=key(1, 11, 13))
-    outcome = resolve(rows, [off], ORDER)
+    outcome = compilations.resolve(rows, [off], ORDER)
     assert outcome.members[(1, 12)].key == key(1, 1, 20)
     short = next(each for each in outcome.views if each.ref.key == key(1, 11, 13))
     assert not short.take and {each.absence for each in short.episodes} == {Absence.OFF}
@@ -130,20 +113,20 @@ def test_a_compilation_switched_off_takes_nothing_and_its_episodes_go_to_the_nex
 
 def test_the_user_may_put_an_episode_only_where_the_compilation_takes_it():
     rows = singles(1, 4) + [row(1, 1, 4, 2160), row(3, 1, 4, 1080, player="cvh")]
-    assert fits(rows, [], 1, 2, key(1, 1, 4), ORDER)
-    assert not fits(rows, [], 1, 2, key(3, 1, 4, player="cvh"), ORDER)
-    assert not fits(rows, [], 1, 9, key(1, 1, 4), ORDER)
+    assert compilations.fits(rows, [], 1, 2, key(1, 1, 4), ORDER)
+    assert not compilations.fits(rows, [], 1, 2, key(3, 1, 4, player="cvh"), ORDER)
+    assert not compilations.fits(rows, [], 1, 9, key(1, 1, 4), ORDER)
 
 
 def test_the_compilations_of_a_season_are_numbered_by_their_start():
     rows = singles(1, 30) + [row(1, 21, 30, 2160), row(1, 1, 10, 2160), row(1, 11, 20, 2160)]
-    views = resolve(rows, [], ORDER).views
+    views = compilations.resolve(rows, [], ORDER).views
     assert [(each.index, each.ref.start) for each in views] == [(0, 1), (1, 11), (2, 21)]
 
 
 def test_rows_with_one_key_are_one_compilation_with_the_best_video():
     rows = singles(1, 4) + [row(1, 1, 4, 1440, key="a"), row(1, 1, 4, 2160, key="b")]
-    views = resolve(rows, [], ORDER).views
+    views = compilations.resolve(rows, [], ORDER).views
     assert len(views) == 1 and views[0].ref.row_key == "b" and views[0].ref.height == 2160
 
 
@@ -157,7 +140,7 @@ def test_every_episode_stands_in_at_most_one_compilation_that_takes_it(seed):
         start = rng.randint(1, 35)
         rows.append(row(rng.choice([1, 2, 3]), start, start + rng.randint(1, 15), rng.choice([720, 1080, 1440, 2160]),
                         player=rng.choice(["vk", "cvh"])))
-    refs = compilations.compilations(layout(rows))
+    refs = compilations.compilations(rows)
     records = []
     for ref in refs:
         if rng.random() < 0.2:
@@ -165,7 +148,7 @@ def test_every_episode_stands_in_at_most_one_compilation_that_takes_it(seed):
     for _ in range(rng.randint(0, 5)):
         records.append(rec(COMPILATION_MEMBER, rng.choice([""] + [ref.key for ref in refs]), episode=rng.randint(1, 40)))
     records = settings.canonical({(each.episode, each.compilation, each.lever): each for each in records}.values())
-    outcome = resolve(rows, records, ORDER)
+    outcome = compilations.resolve(rows, records, ORDER)
     best = {}
     for each in rows:
         if not each.is_compilation:
@@ -188,7 +171,7 @@ def test_an_episode_inherits_the_levers_of_its_compilation_between_its_own_and_i
     other = [{"group": "ruchime", "source_id": 2, "player": "vk"}]
     comp = key(1, 1, 4)
     records = [rec("reference.order", other), rec("reference.order", order, compilation=comp)]
-    ref = resolve(singles(1, 4) + [row(1, 1, 4, 2160)], records, ORDER).members[(1, 2)]
+    ref = compilations.resolve(singles(1, 4) + [row(1, 1, 4, 2160)], records, ORDER).members[(1, 2)]
     by_episode = {(each.season, each.episode): each for each in
                   settings.episode_settings(records, [(1, 2), (1, 9)], {(1, 2): ref})}
     chosen = next(x for x in by_episode[(1, 2)].levers if x.lever == "reference.order")

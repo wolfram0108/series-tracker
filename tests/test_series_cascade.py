@@ -10,7 +10,7 @@ import sqlite3
 import pytest
 
 from core import BaseModule, Bus, Runner
-from core.contracts import ReleaseTable, StoredTable, TableGetReply, TableState
+from core.contracts import ReleaseTable, TableGetReply, TableState
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.catalog.repository import CatalogRepository
@@ -114,8 +114,8 @@ class SlowSource(BaseModule):
         self.entered.set()
         await self.release.wait()
         url = env.payload["url"]
-        table = StoredTable.of(ReleaseTable(url=url, site="vk_channel", complete=True))
-        return TableGetReply(url=url, state=TableState.READY, table=table).model_dump()
+        table = ReleaseTable(url=url, site="vk_channel", complete=True)
+        return TableGetReply(url=url, state=TableState.READY, table=table).model_dump(mode="json")
 
 
 @pytest.mark.asyncio

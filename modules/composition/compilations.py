@@ -18,9 +18,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
-from core import native
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, Absence, CompilationEpisode, CompilationRef,
-                            CompilationView, SettingRecord, parse_compilation_key)
+                            CompilationView, CompositionRow, RowState, SettingRecord, compilation_key,
+                            parse_compilation_key)
 
 from . import settings
 
@@ -35,22 +35,35 @@ class Outcome:
     views: list[CompilationView] = field(default_factory=list)
 
 
-def compilations(rows: native.Rows) -> list[CompilationRef]:
-    """One reference per key over the rows that play, are grouped and are numbered as a range, its video the highest row
-    (the earlier on a tie), in the order the keys come in the layout."""
-    return [CompilationRef(key=key, source_id=source_id, row_key=row_key, player=player, voice_group=group, height=height,
-                           start=start, end=end)
-            for key, source_id, row_key, player, group, height, start, end in rows.compilations()]
+def compilations(rows: Sequence[CompositionRow]) -> list[CompilationRef]:
+    """One reference per key over the rows that play and are numbered, its video the highest row (the earlier on a tie)."""
+    best: dict[str, tuple[CompositionRow, int]] = {}
+    for position, row in enumerate(rows):
+        if row.excluded or row.state != RowState.PLAYABLE or not row.is_compilation or not row.grouped or row.season is None:
+            continue
+        key = compilation_key(row.voice_label, row.source_id, row.player, row.season, row.episode_start, row.episode_end)
+        held = best.get(key)
+        if held is None or (row.height or 0) > (held[0].height or 0):
+            best[key] = (row, position)
+    return [CompilationRef(key=key, source_id=row.source_id, row_key=row.row_key, player=row.player,
+                           voice_group=row.voice_label, height=row.height, start=row.episode_start, end=row.episode_end)
+            for key, (row, _) in best.items()]
 
 
-def resolve(rows: native.Rows, records: Sequence[SettingRecord], source_order: Mapping[int, int]) -> Outcome:
+def resolve(rows: Sequence[CompositionRow], records: Sequence[SettingRecord],
+            source_order: Mapping[int, int]) -> Outcome:
     """The membership of every episode and the view of every compilation, by the rule of the module docstring."""
     refs = compilations(rows)
     if not refs:
         return Outcome()
     season_of = {ref.key: _season(ref) for ref in refs}
-    # The best single video of every episode that plays (at least 1: a video of no known height still plays).
-    singles: dict[Episode, int] = rows.singles()
+    singles: dict[Episode, int] = {}
+    for row in rows:
+        if row.excluded or row.state != RowState.PLAYABLE or row.is_compilation or row.season is None \
+                or row.episode_start is None:
+            continue
+        slot = (row.season, row.episode_start)
+        singles[slot] = max(singles.get(slot, 0), row.height or 0, 1)
     takes = {ref.key: _value(records, COMPILATION_TAKE, season_of[ref.key], None, ref.key) is not False for ref in refs}
     covered: dict[Episode, list[CompilationRef]] = {}
     for ref in refs:
@@ -100,7 +113,7 @@ def resolve(rows: native.Rows, records: Sequence[SettingRecord], source_order: M
     return outcome
 
 
-def fits(rows: native.Rows, records: Sequence[SettingRecord], season: int, episode: int, key: str,
+def fits(rows: Sequence[CompositionRow], records: Sequence[SettingRecord], season: int, episode: int, key: str,
          source_order: Mapping[int, int]) -> bool:
     """Whether the episode may be put into the compilation by the user's word: it covers it, is switched on and is better."""
     view = next((each for each in resolve(rows, records, source_order).views

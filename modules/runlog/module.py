@@ -34,10 +34,9 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-import orjson
 from pydantic import BaseModel
 
-from core import BaseModule, compute, native, storage
+from core import BaseModule, compute, storage
 from core.secrets import redacted
 from core.contracts.release_table import TABLE_TRACE_TOPIC
 from core.contracts.work import RUN_CHANGED
@@ -76,19 +75,9 @@ def _written(payload):
     """What of a payload goes into a dump: a model handed over in the process whole (the layout, megabytes) is told by its
     kind and the size of its lists; its rows are in the dump as the planner's trace of the inputs of its plan."""
     if isinstance(payload, BaseModel):
-        return {"model": type(payload).__name__, **{name: (len(value) if isinstance(value, (list, dict, bytes)) else value)
+        return {"model": type(payload).__name__, **{name: (len(value) if isinstance(value, (list, dict)) else value)
                                                     for name, value in payload.__dict__.items()}}
     return redacted(payload)
-
-
-def _plain(value):
-    """A value JSON has no form for, as the dump keeps it: records kept by columns as their records, a text written by the
-    count as what it says, anything else by its repr."""
-    if isinstance(value, bytes) and value[:4] == b"COLS":
-        return json.loads(native.records(value))
-    if isinstance(value, orjson.Fragment):
-        return json.loads(orjson.dumps(value))
-    return repr(value)
 
 
 def _line(entry) -> str:
@@ -96,7 +85,7 @@ def _line(entry) -> str:
     if kind == "bus":
         body = {"kind": body.kind, "topic": body.topic, "cid": body.correlation_id, "reply_to": body.reply_to,
                 "admission": body.admission, "payload": _written(body.payload)}
-    return json.dumps({"t": at, "e": kind, **body}, ensure_ascii=False, default=_plain)
+    return json.dumps({"t": at, "e": kind, **body}, ensure_ascii=False, default=repr)
 
 
 def _pack(entries: list) -> bytes:

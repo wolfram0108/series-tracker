@@ -1,12 +1,12 @@
 """Route registration and answer helpers shared by the gateway API blocks."""
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
-import orjson
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
@@ -18,9 +18,9 @@ from core.reasons import code_of, relayed
 
 
 def _text(answer: Any) -> bytes:
-    # A value JSON has no form for (a date, a set) is written the way the framework writes it; keys that are numbers are
-    # written as text, as JSON has it. Ten megabytes of a layout are written in tens of milliseconds, not in a hundred.
-    return orjson.dumps(answer, default=jsonable_encoder, option=orjson.OPT_NON_STR_KEYS)
+    # A value JSON has no form for (a date, a set) is written the way the framework writes it.
+    return json.dumps(answer, ensure_ascii=False, allow_nan=False, separators=(",", ":"),
+                      default=jsonable_encoder).encode("utf-8")
 
 
 async def as_made(answer: Any) -> Response:

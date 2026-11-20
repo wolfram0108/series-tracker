@@ -149,27 +149,19 @@ class TableReader:
 
     # --- requests -----------------------------------------------------------------------
 
-    async def get(self, request: TableGetRequest) -> dict:
-        """The reply of `sources.table.get` (`TableGetReply`): the table is given as it is stored, its rows the field of
-        columns they are kept as — nothing is parsed, no model is made of thousands of rows."""
-        state, url, stored, why = await self._get(request)
-        record = stored.record() if stored is not None else None
-        fresh = self._fresh_until_of(record.url, record.read_at) if record is not None else None
-        return {"url": url, "state": state.value, "table": record.model_dump() if record is not None else None,
-                "reason": why, "fresh_until": fresh}
+    async def get(self, request: TableGetRequest) -> TableGetReply:
+        reply = await self._get(request)
+        return reply.model_copy(update={"fresh_until": self.fresh_until(reply.table)}) if reply.table is not None else reply
 
     def fresh_until(self, table: ReleaseTable | None) -> str | None:
         """The end of the term of a table: its read and the term of its site (term.py); none for a table never read."""
-        return None if table is None else self._fresh_until_of(table.url, table.read_at)
-
-    def _fresh_until_of(self, url: str, read_at: str | None) -> str | None:
-        if not read_at:
+        if table is None or not table.read_at:
             return None
         try:
-            moment = datetime.fromisoformat(read_at)
+            read_at = datetime.fromisoformat(table.read_at)
         except ValueError:
             return None
-        return (moment + self._term.of(url)).astimezone(timezone.utc).isoformat()
+        return (read_at + self._term.of(table.url)).astimezone(timezone.utc).isoformat()
 
     async def fresh_of(self, urls: list[str]) -> list[TableReady]:
         """The stored tables of the addresses (by their canonical page) with the end of their term; an address with no
@@ -193,53 +185,48 @@ class TableReader:
                 found.append(TableReady(url=page["url"], read_at=page["read_at"], fresh_until=self.fresh_until(table)))
         return found
 
-    async def _get(self, request: TableGetRequest) -> tuple[TableState, str, Stored | None, str | None]:
-        """How the page stands for the request: its state, its canonical address, what is stored of it (its last
-        complete table, if any) and the reason of a failure."""
+    async def _get(self, request: TableGetRequest) -> TableGetReply:
         found = self._resolve(request.url)
         if found is None:
             # No site reads the address now (the provider of the socket is not up and was never heard of): the page is not read,
             # but the table it had still serves, as after any failed read — a source never loses its rows for a missing reader.
             try:
-                held = await self._repo.stored(request.url)
+                held = (await self._repo.stored(request.url)).table
             except Exception:  # noqa: BLE001 - a store that cannot be read has no table to give; the refusal is the answer
                 self._log.exception("the table of %s could not be read for a page no site reads", request.url)
                 held = None
-            return TableState.FAILED, request.url, held, self._blocked(request.url) or reason("site_not_found")
+            return TableGetReply(url=request.url, state=TableState.FAILED, table=held,
+                                 reason=self._blocked(request.url) or reason("site_not_found"))
         site, key = found
-        # The record is read outside the gate, so the pages of a series are read side by side; in the gate it is the one the
-        # decision is made on unless the page was written since, and then it is read again there.
-        seen = self._repo.version(key)
-        stored = await self._repo.stored(key)
         async with self._gate:
-            if self._repo.version(key) != seen:
-                stored = await self._repo.stored(key)
+            stored = await self._repo.stored(key)
+            table = stored.table
             if not request.refresh:
                 return self._as_it_is(key, stored)
-            if stored.head is not None and self._fresh_at(key, stored.head["read_at"]):
-                return TableState.READY, key, stored, None
-            if getattr(site, "first_read_by_user", False) and (stored.head is None or not request.by_sync):
+            if table is not None and self._fresh(table):
+                return TableGetReply(url=key, state=TableState.READY, table=table)
+            if getattr(site, "first_read_by_user", False) and (table is None or not request.by_sync):
                 # The page of such a site is begun by the user's command; a page nobody has read waits for it, and a page
                 # that was read is read again by a synchronization only (its rows are the setting of its source).
                 return self._as_it_is(key, stored)
             if key not in self._reading:
                 if (why := self._blocked(key)) is not None:
                     # The page would be read by a provider that is not up: no read begins, the last table stays in force.
-                    return TableState.FAILED, key, stored, why
+                    return TableGetReply(url=key, state=TableState.FAILED, table=table, reason=why)
                 self._launch(site, key, rows=request.rows)
-            return TableState.READING, key, stored, None
+            return TableGetReply(url=key, state=TableState.READING, table=table)
 
-    def _as_it_is(self, key: str, stored: Stored) -> tuple[TableState, str, Stored | None, str | None]:
+    def _as_it_is(self, key: str, stored: Stored) -> TableGetReply:
         """The page as it stands, with no read: a recount of a layout must not cost a read of the site. A read that goes
         is `reading`, a last read that failed is `failed` with its reason, any other complete table is `ready` however old,
         and a page nothing was read of is `absent`. All of it with the last complete table, when there is one."""
         if key in self._reading:
-            return TableState.READING, key, stored, None
+            return TableGetReply(url=key, state=TableState.READING, table=stored.table)
         if stored.state == "failed":
-            return TableState.FAILED, key, stored, stored.reason
-        if stored.head is not None:
-            return TableState.READY, key, stored, None
-        return TableState.ABSENT, key, None, None
+            return TableGetReply(url=key, state=TableState.FAILED, table=stored.table, reason=stored.reason)
+        if stored.table is not None:
+            return TableGetReply(url=key, state=TableState.READY, table=stored.table)
+        return TableGetReply(url=key, state=TableState.ABSENT)
 
     async def read(self, request: TableGetRequest, *, changed: bool = False) -> None:
         """Read the page now, term or not, unless a read of it is already going. The user asked for it: the read takes

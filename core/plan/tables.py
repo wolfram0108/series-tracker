@@ -30,10 +30,6 @@ class RowId:
     row_key: str
     video: str = ""
 
-    def fields(self) -> dict:
-        """Its fields as a dict, in their order (what `dataclasses.asdict` gives, with no deep copy of a few texts)."""
-        return {"source_id": self.source_id, "row_key": self.row_key, "video": self.video}
-
 
 @dataclass(frozen=True)
 class Snapshot:
@@ -50,11 +46,6 @@ class Snapshot:
     @property
     def variant_label(self) -> str:
         return self.label or self.group or ""
-
-    def fields(self) -> dict:
-        """Its fields as a dict, in their order (what `dataclasses.asdict` gives, with no deep copy of a few texts)."""
-        return {"source": self.source, "player": self.player, "group": self.group, "height": self.height, "link": self.link,
-                "label": self.label}
 
 
 @dataclass(frozen=True)

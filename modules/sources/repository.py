@@ -1,8 +1,8 @@
 """Репозиторий sources: таблица trackers (зеркала, типы аутентификации) и таблицы страниц сайтов.
 
-Tables of pages: `release_tables` holds, per page, the last complete table — its head (with the parts its read could not
-get) and its rows as one field (`rows`, kept by columns: core.native) — and the state of the read in progress. A new complete
-table replaces the record in one statement. `provider_manifest` holds the last manifest of the provider of the socket
+Tables of pages: `release_tables` holds, per page, the head of the last complete table (with the parts its read could
+not get) and the state of the read in progress; `release_rows` holds the rows of that complete table. A new complete table
+replaces the rows in one transaction. `provider_manifest` holds the last manifest of the provider of the socket
 (modules/sources/provider), by its address.
 """
 from __future__ import annotations
@@ -10,88 +10,77 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from functools import cached_property
 from urllib.parse import urlparse
 
-import orjson
-
-from core import native
-from core.contracts import ReleaseTable, StoredTable, rows_field
+from core.contracts import ReleaseTable, RowState, RowVoice, TableRow, UnreadPart
 from core.contracts.provider import Manifest
 from core.contracts.torrent import order_name
 from core.db import Database
 
 from . import hosts
 
-# The head of the last complete table of a page and its rows are one record: a reader takes both of one table.
-_LAST_TABLE = ("SELECT site, names, title, site_voice, channel, read_at, complete, unread, rows, state AS read_state,"
-               " reason AS read_reason FROM release_tables WHERE url = ?")
-
-# Every write of the record of a page takes the next number of the module (`_COUNT`, then `_NEXT_WRITE` in the same
-# transaction): a page written, forgotten and written again never has a number it had, so a reader that kept the number
-# of a page knows whether it was written since.
-_COUNT = ("UPDATE release_writes SET last = last + 1", ())
-_NEXT_WRITE = "(SELECT last FROM release_writes)"
+# One statement is one snapshot: the head and the rows of a page cannot come from two different tables.
+_LAST_TABLE = (
+    'SELECT t.site, t.names, t.title, t.site_voice, t.channel, t.read_at, t.complete, t.unread, t.state AS read_state, t.reason AS read_reason, r.seq, r."key" AS row_key, r.player, r.player_label,'
+    " r.grp, r.text, r.voice_name, r.voice_kind, r.heights, r.state AS row_state, r.reason AS row_reason,"
+    " r.duration_s, r.published, r.link, r.video, r.site_fields, r.part, r.timeline, r.track, r.language, r.subtitle_type,"
+    " r.season, r.episode"
+    " FROM release_tables t LEFT JOIN release_rows r ON r.url = t.url WHERE t.url = ? ORDER BY r.seq")
 
 _SAVE_HEAD = (
-    "INSERT INTO release_tables (url, site, names, title, site_voice, channel, read_at, unread, rows, complete, state,"
-    " reason, reading_since, writes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'ready', NULL, NULL, " + _NEXT_WRITE + ")"
+    "INSERT INTO release_tables (url, site, names, title, site_voice, channel, read_at, unread, complete, state, reason,"
+    " reading_since) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'ready', NULL, NULL)"
     " ON CONFLICT (url) DO UPDATE SET site = excluded.site, names = excluded.names, title = excluded.title,"
     " site_voice = excluded.site_voice,"
-    " channel = excluded.channel, unread = excluded.unread, rows = excluded.rows,"
-    " read_at = excluded.read_at, complete = 1, state = 'ready', reason = NULL, reading_since = NULL,"
-    " writes = excluded.writes")
+    " channel = excluded.channel, unread = excluded.unread,"
+    " read_at = excluded.read_at, complete = 1, state = 'ready', reason = NULL, reading_since = NULL")
+
+_SAVE_ROW = (
+    'INSERT INTO release_rows (url, seq, "key", player, player_label, grp, text, voice_name, voice_kind, heights,'
+    " state, reason, duration_s, published, link, video, site_fields, part, timeline, track, language,"
+    " subtitle_type, season, episode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
 
 @dataclass(frozen=True)
 class Stored:
     """What the page has: the last complete table (None while there is none) and how the last read ended.
     `state` is `reading`, `ready` or `failed` (None for a page never asked for); `reason` is the failure of the last read.
-    `parted` is False for a table stored before its rows named their parts: a part of it cannot keep its rows.
-
-    The table is kept as it is stored: its head (`head`, every field but the rows) and its rows (`rows`, kept by columns).
-    `record` gives it on as it is; `table` is the model, made once when a reader needs it."""
-    head: dict | None
-    rows: bytes | None
+    `parted` is False for a table stored before its rows named their parts: a part of it cannot keep its rows."""
+    table: ReleaseTable | None
     state: str | None
     reason: str | None
     parted: bool = True
 
-    @cached_property
-    def table(self) -> ReleaseTable | None:
-        record = self.record()
-        return None if record is None else record.table()
 
-    def record(self) -> StoredTable | None:
-        """The table as it is given on: its head and its rows as they are stored."""
-        return None if self.head is None else StoredTable(**self.head, rows=self.rows or rows_field([]))
+def _row_of(record: dict) -> TableRow:
+    return TableRow(
+        key=record["row_key"], player=record["player"], player_label=record["player_label"], group=record["grp"],
+        text=record["text"], voice=RowVoice(name=record["voice_name"], kind=record["voice_kind"]),
+        heights=json.loads(record["heights"]), state=RowState(record["row_state"]), reason=record["row_reason"],
+        duration_s=record["duration_s"], published=record["published"], link=record["link"], video=record["video"],
+        site_fields=json.loads(record["site_fields"]), part=record["part"], timeline=record["timeline"],
+        track=record["track"], language=record["language"], subtitle_type=record["subtitle_type"],
+        season=record["season"], episode=record["episode"])
 
 
 def _stored(conn, url: str) -> Stored:
-    head = conn.execute(_LAST_TABLE, (url,)).fetchone()
-    if head is None:
-        return Stored(None, None, None, None)
-    table = {"url": url, "site": head["site"], "names": json.loads(head["names"]), "title": head["title"],
-             "site_voice": head["site_voice"], "channel": head["channel"], "read_at": head["read_at"], "complete": True,
-             "unread": json.loads(head["unread"] or "[]")} if head["complete"] else None
-    return Stored(table, head["rows"] if table is not None else None, head["read_state"], head["read_reason"],
-                  parted=head["unread"] is not None)
+    records = conn.execute(_LAST_TABLE, (url,)).fetchall()
+    if not records:
+        return Stored(None, None, None)
+    head = records[0]
+    table = ReleaseTable(
+        url=url, site=head["site"], names=json.loads(head["names"]), title=head["title"], site_voice=head["site_voice"],
+        channel=head["channel"],
+        read_at=head["read_at"], complete=True,
+        rows=[_row_of(record) for record in records if record["seq"] is not None],
+        unread=[UnreadPart.model_validate(each) for each in json.loads(head["unread"] or "[]")]) if head["complete"] else None
+    return Stored(table, head["read_state"], head["read_reason"], parted=head["unread"] is not None)
 
 
 class SourcesRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
         self._cache: list[dict] | None = None
-        # The writes of the record of every page made here, the only writer of the records: a reader that looked at a page
-        # outside the gate of the reads tells by it whether the page was written since.
-        self._versions: dict[str, int] = {}
-
-    def version(self, url: str) -> int:
-        """How many writes of the record of the page this process has made."""
-        return self._versions.get(url, 0)
-
-    def _wrote(self, *urls: str) -> None:
-        for url in urls:
-            self._versions[url] = self._versions.get(url, 0) + 1
 
     async def all_trackers(self) -> list[dict]:
         if self._cache is None:
@@ -132,18 +121,18 @@ class SourcesRepository:
         """Replace the page's table in one transaction: a reader sees the old table or the new one, never a part."""
         if not table.complete or not table.read_at:
             raise ValueError("only a complete table is stored")
-        # Two rows of one key are no table: a reader finds a row by its key.
-        if len({row.key for row in table.rows}) != len(table.rows):
-            raise ValueError("two rows of the table have one key")
-        await self._db.execute_many([_COUNT, (_SAVE_HEAD, (
-            table.url, table.site, json.dumps(table.names, ensure_ascii=False), table.title, table.site_voice, table.channel,
-            table.read_at, json.dumps([each.model_dump(mode="json") for each in table.unread], ensure_ascii=False),
-            rows_field(table.rows)))])
-        self._wrote(table.url)
-
-    async def writes(self) -> dict[str, int]:
-        """The number of the last write of the record of every page."""
-        return {row["url"]: row["writes"] for row in await self._db.fetch_all("SELECT url, writes FROM release_tables")}
+        statements: list[tuple[str, tuple]] = [
+            (_SAVE_HEAD, (table.url, table.site, json.dumps(table.names, ensure_ascii=False), table.title, table.site_voice,
+                          table.channel, table.read_at,
+                          json.dumps([each.model_dump(mode="json") for each in table.unread], ensure_ascii=False))),
+            ("DELETE FROM release_rows WHERE url = ?", (table.url,))]
+        for seq, row in enumerate(table.rows):
+            statements.append((_SAVE_ROW, (
+                table.url, seq, row.key, row.player, row.player_label, row.group, row.text, row.voice.name,
+                row.voice.kind, json.dumps(row.heights), row.state.value, row.reason, row.duration_s, row.published,
+                row.link, row.video, json.dumps(row.site_fields, ensure_ascii=False), row.part, row.timeline, row.track.value,
+                row.language, row.subtitle_type, row.season, row.episode)))
+        await self._db.execute_many(statements)
 
     async def pages(self) -> list[dict]:
         """Every page the module holds a record of: its address, the end of its last complete table (none while it was
@@ -152,26 +141,22 @@ class SourcesRepository:
 
     async def forget_pages(self, urls: list[str]) -> None:
         """The records of these pages go with their rows, in one transaction."""
-        await self._db.execute_many([("DELETE FROM release_tables WHERE url = ?", (url,)) for url in urls])
-        self._wrote(*urls)
+        await self._db.execute_many([statement for url in urls for statement in (
+            ("DELETE FROM release_rows WHERE url = ?", (url,)), ("DELETE FROM release_tables WHERE url = ?", (url,)))])
 
     async def mark_reading(self, url: str, site: str, since: str) -> None:
         """Record that a read of the page began; the last complete table stays as it is."""
-        await self._db.execute_many([_COUNT, (
-            "INSERT INTO release_tables (url, site, state, reading_since, writes) VALUES (?, ?, 'reading', ?, "
-            + _NEXT_WRITE + ") ON CONFLICT (url) DO UPDATE SET state = 'reading', reading_since = excluded.reading_since,"
-            " reason = NULL, writes = excluded.writes",
-            (url, site, since))])
-        self._wrote(url)
+        await self._db.execute(
+            "INSERT INTO release_tables (url, site, state, reading_since) VALUES (?, ?, 'reading', ?)"
+            " ON CONFLICT (url) DO UPDATE SET state = 'reading', reading_since = excluded.reading_since, reason = NULL",
+            (url, site, since))
 
     async def mark_failed(self, url: str, site: str, reason: str) -> None:
         """Record that the read failed; the last complete table stays as it is."""
-        await self._db.execute_many([_COUNT, (
-            "INSERT INTO release_tables (url, site, state, reason, writes) VALUES (?, ?, 'failed', ?, " + _NEXT_WRITE + ")"
-            " ON CONFLICT (url) DO UPDATE SET state = 'failed', reason = excluded.reason, reading_since = NULL,"
-            " writes = excluded.writes",
-            (url, site, reason))])
-        self._wrote(url)
+        await self._db.execute(
+            "INSERT INTO release_tables (url, site, state, reason) VALUES (?, ?, 'failed', ?)"
+            " ON CONFLICT (url) DO UPDATE SET state = 'failed', reason = excluded.reason, reading_since = NULL",
+            (url, site, reason))
 
 
     async def players_of_pages(self, urls: list[str]) -> tuple[dict[tuple[str, str], int], dict[str, int]]:
@@ -184,15 +169,16 @@ class SourcesRepository:
         def read(conn) -> tuple[dict[tuple[str, str], int], dict[str, int]]:
             # By the name of the order of sources: the releases of the torrent are one player there (order_name).
             held: dict[tuple[str, str], set[str]] = {}
+            for player, site, url in conn.execute(
+                    f"SELECT DISTINCT r.player, t.site, t.url FROM release_rows r JOIN release_tables t ON t.url = r.url"
+                    f" WHERE t.url IN ({marks})", urls):
+                held.setdefault((order_name(player), site), set()).add(url)
             heights: dict[str, int] = {}
-            for url, site, rows in conn.execute(
-                    f"SELECT url, site, rows FROM release_tables WHERE complete = 1 AND url IN ({marks})", urls):
-                for row in orjson.loads(native.table_json(rows)) if rows else ():
-                    player = order_name(row["player"])
-                    held.setdefault((player, site), set()).add(url)
-                    height = max(row["heights"] or [0])
-                    if height:
-                        heights[player] = max(height, heights.get(player, 0))
+            for player, height in conn.execute(
+                    f"SELECT r.player, MAX(CAST(j.value AS INTEGER)) FROM release_rows r, json_each(r.heights) j"
+                    f" WHERE r.url IN ({marks}) GROUP BY r.player", urls):
+                if height:
+                    heights[order_name(player)] = max(height, heights.get(order_name(player), 0))
             return {key: len(pages) for key, pages in held.items()}, heights
 
         return await self._db.transaction(read)

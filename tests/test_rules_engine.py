@@ -633,10 +633,10 @@ def test_unknown_action_type_disables_rule_not_profile():
         _rule(1, "r", [{"action_type": "assign_voiceoverr",
                         "action_pattern": "X"}],
               conditions=[_cond(_blocks("S01"))])])
+    assert profile.rules == []
     assert len(profile.invalid_rules) == 1
     assert "action_unknown" in profile.invalid_rules[0]["error"]
-    # The rule is out of the profile: the title its condition names is read by no rule.
-    assert process_title(profile, "Some.Show.S01E02") == {"excluded": False, "extracted": {}, "events": [], "errors": []}
+    assert process_title(profile, "Some.Show.S01E02")["excluded"] is False
 
 
 

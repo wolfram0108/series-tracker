@@ -6,8 +6,6 @@ import os
 
 import pytest
 
-from sources_support import rows_of
-
 from core import BaseModule, Bus
 from core.contracts import TableGetRequest
 from core.contracts.torrent import parse_link, player_of, track_link
@@ -124,14 +122,14 @@ async def test_the_table_of_a_trackers_page_is_the_tracks_unpack_read_and_is_rea
     assert first["state"] == "reading"
     assert (await asyncio.wait_for(ready.queue.get(), 5)).payload["url"] == PAGE
     table = (await unpack.request("sources.table.get", {"url": PAGE, "refresh": False}))["table"]
-    assert [(row["key"], row["video"], row["voice"]["name"]) for row in rows_of(table["rows"])] == [
+    assert [(row["key"], row["video"], row["voice"]["name"]) for row in table["rows"]] == [
         ("Show/E01.mkv#1", "page/Show/E01.mkv", "Студия"), ("Show/E01.mkv#2", "page/Show/E01.mkv", "")]
 
     unpack.rows = [track("Show/E01.mkv", 1, "Студия")]
     unpack.changed(PAGE)
     assert (await asyncio.wait_for(ready.queue.get(), 5)).payload["url"] == PAGE
     table = (await unpack.request("sources.table.get", {"url": PAGE, "refresh": False}))["table"]
-    assert [row["key"] for row in rows_of(table["rows"])] == ["Show/E01.mkv#1"]
+    assert [row["key"] for row in table["rows"]] == ["Show/E01.mkv#1"]
 
 
 async def test_a_trackers_page_without_unpack_running_fails_with_that_reason(stand):

@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from core import BaseModule, Bus, BusRequestError, native
+from core import BaseModule, Bus, BusRequestError
 from core.contracts import NotAllowed
 from core.db import Database
 from modules.sources.module import SourcesModule
@@ -62,11 +62,7 @@ class System:
         return await nxt(self.table_end)
 
     async def table(self, url: str = CARD) -> dict:
-        """The reply of `sources.table.get` with the rows of its table (kept by columns) read as the JSON of their models."""
-        reply = await self.probe.request("sources.table.get", {"url": url, "refresh": False})
-        if reply.get("table") is not None:
-            reply["table"]["rows"] = json.loads(native.table_json(reply["table"]["rows"]))
-        return reply
+        return await self.probe.request("sources.table.get", {"url": url, "refresh": False})
 
 
 async def start(tmp_path, mock: MockProvider, server, *, token: str = "", saved=None, path=None) -> System:
@@ -484,7 +480,7 @@ async def test_a_page_no_site_reads_now_still_serves_the_table_it_had_so_a_sourc
             for refresh in (True, False):
                 got = await sources.on_table_get(type("Env", (), {"payload": {"url": CARD, "refresh": refresh}})())
                 assert got["state"] == "failed" and json.loads(got["reason"])["code"] == "provider_not_connected"
-                assert [row["player"] for row in json.loads(native.table_json(got["table"]["rows"]))] == ["line:X"]
+                assert [row["player"] for row in got["table"]["rows"]] == ["line:X"]
             never = await sources.on_table_get(type("Env", (), {"payload": {"url": "title://mock/99/X"}})())
             assert never["state"] == "failed" and never["table"] is None
         finally:

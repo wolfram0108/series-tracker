@@ -11,9 +11,8 @@ import functools
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
-# The heavy counts (core.native) let the interpreter go while they run, so they count side by side on as many cores; the
-# interpreter itself runs one thread of Python at a time.
-POOL_SIZE = 4
+# The interpreter runs one thread of Python at a time: more threads would not count faster, two keep one free.
+POOL_SIZE = 2
 
 _pool = ThreadPoolExecutor(max_workers=POOL_SIZE, thread_name_prefix="compute")
 

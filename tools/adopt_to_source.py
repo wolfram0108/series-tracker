@@ -118,11 +118,11 @@ def apply(conn: sqlite3.Connection, series_id: int, source_ids: list[int]) -> Re
             if found is None:
                 raise Refused(f"the source {source_id} is no source of the series {series_id}")
             url = found[0]
-            table = conn.execute("SELECT site, state, rows FROM release_tables WHERE url = ?", (url,)).fetchone()
+            table = conn.execute("SELECT site, state FROM release_tables WHERE url = ?", (url,)).fetchone()
             if table is None or table[1] != "ready":
                 raise Refused(f"the source {source_id} ({url}) has no table that is ready: read it first")
-            held = {(row["player"], row["video"]): (source_id, row["key"], row["link"], table[0])
-                    for row in json.loads(table[2] or "[]")}
+            held = {(player, video): (source_id, key, link, table[0]) for key, player, video, link in
+                    conn.execute('SELECT "key", player, video, link FROM release_rows WHERE url = ?', (url,))}
             if not held:
                 raise Refused(f"the table of {url} holds no row")
             rows.update(held)
@@ -190,9 +190,7 @@ def apply(conn: sqlite3.Connection, series_id: int, source_ids: list[int]) -> Re
                 conn.execute("UPDATE output_settings SET target = ?, value = ? WHERE rowid = ?", (new_target, new_value, rowid))
                 report.settings_rewritten += 1
 
-        # Derived: with no rows and no print of its inputs, the service counts the layout again at its start.
-        conn.execute("UPDATE composition_state SET rows = NULL, subtitles = NULL, inputs = NULL WHERE series_id = ?",
-                     (series_id,))
+        conn.execute("DELETE FROM composition_rows WHERE series_id = ?", (series_id,))  # derived: the service counts them again
         conn.execute("DELETE FROM composition_sources WHERE series_id = ?", (series_id,))
         conn.execute("COMMIT")
     except BaseException:

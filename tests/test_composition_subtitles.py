@@ -1,12 +1,11 @@
 """The subtitles in the composition (stage 15, DESIGN.md 7.1.1): rows of their own, apart from the rows of sound; one table on
 the series and one on an episode, in the order of core.subtitle_queue, with the variants the level leaves out marked."""
 from core.contracts.compilation import compilation_key
-from core.contracts import (SUBTITLES_ALLOW, SUBTITLES_ORDER, CompositionRow, EffectiveLever, Level, ReleaseTable,
-                            RowState, RowTrack, RowVoice, RuleResult, RulesApplyReply, SeriesSource, SettingRecord,
-                            SourceType, StoredTable, TableRow, variant_target)
+from core.contracts import (SUBTITLES_ALLOW, SUBTITLES_ORDER, CompositionRow, EffectiveLever, Level, RowState, RowTrack,
+                            SettingRecord, variant_target)
 from core.subtitle_queue import ordered
 from modules.composition import queues
-from modules.composition.project import SourceInput, project
+from modules.composition.project import split_rows
 from modules.composition.settings import retarget, validate
 
 
@@ -24,19 +23,9 @@ def sound(episode: int) -> CompositionRow:
 
 
 def test_the_rows_of_subtitles_are_apart_from_the_rows_of_sound_and_are_in_the_output_with_no_group():
-    rows = [TableRow(key="a1", player="torrent:1", state=RowState.PLAYABLE),
-            TableRow(key="s1", player="torrent:1", state=RowState.PLAYABLE, track=RowTrack.SUBTITLES,
-                     voice=RowVoice(name="Полные")),
-            TableRow(key="a2", player="torrent:1", state=RowState.PLAYABLE)]
-    table = StoredTable.of(ReleaseTable(url="https://example.org/t", site="t", complete=True, rows=rows))
-    answers = RulesApplyReply.of({key: RuleResult(season=1, episode=n, voiceover="Студия" if key != "s1" else None)
-                                  for key, n in (("a1", 1), ("s1", 1), ("a2", 2))})
-    source = SeriesSource(id=1, series_id=1, url="https://example.org/t", source_type=SourceType.WEB_VIDEO,
-                          parser_profile_id=7)
-    made = project([SourceInput(source, table, answers)], {"Студия": "Студия"}, {})
-    assert [row.row_key for row in made.rows] == ["a1", "a2"] and [row.row_key for row in made.subtitles] == ["s1"]
-    assert made.subtitles[0].in_output and made.subtitles[0].voice_group is None
-    assert made.subtitles[0].voice_label == "Полные"
+    rows = [sound(1), subtitles("Полные", 1), sound(2)]
+    assert split_rows(rows) == ([rows[0], rows[2]], [rows[1]])
+    assert rows[1].in_output and rows[1].voice_group is None
 
 
 def test_the_order_of_the_subtitles_is_the_users_then_the_sources_then_the_layout():

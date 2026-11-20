@@ -1,8 +1,5 @@
 """The rows of the output — the window «Выход», its plan and the planner: one way in, the table, the rules of the
 constructor, the voice-over groups (ЭТАП_10:107). A row the groups did not take is in none of it."""
-from pydantic import TypeAdapter
-
-from core import native
 from core.contracts import CompositionRow, RowState
 from core.contracts.availability import lines_of_level
 from core.plan.inputs import online_of
@@ -28,13 +25,11 @@ def test_a_row_is_of_the_output_when_the_rules_numbered_it_and_a_group_took_it()
 
 
 def test_a_row_no_group_took_reaches_neither_the_planner_nor_the_levels_of_the_window_however_high_it_is():
-    assert [row.id.row_key for row in online_of(native.Rows.from_json(TypeAdapter(list[CompositionRow]).dump_json(ROWS)))] == [
-        "ref"]
+    assert [row.id.row_key for row in online_of(ROWS)] == ["ref"]
     assert [row.row_key for row in lines_of_level(ROWS, 1, 1)] == ["ref"]
 
 
 def test_the_order_of_the_tracks_of_a_season_has_no_unknown_voice_over_and_keeps_a_group_that_has_no_row_now():
-    layout = native.Rows.from_json(TypeAdapter(list[CompositionRow]).dump_json(ROWS))
-    orders = season_orders({1: [UNKNOWN, "Ушедшая группа", "AniStar"]}, layout, {})
+    orders = season_orders({1: [UNKNOWN, "Ушедшая группа", "AniStar"]}, ROWS, {})
     assert orders == {1: ["Ушедшая группа", "AniStar"]}
-    assert [span.label for each in season_voices(orders, layout) for span in each.voices] == ["Ушедшая группа", "AniStar"]
+    assert [span.label for each in season_voices(orders, ROWS) for span in each.voices] == ["Ушедшая группа", "AniStar"]

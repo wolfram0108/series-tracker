@@ -6,8 +6,6 @@ time. The one number below (STUCK_S) only ends a test that is stuck.
 """
 import asyncio
 import json
-
-import orjson
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
@@ -17,7 +15,7 @@ import pytest
 
 from composition_fakes import (HOST, OTHER_PAGE, PAGE, FakeCatalog, FakeRules, FakeSources, FakeVoices, lecturer,
                                source)
-from core import BaseModule, Bus, BusRequestError, Runner, native
+from core import BaseModule, Bus, BusRequestError, Runner
 from core.contracts import (CompositionPreviewReply, CompositionReply, EffectiveLever, Level, QueuesReply, ReleaseTable, RowState,
                             Queue, TargetKind, ValueShape,
                             RowVoice, SettingsReset, SettingsSet, SettingsSetMany, SourceStatus, TableRow, TableState,
@@ -37,19 +35,8 @@ def db_path(tmp_path):
     return migrated(tmp_path / "composition.db")
 
 
-def plain(reply):
-    """A reply as a window gets it: the parts the module gives written (the rows of a layout, `orjson.Fragment`) read."""
-    if isinstance(reply, dict):
-        return {key: orjson.loads(orjson.dumps(value)) if isinstance(value, orjson.Fragment) else value
-                for key, value in reply.items()}
-    return reply
-
-
 class Probe(BaseModule):
     name = "probe"
-
-    async def request(self, topic, payload=None, *args, **kwargs):
-        return plain(await super().request(topic, payload, *args, **kwargs))
 
 
 @dataclass
@@ -110,11 +97,6 @@ class System:
     def sql(self, query: str, *params) -> list[tuple]:
         with closing(sqlite3.connect(self.db_path)) as conn:
             return conn.execute(query, params).fetchall()
-
-    def stored_rows(self, series_id: int) -> list[dict]:
-        """The rows of sound of the layout as its record keeps them (one field of columns), as the JSON of their models."""
-        found = self.sql("SELECT rows FROM composition_state WHERE series_id = ?", series_id)
-        return json.loads(native.Rows(found[0][0]).json()) if found and found[0][0] is not None else []
 
 
 @pytest.fixture
@@ -212,7 +194,8 @@ async def test_every_number_comes_from_the_answer_of_the_constructor_and_is_stor
     assert call.profile_id == 7 and call.series_season is None
     assert call.lines[0].key == "vk-1-1" and call.lines[0].text == "PID:fake.test | P:VK | Асура | Серия 1 | G:Сезон 1 | V:Ruchime | R:1080p"
     given = [(line.key, lecturer(line.text)) for line in call.lines]
-    stored = [(row["row_key"], row["season"], row["episode_start"], row["episode_end"]) for row in s.stored_rows(series_id)]
+    stored = s.sql("SELECT row_key, season, episode_start, episode_end FROM composition_rows WHERE series_id = ?"
+                   " ORDER BY seq", series_id)
     assert stored == [(key, found["season"], found["episode"], found["episode"]) for key, found in given]
 
 
@@ -310,32 +293,16 @@ async def test_the_whole_layout_holds_every_field_and_a_part_exactly_the_fields_
     from core.contracts import LAYOUT_PARTS
     s = system
     series_id = await laid_out(s)
-    head = {"series_id", "rev", "writes", "part"}  # what every reply carries
-    fields = {name for name, field in CompositionReply.model_fields.items() if not field.exclude} - head
+    fields = set(CompositionReply.model_fields) - {"series_id", "rev", "part"}
     whole = await s.probe.request("composition.get", {"series_id": series_id}, timeout=STUCK_S)
-    assert set(whole) - head == fields
+    assert set(whole) - {"series_id", "rev", "part"} == fields
     for part, held in LAYOUT_PARTS.items():
         assert held <= fields, part
         reply = await s.probe.request("composition.get", {"series_id": series_id, "part": part}, timeout=STUCK_S)
-        assert set(reply) - head == held, part
+        assert set(reply) - {"series_id", "rev", "part"} == held, part
 
 
 # --- M-14: whatever the cause, the layout is counted without the user, and counting twice changes nothing -----------
-
-@pytest.mark.asyncio
-async def test_every_write_of_the_content_of_a_series_raises_its_counter_and_a_read_of_the_same_table_does_not(system):
-    """The counter of the writes tells a reader whether anything of the layout was written since: a table read again
-    with the same rows moves only the time it was read, which is no content of the layout; other rows are."""
-    s = system
-    series_id = await laid_out(s, page(*season_rows(1, range(1, 4))))
-    written = (await s.get(series_id)).writes
-    assert written > 0
-    await s.counted(lambda: s.sources.finish(PAGE, page(*season_rows(1, range(1, 4))), read_at="2026-11-02T12:00:00+00:00"))
-    again = await s.get(series_id)
-    assert again.writes == written and again.sources[0].read_at == "2026-11-02T12:00:00+00:00"
-    await s.counted(lambda: s.sources.finish(PAGE, page(*season_rows(1, range(1, 5)))))
-    assert (await s.get(series_id)).writes == written + 1
-
 
 @pytest.mark.asyncio
 async def test_a_new_table_is_counted_and_names_the_episodes_that_differ(system):
@@ -528,7 +495,8 @@ async def test_the_name_the_constructor_assigned_beats_the_one_of_the_player_and
     assert [r.voice_group for r in reply.rows] == ["Моя", "Стар"]
     assert set(s.voices.asked[-1]) == {"AniStar", "Мой дубляж"}
     assert [r.voice_name for r in reply.rows] == ["Мой дубляж", "AniStar"]
-    assert [row["voice_name"] for row in s.stored_rows(series_id)] == ["Мой дубляж", "AniStar"]
+    assert s.sql("SELECT voice_name FROM composition_rows WHERE series_id = ? ORDER BY seq", series_id) == [
+        ("Мой дубляж",), ("AniStar",)]
 
 
 @pytest.mark.asyncio
@@ -891,7 +859,7 @@ class Consumer(BaseModule):
 
     async def on_changed(self, env) -> None:
         reply = await self.request("composition.get", {"series_id": env.payload["series_id"]}, timeout=STUCK_S)
-        self.seen.put_nowait((env.payload, CompositionReply.model_validate(plain(reply))))
+        self.seen.put_nowait((env.payload, CompositionReply.model_validate(reply)))
 
 
 @pytest.mark.asyncio
@@ -994,7 +962,7 @@ async def test_a_series_that_is_deleted_during_a_count_is_taken_whole_after_it_a
     s.catalog.delete_series(series_id)
     s.rules.release()
     assert await s.next(s.purged) == {"series_id": series_id, "owner": "composition"}
-    for table in ("composition_state", "composition_sources", "unknown_voices", "output_settings"):
+    for table in ("composition_rows", "composition_state", "composition_sources", "unknown_voices", "output_settings"):
         assert s.sql(f"SELECT COUNT(*) FROM {table}") == [(0,)], table
     assert s.taken(s.changed) == [] and s.taken(s.failed) == []
     assert (await s.get(series_id)).rev == 0
@@ -1161,46 +1129,22 @@ async def test_a_count_that_a_stop_cut_short_is_made_again_at_the_next_start_fro
 
 
 @pytest.mark.asyncio
-async def test_a_restart_with_nothing_changed_counts_nothing_and_a_change_of_any_input_counts_the_layout_again(
-        system, monkeypatch):
-    """A layout stands as it is stored while its inputs are those it was counted from, a lever the user set since
-    included; a change of any of them while the service was stopped — the card, the settings of the voice-overs, the
-    rules of a profile, the page of a source, the code — counts it again, and the start after that count counts nothing."""
-    import modules.composition.module as composition_module
+async def test_a_restart_with_nothing_changed_counts_everything_again_and_publishes_nothing(system):
     s = system
     series_id = await laid_out(s)
     await s.set(series_id, "voice.take", False, season=1, target=group_target("Рутина"))
     before = await s.get(series_id)
     s.taken(s.changed)
-    running = [s.composition]
-
-    async def restarted() -> int:
-        """The tables a start asks for: a count of the layout reads them, a layout that stands does not."""
-        await running[-1].stop()
-        again = CompositionModule(s.bus, Database(str(s.db_path)))
-        running.append(again)
-        asked = len(s.sources.requests)
-        await again.start()
-        await again.idle()
-        return len(s.sources.requests) - asked
-
-    def code_changed() -> None:
-        monkeypatch.setattr(composition_module, "code_print", lambda: "another code")
-
+    await s.composition.stop()
+    again = CompositionModule(s.bus, Database(str(s.db_path)))
+    await again.start()
     try:
-        assert await restarted() == 0
-        assert s.taken(s.changed) == [] and s.taken(s.failed) == [] and await s.get(series_id) == before
-        changes = [lambda: s.catalog.series[series_id].update(season=2),
-                   lambda: setattr(s.voices, "priority", ["kodik", "vk", "cvh"]),
-                   lambda: s.rules.versions.update({7: 1}),
-                   lambda: s.sources._written(PAGE), code_changed]
-        for change in changes:
-            change()
-            assert await restarted() > 0, change
-            assert await restarted() == 0, change
+        await again.idle()
+        assert s.taken(s.changed) == [] and s.taken(s.failed) == []
+        assert await s.get(series_id) == before
+        assert s.sources.requests[-1].refresh is False
     finally:
-        for each in running[1:]:
-            await each.stop()
+        await again.stop()
 
 
 @pytest.mark.asyncio
@@ -1453,7 +1397,7 @@ async def test_a_series_deleted_while_a_request_waits_refuses_the_request(system
 
 # --- composition.preview: an address before it is a source of a series -------------------------------------------------------
 
-COMPOSITION_TABLES = ("composition_state", "composition_sources", "unknown_voices", "output_settings")
+COMPOSITION_TABLES = ("composition_rows", "composition_state", "composition_sources", "unknown_voices", "output_settings")
 
 
 async def preview(s: System, url: str = PAGE, **more) -> CompositionPreviewReply:

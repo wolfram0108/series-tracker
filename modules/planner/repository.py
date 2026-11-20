@@ -2,42 +2,13 @@
 failed, the commands «Удалить» that wait, and the syncs under way (taken up again after a stop)."""
 from __future__ import annotations
 
-import hashlib
 import json
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from core.contracts import PackCard
 from core.db import Database
 from core.plan.files import container_of
 from core.plan.tables import Container
-
-
-# What the module keeps of a series, as its print reads it.
-_OWN = ("SELECT name, data FROM plan_assets WHERE series_id=? ORDER BY name",
-        "SELECT key FROM plan_failures WHERE series_id=? ORDER BY key",
-        "SELECT command FROM plan_commands WHERE series_id=? ORDER BY command",
-        "SELECT data FROM plan_outcomes WHERE series_id=?")
-
-
-def _fed(digest, row) -> None:
-    """A row of a table into a print: every value with its length, so that no two rows feed the same bytes."""
-    for value in row:
-        text = str(value).encode()
-        digest.update(len(text).to_bytes(8, "little"))
-        digest.update(text)
-
-
-@dataclass(frozen=True)
-class OwnTables:
-    """What the module keeps of a series, read at one moment: the print of it all (as `own_prints` makes it), the asset,
-    the failed attempts, the commands «Удалить» and the outcome of the last sync."""
-
-    print: str
-    containers: list[Container]
-    failures: list
-    commands: list
-    outcome: list[dict]
 
 
 def _key(value) -> str:
@@ -157,49 +128,14 @@ class PlannerRepository:
                                      ("plan_assets", "plan_failures", "plan_commands", "plan_runs", "plan_outcomes",
                                       "plan_standing")])
 
-    async def standing(self) -> dict[int, tuple[dict[str, bool], str | None]]:
-        """What every series stood at when its view was last counted (ready, waiting, error), and the print of the inputs
-        it was counted from."""
-        return {row["series_id"]: (json.loads(row["flags"]), row["inputs"])
-                for row in await self._db.fetch_all("SELECT series_id, flags, inputs FROM plan_standing")}
+    async def standing(self) -> dict[int, dict[str, bool]]:
+        """What every series stood at when its view was last counted (ready, waiting, error)."""
+        return {row["series_id"]: json.loads(row["flags"])
+                for row in await self._db.fetch_all("SELECT series_id, flags FROM plan_standing")}
 
-    async def save_standing(self, series_id: int, flags: dict[str, bool], inputs: str | None) -> None:
-        await self._db.execute("INSERT INTO plan_standing (series_id, flags, inputs) VALUES (?, ?, ?) ON CONFLICT "
-                               "(series_id) DO UPDATE SET flags=excluded.flags, inputs=excluded.inputs",
-                               (series_id, json.dumps(flags, sort_keys=True), inputs))
-
-    async def own_tables(self, series_id: int) -> OwnTables:
-        """What the module keeps of a series and its print, read in one transaction: the print tells the very tables read.
-        The files are made on the thread of the query (hundreds of files with their tracks)."""
-        def read(conn) -> OwnTables:
-            digest = hashlib.sha256()
-            found = []
-            for query in _OWN:
-                digest.update(query.encode())
-                rows = conn.execute(query, (series_id,)).fetchall()
-                for row in rows:
-                    _fed(digest, row)
-                found.append(rows)
-            assets, failures, commands, outcomes = found
-            return OwnTables(digest.hexdigest(), [container_of(json.loads(data)) for _name, data in assets],
-                             [json.loads(key) for (key,) in failures], [json.loads(command) for (command,) in commands],
-                             json.loads(outcomes[0][0]) if outcomes else [])
-        return await self._db.transaction(read)
-
-    async def own_prints(self, series_ids: list[int]) -> dict[int, str]:
-        """The print of what the module keeps of every series named (the asset, the failures, the commands, the outcome of
-        the last sync), as it is stored, in one transaction: the print `own_tables` gives with its tables."""
-        def read(conn) -> dict[int, str]:
-            out = {}
-            for series_id in series_ids:
-                digest = hashlib.sha256()
-                for query in _OWN:
-                    digest.update(query.encode())
-                    for row in conn.execute(query, (series_id,)):
-                        _fed(digest, row)
-                out[series_id] = digest.hexdigest()
-            return out
-        return await self._db.transaction(read)
+    async def save_standing(self, series_id: int, flags: dict[str, bool]) -> None:
+        await self._db.execute("INSERT INTO plan_standing (series_id, flags) VALUES (?, ?) ON CONFLICT (series_id) "
+                               "DO UPDATE SET flags=excluded.flags", (series_id, json.dumps(flags, sort_keys=True)))
 
     async def pack_cards(self) -> list[PackCard]:
         return [PackCard.model_validate(json.loads(row["data"]))

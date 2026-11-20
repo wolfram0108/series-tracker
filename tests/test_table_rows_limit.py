@@ -1,11 +1,8 @@
 """The first read of a title of the provider waits for the user, and a read takes the first or the last rows of each line
 (core/row_limit.py): the rows of the earlier reads that it did not take stay in the table as they were."""
 import asyncio
-import json
 
 import pytest
-
-from sources_support import rows_of
 
 from core.row_limit import limit_of, limited, normalized
 from modules.sources.sites import ReadContext, TableDraft
@@ -123,9 +120,9 @@ async def test_a_read_of_the_first_or_the_last_rows_keeps_the_rows_of_the_earlie
     assert await read("2") == ["Серия 1", "Серия 2"]
     assert await read("-2") == ["Серия 1", "Серия 2", "Серия 5", "Серия 6"]
     # What a read took is its own: the row of the second read is the new one, the others are as they were left.
-    stored = await system.db.fetch_one("SELECT rows FROM release_tables WHERE url = ?", (PAGE,))
-    heights = {row["text"]: row["heights"] for row in rows_of(stored["rows"])}
-    assert heights["Серия 1"] == [101] and heights["Серия 6"] == [102]
+    heights = {record["text"]: record["heights"] for record in await system.db.fetch_all(
+        "SELECT text, heights FROM release_rows WHERE url = ?", (PAGE,))}
+    assert heights["Серия 1"] == "[101]" and heights["Серия 6"] == "[102]"
     site.line = [1, 2, 3]
     assert await read("all") == ["Серия 1", "Серия 2", "Серия 3"]
 
