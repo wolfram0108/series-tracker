@@ -1,13 +1,13 @@
-"""Чистые функции разбора HTML трекеров: html -> {title, releases}.
+"""Pure functions that parse tracker HTML: html -> {title, releases}.
 
-Отделены от доставки страниц (тестируются на дампах без сети/браузера).
-Контракт результата: {"title": {"ru", "en"}, "releases": [
+Kept apart from page delivery, so they are tested on dumps without network or browser.
+Result contract: {"title": {"ru", "en"}, "releases": [
     {"link"|None, "magnet"|None, "date_marker", "episodes", "quality"}]}.
-Никаких решений «ново/старо» — только факты (Р-9); дельту считает scan.
+No new/old decisions here, only facts (Р-9); scan computes the delta.
 
-Селекторы детерминированные (находка 11): если ожидаемый элемент не
-найден — SourceParseError с понятным текстом, а не поиск «чего-нибудь
-похожего где-нибудь».
+Selectors are deterministic (finding 11): if an expected element is missing,
+raise SourceParseError with a clear message instead of searching for something
+similar somewhere.
 """
 from __future__ import annotations
 
@@ -26,13 +26,13 @@ class SourceParseError(RuntimeError):
 
 
 class SourceRefusedError(SourceParseError):
-    """Отказ, который не изменится от смены хоста: перебор кандидатов
-    доставки на нём прекращается (суточный лимит на учётку)."""
+    """A refusal that does not change with the host: the search through
+    delivery candidates stops on it (daily limit per account)."""
 
 
 def raise_not_a_torrent(text: str) -> None:
-    """Трекер ответил страницей вместо файла — назвать причину.
-    Известные причины — из разбора старого qbittorrent.py."""
+    """The tracker answered with a page instead of a file: name the reason.
+    The known reasons come from the analysis of the old qbittorrent.py."""
     if "Вы использовали доступное Вам количество торрент-файлов" in text:
         raise SourceRefusedError(reason("tracker_daily_limit"))
     if "Вам необходимо включить JavaScript" in text:
@@ -46,7 +46,7 @@ def _release(link=None, magnet=None, date_marker=None, episodes=None,
             "episodes": episodes, "quality": quality, **extra}
 
 
-# --- Kinozal: страница = одна раздача -------------------------------------------
+# --- Kinozal: page = one release -------------------------------------------
 
 def kinozal_parse(html: str, url: str) -> dict:
     soup = BeautifulSoup(html, "lxml")
@@ -65,7 +65,7 @@ def kinozal_parse(html: str, url: str) -> dict:
         if li and (span := li.find("span", class_="floatright")):
             raw_date = span.get_text(strip=True)
             break
-    if not raw_date:  # запасной источник: баннер «Торрент-файл обновлен ...»
+    if not raw_date:  # fallback: the banner «Торрент-файл обновлен ...»
         banner = soup.find("div", class_="bx1 justify",
                            string=re.compile(r"Торрент-файл обновлен"))
         if banner:
@@ -87,7 +87,7 @@ def kinozal_parse(html: str, url: str) -> dict:
                                   date_marker=dates.kinozal_date(raw_date))]}
 
 
-# --- RuTracker: страница = одна раздача ------------------------------------------
+# --- RuTracker: page = one release ------------------------------------------
 
 def rutracker_parse(html: str, url: str) -> dict:
     soup = BeautifulSoup(html, "lxml")
@@ -127,7 +127,7 @@ def rutracker_parse(html: str, url: str) -> dict:
                 date_marker=dates.rutracker_date(raw_date))]}
 
 
-# --- Astar: страница = каталог раздач (вторая очередь, доставка — браузер) -------
+# --- Astar: page = catalog of releases (second queue, delivered by browser) -------
 
 def astar_parse(html: str, url: str) -> dict:
     soup = BeautifulSoup(html, "lxml")
@@ -168,8 +168,8 @@ def astar_parse(html: str, url: str) -> dict:
             releases.append(_release(link=link, date_marker=date_marker,
                                      episodes=episodes, quality=quality))
 
-    # исторический хак Astar: версия без пометки качества при наличии
-    # других версий того же диапазона помечается как 'old'
+    # Historical Astar hack: a release without a quality tag is marked 'old'
+    # when other releases of the same episode range exist.
     by_episodes: dict[str, list] = {}
     for r in releases:
         by_episodes.setdefault(r["episodes"], []).append(r["quality"])
@@ -182,7 +182,7 @@ def astar_parse(html: str, url: str) -> dict:
     return {"title": {"ru": title_ru, "en": None}, "releases": releases}
 
 
-# --- Anilibria.TV: каталог (вторая очередь, доставка — браузер) -------------------
+# --- Anilibria.TV: catalog (second queue, delivered by browser) -------------------
 
 def _anilibria_tv_en_title(full_title: str) -> str:
     parts = [p.strip() for p in (full_title or "").split("/")]

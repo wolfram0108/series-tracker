@@ -1,9 +1,9 @@
-"""Anilibria через официальный публичный API (решение Р-9).
+"""Anilibria via its official public API (decision Р-9).
 
-Вместо рендера их Vue-фронтенда браузером — один GET
-`/api/v1/anime/releases/{alias}`: названия, раздачи с качествами,
-infohash готовым полем (стыкуется с Р-2), честные ISO-даты.
-Документация: anilibria.top/api/docs; ключей/регистрации нет.
+Instead of rendering their Vue frontend in a browser, a single GET to
+`/api/v1/anime/releases/{alias}` gives the titles, the releases with their
+qualities, the infohash as a ready field (matches Р-2), and honest ISO dates.
+Docs: anilibria.top/api/docs; no keys or registration.
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def api_base_from_url(url: str) -> str:
 
 
 def release_to_result(data: dict) -> dict:
-    """JSON релиза API -> контракт sources.parse."""
+    """Convert an API release JSON to the sources.parse contract."""
     name = data.get("name") or {}
     releases = []
     for t in data.get("torrents") or []:
@@ -45,7 +45,7 @@ def release_to_result(data: dict) -> dict:
             date_marker=dates.anilibria_date(t["updated_at"]),
             episodes=t.get("description"),          # '1-17'
             quality=" • ".join(p for p in quality_parts if p) or None,
-            hash=t.get("hash"),                      # infohash готовым полем
+            hash=t.get("hash"),                      # infohash as a ready field
             label=t.get("label"),
         ))
     return {"title": {"ru": name.get("main"), "en": name.get("english")},

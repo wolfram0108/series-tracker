@@ -1,12 +1,12 @@
-"""Хосты доставки: канонизация и порядок кандидатов.
+"""Delivery hosts: canonicalization and the order of candidates.
 
-Ссылка раздачи — ИДЕНТИЧНОСТЬ (входит в torrent_id, Р-10): менять её
-нельзя, иначе ложное «всё новое» и перекачка (находка 13). Поэтому хост
-из ссылки — лишь первый кандидат доставки, а не адрес: живой хост
-выбирается в момент запроса из зеркал трекера.
+A release link is an IDENTITY (part of torrent_id, Р-10): it must not change,
+or it gives a false "everything new" and a re-download (finding 13). So the
+host in the link is only the first delivery candidate, not an address: the
+live host is chosen at request time from the tracker's mirrors.
 
-Знание о префиксах доставки лежит здесь одной копией — его спрашивают и
-транспорт (delivery), и резолв трекера по URL (repository).
+Knowledge of the delivery prefixes lives here in one copy: both the transport
+(delivery) and the tracker's URL resolution (repository) ask it.
 """
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ def canonical_host(netloc: str) -> str:
 
 
 def candidates(url: str, mirrors: Iterable[str] = ()) -> list[str]:
-    """URL-ы для попыток доставки по порядку: канонический хост ссылки,
-    затем зеркала трекера, затем хост как написан в ссылке."""
+    """URLs to try for delivery, in order: the link's canonical host,
+    then the tracker's mirrors, then the host as written in the link."""
     parsed = urlparse(url)
     ordered = [canonical_host(parsed.netloc)]
     ordered += [canonical_host(m) for m in mirrors if m]

@@ -1,13 +1,13 @@
-"""Нормализация дат трекеров.
+"""Normalization of tracker dates.
 
-ВАЖНО (находка 13): итоговые строки — это МАРКЕРЫ сравнения с
-историческими значениями в прод-БД (`torrents.date_time`), формат
-каждого трекера сохраняется байт-в-байт:
+IMPORTANT (finding 13): the resulting strings are MARKERS compared with the
+historical values in the production DB (`torrents.date_time`); each tracker's
+format is kept byte for byte:
   kinozal/rutracker/anilibria_tv: 'DD.MM.YYYY HH:MM:SS'
-  anilibria: ISO 8601 c 'Z'      ('2026-03-17T20:13:16Z')
+  anilibria: ISO 8601 with 'Z'   ('2026-03-17T20:13:16Z')
   astar:     'DD.MM.YYYY'
-Смена формата маркера == ложное «все раздачи обновились» при
-переключении (массовая перекачка).
+Changing a marker format == a false "all releases updated" on switch-over
+(mass re-download).
 """
 from __future__ import annotations
 
@@ -37,8 +37,8 @@ class DateParseError(ValueError):
 
 
 def kinozal_date(raw: str, *, now: datetime | None = None) -> str:
-    """'сегодня в 10:15' / 'вчера в 23:01' / '5 мая 2026 в 10:15'
-    -> 'DD.MM.YYYY HH:MM:00' (московское время — так показывает сайт)."""
+    """Parse a Kinozal date: 'сегодня в 10:15' / 'вчера в 23:01' / '5 мая 2026 в 10:15'
+    -> 'DD.MM.YYYY HH:MM:00' (Moscow time, as the site shows it)."""
     raw = raw.strip().lower()
     current = now or datetime.now(MOSCOW_TZ)
     try:
@@ -57,7 +57,7 @@ def kinozal_date(raw: str, *, now: datetime | None = None) -> str:
 
 
 def rutracker_date(raw: str) -> str:
-    """'04-Ноя-25 10:18' -> '04.11.2025 10:18:00'."""
+    """Parse a RuTracker date: '04-Ноя-25 10:18' -> '04.11.2025 10:18:00'."""
     match = re.match(
         r"(\d{1,2})-([А-Яа-яA-Za-zёЁ]{3})-(\d{2})\s+(\d{1,2}:\d{2})",
         raw.strip())
@@ -72,7 +72,7 @@ def rutracker_date(raw: str) -> str:
 
 
 def anilibria_date(iso: str) -> str:
-    """ISO API ('...+00:00') -> исторический ISO с 'Z'."""
+    """Convert an API ISO timestamp ('...+00:00') to the historical ISO with 'Z'."""
     dt = datetime.fromisoformat(iso)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -80,7 +80,7 @@ def anilibria_date(iso: str) -> str:
 
 
 def anilibria_tv_date(iso: str) -> str:
-    """ISO из data-datetime -> 'DD.MM.YYYY HH:MM:SS'."""
+    """Convert the ISO from data-datetime to 'DD.MM.YYYY HH:MM:SS'."""
     try:
         return datetime.fromisoformat(iso).strftime("%d.%m.%Y %H:%M:%S")
     except (ValueError, TypeError) as exc:
