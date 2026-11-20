@@ -120,7 +120,9 @@ from datetime import datetime, timezone
 from core import storage
 from core.module import BaseModule, BusRequestError
 from core.source_types import torrent_profile_id
-from core.contracts import RUN_CHANGED, RunChanged
+from core.topics import CATALOG_SERIES_GET, CATALOG_SERIES_LIST, SERIES_PURGED, SERIES_STATUS_CONTRIBUTION
+from core.contracts import (RUN_CHANGED, RunChanged, SeriesCard, SeriesDeleted, SeriesPurged, SeriesUpdated, SourceType,
+                            StatusContribution)
 from core.contracts.torrent import RELEASE_CHANGED_TOPIC, STAGING_DIR_KEY
 from core.db import Database
 from core.envelope import Envelope
@@ -579,16 +581,16 @@ class TorrentsModule(BaseModule):
     # --- выборочная загрузка -----------------------------------------------------------
 
     @staticmethod
-    def _memory_of(series: dict) -> tuple[set[int], dict[int, set[int]]]:
+    def _memory_of(series: SeriesCard) -> tuple[set[int], dict[int, set[int]]]:
         """Память исключений сериала: сезоны и номера серий."""
         try:
             seasons = {int(s) for s in
-                       json.loads(series.get("ignored_seasons") or "[]")}
+                       json.loads(series.ignored_seasons or "[]")}
         except (json.JSONDecodeError, TypeError, ValueError):
             seasons = set()
         try:
             episodes = selection.parse_memory(
-                json.loads(series.get("ignored_episodes") or "{}"))
+                json.loads(series.ignored_episodes or "{}"))
         except (json.JSONDecodeError, TypeError):
             episodes = {}
         return seasons, episodes
@@ -597,8 +599,7 @@ class TorrentsModule(BaseModule):
                                  allow_resume: bool) -> int:
         """Память сериала -> колонка is_excluded -> приоритеты в qBit."""
         try:
-            series = await self.request("catalog.series.get",
-                                        {"series_id": series_id})
+            series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
         except BusRequestError as exc:
             self.log.warning("серия %d: память исключений не получена: %s",
                              series_id, exc)
@@ -714,14 +715,12 @@ class TorrentsModule(BaseModule):
 
     async def on_series_updated(self, env: Envelope) -> None:
         """Память исключений изменилась — пересобрать план загрузки."""
-        payload = env.payload or {}
-        if not ({"ignored_seasons", "ignored_episodes"} & set(payload)):
+        event = SeriesUpdated.model_validate(env.payload)
+        if not ({"ignored_seasons", "ignored_episodes"} & event.model_fields_set):
             return
-        await self._project_and_apply(int(payload["series_id"]),
-                                      allow_resume=True)
-        await self._broadcast_downloaded(int(payload["series_id"]))
-        self.send_command("metadata.seasons.recompute",
-                          {"series_id": int(payload["series_id"])})
+        await self._project_and_apply(event.series_id, allow_resume=True)
+        await self._broadcast_downloaded(event.series_id)
+        self.send_command("metadata.seasons.recompute", {"series_id": event.series_id})
 
     # --- реестр раздач (контракты Р-12) ----------------------------------------------
 
@@ -891,8 +890,7 @@ class TorrentsModule(BaseModule):
         """Контракт GET composition для торрент-серий (Р-21): свежие
         правила + предпросмотр имени + наличие файла на диске."""
         series_id = env.payload["series_id"]
-        series = await self.request("catalog.series.get",
-                                    {"series_id": series_id})
+        series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
         files = await self.repo.files_for_series(series_id)
         plan: list[dict] = []
         profile_id = torrent_profile_id(series)
@@ -900,7 +898,7 @@ class TorrentsModule(BaseModule):
             current = f.get("renamed_path") or f["original_path"]
             present = await storage.call(
                 os.path.exists,
-                os.path.join(series["save_path"], current))
+                os.path.join(series.save_path, current))
             excluded = {"is_excluded": bool(f.get("is_excluded")),
                         "exclude_reason": f.get("exclude_reason")}
             meta = f.get("extracted_metadata")
@@ -988,7 +986,7 @@ class TorrentsModule(BaseModule):
         """Cascade R-19: the registry, the files and the tasks of the pipeline go; the torrents leave qBittorrent with
         their files left in place (they lie in the library), as a release of a source leaves it with its series; the
         cache of the .torrent files is dropped by sources on our commands."""
-        series_id = env.payload["series_id"]
+        series_id = SeriesDeleted.model_validate(env.payload).series_id
         rows = await self.repo.history(series_id)
         hashes = [r["qb_hash"] for r in rows if r.get("qb_hash")]
         if hashes:
@@ -1011,8 +1009,7 @@ class TorrentsModule(BaseModule):
         if dropped:
             self._broadcast_queue()
         await self._forget_unlisted_pages()
-        self.publish_event("series.purged",
-                           {"series_id": series_id, "owner": self.name})
+        self.publish_event(SERIES_PURGED, SeriesPurged(series_id=series_id, owner=self.name).model_dump(mode="json"))
 
     async def on_queue_get(self, env: Envelope) -> dict:
         series_id = (env.payload or {}).get("series_id")
@@ -1025,17 +1022,16 @@ class TorrentsModule(BaseModule):
         recheck-задача (восстановление силами qBit). Вызывается при
         открытии окна сериала (вместо фоновой проверки раз в 60 с)."""
         series_id = env.payload["series_id"]
-        series = await self.request("catalog.series.get",
-                                    {"series_id": series_id})
+        series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
         files = await self.repo.files_for_series(series_id)
         # A series with no file of the old pipeline has nothing to check or to warn about here.
         if not files:
             return {"missing": 0, "recheck_started": 0}
         # F7: путь/NAS недоступен → НЕ помечать всё ложно missing и не
         # запускать массовый recheck. Пропускаем сверку до восстановления.
-        if not await storage.call(os.path.exists, series["save_path"]):
+        if not await storage.call(os.path.exists, series.save_path):
             self.log.warning("серия %d: путь %s недоступен — сверка файлов "
-                             "пропущена", series_id, series["save_path"])
+                             "пропущена", series_id, series.save_path)
             return {"missing": 0, "recheck_started": 0}
         missing_hashes: set[str] = set()
         missing = 0
@@ -1046,7 +1042,7 @@ class TorrentsModule(BaseModule):
                 continue
             if f.get("progress", 0) < 100 or not f.get("renamed_path"):
                 continue
-            path = os.path.join(series["save_path"], f["renamed_path"])
+            path = os.path.join(series.save_path, f["renamed_path"])
             exists = await storage.call(os.path.exists, path)
             if f["status"] == "renamed" and not exists:
                 await self.repo.set_file_status(f["id"], "missing")
@@ -1272,20 +1268,20 @@ class TorrentsModule(BaseModule):
         rows = await self.releases.store.all()
         if not rows:
             return []
-        series_of: dict[str, list[dict]] = {}
-        for series in await self.request("catalog.series.list", {}):
-            for source in series.get("sources") or []:
-                if source.get("source_type") == "torrent":
-                    series_of.setdefault(await self._canonical(source["url"]), []).append(series)
+        series_of: dict[str, list[SeriesCard]] = {}
+        for series in (await self.reply_of(CATALOG_SERIES_LIST, {})).series:
+            for source in series.sources:
+                if source.source_type == SourceType.TORRENT:
+                    series_of.setdefault(await self._canonical(source.url), []).append(series)
         tasks = []
         for row in rows:
             view = await self.releases.view(row)
             wanted = [f for f in view.files if f.priority > 0]
             size = sum(f.size for f in wanted)
             progress = round(100 * sum(f.size * f.progress for f in wanted) / size, 1) if size else 0.0
-            for series in series_of.get(view.url) or [{"id": None, "name": ""}]:
+            for series_id, series_name in [(each.id, each.name) for each in series_of.get(view.url, ())] or [(None, "")]:
                 tasks.append({"kind": "release", "qb_hash": view.infohash or "", "url": view.url, "release": view.release,
-                              "title": view.title, "series_id": series["id"], "series_name": series.get("name") or "",
+                              "title": view.title, "series_id": series_id, "series_name": series_name or "",
                               "status": view.state.value, "progress": progress,
                               "files_done": sum(1 for f in wanted if f.progress >= 1), "files_total": len(wanted),
                               "error_message": view.reason})
@@ -1294,9 +1290,8 @@ class TorrentsModule(BaseModule):
     async def _series_name(self, series_id: int) -> str:
         if series_id not in self._names_cache:
             try:
-                series = await self.request("catalog.series.get",
-                                            {"series_id": series_id})
-                self._names_cache[series_id] = series.get("name") or ""
+                series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
+                self._names_cache[series_id] = series.name or ""
             except BusRequestError:
                 return ""
         return self._names_cache[series_id]
@@ -1351,8 +1346,8 @@ class TorrentsModule(BaseModule):
         if self._flags_cache.get(series_id) == flags:
             return
         self._flags_cache[series_id] = flags
-        self.publish_event("series.status.contribution", {
-            "source": "torrents", "series_id": series_id, "flags": flags})
+        self.publish_event(SERIES_STATUS_CONTRIBUTION, StatusContribution(
+            source="torrents", series_id=series_id, flags=flags).model_dump(mode="json"))
 
 
     # --- the releases of the torrent sources (stage 15, modules/torrents/releases.py) ------------------------------
@@ -1365,10 +1360,10 @@ class TorrentsModule(BaseModule):
 
     async def _contribute_page(self, url: str) -> None:
         try:
-            for series in await self.request("catalog.series.list", {}):
-                for source in series.get("sources") or []:
-                    if source.get("source_type") == "torrent" and await self._canonical(source["url"]) == url:
-                        await self._contribute(series["id"])
+            for series in (await self.reply_of(CATALOG_SERIES_LIST, {})).series:
+                for source in series.sources:
+                    if source.source_type == SourceType.TORRENT and await self._canonical(source.url) == url:
+                        await self._contribute(series.id)
                         break
         except Exception:  # noqa: BLE001 - the next word of a release or the next tick of the monitor counts again
             self.log.exception("статус сериалов страницы раздач %s не пересчитан", url)
@@ -1413,16 +1408,15 @@ class TorrentsModule(BaseModule):
         try:
             if (await self.request("settings.value.get", {"key": "scanner_agent_enabled"})).get("value") != "true":
                 return set()
-            series = await self.request("catalog.series.list", {})
-            return {await self._canonical(source["url"]) for one in series if one.get("auto_scan_enabled")
-                    for source in one.get("sources") or []}
+            series = (await self.reply_of(CATALOG_SERIES_LIST, {})).series
+            return {await self._canonical(source.url) for one in series if one.auto_scan_enabled for source in one.sources}
         except Exception:  # noqa: BLE001 - what cannot be counted is not checked; the next time of the schedule counts again
             self.log.exception("страницы для проверки раздач не посчитаны")
             return set()
 
     async def _pages_of(self, series_id: int) -> set[str]:
-        series = await self.request("catalog.series.get", {"series_id": series_id})
-        return {await self._canonical(source["url"]) for source in (series or {}).get("sources") or []}
+        series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
+        return {await self._canonical(source.url) for source in series.sources}
 
     async def on_releases_get(self, env: Envelope) -> dict:
         """{url} → {releases: [ReleaseView]}: the releases kept for the page."""
@@ -1461,8 +1455,8 @@ class TorrentsModule(BaseModule):
     async def _forget_unlisted_pages(self) -> None:
         """The releases of a page no source of any series lists any more leave the client with their files."""
         try:
-            series = await self.request("catalog.series.list", {})
-            listed = {await self._canonical(source["url"]) for one in series for source in one.get("sources") or []}
+            series = (await self.reply_of(CATALOG_SERIES_LIST, {})).series
+            listed = {await self._canonical(source.url) for one in series for source in one.sources}
         except Exception:  # noqa: BLE001 - nothing is removed on a list that could not be read
             self.log.exception("the pages of the sources were not counted; no release is forgotten")
             return

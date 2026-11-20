@@ -11,8 +11,10 @@ import json
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from core.contracts import SeriesCard
 from core.module import BusRequestError
 from core.reasons import code_of, reason, relayed
+from core.topics import CATALOG_SERIES_CREATE, CATALOG_SERIES_GET, CATALOG_SERIES_LIST
 from .routing import admitted
 
 from .schemas import (CreatedSeries, ErrorResponse, FailuresReset, FailuresResetBody, OkResponse, SyncCancelled, SyncScopeBody,
@@ -61,33 +63,34 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return {}
 
-    def _card(series: dict, mapping: dict | None, **added) -> dict:
-        """The series as the window shows it: the dict the catalog answered with its date in ISO, the mapping of TMDB
-        (its date in ISO too) and the fields the gateway adds. What a module answered is its own and is not changed."""
+    def _card(series: SeriesCard, mapping: dict | None, **added) -> dict:
+        """The series as the window shows it: the card the catalog answered written as data with its date in ISO, the
+        mapping of TMDB (its date in ISO too) and the fields the gateway adds. What a module answered is its own and is
+        not changed."""
         tmdb = {**mapping, "last_updated": _iso(mapping.get("last_updated"))} if mapping else mapping
-        return {**series, "last_scan_time": _iso(series.get("last_scan_time")), "tmdb_info": tmdb, **added}
+        return {**series.model_dump(mode="json"), "last_scan_time": _iso(series.last_scan_time), "tmdb_info": tmdb, **added}
 
     # --- список и карточки ----------------------------------------------------
 
     @r.get("/api/series", response_model=list[SeriesObject])
     async def list_series():
-        series = await gw.request("catalog.series.list", {})
+        series = (await gw.reply_of(CATALOG_SERIES_LIST, {})).series
         reply = await gw.request("metadata.map.list", {})
         mappings = {m["series_id"]: m for m in reply["mappings"]}
         # Each owner counts its own rows and a series has rows with one of them only, so the sum needs no kind.
         counts = [await _counts("planner.downloaded_counts"),
                   await _counts("torrents.db.downloaded_counts")]
-        return [_card(s, mappings.get(s["id"]),
-                      downloaded_episodes_count=sum(each.get(s["id"], 0) for each in counts)) for s in series]
+        return [_card(s, mappings.get(s.id),
+                      downloaded_episodes_count=sum(each.get(s.id, 0) for each in counts)) for s in series]
 
     @r.post("/api/series", response_model=CreatedSeries, responses=_ERRORS)
     async def add_series(body: SeriesCreate):
         data = body.model_dump(mode="json", exclude={"tmdb_data"}, exclude_unset=True)
         try:
-            series = await gw.request("catalog.series.create", {"data": data})
+            series = await gw.reply_of(CATALOG_SERIES_CREATE, {"data": data})
         except BusRequestError as exc:
             return _error_response(exc)
-        series_id = series["id"]
+        series_id = series.id
         if body.tmdb_data:
             await gw.request("metadata.map.set", {
                 "series_id": series_id, "tmdb_data": body.tmdb_data})
@@ -109,8 +112,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
            responses=_ERRORS)
     async def series_details(series_id: int):
         try:
-            s = await gw.request("catalog.series.get",
-                                 {"series_id": series_id})
+            s = await gw.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
         except BusRequestError as exc:
             return _error_response(exc, with_success=False)
         reply = await gw.request("metadata.map.get",

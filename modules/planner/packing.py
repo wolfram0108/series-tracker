@@ -9,7 +9,7 @@ from typing import Callable, Iterable
 
 from calc.plan.tables import label_of
 from calc.view.packing import card_id, tracks_of
-from core.contracts import PACK_STAGES, DownloadVariant, PackCard, PackJournal
+from core.contracts import PACK_STAGES, DownloadVariant, PackCard, PackJournal, SeriesCard
 
 ENDED = ("done", "failed")
 
@@ -31,12 +31,12 @@ class PackBook:
 
     # --- the journal of a series ----------------------------------------------------------------------------------
 
-    def journal_begins(self, series: dict, run: str, steps: list[tuple], kind: str = "sync") -> None:
+    def journal_begins(self, series: SeriesCard, run: str, steps: list[tuple], kind: str = "sync") -> None:
         """A journal of the series is carried out: every step of it is counted, whichever file it acts on."""
-        self.journals[series["id"]] = PackJournal(series_id=series["id"], series_name=series.get("name") or "",
+        self.journals[series.id] = PackJournal(series_id=series.id, series_name=series.name or "",
                                                   sync_started=run, kind=kind, steps_of=len(steps),
                                                   started_at=self._wall())
-        self._journal_since[series["id"]] = self._clock()
+        self._journal_since[series.id] = self._clock()
 
     def journal_step(self, series_id: int, step: tuple) -> None:
         """A step of the journal begins: its kind and the file it acts on (the name it takes, for a move or a publish)."""
@@ -61,14 +61,14 @@ class PackBook:
 
     # --- what happens to a container ------------------------------------------------------------------------------
 
-    def planned(self, series: dict, run: str, made, before: dict, order: dict[int, tuple[str, ...]],
+    def planned(self, series: SeriesCard, run: str, made, before: dict, order: dict[int, tuple[str, ...]],
                 marks: dict[int, tuple[int, int]]) -> None:
         """A plan of a sync: every container it builds is queued; a card of this sync no longer built goes."""
         wanted = set()
         for group in made.groups:
             for slot in group.built:
                 goal = made.goal(slot)
-                key = card_id(series["id"], slot)
+                key = card_id(series.id, slot)
                 wanted.add(key)
                 old = self.cards.get(key)
                 if old is not None and old.sync_started == run and old.name == goal.name:
@@ -80,7 +80,7 @@ class PackBook:
                 rid = video.row.id if video.row is not None else video.container.video.id if video.container else video.timeline
                 n, color = marks.get(rid.source_id, (0, 0))
                 card = PackCard(
-                    id=key, series_id=series["id"], series_name=series.get("name") or "", sync_started=run,
+                    id=key, series_id=series.id, series_name=series.name or "", sync_started=run,
                     episode=label_of(slot), name=goal.name, tracks=tracks, reason=reason, queued_at=self._wall(),
                     video=DownloadVariant(source_id=rid.source_id, source_n=n, source_color=color, place=video.snapshot.source,
                                           player=video.snapshot.player,
@@ -92,7 +92,7 @@ class PackBook:
                 self._steps[key] = {goal.name} | ({previous.name} if previous is not None else set())
                 self._enter(card, "queue")
         for key, card in list(self.cards.items()):
-            if card.series_id == series["id"] and card.sync_started == run and key not in wanted and card.status == "queued":
+            if card.series_id == series.id and card.sync_started == run and key not in wanted and card.status == "queued":
                 self.forget(key)
 
     def report(self, key: str, stage: str, figures: dict) -> bool:

@@ -1,29 +1,28 @@
-"""Репозиторий catalog: таблицы series и series_sources (схема прод-БД).
+"""The repository of the catalog: the tables series and series_sources (the schema of the production database).
 
-Колонка state и таблица series_statuses сознательно не читаются и не
-пишутся (Р-11: статус — вычисляемое значение агрегатора); физически они
-остаются в схеме до зачистки после переключения.
+The column `state` and the table `series_statuses` are deliberately neither read nor written (Р-11: the status is a computed
+value of the aggregator); they stay in the schema physically until it is cleaned up after the switch.
 
-Address, kind and profile of a series live in its sources (series_sources, Д-38); a series is read
-together with them.
+The address, kind and profile of a series live in its sources (series_sources, Д-38); a series is read together with them,
+its row a dictionary of its columns and its `sources` a tuple of `SeriesSource`.
 """
 from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 
 from core.contracts import SeriesSource
 from core.db import Database
 from core.reasons import reason
 
 
-# Все живые колонки series, КРОМЕ state (см. докстринг).
+# Every live column of series EXCEPT state (see the docstring).
 _COLUMNS = ("id, name, name_en, site, save_path, season, quality, "
             "last_scan_time, auto_scan_enabled, quality_override, "
             "resolution_override, ignored_seasons, ignored_episodes")
 
-# Колонки, которые можно писать извне (без id и last_scan_time —
-# последняя обновляется только touch_scan_time).
+# The columns that may be written from outside (no id, and no last_scan_time: only touch_scan_time updates it).
 _WRITABLE = {"name", "name_en", "site", "save_path", "season", "quality",
              "auto_scan_enabled", "quality_override", "resolution_override",
              "ignored_seasons", "ignored_episodes"}
@@ -45,9 +44,9 @@ _ADD_SOURCE = ("INSERT INTO series_sources (series_id, position, url, source_typ
                f"?, ?, ?, ?, ?, ?, {_FREE_COLOR})")
 
 
-def _source(row: dict) -> dict:
+def _source(row: dict) -> SeriesSource:
     """A stored source in the shape of the contract."""
-    return SeriesSource.model_validate({**row, "players_off": json.loads(row["players_off"])}).model_dump(mode="json")
+    return SeriesSource.model_validate({**row, "players_off": json.loads(row["players_off"])})
 
 
 def _stored(values: dict) -> dict:
@@ -80,16 +79,16 @@ class CatalogRepository:
     # --- series ----------------------------------------------------------------
 
     @staticmethod
-    def _with_sources(row: dict, sources: list[dict]) -> dict:
-        return {**row, "sources": sources}
+    def _with_sources(row: dict, sources: list[SeriesSource]) -> dict:
+        return {**row, "sources": tuple(sources)}
 
     async def all_series(self) -> list[dict]:
         rows = await self._db.fetch_all(
             f"SELECT {_COLUMNS} FROM series ORDER BY id")
         rows = self._db.coerce_bools(rows, self._BOOLS)
-        by_series: dict[int, list[dict]] = {}
+        by_series: dict[int, list[SeriesSource]] = {}
         for source in await self._all_sources():
-            by_series.setdefault(source["series_id"], []).append(source)
+            by_series.setdefault(source.series_id, []).append(source)
         return [self._with_sources(row, by_series.get(row["id"], [])) for row in rows]
 
     async def series_exists(self, series_id: int) -> bool:
@@ -111,7 +110,7 @@ class CatalogRepository:
     async def create_series(self, data: dict, sources: list[dict]) -> int:
         """A series with its sources in one transaction: a source that is refused leaves no series behind."""
         fields = {k: v for k, v in data.items() if k in _WRITABLE}
-        # дефолты старой ORM-модели (NOT NULL-колонки без DB-дефолтов)
+        # the defaults of the old ORM model (NOT NULL columns without a database default)
         fields.setdefault("auto_scan_enabled", False)
         fields.setdefault("ignored_seasons", "[]")
         fields.setdefault("ignored_episodes", "{}")
@@ -132,7 +131,7 @@ class CatalogRepository:
             raise _refusal(exc, refused[0] if refused else {}) from exc
 
     async def update_series(self, series_id: int, data: dict) -> dict:
-        """Обновляет только живые колонки; возвращает применённые поля."""
+        """Updates only the live columns; returns the fields applied."""
         fields = {k: v for k, v in data.items() if k in _WRITABLE}
         if fields:
             sets = ", ".join(f"{k}=?" for k in fields)
@@ -142,21 +141,20 @@ class CatalogRepository:
         return fields
 
     async def delete_series(self, series_id: int) -> None:
-        # series_statuses — мёртвая таблица (Р-11), но строка-сирота после
-        # удаления серии не нужна и ей: чистим вместе со строкой series.
+        # series_statuses is a dead table (Р-11), but an orphan row left after the series is deleted is no use to it either:
+        # it is cleaned together with the row of series.
         await self._db.execute(
             "DELETE FROM series_statuses WHERE series_id=?", (series_id,))
         # The sources are ours and go before their parent, so the foreign key holds.
         await self._db.execute(
             "DELETE FROM series_sources WHERE series_id=?", (series_id,))
-        # enforce_fk=False: дочерние таблицы дочищают владельцы по
-        # событию series.deleted (Р-19) — мгновенные сироты допустимы.
+        # enforce_fk=False: the child tables are cleaned by their owners on the event series.deleted (Р-19), so an orphan
+        # that lives for a moment is allowed.
         await self._db.execute(
             "DELETE FROM series WHERE id=?", (series_id,), enforce_fk=False)
 
     async def touch_scan_time(self, series_id: int) -> str:
-        from datetime import datetime, timezone
-        # naive-UTC с микросекундами — формат хранения прод-БД
+        # naive UTC with microseconds: the storage format of the production database
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
         await self._db.execute(
             "UPDATE series SET last_scan_time=? WHERE id=?",
@@ -165,24 +163,24 @@ class CatalogRepository:
 
     # --- sources ---------------------------------------------------------------
 
-    async def _all_sources(self) -> list[dict]:
+    async def _all_sources(self) -> list[SeriesSource]:
         rows = await self._db.fetch_all(
             f"SELECT {_SOURCE_COLUMNS} FROM series_sources ORDER BY series_id, position, id")
         return [_source(row) for row in rows]
 
-    async def list_sources(self, series_id: int) -> list[dict]:
+    async def list_sources(self, series_id: int) -> list[SeriesSource]:
         rows = await self._db.fetch_all(
             f"SELECT {_SOURCE_COLUMNS} FROM series_sources WHERE series_id=? ORDER BY position, id",
             (series_id,))
         return [_source(row) for row in rows]
 
-    async def sources_by_profile(self, profile_id: int) -> list[dict]:
+    async def sources_by_profile(self, profile_id: int) -> list[SeriesSource]:
         rows = await self._db.fetch_all(
             f"SELECT {_SOURCE_COLUMNS} FROM series_sources WHERE parser_profile_id=? ORDER BY series_id, position, id",
             (profile_id,))
         return [_source(row) for row in rows]
 
-    async def get_source(self, source_id: int) -> dict | None:
+    async def get_source(self, source_id: int) -> SeriesSource | None:
         row = await self._db.fetch_one(
             f"SELECT {_SOURCE_COLUMNS} FROM series_sources WHERE id=?", (source_id,))
         return _source(row) if row else None

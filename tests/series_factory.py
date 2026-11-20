@@ -25,6 +25,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
+from core.contracts import SeriesCard, SeriesSource
 from core.db import Database
 from modules.catalog.repository import CatalogRepository
 from calc.catalog.series_sources import checked_sources
@@ -66,6 +67,16 @@ def source(**fields) -> dict:
     return {**SOURCE_DEFAULTS, **fields}
 
 
+def series_card(**fields) -> SeriesCard:
+    """A series as the catalog answers it, whole: the defaults of `SERIES_DEFAULTS` for the columns not given, `waiting` for the
+    statuses, not busy. A source is given as a dictionary (the fields of `source(...)`; the number and the series are made)
+    or as a model."""
+    card = {"id": 1, **SERIES_DEFAULTS, "statuses": ("waiting",), "is_busy": False, **fields}
+    card["sources"] = [each if isinstance(each, SeriesSource) else {"id": number, "series_id": card["id"], **SOURCE_DEFAULTS, **each}
+                       for number, each in enumerate(card.get("sources", ()), start=1)]
+    return SeriesCard(**card)
+
+
 def _split(fields: dict, sources: list[dict] | None) -> tuple[dict, list[dict]]:
     """Fields of the series, and its sources: the given list or the one made of the source fields among `fields`."""
     own = {name: fields.pop(name) for name in list(fields) if name in SOURCE_DEFAULTS or name == "position"}
@@ -103,5 +114,5 @@ async def create_series(where, *, sources: list[dict] | None = None, **fields) -
         stored = await CatalogRepository(where).list_sources(series_id)
     else:
         created = await where.request("catalog.series.create", {"data": {**series, "sources": drafts}}, timeout=10)
-        series_id, stored = created["id"], created["sources"]
-    return Created(series_id, tuple(item["id"] for item in stored))
+        series_id, stored = created.id, created.sources
+    return Created(series_id, tuple(item.id for item in stored))

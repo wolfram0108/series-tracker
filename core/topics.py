@@ -48,15 +48,16 @@ from typing import Final, Literal, Mapping
 from pydantic import BaseModel
 
 from .contracts import (
-    AlignmentJob, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+    AlignmentJob, BusyContribution, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
     CompositionPreviewRequest, CompositionReply, ConformParams, ConformSettingsDraft, ConformSettingsSaved,
     ConformSettingsView, GroupsResolveReply, GroupsResolveRequest, OutputSwitch, PlanDelete, PlanForget, PlannerView,
     PlayersListReply, PlayersListRequest, ProviderSaved, ProviderSettingsDraft, ProviderView, QueuesGet, QueuesReply,
-    ReverseReply, ReverseSubmit, RulesApplyReply, RulesApplyRequest, RulesProfileChanged, RunChanged,
-    SeriesReadProgress, SettingsReset, SettingsSet, SettingsSetMany, SiteResolveReply, SiteResolveRequest,
-    SourceEvent, SourcesSettingsView, SubmitReply, TableFailed, TableGetReply, TableGetRequest, TableProgress,
-    TableReady, TitleSearchReply, TitleSearchRequest, VoiceOrderSet, VoiceSettingsDraft, VoiceSettingsSaved,
-    VoiceSettingsView, VoiceTitleSet, WorkState, WorkWithdrawn,
+    ReverseReply, ReverseSubmit, RulesApplyReply, RulesApplyRequest, RulesProfileChanged, RunChanged, SeriesCard,
+    SeriesDeleted, SeriesListReply, SeriesPurged, SeriesReadProgress, SeriesStatusChanged, SeriesUpdated, SettingsReset,
+    SettingsSet, SettingsSetMany, SiteResolveReply, SiteResolveRequest, SourceEvent, SourcesReply, SourcesSettingsView,
+    StatusContribution, SubmitReply, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady,
+    TitleSearchReply, TitleSearchRequest, VoiceOrderSet, VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView,
+    VoiceTitleSet, WorkState, WorkWithdrawn,
 )
 from .contracts.provider import ProviderState
 from .contracts.torrent import PageReleases, ReleaseView
@@ -125,34 +126,36 @@ AUTH_LOGIN = Topic("auth.login", QUERY, "auth", fuse=QUICK_S)
 AUTH_PASSWORD_SET = Topic("auth.password.set", COMMAND, "auth", fuse=QUICK_S)
 
 # --- catalog -----------------------------------------------------------------------------------------------------
-CATALOG_SERIES_CREATE = Topic("catalog.series.create", COMMAND, "catalog", fuse=STANDARD_S)
+# Answered as the models themselves (immutable): a module of the process reads them as they are, the gateway writes them for the window.
+CATALOG_SERIES_CREATE = Topic("catalog.series.create", COMMAND, "catalog", reply=SeriesCard, fuse=STANDARD_S)
 CATALOG_SERIES_DELETE = Topic("catalog.series.delete", COMMAND, "catalog", fuse=STANDARD_S)
-CATALOG_SERIES_GET = Topic("catalog.series.get", QUERY, "catalog", fuse=STANDARD_S)
-CATALOG_SERIES_LIST = Topic("catalog.series.list", QUERY, "catalog", fuse=STANDARD_S)
+CATALOG_SERIES_GET = Topic("catalog.series.get", QUERY, "catalog", reply=SeriesCard, fuse=STANDARD_S)
+CATALOG_SERIES_LIST = Topic("catalog.series.list", QUERY, "catalog", reply=SeriesListReply, fuse=STANDARD_S)
 CATALOG_SERIES_SET_SAVE_PATH = Topic("catalog.series.set_save_path", COMMAND, "catalog", fuse=STANDARD_S)
 CATALOG_SERIES_TOUCH_SCAN_TIME = Topic("catalog.series.touch_scan_time", COMMAND, "catalog", fuse=STANDARD_S)
 CATALOG_SERIES_UPDATE = Topic("catalog.series.update", COMMAND, "catalog", fuse=STANDARD_S)
 CATALOG_SOURCES_ADD = Topic("catalog.sources.add", COMMAND, "catalog", fuse=QUICK_S)
-CATALOG_SOURCES_BY_PROFILE = Topic("catalog.sources.by_profile", QUERY, "catalog", fuse=STANDARD_S)
-CATALOG_SOURCES_LIST = Topic("catalog.sources.list", QUERY, "catalog", fuse=QUICK_S)
+CATALOG_SOURCES_BY_PROFILE = Topic("catalog.sources.by_profile", QUERY, "catalog", reply=SourcesReply, fuse=STANDARD_S)
+CATALOG_SOURCES_LIST = Topic("catalog.sources.list", QUERY, "catalog", reply=SourcesReply, fuse=QUICK_S)
 CATALOG_SOURCES_REMOVE = Topic("catalog.sources.remove", COMMAND, "catalog", fuse=QUICK_S)
 CATALOG_SOURCES_UPDATE = Topic("catalog.sources.update", COMMAND, "catalog", fuse=QUICK_S)
 CATALOG_VIEWING_START = Topic("catalog.viewing.start", COMMAND, "catalog", fuse=STANDARD_S)
 CATALOG_VIEWING_STOP = Topic("catalog.viewing.stop", COMMAND, "catalog", fuse=STANDARD_S)
-SERIES_ADDED = Topic("series.added", EVENT, "catalog")
-SERIES_BUSY_CHANGED = Topic("series.busy.changed", EVENT, "catalog")
+SERIES_ADDED = Topic("series.added", EVENT, "catalog", request=SeriesCard)
+SERIES_BUSY_CHANGED = Topic("series.busy.changed", EVENT, "catalog", request=SeriesStatusChanged)
 # Protocol of the contributions to the status of a series: published by library and scan, read by catalog.
-SERIES_BUSY_CONTRIBUTION = Topic("series.busy.contribution", EVENT, "catalog")
-SERIES_DELETED = Topic("series.deleted", EVENT, "catalog")
+SERIES_BUSY_CONTRIBUTION = Topic("series.busy.contribution", EVENT, "catalog", request=BusyContribution)
+SERIES_DELETED = Topic("series.deleted", EVENT, "catalog", request=SeriesDeleted)
 # The report of a module to the catalog after series.deleted; published by every module that holds data of a series.
-SERIES_PURGED = Topic("series.purged", EVENT, "catalog")
+SERIES_PURGED = Topic("series.purged", EVENT, "catalog", request=SeriesPurged)
 SERIES_SOURCE_ADDED = Topic("series.source.added", EVENT, "catalog", request=SourceEvent)
 SERIES_SOURCE_REMOVED = Topic("series.source.removed", EVENT, "catalog", request=SourceEvent)
 SERIES_SOURCE_UPDATED = Topic("series.source.updated", EVENT, "catalog", request=SourceEvent)
-SERIES_STATUS_CHANGED = Topic("series.status.changed", EVENT, "catalog")
+SERIES_STATUS_CHANGED = Topic("series.status.changed", EVENT, "catalog", request=SeriesStatusChanged)
 # Protocol of the contributions to the status of a series: published by torrents, scan and planner.
-SERIES_STATUS_CONTRIBUTION = Topic("series.status.contribution", EVENT, "catalog")
-SERIES_UPDATED = Topic("series.updated", EVENT, "catalog")
+SERIES_STATUS_CONTRIBUTION = Topic("series.status.contribution", EVENT, "catalog", request=StatusContribution)
+# Published by the catalog (a written card, a touch of the scan time) and by metadata (the aggregate of TMDB): what changed.
+SERIES_UPDATED = Topic("series.updated", EVENT, "catalog", request=SeriesUpdated)
 
 # --- rules -------------------------------------------------------------------------------------------------------
 RULES_APPLY = Topic("rules.apply", QUERY, "rules", request=RulesApplyRequest, reply=RulesApplyReply, fuse=RULES_S)

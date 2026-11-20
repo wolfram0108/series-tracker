@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from core.module import BusRequestError
+from core.topics import CATALOG_SOURCES_LIST
 from core.contracts import (TitleSearchReply, TitleSearchRequest, CompositionPreviewReply, CompositionPreviewRequest,
                             SeriesSource, SourcesSettingsView, SiteResolveReply, SiteResolveRequest)
 
@@ -29,7 +30,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/series/{series_id}/sources", response_model=list[SeriesSource], responses=_ERR)
     async def sources_of(series_id: int):
         try:
-            return await gw.request("catalog.sources.list", {"series_id": series_id})
+            return list((await gw.reply_of(CATALOG_SOURCES_LIST, {"series_id": series_id})).sources)
         except BusRequestError as exc:
             return refusal(exc)
 

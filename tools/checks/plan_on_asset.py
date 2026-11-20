@@ -29,7 +29,7 @@ from calc.plan.tables import Inputs  # noqa: E402
 async def series_report(real: plan_real.RealSeries, series_id: int) -> tuple[str, Counter]:
     inputs, _skipped, info = await plan_real.inputs_of(real, series_id)
     card = info["card"]
-    files = Library(card["save_path"])
+    files = Library(card.save_path)
     held = [await as_in_file(files, each) if os.path.exists(files.path(each.name)) else None
             for each in inputs.containers]
     missing = sum(1 for each in held if each is None)

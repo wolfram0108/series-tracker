@@ -10,7 +10,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME,
                             SUBTITLES_ALLOW, SUBTITLES_ORDER, VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, CompilationRef, CompositionReply, CompositionRow, EffectiveLever, Level, RowState,
-                            SeriesSource, compilation_key,
+                            SeriesCard, compilation_key,
                             parse_group_target, parse_variant_target)
 from core.ignored import parse_memory
 from calc.subtitle_queue import named_of
@@ -139,7 +139,7 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                    subtitle_order=subtitle_order, subtitle_deny=subtitle_deny)
 
 
-def planner_inputs(layout: CompositionReply, series: Mapping[str, Any],
+def planner_inputs(layout: CompositionReply, series: SeriesCard,
                    voices: Mapping[str, Any]) -> tuple[tuple[OnlineRow, ...], Choices]:
     """The rows and the choices of a series as the planner reads them: `layout` is the answer of `composition.get`,
     `series` the card of the catalog, `voices` the view of the settings of the voice-overs (`voices.settings.get`). The
@@ -148,17 +148,17 @@ def planner_inputs(layout: CompositionReply, series: Mapping[str, Any],
     # The rows of subtitles ride among the rows (`Inputs` sets them apart): every reader of the pair takes them as they are.
     online = online_of([*layout.rows, *layout.subtitles], places)
     try:
-        ignored_seasons = {int(each) for each in json.loads(series.get("ignored_seasons") or "[]")}
+        ignored_seasons = {int(each) for each in json.loads(series.ignored_seasons or "[]")}
     except (json.JSONDecodeError, TypeError, ValueError):
         ignored_seasons = set()
     try:
-        ignored = parse_memory(json.loads(series.get("ignored_episodes") or "{}"))
+        ignored = parse_memory(json.loads(series.ignored_episodes or "{}"))
     except (json.JSONDecodeError, TypeError):
         ignored = {}
     slots = {row.slot[:2] for row in online if not row.compilation}
     off = {slot for slot in slots if slot[0] in ignored_seasons or slot[1] in ignored.get(slot[0], set())}
     order = {each.season: [span.label for span in each.voices] for each in layout.voice_orders}
-    sources = [SeriesSource.model_validate(each).id for each in series.get("sources", [])]
+    sources = [each.id for each in series.sources]
     choices = choices_of(layout.rows, online, [(each.season, each.episode, each.levers) for each in layout.settings],
                          [(each.compilation, each.levers) for each in layout.levels if each.compilation],
                          players=voices.priority, player_groups=Groups.of(voices.player_groups),
@@ -167,7 +167,7 @@ def planner_inputs(layout: CompositionReply, series: Mapping[str, Any],
     return online, choices
 
 
-def layout_inputs(layout: CompositionReply, series: Mapping[str, Any],
+def layout_inputs(layout: CompositionReply, series: SeriesCard,
                   voices: Mapping[str, Any]) -> tuple[tuple[OnlineRow, ...], Choices, dict[tuple[int, str], CompilationRef]]:
     """The rows and the choices of a series from its layout, and its compilations by their row (source id, row key): the
     references name the compilation an episode is cut out of by it. Thousands of rows: the pool counts it."""

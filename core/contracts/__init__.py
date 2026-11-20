@@ -26,6 +26,8 @@ from .release_table import (LINE_FIELDS, LINE_SEPARATOR, ParsedDomains, PlayerFa
                             TableState, UnreadPart, line_of, place_of)
 from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, RulesProfileChanged
 from .series_sources import SeriesSource, SourceChanged, SourceEvent, SourceType
+from .series import (BusyContribution, SeriesCard, SeriesDeleted, SeriesListReply, SeriesPurged, SeriesStatusChanged,
+                     SeriesUpdated, SourcesReply, StatusContribution)
 from .voice_groups import GroupsResolveReply, GroupsResolveRequest
 from .availability import Action, NotAllowed, allowed, refusal, require, variant_state
 from .work import RUN_CHANGED, WORK_STATE, WORK_WITHDRAWN, RunChanged, RunSnapshot, Slot, WorkState, WorkWithdrawn, slot_of
@@ -42,6 +44,8 @@ __all__ = ["TitleCard", "TitleLine", "TitleSearchReply", "TitleSearchRequest", "
            "SeriesReadProgress", "TableProgress", "TableReady", "TableRow", "TableState", "UnreadPart", "line_of", "place_of", "LINE_FIELDS",
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
            "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",
+           "BusyContribution", "SeriesCard", "SeriesDeleted", "SeriesListReply", "SeriesPurged", "SeriesStatusChanged", "SeriesUpdated",
+           "SourcesReply", "StatusContribution",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan", "VoiceTitleSet",
            "EpisodeRef", "Exclusion", "LAYOUT_PARTS", "LayoutPart", "PlayerSummary", "SourceStatus", "SourceSummary",

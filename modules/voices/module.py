@@ -92,7 +92,7 @@ class VoicesModule(BaseModule):
         return editor.view(settings, await self._players())
 
     async def on_players_get(self, env: Envelope) -> PlayersListReply:
-        series = await self.request(CATALOG_SERIES_LIST, {})
+        series = (await self.reply_of(CATALOG_SERIES_LIST, {})).series
         return await self.reply_of(SOURCES_PLAYERS_LIST, players_request(series).model_dump(mode="json"))
 
     async def on_settings_export(self, env: Envelope) -> dict:

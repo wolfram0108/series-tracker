@@ -186,7 +186,7 @@ class RulesModule(BaseModule):
 
     async def on_profile_delete(self, env: Envelope) -> dict:
         profile_id = int(env.payload["profile_id"])
-        used = await self.request(CATALOG_SOURCES_BY_PROFILE, {"profile_id": profile_id})
+        used = (await self.reply_of(CATALOG_SOURCES_BY_PROFILE, {"profile_id": profile_id})).sources
         if used:
             raise ValueError(reason("profile_in_use", profile_id=profile_id,
                                     sources=len(used)))
@@ -194,7 +194,7 @@ class RulesModule(BaseModule):
             deleted = await self.repo.delete_profile(profile_id)
         except sqlite3.IntegrityError:
             # A source took the profile after the question: the transaction is rolled back, so ask again.
-            used = await self.request(CATALOG_SOURCES_BY_PROFILE, {"profile_id": profile_id})
+            used = (await self.reply_of(CATALOG_SOURCES_BY_PROFILE, {"profile_id": profile_id})).sources
             if not used:
                 raise
             raise ValueError(reason("profile_in_use", profile_id=profile_id,

@@ -295,6 +295,6 @@ class UnpackModule(BaseModule):
     async def _pages(self) -> list[str]:
         """The pages of the torrent sources of every series, each in its one spelling."""
         pages = set()
-        for url in torrent_urls(await self.request(CATALOG_SERIES_LIST, {})):
+        for url in torrent_urls((await self.reply_of(CATALOG_SERIES_LIST, {})).series):
             pages.add(await self._page(url))
         return sorted(pages)

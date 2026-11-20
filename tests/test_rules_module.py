@@ -11,7 +11,7 @@ import pytest
 from core.bus import Bus
 from core.module import BaseModule, BusRequestError
 from core.runner import Runner
-from core.contracts import RulesApplyReply, RulesProfileChanged
+from core.contracts import RulesApplyReply, RulesProfileChanged, SeriesSource, SourcesReply
 from core.db import Database
 from core.reasons import parse
 from modules.rules import RulesModule
@@ -46,9 +46,9 @@ class CatalogStub(BaseModule):
 
     async def on_by_profile(self, env):
         self.asked.append(env.payload["profile_id"])
-        if self.script:
-            return self.script.pop(0)
-        return self.readers.get(env.payload["profile_id"], [])
+        found = self.script.pop(0) if self.script else self.readers.get(env.payload["profile_id"], [])
+        return SourcesReply(sources=tuple(SeriesSource.model_validate({"series_id": 1, "url": SITE, "source_type": "web_video", **each})
+                                          for each in found))
 
 
 class Recounter(BaseModule):

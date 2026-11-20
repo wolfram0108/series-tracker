@@ -1,12 +1,12 @@
-"""Агрегатор статусов сериала (Р-11): чистая логика без шины и БД.
+"""The aggregator of the statuses of a series (Р-11): pure logic, no bus and no database.
 
-Статус сериала — вычисляемое значение: объединение «свёрток» (вкладов)
-модулей-владельцев задач плюс эфемерный viewing. Ничего не хранится в
-БД; вклады живут в памяти и восстанавливаются публикациями поставщиков
-при старте процесса.
+The status of a series is a computed value: the union of the contributions (folds) of the modules that own tasks, plus the
+ephemeral `viewing`. Nothing is stored in the database; contributions live in memory and are restored by the providers
+publishing them when the process starts. The module that owns the aggregator keeps its instance; the machine itself holds
+no I/O and no clock.
 
-Иерархия повторяет старый STATUS_HIERARCHY — это источник порядка
-пилюль во фронте (дизайн-контракт): первый в списке рисуется первым.
+The hierarchy repeats the old STATUS_HIERARCHY: it is the source of the order of the pills in the interface (a design
+contract): the first in the list is drawn first.
 """
 from __future__ import annotations
 
@@ -17,40 +17,35 @@ HIERARCHY = [
 ]
 # scanning: an open run of a sync of the series; aligning: a voice-over job is with the alignment service (voices shows
 # the download of voice-over files as downloading); packing: the containers of its episodes are being built (downloads).
-# idle — простой торрент-загрузки (qBit stalledDL): отдельный статус
-# рядом с downloading (Р-11, ревизия). Цвет на фронте тот же, что у
-# downloading; меняется только пилюля. Активность как у downloading —
-# поэтому подавляет waiting (входит в _WAITING_SUPPRESSORS ниже).
-# queued — торрент в очереди qBit (queuedDL): тоже отдельный статус,
-# но со своим (светло-коричневым) цветом слоя. Так же подавляет waiting.
+# idle is a stalled torrent download (qBit stalledDL): a status of its own beside downloading (Р-11, revision). Its colour in
+# the interface is that of downloading; only the pill differs. It counts as activity like downloading does, so it
+# suppresses waiting (it is in _WAITING_SUPPRESSORS below).
+# queued is a torrent queued in qBit (queuedDL): a status of its own too, with its own (light brown) colour of the layer.
+# It suppresses waiting the same way.
 
-# viewing и waiting в свёртках не запрещены умышленно: waiting — часть
-# VK-свёртки (семантика «есть pending в плане»), viewing же приходит
-# только командами и в свёртках недопустим.
+# viewing and waiting are deliberately not forbidden in contributions: waiting is part of the VK fold (the meaning "there is
+# something pending in the plan"), while viewing comes only by commands and is not allowed in contributions.
 ALLOWED_FLAGS = frozenset(HIERARCHY) - {"viewing"}
 
-# waiting — факт «есть что ждать»; при реальной активности он не
-# показывается (семантика старых sync_vk_statuses/_sync_waiting_status,
-# у которых это поведение было размазано по двум конфликтующим
-# механизмам). ready и viewing активностью не считаются: «ready,
-# waiting» (скачана часть, остальное ждёт) — валидная пара.
+# waiting is the fact "there is something to wait for"; with real activity it is not shown (the semantics of the old
+# sync_vk_statuses/_sync_waiting_status, whose behaviour was smeared over two conflicting mechanisms). ready and viewing do not
+# count as activity: "ready, waiting" (a part is downloaded, the rest waits) is a valid pair.
 _WAITING_SUPPRESSORS = frozenset(HIERARCHY) - {"ready", "viewing", "waiting"}
 
 
 class StatusAggregator:
     def __init__(self) -> None:
-        # series_id -> source -> множество активных флагов
+        # series_id -> source -> the set of active flags
         self._contrib: dict[int, dict[str, frozenset[str]]] = {}
         self._viewing: set[int] = set()
-        # последний отданный наружу набор; None = ещё не публиковался
+        # the set last given out; a series not in it stands at the default one, `waiting`
         self._published: dict[int, tuple[str, ...]] = {}
 
-    # --- входящие изменения ------------------------------------------------
+    # --- incoming changes ----------------------------------------------------
 
     def set_contribution(self, series_id: int, source: str,
                          flags: dict[str, bool]) -> list[str] | None:
-        """Принять свёртку источника. Возвращает новый набор статусов,
-        если он изменился, иначе None."""
+        """Takes the fold of a source. Returns the new set of statuses if it changed, otherwise None."""
         unknown = set(flags) - ALLOWED_FLAGS
         if unknown:
             raise ValueError(
@@ -60,7 +55,7 @@ class StatusAggregator:
         if active:
             per_series[source] = active
         else:
-            per_series.pop(source, None)  # все false — вклад снят
+            per_series.pop(source, None)  # all false: the contribution is withdrawn
             if not per_series:
                 self._contrib.pop(series_id, None)
         return self._diff(series_id)
@@ -73,8 +68,7 @@ class StatusAggregator:
         return self._diff(series_id)
 
     def clear_all_viewing(self) -> dict[int, list[str]]:
-        """Сброс viewing у всех (последний SSE-клиент отключился).
-        Возвращает изменившиеся наборы по сериалам."""
+        """Drops viewing everywhere (the last SSE client went away). Returns the sets that changed, by series."""
         affected, self._viewing = self._viewing, set()
         changes = {}
         for series_id in affected:
@@ -84,12 +78,12 @@ class StatusAggregator:
         return changes
 
     def forget(self, series_id: int) -> None:
-        """Сериал удалён — забыть его вклады."""
+        """The series is deleted: its contributions are forgotten."""
         self._contrib.pop(series_id, None)
         self._viewing.discard(series_id)
         self._published.pop(series_id, None)
 
-    # --- чтение --------------------------------------------------------------
+    # --- reading -------------------------------------------------------------
 
     def statuses(self, series_id: int) -> list[str]:
         active: set[str] = set()
@@ -97,16 +91,15 @@ class StatusAggregator:
             active |= flags
         if active & _WAITING_SUPPRESSORS:
             active.discard("waiting")
-        # waiting определяется ДО viewing: просмотр — не активность
-        # (семантика оригинала: «viewing, waiting» при открытой модалке
-        # бездействующего сериала).
+        # waiting is settled BEFORE viewing: a view is no activity (the semantics of the original: "viewing, waiting" with
+        # the modal of an idle series open).
         if not active:
             active = {"waiting"}
         if series_id in self._viewing:
             active.add("viewing")
         return sorted(active, key=HIERARCHY.index)
 
-    # --- внутреннее ----------------------------------------------------------
+    # --- internal ------------------------------------------------------------
 
     def _diff(self, series_id: int) -> list[str] | None:
         current = tuple(self.statuses(series_id))

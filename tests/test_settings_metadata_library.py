@@ -11,7 +11,7 @@ from core.db import Database
 from modules.library import LibraryModule
 from modules.metadata import MetadataModule
 from modules.settings import SettingsModule
-from series_factory import insert_series
+from series_factory import insert_series, series_card
 
 
 
@@ -91,7 +91,7 @@ class _Neighbour(BaseModule):
     name = "neigh"
 
     def __init__(self, bus):
-        self.series = {"id": 1, "season": ""}
+        self.series = series_card(id=1, season="")
         self.seasons = {"seasons": []}
         self.asked: list[str] = []
         super().__init__(bus)

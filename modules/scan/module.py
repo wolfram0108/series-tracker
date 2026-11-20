@@ -72,8 +72,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from core.module import NO_HANDLER, BaseModule, BusRequestError
-from core.topics import EDIT_STUCK_S, TABLE_WAIT_S
-from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, OutputSwitch, RunChanged, SeriesSource, Slot, SyncScope, WorkState)
+from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, EDIT_STUCK_S, SERIES_BUSY_CONTRIBUTION, SERIES_PURGED,
+                         SERIES_STATUS_CONTRIBUTION, TABLE_WAIT_S)
+from core.contracts import (RUN_CHANGED, WORK_STATE, BusyContribution, RunSnapshot, availability, OutputSwitch, RunChanged,
+                            SeriesCard, SeriesDeleted, SeriesPurged, Slot, StatusContribution, SyncScope, WorkState)
 from core.db import Database
 from core.envelope import Envelope
 from core.ignored import parse_memory
@@ -131,10 +133,6 @@ class _RunWork:
     def done(self) -> bool:
         return not self.polling and not self.working
 
-
-
-def _sources_of(series: dict) -> list[SeriesSource]:
-    return [SeriesSource.model_validate(each) for each in series.get("sources", [])]
 
 
 class ScanModule(BaseModule):
@@ -247,7 +245,7 @@ class ScanModule(BaseModule):
         # A series the catalog does not have is refused with the catalog's answer, for every change at once. It is
         # asked first: what follows runs without a pause, so an end that comes meanwhile is not missed.
         try:
-            await self.request("catalog.series.get", {"series_id": series_id})
+            await self.request(CATALOG_SERIES_GET, {"series_id": series_id})
         except BusRequestError as exc:
             if NO_HANDLER not in str(exc):
                 raise
@@ -304,7 +302,7 @@ class ScanModule(BaseModule):
         self._require_idle(series_id, availability.Action.EDIT, env)
 
         async def apply() -> None:
-            series = await self.request("catalog.series.get", {"series_id": series_id})
+            series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
             seasons, memory = self._ignored_seasons(series), self._ignored_episodes(series)
             if request.episodes is None:
                 seasons = seasons | {request.season} if request.off else seasons - {request.season}
@@ -325,7 +323,7 @@ class ScanModule(BaseModule):
     async def on_series_deleted(self, env: Envelope) -> None:
         """The cascade of Р-19: the owner cleans scan_tasks; a scan of the series under way is stopped (Д-2, as a download
         and a relocation are)."""
-        series_id = env.payload["series_id"]
+        series_id = SeriesDeleted.model_validate(env.payload).series_id
         self._aborted.add(series_id)
         # A count of the plan that is writing finishes first; one that comes after sees the series aborted.
         async with self._lock(series_id):
@@ -335,8 +333,7 @@ class ScanModule(BaseModule):
         if self._runs.pop(series_id, None) is not None:  # its works go with the series: the run is over
             self._working.pop(series_id, None)
             self._announce_run(series_id, False)
-        self.publish_event("series.purged",
-                           {"series_id": series_id, "owner": self.name})
+        self.publish_event(SERIES_PURGED, SeriesPurged(series_id=series_id, owner=self.name).model_dump(mode="json"))
 
     async def on_scan_all(self, env: Envelope) -> dict:
         if self._scan_all_running:
@@ -417,14 +414,14 @@ class ScanModule(BaseModule):
                 self._passes.pop(series_id, None)
             self._running.discard(series_id)
 
-    async def _provider_blocks(self, series_id: int, series: dict | None = None) -> str | None:
+    async def _provider_blocks(self, series_id: int, series: SeriesCard | None = None) -> str | None:
         """The reason a series cannot be synchronized now: one of its pages is read by a provider of external sources
         that is not up (`sources.pages.check`). None when nothing stops it, and when the question cannot be put — the sync
         then says for itself what is wrong with the series or the page."""
         try:
             if series is None:
-                series = await self.request("catalog.series.get", {"series_id": series_id})
-            urls = [each.url for each in _sources_of(series)]
+                series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
+            urls = [each.url for each in series.sources]
             if not urls:
                 return None
             blocked = (await self.request("sources.pages.check", {"urls": urls})).get("blocked") or []
@@ -447,8 +444,8 @@ class ScanModule(BaseModule):
                 stopped = True
             # A read of a page of the series stops whether a pass waits for it or not: one taken up again at the start
             # of the process belongs to no pass, and the button stops it all the same.
-            series = await self.request("catalog.series.get", {"series_id": series_id})
-            for source in _sources_of(series):
+            series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
+            for source in series.sources:
                 try:
                     reply = await self.request("sources.table.cancel", {"url": source.url})
                     stopped = bool((reply or {}).get("cancelled")) or stopped
@@ -483,9 +480,8 @@ class ScanModule(BaseModule):
                 intent = await self.repo.create_task(series_id, [], {
                     "video_sync": True, "download": download, **({} if scope is None else {"scope": scope.named()})})
             self._owned.add(intent)
-            series = await self.request("catalog.series.get",
-                                        {"series_id": series_id})
-            if not any(each.parser_profile_id for each in _sources_of(series)):
+            series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
+            if not any(each.parser_profile_id for each in series.sources):
                 self._announce_run(series_id, True)
                 raise SyncFailed(reason("scan_no_profile"))
             # The run is told once, with its snapshot: no step of it has begun before (I-60).
@@ -546,36 +542,35 @@ class ScanModule(BaseModule):
         """Есть ли серия в каталоге: носитель ошибки пишется только
         существующей серии — иначе внешний ключ не даст записать."""
         try:
-            await self.request("catalog.series.get",
-                                {"series_id": series_id})
+            await self.request(CATALOG_SERIES_GET, {"series_id": series_id})
             return True
         except BusRequestError:
             return False
 
-    async def _relocate(self, series: dict) -> dict:
+    async def _relocate(self, series: SeriesCard) -> SeriesCard:
         """The first step of a sync: the move of the folder a save planned (И-59); everything after it works in the new
         folder. A failed move fails the sync, and its plan waits for the next one."""
         try:
-            reply = await self.request("library.relocation.apply", {"series_id": series["id"]})
+            reply = await self.request("library.relocation.apply", {"series_id": series.id})
         except BusRequestError as exc:
             if NO_HANDLER in str(exc):
                 return series
             raise
         if not reply["moved"]:
             return series
-        return await self.request("catalog.series.get", {"series_id": series["id"]})
+        return await self.reply_of(CATALOG_SERIES_GET, {"series_id": series.id})
 
     # --- synchronisation and the plan of references ----------------------------------
 
-    async def _sync(self, series: dict, download: bool, scope: SyncScope | None = None) -> dict:
+    async def _sync(self, series: SeriesCard, download: bool, scope: SyncScope | None = None) -> dict:
         """Tables of all sources -> layout -> references and plan -> (with download) the download and the voice-overs. A sync
         of a season or of an episode reads the tables of every source and counts the layout as the sync of the series does;
         only what the planner carries out is the scope's (planner.sync).
 
         Each step starts on the signal that the one before it ended, and any step that fails fails the scan."""
-        series_id = series["id"]
+        series_id = series.id
         self._alive(series_id)
-        tables = await sync.sync_tables(_sources_of(series), self.request, self._signals, self._table_wait_s)
+        tables = await sync.sync_tables(series.sources, self.request, self._signals, self._table_wait_s)
         for each in tables:
             if each.reason:
                 self.log.warning("сериал %d, источник %d: страница %s — %s, причина %s", series_id, each.source_id,
@@ -583,7 +578,7 @@ class ScanModule(BaseModule):
         self._alive(series_id)
         snapshot = self._snapshots.get(series_id)
         await self._step("composition.recompute", {"series_id": series_id, **(
-            {"snapshot": snapshot.model_dump(mode="json")} if snapshot is not None else {})}, units=len(_sources_of(series)))
+            {"snapshot": snapshot.model_dump(mode="json")} if snapshot is not None else {})}, units=len(series.sources))
         # The disk follows the plan here and nowhere else: the planner counts the plan of the series from its asset and
         # these tables, does its work and applies it once, at its end (modules/planner). Without download it applies only
         # what needs no work.
@@ -616,7 +611,8 @@ class ScanModule(BaseModule):
         self.publish_event(RUN_CHANGED, RunChanged(series_id=series_id, active=active,
                                                    snapshot=self._snapshots.get(series_id) if active else None,
                                                    seq=self._run_seq).model_dump(mode="json"))
-        self.publish_event("series.busy.contribution", {"source": "sync", "series_id": series_id, "busy": active})
+        self.publish_event(SERIES_BUSY_CONTRIBUTION,
+                           BusyContribution(source="sync", series_id=series_id, busy=active).model_dump(mode="json"))
 
     async def _hold_run(self, series_id: int, intent: int) -> None:
         """The pass of the sync is over and its works are given out: the run stays open, with its command written down,
@@ -626,16 +622,16 @@ class ScanModule(BaseModule):
         self._runs[series_id] = intent
         await self._ask_working(series_id)
 
-    async def _take_snapshot(self, series: dict, intent: int) -> None:
+    async def _take_snapshot(self, series: SeriesCard, intent: int) -> None:
         """The rules of the profiles of the sources and the settings of the voice-overs as they are when the sync starts,
         written with its command: every step of the run works by them, and a run a restart takes up again too (И-60)."""
-        series_id = series["id"]
+        series_id = series.id
         task = await self.repo.get_task(intent)
         results = task["results_data"] if task else {}
         if results.get("snapshot") is not None:
             self._snapshots[series_id] = RunSnapshot.model_validate(results["snapshot"])
             return
-        profiles = sorted({each.parser_profile_id for each in _sources_of(series) if each.parser_profile_id})
+        profiles = sorted({each.parser_profile_id for each in series.sources if each.parser_profile_id})
         snapshot = RunSnapshot(profiles=(await self._exported("rules.profiles.export", {"profile_ids": profiles}))
                                .get("profiles", {}),
                                voices=(await self._exported("voices.settings.export", {})).get("values", {}))
@@ -702,21 +698,21 @@ class ScanModule(BaseModule):
 
 
     @staticmethod
-    def _ignored_episodes(series: dict) -> dict[int, set[int]]:
+    def _ignored_episodes(series: SeriesCard) -> dict[int, set[int]]:
         """Episodes the user switched off in advance, as for torrents: their rows are created switched off,
         so neither the download nor the voice-overs take them."""
         try:
-            return parse_memory(json.loads(series.get("ignored_episodes") or "{}"))
+            return parse_memory(json.loads(series.ignored_episodes or "{}"))
         except (json.JSONDecodeError, TypeError):
             return {}
 
     @staticmethod
-    def _ignored_seasons(series: dict) -> set[int]:
+    def _ignored_seasons(series: SeriesCard) -> set[int]:
         """Сезоны, помеченные пользователем к игнору (VU11): их эпизоды в
         план не попадают."""
         try:
             return {int(s) for s in
-                    json.loads(series.get("ignored_seasons") or "[]")}
+                    json.loads(series.ignored_seasons or "[]")}
         except (json.JSONDecodeError, TypeError, ValueError):
             return set()
 
@@ -756,9 +752,8 @@ class ScanModule(BaseModule):
 
     def _contribute(self, series_id: int, *, scanning: bool,
                     error: bool) -> None:
-        self.publish_event("series.status.contribution", {
-            "source": "scan", "series_id": series_id,
-            "flags": {"scanning": scanning, "error": error}})
+        self.publish_event(SERIES_STATUS_CONTRIBUTION, StatusContribution(
+            source="scan", series_id=series_id, flags={"scanning": scanning, "error": error}).model_dump(mode="json"))
 
     # --- планировщик автосканирования ----------------------------------------------
 
@@ -813,20 +808,20 @@ class ScanModule(BaseModule):
         await self._broadcast_status()
         stopped = False
         try:
-            all_series = await self.request("catalog.series.list", {})
+            all_series = (await self.reply_of(CATALOG_SERIES_LIST, {})).series
             for s in all_series:
-                if not s.get("auto_scan_enabled"):
+                if not s.auto_scan_enabled:
                     continue
-                if self._state(s["id"]) != availability.SERIES_IDLE:
-                    self.log.info("автоскан: сериал %d пропущен — идёт его синхронизация", s["id"])
+                if self._state(s.id) != availability.SERIES_IDLE:
+                    self.log.info("автоскан: сериал %d пропущен — идёт его синхронизация", s.id)
                     continue
-                if (why := await self._provider_blocks(s["id"], s)) is not None:
-                    self.log.info("автоскан: сериал %d пропущен — %s", s["id"], describe(why))
+                if (why := await self._provider_blocks(s.id, s)) is not None:
+                    self.log.info("автоскан: сериал %d пропущен — %s", s.id, describe(why))
                     continue
                 try:
-                    await self._run_series(s["id"])
+                    await self._run_series(s.id)
                 except Exception as exc:  # noqa: BLE001 — проход не прерываем
-                    self.log.error("автоскан сериала %d: %s", s["id"], exc)
+                    self.log.error("автоскан сериала %d: %s", s.id, exc)
         except asyncio.CancelledError:
             stopped = True  # the module is going away: its neighbours are not asked anything on the way out
             raise

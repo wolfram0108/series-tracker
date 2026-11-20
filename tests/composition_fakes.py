@@ -14,11 +14,12 @@ from typing import Callable
 
 from core.module import BaseModule
 from core.contracts import (GroupsResolveReply, GroupsResolveRequest, ReleaseTable, RuleResult, RulesApplyReply,
-                            RulesApplyRequest, TableFailed, TableGetReply, TableGetRequest, TableReady, TableState,
-                            VoiceSettingsView)
+                            RulesApplyRequest, SeriesCard, SeriesListReply, SourcesReply, TableFailed, TableGetReply,
+                            TableGetRequest, TableReady, TableState, VoiceSettingsView)
 from core.reasons import reason
 from calc.voice_names import fold_name
 from calc.rules.numbering import season_of, settle_parts
+from series_factory import series_card
 
 HOST = "https://fake.test"
 PAGE = f"{HOST}/p/1"
@@ -51,31 +52,31 @@ class FakeCatalog(BaseModule):
         self.handle("catalog.series.list", self.on_list)
         self.handle("catalog.sources.by_profile", self.on_by_profile)
 
-    def _card(self, series_id: int) -> dict:
+    def _card(self, series_id: int) -> SeriesCard:
         card = self.series[series_id]
-        return {"id": series_id, "season": card["season"],
-                "sources": sorted(card["sources"], key=lambda each: (each["position"], each["id"]))}
+        return series_card(id=series_id, season=card["season"],
+                           sources=sorted(card["sources"], key=lambda each: (each["position"], each["id"])))
 
-    async def on_get(self, env) -> dict:
+    async def on_get(self, env) -> SeriesCard:
         series_id = env.payload["series_id"]
         self.gets.put_nowait(series_id)
         if series_id not in self.series:
             raise LookupError(f"сериал {series_id} не найден")
         return self._card(series_id)
 
-    async def on_list(self, env) -> list[dict]:
-        return [self._card(series_id) for series_id in self.series]
+    async def on_list(self, env) -> SeriesListReply:
+        return SeriesListReply(series=tuple(self._card(series_id) for series_id in self.series))
 
-    async def on_by_profile(self, env) -> list[dict]:
-        return [each for card in self.series.values() for each in card["sources"]
-                if each["parser_profile_id"] == env.payload["profile_id"]]
+    async def on_by_profile(self, env) -> SourcesReply:
+        return SourcesReply(sources=tuple(each for card in self.series.values() for each in card["sources"]
+                                          if each["parser_profile_id"] == env.payload["profile_id"]))
 
     # --- what the user does, as the catalog would announce it ------------------------------------
 
     def add_series(self, sources: list[dict] | None = None, season=None) -> int:
         series_id = next(self._series_ids)
         self.series[series_id] = {"season": season, "sources": []}
-        self.publish_event("series.added", {"id": series_id})
+        self.publish_event("series.added", series_card(id=series_id).model_dump(mode="json"))
         for fields in sources if sources is not None else [source()]:
             self.add_source(series_id, **fields)
         return series_id

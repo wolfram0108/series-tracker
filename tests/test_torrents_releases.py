@@ -16,7 +16,8 @@ import pytest
 from app_stand import Served
 from core.bus import Bus
 from core.module import BaseModule
-from core.contracts import RUN_CHANGED
+from core.contracts import RUN_CHANGED, SeriesListReply
+from series_factory import series_card
 from core.contracts.torrent import RELEASE_CHANGED_TOPIC, PageRelease, PageReleases
 from core.db import Database
 from core.schedule import next_at
@@ -61,11 +62,13 @@ class World(BaseModule):
         return {"site": "kinozal", "canonical_url": env.payload["url"], "source_type": "torrent"}
 
     async def on_series(self, env):
-        return {"id": env.payload["series_id"], "sources": [{"url": u} for u in self.series.get(env.payload["series_id"], [])]}
+        return series_card(id=env.payload["series_id"],
+                           sources=[{"url": u} for u in self.series.get(env.payload["series_id"], [])])
 
     async def on_list(self, env):
-        return [{"id": sid, "name": f"Сериал {sid}", "auto_scan_enabled": sid in self.auto,
-                 "sources": [{"url": u, "source_type": "torrent"} for u in urls]} for sid, urls in self.series.items()]
+        return SeriesListReply(series=tuple(series_card(
+            id=sid, name=f"Сериал {sid}", auto_scan_enabled=sid in self.auto, sources=[{"url": u} for u in urls])
+            for sid, urls in self.series.items()))
 
     async def on_runs(self, env):
         return {"runs": [], "as_of": 0}

@@ -153,8 +153,9 @@ from core.contracts.release_table import site_of
 from core.contracts.voices import PLAYERS_OFF_KEY
 from core.contracts import (NotAllowed, ParsedDomains, PlayerFacts, PlayerPlace,
                             PlayersListReply, PlayersListRequest, SiteResolveRequest,
-                            SourceType, SourcesSettingsView, TableGetRequest, TitleSearchRequest, TrackerMirrors)
-from core.topics import TABLE_READ_S
+                            SeriesDeleted, SeriesPurged, SourceType, SourcesSettingsView, TableGetRequest, TitleSearchRequest,
+                            TrackerMirrors)
+from core.topics import CATALOG_SERIES_LIST, SERIES_PURGED, TABLE_READ_S
 from core.db import Database
 from core.envelope import Envelope
 from core.http_limits import bounded_client
@@ -239,6 +240,7 @@ class SourcesModule(BaseModule):
             repo=self.repo, sites=self.sites, players=self.players, term=self.term,
             publish=lambda topic, payload: self.publish_event(topic, payload),
             spawn=lambda coro, **kw: self.spawn(coro, **kw), request=lambda topic, payload, **kw: self.request(topic, payload, **kw),
+            reply=lambda topic, payload: self.reply_of(topic, payload),
             site_of=lambda url: self.tables.resolve(url).site, default=provider, reconnect=provider_reconnect)
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
@@ -295,18 +297,17 @@ class SourcesModule(BaseModule):
 
     async def on_series_deleted(self, env: Envelope) -> None:
         """Cascade of a deleted series (Р-19): the tables of the pages only it listed go, and the owner reports it."""
+        series_id = SeriesDeleted.model_validate(env.payload).series_id
         if await self._forget_unlisted_pages():
-            self.publish_event("series.purged", {"series_id": env.payload["series_id"], "owner": self.name})
+            self.publish_event(SERIES_PURGED, SeriesPurged(series_id=series_id, owner=self.name).model_dump(mode="json"))
 
     async def _forget_unlisted_pages(self) -> bool:
         """Ask the catalog which pages its sources list and forget the stored pages that none does. False when the catalog
         could not be asked: nothing is forgotten then, and the next change counts again."""
         async with self._listing:
             try:
-                series = await self.request("catalog.series.list", {})
-                if not isinstance(series, list):
-                    raise TypeError("the list of series is no list")
-                addresses = [source["url"] for one in series for source in one.get("sources") or []]
+                series = (await self.reply_of(CATALOG_SERIES_LIST, {})).series
+                addresses = [source.url for one in series for source in one.sources]
                 # A page some source lists is kept even when no site reads its address now (the provider of the socket is not
                 # up, or is not configured): its table is the one the next read of it begins from.
                 listed = self.tables.keys_of(addresses) | set(addresses)
@@ -356,14 +357,14 @@ class SourcesModule(BaseModule):
         provider of external sources (no web address), which the window lists apart."""
         counted: dict[str, int] = {}
         provided: set[str] = set()
-        for series in await self.request("catalog.series.list", {}):
-            for source in series.get("sources") or []:
-                if source.get("source_type") == SourceType.TORRENT:
+        for series in (await self.reply_of(CATALOG_SERIES_LIST, {})).series:
+            for source in series.sources:
+                if source.source_type == SourceType.TORRENT:
                     continue
-                site = site_of(source["url"])
+                site = site_of(source.url)
                 if site:
                     counted[site] = counted.get(site, 0) + 1
-                    if not is_web_address(source["url"]):
+                    if not is_web_address(source.url):
                         provided.add(site)
         order = sorted(counted, key=lambda site: (site in provided, -counted[site], site))
         return {"sites": [{"site": site, "provider": site in provided, "sources": counted[site],

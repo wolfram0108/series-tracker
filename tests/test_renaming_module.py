@@ -8,7 +8,7 @@ from core.bus import Bus
 from core.module import BaseModule
 from core.runner import Runner
 from modules.renaming import RenamingModule
-from series_factory import insert_series
+from series_factory import insert_series, series_card
 from schema_db import migrated
 
 
@@ -42,7 +42,7 @@ class FakeNeighbours(BaseModule):
         h("torrents.db.files.upsert", self.on_upsert)
 
     async def on_series(self, env):
-        return self.series
+        return series_card(**self.series)
 
     async def on_format_torrent(self, env):
         self.torrent_profiles.append(env.payload["profile_id"])

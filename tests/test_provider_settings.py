@@ -7,7 +7,9 @@ import asyncio
 
 
 from core.bus import Bus
+from core.contracts import SeriesListReply
 from core.module import BaseModule
+from series_factory import series_card
 from core.db import Database
 from modules.settings import SettingsModule
 from modules.sources.module import SourcesModule
@@ -35,8 +37,8 @@ class Neighbours(BaseModule):
         self.handle("catalog.series.list", self.on_list)
         self.handle("conform.workspace", self.on_workspace)
 
-    async def on_list(self, env) -> list[dict]:
-        return [{"sources": [{"url": each} for each in self.addresses]}]
+    async def on_list(self, env) -> SeriesListReply:
+        return SeriesListReply(series=(series_card(sources=[{"url": each} for each in self.addresses]),))
 
     async def on_workspace(self, env) -> dict:
         return {"downloads": "/nas/work/downloads", "conform": "/nas/work/conform"}

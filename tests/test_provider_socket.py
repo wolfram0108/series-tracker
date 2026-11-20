@@ -12,7 +12,9 @@ import os
 import pytest
 
 from core.bus import Bus
+from core.contracts import SeriesListReply
 from core.module import BaseModule
+from series_factory import series_card
 from core.db import Database
 from modules.sources.module import SourcesModule
 from modules.sources.provider import ProviderClient
@@ -200,5 +202,5 @@ class Catalog(BaseModule):
     def register(self) -> None:
         self.handle("catalog.series.list", self.on_list)
 
-    async def on_list(self, env) -> list[dict]:
-        return [{"sources": [{"url": each} for each in self.addresses]}]
+    async def on_list(self, env) -> SeriesListReply:
+        return SeriesListReply(series=(series_card(sources=[{"url": each} for each in self.addresses]),))

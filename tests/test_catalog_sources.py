@@ -78,7 +78,7 @@ async def test_a_caller_that_names_its_series_cannot_reach_a_source_of_another(s
                                                        "fields": {"vibix_season": 2}}, timeout=5)
     with pytest.raises(BusRequestError, match="source_not_in_series"):
         await probe.request("catalog.sources.remove", {"source_id": foreign, "series_id": mine.series_id}, timeout=5)
-    assert len(await probe.request("catalog.sources.list", {"series_id": other.series_id}, timeout=5)) == 1
+    assert len((await probe.request("catalog.sources.list", {"series_id": other.series_id}, timeout=5)).sources) == 1
     done = await probe.request("catalog.sources.update", {"source_id": mine.source_ids[0], "series_id": mine.series_id,
                                                           "fields": {"vibix_season": 2}}, timeout=5)
     assert done["applied"] == {"vibix_season": 2}
@@ -132,13 +132,13 @@ async def test_a_source_takes_the_first_colour_its_series_has_free_and_keeps_it(
     def colours(series_id):
         return probe.request("catalog.sources.list", {"series_id": series_id}, timeout=5)
 
-    assert [(each["id"], each["color"]) for each in await colours(made.series_id)] == [
+    assert [(each.id, each.color) for each in (await colours(made.series_id)).sources] == [
         (made.source_ids[0], 0), (made.source_ids[1], 1), (third["id"], 2)]
-    assert [each["color"] for each in await colours(other.series_id)] == [0]  # colours are of a series
+    assert [each.color for each in (await colours(other.series_id)).sources] == [0]  # colours are of a series
     await probe.request("catalog.sources.remove", {"source_id": made.source_ids[1]}, timeout=5)
     fourth = await probe.request("catalog.sources.add", {
         "series_id": made.series_id, "source": source(url=ANIMAKIMA, source_type="web_video")}, timeout=5)
-    by_id = {each["id"]: each["color"] for each in await colours(made.series_id)}
+    by_id = {each.id: each.color for each in (await colours(made.series_id)).sources}
     assert by_id == {made.source_ids[0]: 0, third["id"]: 2, fourth["id"]: 1}  # the freed colour, the others kept
     with pytest.raises(BusRequestError):
         await probe.request("catalog.sources.update", {"source_id": third["id"], "fields": {"color": 5}}, timeout=5)

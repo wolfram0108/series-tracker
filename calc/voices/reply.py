@@ -4,10 +4,10 @@ the module."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
-from core.contracts import (GroupsResolveReply, GroupsResolveRequest, PlayerFacts, PlayersListRequest, SettingProblem,
-                            VoiceSettingsDraft)
+from core.contracts import (GroupsResolveReply, GroupsResolveRequest, PlayerFacts, PlayersListRequest, SeriesCard,
+                            SettingProblem, VoiceSettingsDraft)
 
 from . import editor
 from .settings import VoiceSettings
@@ -18,9 +18,9 @@ def groups_reply(settings: VoiceSettings, request: GroupsResolveRequest) -> Grou
     return GroupsResolveReply(groups={name: settings.voices.group_of(name) for name in request.names})
 
 
-def players_request(series: Sequence[Mapping[str, Any]]) -> PlayersListRequest:
+def players_request(series: Sequence[SeriesCard]) -> PlayersListRequest:
     """The addresses of the sources of every series: the pages that say where each player is."""
-    return PlayersListRequest(urls=[source["url"] for each in series for source in each.get("sources") or [] if source.get("url")])
+    return PlayersListRequest(urls=[source.url for each in series for source in each.sources if source.url])
 
 
 @dataclass(frozen=True)

@@ -29,10 +29,12 @@ import os
 
 from core import storage
 from core.fsnames import sanitize_path
+from core.contracts import BusyContribution, SeriesDeleted, SeriesPurged
 from core.module import BaseModule
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
+from core.topics import CATALOG_SERIES_GET, SERIES_BUSY_CONTRIBUTION, SERIES_PURGED
 
 from .repository import LibraryRepository
 
@@ -106,18 +108,17 @@ class LibraryModule(BaseModule):
         """The save of the card: the move is written down, the files stay where they are until the sync (И-59)."""
         series_id = env.payload["series_id"]
         new_path = sanitize_path(env.payload["new_path"])
-        series = await self.request("catalog.series.get",
-                                    {"series_id": series_id})
+        series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
         if series_id in self._relocations or await self.repo.moving(series_id):
             raise LibraryError(reason("move_in_progress"))
-        if new_path == series["save_path"]:
+        if new_path == series.save_path:
             if await self.repo.drop_plan(series_id):
                 self.publish_event("library.relocation.planned", {"series_id": series_id, "new_path": None})
             return {"new_path": None}
         if not os.path.isabs(new_path):
             raise LibraryError(reason("save_path_relative", path=new_path))
         self._check_allowed(os.path.normpath(new_path))
-        await storage.call(self._check_same_device, series["save_path"], new_path)
+        await storage.call(self._check_same_device, series.save_path, new_path)
         await self.repo.plan(series_id, new_path)
         self.publish_event("library.relocation.planned", {"series_id": series_id, "new_path": new_path})
         return {"new_path": new_path}
@@ -162,9 +163,8 @@ class LibraryModule(BaseModule):
                            {"series_id": series_id})
         try:
             await self.repo.set_status(task["id"], "in_progress")
-            series = await self.request("catalog.series.get",
-                                        {"series_id": series_id})
-            old_base, new_base = series["save_path"], task["new_path"]
+            series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
+            old_base, new_base = series.save_path, task["new_path"]
             await self._move_plan_files(series_id, old_base, new_base)
             await self._move_torrents(series_id, new_base)
             await self.request("catalog.series.set_save_path", {
@@ -215,17 +215,16 @@ class LibraryModule(BaseModule):
                     "hash": torrent["qb_hash"], "location": new_base})
 
     def _busy(self, series_id: int, busy: bool) -> None:
-        self.publish_event("series.busy.contribution", {
-            "source": "library", "series_id": series_id, "busy": busy})
+        self.publish_event(SERIES_BUSY_CONTRIBUTION, BusyContribution(source="library", series_id=series_id, busy=busy)
+                           .model_dump(mode="json"))
 
     async def on_series_deleted(self, env):
         """Каскад Р-19 + Д2: прервать идущее перемещение этой серии
         (os.rename атомарен — полуфайлов нет, останавливаем перенос
         оставшихся файлов) и вычистить relocation_tasks."""
-        series_id = env.payload["series_id"]
+        series_id = SeriesDeleted.model_validate(env.payload).series_id
         t = self._relocations.pop(series_id, None)
         if t and not t.done():
             t.cancel()
         await self.repo.delete_for_series(series_id)
-        self.publish_event("series.purged",
-                           {"series_id": series_id, "owner": self.name})
+        self.publish_event(SERIES_PURGED, SeriesPurged(series_id=series_id, owner=self.name).model_dump(mode="json"))

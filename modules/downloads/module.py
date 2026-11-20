@@ -61,7 +61,7 @@ from core import notices, storage
 from core.module import BaseModule
 from core.clock import beat_while
 from core.ffprobe import duration_of, film_stream, streams_of
-from core.contracts import RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, WorkWithdrawn
+from core.contracts import RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, SeriesDeleted, WorkWithdrawn
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import describe, reason
@@ -228,7 +228,8 @@ class DownloadsModule(BaseModule):
             await self._apply(Limits(**{**vars(self.places.limits), name: value}))
 
     async def on_series_deleted(self, env: Envelope) -> None:
-        await self._withdraw(lambda job_key, owner: owner == env.payload["series_id"])
+        series_id = SeriesDeleted.model_validate(env.payload).series_id
+        await self._withdraw(lambda job_key, owner: owner == series_id)
 
     async def on_work_withdrawn(self, env: Envelope) -> None:
         """The owner of the work does not need it: the jobs of the series, or of the keys it names, stop. This module

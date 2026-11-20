@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from core.contracts import RulesApplyReply
+from core.contracts import RulesApplyReply, SeriesCard, SourceType
 from core.contracts.torrent import EditorTab, ReleaseView
 
 from .layout import Inputs, compose
@@ -28,9 +28,9 @@ def profiles_of(stored: Mapping[str, Any] | None) -> dict[str, int]:
     return {tab: stored[column] for tab, column in PROFILE_COLUMNS.items() if stored and stored.get(column)}
 
 
-def torrent_urls(listing: Sequence[Mapping[str, Any]]) -> list[str]:
+def torrent_urls(listing: Sequence[SeriesCard]) -> list[str]:
     """The addresses of the torrent sources of the series listed, as the sources are written."""
-    return [source["url"] for one in listing for source in one.get("sources") or [] if source.get("source_type") == "torrent"]
+    return [source.url for one in listing for source in one.sources if source.source_type == SourceType.TORRENT]
 
 
 def stored_inputs(releases: list[ReleaseView], streams: dict[str, dict[str, dict]], assignments: Sequence[Mapping[str, Any]],

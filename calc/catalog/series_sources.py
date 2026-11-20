@@ -4,6 +4,8 @@ No bus and no database here, so that the repository and the module apply the sam
 """
 from __future__ import annotations
 
+from typing import Mapping
+
 from calc.row_limit import normalized
 from core.contracts import SeriesSource
 from core.reasons import reason
@@ -22,7 +24,7 @@ def refuse_removed_fields(fields: dict) -> None:
             raise ValueError(reason("series_field_removed", field=name))
 
 
-def checked_fields(fields: dict, stored: dict | None = None) -> dict:
+def checked_fields(fields: dict, stored: SeriesSource | None = None) -> dict:
     """The fields of a source checked against the contract.
 
     A new source (`stored` is None) comes back whole, with the defaults of the contract, except the position that
@@ -33,7 +35,8 @@ def checked_fields(fields: dict, stored: dict | None = None) -> dict:
     unknown = sorted(set(fields) - set(SOURCE_FIELDS))
     if unknown:
         raise ValueError(reason("source_field_unknown", field=unknown[0], allowed=", ".join(SOURCE_FIELDS)))
-    model = SeriesSource.model_validate({**(stored or {"id": 0, "series_id": 0}), **fields})
+    held = stored.model_dump(mode="json") if stored is not None else {"id": 0, "series_id": 0}
+    model = SeriesSource.model_validate({**held, **fields})
     if not model.url.strip():
         raise ValueError(reason("source_url_empty"))
     if model.vibix_season is not None and model.vibix_season < 1:
@@ -44,8 +47,8 @@ def checked_fields(fields: dict, stored: dict | None = None) -> dict:
     model = model.model_copy(update={"rows_per_line": rows})
     values = model.model_dump(mode="json")
     values["players_off"] = list(dict.fromkeys(values["players_off"]))
-    names = tuple(fields) if stored else tuple(name for name in SOURCE_FIELDS
-                                               if name != "position" or "position" in fields)
+    names = tuple(fields) if stored is not None else tuple(name for name in SOURCE_FIELDS
+                                                           if name != "position" or "position" in fields)
     return {name: values[name] for name in names}
 
 
@@ -61,3 +64,10 @@ def checked_sources(raw: object) -> list[dict]:
         if urls.count(url) > 1:
             raise ValueError(reason("source_exists", url=url))
     return drafts
+
+
+def changed_fields(values: Mapping[str, object], stored: SeriesSource) -> dict:
+    """What of the checked `values` differs from the stored source: a value equal to the stored one is no change, so it
+    raises no event and no recount downstream."""
+    held = stored.model_dump(mode="json")
+    return {name: value for name, value in values.items() if value != held[name]}

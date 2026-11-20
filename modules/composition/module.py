@@ -95,8 +95,8 @@ Events (incoming) — every one of them only asks for a recount of the series it
   rules.profile.changed {profile_id} — the series whose sources are read by that profile
   voices.settings.changed — the groups of voice-overs or the players switched off in the settings may have changed:
       every series is counted again
-  series.updated {series_id, season?} — the season of the card is the constructor's fallback season
-  series.added {id} — a series came; series.deleted {series_id} — everything of the series goes, then series.purged
+  series.updated (SeriesUpdated; `season` set) — the season of the card is the constructor's fallback season
+  series.added (SeriesCard) — a series came; series.deleted (SeriesDeleted) — everything of the series goes, then series.purged
   Whatever the cause, a recount is the same one function over the whole series, and recounting twice with the same
   inputs changes nothing. A cause that comes while the series is being counted sets a flag and the series is counted
   once more when the running count ends; series are counted independently of each other.
@@ -128,8 +128,8 @@ from core import compute
 from core.contracts import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, GroupsResolveRequest, QueuesGet,
                             QueuesReply, ReleaseTable, RulesApplyReply, RulesProfileChanged, RunChanged, RunSnapshot,
-                            SeriesReadProgress, SeriesSource, SettingsReset, SettingsSet, SettingsSetMany, SourceEvent,
-                            TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableState, VoiceOrderSet,
+                            SeriesCard, SeriesDeleted, SeriesPurged, SeriesReadProgress, SeriesSource, SeriesUpdated, SettingsReset, SettingsSet,
+                            SettingsSetMany, SourceEvent, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableState, VoiceOrderSet,
                             VoiceSettingsView, VoiceTitleSet, availability)
 from core.db import Database
 from core.envelope import Envelope
@@ -242,12 +242,12 @@ class CompositionModule(BaseModule):
             self.log.exception("пересчёт раскладок при старте не начат")
 
     async def _resume(self) -> None:
-        listing = await self._ask(CATALOG_SERIES_LIST, {})
+        listing = (await self._ask(CATALOG_SERIES_LIST, {})).series
         known = set(await self.repo.series_ids())
-        present = {each["id"] for each in listing}
+        present = {each.id for each in listing}
         for each in listing:
-            if each["id"] in known or each.get("sources"):
-                self._schedule(each["id"])
+            if each.id in known or each.sources:
+                self._schedule(each.id)
         for series_id in known - present:
             await self._purge(series_id)
 
@@ -427,17 +427,18 @@ class CompositionModule(BaseModule):
 
     def on_series_added(self, env: Envelope) -> None:
         # A series number is never given twice, but a test or a restored database may; an earlier delete must not stick.
-        self._deleted.discard(env.payload["id"])
+        self._deleted.discard(SeriesCard.model_validate(env.payload).id)
 
     def on_series_updated(self, env: Envelope) -> None:
-        if "season" in env.payload:
-            self._schedule(env.payload["series_id"])
+        event = SeriesUpdated.model_validate(env.payload)
+        if "season" in event.model_fields_set:
+            self._schedule(event.series_id)
 
     async def on_series_deleted(self, env: Envelope) -> None:
-        series_id = env.payload["series_id"]
+        series_id = SeriesDeleted.model_validate(env.payload).series_id
         self._deleted.add(series_id)
         await self._purge(series_id)
-        self.publish_event(SERIES_PURGED, {"series_id": series_id, "owner": OWNER})
+        self.publish_event(SERIES_PURGED, SeriesPurged(series_id=series_id, owner=OWNER).model_dump(mode="json"))
 
     def on_source_changed(self, env: Envelope) -> None:
         """A source came, went or changed: the layout is counted again. Its page is read anew only when it is new or an
@@ -478,10 +479,10 @@ class CompositionModule(BaseModule):
     async def on_profile_changed(self, env: Envelope) -> None:
         profile_id = RulesProfileChanged.model_validate(env.payload).profile_id
         try:
-            sources = await self._ask(CATALOG_SOURCES_BY_PROFILE, {"profile_id": profile_id})
+            sources = (await self._ask(CATALOG_SOURCES_BY_PROFILE, {"profile_id": profile_id})).sources
         except _Unavailable:
             return  # logged by the request; no series is known to tell the failure about
-        for series_id in sorted({each["series_id"] for each in sources}):
+        for series_id in sorted({each.series_id for each in sources}):
             self._schedule(series_id)
 
     async def on_groups_changed(self, env: Envelope) -> None:
@@ -588,15 +589,14 @@ class CompositionModule(BaseModule):
         every source its table and the answer of its rules, then the groups of the voice-overs of all of them (the names the
         groups are asked about are counted from the answers of the rules); nothing is written here."""
         card = await self._ask(CATALOG_SERIES_GET, {"series_id": series_id})
-        sources = [SeriesSource.model_validate(each) for each in card.get("sources", [])]
         snapshot = self._snapshots.get(series_id)
         off = await self._players_off(snapshot)
         inputs = []
-        for source in sources:
+        for source in card.sources:
             table, failure, url = await self._table(series_id, flight, source, source.id in refresh)
             answer = None
             if table is not None and source.parser_profile_id is not None:
-                answer = await self._answer(source, table, card.get("season"), snapshot, off)
+                answer = await self._answer(source, table, card.season, snapshot, off)
             inputs.append(SourceInput(source, table, answer, failure, url, players_off=off))
         names = await compute.run(project.voice_names, inputs)
         return inputs, await self._groups(names, snapshot) if names else {}

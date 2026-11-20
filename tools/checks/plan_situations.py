@@ -98,7 +98,7 @@ async def situations(real: plan_real.RealSeries, series_id: int) -> tuple[list[d
         world = copy.deepcopy(base)
         world.site[source] = []
         found.append(outcome(world, f"источник {source} ({info['places'].get(source, '')}) удалил все видео"))
-    profiles = sorted({each["parser_profile_id"] for each in info["card"]["sources"] if each.get("parser_profile_id")})
+    profiles = sorted({each.parser_profile_id for each in info["card"].sources if each.parser_profile_id})
     for profile_id in profiles:
         rules = await real.rules_of(profile_id)
         for place, rule in enumerate(rules):

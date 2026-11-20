@@ -14,7 +14,8 @@ import pytest
 
 from core.bus import Bus
 from core.module import BaseModule
-from core.contracts import RowState, TableRow, UnreadPart
+from core.contracts import RowState, SeriesListReply, TableRow, UnreadPart
+from series_factory import series_card
 from core.contracts.release_table import site_of
 from core.db import Database
 from core.reasons import parse, reason
@@ -314,11 +315,12 @@ class Catalog(BaseModule):
     def register(self) -> None:
         self.handle("catalog.series.list", self.on_list)
 
-    async def on_list(self, env) -> list[dict]:
+    async def on_list(self, env) -> SeriesListReply:
         self.asked += 1
         if self.failing:
             raise RuntimeError("the catalog is down")
-        return [{"id": series_id, "sources": [{"url": url} for url in urls]} for series_id, urls in self.series.items()]
+        return SeriesListReply(series=tuple(series_card(id=series_id, sources=[{"url": url} for url in urls])
+                                            for series_id, urls in self.series.items()))
 
 
 @dataclass

@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from core.module import BusRequestError
 from core.contracts import ProviderSaved, ProviderSettingsDraft, ProviderSite, ProviderView
 from core.logging import get_logger
+from core.topics import CATALOG_SERIES_LIST
 
 from ..players.registry import PlayerRegistry
 from ..repository import SourcesRepository
@@ -26,14 +27,16 @@ from .connector import Connector
 CHANGED_TOPIC = "sources.provider.changed"
 Publish = Callable[[str, dict], None]
 Request = Callable[..., Awaitable[dict]]
+# The answer of a neighbour as the model of its topic (`BaseModule.reply_of`).
+Reply = Callable[..., Awaitable[Any]]
 
 
 class ProviderHost:
     def __init__(self, *, repo: SourcesRepository, sites: SiteRegistry, players: PlayerRegistry, term: Term, publish: Publish,
-                 spawn: Callable[..., asyncio.Task], request: Request, site_of: Callable[[str], str | None],
+                 spawn: Callable[..., asyncio.Task], request: Request, reply: Reply, site_of: Callable[[str], str | None],
                  default: ProviderClient | None = None, reconnect: tuple[float, float] | None = None) -> None:
         self._repo, self._sites, self._players, self._term = repo, sites, players, term
-        self._publish, self._spawn, self._request, self._site_of = publish, spawn, request, site_of
+        self._publish, self._spawn, self._request, self._reply, self._site_of = publish, spawn, request, reply, site_of
         self._reconnect = reconnect
         self._log = get_logger("sources")
         self._lock = asyncio.Lock()
@@ -150,13 +153,13 @@ class ProviderHost:
 
     async def _sources_by_app(self) -> Counter:
         try:
-            series = await self._request("catalog.series.list", {})
+            series = (await self._reply(CATALOG_SERIES_LIST, {})).series
         except (BusRequestError, asyncio.TimeoutError):
             return Counter()
         found = Counter()
-        for one in series if isinstance(series, list) else ():
-            for source in one.get("sources") or []:
-                site = self._site_of(source.get("url") or "")
+        for one in series:
+            for source in one.sources:
+                site = self._site_of(source.url or "")
                 if site:
                     found[site] += 1
         return found

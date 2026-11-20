@@ -17,10 +17,12 @@ import json
 
 import httpx
 
+from core.contracts import SeriesCard, SeriesDeleted, SeriesPurged, SeriesUpdated
 from core.module import BaseModule, BusRequestError
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
+from core.topics import CATALOG_SERIES_GET, SERIES_PURGED, SERIES_UPDATED
 
 from .repository import MetadataRepository
 
@@ -117,10 +119,9 @@ class MetadataModule(BaseModule):
 
     async def on_series_deleted(self, env: Envelope) -> None:
         """Каскад Р-19: владелец чистит своё по событию."""
-        series_id = env.payload["series_id"]
+        series_id = SeriesDeleted.model_validate(env.payload).series_id
         await self.repo.delete_for_series(series_id)
-        self.publish_event("series.purged",
-                           {"series_id": series_id, "owner": self.name})
+        self.publish_event(SERIES_PURGED, SeriesPurged(series_id=series_id, owner=self.name).model_dump(mode="json"))
 
     async def on_details(self, env: Envelope) -> dict:
         return await self._details(int(env.payload["tmdb_id"]))
@@ -155,9 +156,8 @@ class MetadataModule(BaseModule):
         mapping = await self.repo.get_mapping(series_id)
         if not mapping or not mapping.get("tmdb_id"):
             return {"skipped": "no_tmdb"}
-        series = await self.request("catalog.series.get",
-                                    {"series_id": series_id})
-        if (series.get("season") or "").strip():
+        series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
+        if (series.season or "").strip():
             return {"skipped": "single_season"}
         real = await self._real_seasons(series)
         if not real:
@@ -165,21 +165,20 @@ class MetadataModule(BaseModule):
         counts = await self._season_counts(mapping, real)
         total = sum(counts.get(s, 0) for s in real)
         await self.repo.set_aggregate(series_id, total, counts)
-        self.publish_event("series.updated", {
-            "series_id": series_id,
-            "tmdb_info": await self.repo.get_mapping(series_id)})
+        self.publish_event(SERIES_UPDATED, SeriesUpdated(
+            series_id=series_id, tmdb_info=await self.repo.get_mapping(series_id)).model_dump(mode="json", exclude_unset=True))
         self.log.info("агрегат TMDB серии %d: сезоны %s → %d серий",
                       series_id, sorted(real), total)
         return {"total": total, "seasons": sorted(real)}
 
-    async def _real_seasons(self, series: dict) -> set[int]:
+    async def _real_seasons(self, series: SeriesCard) -> set[int]:
         """Реальные сезоны из нейминга (≠0): сезоны файлов плана сериала (planner.seasons; Р-7, чужое — query)."""
         topic = "planner.seasons"
         try:
-            reply = await self.request(topic, {"series_id": series["id"]})
+            reply = await self.request(topic, {"series_id": series.id})
         except BusRequestError as exc:
             self.log.warning("сезоны серии %d недоступны (%s): %s",
-                             series["id"], topic, exc)
+                             series.id, topic, exc)
             return set()
         out: set[int] = set()
         for s in reply.get("seasons", []):

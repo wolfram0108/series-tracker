@@ -24,8 +24,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, ROOT)
 
 from core.contracts import (CompositionGetRequest, CompositionRow, RulesApplyReply,  # noqa: E402
-                            SeriesSource, SourceType)
+                            SeriesCard, SourceType)
 from core.db import Database  # noqa: E402
+from calc.catalog.series import card_of  # noqa: E402
 from calc.plan import inputs as plan_inputs  # noqa: E402
 from calc.plan.codec import container_of  # noqa: E402
 from calc.plan.tables import Container, Inputs, OnlineRow  # noqa: E402
@@ -76,14 +77,13 @@ class RealSeries:
 
     async def layout(self, series_id: int, rules: dict[int, list[dict]] | None = None) -> tuple[list[CompositionRow], dict]:
         """The rows of the layout as the real constructor makes them now; `rules` replaces the stored rules of profiles."""
-        card = await self.catalog.get_series(series_id)
+        card = card_of(await self.catalog.get_series(series_id), (), False)
         stored = await self.composition.stored(series_id)
         urls = {each.source_id: each.table_url for each in stored.sources}
         inputs = []
-        for each in card.get("sources", []):
-            if each.get("source_type") == SourceType.TORRENT:
+        for source in card.sources:
+            if source.source_type == SourceType.TORRENT:
                 continue
-            source = SeriesSource.model_validate(each)
             url = urls.get(source.id)
             table = (await self.sources.stored(url)).table if url else None
             answer = None
@@ -92,7 +92,7 @@ class RealSeries:
                 raw = (rules or {}).get(source.parser_profile_id)
                 profile = compile_profile(source.parser_profile_id,
                                           raw if raw is not None else await self.rules_of(source.parser_profile_id))
-                results = settle_parts(lines, {line.key: result_of(process_title(profile, line.text), card.get("season"))
+                results = settle_parts(lines, {line.key: result_of(process_title(profile, line.text), card.season)
                                                for line in lines})
                 answer = RulesApplyReply(results=results, invalid_rules=profile.invalid_rules)
             inputs.append(project.SourceInput(source, table, answer, None, url))
@@ -112,10 +112,11 @@ def asset_of(path: str, series_id: int, online: list[OnlineRow]) -> list[Contain
     return list(plan_inputs.assets_against([container_of(json.loads(data)) for (data,) in rows], online))
 
 
-def namer_of(series: dict):
+def namer_of(card: SeriesCard):
     """The series' own rule of names (calc/rules/formatter), as the container of an episode is named: an .mkv; a
     switched-off one hidden with `.off`."""
     from calc.rules import formatter
+    series = card.model_dump(mode="json")  # the rule reads the card by key
 
     def name(slot, video, off: bool) -> str:
         snapshot = video.snapshot

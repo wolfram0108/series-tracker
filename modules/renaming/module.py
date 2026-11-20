@@ -16,8 +16,10 @@ import asyncio
 import os
 import re
 
+from core.contracts import SeriesCard
 from core.module import BaseModule, BusRequestError
 from core.source_types import torrent_profile_id
+from core.topics import CATALOG_SERIES_GET
 from core.envelope import Envelope
 
 _VIDEO_EXT = (".mkv", ".avi", ".mp4", ".mov", ".wmv", ".webm", ".ts", ".m4v")
@@ -67,8 +69,7 @@ class RenamingModule(BaseModule):
 
     async def on_process_torrent(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
-        series = await self.request("catalog.series.get",
-                                    {"series_id": series_id})
+        series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
         # C9: one lock per series, so that two stages of the pipeline never rename the same files at once.
         lock = self._locks.setdefault(series_id, asyncio.Lock())
         async with lock:
@@ -77,7 +78,7 @@ class RenamingModule(BaseModule):
                 dry_run=bool(env.payload.get("dry_run")))
         return {"renamed": renamed}
 
-    async def _process_torrent(self, series: dict, qb_hash: str, *,
+    async def _process_torrent(self, series: SeriesCard, qb_hash: str, *,
                                dry_run: bool = False) -> int:
         """Логика старого renaming_processor: правила по имени файла →
         'Season NN/строгое имя' → rename внутри qBittorrent.
@@ -125,10 +126,11 @@ class RenamingModule(BaseModule):
 
         # 1. Сначала обрабатываем видеофайлы
         profile_id = torrent_profile_id(series)
+        card = series.model_dump(mode="json")  # the rules read the card by key
         video_items = [it for it in all_items if it["is_video"]]
         for v in video_items:
             reply = await self.request("rules.format_torrent_file", {
-                "series": series,
+                "series": card,
                 "profile_id": profile_id,
                 "file_basename": v["basename"],
                 "original_path": v["original_path"]})

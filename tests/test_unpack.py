@@ -17,7 +17,8 @@ from core.bus import Bus
 from core.module import BaseModule
 from core.ffprobe import subtitle_events
 from core.envelope import Envelope
-from core.contracts import RowTrack
+from core.contracts import RowTrack, SeriesListReply, SourcesReply
+from series_factory import series_card
 from core.contracts.torrent import ReleaseFile, ReleaseState, ReleaseView
 from core.db import Database
 from modules.rules import RulesModule
@@ -116,14 +117,14 @@ class Torrents(BaseModule):
             self.handle(topic, getattr(self, "on_" + topic.split(".")[-1]))
 
     async def on_by_profile(self, env):
-        return []
+        return SourcesReply(sources=())
 
     async def on_releases(self, env):
         return {"releases": [r.model_dump(mode="json") for r in self.releases]}
 
     async def on_list(self, env):
-        return [{"id": 1, "sources": [{"url": URL, "source_type": "torrent"}] if self.listed else [], "ignored_seasons": "[2]",
-                 "ignored_episodes": "{}"}]
+        return SeriesListReply(series=(series_card(
+            id=1, sources=[{"url": URL}] if self.listed else [], ignored_seasons="[2]", ignored_episodes="{}"),))
 
     async def on_resolve(self, env):
         # The page written with a mirror of the tracker is the page of its own domain.

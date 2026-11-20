@@ -28,6 +28,7 @@ from modules.planner import PlannerModule
 from plan_disk import Codec, Daemon, Host
 from plan_world import truth_of
 from schema_db import migrated
+from series_factory import series_card
 from settle import settle
 
 REF = "AniStar"
@@ -73,11 +74,9 @@ class Neighbours(BaseModule):
         self.handle("downloads.withdraw", self.on_withdraw)
         self.handle("rules.format_filename", self.on_format_filename)
 
-    async def on_series(self, env: Envelope) -> dict:
-        return {"id": SERIES, "name": "Сериал", "save_path": self.library, "ignored_seasons": "[]",
-                "ignored_episodes": "{}", "sources": [
-                    {"id": source, "series_id": SERIES, "url": f"https://site/{source}", "source_type": "web_video"}
-                    for source in (1, 2, 3, 4)]}
+    async def on_series(self, env: Envelope):
+        return series_card(id=SERIES, name="Сериал", save_path=self.library, ignored_seasons="[]", ignored_episodes="{}", sources=[
+            {"id": source, "url": f"https://site/{source}", "source_type": "web_video"} for source in (1, 2, 3, 4)])
 
     async def on_composition(self, env: Envelope) -> CompositionReply:
         return CompositionReply(series_id=SERIES, rev=1, rows=self.site.rows, settings=self.site.settings)

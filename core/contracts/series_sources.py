@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
+
+from .frozen import Frozen
 
 
 class SourceType(StrEnum):
@@ -12,7 +14,7 @@ class SourceType(StrEnum):
     WEB_VIDEO = "web_video"
 
 
-class SeriesSource(BaseModel):
+class SeriesSource(Frozen):
     """`url` is a page address, or `channel|query` for a VK channel; the choices belong to the source, not the address."""
 
     id: int
@@ -22,7 +24,7 @@ class SeriesSource(BaseModel):
     source_type: SourceType
     parser_profile_id: int | None = None
     vibix_season: int | None = None
-    players_off: list[str] = Field(default_factory=list)
+    players_off: tuple[str, ...] = Field(default_factory=tuple)
     # How many rows of each line of a title a provider source reads: `all`, `N` (the first N) or `-N` (the last N).
     rows_per_line: str = "all"
     # The colour of the source in its series (0–15 of the palette of the interface): given once when it comes, kept by it.
@@ -34,7 +36,7 @@ class SeriesSource(BaseModel):
         return "all" if value is None else value
 
 
-class SourceEvent(BaseModel):
+class SourceEvent(Frozen):
     """`series.source.added`, `.updated` and `.removed`: with the source as it is stored now, so that whoever keeps the
     sources of a series takes the change from the packet itself; none for a source that went."""
 
@@ -43,7 +45,7 @@ class SourceEvent(BaseModel):
     source: SeriesSource | None = None
     # The fields an update changed: whoever reads the page of the source reads it again only for those that change what
     # is read (the address, the players, the season of a catalog).
-    changed: list[str] = Field(default_factory=list)
+    changed: tuple[str, ...] = Field(default_factory=tuple)
 
 
 class SourceChanged(SourceEvent):

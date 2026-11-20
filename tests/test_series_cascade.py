@@ -79,7 +79,7 @@ async def test_delete_during_scan_leaves_no_rows(db_path):
     try:
         created = await catalog.request("catalog.series.create",
                                         {"data": _series_data("Т1")})
-        series_id = created["id"]
+        series_id = created.id
         task = asyncio.create_task(catalog.request(
             "scan.series.run", {"series_id": series_id}))
         await asyncio.wait_for(source.entered.wait(), 10)
