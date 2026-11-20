@@ -3,7 +3,7 @@ service reads them (core/plan/inputs): what the head of a queue a window lists i
 from core.plan.inputs import choices_of, online_of
 from core.plan.planner import plan
 from core.plan.tables import Inputs
-from core.voice_names import NO_GROUPS
+from calc.voice_names import NO_GROUPS
 
 
 def goals(rows, settings=(), *, players, sources, groups=NO_GROUPS, order=None):

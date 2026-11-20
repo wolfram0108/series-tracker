@@ -13,7 +13,7 @@ from core.contracts.composition import LEFT_BEFORE_RULES
 from core.contracts import (CompositionRow, Exclusion, PlayerSummary, SeasonVoiceOrder, VoiceSpan, ReleaseTable, RowState, RowTrack, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, line_of, place_of)
 from core.contracts.torrent import order_name
-from core.voice_names import fold_name
+from calc.voice_names import fold_name
 
 # One template for the name of a voice-over that belongs to no user group.
 UNKNOWN_VOICE_LABEL = "Неизвестная озвучка {number}"

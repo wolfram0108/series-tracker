@@ -1,7 +1,7 @@
 """A real series as the tables of the planner (core/plan), read from a copy of the service's database.
 
 The rows come out of the real constructor: the stored tables of the pages go through the rules of their profiles
-(modules/rules: compile_profile, process_title, result_of, settle_parts) and the layout (modules/composition/project),
+(modules/rules: compile_profile, process_title, result_of, settle_parts) and the layout (calc/layout/project),
 with the groups of voice-overs of the settings — the same functions the service runs. Other rules can be given in place of
 the stored ones: a situation «this rule is changed» is the real constructor run with them. The asset (files and tracks)
 is the table the planner keeps (plan_assets), read against the rows as the planner reads it; the choices come from the
@@ -30,7 +30,7 @@ from core.plan import inputs as plan_inputs  # noqa: E402
 from core.plan.files import container_of  # noqa: E402
 from core.plan.tables import Container, Inputs, OnlineRow  # noqa: E402
 from modules.catalog.repository import CatalogRepository  # noqa: E402
-from modules.composition import project  # noqa: E402
+from calc.layout import project  # noqa: E402
 from modules.composition.module import layout_reply  # noqa: E402
 from modules.composition.repository import CompositionRepository  # noqa: E402
 from modules.rules.engine import compile_profile, process_title  # noqa: E402

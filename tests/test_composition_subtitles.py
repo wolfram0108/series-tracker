@@ -1,8 +1,8 @@
 """The subtitles in the composition (stage 15, DESIGN.md 7.1.1): rows of their own, apart from the rows of sound; one table on
-the series and one on an episode, in the order of core.subtitle_queue, with the variants the level leaves out marked."""
+the series and one on an episode, in the order of calc.subtitle_queue, with the variants the level leaves out marked."""
 from core.contracts import (SUBTITLES_ALLOW, SUBTITLES_ORDER, CompositionRow, EffectiveLever, Level, RowState, RowTrack,
                             variant_target)
-from modules.composition import queues
+from calc.layout import queues
 
 
 def subtitles(name: str, episode: int, source: int = 1, language: str = "rus", kind: str = "full", stale=False):

@@ -13,9 +13,9 @@ from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, MARKUP_ALLOW, 
                             SeriesSource, compilation_key,
                             parse_group_target, parse_variant_target)
 from core.ignored import parse_memory
-from core.subtitle_queue import named_of
-from core.variant_queue import Same
-from core.voice_names import Groups
+from calc.subtitle_queue import named_of
+from calc.variant_queue import Same
+from calc.voice_names import Groups
 
 from .tables import Choices, Container, OnlineRow, RowId
 

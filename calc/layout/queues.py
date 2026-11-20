@@ -1,5 +1,5 @@
 """The queues of a level as a window lists them: the reference, the markup reference and the voice-over of each group, in
-the order the core tries their variants (`core.variant_queue`), with what the levers of the level say of each variant.
+the order the core tries their variants (`calc.variant_queue`), with what the levers of the level say of each variant.
 
 Pure functions over the lines of the level and its levers: the same rule and the same levers the planner reads, so the
 order shown is the order taken. A variant is listed where the table of what is allowed lets the user put it into the
@@ -14,8 +14,8 @@ from core.contracts import (MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_A
                             SUBTITLES_ALLOW, SUBTITLES_ORDER, VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, GroupQueue, Level, QueueRow, QueueView,
                             RowState, group_target, variant_target)
-from core.subtitle_queue import flags, named_of, ordered
-from core.variant_queue import VOICE_RANKING, Candidate, Order, Same, ranked, ranked_singles
+from calc.subtitle_queue import flags, named_of, ordered
+from calc.variant_queue import VOICE_RANKING, Candidate, Order, Same, ranked, ranked_singles
 
 from .project import spans
 
@@ -105,7 +105,7 @@ def build(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever], ord
 
 def subtitles(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever], sources: dict[int, int],
               episode: int | None = None) -> QueueView:
-    """The subtitles of a level in the order of the container (core.subtitle_queue): every variant the lines have, the ones
+    """The subtitles of a level in the order of the container (calc.subtitle_queue): every variant the lines have, the ones
     the level leaves out marked. `lines` are the rows of subtitles of the level in the order of the layout, `sources` the
     place of every source of the series."""
     level = _Level(lines, levers, episode)

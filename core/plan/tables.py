@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping
 
-from core.variant_queue import Same
-from core.voice_names import NO_GROUPS, Groups
+from calc.variant_queue import Same
+from calc.voice_names import NO_GROUPS, Groups
 
 # (season, episode), or (season, episode, part) for a part of an episode: the place of one video of the library.
 Slot = tuple[int, ...]
@@ -156,7 +156,7 @@ class Track:
 class Subtitle:
     """A subtitles track in a container (DESIGN.md 7.1.1): the row it came from, its name, the player of that row, the
     timeline it is in step with, its language and its type (full, signs) as the row gives them; and how it lies in the
-    container (core.subtitle_queue.flags: the first full track default, the first of signs forced)."""
+    container (calc.subtitle_queue.flags: the first full track default, the first of signs forced)."""
 
     row: RowId
     name: str

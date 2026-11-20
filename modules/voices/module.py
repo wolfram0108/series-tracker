@@ -11,7 +11,7 @@ switched off for every source), voices.groups and voices.player_groups (JSON obj
 
 Queries:
   voices.groups.resolve GroupsResolveRequest -> GroupsResolveReply: the user group of every name (None for a name no group
-      holds), by the folded name or trigger of the group (core/voice_names.py); asked by `composition` for the names of the
+      holds), by the folded name or trigger of the group (calc/voice_names.py); asked by `composition` for the names of the
       voice-overs of its rows. A combined credit "A / B" is one name.
   voices.settings.get {values?} -> VoiceSettingsView: the groups of voice-overs and the order of sources as they apply (the
       order the user saved, then every other player the sources know, in their order: `sources.players.list`), the

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Mapping
 
 from core.contracts.voices import LANGUAGES, PLAYERS_OFF_KEY
-from core.voice_names import NO_GROUPS, Groups, usable_groups
+from calc.voice_names import NO_GROUPS, Groups, usable_groups
 
 # Source priority, most preferred first; empirical, by bitrate. The first one wins a resolution tie.
 DEFAULT_PRIORITY = ("alloha", "vk", "cvh", "allvideo", "vibix", "kodik")

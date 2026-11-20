@@ -6,7 +6,7 @@ from core.plan.marks import references_of
 from core.plan.planner import plan
 from core.plan.tables import Inputs
 from core.reasons import parse
-from core.voice_names import NO_GROUPS
+from calc.voice_names import NO_GROUPS
 from scan_support import row
 
 PRIORITY = ("vk", "cvh", "kodik")

@@ -43,7 +43,7 @@ Queries:
       asked: the reply is `ready`, has no summary, and its lines are those given (key = their place in the list),
       each with the answer of the profile when one is given.
   composition.queues.get {series_id, season?, episode?} → QueuesReply: the queue of the reference and of the voice-over of
-      each group of a level, in the order the core tries their variants (`core.variant_queue`), with the value and the
+      each group of a level, in the order the core tries their variants (`calc.variant_queue`), with the value and the
       level of every lever of the level that acts on them (`queues.py`). The order of players is asked of voices. Also the
       queue of the markup reference (stage 14) and `markup_follows`: with no `markup.order` on the chain of levels it is
       the queue of the reference itself. The variants the user declared equal (Р-99, the levers `reference.same` and
@@ -119,11 +119,11 @@ from core.contracts import (LAYOUT_PARTS, COMPILATION_MEMBER, MARKUP_ALLOW, MARK
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
-from core.variant_queue import Order
-from core.voice_names import Groups
+from calc.variant_queue import Order
+from calc.voice_names import Groups
 
-from . import compilations, levers, project, queues, settings
-from .project import SourceInput
+from calc.layout import compilations, levers, project, queues, settings
+from calc.layout.project import SourceInput
 from .repository import CompositionRepository, StoredSource
 
 OWNER = "composition"

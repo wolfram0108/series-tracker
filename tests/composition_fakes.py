@@ -17,7 +17,7 @@ from core.contracts import (GroupsResolveReply, GroupsResolveRequest, ReleaseTab
                             RulesApplyRequest, TableFailed, TableGetReply, TableGetRequest, TableReady, TableState,
                             VoiceSettingsView)
 from core.reasons import reason
-from core.voice_names import fold_name
+from calc.voice_names import fold_name
 from modules.rules.numbering import season_of, settle_parts
 
 HOST = "https://fake.test"

@@ -9,7 +9,7 @@ import re
 import pytest
 
 from app_stand import STAND_LIMIT_S, AppStand
-from core.voice_names import fold_name
+from calc.voice_names import fold_name
 from provider_mock import MockProvider, serving
 
 

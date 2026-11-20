@@ -11,7 +11,7 @@ from typing import Collection, Mapping, Sequence
 
 from core.contracts import Reason, SettingProblem, VoiceSettingsDraft, VoiceSettingsView
 from core.reasons import parse as parse_reason, reason
-from core.voice_names import fold_name
+from calc.voice_names import fold_name
 
 from core.contracts.voices import LANGUAGES
 

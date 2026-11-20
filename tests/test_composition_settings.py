@@ -4,9 +4,9 @@ the episodes a change touches (invariants I-22 to I-24, combinations C-13 to C-1
 import pytest
 
 from core.contracts import (Queue, SettingRecord, TargetKind, ValueShape, group_target, variant_target)
-from modules.composition import levers
-from modules.composition.levers import Lever, _order_sources
-from modules.composition.settings import (retarget, without_source)
+from calc.layout import levers
+from calc.layout.levers import Lever, _order_sources
+from calc.layout.settings import (retarget, without_source)
 
 VK = variant_target("Ruchime", 1, "vk")
 KODIK = variant_target("Ruchime", 2, "kodik")

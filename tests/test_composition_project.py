@@ -4,7 +4,7 @@ unknown voice-overs, the summaries a window shows before any number exists."""
 
 from core.contracts import (CompositionRow, Exclusion, ReleaseTable, RowState, RowVoice, RuleResult, RulesApplyReply, SeriesSource,
                             SourceType, TableRow)
-from modules.composition.project import (SourceInput, lines_for, project)
+from calc.layout.project import (SourceInput, lines_for, project)
 
 def source(id=1, position=0, profile=7, **fields) -> SeriesSource:
     return SeriesSource(id=id, series_id=5, position=position, url=f"https://example.org/{id}",

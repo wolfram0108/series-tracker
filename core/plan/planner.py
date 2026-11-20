@@ -28,10 +28,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Callable, Iterable
 
-from core.subtitle_queue import flags as subtitle_flags, ordered as subtitles_ordered
-from core.variant_queue import NO_SAME, VARIANT_RANKING, VOICE_RANKING, Line, standing
-from core.variant_queue import Candidate as Ranked
-from core.variant_queue import Order, by_resolution
+from calc.subtitle_queue import flags as subtitle_flags, ordered as subtitles_ordered
+from calc.variant_queue import NO_SAME, VARIANT_RANKING, VOICE_RANKING, Line, standing
+from calc.variant_queue import Candidate as Ranked
+from calc.variant_queue import Order, by_resolution
 
 from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Snapshot, Subtitle, Track, Video, episode_of
 
@@ -239,7 +239,7 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
     known: dict[tuple, tuple] = {}
 
     def criteria(ranking, height: int, player: str, source_id: int) -> tuple:
-        """The service's own criteria (core/variant_queue), the place of the row aside: it is the last tie-break. The
+        """The service's own criteria (calc/variant_queue), the place of the row aside: it is the last tie-break. The
         variants of a series are few and every episode asks them: each is ranked once a plan."""
         key = (ranking, height, player, source_id)
         found = known.get(key)
@@ -459,7 +459,7 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
 
 def _subtitles(slot: Slot, inputs: Inputs, by_slot: "Index", video: VideoWay, idle: bool
                ) -> tuple[tuple[SubtitleWay, ...], tuple[tuple[str, int, str], ...]]:
-    """The subtitles of a goal in the order of the container (core.subtitle_queue), and the variants it takes that are on
+    """The subtitles of a goal in the order of the container (calc.subtitle_queue), and the variants it takes that are on
     no timeline of its video. A track is in step only on the video's own timeline: one held there by a file of the episode
     stays (its row may be gone, the release archived), one of a row on it is taken from the row's file; another timeline
     waits for the alignment of subtitles (stage 15, step 10). An idle file keeps what it holds."""
@@ -501,7 +501,7 @@ def _subtitles(slot: Slot, inputs: Inputs, by_slot: "Index", video: VideoWay, id
 
 
 def _flagged(ways: list[SubtitleWay]) -> tuple[SubtitleWay, ...]:
-    """The tracks of a goal as they lie in the container (core.subtitle_queue.flags): the first full one default, the first
+    """The tracks of a goal as they lie in the container (calc.subtitle_queue.flags): the first full one default, the first
     of signs forced. A file whose tracks lie otherwise is built again from what it holds."""
     laid = subtitle_flags([way.subtitle.subtitle_type for way in ways])
     return tuple(replace(way, subtitle=replace(way.subtitle, default=default, forced=forced))

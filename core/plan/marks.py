@@ -12,7 +12,7 @@ from typing import Mapping
 
 from core.contracts import CompilationRef, CutPicture, Reference, ReferenceMark
 from core.reasons import reason
-from core.variant_queue import NO_SAME
+from calc.variant_queue import NO_SAME
 
 from .planner import Plan
 from .tables import Inputs, OnlineRow, Slot, episode_of

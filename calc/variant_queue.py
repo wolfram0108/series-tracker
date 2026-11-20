@@ -20,7 +20,7 @@ from functools import cached_property
 from typing import Callable, Hashable, Iterable, Sequence
 
 from core.contracts import CompositionRow
-from core.voice_names import NO_GROUPS, Groups, PlayerOrder
+from calc.voice_names import NO_GROUPS, Groups, PlayerOrder
 
 
 @dataclass(frozen=True)

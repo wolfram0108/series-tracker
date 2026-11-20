@@ -5,7 +5,7 @@ a kind of player), so that it outlives a new reading of a table. No record means
 
 A variant is one place a voice-over of an episode can be had from: a voice-over group at a player of a source. The output
 of an episode is the variants of its voice-overs. They are tried in queues — one for the reference, one for the
-voice-over of each group — in the order of `core.variant_queue`; a lever puts the variants the user named first, in his
+voice-over of each group — in the order of `calc.variant_queue`; a lever puts the variants the user named first, in his
 order, and a flag of a variant leaves it out of one queue.
 """
 from __future__ import annotations
@@ -267,7 +267,7 @@ class QueueRow(BaseModel):
     # none for a variant that equals no other one the level lists.
     same: int | None = None
     # A variant of subtitles: the language of its tracks and their type (full, signs), as its rows say; and how its track
-    # lies in the container (core.subtitle_queue.flags: the first full one taken default, the first of signs forced).
+    # lies in the container (calc.subtitle_queue.flags: the first full one taken default, the first of signs forced).
     language: str = ""
     subtitle_type: str = ""
     default: bool = False

@@ -1,10 +1,10 @@
-"""Stage 12: the compilation each episode stands in (modules/composition/compilations.py) and the level of a compilation in
-the inheritance of levers (modules/composition/settings.py). Invariant К-1: an episode stands in at most one compilation,
+"""Stage 12: the compilation each episode stands in (calc/layout/compilations.py) and the level of a compilation in
+the inheritance of levers (calc/layout/settings.py). Invariant К-1: an episode stands in at most one compilation,
 one that covers it, is switched on and is higher than its best single video."""
 
 
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, Absence, CompositionRow, RowState, SettingRecord, compilation_key)
-from modules.composition import compilations, settings
+from calc.layout import compilations, settings
 
 
 def row(source_id, start, end=None, height=1080, player="vk", group="ПВА ШОУ", state=RowState.PLAYABLE, season=1, key=None):
