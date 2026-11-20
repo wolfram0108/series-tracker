@@ -20,8 +20,9 @@
 - `voice-alignment` — несколько источников на сериал (ruchime + dunhuatv.ru),
   парсер dunhuatv.ru (Kodik-озвучки) и автоматическое выравнивание озвучек
   по референсу через сервис `track-muxer` — `docs/missions/voice-alignment/`
-- `rust-core` — цепочка пересчёта сериала (раскладка → план → вид, затем правила)
-  с её данными в ядре на Rust, многоядерный пересчёт — `docs/missions/rust-core/`
+- `modular-architecture` — чистый счёт (правила, раскладка, план, вид) в пакете
+  `calc` без ввода-вывода, модули — данные и внешний мир, все топики шины по одному
+  реестру — `docs/missions/modular-architecture/`
 - (завершённые — в `docs/missions/_done/`, напр.
   `torrent-naming-preview` — предпросмотр нейминга в окне добавления)
 
