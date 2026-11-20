@@ -141,7 +141,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.post("/api/torrent/editor", response_model=DynamicObject, responses=_ERR)
     async def editor(body: PageBody):
-        """The torrent editor of the page: the items of its five tabs, the folders, what is unplaced, the profiles."""
+        """The torrent editor of the page: the items of its five tabs, the folders, what is unplaced, the profiles. The first
+        opening of a page makes its profiles; the editor itself is a read."""
+        try:
+            await gw.request("unpack.editor.open", body.model_dump())
+        except BusRequestError as exc:
+            return refusal(exc)
         return await asked("unpack.editor.get", body.model_dump())
 
     @r.post("/api/torrent/editor/assign", response_model=OkResponse, responses=_ERR)

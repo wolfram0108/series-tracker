@@ -69,7 +69,7 @@ class Conflict:
     by: str  # the source that took the episode: `manual` or the name of a rule
 
 
-@dataclass
+@dataclass(frozen=True)
 class Inputs:
     releases: list[ReleaseView]
     streams: dict[str, dict[str, dict]]             # release → path → {streams, attachments, chapters, reason}

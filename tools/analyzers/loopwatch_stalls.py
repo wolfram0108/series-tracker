@@ -66,8 +66,8 @@ def read(raw):
     print("where (innermost frame): count, total ms, max ms")
     for where, items in sorted(by_where.items(), key=lambda kv: -sum(kv[1]))[:12]:
         print(f"  {len(items):4} {sum(items):7} {max(items):6}  {where[:150]}")
-    calc = re.compile(r"core/plan/(planner|tables|inputs|marks)|core/(variant_queue|subtitle_queue|voice_names)|modules/rules/engine|"
-                      r"modules/composition/(project|settings|levers|queues|compilations)|modules/unpack/layout|"
+    calc = re.compile(r"core/plan/(planner|tables|inputs|marks)|core/(variant_queue|subtitle_queue|voice_names)|modules/rules/(engine|numbering|formatter)|"
+                      r"modules/composition/(project|settings|levers|queues|compilations)|modules/unpack/layout|modules/voices/(editor|settings)|"
                       r"modules/planner/(view|packing)|calc/")
     mine = [s for s in stalls if calc.search(s[4])]
     pool = [s for s in stalls if "интерпретатор в это время держал поток compute" in s[4]]

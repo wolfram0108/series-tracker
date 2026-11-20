@@ -1,6 +1,6 @@
 """The reading of the releases of a torrent source (stage 15, module unpack).
 
-The layout (modules/unpack/layout.py) on synthetic releases of the kinds of the corpus of the owner's releases: every file
+The layout (calc/unpack/layout.py) on synthetic releases of the kinds of the corpus of the owner's releases: every file
 in one folder with suffixes, sounds in folders by studio, seasons in folders of their own, two videos of one episode; a
 placement by hand before a rule; the rows of a release being updated not obtained, of a first download none. Then the
 module on the bus with the real rules and real small files made by ffmpeg and read by ffprobe: the preset of the editor
@@ -23,7 +23,7 @@ from core.db import Database
 from modules.rules import RulesModule
 from modules.settings import SettingsModule
 from modules.unpack import UnpackModule
-from modules.unpack.layout import Inputs, compose, item_of, lines
+from calc.unpack.layout import Inputs, compose, item_of, lines
 from schema_db import migrated
 
 URL = "https://kinozal.tv/details.php?id=7"
@@ -152,7 +152,7 @@ async def _rule(torrents, profile_id: int, name: str, blocks: list[dict]) -> Non
 async def test_a_page_no_source_lists_is_forgotten_with_the_profiles_of_its_tabs(bus_stand):
     torrents, unpack, bus, root = bus_stand
     torrents.releases = [release(["Show/Show - 01.mkv"])]
-    profiles = (await torrents.request("unpack.editor.get", {"url": URL}))["profiles"]
+    profiles = (await torrents.request("unpack.editor.open", {"url": URL}))["profiles"]
     await torrents.request("unpack.folder.set", {"url": URL, "tab": "voices", "name": "Студия"})
     torrents.listed = False
     await unpack.on_source_changed(Envelope(topic="series.source.removed", kind="event", payload={"series_id": 1, "source_id": 1}))

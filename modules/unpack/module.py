@@ -4,7 +4,7 @@ unpack_assignments, unpack_hidden, unpack_removed, unpack_sources (modules/unpac
 
 A release `torrents` downloaded is read here: every video, sound and subtitles file by ffprobe once per version and size
 (the video of a source is never compared by content); the files are laid out by the rules of the five tabs of the editor
-and by what the user placed by hand (modules/unpack/layout.py). The editor places, it never leaves out: an item is placed
+and by what the user placed by hand (calc/unpack/layout.py). The editor places, it never leaves out: an item is placed
 (green) or not (red); every placed sound and subtitles track of a placed video is a row of the table of the page, as a row
 of a site, and a red one is no row — what goes out of the output is the work of the constructor of the series. The one
 exception is a subtitles track with no events at all (only a header; the read counts the packets of each subtitles stream):
@@ -14,11 +14,17 @@ of a release is downloaded: nothing here tells `torrents` what not to download. 
 editor is first opened; nothing is placed by rules no one wrote. A page no torrent source lists any more is forgotten with
 its profiles.
 
+The layout is counted in the pool of computation (calc/unpack): the lines of the files, then the layout itself; between them
+the rules of each tab are asked, because the tabs of tracks read the places the files got.
+
 Queries / commands (a page is named by any mirror of its tracker; the module keeps it, and answers it, in its one spelling):
-  unpack.table.get {url} → TableDraft {names, title, rows} — the rows of the page (`sources` asks it as the read of a tracker's
+  unpack.table.get {url} → {names, rows} — the rows of the page (`sources` asks it as the read of a tracker's
       page): a release downloaded for the first time gives none, a release being updated gives its rows not obtained
+  unpack.editor.open {url} → {url, profiles} — the editor of the page is made ready: the profiles of its five tabs are made
+      when they are missing (the first opening of the page) and kept; the window asks it before it asks for the editor
   unpack.editor.get {url} → {url, profiles: {files, voices, subtitles, voice_streams, subtitle_streams}, view} — the editor of the page: its releases,
-      the items of every tab with their line, their place or folder and what put them there, the folders, what is unplaced
+      the items of every tab with their line, their place or folder and what put them there, the folders, what is unplaced;
+      it changes nothing (a tab whose profile was not made has none in `profiles`)
   unpack.assign {url, tab, items, season?, episode?, episode_last?, tag?, folder?, in_order?} — placed by hand (a drag): a
       file in a season and an episode (of the version `tag`, DIR), a track in a folder; `in_order`: the items in the order given take the episodes from
       `episode` on, one each (files dropped on a season)
@@ -45,25 +51,28 @@ Events in: torrents.release.changed (a release with its files: a ready one is re
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
-from core.module import BaseModule
-from core.contracts.torrent import (RELEASE_CHANGED_TOPIC, EditorTab, FileKind, ReleaseState, ReleaseView, kind_of)
+from calc.unpack.layout import Inputs, lines
+from calc.unpack.read import files_to_read, shape_of, subtitle_tracks, with_events
+from calc.unpack.reply import (PROFILE_COLUMNS, editor_reply, profile_name, profiles_of, results_of, stored_inputs,
+                               table_reply, torrent_urls)
+from core import compute
+from core.contracts import RulesApplyReply
+from core.contracts.torrent import EditorTab, ReleaseState, ReleaseView
 from core.db import Database
 from core.envelope import Envelope
 from core.ffprobe import layout_of, subtitle_events
+from core.module import BaseModule
+from core.topics import (CATALOG_SERIES_LIST, RULES_APPLY, RULES_PROFILE_CHANGED, RULES_PROFILES_CREATE,
+                         RULES_PROFILES_DELETE, SERIES_DELETED, SERIES_SOURCE_ADDED, SERIES_SOURCE_REMOVED,
+                         SERIES_SOURCE_UPDATED, SOURCES_SITE_RESOLVE, TORRENTS_RELEASE_CHANGED, TORRENTS_RELEASES_GET,
+                         UNPACK_ASSIGN, UNPACK_AUTO, UNPACK_EDITOR_CHANGED, UNPACK_EDITOR_GET, UNPACK_EDITOR_OPEN,
+                         UNPACK_FOLDER_DELETE, UNPACK_FOLDER_SET, UNPACK_READ_PROGRESS, UNPACK_REMOVE, UNPACK_TABLE_CHANGED,
+                         UNPACK_TABLE_GET, UNPACK_UNASSIGN)
 
-from .layout import Inputs, compose, lines
 from .repository import UnpackRepository
 
-TABLE_CHANGED_TOPIC = "unpack.table.changed"
-EDITOR_CHANGED_TOPIC = "unpack.editor.changed"
-READ_PROGRESS_TOPIC = "unpack.read.progress"
-READ = {FileKind.VIDEO, FileKind.AUDIO, FileKind.SUBTITLES}
-# The profile of each tab of the editor in the table unpack_sources, and the word its name is made with.
-PROFILE_COLUMNS = {"files": "files_profile_id", "voices": "voices_profile_id", "subtitles": "subtitles_profile_id",
-                   "voice_streams": "voice_streams_profile_id", "subtitle_streams": "subtitle_streams_profile_id"}
-TAB_WORDS = {"files": "файлы", "voices": "озвучки", "subtitles": "субтитры", "voice_streams": "озв. конт.",
-             "subtitle_streams": "суб. конт."}
 
 class UnpackModule(BaseModule):
     name = "unpack"
@@ -76,17 +85,18 @@ class UnpackModule(BaseModule):
         super().__init__(bus)
 
     def register(self) -> None:
-        self.handle("unpack.table.get", self.on_table_get)
-        self.handle("unpack.editor.get", self.on_editor_get)
-        self.handle("unpack.assign", self.on_assign)
-        self.handle("unpack.unassign", self.on_unassign)
-        self.handle("unpack.folder.set", self.on_folder_set)
-        self.handle("unpack.folder.delete", self.on_folder_delete)
-        self.handle("unpack.auto", self.on_auto)
-        self.handle("unpack.remove", self.on_remove)
-        self.handle(RELEASE_CHANGED_TOPIC, self.on_release_changed)
-        self.handle("rules.profile.changed", self.on_profile_changed)
-        for topic in ("series.source.added", "series.source.updated", "series.source.removed", "series.deleted"):
+        self.handle(UNPACK_TABLE_GET, self.on_table_get)
+        self.handle(UNPACK_EDITOR_OPEN, self.on_editor_open)
+        self.handle(UNPACK_EDITOR_GET, self.on_editor_get)
+        self.handle(UNPACK_ASSIGN, self.on_assign)
+        self.handle(UNPACK_UNASSIGN, self.on_unassign)
+        self.handle(UNPACK_FOLDER_SET, self.on_folder_set)
+        self.handle(UNPACK_FOLDER_DELETE, self.on_folder_delete)
+        self.handle(UNPACK_AUTO, self.on_auto)
+        self.handle(UNPACK_REMOVE, self.on_remove)
+        self.handle(TORRENTS_RELEASE_CHANGED, self.on_release_changed)
+        self.handle(RULES_PROFILE_CHANGED, self.on_profile_changed)
+        for topic in (SERIES_SOURCE_ADDED, SERIES_SOURCE_UPDATED, SERIES_SOURCE_REMOVED, SERIES_DELETED):
             self.handle(topic, self.on_source_changed)
 
     async def on_start(self) -> None:
@@ -96,7 +106,7 @@ class UnpackModule(BaseModule):
             self.log.exception("the pages no source lists were not forgotten")
         # The rows of the pages can be asked now: a read of one that began before (a start) is made again from them.
         for url in await self.repo.pages():
-            self.publish_event(TABLE_CHANGED_TOPIC, {"url": url})
+            self.publish_event(UNPACK_TABLE_CHANGED, {"url": url})
         self.spawn(self._read_unfinished(), name="unpack:read")
 
     async def _read_unfinished(self) -> None:
@@ -120,9 +130,8 @@ class UnpackModule(BaseModule):
                 continue
             stored = await self.repo.profiles(url) or {}
             await self.repo.forget(url)
-            for column in PROFILE_COLUMNS.values():
-                if stored.get(column):
-                    await self.request("rules.profiles.delete", {"profile_id": stored[column]})
+            for profile_id in profiles_of(stored).values():
+                await self.request(RULES_PROFILES_DELETE, {"profile_id": profile_id})
             self.log.info("страница %s больше не источник: её разбор и профили вкладок забыты", url)
 
     async def on_source_changed(self, env: Envelope) -> None:
@@ -131,70 +140,64 @@ class UnpackModule(BaseModule):
     # --- the layout ---------------------------------------------------------------------------------------------------
 
     async def _releases(self, url: str) -> list[ReleaseView]:
-        reply = await self.request("torrents.releases.get", {"url": url})
+        reply = await self.request(TORRENTS_RELEASES_GET, {"url": url})
         return [ReleaseView.model_validate(each) for each in reply.get("releases") or []]
 
     async def _apply(self, profile_id: int | None, keyed: dict[str, str]) -> dict[str, dict]:
+        """The rules of a tab applied to its lines: the result of each, by its item."""
         if not profile_id or not keyed:
             return {}
-        reply = await self.request("rules.apply", {"profile_id": profile_id,
-                                                   "lines": [{"key": key, "text": text} for key, text in keyed.items()]})
-        return {key: result.model_dump() for key, result in reply.results.items()}
+        reply: RulesApplyReply = await self.reply_of(RULES_APPLY, {
+            "profile_id": profile_id, "lines": [{"key": key, "text": text} for key, text in keyed.items()]})
+        return await compute.run(results_of, reply)
 
     async def _inputs(self, url: str, releases: list[ReleaseView] | None = None) -> Inputs:
+        """The inputs of the layout of a page: what is stored, then the rules of «Файлы» over the lines of the files, then
+        the rules of the tabs of tracks over the lines that read the places the files got."""
         releases = releases if releases is not None else await self._releases(url)
-        manual: dict[str, dict[str, dict]] = {tab.value: {} for tab in EditorTab}
-        for row in await self.repo.assignments(url):
-            manual[row["tab"]][row["item"]] = row
         streams = {r.release: await self.repo.streams(url, r.release) for r in releases}
-        inputs = Inputs(releases=releases, streams=streams, results={}, manual=manual, folders=await self.repo.folders(url),
-                        hidden={(row["tab"], row["name"]) for row in await self.repo.hidden(url)},
-                        removed={(row["tab"], row["item"]) for row in await self.repo.removed(url)})
+        inputs = stored_inputs(releases, streams, await self.repo.assignments(url), await self.repo.folders(url),
+                               await self.repo.hidden(url), await self.repo.removed(url))
         profiles = await self.repo.profiles(url) or {}
-        keyed = lines(inputs)
-        inputs.results[EditorTab.FILES] = await self._apply(profiles.get(PROFILE_COLUMNS["files"]), keyed[EditorTab.FILES])
-        keyed = lines(inputs)  # the tabs of tracks read the places the files got
+        keyed = await compute.run(lines, inputs)
+        results = {EditorTab.FILES: await self._apply(profiles.get(PROFILE_COLUMNS["files"]), keyed[EditorTab.FILES])}
+        keyed = await compute.run(lines, replace(inputs, results=dict(results)))  # the tabs of tracks read the places the files got
         for tab in (EditorTab.VOICES, EditorTab.SUBTITLES, EditorTab.VOICE_STREAMS, EditorTab.SUBTITLE_STREAMS):
-            inputs.results[tab] = await self._apply(profiles.get(PROFILE_COLUMNS[tab.value]), keyed[tab])
-        return inputs
+            results[tab] = await self._apply(profiles.get(PROFILE_COLUMNS[tab.value]), keyed[tab])
+        return replace(inputs, results=results)
 
     async def _page(self, url: str) -> str:
         """The one spelling of a page (its tracker's own domain): what the module keeps of a page is keyed by it, whatever
         mirror the source of a series was written with."""
-        resolved = await self.request("sources.site.resolve", {"url": url})
-        return resolved.get("canonical_url") or url
+        resolved = await self.reply_of(SOURCES_SITE_RESOLVE, {"url": url})
+        return resolved.canonical_url or url
 
     async def on_table_get(self, env: Envelope) -> dict:
         url = await self._page(env.payload["url"])
-        releases = await self._releases(url)
-        _view, rows = compose(await self._inputs(url, releases))
-        names = [r.title for r in releases if r.title][:1]
-        return {"names": names, "rows": [row.model_dump(mode="json") for row in rows]}
+        return await compute.run(table_reply, await self._inputs(url))
 
     async def on_editor_get(self, env: Envelope) -> dict:
         url = await self._page(env.payload["url"])
-        profiles = await self._tab_profiles(url)
-        view, _rows = compose(await self._inputs(url))
-        for release in view["releases"]:
-            found = self._reading.get((url, release["release"]))
-            release["reading"] = None if found is None else {"done": found[0], "total": found[1]}
-        return {"url": url, "profiles": profiles, "view": view}
+        stored = await self.repo.profiles(url)
+        inputs = await self._inputs(url)
+        return await compute.run(editor_reply, url, stored, inputs, dict(self._reading))
 
-    async def _tab_profiles(self, url: str) -> dict[str, int]:
+    async def on_editor_open(self, env: Envelope) -> dict:
         """The profiles of the five tabs of the source, each its own and empty until the owner writes rules in it; made when
         its editor is first opened (a tab missing from an older page gets its profile then)."""
+        url = await self._page(env.payload["url"])
         stored = await self.repo.profiles(url) or {}
         made = {}
         for tab, column in PROFILE_COLUMNS.items():
-            made[tab] = stored.get(column) or (await self.request("rules.profiles.create", {
-                "name": f"Торрент: {url} · {TAB_WORDS[tab]}", "kind": "torrent"}))["id"]
+            made[tab] = stored.get(column) or (await self.request(RULES_PROFILES_CREATE, {
+                "name": profile_name(url, tab), "kind": "torrent"}))["id"]
         if any(stored.get(column) != made[tab] for tab, column in PROFILE_COLUMNS.items()):
             await self.repo.save_profiles(url, made)
-        return made
+        return {"url": url, "profiles": made}
 
     def _changed(self, url: str) -> None:
-        self.publish_event(TABLE_CHANGED_TOPIC, {"url": url})
-        self.publish_event(EDITOR_CHANGED_TOPIC, {"url": url})
+        self.publish_event(UNPACK_TABLE_CHANGED, {"url": url})
+        self.publish_event(UNPACK_EDITOR_CHANGED, {"url": url})
 
     # --- what the user places -------------------------------------------------------------------------------------
 
@@ -236,8 +239,7 @@ class UnpackModule(BaseModule):
 
     async def on_release_changed(self, env: Envelope) -> None:
         release = ReleaseView.model_validate(env.payload)
-        shape = (release.state, release.infohash, release.folder,
-                 tuple((f.path, f.size, f.priority) for f in release.files))
+        shape = shape_of(release)
         if self._shapes.get((release.url, release.release)) == shape:
             return
         self._shapes[(release.url, release.release)] = shape
@@ -247,11 +249,7 @@ class UnpackModule(BaseModule):
 
     async def _read(self, release: ReleaseView) -> None:
         """Every video, sound and subtitles file of the version, read once per version and size."""
-        known = await self.repo.streams(release.url, release.release)
-        # A file read before the events of its subtitles were counted is read again: a track with none is no row.
-        todo = [f for f in release.files if kind_of(f.path) in READ and f.priority != 0 and not (
-            (stored := known.get(f.path)) and stored["infohash"] == release.infohash and stored["size"] == f.size
-            and not any(s["kind"] == "subtitle" and s.get("events") is None for s in stored["streams"]))]
+        todo = files_to_read(release, await self.repo.streams(release.url, release.release))
         key = (release.url, release.release)
         try:
             for done, f in enumerate(todo):
@@ -259,7 +257,7 @@ class UnpackModule(BaseModule):
                 path = os.path.join(release.folder, f.path)
                 layout, said = await layout_of(path)
                 if layout is not None:
-                    await self._count_events(f.path, path, layout)
+                    layout = await self._count_events(f.path, path, layout)
                 await self.repo.save_streams(release.url, release.release, f.path, release.infohash or "", f.size, layout,
                                              None if layout is not None else said)
         finally:
@@ -268,40 +266,35 @@ class UnpackModule(BaseModule):
             self._reading.pop(key, None)
         await self.repo.drop_streams(release.url, release.release, {f.path for f in release.files})
 
-    async def _count_events(self, name: str, path: str, layout: dict) -> None:
+    async def _count_events(self, name: str, path: str, layout: dict) -> dict:
         """Each subtitles stream of the file gets its number of events. When they could not be counted the streams keep none
         (the tracks are taken as they are: only a track known to hold none is left out) and the file is counted again at its
         next read: a count that failed is not an answer to keep."""
-        tracks = [s for s in layout["streams"] if s["kind"] == "subtitle"]
-        if not tracks:
-            return
+        if not subtitle_tracks(layout):
+            return layout
         counts = await subtitle_events(path)
         if counts is None:
             self.log.warning("в файле %s реплики дорожек субтитров не посчитаны: будут посчитаны при следующем чтении", name)
-            return
-        for s in tracks:
-            s["events"] = counts.get(s["index"], 0)
-            if s["events"] == 0:
-                self.log.info("в файле %s дорожка субтитров %d (%s) без реплик: в таблицу не попадёт", name, s["index"],
-                              s["title"] or s["language"] or "без названия")
+            return layout
+        counted, empty = with_events(layout, counts)
+        for s in empty:
+            self.log.info("в файле %s дорожка субтитров %d (%s) без реплик: в таблицу не попадёт", name, s["index"],
+                          s["title"] or s["language"] or "без названия")
+        return counted
 
     def _progress(self, key: tuple[str, str], done: int, total: int) -> None:
         self._reading[key] = (done, total)
-        self.publish_event(READ_PROGRESS_TOPIC, {"url": key[0], "release": key[1], "done": done, "total": total})
+        self.publish_event(UNPACK_READ_PROGRESS, {"url": key[0], "release": key[1], "done": done, "total": total})
 
     async def on_profile_changed(self, env: Envelope) -> None:
         profile_id = env.payload.get("profile_id")
         for url in await self._pages():
-            stored = await self.repo.profiles(url) or {}
-            if profile_id in {stored.get(column) for column in PROFILE_COLUMNS.values()}:
+            if profile_id in profiles_of(await self.repo.profiles(url)).values():
                 self._changed(url)
 
     async def _pages(self) -> list[str]:
-        reply = await self.request("catalog.series.list", {})
+        """The pages of the torrent sources of every series, each in its one spelling."""
         pages = set()
-        for one in reply:
-            for source in one.get("sources") or []:
-                if source.get("source_type") == "torrent":
-                    resolved = await self.request("sources.site.resolve", {"url": source["url"]})
-                    pages.add(resolved.get("canonical_url") or source["url"])
+        for url in torrent_urls(await self.request(CATALOG_SERIES_LIST, {})):
+            pages.add(await self._page(url))
         return sorted(pages)

@@ -11,7 +11,8 @@ async def test_every_point_asks_its_owner_with_the_body_as_it_came(tmp_path):
     answers = {"sources.releases.get": {"url": URL, "site": "kinozal", "releases": []},
                "torrents.releases.get": {"releases": []}, "torrents.release.download": {"release": "page"},
                "torrents.release.check": {"releases": ["page"]}, "torrents.release.watch": {"watched": False},
-               "unpack.editor.get": {"url": URL, "view": {}}, "unpack.assign": None, "unpack.unassign": None,
+               "unpack.editor.open": {"url": URL, "profiles": {}}, "unpack.editor.get": {"url": URL, "view": {}},
+               "unpack.assign": None, "unpack.unassign": None,
                "unpack.folder.set": None, "unpack.folder.delete": None}
     async with serving(tmp_path, answers) as (client, owners, _, _):
         for point, body in (("page", {"url": URL}), ("releases", {"url": URL}),

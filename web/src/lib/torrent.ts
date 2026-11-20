@@ -36,7 +36,7 @@ export interface PageReleases { url: string; site: string; title: string; releas
 /** The place of a file: its season, episode and the tag of its version (DIR) — an episode with its tag is one of its own. */
 export interface Place { season: number; episode: number; last: number | null; tag: string }
 /** Why a file «Файлы» gave an episode is red: the episode was `taken` by a source before it (`by`: `manual` or a rule), or
- *  one source put `twice` a video in it (modules/unpack/layout.py). */
+ *  one source put `twice` a video in it (calc/unpack/layout.py). */
 export interface FileConflict { code: "taken" | "twice"; episode: string; by: string }
 export interface StreamFacts {
   index: number
@@ -155,7 +155,7 @@ export function ruleOf(by: string | null): { rule: string; row: number | null } 
 
 // --- the tab «Файлы» ------------------------------------------------------------------------------------------------
 
-/** How a track got its folder when no rule and no hand placed it: its title in the file (modules/unpack/layout.py). */
+/** How a track got its folder when no rule and no hand placed it: its title in the file (calc/unpack/layout.py). */
 export const FROM_META = "meta"
 
 export type FileFilter = "all" | "unplaced" | "placed" | "notInvolved"

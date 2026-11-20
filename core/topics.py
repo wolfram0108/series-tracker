@@ -486,12 +486,15 @@ TRACKERAUTH_SECRET_GET = Topic("trackerauth.secret.get", QUERY, "trackerauth", f
 UNPACK_ASSIGN = Topic("unpack.assign", COMMAND, "unpack", fuse=STANDARD_S)
 UNPACK_AUTO = Topic("unpack.auto", COMMAND, "unpack", fuse=STANDARD_S)
 UNPACK_EDITOR_CHANGED = Topic("unpack.editor.changed", EVENT, "unpack")
-# Mixed: the first opening also makes the missing profiles of the five tabs (the fuse counts them); split in the pass of
-# unpack.
+# The editor of a page: its releases, then the profile of each of the five tabs applied, one after another. It changes nothing;
+# the profiles of the tabs are made by `unpack.editor.open`.
 UNPACK_EDITOR_GET = Topic(
     "unpack.editor.get", QUERY, "unpack",
-    fuse=after(QUICK_S, SOURCES_SITE_RESOLVE, *each(5, RULES_PROFILES_CREATE), TORRENTS_RELEASES_GET,
-               *each(5, RULES_APPLY)))
+    fuse=after(QUICK_S, SOURCES_SITE_RESOLVE, TORRENTS_RELEASES_GET, *each(5, RULES_APPLY)))
+# The window opens the editor of a page with it: the missing profiles of the five tabs are made (the first opening of the page).
+UNPACK_EDITOR_OPEN = Topic(
+    "unpack.editor.open", COMMAND, "unpack",
+    fuse=after(QUICK_S, SOURCES_SITE_RESOLVE, *each(5, RULES_PROFILES_CREATE)))
 UNPACK_FOLDER_DELETE = Topic("unpack.folder.delete", COMMAND, "unpack", fuse=STANDARD_S)
 UNPACK_FOLDER_SET = Topic("unpack.folder.set", COMMAND, "unpack", fuse=STANDARD_S)
 UNPACK_READ_PROGRESS = Topic("unpack.read.progress", EVENT, "unpack")
