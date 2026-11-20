@@ -213,7 +213,7 @@ async def test_a_pass_over_all_series_that_the_stop_of_the_module_cancels_asks_n
     left = []
     while not spy.queue.empty():
         left.append(spy.queue.get_nowait())
-    assert [each.topic for each in left if each.kind == "query"] == []
+    assert [each.topic for each in left if each.reply_to] == []
 
 
 # --- what the user switched off ---------------------------------------------------------------------------------------------
@@ -266,14 +266,14 @@ async def test_a_caller_that_stops_waiting_for_its_grant_gives_it_back_and_the_s
     held = asyncio.Event()
 
     def watched(env):
-        if stops == "before_the_grant" and env.topic == "scan.edit.begin" and env.kind == "query":
+        if stops == "before_the_grant" and env.topic == "scan.edit.begin" and env.kind == "command":
             # The request waits in front of scan; the caller is gone first, and its end goes out before the request is read.
             grants.append(env)
             editing.cancel()
             held.set()
             return 1
         result = publish(env)
-        if env.topic == "scan.edit.begin" and env.kind == "query":
+        if env.topic == "scan.edit.begin" and env.kind == "command":
             grants.append(env)
         elif stops == "after_the_grant" and env.kind == "reply" and grants and env.correlation_id == grants[0].correlation_id:
             editing.cancel()

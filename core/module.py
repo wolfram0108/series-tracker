@@ -3,8 +3,9 @@
 Даёт модулю:
 - декларативные подписки (handle("точный.топик")) с потребителями: модуль подписан ровно на то, что разбирает;
 - publish_event / send_command — отправка без ожидания;
-- request() — query→reply с correlation_id и таймаутом (поверх pub/sub);
-- автоматический ответ на query: значение, возвращённое обработчиком,
+- request() — query или command → reply с correlation_id и предохранителем (поверх pub/sub); вид конверта и
+  предохранитель берутся из реестра топиков (core/topics.py);
+- автоматический ответ на query и на command с reply_to: значение, возвращённое обработчиком,
   уезжает reply-конвертом в reply_to запроса;
 - жизненный цикл start/stop и хук on_start (reconcile: добор
   незавершённых задач из БД — правило «шина — сигнал, БД — истина»).
@@ -25,7 +26,7 @@ from .contracts.availability import NotAllowed
 from .envelope import Envelope
 from .logging import get_logger
 from .reasons import EXTERNAL, describe, parse, reason
-from .topics import deadline_of
+from .topics import TOPICS, Topic, deadline_of
 
 Handler = Callable[[Envelope], Awaitable[Any]]
 
@@ -48,6 +49,10 @@ def is_refusal(exc: BaseException) -> bool:
 
 # `request` takes the fuse from the record of the topic (`core.topics`) unless the caller names one (a test, a one-off wrapper).
 _FROM_TABLE: Any = object()
+
+
+def _name_of(topic: Topic | str) -> str:
+    return topic.name if isinstance(topic, Topic) else topic
 
 
 class BusRequestError(RuntimeError):
@@ -76,13 +81,14 @@ class BaseModule:
     def register(self) -> None:
         """Переопределяется модулем: здесь объявляются self.handle(...)."""
 
-    def handle(self, pattern: str, handler: Handler, *,
+    def handle(self, pattern: Topic | str, handler: Handler, *,
                concurrent: bool = False) -> None:
         """concurrent=True — каждый конверт обрабатывается отдельной
         задачей: долгий обработчик (скан, загрузка) не блокирует
         очередь топика для следующих запросов. По умолчанию —
         последовательно: порядок обработки сохраняется (важно, например,
         для свёрток статусов)."""
+        pattern = _name_of(pattern)
         # A family of topics would bring the module envelopes it does not handle, and an answer to a query of any of them.
         if not is_exact(pattern):
             raise ValueError(f"модуль {self.name}: подписка '{pattern}' — не точный топик")
@@ -142,22 +148,29 @@ class BaseModule:
 
     # --- отправка ----------------------------------------------------------
 
-    def publish_event(self, topic: str, payload: Any = None) -> None:
-        self.bus.publish(Envelope(topic=topic, kind="event", payload=payload))
+    def publish_event(self, topic: Topic | str, payload: Any = None) -> None:
+        self.bus.publish(Envelope(topic=_name_of(topic), kind="event", payload=payload))
 
-    def send_command(self, topic: str, payload: Any = None) -> None:
-        self.bus.publish(Envelope(topic=topic, kind="command", payload=payload))
+    def send_command(self, topic: Topic | str, payload: Any = None) -> None:
+        """A command sent without waiting for an answer."""
+        self.bus.publish(Envelope(topic=_name_of(topic), kind="command", payload=payload))
 
-    async def request(self, topic: str, payload: Any = None, timeout: float | None = _FROM_TABLE, *,
+    async def request(self, topic: Topic | str, payload: Any = None, timeout: float | None = _FROM_TABLE, *,
                       units: int = 1) -> Any:
-        """The answer of the owner of `topic`. The fuse is the owner's (`core.topics`), times `units` for a topic
-        whose work is one step for each unit; `None` waits without one."""
+        """The answer of the owner of `topic`. The envelope is of the kind of the topic's record (`core.topics`): a
+        command for a command, a query for a query and for a string the registry does not know (a test, a one-off
+        wrapper). The fuse is the owner's, times `units` for a topic whose work is one step for each unit; `None` waits
+        without one. An event is told, not asked: a request for one is a mistake of the caller."""
+        record = topic if isinstance(topic, Topic) else TOPICS.get(topic)
+        if record is not None and record.kind == "event":
+            raise ValueError(f"модуль {self.name}: запрос к событию '{record.name}' — на события не отвечают")
+        kind = "query" if record is None else record.kind
         if timeout is _FROM_TABLE:
             timeout = deadline_of(topic, units)
         admission = current_admission.get()
         if admission is not None and not admission.covers():
             admission = None  # a task started inside the change is other work
-        env = Envelope(topic=topic, kind="query", payload=payload,
+        env = Envelope(topic=_name_of(topic), kind=kind, payload=payload,
                        reply_to=self._reply_topic, admission=admission.token if admission else None)
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[env.correlation_id] = fut
@@ -169,7 +182,7 @@ class BaseModule:
             delivered = self.bus.publish(env)
             if delivered == 0:
                 unanswerable = True
-                raise BusRequestError(reason(NO_HANDLER, topic=topic))
+                raise BusRequestError(reason(NO_HANDLER, topic=env.topic))
             return await asyncio.wait_for(fut, timeout)
         finally:
             self._pending.pop(env.correlation_id, None)
@@ -204,7 +217,8 @@ class BaseModule:
         # A request of an admitted change is handled under that admission: what the handler asks of others is part of the
         # change, and the answer goes back only once those requests are answered too (late ones included), so the change
         # is over when its last write is, however deep.
-        relay = _Relay(env.admission, self.log) if env.admission and env.kind == "query" else None
+        asked = env.kind in ("query", "command")
+        relay = _Relay(env.admission, self.log) if env.admission and asked else None
         context = current_admission.set(relay.admission) if relay is not None else None
         try:
             try:
@@ -234,7 +248,7 @@ class BaseModule:
                 current_admission.reset(context)
         if relay is not None:
             await relay.over()
-        if env.kind == "query" and env.reply_to:
+        if asked and env.reply_to:
             self.bus.publish(Envelope(
                 topic=env.reply_to, kind="reply", payload=payload,
                 correlation_id=env.correlation_id))

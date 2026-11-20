@@ -132,7 +132,7 @@ async def main(series: list[int], base: str, rounds: int, out: str | None) -> No
     asked: dict[str, tuple[str, float]] = {}
 
     def seen(env) -> None:
-        if env.kind == "query":
+        if env.reply_to:  # a request of either kind: a query or a command that waits for its answer
             asked[env.correlation_id] = (env.topic, time.perf_counter())
         elif env.kind == "reply" and env.correlation_id in asked:
             topic, start = asked.pop(env.correlation_id)
