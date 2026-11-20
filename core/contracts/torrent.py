@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import posixpath
 from enum import StrEnum
-from typing import Iterable, get_args
+from typing import Any, Iterable, Literal, get_args
 from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,8 +18,6 @@ from .release_table import SubtitleType
 
 TORRENT_PLAYER = "torrent"
 _SCHEME = "torrent:"
-# A release of a page changed: its state, its version, its files (`ReleaseView`); `unpack` reads the files of a ready one.
-RELEASE_CHANGED_TOPIC = "torrents.release.changed"
 # The folder the releases are downloaded to (the staging folder of the torrent sources), a key of `settings`.
 STAGING_DIR_KEY = "torrents.staging_dir"
 
@@ -38,7 +36,7 @@ class ReleaseState(StrEnum):
     ARCHIVED = "archived"
 
 
-class ReleaseFile(BaseModel):
+class ReleaseFile(Frozen):
     model_config = ConfigDict(extra="forbid")
 
     path: str
@@ -47,7 +45,7 @@ class ReleaseFile(BaseModel):
     priority: int = 1
 
 
-class ReleaseView(BaseModel):
+class ReleaseView(Frozen):
     """A release `torrents` keeps for a page. `folder` is where its files are (`folder/path`); `pending` a newer version
     the page lists that waits for the end of a sync of a series with this source."""
 
@@ -63,7 +61,7 @@ class ReleaseView(BaseModel):
     watched: bool = True
     folder: str | None = None
     pending: bool = False
-    files: list[ReleaseFile] = Field(default_factory=list)
+    files: tuple[ReleaseFile, ...] = Field(default_factory=tuple)
     # When the page was last checked for a newer version of it (none: never), and the next check of the schedule after
     # that (core/schedule.py; none: no check scheduled): past it the release is not known to be current.
     checked_at: str | None = None
@@ -99,6 +97,95 @@ class PageReleases(Frozen):
     site: str
     title: str = ""
     releases: tuple[PageRelease, ...] = Field(default_factory=tuple)
+
+
+class ReleasesReply(Frozen):
+    """`torrents.releases.get {url}`: the releases kept for the page."""
+
+    releases: tuple[ReleaseView, ...] = Field(default_factory=tuple)
+
+
+class ReleaseRef(BaseModel):
+    """`torrents.release.download` and `torrents.release.drop_files`: a release by its page and its id on the page."""
+
+    url: str
+    release: str
+
+
+class ReleaseWatch(ReleaseRef):
+    """`torrents.release.watch`: the automatic update of the release on or off."""
+
+    watched: bool
+
+
+class ReleasesChecked(Frozen):
+    """`torrents.release.check {url}`: the releases whose update began or waits for the end of a sync."""
+
+    releases: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class StagingFolder(Frozen):
+    """`torrents.staging.get`, and the event `torrents.staging.changed`: the folder the releases download into ("" when none is set)."""
+
+    value: str
+
+
+class StagingSet(BaseModel):
+    """`torrents.staging.set`: the folder to download the releases into, an absolute path. What the window sent is taken as it came
+    (a value that is no text is refused with the others that are no absolute path)."""
+
+    value: Any = None
+
+
+class StagingSaved(Frozen):
+    """`torrents.staging.set`: the folder was saved, or refused with a `reason` (a path that is not absolute)."""
+
+    ok: bool
+    value: str
+    reason: str | None = None
+
+
+class TorrentProgress(Frozen):
+    """A torrent of the old pipeline in the monitor: a row of `torrent_progress` with the name of its series."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    qb_hash: str
+    series_id: int
+    status: str | None = None
+    progress: int = 0
+    dlspeed: int | None = None
+    eta: int | None = None
+    error_message: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    series_name: str = ""
+
+
+class ReleaseTask(Frozen):
+    """A release of a torrent source in the monitor: one task per series whose source is its page, whatever the state of the release."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["release"]
+    qb_hash: str
+    url: str
+    release: str
+    title: str
+    series_id: int | None = None
+    series_name: str = ""
+    status: str
+    progress: float
+    files_done: int
+    files_total: int
+    error_message: str | None = None
+
+
+class TorrentTasks(Frozen):
+    """`torrents.db.progress.list`, and the event `torrents.progress.changed`: what the monitor of «Агенты» shows of the torrents."""
+
+    tasks: tuple[TorrentProgress | ReleaseTask, ...] = Field(default_factory=tuple)
 
 
 def order_name(player: str) -> str:

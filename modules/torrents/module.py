@@ -1,113 +1,96 @@
-"""Модуль torrents: единственный собеседник qBittorrent (Р-1) и
-торрент-конвейер (Р-14).
+"""Module torrents: the only interlocutor of qBittorrent (Р-1), the releases of the torrent sources, and the old torrent pipeline.
 
-Клиентская часть (этап 2): queries/commands поверх QbtClient;
-добавление с локальным infohash (Р-2) и различением «уже существует».
+The client is made at the start (the credentials are read over the bus: the address and the login from `trackerauth.credentials.get`,
+the password from `trackerauth.secret.get`, the one answer that carries it; env wins when it has an address, Р-22) and makes its first
+login. Until that is done a request that needs the client waits for it (its fuse is the topic's) instead of answering «not
+configured»; every way to the client goes through that wait (`_known`, `_client`).
 
-Конвейер (этап 4): стадийная машина pipeline.py поверх agent_tasks
-(ресьюмабельно: задачи восстанавливаются из БД и сверяются с qBit).
-ИНВАРИАНТ ЯДРА — пауза до завершения переименования, см. pipeline.py.
+The releases of the torrent sources (stage 15, modules/torrents/releases.py; tables torrent_releases, torrent_release_files,
+torrent_release_versions), keyed by the page and the id of the release on it, never by a series. The answers are the models of
+core/contracts/torrent.py, handed over as they are; the count (the folder, the view, the word of the client, whether a page lists a
+newer version) is pure and lives in calc/torrents/releases.py:
+  torrents.releases.get PageUrl -> ReleasesReply — the releases kept for the page
+  torrents.release.download ReleaseRef -> ReleaseView — «Скачать»: the release as the page lists it now (sources.releases.get) goes to
+      the client started, category st-source, into <torrents.staging_dir>/<site>-<key>; refused (NotAllowed) without the staging
+      folder, for a release the page does not list or that has no .torrent
+  torrents.release.check PageUrl -> ReleasesChecked — the page is read now: a watched release it lists in another version (another
+      infohash, else another date) begins its update — the old version leaves the client without its files, the new one comes started
+      into the same folder, the client checks the files there and downloads the rest; while a sync of a series with the page runs
+      (scan.run.changed) the update waits for its end. The check sets `checked_at` of every watched release of the page. The pages of
+      the series in the automatic mode are also checked at the times of the schedule (core/schedule.py) while the automatic sync is
+      on, and a time missed while the service was down at the start; «Перечитать» of the source checks its page whatever the mode
+      (trackers.py)
+  torrents.release.watch ReleaseWatch -> ReleaseView — the automatic update on or off
+  torrents.release.drop_files ReleaseRef (command) — a release no longer watched gives up its files (archived)
+  torrents.staging.get -> StagingFolder and torrents.staging.set StagingSet -> StagingSaved — the folder the releases download into
+      (the setting torrents.staging_dir); a value that is no absolute path is refused (`staging_dir_not_absolute`); the releases move
+      there on settings.changed; the event torrents.staging.changed StagingFolder tells every window the folder held now
+  Event torrents.release.changed ReleaseView — state, version or files changed; `ready` once every wanted file is there (an update
+  ends by removing the files of the old version the new one does not list). `client` of the view is what the client says of the
+  torrent (qBittorrent's state as is, e.g. `checkingDL`): the client is asked while a release moves or is checked, and once in
+  `monitor_idle` otherwise; a change of it is told as the event above. The releases of the pages of the torrent sources of a series
+  give the flags of its status (checking, downloading, queued, idle, ready, error, metadata) by the same words as its own torrents
+  (calc/torrents/states.py torrent_flag). A page no source lists any more (series.source.removed, series.deleted) leaves the client
+  with its files and its folder. settings.changed {key: torrents.staging_dir} moves every release to the new folder (setLocation);
+  {key: schedule} sets the times of the checks and tells every release again (its `fresh_until` moved); {key:
+  scanner_agent_enabled} wakes the checks.
 
-Управление клиентом qBittorrent (публичный контракт модуля; вызывающих внутри системы сейчас нет — их ждёт
-интерфейс и другие модули):
-  torrents.info.get {hashes?}           → список раздач клиента (все, если hashes не заданы)
-  torrents.pause / .resume / .recheck {hashes} — команды клиенту
-  torrents.delete {hashes, delete_files?} — убрать раздачи из клиента (файлы — по флагу)
-  Клиент создаётся при старте (креды читаются по шине) и делает первый вход: пока этого нет, запрос, которому нужен клиент,
-  ждёт его (предохранитель — у топика), а не отвечает «не настроен».
+What the monitor of «Агенты» shows (the table torrent_progress, one row per infohash; the table download_tasks belongs to downloads
+and holds no torrents): torrents.db.progress.list -> TorrentTasks and the event torrents.progress.changed TorrentTasks, {tasks: [...]}.
+A task is a torrent of the old pipeline ({id, qb_hash, series_id, series_name, status, progress, dlspeed, eta, error_message,
+created_at, updated_at}) or a release of a torrent source, whatever its state (downloading, ready, being updated, failed, archived;
+a release is there until its source goes), one task per series with the page: {kind: "release", qb_hash, url, release, title,
+series_id, series_name, status (the state of the release), progress (by the size of the wanted files), files_done, files_total,
+error_message}. Both pictures (the queue and the progress) go again when a window connects (gateway.sse.clients).
 
-Queries/commands конвейера (контракты Р-12, их ждёт scan):
-  torrents.db.active {series_id}        → активные раздачи, сверенные с qBit
-  torrents.db.deactivate_all {series_id} → для force_replace
-  torrents.register {series_id, torrent, qb_hash, link_type, replaces,
-      start_pipeline?}
-      — фиксация раздачи по ИДЕНТИЧНОСТИ infohash (qb_hash), не по ярлыку
-        с трекера. Тот же infohash уже у серии → ничего не качаем, лишь
-        переклеиваем ярлык (ПУНКТ 3). Новый infohash → старую раздачу
-        убрать из qBit, прежнюю строку пометить «заменена» (история),
-        новую — в конвейер (ПУНКТ 4). replaces.db_id — точная строка для
-        деактивации (по id, не по ярлыку: иначе деактивируется не та).
-        start_pipeline=false — подготовка состава: метаданные, разбор
-        правилами в torrent_files и приоритеты файлов, БЕЗ задачи
-        конвейера. Раздача стоит на паузе, пока пользователь отбирает
-        серии; дальше её доводит запрос torrents.drive_incomplete
-  torrents.queue.get {series_id?}       → {count, tasks}
-  torrents.fs.verify {series_id}        → {missing, recheck_started}
-      — проверка файлов на диске + recheck-задачи для пропавших
-      (вызывается сканом и при открытии модалки — решение Р-13/Р-14)
-      A series with no file of the pipeline answers {0, 0} at once.
+Control of the qBittorrent client (the public contract of the module; nothing inside the system calls most of it now, the interface and
+the other modules are what it waits for):
+  torrents.info.get {hashes?}           -> the torrents of the client (all, when no hashes are given)
+  torrents.pause / .resume / .recheck {hashes} — commands to the client
+  torrents.delete {hashes, delete_files?} — remove torrents from the client (their files by the flag)
+  torrents.add {save_path, paused?, magnet | content_b64} -> {hash, link_type, existed}: the infohash is counted locally (Р-2)
+      and «already exists» is told apart
+
+The old torrent pipeline (Р-14) and what belongs to it: torrents.register, torrents.db.*, torrents.preview.*, torrents.composition,
+torrents.seasons, torrents.queue.*, torrents.fs.verify, torrents.drive_incomplete, the agent and the monitor, and renaming.process_torrent
+of the module `renaming`. It leaves with step 11 of stage 15 of the mission voice-alignment and is not rebuilt (its topics are the
+records of the registry and its answers are dictionaries until then). The stage machine pipeline.py over agent_tasks is resumable:
+the tasks are restored from the base and checked against qBit. KERNEL INVARIANT — the torrent is paused until the renaming ends, see
+calc/torrents/pipeline.py.
+Queries/commands of the pipeline (contracts of Р-12, scan waited for them):
+  torrents.db.active {series_id}        -> the active torrents, checked against qBit
+  torrents.db.deactivate_all {series_id} -> for force_replace
+  torrents.register {series_id, torrent, qb_hash, link_type, replaces, start_pipeline?}
+      — the torrent is fixed by the IDENTITY of its infohash (qb_hash), not by the label from the tracker. The same infohash already
+        in the series -> nothing is downloaded, only the label is moved (POINT 3). A new infohash -> the old torrent leaves qBit, its
+        row is marked «replaced» (history), the new one goes into the pipeline (POINT 4). replaces.db_id is the exact row to
+        deactivate (by id, not by the label: or the wrong one would be). start_pipeline=false prepares the content: the metadata,
+        the rules' parse into torrent_files and the priorities of the files, WITHOUT a task of the pipeline. The torrent stays paused
+        while the user picks the episodes; then torrents.drive_incomplete drives it on
+  torrents.queue.get {series_id?}       -> {count, tasks}
+  torrents.fs.verify {series_id}        -> {missing, recheck_started}
+      — the files on disk are checked, and recheck tasks are made for the missing ones (scan calls it, and the window of a series on
+        opening: the decision of Р-13/Р-14). A series with no file of the pipeline answers {0, 0} at once.
   torrents.preview.fetch {items: [{torrent_id, magnet?, link?}]}
-      — command: the file lists of the releases of the add form, for the
-        preview of the naming. Each release ends with the event
-        torrents.preview.ready or .failed, both published by this module only;
-        there is no reply. The releases go in order: a magnet gets its
-        metadata through qBit (added STARTED in the category
-        st-naming-preview, files read, torrent deleted; ephemeral, not
-        resumed; zombie-safe: cleanup by infohash and a sweep of the category
-        in on_start); a link gets its .torrent from sources
-        (sources.torrent_file.get, with its cache) and the file list is read
-        locally (bencode), without qBit. A release with neither a magnet nor a
-        link, or whose .torrent was not got or not parsed, ends with
-        preview.failed and the reason.
+      — command: the file lists of the releases of the add form, for the preview of the naming. Each release ends with the event
+        torrents.preview.ready or .failed, both published by this module only; there is no reply. The releases go in order: a magnet
+        gets its metadata through qBit (added STARTED in the category st-naming-preview, files read, torrent deleted; ephemeral, not
+        resumed; zombie-safe: cleanup by infohash and a sweep of the category in on_start); a link gets its .torrent from sources
+        (sources.torrent_file.get, with its cache) and the file list is read locally (bencode), without qBit. A release with neither
+        a magnet nor a link, or whose .torrent was not got or not parsed, ends with preview.failed and the reason.
+Events of the pipeline: torrents.queue.changed {count, tasks} (the contract of the SSE agent_queue_update; count=0 tells scan to
+assign the next pass), series.status.contribution {source: torrents, ...} (the stages to flags by the map of Р-11, and downloading/
+ready from the progress: the semantics of sync_torrent_statuses), torrents.preview.ready {torrent_id, infohash, name, files} /
+torrents.preview.failed {torrent_id, infohash, reason} (-> SSE: the preview of the naming on adding).
 
-События: torrents.queue.changed {count, tasks} (контракт SSE
-agent_queue_update; count=0 — сигнал scan'у назначить следующий проход),
-series.status.contribution {source: torrents, ...} (стадии → флаги по
-карте Р-11 + downloading/ready из прогресса — семантика
-sync_torrent_statuses), torrents.preview.ready {torrent_id, infohash, name,
-files} / torrents.preview.failed {torrent_id, infohash, reason} (→ SSE:
-предпросмотр нейминга при добавлении).
+Selective download. The memory of the exclusions lives in the series (series.ignored_seasons + series.ignored_episodes, owned by
+catalog) and so outlives the replacement of a torrent; torrent_files.is_excluded is its projection on the files of the current release,
+and the qBit priorities are counted from it (0 — do not download). Only what is recognized and not excluded is downloaded; the one
+source of truth is calc/torrents/selection.py. The projection is rebuilt on a change of the memory (the event series.updated) and on a
+change of the content (torrents.db.files.upsert).
 
-Выборочная загрузка. Память исключений живёт в сериале
-(series.ignored_seasons + series.ignored_episodes, владелец catalog) и
-потому переживает замену раздачи; torrent_files.is_excluded — её
-проекция на файлы текущего релиза, из неё считаются приоритеты qBit
-(0 — не качать). Качается только распознанное и не исключённое,
-единственная точка правды — selection.py. Проекция пересобирается на
-изменение памяти (событие series.updated) и на изменение состава
-(torrents.db.files.upsert).
-
-Прогресс раздач для интерфейса — таблица torrent_progress (одна строка на infohash; таблица
-download_tasks принадлежит downloads, торрентов в ней нет): query torrents.db.progress.list и
-событие torrents.progress.changed отдают {tasks: [{id, qb_hash, series_id, series_name, status,
-progress, dlspeed, eta, error_message, created_at, updated_at}]}. With them stand the releases of the torrent sources the
-keeps, whatever their state (downloading, ready, being updated, failed, archived) — a release is there until its source
-goes — one task per series with the page: {kind: "release", qb_hash, url, release, title,
-series_id, series_name, status (the state of the release), progress (by the size of the wanted files), files_done,
-files_total, error_message} — the monitor of «Агенты» shows every torrent of the client. Both pictures (the queue and the
-progress) go again when a window connects (gateway.sse.clients).
-
-The releases of the torrent sources (stage 15, modules/torrents/releases.py; tables torrent_releases,
-torrent_release_files, torrent_release_versions), keyed by the page and the id of the release on it, never by a series:
-  torrents.releases.get {url} → {releases: [ReleaseView]} — the releases kept for the page (core/contracts/torrent.py)
-  torrents.release.download {url, release} → ReleaseView — «Скачать»: the release as the page lists it now
-      (sources.releases.get) goes to the client started, category st-source, into <torrents.staging_dir>/<site>-<key>;
-      refused (NotAllowed) without the staging folder, for a release the page does not list or that has no .torrent
-  torrents.release.check {url} → {releases} — the page is read now: a watched release it lists in another version (another
-      infohash, else another date) begins its update — the old version leaves the client without its files, the new one
-      comes started into the same folder, the client checks the files there and downloads the rest; while a sync of a
-      series with the page runs (scan.run.changed) the update waits for its end. The check sets `checked_at` of every
-      watched release of the page. The pages of the series in the automatic mode are also checked at the times of the
-      schedule (core/schedule.py) while the automatic sync is on, and a time missed while the service was down at the
-      start; «Перечитать» of the source checks its page whatever the mode (trackers.py).
-  torrents.release.watch {url, release, watched} → ReleaseView — the automatic update on or off
-  torrents.staging.get {} → {value} and torrents.staging.set {value} → {ok, value, reason?} — the folder the releases download
-      into (the setting torrents.staging_dir); a value that is no absolute path is refused (`staging_dir_not_absolute`); the
-      releases move there on settings.changed; event torrents.staging.changed {value} tells every window the folder held now
-  torrents.release.drop_files {url, release} (command) — a release no longer watched gives up its files (archived)
-  Event torrents.release.changed ReleaseView — state, version or files changed; `ready` once every wanted file is there
-  (an update ends by removing the files of the old version the new one does not list). `client` of the view is what the
-  client says of the torrent (qBittorrent's state as is, e.g. `checkingDL`): the client is asked while a release moves or
-  is checked, and once in `monitor_idle` otherwise; a change of it is told as the event above. The releases of the pages
-  of the torrent sources of a series give the flags of its status (checking, downloading, queued, idle, ready, error,
-  metadata) by the same words as its own torrents (pipeline.torrent_flag). A page no source lists any more
-  (series.source.removed, series.deleted) leaves the client with its files and its folder. settings.changed
-  {key: torrents.staging_dir} moves every release to the new folder (setLocation); {key: schedule} sets the times of the
-  checks and tells every release again (its `fresh_until` moved); {key: scanner_agent_enabled} wakes the checks.
-
-Переименование файлов — query renaming.process_torrent (зона renaming);
-мониторинг прогресса — адаптивный опрос qBit (часто при активности,
-редко в покое), события только при изменениях.
+The files are renamed inside qBittorrent by the query renaming.process_torrent (the zone of renaming); the progress is followed by an
+adaptive poll of qBit (often while something moves, rarely at rest), events only on changes.
 """
 from __future__ import annotations
 
@@ -117,41 +100,53 @@ import json
 import os
 from datetime import datetime, timezone
 
+from calc.torrents import pipeline, selection
+from calc.torrents.infohash import TorrentParseError, infohash_candidates, infohash_from_magnet, torrent_file_list
+from calc.torrents.releases import release_tasks, status_flag
+from calc.torrents.selection import memory_of
+from calc.torrents.states import torrent_flag
 from core import storage
 from core.module import BaseModule, BusRequestError
 from core.source_types import torrent_profile_id
-from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, METADATA_SEASONS_RECOMPUTE, SERIES_PURGED,
-                         SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SOURCES_SITE_RESOLVE,
-                         SOURCES_TORRENT_FILE_DROP, SOURCES_TORRENT_FILE_GET, TRACKERAUTH_CREDENTIALS_CHANGED,
-                         TRACKERAUTH_CREDENTIALS_GET)
-from core.contracts import (RUN_CHANGED, CredentialsChanged, RunChanged, SeriesCard, SeriesDeleted, SeriesPurged, SeriesUpdated,
+from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, CATALOG_SERIES_TOUCH_SCAN_TIME, GATEWAY_SSE_CLIENTS,
+                         METADATA_SEASONS_RECOMPUTE, RENAMING_PROCESS_TORRENT, RULES_FORMAT_TORRENT_FILE, SCAN_RUN_CHANGED,
+                         SCAN_RUNS_GET, SERIES_DELETED, SERIES_DOWNLOADED_CHANGED, SERIES_PURGED, SERIES_SOURCE_REMOVED,
+                         SERIES_STATUS_CONTRIBUTION, SERIES_UPDATED, SETTINGS_CHANGED, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET,
+                         SOURCES_SITE_RESOLVE, SOURCES_TORRENT_FILE_DROP, SOURCES_TORRENT_FILE_GET, TORRENTS_ADD,
+                         TORRENTS_COMPOSITION, TORRENTS_DB_ACTIVE, TORRENTS_DB_ADD, TORRENTS_DB_DEACTIVATE_ALL,
+                         TORRENTS_DB_DOWNLOADED_COUNTS, TORRENTS_DB_FILES_FOR_SERIES, TORRENTS_DB_FILES_LIST,
+                         TORRENTS_DB_FILES_UPSERT, TORRENTS_DB_HISTORY, TORRENTS_DB_PROGRESS_LIST, TORRENTS_DELETE,
+                         TORRENTS_DRIVE_INCOMPLETE, TORRENTS_FILES_GET, TORRENTS_FS_VERIFY, TORRENTS_INFO_GET, TORRENTS_PAUSE,
+                         TORRENTS_PREVIEW_FAILED, TORRENTS_PREVIEW_FETCH, TORRENTS_PREVIEW_READY, TORRENTS_PROGRESS_CHANGED,
+                         TORRENTS_QUEUE_CHANGED, TORRENTS_QUEUE_GET, TORRENTS_RECHECK, TORRENTS_REGISTER,
+                         TORRENTS_RELEASE_CHANGED, TORRENTS_RELEASE_CHECK, TORRENTS_RELEASE_DOWNLOAD,
+                         TORRENTS_RELEASE_DROP_FILES, TORRENTS_RELEASE_WATCH, TORRENTS_RELEASES_GET, TORRENTS_RENAME_FILE,
+                         TORRENTS_RESUME, TORRENTS_SEASONS, TORRENTS_SET_LOCATION, TORRENTS_STAGING_CHANGED,
+                         TORRENTS_STAGING_GET, TORRENTS_STAGING_SET, TRACKERAUTH_CREDENTIALS_CHANGED,
+                         TRACKERAUTH_CREDENTIALS_GET, TRACKERAUTH_SECRET_GET)
+from core.contracts import (CredentialsChanged, PageUrl, RunChanged, SeriesDeleted, SeriesPurged, SeriesUpdated,
                             SettingValue, SourceType, StatusContribution)
-from core.contracts.torrent import RELEASE_CHANGED_TOPIC, STAGING_DIR_KEY
+from core.contracts.torrent import (STAGING_DIR_KEY, ReleaseRef, ReleasesChecked, ReleasesReply, ReleaseTask, ReleaseView,
+                                    ReleaseWatch, StagingFolder, StagingSaved, StagingSet, TorrentProgress, TorrentTasks)
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason, relayed
 from core.retry import UNTIMED, Budget, retrying
 from core.schedule import SCHEDULE_KEY, last_at, next_at, parse
 
-from . import pipeline, selection
-from .infohash import (TorrentParseError, infohash_candidates,
-                       infohash_from_magnet, torrent_file_list)
 from .qbt_client import QbtClient, QbtError
-from .releases import Releases, status_flag
+from .releases import Releases
 from .repository import ReleaseStore, TorrentsRepository
 
-# Состояния-ошибки qBittorrent: внутренняя ошибка раздачи и
-# недоступные/пропавшие файлы (находка 43). Старая система (и наш
-# перенос) считала их «загрузкой» — карточка врала; теперь это флаг
-# error. Тексты — для модалки статуса.
+# qBittorrent error states: internal torrent error and unavailable/missing files (finding 43).
+# The old system (and our port) counted them as downloading, so the card lied; now they are the `error` flag. Texts are for the status modal.
 _ERROR_STATES = {
     "error": reason("qbt_error"),
     "missingFiles": reason("qbt_files_missing"),
 }
 
-# Категория qBit для транзиентных preview-раздач (добор метаданных magnet при
-# добавлении сериала). Reconcile при старте сметает всё в ней — бэкстоп от
-# осиротевших раздач при краше между add и delete (зомби-безопасность).
+# qBit category of transient preview torrents (metadata fetch for a magnet when a series is added).
+# Startup reconcile sweeps the whole category: a backstop against orphans left by a crash between add and delete (zombie safety).
 PREVIEW_CATEGORY = "st-naming-preview"
 
 
@@ -177,12 +172,11 @@ class TorrentsModule(BaseModule):
         self._looked = asyncio.Event()
         if self._qbt_injected:
             self._looked.set()
-        self._pipe: dict[str, dict] = {}  # hash -> задача конвейера
+        self._pipe: dict[str, dict] = {}  # hash -> pipeline task
         self._wake = asyncio.Event()
         self._flags_cache: dict[int, dict] = {}
-        self._names_cache: dict[int, str] = {}  # имена серий для прогресса
-        # Предпросмотр нейминга при добавлении: кэш списков файлов по infohash,
-        # single-flight (один добор на infohash), кэш дефолтного пути qBit.
+        self._names_cache: dict[int, str] = {}  # series names for the progress
+        # Naming preview on add: file-list cache by infohash, single-flight (one fetch per infohash), cache of qBit's default path.
         self._preview_cache: dict[str, dict] = {}
         self._preview_inflight: set[str] = set()
         self._preview_tasks: set[asyncio.Task] = set()
@@ -198,75 +192,74 @@ class TorrentsModule(BaseModule):
         # A change of the schedule wakes the loop of the checks of the releases (_watch_loop).
         self._schedule_wake = asyncio.Event()
         self.releases = Releases(
-            ReleaseStore(db), client=lambda: self.qbt, reply=lambda topic, payload: self.reply_of(topic, payload),
-            publish=self._release_event, wake=self._release_wake.set)
+            ReleaseStore(db), client=self._client, reply=self.reply_of, publish=self._release_event,
+            wake=self._release_wake.set)
         super().__init__(bus)
 
     def register(self) -> None:
-        self.handle("torrents.add", self.on_add)
-        self.handle("torrents.info.get", self.on_info)
-        self.handle("torrents.files.get", self.on_files)
-        self.handle("torrents.preview.fetch", self.on_preview_fetch,
+        self.handle(TORRENTS_ADD, self.on_add)
+        self.handle(TORRENTS_INFO_GET, self.on_info)
+        self.handle(TORRENTS_FILES_GET, self.on_files)
+        self.handle(TORRENTS_PREVIEW_FETCH, self.on_preview_fetch,
                     concurrent=True)
-        self.handle("torrents.pause", self.on_pause)
-        self.handle("torrents.resume", self.on_resume)
-        self.handle("torrents.recheck", self.on_recheck)
-        self.handle("torrents.delete", self.on_delete)
-        self.handle("torrents.rename_file", self.on_rename_file)
-        self.handle("torrents.set_location", self.on_set_location)
-        self.handle("torrents.db.active", self.on_db_active)
-        self.handle("torrents.db.deactivate_all", self.on_db_deactivate_all)
-        self.handle("torrents.db.files.list", self.on_db_files_list)
-        self.handle("torrents.db.files.upsert", self.on_db_files_upsert)
-        self.handle("torrents.register", self.on_register)
-        self.handle("torrents.queue.get", self.on_queue_get)
-        self.handle("torrents.fs.verify", self.on_fs_verify, concurrent=True)
-        self.handle("torrents.drive_incomplete", self.on_drive_incomplete)
-        self.handle("torrents.db.history", self.on_db_history)
-        self.handle("torrents.db.add", self.on_db_add)
-        self.handle("torrents.db.downloaded_counts",
+        self.handle(TORRENTS_PAUSE, self.on_pause)
+        self.handle(TORRENTS_RESUME, self.on_resume)
+        self.handle(TORRENTS_RECHECK, self.on_recheck)
+        self.handle(TORRENTS_DELETE, self.on_delete)
+        self.handle(TORRENTS_RENAME_FILE, self.on_rename_file)
+        self.handle(TORRENTS_SET_LOCATION, self.on_set_location)
+        self.handle(TORRENTS_DB_ACTIVE, self.on_db_active)
+        self.handle(TORRENTS_DB_DEACTIVATE_ALL, self.on_db_deactivate_all)
+        self.handle(TORRENTS_DB_FILES_LIST, self.on_db_files_list)
+        self.handle(TORRENTS_DB_FILES_UPSERT, self.on_db_files_upsert)
+        self.handle(TORRENTS_REGISTER, self.on_register)
+        self.handle(TORRENTS_QUEUE_GET, self.on_queue_get)
+        self.handle(TORRENTS_FS_VERIFY, self.on_fs_verify, concurrent=True)
+        self.handle(TORRENTS_DRIVE_INCOMPLETE, self.on_drive_incomplete)
+        self.handle(TORRENTS_DB_HISTORY, self.on_db_history)
+        self.handle(TORRENTS_DB_ADD, self.on_db_add)
+        self.handle(TORRENTS_DB_DOWNLOADED_COUNTS,
                     self.on_downloaded_counts)
-        self.handle("torrents.seasons", self.on_seasons)
-        self.handle("torrents.db.files.for_series", self.on_files_for_series)
-        self.handle("torrents.db.progress.list", self.on_progress_list)
-        self.handle("torrents.composition", self.on_composition,
+        self.handle(TORRENTS_SEASONS, self.on_seasons)
+        self.handle(TORRENTS_DB_FILES_FOR_SERIES, self.on_files_for_series)
+        self.handle(TORRENTS_DB_PROGRESS_LIST, self.on_progress_list)
+        self.handle(TORRENTS_COMPOSITION, self.on_composition,
                     concurrent=True)
-        self.handle("series.deleted", self.on_series_deleted)
-        self.handle("series.updated", self.on_series_updated)
-        self.handle("torrents.releases.get", self.on_releases_get)
-        self.handle("gateway.sse.clients", self.on_sse_clients)
-        self.handle("torrents.release.download", self.on_release_download)
-        self.handle("torrents.staging.get", self.on_staging_get)
-        self.handle("torrents.staging.set", self.on_staging_set)
-        self.handle("torrents.release.check", self.on_release_check)
-        self.handle("torrents.release.watch", self.on_release_watch)
-        self.handle("torrents.release.drop_files", self.on_release_drop_files)
-        self.handle(RUN_CHANGED, self.on_run_changed)
-        self.handle("series.source.removed", self.on_source_removed)
-        self.handle("settings.changed", self.on_settings_changed)
+        self.handle(SERIES_DELETED, self.on_series_deleted)
+        self.handle(SERIES_UPDATED, self.on_series_updated)
+        self.handle(TORRENTS_RELEASES_GET, self.on_releases_get)
+        self.handle(GATEWAY_SSE_CLIENTS, self.on_sse_clients)
+        self.handle(TORRENTS_RELEASE_DOWNLOAD, self.on_release_download)
+        self.handle(TORRENTS_STAGING_GET, self.on_staging_get)
+        self.handle(TORRENTS_STAGING_SET, self.on_staging_set)
+        self.handle(TORRENTS_RELEASE_CHECK, self.on_release_check)
+        self.handle(TORRENTS_RELEASE_WATCH, self.on_release_watch)
+        self.handle(TORRENTS_RELEASE_DROP_FILES, self.on_release_drop_files)
+        self.handle(SCAN_RUN_CHANGED, self.on_run_changed)
+        self.handle(SERIES_SOURCE_REMOVED, self.on_source_removed)
+        self.handle(SETTINGS_CHANGED, self.on_settings_changed)
         self.handle(TRACKERAUTH_CREDENTIALS_CHANGED, self.on_credentials_changed)
 
     async def _resolve_qbt_config(self) -> dict:
-        """env имеет приоритет (стенд); без env — креды qbittorrent из
-        таблицы auth через шину (прод-сценарий, Р-22)."""
+        """Env wins (the stand); without env the qbittorrent credentials come
+        from the auth table over the bus (the production scenario, Р-22)."""
         cfg = dict(self._qbt_config)
         if cfg.get("base_url"):
             return cfg
         try:
-            reply = await self.reply_of(TRACKERAUTH_CREDENTIALS_GET, {"service": "qbittorrent"})
+            row = (await self.reply_of(TRACKERAUTH_CREDENTIALS_GET, {"service": "qbittorrent"})).credentials
+            # The credentials never carry the password (docs/security.md): it comes in the one answer that does.
+            secret = (await self.reply_of(TRACKERAUTH_SECRET_GET, {"service": "qbittorrent"})).secret if row else ""
         except BusRequestError as exc:
             self.log.warning("креды qBittorrent не получены: %s", exc)
             return cfg
-        # The reply never carries the password (docs/security.md), so none comes with it.
-        row = reply.credentials
         return dict(base_url=(row.url if row else "") or "",
                     username=(row.username if row else "") or "",
-                    password="")
+                    password=secret)
 
     async def _connect_qbt(self) -> None:
-        """Создание клиента и вход; любая ошибка (включая пустой URL —
-        креды ещё не настроены) не валит процесс: конвейер ждёт
-        (находка 7 — модуль не замораживает и не роняет систему)."""
+        """Makes the client and logs in; any error (including an empty URL, the credentials
+        are not set yet) does not kill the process: the pipeline waits (finding 7: the module neither freezes nor brings the system down)."""
         try:
             cfg = await self._resolve_qbt_config()
             old, self.qbt = self.qbt, QbtClient(**cfg)
@@ -278,7 +271,7 @@ class TorrentsModule(BaseModule):
                 return
             try:
                 await self.qbt.login()
-            except Exception as exc:  # noqa: BLE001 — недоступность не фатальна
+            except Exception as exc:  # noqa: BLE001 — unavailability is not fatal
                 self.log.error("qBittorrent недоступен: %s — конвейер будет "
                                "ждать", exc)
         finally:
@@ -291,6 +284,11 @@ class TorrentsModule(BaseModule):
         if not self._looked.is_set():
             self.log.info("qBittorrent: запрос ждёт, пока будет создан клиент и сделан первый вход")
             await self._looked.wait()
+
+    async def _client(self) -> QbtClient:
+        """The one way to the client of the releases: it is looked at first (`_known`), so what comes back is there."""
+        await self._known()
+        return self.qbt
 
     async def on_credentials_changed(self, env: Envelope) -> None:
         if CredentialsChanged.model_validate(env.payload).service != "qbittorrent" or self._qbt_injected:
@@ -309,14 +307,12 @@ class TorrentsModule(BaseModule):
         await self._start_releases()
 
     async def _reconcile_with_qbt(self) -> None:
-        """Сверка БД с реальным qBit при старте (crash-tolerance): если
-        торрент есть в БД, но отсутствует в qBit (удалён вручную/пропал),
-        запись сбрасывается и серия возвращается в состояние «торрента
-        нет» — следующий скан добавит раздачу заново. qBit недоступен —
-        пропускаем (не теряем данные на ложном выводе)."""
+        """Reconciles the DB with the real qBit at start (crash tolerance): a torrent
+        in the DB but missing from qBit (removed by hand or lost) gets its row reset and the series goes back to
+        'no torrent'; the next scan adds the release again. qBit unavailable: skip (no data is lost on a false conclusion)."""
         try:
             live = await self.qbt.torrents_info()
-        except Exception as exc:  # noqa: BLE001 — qBit мог не подняться
+        except Exception as exc:  # noqa: BLE001 — qBit may not be up yet
             self.log.warning("reconcile с qBit пропущен — qBit недоступен: "
                              "%s", exc)
             return
@@ -335,8 +331,8 @@ class TorrentsModule(BaseModule):
             await self.qbt.close()
 
     async def _recover_tasks(self) -> None:
-        """Reconcile (Р-11): задачи из БД — в память (стадия error —
-        носитель, в конвейер не возвращается), свёртки по всем сериям."""
+        """Reconcile (Р-11): tasks from the DB go to memory (stage error is a carrier and
+        does not return to the pipeline); rollups over all series."""
         series_ids = set()
         for task in await self.repo.all_tasks():
             series_ids.add(task["series_id"])
@@ -382,7 +378,7 @@ class TorrentsModule(BaseModule):
         if torrent_hash is None:
             raise RuntimeError(reason("qbt_torrent_not_appeared", verdict=verdict,
                                       candidates=candidates))
-        existed = verdict == "fails"  # Fails. + найден по hash = уже был
+        existed = verdict == "fails"  # "Fails." and found by hash means it already existed
         if existed:
             self.log.info("торрент %s уже существовал в qBittorrent",
                           torrent_hash[:8])
@@ -398,7 +394,7 @@ class TorrentsModule(BaseModule):
         await self._known()
         return await self.qbt.torrent_files(env.payload["hash"])
 
-    # --- предпросмотр нейминга при добавлении (фоновый добор списка файлов) --------
+    # --- naming preview on add (background fetch of the file list) --------
 
     async def on_preview_fetch(self, env: Envelope) -> None:
         """The releases of the add form to file lists, by preview.ready/failed. The handler is concurrent:
@@ -435,7 +431,7 @@ class TorrentsModule(BaseModule):
             data = {"name": name, "files": files}
             self._preview_cache[ih] = data
             self._emit_preview_ready(tid, ih, data)
-        except Exception as exc:  # noqa: BLE001 — предпросмотр не валит систему
+        except Exception as exc:  # noqa: BLE001 — preview must not bring the system down
             self.log.warning("preview .torrent %s: %s", tid, exc)
             self._emit_preview_failed(
                 tid, None, reason("preview_torrent_unreadable", detail=str(exc)))
@@ -465,9 +461,6 @@ class TorrentsModule(BaseModule):
         added = False
         try:
             await self._known()
-            if self.qbt is None:
-                self._emit_preview_failed(tid, ih, reason("qbt_not_configured"))
-                return
             save_path = await self._preview_save_path_get()
             await self.qbt.add_magnet(magnet, save_path, paused=False,
                                       category=PREVIEW_CATEGORY)
@@ -479,7 +472,7 @@ class TorrentsModule(BaseModule):
             data = {"name": None, "files": files}
             self._preview_cache[ih] = data
             self._emit_preview_ready(tid, ih, data)
-        except Exception as exc:  # noqa: BLE001 — предпросмотр не валит систему
+        except Exception as exc:  # noqa: BLE001 — preview must not bring the system down
             self.log.warning("preview magnet %s: %s", ih[:8], exc)
             self._emit_preview_failed(tid, ih, reason("preview_fetch_failed", detail=str(exc)))
         finally:
@@ -489,7 +482,7 @@ class TorrentsModule(BaseModule):
 
     async def _preview_poll_files(self, ih: str, *, timeout: float,
                                   poll: float = 0.5) -> list[dict] | None:
-        """Поллинг /torrents/files до появления метаданных. None — таймаут."""
+        """Polls /torrents/files until the metadata appears. None means timeout."""
         async def look() -> list[dict] | None:
             files = await self.qbt.torrent_files(ih)
             return [{"path": f.get("name"), "size": f.get("size")} for f in files] if files else None
@@ -500,16 +493,15 @@ class TorrentsModule(BaseModule):
         return found
 
     async def _preview_cleanup(self, ih: str) -> None:
-        """Уборка preview-раздачи по ИЗВЕСТНОМУ infohash с подтверждением:
-        delete повторяется, пока qBit не подтвердит отсутствие (переживает
-        асинхронность add и отмену). deleteFiles=true снимает любые частичные
-        (контента ≈0 — метаданные приходят до пирсов, но подстраховка)."""
+        """Cleans up a preview torrent by its KNOWN infohash, with confirmation: delete
+        is repeated until qBit confirms it is gone (this survives the asynchrony of add and a cancel).
+        deleteFiles=true removes any partial files (content is about 0: metadata comes before peers, but this is a safeguard)."""
         async def attempt() -> bool | None:
             try:
                 await self.qbt.delete([ih], delete_files=True)
                 return not await self.qbt.torrents_info([ih])
             except QbtError:
-                return None  # qBit недоступен — старт-sweep подметёт по категории
+                return None  # qBit unavailable — the start sweep takes it by category
 
         gone, _attempts, _exhausted = await retrying(attempt, final=lambda got: got is not False,
                                                      budget=PREVIEW_CLEANUP_BUDGET)
@@ -523,9 +515,8 @@ class TorrentsModule(BaseModule):
         return self._preview_save_path or ""
 
     async def _sweep_preview_orphans(self) -> None:
-        """BACKSTOP зомби-безопасности: смести все раздачи preview-категории при
-        старте (осиротевшие при краше между add и delete). qBit недоступен —
-        пропускаем (как reconcile, данные не теряем)."""
+        """BACKSTOP of zombie safety: sweep all torrents of the preview category at start
+        (orphaned by a crash between add and delete). qBit unavailable: skip (as reconcile does, no data is lost)."""
         if self.qbt is None:
             return
         try:
@@ -536,16 +527,16 @@ class TorrentsModule(BaseModule):
                 await self.qbt.delete(hashes, delete_files=True)
                 self.log.warning("preview: подметено осиротевших раздач: %d",
                                  len(hashes))
-        except Exception as exc:  # noqa: BLE001 — старт модуля не должен падать
+        except Exception as exc:  # noqa: BLE001 — module start must not fail
             self.log.warning("preview: sweep категории пропущен: %s", exc)
 
     def _emit_preview_ready(self, tid, ih, data: dict) -> None:
-        self.publish_event("torrents.preview.ready", {
+        self.publish_event(TORRENTS_PREVIEW_READY, {
             "torrent_id": tid, "infohash": ih,
             "name": data.get("name"), "files": data.get("files") or []})
 
     def _emit_preview_failed(self, tid, ih, failure: str) -> None:
-        self.publish_event("torrents.preview.failed", {
+        self.publish_event(TORRENTS_PREVIEW_FAILED, {
             "torrent_id": tid, "infohash": ih, "reason": failure})
 
     # --- commands ------------------------------------------------------------------
@@ -578,33 +569,18 @@ class TorrentsModule(BaseModule):
         await self.qbt.set_location(env.payload["hash"],
                                     env.payload["location"])
 
-    # --- выборочная загрузка -----------------------------------------------------------
-
-    @staticmethod
-    def _memory_of(series: SeriesCard) -> tuple[set[int], dict[int, set[int]]]:
-        """Память исключений сериала: сезоны и номера серий."""
-        try:
-            seasons = {int(s) for s in
-                       json.loads(series.ignored_seasons or "[]")}
-        except (json.JSONDecodeError, TypeError, ValueError):
-            seasons = set()
-        try:
-            episodes = selection.parse_memory(
-                json.loads(series.ignored_episodes or "{}"))
-        except (json.JSONDecodeError, TypeError):
-            episodes = {}
-        return seasons, episodes
+    # --- selective download -----------------------------------------------------------
 
     async def _project_and_apply(self, series_id: int, *,
                                  allow_resume: bool) -> int:
-        """Память сериала -> колонка is_excluded -> приоритеты в qBit."""
+        """Series memory -> is_excluded column -> qBit priorities."""
         try:
             series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
         except BusRequestError as exc:
             self.log.warning("серия %d: память исключений не получена: %s",
                              series_id, exc)
             return 0
-        seasons, episodes = self._memory_of(series)
+        seasons, episodes = memory_of(series)
         changed = await self.repo.project_selection(series_id, seasons,
                                                     episodes)
         for qb_hash in await self.repo.active_hashes(series_id):
@@ -613,10 +589,9 @@ class TorrentsModule(BaseModule):
 
     async def _apply_selection(self, qb_hash: str, *,
                                allow_resume: bool) -> None:
-        """Единственная точка, где выбор превращается в приоритеты qBit.
+        """The only place where the selection becomes qBit priorities.
 
-        БД остаётся истиной: сбой qBit только логируется — ближайшая
-        сверка файлов применит приоритеты заново."""
+        The DB stays the truth: a qBit failure is only logged; the next file check applies the priorities again."""
         lock = self._selection_locks.setdefault(qb_hash, asyncio.Lock())
         async with lock:
             rows = await self.repo.files_by_hash(qb_hash)
@@ -648,10 +623,9 @@ class TorrentsModule(BaseModule):
                 await self._resume_for_new_files(qb_hash)
 
     async def _resume_for_new_files(self, qb_hash: str) -> None:
-        """Вернули серию в план — qBit докачает её только запущенным.
+        """The series is back in the plan: qBit downloads it only while running.
 
-        Раздачу в конвейере не трогаем: инвариант ядра требует паузы до
-        конца переименования."""
+        The torrent in the pipeline is not touched: the kernel invariant requires a pause until the renaming ends."""
         if qb_hash in self._pipe or await self.repo.task_by_hash(qb_hash):
             return
         try:
@@ -666,21 +640,20 @@ class TorrentsModule(BaseModule):
 
     async def _prepare_composition(self, series_id: int,
                                    qb_hash: str) -> None:
-        """Состав раздачи в БД до закачки: метаданные → правила →
-        приоритеты. Торрент всё это время стоит на паузе."""
+        """The torrent's composition in the DB before download: metadata -> rules ->
+        priorities. The torrent stays paused meanwhile."""
         if not await self._await_metadata(qb_hash):
             self.log.warning("[%s] метаданные не получены — состав не "
                              "построен", qb_hash[:8])
             return
-        await self.request("renaming.process_torrent", {
+        await self.request(RENAMING_PROCESS_TORRENT, {
             "series_id": series_id, "qb_hash": qb_hash, "dry_run": True})
         await self._project_and_apply(series_id, allow_resume=False)
 
     async def _await_metadata(self, qb_hash: str,
                               attempts: int = 60) -> bool:
-        """Дождаться списка файлов. magnet отдаёт метаданные только
-        запущенным, поэтому его на это время запускаем и сразу возвращаем
-        на паузу — то же исключение из инварианта, что и в конвейере."""
+        """Waits for the file list. A magnet gives its metadata only while running,
+        so it is started for this time and paused at once: the same exception to the invariant as in the pipeline."""
         started = False
 
         async def look() -> bool | None:
@@ -714,7 +687,7 @@ class TorrentsModule(BaseModule):
                                      "поставлена", qb_hash[:8])
 
     async def on_series_updated(self, env: Envelope) -> None:
-        """Память исключений изменилась — пересобрать план загрузки."""
+        """The exclusion memory changed: rebuild the download plan."""
         event = SeriesUpdated.model_validate(env.payload)
         if not ({"ignored_seasons", "ignored_episodes"} & event.model_fields_set):
             return
@@ -722,10 +695,10 @@ class TorrentsModule(BaseModule):
         await self._broadcast_downloaded(event.series_id)
         self.send_command(METADATA_SEASONS_RECOMPUTE, {"series_id": event.series_id})
 
-    # --- реестр раздач (контракты Р-12) ----------------------------------------------
+    # --- torrent registry (contracts of Р-12) ----------------------------------------------
 
     async def on_db_active(self, env: Envelope) -> list[dict]:
-        """Активные раздачи серии, сверенные с qBittorrent."""
+        """The series' active torrents, checked against qBittorrent."""
         rows = await self.repo.active_torrents(env.payload["series_id"])
         hashes = [r["qb_hash"] for r in rows if r.get("qb_hash")]
         if not hashes:
@@ -746,32 +719,29 @@ class TorrentsModule(BaseModule):
         return await self.repo.files_for_torrent(row["id"])
 
     async def on_db_files_upsert(self, env: Envelope) -> dict:
-        """Записи о файлах раздачи (пишет renaming после переименования —
-        таблицей torrent_files владеем мы)."""
+        """Records of a torrent's files (renaming writes them after the rename;
+        we own the torrent_files table)."""
         row = await self.repo.torrent_by_hash(env.payload["qb_hash"])
         if not row:
             raise LookupError(reason("torrent_not_in_db", qb_hash=env.payload["qb_hash"][:8]))
         await self.repo.upsert_files(row["id"], env.payload["files"])
-        # Состав раздачи сменился (новый релиз, переприменение правил) —
-        # проекция памяти восстанавливает выбор пользователя на новых
-        # строках до того, как qBit начнёт качать лишнее.
+        # The torrent's composition changed (new release, rules re-applied): the memory projection
+        # restores the user's choice on the new rows before qBit starts downloading the extra.
         await self._project_and_apply(row["series_id"], allow_resume=False)
         await self._broadcast_downloaded(row["series_id"])  # Д1
         return {"count": len(env.payload["files"])}
 
     async def on_register(self, env: Envelope) -> dict:
-        """Идентичность раздачи — infohash (qb_hash), не ярлык с трекера.
+        """A torrent's identity is its infohash (qb_hash), not the tracker's label.
 
-        ПУНКТ 3: если этот infohash серия уже знает и он здоров — ничего не
-        качаем и не дублируем; лишь переклеиваем ярлык/дату (детектор по
-        дате, ПУНКТ 1, должен сойтись). ПУНКТ 4: новый infohash → старую
-        раздачу обязательно убрать из qBit, прежнюю строку пометить
-        «заменена» (история), новую прогнать пайплайном."""
+        POINT 3: if the series already knows this infohash and it is healthy, nothing is downloaded or duplicated;
+        only the label and date are re-glued (the date detector, POINT 1, must converge). POINT 4: a new infohash means
+        the old torrent must leave qBit, its previous row is marked 'replaced' (history), and the new one runs through the pipeline."""
         p = env.payload
         qb_hash, series_id = p["qb_hash"], p["series_id"]
         torrent, replaces = p["torrent"], p.get("replaces")
 
-        # задача этого infohash уже в полёте — ничего не делаем (идемпотентно)
+        # a task for this infohash is already in flight: do nothing (idempotent)
         if qb_hash in self._pipe:
             return {"existed": True}
 
@@ -782,9 +752,8 @@ class TorrentsModule(BaseModule):
         known = await self.repo.row_by_hash(series_id, qb_hash)
 
         if not start_pipeline:
-            # Подготовка состава: раздача остаётся на паузе, задача
-            # конвейера не создаётся — закачка не начнётся, пока
-            # пользователь не отберёт серии и не запустит скан.
+            # Preparing the composition: the torrent stays paused and no pipeline task is created,
+            # so the download does not start until the user picks the episodes and runs the scan.
             if known:
                 await self.repo.refresh_listing(known["id"], torrent, qb_hash)
             else:
@@ -794,11 +763,9 @@ class TorrentsModule(BaseModule):
             return {"existed": bool(known), "prepared": True}
 
         if known and not is_error_retry:
-            # ПУНКТ 3 — но «ничего не делать» ТОЛЬКО если раздача реально
-            # докачана и здорова в qB, а не просто известна БД. Удалил из qB
-            # и добавил заново / раздача неполна / в ошибке → реконсиляция:
-            # обновляем ту же строку (без дубля) и (пере)гоняем конвейер,
-            # чтобы раздача докачалась и переименовалась.
+            # POINT 3: "do nothing" applies ONLY when the torrent is really complete and healthy in qB,
+            # not merely known to the DB. Removed from qB and re-added / incomplete / in error -> reconcile:
+            # update the same row (no duplicate) and (re)run the pipeline so it downloads and renames.
             await self.repo.refresh_listing(known["id"], torrent, qb_hash)
             if await self._is_complete_in_qb(qb_hash):
                 return {"existed": True}
@@ -806,7 +773,7 @@ class TorrentsModule(BaseModule):
                                        link_type, "None")
             return {"existed": False}
 
-        # ПУНКТ 4 (или перезапуск после ошибки): новый infohash → активной.
+        # POINT 4 (or a restart after an error): a new infohash becomes active.
         await self.repo.upsert_registered(series_id, torrent, qb_hash)
 
         old_torrent_id = await self._retire_replaced(torrent, replaces,
@@ -817,17 +784,17 @@ class TorrentsModule(BaseModule):
 
     async def _retire_replaced(self, torrent: dict, replaces: dict | None,
                                qb_hash: str) -> str:
-        """ПУНКТ 4: прежнюю раздачу — в историю, из qBit убрать."""
+        """POINT 4: the previous torrent goes to history and is removed from qBit."""
         if not replaces or replaces.get("torrent_id") == torrent["torrent_id"]:
             return "None"
         old_torrent_id = replaces.get("torrent_id") or "None"
         old_db_id = replaces.get("db_id")
         if old_db_id is not None:
-            # точная строка по db_id (история сохраняется, файлы снимаются)
+            # the exact row by db_id (history is kept, files are cleared)
             await self.repo.deactivate_and_clear_files(old_db_id)
         old_hash = replaces.get("qb_hash")
         if old_hash and old_hash != qb_hash:
-            # новый infohash → старую раздачу убрать из qBit (обязательно)
+            # a new infohash: the old torrent must be removed from qBit (mandatory)
             try:
                 await self.qbt.delete([old_hash], delete_files=False)
             except QbtError as exc:
@@ -836,10 +803,8 @@ class TorrentsModule(BaseModule):
         return old_torrent_id
 
     async def _is_complete_in_qb(self, qb_hash: str) -> bool:
-        """Раздача реально докачана и здорова в qBit (а не просто известна
-        БД): только тогда повторная регистрация — no-op (ПУНКТ 3). qBit
-        недоступен / раздачи нет / прогресс <100 / ошибка → не докачана,
-        нужна реконсиляция конвейером."""
+        """The torrent is really complete and healthy in qBit (not merely known to the DB):
+        only then a repeated registration is a no-op (POINT 3). qBit unavailable / no torrent / progress <100 / error: not complete, the pipeline must reconcile it."""
         try:
             infos = await self.qbt.torrents_info([qb_hash])
         except QbtError:
@@ -851,9 +816,8 @@ class TorrentsModule(BaseModule):
                 and info.get("state") not in _ERROR_STATES)
 
     async def _is_stuck_in_qb(self, qb_hash: str) -> bool:
-        """Раздача в qB НА ПАУЗЕ и не докачана — застряла (конвейер поставил
-        паузу и не возобновил). Качающиеся (running) и ждущие пиров
-        (stalledDL) не застряли — их не трогаем."""
+        """The torrent is PAUSED in qB and not complete: it is stuck (the pipeline paused it and did not resume).
+        Downloading (running) and peer-waiting (stalledDL) torrents are not stuck, so they are left alone."""
         try:
             infos = await self.qbt.torrents_info([qb_hash])
         except QbtError:
@@ -867,7 +831,7 @@ class TorrentsModule(BaseModule):
     async def _enter_pipeline(self, qb_hash: str, series_id: int,
                               torrent: dict, link_type: str,
                               old_torrent_id: str) -> None:
-        """Поставить задачу конвейера для infohash и разбудить его."""
+        """Queues a pipeline task for the infohash and wakes the pipeline."""
         task = {"torrent_hash": qb_hash, "series_id": series_id,
                 "torrent_id": torrent["torrent_id"],
                 "old_torrent_id": old_torrent_id,
@@ -879,16 +843,16 @@ class TorrentsModule(BaseModule):
         await self._contribute(series_id)
 
     async def on_db_history(self, env: Envelope) -> list[dict]:
-        """Вся история раздач серии (контракт GET torrents/history)."""
+        """The whole torrent history of the series (contract GET torrents/history)."""
         return await self.repo.history(env.payload["series_id"])
 
     async def on_files_for_series(self, env: Envelope) -> list[dict]:
-        """Файлы всех раздач серии (sourcefile-список, композиция)."""
+        """Files of all the series' torrents (the sourcefile list, composition)."""
         return await self.repo.files_for_series(env.payload["series_id"])
 
     async def on_composition(self, env: Envelope) -> list[dict]:
-        """Контракт GET composition для торрент-серий (Р-21): свежие
-        правила + предпросмотр имени + наличие файла на диске."""
+        """Contract GET composition for torrent series (Р-21): fresh rules,
+        name preview, and whether the file is present on disk."""
         series_id = env.payload["series_id"]
         series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
         files = await self.repo.files_for_series(series_id)
@@ -906,7 +870,7 @@ class TorrentsModule(BaseModule):
             is_non_video = (meta_dict.get("is_extra")
                             or meta_dict.get("media_type") in ("audio", "subtitles", "extra"))
             if profile_id is None or is_non_video:
-                # как в оригинале: без профиля или для не-видео — сохранённые метаданные
+                # as in the original: without a profile or for non-video, the saved metadata
                 preview = f.get("renamed_path") or meta_dict.get("target_path") or current
                 plan.append({
                     "id": f["id"], "original_path": f["original_path"],
@@ -917,7 +881,7 @@ class TorrentsModule(BaseModule):
                     "qb_hash": f.get("qb_hash"),
                     "is_mismatch": False, **excluded})
                 continue
-            reply = await self.request("rules.format_torrent_file", {
+            reply = await self.request(RULES_FORMAT_TORRENT_FILE, {
                 "series": series, "profile_id": profile_id,
                 "file_basename": os.path.basename(f["original_path"]),
                 "original_path": f["original_path"]})
@@ -935,9 +899,8 @@ class TorrentsModule(BaseModule):
 
     async def _unregistered_files(self, series_id: int,
                                   known: list[dict]) -> list[dict]:
-        """Файлы раздачи, которых нет в реестре: правила их не разобрали,
-        качаться они не будут — пользователь должен это видеть, а не
-        гадать, куда делась половина раздачи."""
+        """Torrent files missing from the registry: the rules did not parse them and they will not download.
+        The user must see this rather than guess where half of the torrent went."""
         seen = {f.get("renamed_path") or f["original_path"] for f in known}
         seen |= {f["original_path"] for f in known}
         extra: list[dict] = []
@@ -966,19 +929,18 @@ class TorrentsModule(BaseModule):
         return extra
 
     async def on_db_add(self, env: Envelope) -> dict:
-        """Раздачи формы добавления серии — только реестр в БД, без qBit
-        (семантика старого add_series: конвейер запустит скан)."""
+        """Torrents of the series add form: the DB registry only, no qBit
+        (the semantics of the old add_series: the pipeline starts the scan)."""
         added = await self.repo.add_registered_rows(
             env.payload["series_id"], env.payload["torrents"])
         return {"added": added}
 
     async def on_downloaded_counts(self, env: Envelope) -> dict:
-        """{counts: {series_id: n}} — переименованные файлы (Р-19)."""
+        """{counts: {series_id: n}} — renamed files (Р-19)."""
         return {"counts": await self.repo.downloaded_counts()}
 
     async def on_seasons(self, env: Envelope) -> dict:
-        """{seasons: [..]} — реальные сезоны серии из нейминга (для агрегата
-        TMDB по нескольким сезонам)."""
+        """{seasons: [..]} — the real seasons of the series from the naming (for the TMDB aggregate over several seasons)."""
         return {"seasons": await self.repo.seasons_for_series(
             env.payload["series_id"])}
 
@@ -1017,17 +979,16 @@ class TorrentsModule(BaseModule):
         return {"count": len(tasks), "tasks": tasks}
 
     async def on_fs_verify(self, env: Envelope) -> dict:
-        """Файлы на диске: 100%-скачанный renamed без файла → missing →
-        recheck-задача (восстановление силами qBit). Вызывается при
-        открытии окна сериала (вместо фоновой проверки раз в 60 с)."""
+        """Files on disk: a 100%-downloaded renamed file with no file on disk -> missing -> a recheck task (qBit restores it).
+        Called when the series window opens, instead of a background check every 60 s."""
         series_id = env.payload["series_id"]
         series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
         files = await self.repo.files_for_series(series_id)
         # A series with no file of the old pipeline has nothing to check or to warn about here.
         if not files:
             return {"missing": 0, "recheck_started": 0}
-        # F7: путь/NAS недоступен → НЕ помечать всё ложно missing и не
-        # запускать массовый recheck. Пропускаем сверку до восстановления.
+        # F7: path/NAS unavailable -> do NOT mark everything as missing falsely and do not start a mass recheck.
+        # The check is skipped until it is restored.
         if not await storage.call(os.path.exists, series.save_path):
             self.log.warning("серия %d: путь %s недоступен — сверка файлов "
                              "пропущена", series_id, series.save_path)
@@ -1035,8 +996,8 @@ class TorrentsModule(BaseModule):
         missing_hashes: set[str] = set()
         missing = 0
         for f in files:
-            # Исключённого файла на диске нет по замыслу: без этой ветки
-            # он на каждом скане уезжал бы в missing и тянул recheck.
+            # An excluded file is absent from disk by design: without this branch
+            # it would go to missing on every scan and trigger a recheck.
             if f.get("is_excluded"):
                 continue
             if f.get("progress", 0) < 100 or not f.get("renamed_path"):
@@ -1074,19 +1035,17 @@ class TorrentsModule(BaseModule):
             self._wake.set()
             self._broadcast_queue()
             await self._contribute(series_id)
-        # Точка самолечения: приоритеты в qBit могли разойтись с БД
-        # (клиент был недоступен, раздачу правили руками).
+        # Self-healing point: qBit priorities may have diverged from the DB
+        # (the client was unavailable, or the torrent was edited by hand).
         await self._project_and_apply(series_id, allow_resume=False)
-        await self._broadcast_downloaded(series_id)  # Д1: missing меняет счёт
+        await self._broadcast_downloaded(series_id)  # Д1: missing changes the count
         return {"missing": missing, "recheck_started": started}
 
     async def on_drive_incomplete(self, env: Envelope) -> dict:
-        """Реконсиляция застрявших раздач (ситуация P10): активная раздача,
-        которая ЕСТЬ в qB, но не докачана и БЕЗ задачи конвейера (задача
-        потеряна / не доведена), — загоняется в конвейер заново. Здоровые
-        (докачанные) и уже ведомые/ошибочные (есть задача) не трогаем.
-        Зовётся сканом на каждом проходе — восстанавливает самолечение
-        легаси, но точечно."""
+        """Reconciles stuck torrents (situation P10): an active torrent that IS in qB but is not complete
+        and has NO pipeline task (the task was lost or not finished) goes back into the pipeline.
+        Healthy (complete) torrents and those already driven or in error (a task exists) are left alone.
+        The scan calls it on every pass: it restores the legacy self-healing, point by point."""
         series_id = env.payload["series_id"]
         driven = 0
         for row in await self.repo.active_torrents(series_id):
@@ -1094,14 +1053,14 @@ class TorrentsModule(BaseModule):
             if not qb_hash or qb_hash in self._pipe:
                 continue
             if await self.repo.task_by_hash(qb_hash):
-                continue  # уже есть задача (в т.ч. носитель error) — не трогаем
+                continue  # a task already exists (including a carrier in error): leave it alone
             if not await self._is_stuck_in_qb(qb_hash):
-                continue  # качается / ждёт пиров / докачана — не застряла
+                continue  # downloading / waiting for peers / complete: not stuck
             torrent = {"torrent_id": row["torrent_id"], "link": row.get("link"),
                        "magnet": None, "date_time": row.get("date_time"),
                        "quality": row.get("quality"),
                        "episodes": row.get("episodes")}
-            # раздача уже в qB с метаданными → входная стадия как у file
+            # the torrent is already in qB with metadata: the entry stage is the same as for a file
             await self._enter_pipeline(qb_hash, series_id, torrent, "file",
                                        "None")
             driven += 1
@@ -1110,7 +1069,7 @@ class TorrentsModule(BaseModule):
                           "%d", series_id, driven)
         return {"driven": driven}
 
-    # --- конвейер ---------------------------------------------------------------------
+    # --- pipeline ---------------------------------------------------------------------
 
     async def _pipeline_loop(self) -> None:
         while True:
@@ -1149,7 +1108,7 @@ class TorrentsModule(BaseModule):
                                      "ядра)", qb_hash[:8], task["stage"])
                 await self.qbt.pause([qb_hash])
             elif action == "rename":
-                await self.request("renaming.process_torrent", {
+                await self.request(RENAMING_PROCESS_TORRENT, {
                     "series_id": task["series_id"], "qb_hash": qb_hash})
             elif action == "recheck":
                 await self.qbt.recheck([qb_hash])
@@ -1165,7 +1124,7 @@ class TorrentsModule(BaseModule):
                 self.log.info("[%s] стадия: %s", qb_hash[:8], next_stage)
                 self._broadcast_queue()
                 await self._contribute(task["series_id"])
-        except Exception as exc:  # noqa: BLE001 — ошибка не валит конвейер
+        except Exception as exc:  # noqa: BLE001 — an error does not bring the pipeline down
             self.log.exception("[%s] ошибка на стадии '%s'", qb_hash[:8],
                                task["stage"])
             await self.repo.set_stage(qb_hash, pipeline.ERROR)
@@ -1176,42 +1135,37 @@ class TorrentsModule(BaseModule):
     async def _complete(self, qb_hash: str, task: dict) -> None:
         await self.repo.delete_task(qb_hash)
         del self._pipe[qb_hash]
-        self.send_command("catalog.series.touch_scan_time",
-                          {"series_id": task["series_id"]})
-        # Переименование разложило файлы по Season NN → реальные сезоны
-        # известны: пересчитать многосезонный агрегат TMDB.
+        self.send_command(CATALOG_SERIES_TOUCH_SCAN_TIME, {"series_id": task["series_id"]})
+        # The rename sorted files into Season NN folders, so the real seasons are known:
+        # recompute the multi-season TMDB aggregate.
         self.send_command(METADATA_SEASONS_RECOMPUTE, {"series_id": task["series_id"]})
         self.log.info("[%s] задача конвейера выполнена", qb_hash[:8])
         self._broadcast_queue()
         await self._contribute(task["series_id"])
 
     async def _drop_task(self, qb_hash: str, series_id: int) -> None:
-        # раздача исчезла из qB — деактивируем строку и снимаем файло-записи
-        # (симметрия с reconcile при старте, R3): серия возвращается к
-        # «торрента нет», следующий скан добавит заново. Иначе осталась бы
-        # фантомная is_active=1 без живой раздачи (ложные счётчики).
+        # The torrent vanished from qB: deactivate the row and drop its file records (symmetry with the startup reconcile, R3);
+        # the series goes back to 'no torrent' and the next scan adds it again. Otherwise a phantom is_active=1 would remain (false counters).
         row = await self.repo.torrent_by_hash(qb_hash)
         was_active = bool(row and row["is_active"])
         await self.repo.drop_task_and_row(qb_hash, row["id"] if was_active else None)
         self._pipe.pop(qb_hash, None)
         if was_active:
-            await self._broadcast_downloaded(series_id)  # Д1: счёт упал
+            await self._broadcast_downloaded(series_id)  # Д1: the count dropped
         self._broadcast_queue()
         await self._contribute(series_id)
 
     def _broadcast_queue(self) -> None:
         tasks = list(self._pipe.values())
-        self.publish_event("torrents.queue.changed",
-                           {"count": len(tasks), "tasks": tasks})
+        self.publish_event(TORRENTS_QUEUE_CHANGED, {"count": len(tasks), "tasks": tasks})
 
     async def _broadcast_downloaded(self, series_id: int) -> None:
-        """Состав скачанных файлов серии изменился → толкнуть счётчик в SSE
-        (Д1): карточка обновляет «скачано» сразу, без перезагрузки."""
+        """The downloaded files of the series changed -> push the counter to SSE
+        (Д1): the card updates «скачано» at once, without a reload."""
         count = await self.repo.downloaded_count_for_series(series_id)
-        self.publish_event("series.downloaded.changed",
-                           {"series_id": series_id, "count": count})
+        self.publish_event(SERIES_DOWNLOADED_CHANGED, {"series_id": series_id, "count": count})
 
-    # --- мониторинг прогресса -----------------------------------------------------------
+    # --- progress monitoring -----------------------------------------------------------
 
     async def _monitor_loop(self) -> None:
         while True:
@@ -1252,38 +1206,25 @@ class TorrentsModule(BaseModule):
             await self._contribute(series_id)
         await self._broadcast_progress()
 
-    # --- прогресс торрентов для UI (Р-23: вместо поллинга вкладки) ---------------------
+    # --- torrent progress for the UI (Р-23: instead of polling the tab) ---------------------
 
-    async def _progress_tasks(self) -> list[dict]:
-        tasks = await self.repo.all_torrent_progress()
-        for t in tasks:
-            t["series_name"] = await self._series_name(t["series_id"])
-        return tasks + await self._release_tasks()
+    async def _progress_tasks(self) -> TorrentTasks:
+        rows = await self.repo.all_torrent_progress()
+        old = tuple([TorrentProgress(**row, series_name=await self._series_name(row["series_id"])) for row in rows])
+        return TorrentTasks(tasks=old + await self._release_tasks())
 
-    async def _release_tasks(self) -> list[dict]:
+    async def _release_tasks(self) -> tuple[ReleaseTask, ...]:
         """Every release the module keeps, one task per series whose torrent source is the page: it is there until its source
         goes, whatever its state."""
         rows = await self.releases.store.all()
         if not rows:
-            return []
-        series_of: dict[str, list[SeriesCard]] = {}
+            return ()
+        series_of: dict[str, list[tuple[int, str]]] = {}
         for series in (await self.reply_of(CATALOG_SERIES_LIST, {})).series:
             for source in series.sources:
                 if source.source_type == SourceType.TORRENT:
-                    series_of.setdefault(await self._canonical(source.url), []).append(series)
-        tasks = []
-        for row in rows:
-            view = await self.releases.view(row)
-            wanted = [f for f in view.files if f.priority > 0]
-            size = sum(f.size for f in wanted)
-            progress = round(100 * sum(f.size * f.progress for f in wanted) / size, 1) if size else 0.0
-            for series_id, series_name in [(each.id, each.name) for each in series_of.get(view.url, ())] or [(None, "")]:
-                tasks.append({"kind": "release", "qb_hash": view.infohash or "", "url": view.url, "release": view.release,
-                              "title": view.title, "series_id": series_id, "series_name": series_name or "",
-                              "status": view.state.value, "progress": progress,
-                              "files_done": sum(1 for f in wanted if f.progress >= 1), "files_total": len(wanted),
-                              "error_message": view.reason})
-        return tasks
+                    series_of.setdefault(await self._canonical(source.url), []).append((series.id, series.name))
+        return release_tasks([await self.releases.view(row) for row in rows], series_of)
 
     async def _series_name(self, series_id: int) -> str:
         if series_id not in self._names_cache:
@@ -1294,9 +1235,9 @@ class TorrentsModule(BaseModule):
                 return ""
         return self._names_cache[series_id]
 
-    async def on_progress_list(self, env: Envelope) -> dict:
-        """Контракт старого GET /api/series/active_torrents."""
-        return {"tasks": await self._progress_tasks()}
+    async def on_progress_list(self, env: Envelope) -> TorrentTasks:
+        """Contract of the old GET /api/series/active_torrents."""
+        return await self._progress_tasks()
 
     async def on_sse_clients(self, env: Envelope) -> None:
         """A window that connects gets the pictures of the torrents at once, as those of the other queues: it does not wait
@@ -1308,17 +1249,16 @@ class TorrentsModule(BaseModule):
         await self._broadcast_progress()
 
     async def _broadcast_progress(self) -> None:
-        """torrents.progress.changed — только при реальных изменениях
-        (SSE torrent_progress_update; заменяет 5-секундный поллинг
-        вкладки «Агенты», находка 40)."""
-        tasks = await self._progress_tasks()
-        snapshot = json.dumps(tasks, sort_keys=True, default=str)
+        """torrents.progress.changed — only on real changes
+        (SSE torrent_progress_update; replaces the 5-second polling of the «Агенты» tab, finding 40)."""
+        picture = (await self._progress_tasks()).model_dump(mode="json")
+        snapshot = json.dumps(picture, sort_keys=True)
         if snapshot == self._progress_snapshot:
             return
         self._progress_snapshot = snapshot
-        self.publish_event("torrents.progress.changed", {"tasks": tasks})
+        self.publish_event(TORRENTS_PROGRESS_CHANGED, picture)
 
-    # --- свёртка статусов (Р-11) --------------------------------------------------------
+    # --- status rollup (Р-11) --------------------------------------------------------
 
     async def _contribute(self, series_id: int) -> None:
         flags = dict.fromkeys(
@@ -1328,15 +1268,15 @@ class TorrentsModule(BaseModule):
             flag = pipeline.STAGE_FLAGS.get(task["stage"])
             if flag:
                 flags[flag] = True
-        # Раздача, где не нужен ни один файл, отдаёт progress=100 (качать
-        # нечего) — «готов» по ней был бы враньём.
+        # A torrent where no file is wanted reports progress=100 (nothing to download):
+        # 'ready' by it would be a lie.
         fully_excluded = await self.repo.fully_excluded_hashes(series_id)
         for row in await self.repo.torrent_progress(series_id):
             if row["status"] in _ERROR_STATES:
                 flags["error"] = True
             elif row["qb_hash"] in fully_excluded:
                 continue
-            elif flag := pipeline.torrent_flag(row["status"], row["progress"] >= 100):
+            elif flag := torrent_flag(row["status"], row["progress"] >= 100):
                 flags[flag] = True
         # The releases of the torrent sources of the series speak by the same words as its own torrents.
         for flag in await self._release_flags(series_id):
@@ -1350,11 +1290,10 @@ class TorrentsModule(BaseModule):
 
     # --- the releases of the torrent sources (stage 15, modules/torrents/releases.py) ------------------------------
 
-    def _release_event(self, topic: str, payload: dict) -> None:
+    def _release_event(self, view: ReleaseView) -> None:
         """A release told of: the window is told, and the series whose source is its page recount their status."""
-        self.publish_event(topic, payload)
-        if topic == RELEASE_CHANGED_TOPIC:
-            self.spawn(self._contribute_page(payload["url"]), name=f"torrents.release.contribute:{payload['url']}")
+        self.publish_event(TORRENTS_RELEASE_CHANGED, view.model_dump(mode="json"))
+        self.spawn(self._contribute_page(view.url), name=f"torrents.release.contribute:{view.url}")
 
     async def _contribute_page(self, url: str) -> None:
         try:
@@ -1385,7 +1324,7 @@ class TorrentsModule(BaseModule):
             stored = None
         self.releases.staging = stored or ""
         try:
-            runs = (await self.request("scan.runs.get", {})).get("runs") or []
+            runs = (await self.request(SCAN_RUNS_GET, {})).get("runs") or []
             for run in runs:
                 self.releases.runs[run["series_id"]] = await self._pages_of(run["series_id"])
         except Exception:  # noqa: BLE001 - an update that begins in a run is the worse loss: none begins until the next run news
@@ -1416,31 +1355,28 @@ class TorrentsModule(BaseModule):
         series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
         return {await self._canonical(source.url) for source in series.sources}
 
-    async def on_releases_get(self, env: Envelope) -> dict:
-        """{url} → {releases: [ReleaseView]}: the releases kept for the page."""
-        url = await self._canonical(env.payload["url"])
-        return {"releases": [view.model_dump(mode="json") for view in await self.releases.of_page(url)]}
+    async def on_releases_get(self, env: Envelope) -> ReleasesReply:
+        """{url} → the releases kept for the page."""
+        url = await self._canonical(PageUrl.model_validate(env.payload).url)
+        return ReleasesReply(releases=tuple(await self.releases.of_page(url)))
 
-    async def on_release_download(self, env: Envelope) -> dict:
-        """{url, release} → ReleaseView: «Скачать» — the release goes to the client; a refusal is NotAllowed with its reason."""
-        await self._known()
-        return (await self.releases.download(await self._canonical(env.payload["url"]), env.payload["release"])
-                ).model_dump(mode="json")
+    async def on_release_download(self, env: Envelope) -> ReleaseView:
+        """«Скачать» — the release goes to the client; a refusal is NotAllowed with its reason."""
+        ref = ReleaseRef.model_validate(env.payload)
+        return await self.releases.download(await self._canonical(ref.url), ref.release)
 
-    async def on_release_check(self, env: Envelope) -> dict:
-        """{url} → {releases}: the page is read now; the watched releases it lists newer begin their update or wait."""
-        await self._known()
-        return {"releases": await self.releases.check(await self._canonical(env.payload["url"]))}
+    async def on_release_check(self, env: Envelope) -> ReleasesChecked:
+        """The page is read now; the watched releases it lists newer begin their update or wait."""
+        url = await self._canonical(PageUrl.model_validate(env.payload).url)
+        return ReleasesChecked(releases=tuple(await self.releases.check(url)))
 
-    async def on_release_watch(self, env: Envelope) -> dict:
-        await self._known()
-        url = await self._canonical(env.payload["url"])
-        return (await self.releases.watch(url, env.payload["release"], bool(env.payload["watched"]))).model_dump(mode="json")
+    async def on_release_watch(self, env: Envelope) -> ReleaseView:
+        command = ReleaseWatch.model_validate(env.payload)
+        return await self.releases.watch(await self._canonical(command.url), command.release, command.watched)
 
     async def on_release_drop_files(self, env: Envelope) -> None:
-        await self._known()
-        url = await self._canonical(env.payload["url"])
-        await self.releases.drop_files(url, env.payload["release"])
+        ref = ReleaseRef.model_validate(env.payload)
+        await self.releases.drop_files(await self._canonical(ref.url), ref.release)
 
     async def on_run_changed(self, env: Envelope) -> None:
         run = RunChanged.model_validate(env.payload)
@@ -1461,22 +1397,22 @@ class TorrentsModule(BaseModule):
         for url in {row["url"] for row in await self.releases.store.all()} - listed:
             await self.releases.forget(url)
 
-    async def on_staging_get(self, env: Envelope) -> dict:
-        return {"value": (await self.reply_of(SETTINGS_VALUE_GET, {"key": STAGING_DIR_KEY})).value or ""}
+    async def on_staging_get(self, env: Envelope) -> StagingFolder:
+        return StagingFolder(value=(await self.reply_of(SETTINGS_VALUE_GET, {"key": STAGING_DIR_KEY})).value or "")
 
-    async def on_staging_set(self, env: Envelope) -> dict:
+    async def on_staging_set(self, env: Envelope) -> StagingSaved:
         """The folder of the releases, as the settings of the sources set it: an absolute path, the same for the client."""
-        value = str(env.payload.get("value") or "").strip()
+        value = str(StagingSet.model_validate(env.payload).value or "").strip()
         if not os.path.isabs(value):
-            return {"ok": False, "value": value, "reason": reason("staging_dir_not_absolute")}
+            return StagingSaved(ok=False, value=value, reason=reason("staging_dir_not_absolute"))
         await self.request(SETTINGS_VALUE_SET, {"key": STAGING_DIR_KEY, "value": value})
-        return {"ok": True, "value": value}
+        return StagingSaved(ok=True, value=value)
 
     async def on_settings_changed(self, env: Envelope) -> None:
         setting = SettingValue.model_validate(env.payload)
         if setting.key == STAGING_DIR_KEY:
             # Every open window of the settings shows the folder the core holds now, whichever window set it.
-            self.publish_event("torrents.staging.changed", {"value": setting.value or ""})
+            self.publish_event(TORRENTS_STAGING_CHANGED, StagingFolder(value=setting.value or "").model_dump(mode="json"))
             await self.releases.relocate(setting.value or "")
         elif setting.key == "scanner_agent_enabled":
             self._schedule_wake.set()  # switched on: a time missed while it was off is made up now

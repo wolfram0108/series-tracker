@@ -145,7 +145,6 @@ class RutrackerProvider:
     def request_headers(self, url: str) -> dict:
         headers: dict = {}
         if "/forum/dl.php" in url:  # .torrent download
-            import re
             match = re.search(r"t=(\d+)", url)
             _, base = _base(url)
             headers.update({

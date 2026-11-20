@@ -49,7 +49,7 @@ from typing import Final, Literal, Mapping
 from pydantic import BaseModel
 
 from .contracts import (
-    BlockedPage, ManifestApplied, MirrorsSaved, MirrorsSet, PageUrl, PagesCheck, PagesCheckReply, PagesForgotten, StreamReply,
+    ManifestApplied, MirrorsSaved, MirrorsSet, PageUrl, PagesCheck, PagesCheckReply, PagesForgotten, StreamReply,
     TableCancel, TableCancelled, TableRead, TableRefresh, TablesFresh, TablesFreshReply, TermSaved, TermSet, TermsReply,
     TorrentFile, TorrentFileDrop, TorrentFileGet, TrackersReply, VideoFetch, VideoFetched, VideoFetchStop, VideoFetchStopped,
     VideoStream,
@@ -67,9 +67,12 @@ from .contracts import (
     SubmitReply, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TitleSearchReply,
     TitleSearchRequest, VoiceOrderSet, VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView, VoiceTitleSet,
     WorkState, WorkWithdrawn,
+    DirectoriesGet, DirectoryListing, Relocated, RelocationFinished, RelocationOf, RelocationPath, RelocationPlan,
+    RelocationPlanned, RelocationStarted,
 )
 from .contracts.provider import ProviderState
-from .contracts.torrent import PageReleases, ReleaseView
+from .contracts.torrent import (PageReleases, ReleaseRef, ReleasesChecked, ReleasesReply, ReleaseView, ReleaseWatch, StagingFolder,
+                                StagingSaved, StagingSet, TorrentTasks)
 
 TopicKind = Literal["query", "command", "event"]
 QUERY: Final = "query"
@@ -374,14 +377,18 @@ DOWNLOADS_WITHDRAW = Topic("downloads.withdraw", COMMAND, "downloads", fuse=STAN
 GATEWAY_SSE_CLIENTS = Topic("gateway.sse.clients", EVENT, "gateway")
 
 # --- library -----------------------------------------------------------------------------------------------------
-LIBRARY_DIRECTORIES_LIST = Topic("library.directories.list", QUERY, "library", fuse=STANDARD_S)
+LIBRARY_DIRECTORIES_LIST = Topic(
+    "library.directories.list", QUERY, "library", request=DirectoriesGet, reply=DirectoryListing, fuse=STANDARD_S)
 # One move for each file, each with its own (core.storage.MOVE_TIMEOUT_S).
-LIBRARY_RELOCATION_APPLY = Topic("library.relocation.apply", COMMAND, "library", fuse=None)
-LIBRARY_RELOCATION_FINISHED = Topic("library.relocation.finished", EVENT, "library")
-LIBRARY_RELOCATION_GET = Topic("library.relocation.get", QUERY, "library", fuse=STANDARD_S)
-LIBRARY_RELOCATION_PLAN = Topic("library.relocation.plan", COMMAND, "library", fuse=STANDARD_S)
-LIBRARY_RELOCATION_PLANNED = Topic("library.relocation.planned", EVENT, "library")
-LIBRARY_RELOCATION_STARTED = Topic("library.relocation.started", EVENT, "library")
+LIBRARY_RELOCATION_APPLY = Topic(
+    "library.relocation.apply", COMMAND, "library", request=RelocationOf, reply=Relocated, fuse=None)
+LIBRARY_RELOCATION_FINISHED = Topic("library.relocation.finished", EVENT, "library", request=RelocationFinished)
+LIBRARY_RELOCATION_GET = Topic(
+    "library.relocation.get", QUERY, "library", request=RelocationOf, reply=RelocationPath, fuse=STANDARD_S)
+LIBRARY_RELOCATION_PLAN = Topic(
+    "library.relocation.plan", COMMAND, "library", request=RelocationPlan, reply=RelocationPath, fuse=STANDARD_S)
+LIBRARY_RELOCATION_PLANNED = Topic("library.relocation.planned", EVENT, "library", request=RelocationPlanned)
+LIBRARY_RELOCATION_STARTED = Topic("library.relocation.started", EVENT, "library", request=RelocationStarted)
 
 # --- metadata ----------------------------------------------------------------------------------------------------
 # The read of TMDB over the network: a query (it changes nothing here).
@@ -480,7 +487,7 @@ TORRENTS_DB_FILES_UPSERT = Topic("torrents.db.files.upsert", COMMAND, "torrents"
 TORRENTS_DB_HISTORY = Topic("torrents.db.history", QUERY, "torrents", fuse=QUICK_S)
 # The monitor names the series of the old pipeline and the series whose torrent source is the page of a release.
 TORRENTS_DB_PROGRESS_LIST = Topic(
-    "torrents.db.progress.list", QUERY, "torrents",
+    "torrents.db.progress.list", QUERY, "torrents", reply=TorrentTasks,
     fuse=after(QUICK_S, CATALOG_SERIES_GET, CATALOG_SERIES_LIST, SOURCES_SITE_RESOLVE))
 TORRENTS_DELETE = Topic("torrents.delete", COMMAND, "torrents", fuse=STANDARD_S)
 TORRENTS_DRIVE_INCOMPLETE = Topic("torrents.drive_incomplete", COMMAND, "torrents", fuse=HEAVY_S)
@@ -491,7 +498,7 @@ TORRENTS_PAUSE = Topic("torrents.pause", COMMAND, "torrents", fuse=STANDARD_S)
 TORRENTS_PREVIEW_FAILED = Topic("torrents.preview.failed", EVENT, "torrents")
 TORRENTS_PREVIEW_FETCH = Topic("torrents.preview.fetch", COMMAND, "torrents", fuse=STANDARD_S)
 TORRENTS_PREVIEW_READY = Topic("torrents.preview.ready", EVENT, "torrents")
-TORRENTS_PROGRESS_CHANGED = Topic("torrents.progress.changed", EVENT, "torrents")
+TORRENTS_PROGRESS_CHANGED = Topic("torrents.progress.changed", EVENT, "torrents", request=TorrentTasks)
 TORRENTS_QUEUE_CHANGED = Topic("torrents.queue.changed", EVENT, "torrents")
 TORRENTS_QUEUE_GET = Topic("torrents.queue.get", QUERY, "torrents", fuse=QUICK_S)
 TORRENTS_RECHECK = Topic("torrents.recheck", COMMAND, "torrents", fuse=STANDARD_S)
@@ -499,21 +506,24 @@ TORRENTS_REGISTER = Topic("torrents.register", COMMAND, "torrents", fuse=BATCH_S
 TORRENTS_RELEASE_CHANGED = Topic("torrents.release.changed", EVENT, "torrents", request=ReleaseView)
 # The releases of a tracker's page: the page read on the tracker, a new version's file fetched, the client driven.
 TORRENTS_RELEASE_CHECK = Topic(
-    "torrents.release.check", COMMAND, "torrents",
+    "torrents.release.check", COMMAND, "torrents", request=PageUrl, reply=ReleasesChecked,
     fuse=after(HEAVY_S, SOURCES_SITE_RESOLVE, SOURCES_RELEASES_GET, SOURCES_TORRENT_FILE_GET))
 TORRENTS_RELEASE_DOWNLOAD = Topic(
-    "torrents.release.download", COMMAND, "torrents", reply=ReleaseView,
+    "torrents.release.download", COMMAND, "torrents", request=ReleaseRef, reply=ReleaseView,
     fuse=after(HEAVY_S, SOURCES_SITE_RESOLVE, SOURCES_RELEASES_GET, SOURCES_TORRENT_FILE_GET))
-TORRENTS_RELEASE_DROP_FILES = Topic("torrents.release.drop_files", COMMAND, "torrents", fuse=STANDARD_S)
-TORRENTS_RELEASE_WATCH = Topic("torrents.release.watch", COMMAND, "torrents", reply=ReleaseView, fuse=STANDARD_S)
-TORRENTS_RELEASES_GET = Topic("torrents.releases.get", QUERY, "torrents", fuse=STANDARD_S)
+TORRENTS_RELEASE_DROP_FILES = Topic("torrents.release.drop_files", COMMAND, "torrents", request=ReleaseRef, fuse=STANDARD_S)
+TORRENTS_RELEASE_WATCH = Topic(
+    "torrents.release.watch", COMMAND, "torrents", request=ReleaseWatch, reply=ReleaseView, fuse=STANDARD_S)
+TORRENTS_RELEASES_GET = Topic(
+    "torrents.releases.get", QUERY, "torrents", request=PageUrl, reply=ReleasesReply, fuse=STANDARD_S)
 TORRENTS_RENAME_FILE = Topic("torrents.rename_file", COMMAND, "torrents", fuse=STANDARD_S)
 TORRENTS_RESUME = Topic("torrents.resume", COMMAND, "torrents", fuse=STANDARD_S)
 TORRENTS_SEASONS = Topic("torrents.seasons", QUERY, "torrents", fuse=STANDARD_S)
 TORRENTS_SET_LOCATION = Topic("torrents.set_location", COMMAND, "torrents", fuse=STANDARD_S)
-TORRENTS_STAGING_CHANGED = Topic("torrents.staging.changed", EVENT, "torrents")
-TORRENTS_STAGING_GET = Topic("torrents.staging.get", QUERY, "torrents", fuse=STANDARD_S)
-TORRENTS_STAGING_SET = Topic("torrents.staging.set", COMMAND, "torrents", fuse=STANDARD_S)
+TORRENTS_STAGING_CHANGED = Topic("torrents.staging.changed", EVENT, "torrents", request=StagingFolder)
+TORRENTS_STAGING_GET = Topic("torrents.staging.get", QUERY, "torrents", reply=StagingFolder, fuse=STANDARD_S)
+TORRENTS_STAGING_SET = Topic(
+    "torrents.staging.set", COMMAND, "torrents", request=StagingSet, reply=StagingSaved, fuse=STANDARD_S)
 
 # --- trackerauth -------------------------------------------------------------------------------------------------
 TRACKERAUTH_CREDENTIALS_CHANGED = Topic("trackerauth.credentials.changed", EVENT, "trackerauth", request=CredentialsChanged)

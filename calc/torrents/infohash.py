@@ -1,14 +1,14 @@
-"""Локальное вычисление infohash торрента (решение Р-2).
+"""Local computation of a torrent's infohash (decision Р-2).
 
-Infohash v1 — SHA1 байтов секции `info` .torrent-файла; его qBittorrent
-использует как первичный ключ торрента. Считаем по исходным байтам
-файла (span-подход), а не пересборкой словаря: так результат не зависит
-от каких-либо допущений о канонической сортировке ключей.
+Infohash v1 is the SHA1 of the bytes of the `info` section of a .torrent
+file; qBittorrent uses it as the torrent's primary key. It is computed over
+the original file bytes (span approach), not by rebuilding the dictionary,
+so the result does not depend on any assumption about canonical key order.
 
-Magnet: hash записан в самой ссылке (`xt=urn:btih:...`) в hex (40
-символов) или base32 (32 символа). Новый формат v2 (`urn:btmh:`)
-осознанно не поддерживается — явная ошибка вместо тихой (в рунете
-v2-магниты пока экзотика; см. contracts/revision.md Р-2).
+Magnet: the hash is in the link itself (`xt=urn:btih:...`), as hex (40
+characters) or base32 (32 characters). The new v2 format (`urn:btmh:`) is
+deliberately unsupported — an explicit error instead of a silent one (v2
+magnets are still exotic on the Runet; see contracts/revision.md Р-2).
 """
 from __future__ import annotations
 
@@ -20,26 +20,26 @@ from core.reasons import reason
 
 
 class TorrentParseError(ValueError):
-    """Невалидный .torrent / magnet или неподдерживаемый формат."""
+    """Invalid .torrent / magnet, or an unsupported format."""
 
 
-# --- bencode: декодер со спанами -------------------------------------------
+# --- bencode: decoder with spans -------------------------------------------
 
 def _decode(data: bytes, pos: int) -> tuple[object, int]:
-    """Декодирует значение с позиции pos, возвращает (значение, конец)."""
+    """Decodes a value starting at pos; returns (value, end)."""
     if pos >= len(data):
         raise TorrentParseError(reason("torrent_truncated"))
     ch = data[pos:pos + 1]
-    if ch == b"i":  # целое: i<число>e
+    if ch == b"i":  # integer: i<number>e
         end = data.index(b"e", pos)
         return int(data[pos + 1:end]), end + 1
-    if ch == b"l":  # список: l<значения>e
+    if ch == b"l":  # list: l<values>e
         items, pos = [], pos + 1
         while data[pos:pos + 1] != b"e":
             item, pos = _decode(data, pos)
             items.append(item)
         return items, pos + 1
-    if ch == b"d":  # словарь: d<ключ><значение>...e
+    if ch == b"d":  # dict: d<key><value>...e
         result, pos = {}, pos + 1
         while data[pos:pos + 1] != b"e":
             key, pos = _decode(data, pos)
@@ -47,9 +47,9 @@ def _decode(data: bytes, pos: int) -> tuple[object, int]:
                 raise TorrentParseError(reason("torrent_bad_key"))
             value_start = pos
             value, pos = _decode(data, pos)
-            result[key] = (value, value_start, pos)  # значение + спан
+            result[key] = (value, value_start, pos)  # value + span
         return result, pos + 1
-    if ch.isdigit():  # байтовая строка: <длина>:<байты>
+    if ch.isdigit():  # byte string: <length>:<bytes>
         colon = data.index(b":", pos)
         length = int(data[pos:colon])
         start = colon + 1
@@ -60,15 +60,15 @@ def _decode(data: bytes, pos: int) -> tuple[object, int]:
 
 
 def infohash_candidates(content: bytes) -> list[str]:
-    """Кандидаты infohash (hex, нижний регистр) из .torrent-файла.
+    """Infohash candidates (hex, lowercase) from a .torrent file.
 
-    Классический торрент → один кандидат: SHA1 секции info (v1).
-    Гибрид/v2 (`meta version: 2`) → ДВА кандидата, первым — укороченный
-    SHA256: libtorrent 2.x (qBittorrent ≥4.4) ключует гибриды именно им.
-    Подтверждено на данных прода: раздача с meta version 2 лежала в БД
-    под sha256(info)[:40], остальные 169 — под sha1 (см. revision.md Р-2).
-    Какой кандидат реально использует qBit — определяется контрольным
-    запросом после добавления.
+    A classic torrent gives one candidate: SHA1 of the info section (v1).
+    A hybrid/v2 (`meta version: 2`) gives TWO candidates, the first being the
+    truncated SHA256: libtorrent 2.x (qBittorrent ≥4.4) keys hybrids by it.
+    Confirmed on production data: a torrent with meta version 2 was stored
+    in the DB under sha256(info)[:40], the other 169 under sha1 (see
+    revision.md Р-2). Which candidate qBit actually uses is settled by a
+    control query after adding.
     """
     try:
         top, _ = _decode(content, 0)
@@ -86,16 +86,16 @@ def infohash_candidates(content: bytes) -> list[str]:
     return [v1]
 
 
-# --- список файлов (предпросмотр нейминга при добавлении) --------------------
+# --- file list (naming preview on add) -------------------------------------
 
 def torrent_file_list(content: bytes) -> tuple[str | None, list[dict]]:
-    """Список файлов из .torrent — для предпросмотра нейминга при добавлении.
+    """File list from a .torrent — for the naming preview on add.
 
-    Поверх того же span-декодера, что и infohash (сеть не нужна). Ключи
-    `name.utf-8`/`path.utf-8` предпочитаются: рус-трекеры кладут основной путь
-    в cp1251, а qBittorrent отдаёт именно utf-8-вариант — так предпросмотр
-    совпадёт с фактическим переименованием. Многофайловый torrent →
-    (имя_папки, [{path, size}]); однофайловый → (None, [{path=имя, size}]).
+    Built on the same span decoder as the infohash (no network needed). The
+    `name.utf-8`/`path.utf-8` keys are preferred: Russian trackers put the main
+    path in cp1251, while qBittorrent reports the utf-8 variant — so the preview
+    matches the actual rename. Multi-file torrent -> (folder_name, [{path, size}]);
+    single-file -> (None, [{path=name, size}]).
     """
     try:
         top, _ = _decode(content, 0)
@@ -103,7 +103,7 @@ def torrent_file_list(content: bytes) -> tuple[str | None, list[dict]]:
         raise TorrentParseError(reason("torrent_bencode_broken", detail=str(exc))) from exc
     if not isinstance(top, dict) or b"info" not in top:
         raise TorrentParseError(reason("torrent_no_info"))
-    info = top[b"info"][0]  # _decode хранит значение словаря как (value, start, end)
+    info = top[b"info"][0]  # _decode stores a dict value as (value, start, end)
 
     def _val(d: dict, key: bytes):
         item = d.get(key)
@@ -115,9 +115,9 @@ def torrent_file_list(content: bytes) -> tuple[str | None, list[dict]]:
 
     name = _val(info, b"name.utf-8") or _val(info, b"name")
     files_raw = _val(info, b"files")
-    if files_raw is not None:  # многофайловый
+    if files_raw is not None:  # multi-file
         files = []
-        for entry in files_raw:  # элементы списка — «сырые» словари со спанами
+        for entry in files_raw:  # list items are raw dicts with spans
             if not isinstance(entry, dict):
                 continue
             parts = _val(entry, b"path.utf-8") or _val(entry, b"path") or []
@@ -131,7 +131,7 @@ def torrent_file_list(content: bytes) -> tuple[str | None, list[dict]]:
 # --- magnet ------------------------------------------------------------------
 
 def infohash_from_magnet(link: str) -> str:
-    """Infohash v1 (hex, нижний регистр) из magnet-ссылки."""
+    """Infohash v1 (hex, lowercase) from a magnet link."""
     parsed = urlparse(link)
     if parsed.scheme != "magnet":
         raise TorrentParseError(reason("magnet_not_magnet"))
@@ -147,7 +147,7 @@ def infohash_from_magnet(link: str) -> str:
             except ValueError as exc:
                 raise TorrentParseError(reason("magnet_hash_invalid", value=value)) from exc
             return value.lower()
-        if len(value) == 32:  # base32 (старые ссылки)
+        if len(value) == 32:  # base32 (old links)
             try:
                 raw = base64.b32decode(value.upper())
             except Exception as exc:

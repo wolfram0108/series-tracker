@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from core.module import BusRequestError
 from core.contracts import DownloadCard, PackCard
 from core.reasons import reason, relayed
-from core.topics import SETTINGS_VALUE_SET
+from core.topics import SETTINGS_VALUE_SET, TORRENTS_QUEUE_GET
 
 from .schemas import (ConformJobChange, DynamicObject, ErrorOnly, ErrorResponse, OkResponse, QueueTask, ScannerStatus,
                       ScheduleBody)
@@ -63,7 +63,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/agent/queue", response_model=list[QueueTask])
     async def agent_queue():
         try:
-            reply = await gw.request("torrents.queue.get", {})
+            reply = await gw.request(TORRENTS_QUEUE_GET, {})
         except BusRequestError:
             return []  # модуль не поднят — как старый «нет агента»
         return [{"hash": t.get("torrent_hash"), **t} for t in reply["tasks"]]

@@ -29,7 +29,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
-from modules.torrents.infohash import infohash_from_magnet
+from calc.torrents.infohash import infohash_from_magnet
 
 PIECE = 256 * 1024
 INCOMPLETE = ".!qB"

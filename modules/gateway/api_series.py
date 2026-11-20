@@ -14,8 +14,9 @@ from fastapi.responses import JSONResponse
 from core.contracts import SeriesCard, TmdbMapping
 from core.module import BusRequestError
 from core.reasons import code_of, reason, relayed
-from core.topics import (CATALOG_SERIES_CREATE, CATALOG_SERIES_GET, CATALOG_SERIES_LIST, METADATA_MAP_GET, METADATA_MAP_LIST,
-                         METADATA_MAP_SET)
+from core.topics import (CATALOG_SERIES_CREATE, CATALOG_SERIES_GET, CATALOG_SERIES_LIST, LIBRARY_RELOCATION_GET,
+                         LIBRARY_RELOCATION_PLAN, METADATA_MAP_GET, METADATA_MAP_LIST, METADATA_MAP_SET,
+                         TORRENTS_DB_DOWNLOADED_COUNTS, TORRENTS_DB_PROGRESS_LIST, TORRENTS_FS_VERIFY, Topic)
 from .routing import admitted
 
 from .schemas import (CreatedSeries, ErrorResponse, FailuresReset, FailuresResetBody, OkResponse, SyncCancelled, SyncScopeBody,
@@ -56,7 +57,7 @@ def _error_response(exc: BusRequestError, *, with_success: bool = True):
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
     r = APIRouter()
 
-    async def _counts(topic: str) -> dict:
+    async def _counts(topic: Topic | str) -> dict:
         """Счётчики скачанного; модуль может быть не запущен (torrents
         без qBit) — тогда счётчик пустой, карточки живут дальше."""
         try:
@@ -79,7 +80,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         mappings = {m.series_id: m for m in (await gw.reply_of(METADATA_MAP_LIST, {})).mappings}
         # Each owner counts its own rows and a series has rows with one of them only, so the sum needs no kind.
         counts = [await _counts("planner.downloaded_counts"),
-                  await _counts("torrents.db.downloaded_counts")]
+                  await _counts(TORRENTS_DB_DOWNLOADED_COUNTS)]
         return [_card(s, mappings.get(s.id),
                       downloaded_episodes_count=sum(each.get(s.id, 0) for each in counts)) for s in series]
 
@@ -103,10 +104,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         «Мониторинг» вкладки агентов; Р-23 — исправление маппинга
         блока 2: источник — torrent_progress модуля torrents, не очередь конвейера)."""
         try:
-            reply = await gw.request("torrents.db.progress.list", {})
+            reply = await gw.reply_of(TORRENTS_DB_PROGRESS_LIST, {})
         except BusRequestError:
             return []
-        return reply["tasks"]
+        return reply.model_dump(mode="json")["tasks"]
 
     @r.get("/api/series/{series_id}", response_model=SeriesObject,
            responses=_ERRORS)
@@ -116,7 +117,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError as exc:
             return _error_response(exc, with_success=False)
         reply = await gw.reply_of(METADATA_MAP_GET, {"series_id": series_id})
-        planned = (await gw.request("library.relocation.get", {"series_id": series_id}))["new_path"]
+        planned = (await gw.reply_of(LIBRARY_RELOCATION_GET, {"series_id": series_id})).new_path
         return _card(s, reply.mapping, planned_save_path=planned)
 
     @r.post("/api/series/{series_id}", response_model=OkResponse,
@@ -137,7 +138,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                     await gw.request(METADATA_MAP_SET, {
                         "series_id": series_id, "tmdb_data": tmdb_data})
                 if new_path := sent.get("save_path"):
-                    await gw.request("library.relocation.plan", {
+                    await gw.request(LIBRARY_RELOCATION_PLAN, {
                         "series_id": series_id, "new_path": new_path})
         except BusRequestError as exc:
             return _error_response(exc)
@@ -169,7 +170,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         if viewing:
             # The owner of the files of the torrent pipeline checks its own and finds nothing of a foreign series, so
             # the gateway needs no kind to choose.
-            gw.send_command("torrents.fs.verify", {"series_id": series_id})
+            gw.send_command(TORRENTS_FS_VERIFY, {"series_id": series_id})
         return {"success": True}
 
     @r.post("/api/series/{series_id}/toggle_auto_scan",

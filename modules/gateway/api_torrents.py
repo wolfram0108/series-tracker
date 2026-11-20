@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field, model_validator
 
 from core.module import BusRequestError
 from core.contracts import SubtitleType
-from core.topics import SOURCES_RELEASES_GET
+from core.topics import (SOURCES_RELEASES_GET, TORRENTS_RELEASE_CHECK, TORRENTS_RELEASE_DOWNLOAD, TORRENTS_RELEASE_WATCH,
+                         TORRENTS_RELEASES_GET, Topic)
 
 from .routing import as_made, refusal
 from .schemas import DynamicObject, ErrorResponse, OkResponse
@@ -102,13 +103,13 @@ class AutoBody(BaseModel):
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
     r = APIRouter()
 
-    async def asked(topic: str, payload: dict):
+    async def asked(topic: Topic | str, payload: dict):
         try:
             return await as_made(await gw.request(topic, payload))
         except BusRequestError as exc:
             return refusal(exc)
 
-    async def told(topic: str, payload: dict):
+    async def told(topic: Topic | str, payload: dict):
         try:
             await gw.request(topic, payload)
         except BusRequestError as exc:
@@ -123,22 +124,22 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/torrent/releases", response_model=DynamicObject, responses=_ERR)
     async def releases(body: PageBody):
         """The releases kept for the page: state, version, folder, files."""
-        return await asked("torrents.releases.get", body.model_dump())
+        return await asked(TORRENTS_RELEASES_GET, body.model_dump())
 
     @r.post("/api/torrent/download", response_model=DynamicObject, responses=_ERR)
     async def download(body: ReleaseBody):
         """«Скачать»: the release goes to the client into its folder; a refusal says why (409)."""
-        return await asked("torrents.release.download", body.model_dump())
+        return await asked(TORRENTS_RELEASE_DOWNLOAD, body.model_dump())
 
     @r.post("/api/torrent/check", response_model=DynamicObject, responses=_ERR)
     async def check(body: PageBody):
         """The page is read now: a watched release it lists in another version begins its update, or waits for a sync."""
-        return await asked("torrents.release.check", body.model_dump())
+        return await asked(TORRENTS_RELEASE_CHECK, body.model_dump())
 
     @r.post("/api/torrent/watch", response_model=DynamicObject, responses=_ERR)
     async def watch(body: WatchBody):
         """The automatic update of the release on or off."""
-        return await asked("torrents.release.watch", body.model_dump())
+        return await asked(TORRENTS_RELEASE_WATCH, body.model_dump())
 
     @r.post("/api/torrent/editor", response_model=DynamicObject, responses=_ERR)
     async def editor(body: PageBody):

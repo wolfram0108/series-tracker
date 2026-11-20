@@ -39,6 +39,8 @@ from .settings import SavedPath, SavedPaths, SettingValue, SettingValues
 from .series import (WRITABLE_FIELDS, BusyContribution, SeriesCard, SeriesDeleted, SeriesListReply, SeriesPurged, SeriesStatusChanged,
                      SeriesUpdated, SourcesReply, StatusContribution)
 from .voice_groups import GroupsResolveReply, GroupsResolveRequest
+from .library import (DirectoriesGet, DirectoryItem, DirectoryListing, Relocated, RelocationFinished, RelocationOf, RelocationPath,
+                      RelocationPlan, RelocationPlanned, RelocationStarted)
 from .availability import Action, NotAllowed, allowed, refusal, require, variant_state
 from .work import RUN_CHANGED, WORK_STATE, WORK_WITHDRAWN, RunChanged, RunSnapshot, Slot, WorkState, WorkWithdrawn, slot_of
 from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, DubsScope, DubsSnapshot, DubState, DubStatus,
@@ -70,7 +72,8 @@ __all__ = ["TitleCard", "TitleLine", "TitleSearchReply", "TitleSearchRequest", "
            "TargetKind", "ValueShape",
            "group_target", "parse_group_target", "parse_variant_target", "variant_target",
            "CutPicture", "OutputSwitch", "Reference", "ReferenceChanged", "ReferenceMark",
-           "GroupsResolveReply", "GroupsResolveRequest"]
+           "GroupsResolveReply", "GroupsResolveRequest", "DirectoriesGet", "DirectoryItem", "DirectoryListing", "Relocated",
+           "RelocationFinished", "RelocationOf", "RelocationPath", "RelocationPlan", "RelocationPlanned", "RelocationStarted"]
 
 from .planner import (PlanAsset, PlanAssetTrack, PlanSubtitle, PlanAssetVideo, PlanCommand, PlanDelete, PlanEpisode,  # noqa: E402
                       PlanFailure, PlanForget, PlanGoalTrack, PlanGoalVideo, PlannerView, PlanProblem, PlanRowRef, PlanSnapshot,

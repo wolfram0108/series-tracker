@@ -1,5 +1,5 @@
-"""Репозиторий torrents: таблицы torrents, torrent_files, agent_tasks
-и torrent_progress (прогресс раздач для UI).
+"""Repository for torrents: tables torrents, torrent_files, agent_tasks
+and torrent_progress (per-release progress for the UI).
 """
 from __future__ import annotations
 
@@ -8,16 +8,15 @@ from datetime import datetime, timezone
 
 from core.db import Database
 
-from . import selection
+from calc.torrents import selection
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
-# Счётчик «скачано» не считает спешелы (сезон 0): они не соответствуют TMDB,
-# total их не учитывает — иначе «скачано» вышло бы больше «всего». Файлы без
-# извлечённого сезона (NULL) считаются (одиночные серии без явного сезона).
+# "Downloaded" skips specials (season 0): TMDB does not match them and "total" excludes them,
+# so counting them would exceed "total". Files with no extracted season (NULL) still count (single episodes).
 _NOT_SPECIALS = ("(json_extract(tf.extracted_metadata, '$.season') IS NULL "
                  "OR json_extract(tf.extracted_metadata, '$.season') != 0)")
 
@@ -33,7 +32,7 @@ class TorrentsRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    # --- torrents (реестр раздач) ----------------------------------------------------
+    # --- torrents (release registry) ----------------------------------------------------
 
     async def active_torrents(self, series_id: int) -> list[dict]:
         return await self._db.fetch_all(
@@ -47,9 +46,8 @@ class TorrentsRepository:
 
     async def upsert_registered(self, series_id: int, torrent: dict,
                                 qb_hash: str) -> None:
-        """Идемпотентная фиксация раздачи: link в БД — то, от чего
-        считался torrent_id (для magnet-трекеров это magnet —
-        констрейнт данных, Р-12)."""
+        """Idempotent recording of a release: the link in the DB is what torrent_id
+        was computed from (for magnet trackers it is the magnet: a data constraint, Р-12)."""
         link = torrent.get("link") or torrent.get("magnet")
         existing = await self._db.fetch_one(
             "SELECT id FROM torrents WHERE torrent_id=?",
@@ -69,10 +67,9 @@ class TorrentsRepository:
 
     async def refresh_listing(self, db_id: int, torrent: dict,
                               qb_hash: str) -> None:
-        """ПУНКТ 3: тот же infohash перевыложен под новым ярлыком — обновляем
-        метку/дату/качество и держим строку активной. Без закачки и дублей;
-        нужно лишь чтобы детектор по дате (ПУНКТ 1) сошёлся и трекер не
-        дёргался каждый скан."""
+        """POINT 3: the same infohash re-published under a new label: update the
+        label/date/quality and keep the row active. No download and no duplicates; it only
+        lets the date detector (POINT 1) converge and keeps the tracker from being polled on every scan."""
         link = torrent.get("link") or torrent.get("magnet")
         await self._db.execute(
             "UPDATE torrents SET is_active=1, qb_hash=?, torrent_id=?, "
@@ -81,11 +78,10 @@ class TorrentsRepository:
              torrent.get("quality"), torrent.get("episodes"), db_id))
 
     async def deactivate_and_clear_files(self, db_id: int) -> None:
-        """Замена раздачи (ПУНКТ 4): строку пометить неактивной — она
-        ОСТАЁТСЯ как запись истории релиза, — а записи о её файлах снять
-        (файлы на диске замещены новой раздачей). Ключ — id строки (точная
-        строка), как в старой системе (deactivate_torrent_and_clear_files),
-        а НЕ ярлык с трекера: иначе можно деактивировать не ту строку."""
+        """Replacing a release (POINT 4): the row is marked inactive and REMAINS as the
+        release history record; its file records are removed (files on disk are replaced by the new release).
+        The key is the row id (the exact row), as in the old system (deactivate_torrent_and_clear_files),
+        NOT the tracker label: otherwise the wrong row could be deactivated."""
         await self._db.execute_many(self._deactivation(db_id))
 
     @staticmethod
@@ -107,11 +103,10 @@ class TorrentsRepository:
         return [r["qb_hash"] for r in rows if r.get("qb_hash")]
 
     async def deactivate_orphans(self, live_hashes: set[str]) -> list[int]:
-        """Reconcile с qBit (crash-tolerance): активные torrents-записи,
-        чьего qb_hash НЕТ в реальном qBit (торрент удалён вручную/пропал),
-        сбрасываются — файлы удаляются, is_active=0. Серия возвращается в
-        состояние «торрента нет», следующий скан добавит раздачу заново.
-        Возвращает series_id затронутых серий."""
+        """Reconcile with qBit (crash tolerance): active torrents rows whose qb_hash is
+        NOT in the live qBit (torrent removed manually or vanished) are reset: files are deleted, is_active=0.
+        The series goes back to the "no torrent" state; the next scan adds the release again.
+        Returns the series_id values of the affected series."""
         affected: list[int] = []
         for row in await self.all_active():
             qh = (row.get("qb_hash") or "").lower()
@@ -121,22 +116,21 @@ class TorrentsRepository:
         return affected
 
     async def torrent_by_hash(self, qb_hash: str) -> dict | None:
-        """Строка-владелец infohash. При исторических двойниках (та же
-        раздача под старым ярлыком) возвращается АКТИВНАЯ — привязка файлов
-        и прогресс идут только на живую строку (инвариант И2)."""
+        """The row owning the infohash. With historical duplicates (the same release under an old label)
+        the ACTIVE row is returned: file binding and progress go only to the live row (invariant И2)."""
         return await self._db.fetch_one(
             "SELECT * FROM torrents WHERE qb_hash=? "
             "ORDER BY is_active DESC, id LIMIT 1", (qb_hash,))
 
     async def row_by_hash(self, series_id: int, qb_hash: str) -> dict | None:
-        """Знает ли серия этот infohash (активный или исторический). Ключ
-        идентичности раздачи (И1): по нему решается «это та же раздача»."""
+        """Whether the series knows this infohash (active or historical). The release identity key (И1):
+        it decides "this is the same release"."""
         return await self._db.fetch_one(
             "SELECT * FROM torrents WHERE series_id=? AND qb_hash=? "
             "ORDER BY is_active DESC, id LIMIT 1", (series_id, qb_hash))
 
     async def history(self, series_id: int) -> list[dict]:
-        """Вся история раздач серии (контракт старого get_torrents)."""
+        """Full release history of the series (contract of the old get_torrents)."""
         rows = await self._db.fetch_all(
             "SELECT * FROM torrents WHERE series_id=? ORDER BY id",
             (series_id,))
@@ -144,8 +138,8 @@ class TorrentsRepository:
 
     async def add_registered_rows(self, series_id: int,
                                   torrents: list[dict]) -> int:
-        """Регистрация раздач формы добавления серии (без qBit —
-        семантика старого add_series: скан подхватит позже)."""
+        """Registers releases from the series add form (without qBit: the semantics of the old
+        add_series; the scan picks them up later)."""
         added = 0
         for t in torrents:
             if not t.get("link"):
@@ -160,9 +154,8 @@ class TorrentsRepository:
         return added
 
     async def downloaded_counts(self) -> dict[int, int]:
-        """Переименованные файлы по сериям — счётчик карточек (Р-19).
-        Только АКТИВНЫЕ раздачи (И4): заменённые строки — история, в счёт
-        не идут; иначе налипший дубль даёт «16 вместо 8»."""
+        """Renamed files per series: the card counter (Р-19). ACTIVE releases only (И4):
+        replaced rows are history and are not counted; otherwise a stuck duplicate gives "16 instead of 8"."""
         rows = await self._db.fetch_all(
             "SELECT t.series_id AS series_id, COUNT(*) AS n "
             "FROM torrent_files tf JOIN torrents t ON t.id=tf.torrent_db_id "
@@ -171,8 +164,8 @@ class TorrentsRepository:
         return {r["series_id"]: r["n"] for r in rows}
 
     async def downloaded_count_for_series(self, series_id: int) -> int:
-        """Счётчик «скачано» одной серии (переименованные файлы активных
-        раздач) — для реактивного обновления карточки (Д1)."""
+        """The "downloaded" counter of one series (renamed files of active releases),
+        for the reactive card update (Д1)."""
         row = await self._db.fetch_one(
             "SELECT COUNT(*) AS n FROM torrent_files tf "
             "JOIN torrents t ON t.id=tf.torrent_db_id "
@@ -182,8 +175,8 @@ class TorrentsRepository:
         return row["n"] if row else 0
 
     async def seasons_for_series(self, series_id: int) -> list[int]:
-        """Реальные сезоны серии — distinct season из extracted_metadata
-        файлов АКТИВНЫХ раздач (для агрегата TMDB по нескольким сезонам)."""
+        """Real seasons of the series: distinct season from extracted_metadata of files
+        of ACTIVE releases (for the TMDB aggregate over several seasons)."""
         rows = await self._db.fetch_all(
             "SELECT DISTINCT json_extract(tf.extracted_metadata, '$.season') "
             "AS season FROM torrent_files tf "
@@ -194,7 +187,7 @@ class TorrentsRepository:
         return [r["season"] for r in rows if r["season"] is not None]
 
     async def delete_for_series(self, series_id: int) -> None:
-        """Каскад Р-19: серия удалена — наши таблицы чистятся."""
+        """Cascade Р-19: the series is deleted, so our tables are cleaned up."""
         await self._db.execute(
             "DELETE FROM torrent_files WHERE torrent_db_id IN "
             "(SELECT id FROM torrents WHERE series_id=?)", (series_id,))
@@ -205,14 +198,14 @@ class TorrentsRepository:
         await self._db.execute(
             "DELETE FROM torrent_progress WHERE series_id=?", (series_id,))
 
-    # --- agent_tasks (задачи конвейера) -----------------------------------------------
+    # --- agent_tasks (pipeline tasks) -----------------------------------------------
 
     async def all_tasks(self) -> list[dict]:
         return await self._db.fetch_all("SELECT * FROM agent_tasks")
 
     async def task_by_hash(self, torrent_hash: str) -> dict | None:
-        """Задача конвейера по infohash — для различения «уже здоров»
-        (задачи нет) и «ошибка, нужен перезапуск» (стадия error)."""
+        """Pipeline task by infohash: tells "already healthy" (no task) apart from
+        "error, restart needed" (error stage)."""
         return await self._db.fetch_one(
             "SELECT * FROM agent_tasks WHERE torrent_hash=?", (torrent_hash,))
 
@@ -240,9 +233,8 @@ class TorrentsRepository:
     # --- torrent_files ----------------------------------------------------------------
 
     async def files_for_series(self, series_id: int) -> list[dict]:
-        """Файлы с qb_hash и прогрессом (контракт старого
-        get_torrent_files_for_series). Только АКТИВНЫЕ раздачи (И4):
-        заменённые — история без файлов."""
+        """Files with qb_hash and progress (contract of the old get_torrent_files_for_series).
+        ACTIVE releases only (И4): replaced ones are history without files."""
         rows = await self._db.fetch_all(
             "SELECT tf.*, t.qb_hash, COALESCE(tp.progress, 0) AS progress "
             "FROM torrent_files tf "
@@ -258,7 +250,7 @@ class TorrentsRepository:
         return self._db.coerce_bools(rows, _FILE_BOOLS)
 
     async def files_by_hash(self, qb_hash: str) -> list[dict]:
-        """Файлы раздачи по infohash — вход применения приоритетов."""
+        """Files of a release by infohash: the input for applying priorities."""
         rows = await self._db.fetch_all(
             "SELECT tf.* FROM torrent_files tf "
             "JOIN torrents t ON t.id=tf.torrent_db_id WHERE t.qb_hash=?",
@@ -272,9 +264,8 @@ class TorrentsRepository:
         return [r["qb_hash"] for r in rows if r["qb_hash"]]
 
     async def fully_excluded_hashes(self, series_id: int) -> set[str]:
-        """Раздачи, где не нужен ни один файл: qBittorrent отдаёт по ним
-        progress=1.0 (нечего качать), и без этого списка карточка
-        показала бы «готов» при нуле файлов на диске."""
+        """Releases where no file is needed: qBittorrent reports progress=1.0 for them (nothing to download),
+        and without this list the card would show "ready" with zero files on disk."""
         rows = await self._db.fetch_all(
             "SELECT t.qb_hash AS qb_hash, COUNT(*) AS total, "
             "SUM(tf.is_excluded) AS excluded FROM torrent_files tf "
@@ -287,11 +278,10 @@ class TorrentsRepository:
     async def project_selection(self, series_id: int,
                                 ignored_seasons: set[int],
                                 ignored_episodes: dict[int, set[int]]) -> int:
-        """Память сериала -> колонка is_excluded файлов активных раздач.
+        """Series memory -> is_excluded column of files of active releases.
 
-        Проекция, а не второй источник правды: агрегаты и приоритеты
-        читают одну колонку, память остаётся в series и переживает
-        замену раздачи."""
+        A projection, not a second source of truth: aggregates and priorities read one column;
+        the memory stays in series and survives release replacement."""
         changed = 0
         for row in await self.files_for_series(series_id):
             meta = row.get("extracted_metadata")
@@ -375,8 +365,8 @@ class TorrentsRepository:
             "SELECT * FROM torrent_progress WHERE series_id=?", (series_id,))
 
     async def all_torrent_progress(self) -> list[dict]:
-        """Прогресс всех раздач (контракт старого get_all_active_torrent_tasks —
-        таблица мониторинга в UI)."""
+        """Progress of all releases (contract of the old get_all_active_torrent_tasks:
+        the monitoring table in the UI)."""
         return await self._db.fetch_all(
             "SELECT * FROM torrent_progress ORDER BY id")
 

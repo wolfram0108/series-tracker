@@ -7,7 +7,7 @@
 
 import pytest
 
-from modules.torrents.infohash import (TorrentParseError,
+from calc.torrents.infohash import (TorrentParseError,
                                        infohash_candidates,
                                        infohash_from_magnet)
 

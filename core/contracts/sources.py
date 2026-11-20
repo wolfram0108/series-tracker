@@ -30,7 +30,7 @@ class PagesCheckReply(Frozen):
 
 
 class PageUrl(BaseModel):
-    """`sources.releases.get`: the page of a tracker whose releases are asked."""
+    """`sources.releases.get`, `torrents.releases.get` and `torrents.release.check`: the page of a tracker whose releases are asked."""
 
     url: str
 

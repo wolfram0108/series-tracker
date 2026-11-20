@@ -20,10 +20,11 @@ from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, Co
                             PlayersListReply, ProviderSaved, ProviderSettingsDraft, ProviderView, VoiceSettingsDraft,
                             VoiceSettingsSaved, VoiceSettingsView)
 from core.reasons import code_of, reason, relayed
-from core.topics import (METADATA_DETAILS, METADATA_SEARCH, SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST, SETTINGS_PATHS_REMOVE,
-                         SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SETTINGS_VALUES_BY_PREFIX, SOURCES_PROVIDER_GET,
-                         SOURCES_PROVIDER_SET, SOURCES_TERMS_GET, SOURCES_TERMS_SET, SOURCES_TRACKER_SET_MIRRORS,
-                         SOURCES_TRACKERS_LIST, TRACKERAUTH_CREDENTIALS_GET, TRACKERAUTH_CREDENTIALS_SET, TRACKERAUTH_SECRET_GET)
+from core.topics import (LIBRARY_DIRECTORIES_LIST, METADATA_DETAILS, METADATA_SEARCH, SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST,
+                         SETTINGS_PATHS_REMOVE, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SETTINGS_VALUES_BY_PREFIX,
+                         SOURCES_PROVIDER_GET, SOURCES_PROVIDER_SET, SOURCES_TERMS_GET, SOURCES_TERMS_SET,
+                         SOURCES_TRACKER_SET_MIRRORS, SOURCES_TRACKERS_LIST, TORRENTS_STAGING_GET, TORRENTS_STAGING_SET,
+                         TRACKERAUTH_CREDENTIALS_GET, TRACKERAUTH_CREDENTIALS_SET, TRACKERAUTH_SECRET_GET)
 
 from .routing import refusal, route_per_method
 from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse
@@ -172,11 +173,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         refuses is 400 with its reason."""
         if request.method == "POST":
             data = await request.json()
-            reply = await gw.request("torrents.staging.set", {"value": data.get("value")})
-            if not reply.get("ok"):
-                return JSONResponse({"error": reply["reason"]}, status_code=400)
-            return {"success": True, "value": reply["value"]}
-        return {"value": (await gw.request("torrents.staging.get", {}))["value"]}
+            reply = await gw.reply_of(TORRENTS_STAGING_SET, {"value": data.get("value")})
+            if not reply.ok:
+                return JSONResponse({"error": reply.reason}, status_code=400)
+            return {"success": True, "value": reply.value}
+        return {"value": (await gw.reply_of(TORRENTS_STAGING_GET, {})).value}
 
     @route_per_method(r, "/api/settings/saved_paths", methods=["GET", "POST", "DELETE"],
                       response_model=DynamicObject)
@@ -320,8 +321,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/directories", response_model=DynamicObject, responses=_ERR1)
     async def directories(path: str = "/"):
         try:
-            return await gw.request("library.directories.list",
-                                    {"path": path})
+            return (await gw.reply_of(LIBRARY_DIRECTORIES_LIST, {"path": path})).model_dump(mode="json")
         except BusRequestError as exc:
             msg = relayed(str(exc))
             code = 403 if code_of(str(exc)) in _FORBIDDEN_PATH_CODES else 400

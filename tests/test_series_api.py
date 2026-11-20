@@ -61,7 +61,7 @@ class Neighbours(BaseModule):
                 {"torrent_hash": "h1", "series_id": 1, "stage": "renaming"}]}
 
         async def progress(env):
-            return {"tasks": [{"qb_hash": "h1", "series_id": 1,
+            return {"tasks": [{"id": 1, "qb_hash": "h1", "series_id": 1,
                                "series_name": "Тайтл", "status": "downloading",
                                "progress": 55, "dlspeed": 1024, "eta": 60}]}
 

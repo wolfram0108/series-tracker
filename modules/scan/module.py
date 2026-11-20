@@ -72,8 +72,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from core.module import NO_HANDLER, BaseModule, BusRequestError
-from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, EDIT_STUCK_S, METADATA_SEASONS_RECOMPUTE,
-                         SERIES_BUSY_CONTRIBUTION, SERIES_PURGED, SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET,
+from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, EDIT_STUCK_S, LIBRARY_RELOCATION_APPLY,
+                         METADATA_SEASONS_RECOMPUTE, SERIES_BUSY_CONTRIBUTION, SERIES_PURGED, SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET,
                          SETTINGS_VALUE_SET, SOURCES_PAGES_CHECK, SOURCES_TABLE_CANCEL, SOURCES_TABLE_FAILED,
                          SOURCES_TABLE_READY, TABLE_WAIT_S)
 from core.contracts import (RUN_CHANGED, WORK_STATE, BusyContribution, RunSnapshot, availability, OutputSwitch, RunChanged,
@@ -553,12 +553,12 @@ class ScanModule(BaseModule):
         """The first step of a sync: the move of the folder a save planned (И-59); everything after it works in the new
         folder. A failed move fails the sync, and its plan waits for the next one."""
         try:
-            reply = await self.request("library.relocation.apply", {"series_id": series.id})
+            reply = await self.reply_of(LIBRARY_RELOCATION_APPLY, {"series_id": series.id})
         except BusRequestError as exc:
             if NO_HANDLER in str(exc):
                 return series
             raise
-        if not reply["moved"]:
+        if not reply.moved:
             return series
         return await self.reply_of(CATALOG_SERIES_GET, {"series_id": series.id})
 

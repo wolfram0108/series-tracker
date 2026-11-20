@@ -124,7 +124,7 @@ from core.clock import beat_while
 from core.contracts import (CompositionGetRequest, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView,
                             Reference, SeriesCard, SeriesDeleted, SeriesPurged, SourceType, StatusContribution,
                             SubmitOutcome, SubmitReply, SyncScope, job_dir, job_key)
-from core.contracts.torrent import fonts_of, parse_link
+from core.contracts.torrent import ReleaseState, fonts_of, parse_link
 from core.contracts.work import WorkState, WorkWithdrawn
 from core.dump import plain
 from core.envelope import Envelope
@@ -395,11 +395,11 @@ class BusSync(SeriesSync):
         step reads it there. Nothing is copied, and the file is never removed by the sync: it is the release's."""
         release, video, file, stream = parse_link(row.link)
         url = self.source_urls.get(row.id.source_id)
-        reply = await self.m.request(TORRENTS_RELEASES_GET, {"url": url}) if url else {}
-        kept = next((each for each in reply.get("releases") or [] if each["release"] == release), None)
-        if kept is None or kept["state"] != "ready" or not kept.get("folder"):
+        releases = (await self.m.reply_of(TORRENTS_RELEASES_GET, {"url": url})).releases if url else ()
+        kept = next((each for each in releases if each.release == release), None)
+        if kept is None or kept.state != ReleaseState.READY or not kept.folder:
             raise Passing(reason("torrent_not_ready", release=release))
-        video_path, sound_path = os.path.join(kept["folder"], video), os.path.join(kept["folder"], file)
+        video_path, sound_path = os.path.join(kept.folder, video), os.path.join(kept.folder, file)
         for path in {video_path, sound_path}:
             if not await storage.call(os.path.exists, path):
                 raise Passing(reason("torrent_file_missing", path=path))
@@ -409,8 +409,7 @@ class BusSync(SeriesSync):
         if op.kind == "download_dub":
             return Made(row, video_path, sound=sound, stream=stream)
         if op.kind == "take_subtitles":  # the n-th subtitles of its file, with the fonts beside it (DESIGN.md 7.1, 7.1.1)
-            fonts = tuple(os.path.join(kept["folder"], path)
-                          for path in fonts_of((each["path"] for each in kept.get("files") or []), file))
+            fonts = tuple(os.path.join(kept.folder, path) for path in fonts_of((each.path for each in kept.files), file))
             return Made(None, video_path, sound=sound, stream=stream, fonts=fonts)
         return Made(None, video_path)
 
@@ -1177,11 +1176,11 @@ class PlannerModule(BaseModule):
                 shared = any(other.id != series.id and any(each.url == url for each in other.sources) for other in listing)
                 if shared:
                     continue
-                for release in (await self.request(TORRENTS_RELEASES_GET, {"url": url})).get("releases") or []:
-                    if not release["watched"] and release["state"] == "ready":
+                for release in (await self.reply_of(TORRENTS_RELEASES_GET, {"url": url})).releases:
+                    if not release.watched and release.state == ReleaseState.READY:
                         self.log.info("сериал %d: раздача %s %s без слежения собрана — её файлы удаляются", series.id,
-                                      url, release["release"])
-                        self.send_command(TORRENTS_RELEASE_DROP_FILES, {"url": url, "release": release["release"]})
+                                      url, release.release)
+                        self.send_command(TORRENTS_RELEASE_DROP_FILES, {"url": url, "release": release.release})
         except Exception:  # noqa: BLE001 - the files of a release stay until the next sync; nothing is lost by waiting
             self.log.exception("сериал %d: раздачи без слежения не разобраны", series.id)
 

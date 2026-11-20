@@ -140,8 +140,7 @@ class UnpackModule(BaseModule):
     # --- the layout ---------------------------------------------------------------------------------------------------
 
     async def _releases(self, url: str) -> list[ReleaseView]:
-        reply = await self.request(TORRENTS_RELEASES_GET, {"url": url})
-        return [ReleaseView.model_validate(each) for each in reply.get("releases") or []]
+        return list((await self.reply_of(TORRENTS_RELEASES_GET, {"url": url})).releases)
 
     async def _apply(self, profile_id: int | None, keyed: dict[str, str]) -> dict[str, dict]:
         """The rules of a tab applied to its lines: the result of each, by its item."""

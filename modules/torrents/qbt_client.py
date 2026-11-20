@@ -1,14 +1,14 @@
-"""Асинхронный клиент qBittorrent WebAPI v2 (решения Р-2, Р-3, Р-5).
+"""Async qBittorrent WebAPI v2 client (decisions Р-2, Р-3, Р-5).
 
-Политики, выведенные разбором старой системы (revision.md):
-- сессия эфемерна: логин при старте, на 403 — тихий релогин и повтор
-  сорванной операции; SID нигде не персистится (Р-3);
-- 404 = ресурса нет: возвращается None, без ретраев;
-- прочие сетевые ошибки — ретраи с паузой по бюджету `core.retry`;
-- у каждого вызова жёсткий таймаут (находка №7: ничто не виснет вечно).
+Policies derived from the analysis of the old system (revision.md):
+- the session is ephemeral: login at start, on 403 a silent re-login and a retry
+  of the failed operation; SID is never persisted (Р-3);
+- 404 = resource absent: returns None, no retries;
+- other network errors are retried with a pause within the `core.retry` budget;
+- every call has a hard timeout (finding #7: nothing hangs forever).
 
-Известная грабля совместимости: в qBittorrent 5.x параметр добавления
-«на паузе» переименован из `paused` в `stopped` — передаём оба.
+Known compatibility pitfall: in qBittorrent 5.x the "add paused" parameter
+was renamed from `paused` to `stopped` — we pass both.
 """
 from __future__ import annotations
 
@@ -22,11 +22,11 @@ from core.retry import UNTIMED, Budget, retrying
 
 
 class QbtError(RuntimeError):
-    """Операция с qBittorrent не удалась после всех повторов."""
+    """qBittorrent operation failed after all retries."""
 
 
 class QbtAuthError(QbtError):
-    """Логин отвергнут — неверные учётные данные."""
+    """Login rejected — invalid credentials."""
 
 
 class QbtClient:
@@ -37,7 +37,7 @@ class QbtClient:
         self._password = password
         self._retries = retries
         self._retry_delay = retry_delay
-        self._stop_ep = "stop"      # уточняется в login() по версии WebAPI
+        self._stop_ep = "stop"      # refined in login() from the WebAPI version
         self._start_ep = "start"
         self.log = get_logger("torrents")
         self._http = httpx.AsyncClient(
@@ -49,12 +49,12 @@ class QbtClient:
     async def close(self) -> None:
         await self._http.aclose()
 
-    # --- сессия ---------------------------------------------------------------
+    # --- session ---------------------------------------------------------------
 
     async def login(self) -> None:
-        # Поколения API отвечают на успех по-разному: 200 «Ok.» (4.x)
-        # или 204 без тела (5.x). Надёжный критерий: 2xx без «Fails.»
-        # и последующий авторизованный запрос проходит.
+        # API generations reply to success differently: 200 «Ok.» (4.x)
+        # or 204 with no body (5.x). Reliable criterion: 2xx without «Fails.»
+        # and the next authorized request passes.
         resp = await self._http.post("/api/v2/auth/login", data={
             "username": self._username, "password": self._password})
         if not resp.is_success or resp.text.strip() == "Fails.":
@@ -62,8 +62,8 @@ class QbtClient:
         check = await self._http.get("/api/v2/app/webapiVersion")
         if check.status_code != 200:
             raise QbtAuthError(reason("qbt_session_broken", status=check.status_code))
-        # Имена эндпоинтов паузы зависят от поколения API:
-        # WebAPI ≥ 2.11 (qBittorrent 5.x) — stop/start, старше — pause/resume.
+        # Pause endpoint names depend on the API generation:
+        # WebAPI ≥ 2.11 (qBittorrent 5.x) uses stop/start, older uses pause/resume.
         api = check.text.strip()
         try:
             modern = tuple(int(x) for x in api.split(".")[:2]) >= (2, 11)
@@ -77,7 +77,7 @@ class QbtClient:
                        conflict_ok: bool = False,
                        timeout: Optional[float] = None,
                        **kwargs: Any) -> Optional[httpx.Response]:
-        """Запрос с политиками 403/404/409/таймаут. None — только для 404."""
+        """Request with 403/404/409/timeout policies. None — only for 404."""
         async def send() -> httpx.Response | httpx.HTTPError:
             try:
                 return await self._http.request(
@@ -90,7 +90,7 @@ class QbtClient:
         async def ask() -> httpx.Response | httpx.HTTPError:
             got = await send()
             if isinstance(got, httpx.Response) and got.status_code == 403:
-                # Сессия протухла — тихий релогин и повтор операции (Р-3).
+                # Session expired — silent re-login and retry of the operation (Р-3).
                 self.log.info("403 от qBittorrent — обновляю сессию")
                 await self.login()
                 got = await send()
@@ -108,11 +108,11 @@ class QbtClient:
         if result.status_code == 404:
             return None
         if result.status_code == 409 and conflict_ok:
-            return result  # осмысленный ответ «уже существует» (5.x)
+            return result  # meaningful "already exists" reply (5.x)
         result.raise_for_status()
         return result
 
-    # --- операции ---------------------------------------------------------------
+    # --- operations ---------------------------------------------------------------
 
     async def version(self) -> str:
         resp = await self._request("GET", "/api/v2/app/version")
@@ -120,7 +120,7 @@ class QbtClient:
 
     @staticmethod
     def _add_verdict(resp: httpx.Response) -> str:
-        # Дубликат: 4.x отвечает 200 «Fails.», 5.x — 409 Conflict.
+        # Duplicate: 4.x replies 200 «Fails.», 5.x replies 409 Conflict.
         if resp.status_code == 409 or "Fails." in resp.text:
             return "fails"
         return "ok"
@@ -128,7 +128,7 @@ class QbtClient:
     async def add_torrent_file(self, content: bytes, save_path: str, *,
                                paused: bool = True,
                                category: str | None = None) -> str:
-        """Добавляет .torrent. Возвращает 'ok' | 'fails' (= уже существует?)."""
+        """Adds a .torrent. Returns 'ok' | 'fails' (= already exists?)."""
         flag = "true" if paused else "false"
         data = {"savepath": save_path, "paused": flag, "stopped": flag}
         if category:
@@ -163,22 +163,22 @@ class QbtClient:
         return resp.json() if resp else []
 
     async def create_category(self, name: str, save_path: str = "") -> None:
-        """Создать категорию qBit (идемпотентно: уже есть → 409, глотаем)."""
+        """Creates a qBit category (idempotent: already exists → 409, swallowed)."""
         await self._request("POST", "/api/v2/torrents/createCategory",
                             conflict_ok=True,
                             data={"category": name, "savePath": save_path})
 
     async def default_save_path(self) -> str:
-        """Путь сохранения по умолчанию — для транзиентных preview-раздач."""
+        """Default save path — for transient preview torrents."""
         resp = await self._request("GET", "/api/v2/app/preferences")
         return (resp.json() or {}).get("save_path", "") if resp else ""
 
     async def find_hash(self, candidates: list[str], *,
                         attempts: int = 5, delay: float = 0.5) -> Optional[str]:
-        """Каким из кандидатов infohash qBittorrent ключует торрент (Р-2).
+        """Which of the candidates qBittorrent keys the torrent by (Р-2).
 
-        Несколько коротких попыток: торрент появляется в списке почти
-        мгновенно, но «почти» — не «строго до ответа API».
+        Several short attempts: the torrent shows up in the list almost
+        instantly, but "almost" is not "strictly before the API replies".
         """
         async def look() -> Optional[str]:
             known = {t["hash"] for t in await self.torrents_info(candidates)}
@@ -196,7 +196,7 @@ class QbtClient:
 
     async def set_file_priority(self, torrent_hash: str, indices: list[int],
                                 priority: int) -> None:
-        """Приоритет файлов раздачи (0 — не скачивать)."""
+        """File priority of the torrent (0 — do not download)."""
         if not indices:
             return
         await self._request("POST", "/api/v2/torrents/filePrio",

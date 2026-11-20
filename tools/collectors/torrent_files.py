@@ -1,7 +1,7 @@
 """The file lists of a directory of .torrent files, as raw material for the analysis of how releases lay out their files.
 
 One JSON line per .torrent: {torrent, root, files: [{path, size}], error}. The list is read by the service's own reader
-(`modules.torrents.infohash.torrent_file_list`), so the paths are the ones qBittorrent would show. A new file is written
+(`calc.torrents.infohash.torrent_file_list`), so the paths are the ones qBittorrent would show. A new file is written
 for every run (data/raw is append-only); nothing is read from the network.
 
     python tools/collectors/torrent_files.py <dir with .torrent> <label>
@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from modules.torrents.infohash import TorrentParseError, torrent_file_list  # noqa: E402
+from calc.torrents.infohash import TorrentParseError, torrent_file_list  # noqa: E402
 
 
 def main() -> None:

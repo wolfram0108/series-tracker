@@ -1,22 +1,25 @@
-"""Выбор состава раздачи — чистые функции (как pipeline.py).
+"""Torrent content selection — pure functions (like pipeline.py).
 
-Единая точка правды «качать / не качать». Правило — белый список:
-качается только файл, который система распознала как серию сериала и
-который пользователь не исключил. Всё остальное (не-видео, файлы без
-резолва сезона — их не создаёт renaming, файлы без номера серии) в qBit
-получает приоритет 0 ещё до старта закачки.
+Single source of truth for "download / don't download". The rule is an
+allowlist: only a file that the system recognized as a series episode and
+that the user did not exclude is downloaded. Everything else (non-video
+files, files without a resolved season — renaming does not create them,
+files without an episode number) gets qBit priority 0 before the download
+starts.
 
-Память исключений живёт в сериале (сезоны + номера серий), а не в
-строках файлов: релиз заменяется, файлы пересоздаются — выбор обязан
-пережить замену. Здесь она только применяется.
+The exclusion memory lives in the series (seasons + episode numbers), not
+in the file rows: a release gets replaced and files are recreated, so the
+selection must survive the replacement. Here it is only applied.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
-from core.ignored import covered, episodes_of, parse_memory  # noqa: F401 - the shared rule, re-exported
+from core.contracts import SeriesCard
+from core.ignored import covered, episodes_of, parse_memory
 
-# qBittorrent file priority: 0 — не скачивать, 1 — обычный.
+# qBittorrent file priority: 0 — do not download, 1 — normal.
 PRIORITY_SKIP = 0
 PRIORITY_NORMAL = 1
 
@@ -26,17 +29,30 @@ REASON_UNRECOGNIZED = "unrecognized"
 
 @dataclass
 class Selection:
-    """Дельта приоритетов для одной раздачи."""
+    """Priority delta for one torrent."""
     to_disable: list[int] = field(default_factory=list)
     to_enable: list[int] = field(default_factory=list)
     unmatched: list[str] = field(default_factory=list)
     wanted_empty: bool = False
 
 
+def memory_of(series: SeriesCard) -> tuple[set[int], dict[int, set[int]]]:
+    """The exclusion memory of a series: the seasons and the episode numbers the user left out; a memory that cannot be read is empty."""
+    try:
+        seasons = {int(s) for s in json.loads(series.ignored_seasons or "[]")}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        seasons = set()
+    try:
+        episodes = parse_memory(json.loads(series.ignored_episodes or "{}"))
+    except (json.JSONDecodeError, TypeError):
+        episodes = {}
+    return seasons, episodes
+
+
 def is_wanted(extracted: dict | None, ignored_seasons: set[int],
               ignored_episodes: dict[int, set[int]]
               ) -> tuple[bool, str | None]:
-    """Нужен ли файл. Возвращает (нужен, причина исключения)."""
+    """Whether the file is wanted. Returns (wanted, exclusion reason)."""
     meta = extracted or {}
     if meta.get("is_extra"):
         return True, None
@@ -59,10 +75,10 @@ def _index_of(qb_file: dict, position: int) -> int:
 
 
 def resolve(db_rows: list[dict], qb_files: list[dict]) -> Selection:
-    """Строки БД + файлы qBit -> какие индексы включить/выключить.
+    """DB rows + qBit files -> which indices to enable / disable.
 
-    Сопоставление по qb_file_index, имя — фолбэк для строк, записанных
-    до появления индекса (имя мутирует при переименовании, индекс нет).
+    Matched by qb_file_index; the name is a fallback for rows written before
+    the index existed (the name mutates on rename, the index does not).
     """
     by_index: dict[int, dict] = {}
     by_name: dict[str, dict] = {}
@@ -81,8 +97,8 @@ def resolve(db_rows: list[dict], qb_files: list[dict]) -> Selection:
         index = _index_of(qb_file, position)
         row = by_index.get(index) or by_name.get(qb_file.get("name") or "")
         if row is None:
-            # Файла нет в реестре: не-видео либо правила не дали сезон —
-            # такое не качаем (белый список).
+            # Not in the registry: non-video, or the rules gave no season —
+            # we never download such files (allowlist).
             want = False
         else:
             matched.add(id(row))

@@ -18,9 +18,10 @@ from core.bus import Bus
 from core.module import BaseModule
 from core.contracts import RUN_CHANGED, SeriesListReply
 from series_factory import series_card
-from core.contracts.torrent import RELEASE_CHANGED_TOPIC, PageRelease, PageReleases
+from core.contracts.torrent import PageRelease, PageReleases
 from core.db import Database
 from core.schedule import next_at
+from core.topics import TORRENTS_RELEASE_CHANGED
 from modules.torrents.module import TorrentsModule
 from modules.torrents.qbt_client import QbtClient
 from qbit_model import V1, V2, QbitModel, release
@@ -99,7 +100,7 @@ async def stand(tmp_path):
     db = Database(str(migrated(tmp_path / "t.db")))
     world = World(bus, str(tmp_path / "staging"))
     torrents = TorrentsModule(bus, db, qbt=client, pipeline_poll=0.02, monitor_active=0.02, monitor_idle=0.05)
-    told = bus.subscribe(RELEASE_CHANGED_TOPIC)
+    told = bus.subscribe(TORRENTS_RELEASE_CHANGED.name)
     await world.start()
     await torrents.start()
     yield model, world, torrents, told
@@ -140,7 +141,7 @@ async def test_an_update_comes_into_the_same_folder_and_leaves_only_the_files_of
     kept = os.stat(f"{folder}/Show/E01.mkv").st_mtime_ns
 
     h2 = world.lists(model, release(V2), published="d2", link="L2")
-    assert (await world.request("torrents.release.check", {"url": PAGE}))["releases"] == ["page"]
+    assert (await world.request("torrents.release.check", {"url": PAGE})).releases == ("page",)
     updating = await until(told, "updating")
     ready = await until(told, "ready", lambda news: news["infohash"] == h2)
 
@@ -167,7 +168,7 @@ async def test_an_update_comes_into_the_same_folder_and_leaves_only_the_files_of
 
     model.checking.add(h2)
     await flags_until({"checking": True, "ready": False})
-    assert (await world.request("torrents.releases.get", {"url": PAGE}))["releases"][0]["client"].startswith("checking")
+    assert (await world.request("torrents.releases.get", {"url": PAGE})).releases[0].client.startswith("checking")
     model.checking.discard(h2)
     await flags_until({"checking": False, "ready": True})
 

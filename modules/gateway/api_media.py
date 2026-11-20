@@ -9,6 +9,7 @@ from fastapi import APIRouter
 
 from core.module import BusRequestError
 from core.reasons import reason
+from core.topics import TORRENTS_DB_FILES_FOR_SERIES
 
 from .routing import refusal
 from .schemas import ErrorOnly, ErrorResponse, OkResponse
@@ -42,8 +43,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """File names of the series' torrents for the rules test; a video series has none, its lines
         for the test come from composition.preview."""
         try:
-            files = await gw.request("torrents.db.files.for_series",
-                                     {"series_id": series_id})
+            files = await gw.request(TORRENTS_DB_FILES_FOR_SERIES, {"series_id": series_id})
         except BusRequestError:
             return []
         return [os.path.basename(f["original_path"]) for f in files]
