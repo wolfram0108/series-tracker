@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
 import PrimeVue from "primevue/config"
+import { createPinia, setActivePinia } from "pinia"
 
 // The tab «Торрент» (stage 15, step 9): the head tells the state of the release, the editors place what is picked with one
 // request each, and what the core changes comes back as its events — never by asking again.
@@ -19,6 +20,7 @@ vi.mock("../../../composables/useWindowBusy", () => ({ useBusyBar: () => undefin
 import { t, tn } from "../../../i18n"
 import type { Editor, EditorView, ReleaseView } from "../../../lib/torrent"
 import type { SeriesSource } from "../../../lib/sources"
+import { useSourceTablesStore } from "../../../stores/sourceTables"
 import TorrentTab from "./TorrentTab.vue"
 import TorrentFiles from "./TorrentFiles.vue"
 import TorrentTracks from "./TorrentTracks.vue"
@@ -62,13 +64,16 @@ const editor = (overrides: Partial<EditorView> = {}): Editor => ({ url: URL, pro
   view: view(overrides) })
 
 let mounted: VueWrapper | null = null
+let pinia = createPinia()
 const mountWith = (component: unknown, props: Record<string, unknown>) => {
-  mounted = mount(component as never, { props: props as never, global: { plugins: [PrimeVue], stubs: { RulesEditor: true } } })
+  mounted = mount(component as never, { props: props as never, global: { plugins: [PrimeVue, pinia], stubs: { RulesEditor: true } } })
   return mounted
 }
 // jsdom has no matchMedia; the list of PrimeVue (the language of a folder) asks it of the orientation of the screen.
 window.matchMedia ??= ((query: string) => ({ matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as never
 beforeEach(() => {
+  pinia = createPinia()
+  setActivePinia(pinia)
   sse.handlers.clear()
   for (const each of Object.values(calls)) each.mockReset().mockResolvedValue(ok({}))
 })
@@ -105,6 +110,26 @@ describe("the head of the tab", () => {
     expect(w.find(".torrent-state").text()).toBe("Готово")
     expect(w.find(".torrent-waiting").text()).toBe(t("torrent.progress.waiting", { n: 3 }))
     expect(w.findAll(".torrent-switch .st-tab").map((tab) => tab.text())).toEqual(["Файлы2", "Озвучки1", "Субтитры", "Озв. конт.", "Суб. конт."])
+  })
+
+  it("shows what the client does with the release — a check of its files — and the read of its page from the first packet to the end", async () => {
+    calls.fetchReleases.mockResolvedValue(ok({ releases: [{ ...kept("ready"), client: "checkingDL" }] }))
+    calls.fetchEditor.mockResolvedValue(ok(editor()))
+    const w = mountWith(TorrentTab, { sources: [source] })
+    await flushPromises()
+    expect(w.find(".torrent-state").text()).toBe("Проверка")
+    sse.handlers.get("torrent_release_update")!({ ...kept("ready"), client: "stalledUP" })
+    await flushPromises()
+    expect(w.find(".torrent-state").text()).toBe("Готово")
+
+    const tables = useSourceTablesStore(pinia)
+    expect(w.find(".torrent-page-read").exists()).toBe(false)
+    tables.applyProgress({ url: URL, phase: "release", current: 0, total: 1 })
+    await flushPromises()
+    expect(w.find(".torrent-page-read").text()).toContain("Страница релиза")
+    tables.applyReady({ url: URL, read_at: "2026-11-20T10:00:00Z", fresh_until: null })
+    await flushPromises()
+    expect(w.find(".torrent-page-read").exists()).toBe(false)
   })
 
   it("reads the editor again when the core says it changed, and the automatic update is one request", async () => {

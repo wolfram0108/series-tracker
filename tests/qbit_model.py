@@ -160,6 +160,9 @@ class QbitModel:
         self.username, self.password = username, password
         self.incomplete_ext = incomplete_ext
         self.torrents: dict[str, _Torrent] = {}
+        # The torrents whose check of the files is going on now (the real client says `checkingDL`/`checkingUP` while it
+        # hashes; the model's own check is instant, so a test holds one here and ends it by removing the hash).
+        self.checking: set[str] = set()
         self.categories: dict[str, str] = {}
         self.swarm: dict[str, _Release] = {}
         self.sessions: set[str] = set()
@@ -270,6 +273,8 @@ class QbitModel:
         self._settle_names(t)
 
     def _state(self, t: _Torrent) -> str:
+        if t.hash in self.checking:
+            return "checkingUP" if t.complete() else "checkingDL"
         if not t.meta:
             return "stoppedDL" if t.stopped else "metaDL"
         done = t.complete()

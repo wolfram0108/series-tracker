@@ -67,6 +67,9 @@ class ReleaseView(BaseModel):
     # that (core/schedule.py; none: no check scheduled): past it the release is not known to be current.
     checked_at: str | None = None
     fresh_until: str | None = None
+    # What the client says of the torrent now, as it words it (qBittorrent's state: `checkingDL`, `downloading`, ...); none:
+    # not known (the client was not asked yet, or the torrent is not in it). A fact of the moment, kept in memory only.
+    client: str | None = None
 
 
 class PageRelease(BaseModel):

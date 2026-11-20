@@ -7,6 +7,7 @@ import type { SeriesSource } from "../../../lib/sources"
 import { EDITOR_TABS, sourceState, type Editor, type EditorTab, type PageReleases, type ReleaseView } from "../../../lib/torrent"
 import { useSSE } from "../../../composables/useSSE"
 import { useBusyBar } from "../../../composables/useWindowBusy"
+import { useSourceTablesStore } from "../../../stores/sourceTables"
 import { fetchEditor, fetchPage, fetchReleases } from "../../../composables/torrentCalls"
 import RulesEditor from "../../settings/RulesEditor.vue"
 import RulesAddButtons from "../../settings/RulesAddButtons.vue"
@@ -106,6 +107,13 @@ const offs = [
 onMounted(() => void load())
 onUnmounted(() => offs.forEach((off) => off()))
 
+// The read of the page of the source (its «Перечитать», a sync, the schedule) is the core's news, kept by its canonical address.
+const tables = useSourceTablesStore()
+const pageRead = computed(() => {
+  const page = tables.forUrl(urlOf())
+  return page?.state === "reading" ? page.progress : null
+})
+
 const counts = computed(() => editor.value?.view.unplaced ?? { files: 0, voices: 0, subtitles: 0, voice_streams: 0, subtitle_streams: 0 })
 const lines = computed(() => {
   const view = editor.value?.view
@@ -135,7 +143,7 @@ const rulePlace = computed<RulePlace>(() => tab.value === "files" ? "files"
     <template v-if="source">
       <TorrentHead
         :source="source" :place="place + 1" :page="page" :release="release" :state="state" :editor="editor"
-        :tab="tab" :counts="counts" @tab="tab = $event" @failure="failure = $event"
+        :tab="tab" :counts="counts" :page-read="pageRead" @tab="tab = $event" @failure="failure = $event"
       />
       <p v-if="failure" class="sheet-problem torrent-failure">{{ failure }}</p>
       <p v-if="state.stage === 'notLoaded'" class="torrent-hint">{{ t("torrent.notLoaded.hint") }}</p>

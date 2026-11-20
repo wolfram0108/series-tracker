@@ -6,7 +6,8 @@ files lie under their own names in its folder (`<staging>/<site>-<key>`); the so
 wanted file is there (`ready`). An update is the new version added started in the same folder: the client checks the files
 on disk itself (measured, DESIGN.md «Обновление в qBittorrent»), downloads only what is not there, and the release is
 unavailable as a whole until it is `ready` again; the files of the old version the new one does not list are removed then.
-Nothing waits by time: what the client does is read from it (its WebAPI pushes nothing) while some release moves.
+Nothing waits by time: what the client does is read from it (its WebAPI pushes nothing) while some release moves or is
+being checked, and now and then otherwise, so that a check the client began by itself is told too.
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ from core.reasons import reason
 from core.schedule import next_at
 
 from .infohash import TorrentParseError, infohash_candidates, infohash_from_magnet
+from .pipeline import CHECKING, torrent_flag
 from .qbt_client import QbtClient
 from .repository import ReleaseStore
 
@@ -89,6 +91,8 @@ class Releases:
     pending: dict[tuple[str, str], PageRelease] = field(default_factory=dict)
     # The minutes of the day the watched pages are checked (the schedule, core/schedule.py).
     checks: tuple[int, ...] = ()
+    # What the client said of each torrent at its last asking: infohash → its state (a fact of the moment, not stored).
+    clients: dict[str, str] = field(default_factory=dict)
 
     # --- what is asked ---------------------------------------------------------------------------------------------------
 
@@ -98,7 +102,8 @@ class Releases:
                            infohash=row["infohash"], state=ReleaseState(row["state"]), reason=row["reason"],
                            watched=bool(row["watched"]), folder=row["folder"],
                            pending=(row["url"], row["release"]) in self.pending, files=files,
-                           checked_at=row["checked_at"], fresh_until=self.fresh_until(row["checked_at"]))
+                           checked_at=row["checked_at"], fresh_until=self.fresh_until(row["checked_at"]),
+                           client=self.clients.get(row["infohash"]) if row["infohash"] else None)
 
     def fresh_until(self, checked_at: str | None) -> str | None:
         """The next check of the schedule after the last one: past it the release is not known to be current."""
@@ -237,18 +242,30 @@ class Releases:
 
     # --- what the client does ------------------------------------------------------------------------------------------
 
-    async def moving(self) -> bool:
-        return any(ReleaseState(row["state"]) in MOVING for row in await self.store.all())
-
-    async def tick(self) -> None:
-        """What the client says of every release that moves: its files, and the end of its download."""
-        rows = [row for row in await self.store.all() if ReleaseState(row["state"]) in MOVING and row["infohash"]]
-        if not rows:
-            return
-        qbt = self._client()
+    async def tick(self) -> bool:
+        """What the client says of every release it holds: told when it changed (a check began or ended), and for a release
+        that moves its files and the end of its download. True while one moves or is checked: the client is asked soon again."""
+        rows = [row for row in await self.store.all() if row["infohash"] and row["state"] != ReleaseState.ARCHIVED]
+        qbt = self.client()
+        if not rows or qbt is None:
+            return False
         info = {each["hash"]: each for each in await qbt.torrents_info([row["infohash"] for row in rows])}
+        busy = False
         for row in rows:
-            await self._follow(qbt, row, info.get(row["infohash"]))
+            found = info.get(row["infohash"])
+            state = found.get("state") if found else None
+            before = self.clients.get(row["infohash"])
+            if state is None:
+                self.clients.pop(row["infohash"], None)
+            else:
+                self.clients[row["infohash"]] = state
+            if ReleaseState(row["state"]) in MOVING:
+                await self._follow(qbt, row, found)
+                busy = True
+            if state != before:
+                await self._told(row["url"], row["release"])
+            busy = busy or state in CHECKING
+        return busy
 
     async def _follow(self, qbt: QbtClient, row: dict, info: dict | None) -> None:
         url, release = row["url"], row["release"]
@@ -338,6 +355,19 @@ class Releases:
             if row["infohash"] and qbt is not None:
                 await qbt.set_location(row["infohash"], folder)
             await self.store.save(row["url"], row["release"], folder=folder)
+
+
+def status_flag(view: ReleaseView) -> str | None:
+    """The flag of the status of a series that a release gives (modules/catalog/aggregator.py): what the client does with it
+    (a check, a download, a wait) while it is not ready, `ready` when it is, an error when it failed; an archived one gives none."""
+    if view.state == ReleaseState.FAILED:
+        return "error"
+    if view.state == ReleaseState.ARCHIVED:
+        return None
+    if view.state == ReleaseState.METADATA:
+        return "metadata"
+    ready = view.state == ReleaseState.READY
+    return torrent_flag(view.client or ("uploading" if ready else "downloading"), ready)
 
 
 def _titled(page: PageReleases, release: PageRelease) -> PageRelease:

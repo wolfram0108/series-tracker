@@ -51,6 +51,29 @@ POST_RECHECK = {"queuedUP", "queuedDL", "stalledUP", "stalledDL",
 RUNNING = {"uploading", "stalledUP", "forcedUP", "downloading",
            "stalledDL", "forcedDL", "queuedUP", "queuedDL"}
 PAUSED = {"pausedUP", "pausedDL", "stoppedUP", "stoppedDL"}
+# Простой: торрент в загрузке, но данные не идут (нет пиров/источников) — статус idle (Р-11).
+IDLE = {"stalledDL"}
+# Очередь: торрент ждёт свободного слота в очереди qBit — статус queued (Р-11).
+QUEUED = {"queuedDL"}
+# Состояния, в которых торрент ничего не качает и не проверяет: ни одной пилюли.
+NOT_DOWNLOADING = {"pausedUP", "pausedDL", "stoppedUP", "stoppedDL", "uploading"}
+
+
+def torrent_flag(status: str, complete: bool) -> str | None:
+    """The status flag of a series that a torrent gives by what its client says (the one place that words it, for the
+    torrents of the pipeline and the releases of the torrent sources): a check is shown whatever the progress; None — the
+    torrent is paused or seeding and shows nothing."""
+    if status in CHECKING:
+        return "checking"
+    if complete:
+        return "ready"
+    if status in IDLE:
+        return "idle"
+    if status in QUEUED:
+        return "queued"
+    if status in NOT_DOWNLOADING:
+        return None
+    return "downloading"
 
 
 def decide(stage: str, info: dict, recheck_initiated: bool,

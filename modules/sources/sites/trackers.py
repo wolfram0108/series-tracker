@@ -17,7 +17,7 @@ from core import NO_HANDLER, BusRequestError
 from core.contracts import SourceType
 from core.reasons import code_of, reason
 
-from . import ReadContext, SiteError, TableDraft, on_domain
+from . import PHASE_RELEASE, ReadContext, SiteError, TableDraft, on_domain
 
 
 @dataclass(frozen=True)
@@ -66,6 +66,8 @@ class TrackerSite:
     async def read(self, url: str, ctx: ReadContext) -> TableDraft:
         if ctx.ask is None:
             raise SiteError(reason("unpack_not_running"))
+        # The read is told at once, so every screen that shows reads shows this one from the click; the page is one step.
+        ctx.progress(PHASE_RELEASE, 0, 1)
         if ctx.fresh:
             # «Перечитать» of the source also checks its releases on the tracker: one button for the page and its releases.
             try:
@@ -73,6 +75,7 @@ class TrackerSite:
             except BusRequestError as exc:
                 if code_of(str(exc)) != NO_HANDLER:
                     raise SiteError(str(exc)) from exc
+        ctx.progress(PHASE_RELEASE, 1, 1)
         try:
             answer = await ctx.ask("unpack.table.get", {"url": url})
         except BusRequestError as exc:

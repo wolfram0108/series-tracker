@@ -6,8 +6,9 @@ import ToggleSwitch from "primevue/toggleswitch"
 import Button from "primevue/button"
 import { t, type MessageKey } from "../../../i18n"
 import type { SeriesSource } from "../../../lib/sources"
-import { siteOf } from "../../../lib/sources"
-import { RELEASE_STATES, stateIcon, stateLabel } from "../../../lib/states"
+import { progressText, siteOf } from "../../../lib/sources"
+import type { PageProgress } from "../../../stores/sourceTables"
+import { releaseShown, stateIcon, stateLabel } from "../../../lib/states"
 import { EDITOR_TABS, type Editor, type EditorTab, type PageReleases, type ReleaseView, type SourceState } from "../../../lib/torrent"
 import { downloadRelease, watchRelease } from "../../../composables/torrentCalls"
 import SourceMark from "../output/SourceMark.vue"
@@ -24,10 +25,13 @@ const props = defineProps<{
   editor: Editor | null
   tab: EditorTab
   counts: Record<EditorTab, number>
+  /** The page of the source is being read now (its «Перечитать», a sync, the schedule): how far, as the core tells it. */
+  pageRead: PageProgress | null
 }>()
 const emit = defineEmits<{ tab: [EditorTab]; failure: [string] }>()
 
-const named = computed(() => RELEASE_STATES[props.state.stage])
+// The stage of the release, unless the client says more: that it checks the files, waits in its queue or stands idle.
+const named = computed(() => releaseShown(props.state.stage, props.release?.client))
 const mark = computed(() => ({ n: props.place, color: props.source.color, place: props.source.url }))
 const title = computed(() => props.release?.title ?? chosenRelease.value?.title ?? props.page?.title ?? "")
 
@@ -91,6 +95,9 @@ async function setWatched(watched: boolean): Promise<void> {
     <b class="torrent-site">{{ page?.site || siteOf(source.url) }}</b>
     <span class="torrent-title" :title="title">{{ title }}<template v-if="told"> · {{ told }}</template></span>
     <span class="pill torrent-state" :data-state="named"><i class="pi" :class="stateIcon(named)" aria-hidden="true" />{{ stateLabel(named) }}</span>
+    <span v-if="pageRead" class="pill torrent-state torrent-page-read" data-state="read" role="status">
+      <i class="pi pi-spin pi-spinner" aria-hidden="true" />{{ progressText(pageRead) }}
+    </span>
     <!-- When the page was last checked for a newer version, and whether the next check of the schedule is past. -->
     <FreshMark v-if="release?.watched" :at="release.checked_at ?? null" :until="release.fresh_until ?? null" />
     <span v-if="progress" class="torrent-progress" :data-state="named">

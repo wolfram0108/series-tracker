@@ -105,12 +105,13 @@ async def stand(tmp_path):
     served.close()
 
 
-async def until(told, state: str) -> dict:
-    """The next news of the release in `state`; every news before it is passed by."""
+async def until(told, state: str, wanted=lambda news: True) -> dict:
+    """The next news of the release in `state` that `wanted` accepts; every news before it is passed by (the client's word
+    of the torrent is told too, so one state can be told several times)."""
     async def wait():
         while True:
             news = (await told.queue.get()).payload
-            if news["state"] == state:
+            if news["state"] == state and wanted(news):
                 return news
     return await asyncio.wait_for(wait(), LIMIT_S)
 
@@ -137,7 +138,7 @@ async def test_an_update_comes_into_the_same_folder_and_leaves_only_the_files_of
     h2 = world.lists(model, release(V2), published="d2", link="L2")
     assert (await world.request("torrents.release.check", {"url": PAGE}))["releases"] == ["page"]
     updating = await until(told, "updating")
-    ready = await until(told, "ready")
+    ready = await until(told, "ready", lambda news: news["infohash"] == h2)
 
     assert h1 not in model.torrents and h2 in model.torrents
     assert ("torrents/delete", {"hashes": h1, "deleteFiles": "false"}) in model.calls
@@ -147,6 +148,24 @@ async def test_an_update_comes_into_the_same_folder_and_leaves_only_the_files_of
     assert os.stat(f"{folder}/Show/E01.mkv").st_mtime_ns == kept  # a file the update did not change is not written again
     versions = await torrents.releases.store.versions((await torrents.releases.store.get(PAGE, "page"))["id"])
     assert [v["infohash"] for v in versions] == [h1, h2]
+
+    # The client checks the files again (the check an update begins with): the window is told what the client says and the
+    # series whose source is the page shows a check on its card while it lasts, then its release is ready again.
+    status = torrents.bus.subscribe("series.status.contribution")
+
+    async def flags_until(wanted: dict[str, bool]) -> None:
+        async def wait():
+            while True:
+                flags = (await status.queue.get()).payload["flags"]
+                if all(flags[name] == on for name, on in wanted.items()):
+                    return
+        await asyncio.wait_for(wait(), LIMIT_S)
+
+    model.checking.add(h2)
+    await flags_until({"checking": True, "ready": False})
+    assert (await world.request("torrents.releases.get", {"url": PAGE}))["releases"][0]["client"].startswith("checking")
+    model.checking.discard(h2)
+    await flags_until({"checking": False, "ready": True})
 
 
 async def test_an_update_waits_for_the_end_of_a_sync_of_a_series_with_the_page(stand):
@@ -159,12 +178,12 @@ async def test_an_update_waits_for_the_end_of_a_sync_of_a_series_with_the_page(s
     await asyncio.wait_for(_until_held(torrents), LIMIT_S)
     h2 = world.lists(model, release(V2), published="d2", link="L2")
     await world.request("torrents.release.check", {"url": PAGE})
-    waiting = (await told.queue.get()).payload
-    assert waiting["pending"] and waiting["state"] == "ready" and h2 not in model.torrents
+    waiting = await until(told, "ready", lambda news: news["pending"])
+    assert h2 not in model.torrents
 
     world.publish_event(RUN_CHANGED, {"series_id": 1, "active": False, "seq": 2})
-    ready = await until(told, "ready")
-    assert ready["infohash"] == h2 and not ready["pending"]
+    ready = await until(told, "ready", lambda news: news["infohash"] == h2)
+    assert not ready["pending"]
 
 
 async def _until_held(torrents) -> None:
@@ -208,10 +227,10 @@ async def test_a_check_tells_when_it_was_and_the_next_check_of_the_schedule_and_
 
     schedule = {"syncs": ["00:00", "12:00"], "torrent_mode": "between", "torrent_free": [], "torrent_between": 1}
     world.publish_event("settings.changed", {"key": "schedule", "value": json.dumps(schedule)})
-    await until(told, "ready")
-    assert torrents.releases.checks == (360, 1080)
+    while torrents.releases.checks != (360, 1080):
+        await asyncio.wait_for(told.queue.get(), LIMIT_S)
     await world.request("torrents.release.check", {"url": PAGE})
-    checked = await until(told, "ready")
+    checked = await until(told, "ready", lambda news: news["checked_at"] is not None)
     at = datetime.fromisoformat(checked["checked_at"])
     assert datetime.fromisoformat(checked["fresh_until"]) == next_at((360, 1080), at)
 
@@ -219,3 +238,4 @@ async def test_a_check_tells_when_it_was_and_the_next_check_of_the_schedule_and_
     assert await torrents.releases.due(at - timedelta(minutes=1), {PAGE}) == []
     assert await torrents.releases.due(at + timedelta(minutes=1), {PAGE}) == [PAGE]
     assert await torrents.releases.due(at + timedelta(minutes=1), set()) == []
+

@@ -156,6 +156,18 @@ export const RELEASE_STATES: Readonly<Record<SourceStage, StateName>> = {
   archived: "archived",
 }
 
+/** The states of the client that a release shows instead of its own stage: what the client does with it now. A download that
+ *  waits in the queue or stands idle, a check of the files (also of a ready release), a move. */
+const CLIENT_OVER_STAGE: readonly StateName[] = ["checking", "moving", "queued", "idle", "stopped"]
+const STAGES_THE_CLIENT_SPEAKS_FOR: readonly SourceStage[] = ["download", "update", "ready"]
+
+/** The state a release shows: its stage, unless the client says it is checking, moving, queued, idle or stopped. */
+export function releaseShown(stage: SourceStage, client: string | null | undefined): StateName {
+  const own = RELEASE_STATES[stage]
+  const live = stateOf(QBIT_STATES, client)
+  return live && CLIENT_OVER_STAGE.includes(live) && STAGES_THE_CLIENT_SPEAKS_FOR.includes(stage) ? live : own
+}
+
 /** A release of a torrent source as the module torrents keeps it (core/contracts/torrent.py ReleaseState). */
 export const RELEASE_CODES = {
   metadata: "metadata", downloading: "download", ready: "done", updating: "update", failed: "failed", archived: "archived",

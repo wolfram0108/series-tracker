@@ -94,7 +94,11 @@ torrent_release_files, torrent_release_versions), keyed by the page and the id o
       releases move there on settings.changed; event torrents.staging.changed {value} tells every window the folder held now
   torrents.release.drop_files {url, release} (command) — a release no longer watched gives up its files (archived)
   Event torrents.release.changed ReleaseView — state, version or files changed; `ready` once every wanted file is there
-  (an update ends by removing the files of the old version the new one does not list). A page no source lists any more
+  (an update ends by removing the files of the old version the new one does not list). `client` of the view is what the
+  client says of the torrent (qBittorrent's state as is, e.g. `checkingDL`): the client is asked while a release moves or
+  is checked, and once in `monitor_idle` otherwise; a change of it is told as the event above. The releases of the pages
+  of the torrent sources of a series give the flags of its status (checking, downloading, queued, idle, ready, error,
+  metadata) by the same words as its own torrents (pipeline.torrent_flag). A page no source lists any more
   (series.source.removed, series.deleted) leaves the client with its files and its folder. settings.changed
   {key: torrents.staging_dir} moves every release to the new folder (setLocation); {key: schedule} sets the times of the
   checks and tells every release again (its `fresh_until` moved); {key: scanner_agent_enabled} wakes the checks.
@@ -113,7 +117,7 @@ from datetime import datetime, timezone
 
 from core import BaseModule, BusRequestError, storage, torrent_profile_id
 from core.contracts import RUN_CHANGED, RunChanged
-from core.contracts.torrent import STAGING_DIR_KEY
+from core.contracts.torrent import RELEASE_CHANGED_TOPIC, STAGING_DIR_KEY
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason, relayed
@@ -124,19 +128,9 @@ from . import pipeline, selection
 from .infohash import (TorrentParseError, infohash_candidates,
                        infohash_from_magnet, torrent_file_list)
 from .qbt_client import QbtClient, QbtError
-from .releases import Releases
+from .releases import Releases, status_flag
 from .repository import ReleaseStore, TorrentsRepository
 
-# state-исключения для downloading (старый sync_torrent_statuses +
-# stopped*-имена поколения qBit 5.x)
-_NOT_DOWNLOADING = {"pausedUP", "pausedDL", "stoppedUP", "stoppedDL",
-                    "uploading"}
-# Простой: торрент в загрузке, но данные не идут (нет пиров/источников).
-# Отдельный статус idle (Р-11): цвет как у downloading, пилюля «Простой».
-_IDLE_STATES = {"stalledDL"}
-# Очередь: торрент ждёт свободного слота в очереди qBit. Отдельный
-# статус queued (Р-11): свой цвет слоя, пилюля «В очереди».
-_QUEUED_STATES = {"queuedDL"}
 # Состояния-ошибки qBittorrent: внутренняя ошибка раздачи и
 # недоступные/пропавшие файлы (находка 43). Старая система (и наш
 # перенос) считала их «загрузкой» — карточка врала; теперь это флаг
@@ -191,7 +185,7 @@ class TorrentsModule(BaseModule):
         self._schedule_wake = asyncio.Event()
         self.releases = Releases(
             ReleaseStore(db), client=lambda: self.qbt, request=lambda topic, payload: self.request(topic, payload),
-            publish=lambda topic, payload: self.publish_event(topic, payload), wake=self._release_wake.set)
+            publish=self._release_event, wake=self._release_wake.set)
         super().__init__(bus)
 
     def register(self) -> None:
@@ -1318,14 +1312,11 @@ class TorrentsModule(BaseModule):
                 flags["error"] = True
             elif row["qb_hash"] in fully_excluded:
                 continue
-            elif row["progress"] >= 100:
-                flags["ready"] = True
-            elif row["status"] in _IDLE_STATES:
-                flags["idle"] = True
-            elif row["status"] in _QUEUED_STATES:
-                flags["queued"] = True
-            elif row["status"] not in _NOT_DOWNLOADING:
-                flags["downloading"] = True
+            elif flag := pipeline.torrent_flag(row["status"], row["progress"] >= 100):
+                flags[flag] = True
+        # The releases of the torrent sources of the series speak by the same words as its own torrents.
+        for flag in await self._release_flags(series_id):
+            flags[flag] = True
         if self._flags_cache.get(series_id) == flags:
             return
         self._flags_cache[series_id] = flags
@@ -1334,6 +1325,33 @@ class TorrentsModule(BaseModule):
 
 
     # --- the releases of the torrent sources (stage 15, modules/torrents/releases.py) ------------------------------
+
+    def _release_event(self, topic: str, payload: dict) -> None:
+        """A release told of: the window is told, and the series whose source is its page recount their status."""
+        self.publish_event(topic, payload)
+        if topic == RELEASE_CHANGED_TOPIC:
+            self.spawn(self._contribute_page(payload["url"]), name=f"torrents.release.contribute:{payload['url']}")
+
+    async def _contribute_page(self, url: str) -> None:
+        try:
+            for series in await self.request("catalog.series.list", {}):
+                for source in series.get("sources") or []:
+                    if source.get("source_type") == "torrent" and await self._canonical(source["url"]) == url:
+                        await self._contribute(series["id"])
+                        break
+        except Exception:  # noqa: BLE001 - the next word of a release or the next tick of the monitor counts again
+            self.log.exception("статус сериалов страницы раздач %s не пересчитан", url)
+
+    async def _release_flags(self, series_id: int) -> set[str]:
+        """The flags of the status that the releases of the pages of the torrent sources of the series give."""
+        if not await self.releases.store.all():
+            return set()
+        flags: set[str] = set()
+        for page in await self._pages_of(series_id):
+            for view in await self.releases.of_page(page):
+                if flag := status_flag(view):
+                    flags.add(flag)
+        return flags
 
     async def _start_releases(self) -> None:
         try:
@@ -1348,11 +1366,6 @@ class TorrentsModule(BaseModule):
                 self.releases.runs[run["series_id"]] = await self._pages_of(run["series_id"])
         except Exception:  # noqa: BLE001 - an update that begins in a run is the worse loss: none begins until the next run news
             self.log.exception("the open syncs were not read; the updates wait for the news of a run")
-        try:
-            if await self.releases.moving():
-                self._release_wake.set()  # releases moved when the service stopped: the client is asked at once
-        except Exception:  # noqa: BLE001 - the next word of a release wakes the following
-            self.log.exception("the releases of the torrent sources were not read at the start")
         try:
             self.releases.checks = parse((await self.request("settings.value.get", {"key": SCHEDULE_KEY})).get("value")).checks()
         except Exception:  # noqa: BLE001 - without the schedule no page is checked until it changes
@@ -1445,27 +1458,24 @@ class TorrentsModule(BaseModule):
             await self.releases.told_all()  # the next check of every release moved
 
     async def _release_loop(self) -> None:
-        """Woken by a word (a release added, its priorities changed); while a release moves the client is asked again at
-        the pace of the monitor, since it pushes nothing; when none moves the loop waits for the next word."""
+        """Woken by a word (a release added, its priorities changed). The client pushes nothing: it is asked again at the
+        pace of the monitor while a release moves or is checked, and at the idle pace otherwise, so that a check the client
+        began by itself is told too."""
         while True:
-            await self._release_wake.wait()
-            self._release_wake.clear()
             try:
-                await self.releases.tick()
-                moving = await self.releases.moving()
+                busy = await self.releases.tick()
                 await self._broadcast_progress()
             except QbtError as exc:
                 self.log.warning("раздачи источников: qBittorrent недоступен: %s", exc)
-                moving = True
+                busy = True
             except Exception:  # noqa: BLE001 - one bad tick does not end the following of the releases
                 self.log.exception("ошибка такта раздач источников")
-                moving = True
-            if not moving:
-                continue
+                busy = True
             try:
-                await asyncio.wait_for(self._release_wake.wait(), self._monitor_active)
+                await asyncio.wait_for(self._release_wake.wait(), self._monitor_active if busy else self._monitor_idle)
             except TimeoutError:
-                self._release_wake.set()
+                pass
+            self._release_wake.clear()
 
     async def _watch_loop(self) -> None:
         """The watched pages are checked at the times of the schedule (core/schedule.py; the time of day is the subject of

@@ -89,6 +89,7 @@ async def test_the_output_lays_the_subtitles_of_a_release_in_the_container_defau
     await stand.configure([VOICE])
     await stand.call("POST", "/api/settings/torrent_staging", {"value": stand.staging})
     page = stand.torrent_page("subs", "Сериал", {"Show - 01.mkv": 1, "Show - 01.rus.ass": ASS})
+    reads = stand.bus.subscribe("composition.series.reading")
     made = await stand.call("POST", "/api/series", {"name": "Сериал", "name_en": "Show", "site": "anilibria",
                                                     "save_path": stand.library, "sources": [
                                                         {"url": page.url, "source_type": "torrent",
@@ -120,3 +121,11 @@ async def test_the_output_lays_the_subtitles_of_a_release_in_the_container_defau
     assert [each["episode"] for each in view["assets"]] == [[1, 1]]
     held = await container.contents(os.path.join(stand.library, view["assets"][0]["name"]))
     assert [(each.title, each.language, each.default, each.forced) for each in held.subtitles] == [("Надписи", "rus", False, True)]
+
+    # Every read of the page is told to the series from its first moment (a tracker page has one
+    # step, the release) to its end, so the card and the window of the source show it.
+    told = []
+    while not reads.queue.empty():
+        packet = reads.queue.get_nowait().payload
+        told.append((packet["phase"], packet["active"]))
+    assert ("release", True) in told and told[-1][1] is False

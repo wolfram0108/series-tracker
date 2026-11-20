@@ -26,6 +26,8 @@ export interface ReleaseView {
   /** When the page was last checked for a newer version (none: never), and the next check of the schedule after it. */
   checked_at?: string | null
   fresh_until?: string | null
+  /** What the client says of the torrent now, as it words it (qBittorrent's state: `checkingDL`, `downloading`...); none: not known. */
+  client?: string | null
 }
 /** A release as the page lists it now (sources.releases.get). */
 export interface PageRelease { release: string; title: string; link?: string | null; magnet?: string | null; published?: string | null; episodes?: string | null }
