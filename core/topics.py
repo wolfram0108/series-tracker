@@ -48,10 +48,10 @@ from typing import Final, Literal, Mapping
 from pydantic import BaseModel
 
 from .contracts import (
-    AlignmentJob, BusyContribution, CompositionChanged, CompositionFailed, CompositionGetRequest,
+    AdminState, AlignmentJob, BusyContribution, CompositionChanged, CompositionFailed, CompositionGetRequest,
     CompositionPreviewReply, CompositionPreviewRequest, CompositionReply, ConformParams, ConformSettingsDraft,
-    ConformSettingsSaved, ConformSettingsView, GroupsResolveReply, GroupsResolveRequest, OutputSwitch,
-    PlanDelete, PlanForget, PlannerView, PlayersListReply, PlayersListRequest, ProviderSaved, ProviderSettingsDraft, ProviderView,
+    ConformSettingsSaved, ConformSettingsView, GroupsResolveReply, GroupsResolveRequest, LoginReply, OutputSwitch,
+    PasswordSaved, PlanDelete, PlanForget, PlannerView, PlayersListReply, PlayersListRequest, ProviderSaved, ProviderSettingsDraft, ProviderView,
     QueuesGet, QueuesReply, ReverseReply, ReverseSubmit, RulesApplyReply, RulesApplyRequest, RulesProfileChanged,
     RunChanged, SavedPaths, SeriesCard, SeriesDeleted, SeriesListReply, SeriesPurged, SeriesReadProgress,
     SeriesStatusChanged, SeriesUpdated, SettingsReset, SettingsSet, SettingsSetMany, SettingValue, SettingValues,
@@ -121,10 +121,10 @@ def each(count: int, step: Topic) -> tuple[Topic, ...]:
 
 
 # --- auth --------------------------------------------------------------------------------------------------------
-AUTH_EXISTS = Topic("auth.exists", QUERY, "auth", fuse=QUICK_S)
+AUTH_EXISTS = Topic("auth.exists", QUERY, "auth", reply=AdminState, fuse=QUICK_S)
 # A password found right also renews an outdated hash of it, in the table of the module itself.
-AUTH_LOGIN = Topic("auth.login", QUERY, "auth", fuse=QUICK_S)
-AUTH_PASSWORD_SET = Topic("auth.password.set", COMMAND, "auth", fuse=QUICK_S)
+AUTH_LOGIN = Topic("auth.login", QUERY, "auth", reply=LoginReply, fuse=QUICK_S)
+AUTH_PASSWORD_SET = Topic("auth.password.set", COMMAND, "auth", reply=PasswordSaved, fuse=QUICK_S)
 
 # --- catalog -----------------------------------------------------------------------------------------------------
 # Answered as the models themselves (immutable): a module of the process reads them as they are, the gateway writes them for the window.

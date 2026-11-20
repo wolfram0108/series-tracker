@@ -26,6 +26,7 @@ from .release_table import (LINE_FIELDS, LINE_SEPARATOR, ParsedDomains, PlayerFa
                             TableState, UnreadPart, line_of, place_of)
 from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, RulesProfileChanged
 from .series_sources import SeriesSource, SourceChanged, SourceEvent, SourceType
+from .auth import AdminState, LoginReply, PasswordSaved
 from .settings import SavedPath, SavedPaths, SettingValue, SettingValues
 from .series import (BusyContribution, SeriesCard, SeriesDeleted, SeriesListReply, SeriesPurged, SeriesStatusChanged,
                      SeriesUpdated, SourcesReply, StatusContribution)
@@ -46,7 +47,7 @@ __all__ = ["TitleCard", "TitleLine", "TitleSearchReply", "TitleSearchRequest", "
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
            "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",
            "BusyContribution", "SeriesCard", "SeriesDeleted", "SeriesListReply", "SeriesPurged", "SeriesStatusChanged", "SeriesUpdated",
-           "SourcesReply", "StatusContribution", "SavedPath", "SavedPaths", "SettingValue", "SettingValues",
+           "SourcesReply", "StatusContribution", "AdminState", "LoginReply", "PasswordSaved", "SavedPath", "SavedPaths", "SettingValue", "SettingValues",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan", "VoiceTitleSet",
            "EpisodeRef", "Exclusion", "LAYOUT_PARTS", "LayoutPart", "PlayerSummary", "SourceStatus", "SourceSummary",

@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from core.module import BusRequestError
 from core.reasons import reason
+from core.topics import AUTH_EXISTS, AUTH_LOGIN, AUTH_PASSWORD_SET
 
 # Защита от перебора: на IP — окно неудач и временный бан (in-memory;
 # одно-процессное приложение, отдельного хранилища не нужно). Реальный IP
@@ -61,13 +62,12 @@ def build_router(gw):
         username = (data.get("username") or "").strip()
         password = data.get("password") or ""
         try:
-            reply = await gw.request(
-                "auth.login", {"username": username, "password": password})
+            reply = await gw.reply_of(AUTH_LOGIN, {"username": username, "password": password})
         except BusRequestError:
             return JSONResponse(
                 {"success": False, "error": reason("auth_unavailable")},
                 status_code=503)
-        if not reply.get("ok"):
+        if not reply.ok:
             limiter.record_fail(ip, now)
             return JSONResponse(
                 {"success": False, "error": reason("login_wrong")},
@@ -84,9 +84,9 @@ def build_router(gw):
         ввода логина (приложение однопользовательское)."""
         admin = ""
         try:
-            reply = await gw.request("auth.exists", {})
-            configured = bool(reply.get("exists"))
-            admin = reply.get("username") or ""
+            reply = await gw.reply_of(AUTH_EXISTS, {})
+            configured = reply.exists
+            admin = reply.username
         except BusRequestError:
             configured = False
         user = request.session.get("user")
@@ -101,7 +101,7 @@ def build_router(gw):
         нет; после создания — 403 (пересоздать в обход входа нельзя).
         Успех сразу логинит (сессия)."""
         try:
-            exists = (await gw.request("auth.exists", {})).get("exists")
+            exists = (await gw.reply_of(AUTH_EXISTS, {})).exists
         except BusRequestError:
             return JSONResponse(
                 {"success": False, "error": reason("auth_unavailable")},
@@ -118,9 +118,8 @@ def build_router(gw):
                 {"success": False,
                  "error": reason("setup_incomplete", min=8)},
                 status_code=400)
-        reply = await gw.request(
-            "auth.password.set", {"username": username, "password": password})
-        if not reply.get("ok"):
+        reply = await gw.reply_of(AUTH_PASSWORD_SET, {"username": username, "password": password})
+        if not reply.ok:
             return JSONResponse(
                 {"success": False, "error": reason("admin_create_failed")},
                 status_code=400)
@@ -148,9 +147,8 @@ def build_router(gw):
                 {"success": False,
                  "error": reason("new_password_short", min=8)},
                 status_code=400)
-        reply = await gw.request(
-            "auth.password.set", {"username": user, "password": new})
-        if not reply.get("ok"):
+        reply = await gw.reply_of(AUTH_PASSWORD_SET, {"username": user, "password": new})
+        if not reply.ok:
             return JSONResponse(
                 {"success": False, "error": reason("password_change_failed")},
                 status_code=400)

@@ -1,4 +1,4 @@
-"""Репозиторий auth: таблица admin_user (одна строка — один администратор)."""
+"""The repository of auth: the table admin_user (one row, one administrator)."""
 from __future__ import annotations
 
 from core.db import Database
