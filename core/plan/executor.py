@@ -17,7 +17,7 @@ from typing import Callable
 
 from .. import compute
 from ..reasons import reason
-from .planner import Goal, Group, Op, Plan, plan, restricted, video_op
+from .planner import Goal, Group, Op, Plan, plan, renamed, restricted, video_op
 from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
 
 # The steps that obtain a row; the take of a row of subtitles from its file is one of them (DESIGN.md 7.1.1).
@@ -351,7 +351,8 @@ class SeriesSync:
     async def plan_of(self, inputs: Inputs) -> Plan:
         first = await compute.run(plan, inputs, self.namer)
         namer = await self.namer_for(first)
-        made = first if namer is self.namer else await compute.run(plan, inputs, namer)
+        # The names came after the goals: the goals stay, their steps and groups are made again with the names.
+        made = first if namer is self.namer else await compute.run(renamed, inputs, first, namer)
         return made if self.holds is None else restricted(made, self.holds)
 
     async def sync(self, online: tuple[OnlineRow, ...], choices: Choices) -> Synced:

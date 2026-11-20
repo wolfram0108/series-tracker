@@ -563,9 +563,10 @@ async def test_the_names_of_the_files_are_asked_of_the_rule_once_for_a_card_and_
     episode(neighbours, 1, 1)
     episode(neighbours, 1, 2)
     seen, untap = tapped(planner)
-    made = []
-    counted = executor.plan
+    made, named = [], []
+    counted, renamed = executor.plan, executor.renamed
     monkeypatch.setattr(executor, "plan", lambda *args: made.append(1) or counted(*args))
+    monkeypatch.setattr(executor, "renamed", lambda *args: named.append(1) or renamed(*args))
     try:
         await planner.request("planner.series.get", {"series_id": SERIES})
         asked = len([each for each in seen if each.topic == "rules.format_filename" and each.kind == "query"])
@@ -574,7 +575,8 @@ async def test_the_names_of_the_files_are_asked_of_the_rule_once_for_a_card_and_
         again = len([each for each in seen if each.topic == "rules.format_filename" and each.kind == "query"]) - asked
     finally:
         untap()
-    assert asked >= 1 and plans == 2  # the first view: names asked, then the plan made again with them
+    # The first view: the goals counted once, the names asked, then the goals named with them (no goal counted again).
+    assert asked >= 1 and plans == 1 and named == [1]
     assert again == 0 and len(made) == plans  # nothing changed: the second read takes the view as it was counted
 
 
@@ -659,9 +661,10 @@ async def test_a_start_counts_again_only_a_series_whose_inputs_changed_since_it_
     episode(neighbours, 1, 1)
     await sync(world)
     await planner.request("planner.series.get", {"series_id": SERIES})  # the view of the tables after the sync
-    made = []
-    counted = executor.plan
+    made, named = [], []
+    counted, renamed = executor.plan, executor.renamed
     monkeypatch.setattr(executor, "plan", lambda *args: made.append(1) or counted(*args))
+    monkeypatch.setattr(executor, "renamed", lambda *args: named.append(1) or renamed(*args))
     running = [planner]
 
     async def restarted() -> int:
@@ -710,9 +713,10 @@ async def test_the_view_is_counted_once_for_changes_that_come_together_and_every
     neighbours, planner, _ = world
     episode(neighbours, 1, 1)
     await planner.request("planner.series.get", {"series_id": SERIES})
-    made = []
-    counted = executor.plan
+    made, named = [], []
+    counted, renamed = executor.plan, executor.renamed
     monkeypatch.setattr(executor, "plan", lambda *args: made.append(1) or counted(*args))
+    monkeypatch.setattr(executor, "renamed", lambda *args: named.append(1) or renamed(*args))
     told = planner.bus.subscribe("planner.series.changed")
     for _ in range(5):
         planner.bus.publish(Envelope(topic="composition.changed", kind="event", payload={"series_id": SERIES}))

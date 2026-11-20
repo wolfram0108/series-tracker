@@ -2,7 +2,6 @@
 whether its row is online), the goal of every episode as the last plan counted it, the failures and the commands."""
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Iterable
 
 from core.plan.executor import SeriesSync
@@ -11,7 +10,7 @@ from core.plan.tables import OnlineRow, RowId
 
 
 def _row(row: RowId | None) -> dict | None:
-    return None if row is None else asdict(row)
+    return None if row is None else row.fields()
 
 
 def _variant(variant: tuple[str, int, str] | None) -> dict | None:
@@ -67,9 +66,9 @@ def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: boo
         video = container.video
         assets.append({
             "name": container.name, "off": container.off, "episode": list(video.episode),
-            "video": {"row": _row(video.id), "cut_of": _row(video.cut_of), **asdict(video.snapshot),
+            "video": {"row": _row(video.id), "cut_of": _row(video.cut_of), **video.snapshot.fields(),
                       "online": None if online is None else video.id in online},
-            "tracks": [{"row": _row(track.dub), **asdict(track.snapshot),
+            "tracks": [{"row": _row(track.dub), **track.snapshot.fields(),
                         "online": None if online is None else track.dub in online} for track in container.tracks],
             "timeline": _variant(timeline_variant(container)),
             "subtitles": [_subtitle(each) for each in container.subtitles]})
@@ -78,11 +77,11 @@ def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: boo
         for goal in made.goals:
             episodes.append({
                 "slot": list(goal.slot), "name": goal.name, "off": goal.off, "voices_off": sorted(goal.voices_off),
-                "video": {"kind": goal.video.kind, **asdict(goal.video.snapshot), "row": _row(goal.video.timeline),
+                "video": {"kind": goal.video.kind, **goal.video.snapshot.fields(), "row": _row(goal.video.timeline),
                           "file": goal.video.container.name if goal.video.container is not None else None,
                           "cut_of": _row(goal.video.row.id if goal.video.kind == "cut" else
                                          goal.video.container.video.cut_of if goal.video.container is not None else None)},
-                "tracks": [{"voice": way.voice, "kind": way.kind, "row": _row(way.dub), **asdict(way.snapshot),
+                "tracks": [{"voice": way.voice, "kind": way.kind, "row": _row(way.dub), **way.snapshot.fields(),
                             "own": way.own} for way in goal.tracks],
                 "markup": voice_of(goal.markup.group, goal.markup.id) if goal.markup is not None else None,
                 "markup_variant": _variant(goal.markup.variant) if goal.markup is not None else None,

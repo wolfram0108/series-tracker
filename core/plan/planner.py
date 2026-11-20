@@ -214,22 +214,61 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
     """The goal, the graph and the groups of a series. `namer` is the rule of the name of a file (the series' own rule of
     names in the service); without it a plain name of the episode, the group and the height. Its rows are rows of the
     output only (`online_of`): a file made before of a row no group took stays as it is and takes no new work."""
-    choices = inputs.choices
-    online = {row.id: row for row in inputs.online}
-    # A timeline is found as its row is: a row's own timeline is the row, a timeline several rows share is each of them.
-    on_timeline = {**{row.timeline: row for row in inputs.online}, **online}
-    singles = [row for row in inputs.online if not row.compilation]
-    deleted_videos = {each[1] for each in choices.delete if each[0] == "video"}
-    deleted_tracks = {(each[1], each[2]) for each in choices.delete if each[0] == "track"}
-    containers = sorted(inputs.containers, key=lambda each: each.name)
+    frame = _Frame(inputs)
+    return _planned(inputs, frame, _goals(inputs, frame, namer or default_name))
 
-    def video_slot(video: Video) -> Slot:
-        row = on_timeline.get(video.timeline) if video.cut_of is not None else online.get(video.id)
+
+def renamed(inputs: Inputs, made: Plan, namer: Callable[[Slot, VideoWay, bool], str]) -> Plan:
+    """The plan `made` of these inputs with the names `namer` gives: a name is no input of a goal, only its name, so the goals
+    stay and their steps and groups — which read the names — are made again."""
+    goals = tuple(replace(goal, name=namer(goal.slot, goal.video, goal.off)) for goal in made.goals)
+    return _planned(inputs, _Frame(inputs), goals)
+
+
+def default_name(slot: Slot, video: VideoWay, off: bool) -> str:
+    return name_of(slot, video.snapshot, off)
+
+
+class _Frame:
+    """What every part of a plan reads of its inputs: the rows and the files by what they are, and where each file and
+    track stands."""
+
+    def __init__(self, inputs: Inputs) -> None:
+        choices = inputs.choices
+        self.online = {row.id: row for row in inputs.online}
+        # A timeline is found as its row is: a row's own timeline is the row, a timeline several rows share is each of them.
+        self.on_timeline = {**{row.timeline: row for row in inputs.online}, **self.online}
+        self.deleted_videos = {each[1] for each in choices.delete if each[0] == "video"}
+        self.deleted_tracks = {(each[1], each[2]) for each in choices.delete if each[0] == "track"}
+        self.containers = sorted(inputs.containers, key=lambda each: each.name)
+
+    def video_slot(self, video: Video) -> Slot:
+        row = self.on_timeline.get(video.timeline) if video.cut_of is not None else self.online.get(video.id)
         return row.slot if row is not None and not row.compilation else video.episode
 
-    def track_slot(track: Track) -> Slot:
-        row = online.get(track.dub)
+    def track_slot(self, track: Track) -> Slot:
+        row = self.online.get(track.dub)
         return row.slot if row is not None and not row.compilation else track.episode
+
+
+def _planned(inputs: Inputs, frame: _Frame, goals) -> Plan:
+    """The steps and the groups of the goals."""
+    choices = inputs.choices
+    ops = _ops(goals, frame.containers)
+    groups = _groups(goals, ops, frame.containers, frame.deleted_videos, frame.video_slot, frame.track_slot,
+                     lambda track, slot: switched_off(choices, track, slot), frame.deleted_tracks,
+                     lambda variant, slot: variant in choices.subtitle_deny.get(episode_of(slot), frozenset()))
+    return Plan(tuple(goals), tuple(ops), tuple(groups))
+
+
+def _goals(inputs: Inputs, frame: _Frame, namer: Callable[[Slot, VideoWay, bool], str]) -> list[Goal]:
+    """The goal of every episode the rows or the files have."""
+    choices = inputs.choices
+    online = frame.online
+    singles = [row for row in inputs.online if not row.compilation]
+    deleted_videos = frame.deleted_videos
+    containers = frame.containers
+    video_slot, track_slot = frame.video_slot, frame.track_slot
 
     order = Order(tuple(choices.players), {source_id: place for place, source_id in enumerate(choices.sources)},
                   choices.player_groups)
@@ -284,17 +323,11 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
             (container, own_track(container), True, container.name in deleted_videos))
         for track in container.tracks:
             by_slot.tracks.setdefault(track_slot(track), []).append(
-                (container, track, False, (container.name, track.dub) in deleted_tracks))
+                (container, track, False, (container.name, track.dub) in frame.deleted_tracks))
 
     slots = sorted(set(by_slot.rows) | set(by_slot.files))
-    namer = namer or (lambda slot, video, off: name_of(slot, video.snapshot, off))
-    goals = [goal for slot in slots if (goal := _goal(slot, inputs, namer, by_slot, criteria, position,
-                                                      group_rank, own_place)) is not None]
-    ops = _ops(goals, containers)
-    groups = _groups(goals, ops, containers, deleted_videos, video_slot, track_slot,
-                     lambda track, slot: switched_off(choices, track, slot), deleted_tracks,
-                     lambda variant, slot: variant in choices.subtitle_deny.get(episode_of(slot), frozenset()))
-    return Plan(tuple(goals), tuple(ops), tuple(groups))
+    return [goal for slot in slots if (goal := _goal(slot, inputs, namer, by_slot, criteria, position,
+                                                     group_rank, own_place)) is not None]
 
 
 class Index:
