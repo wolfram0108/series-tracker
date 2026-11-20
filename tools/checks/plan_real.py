@@ -39,8 +39,8 @@ from calc.rules.reply import result_of  # noqa: E402
 from modules.rules.repository import RulesRepository  # noqa: E402
 from modules.settings.repository import SettingsRepository  # noqa: E402
 from modules.sources.repository import SourcesRepository  # noqa: E402
-from modules.voices import editor  # noqa: E402
-from modules.voices.settings import PREFIX, parse  # noqa: E402
+from calc.voices import editor  # noqa: E402
+from calc.voices.settings import PREFIX, parse  # noqa: E402
 
 PROD_DB = os.path.join(ROOT, "app.db")
 
@@ -136,7 +136,7 @@ async def inputs_of(real: RealSeries, series_id: int, rules: dict[int, list[dict
     rows, info = await real.layout(series_id, rules)
     stored = replace(info["stored"], rows=rows)
     layout = layout_of(CompositionGetRequest(series_id=series_id), stored)
-    voices = editor.view(info["voices"]).model_dump(mode="json")
+    voices = editor.view(info["voices"])
     online, choices = plan_inputs.planner_inputs(layout, info["card"], voices)
     containers = asset_of(real.path, series_id, list(online))
     info["rows"] = rows

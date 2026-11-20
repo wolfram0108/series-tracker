@@ -1,5 +1,5 @@
 """Tests of the typed reading of the voices settings."""
-from modules.voices.settings import DEFAULT_PRIORITY, parse
+from calc.voices.settings import DEFAULT_PRIORITY, parse
 
 
 def test_each_wrong_value_falls_back_to_its_default_and_is_named():

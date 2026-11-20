@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .frozen import Frozen
+
 
 class GroupsResolveRequest(BaseModel):
     names: list[str]
@@ -12,7 +14,7 @@ class GroupsResolveRequest(BaseModel):
     values: dict[str, Any] | None = None
 
 
-class GroupsResolveReply(BaseModel):
+class GroupsResolveReply(Frozen):
     """A name that matches no trigger of any group maps to None."""
 
     groups: dict[str, str | None] = Field(default_factory=dict)

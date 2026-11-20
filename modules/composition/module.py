@@ -720,20 +720,12 @@ class CompositionModule(BaseModule):
 
     async def _voices(self) -> VoiceSettingsView:
         """The settings of the voice-overs as they stand now: the order of players and sources the queues are made by."""
-        return await self._reply_of(VOICES_SETTINGS_GET, {})
-
-    async def _reply_of(self, topic: Topic, payload=None):
-        """The answer of the owner of `topic` as the model of its record. An answer that came as that model is taken as it
-        is; a dictionary is checked, off the loop (the tables and the answers of the rules are thousands of rows)."""
-        answer = await self.request(topic, payload)
-        if topic.reply is None or isinstance(answer, topic.reply):
-            return answer
-        return await compute.run(topic.reply.model_validate, answer)
+        return await self.reply_of(VOICES_SETTINGS_GET, {})
 
     async def _ask(self, topic: Topic, payload=None):
-        """`_reply_of` for a count: any failure of a neighbour is one signal, that the count did not happen."""
+        """`reply_of` for a count: any failure of a neighbour is one signal, that the count did not happen."""
         try:
-            return await self._reply_of(topic, payload)
+            return await self.reply_of(topic, payload)
         except Exception as exc:  # noqa: BLE001
             self.log.error("запрос %s не выполнен: %s: %s", topic.name, type(exc).__name__, exc)
             raise _Unavailable(topic.name) from exc

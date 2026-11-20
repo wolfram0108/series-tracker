@@ -4,6 +4,8 @@ from __future__ import annotations
 from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
+from .frozen import Frozen
+
 
 class DubStatus(StrEnum):
     """The step a voice-over of an episode is at; the row in the database holds exactly one of these."""
@@ -68,7 +70,7 @@ class DubHint(StrEnum):
     ABSENT = "absent"
 
 
-class Reason(BaseModel):
+class Reason(Frozen):
     """Why a voice-over is in its state: a code and the facts that fill its text in the interface."""
 
     code: str
@@ -164,32 +166,36 @@ class VoiceSettingsDraft(BaseModel):
     voice_languages: dict[str, str] = Field(default_factory=dict)
 
 
-class SettingProblem(BaseModel):
+class SettingProblem(Frozen):
     """What is wrong with one field of the settings; the interface words the reason."""
 
     field: str
     detail: Reason
 
 
-class VoiceSettingsView(VoiceSettingsDraft):
+class VoiceSettingsView(VoiceSettingsDraft, Frozen):
     """The reply of `voices.settings.get`: what applies now, the order to return to, and the fields whose stored
     value was refused."""
 
-    default_priority: list[str]
-    rejected: list[str]
+    # The fields of the form again, as tuples: a reply is handed over as it is and nobody changes it.
+    priority: tuple[str, ...]
+    players_off: tuple[str, ...] = Field(default_factory=tuple)
+    voice_groups: dict[str, tuple[str, ...]]
+    default_priority: tuple[str, ...]
+    rejected: tuple[str, ...]
     # The words a window names each player of the order by (`4K` for a line of the provider).
     player_labels: dict[str, str] = Field(default_factory=dict)
     # Players the user put into one group take one place in the order; no screen edits them yet.
-    player_groups: dict[str, list[str]] = Field(default_factory=dict)
+    player_groups: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     # The height the file of a compilation is downloaded at for its cuts (0: the best it has).
     cut_max_height: int = 0
 
 
-class VoiceSettingsSaved(BaseModel):
+class VoiceSettingsSaved(Frozen):
     """The reply of `voices.settings.set`: saved, or the problems that kept it from being saved."""
 
     saved: bool
-    problems: list[SettingProblem]
+    problems: tuple[SettingProblem, ...]
     settings: VoiceSettingsView
 
 

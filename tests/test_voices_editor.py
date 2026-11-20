@@ -2,7 +2,7 @@
 
 
 from core.contracts import VoiceSettingsDraft
-from modules.voices import editor
+from calc.voices import editor
 
 
 def draft(**changes) -> VoiceSettingsDraft:

@@ -4,7 +4,7 @@
 - декларативные подписки (handle("точный.топик")) с потребителями: модуль подписан ровно на то, что разбирает;
 - publish_event / send_command — отправка без ожидания;
 - request() — query или command → reply с correlation_id и предохранителем (поверх pub/sub); вид конверта и
-  предохранитель берутся из реестра топиков (core/topics.py);
+  предохранитель берутся из реестра топиков (core/topics.py); reply_of() — тот же ответ моделью записи реестра;
 - автоматический ответ на query и на command с reply_to: значение, возвращённое обработчиком,
   уезжает reply-конвертом в reply_to запроса;
 - жизненный цикл start/stop и хук on_start (reconcile: добор
@@ -19,6 +19,7 @@ import asyncio
 import inspect
 from typing import Any, Awaitable, Callable
 
+from . import compute
 from .admission import Admission
 from .admission import current as current_admission
 from .bus import Bus, Subscription, is_exact
@@ -190,6 +191,15 @@ class BaseModule:
             # when its answer comes (`_consume_replies`); only a request nobody received has no answer to wait for.
             if unanswerable and self._admitted.pop(env.correlation_id, None) is not None:
                 admission.answered(env.correlation_id)
+
+    async def reply_of(self, topic: Topic, payload: Any = None) -> Any:
+        """The answer of the owner of `topic` as the model of its record (`Topic.reply`). An answer that came as that model is
+        taken as it is; a dictionary is checked off the loop (a table or the answers of the rules are thousands of rows). A
+        topic with no model gives its answer as it came."""
+        answer = await self.request(topic, payload)
+        if topic.reply is None or isinstance(answer, topic.reply):
+            return answer
+        return await compute.run(topic.reply.model_validate, answer)
 
     def background(self) -> set[asyncio.Task]:
         """Задачи, в которых модуль работает вне обработчиков шины; тот, кто ждёт тишины, ждёт и их."""

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Collection, Mapping, Sequence
 
-from core.contracts import Reason, SettingProblem, VoiceSettingsDraft, VoiceSettingsView
+from core.contracts import PlayerFacts, Reason, SettingProblem, VoiceSettingsDraft, VoiceSettingsView
 from core.reasons import parse as parse_reason, reason
 from calc.voice_names import fold_name
 
@@ -157,12 +157,12 @@ def effective_order(priority: Sequence[str], system: Sequence[str]) -> list[str]
     return [*priority, *(name for name in system if fold_name(name) not in held)]
 
 
-def view(settings: VoiceSettings, players: Sequence[Mapping[str, str]] = ()) -> VoiceSettingsView:
-    """What applies now, with the order to return to; `players` are those the sources know ({name, label})."""
-    system = [each["name"] for each in players]
+def view(settings: VoiceSettings, players: Sequence[PlayerFacts] = ()) -> VoiceSettingsView:
+    """What applies now, with the order to return to; `players` are those the sources know."""
+    system = [each.name for each in players]
     return VoiceSettingsView(
         priority=effective_order(settings.priority, system),
-        player_labels={each["name"]: each.get("label") or each["name"] for each in players},
+        player_labels={each.name: each.label or each.name for each in players},
         voice_groups={name: list(triggers) for name, triggers in settings.voice_groups.items()},
         voice_languages=dict(settings.voice_languages),
         players_off=list(settings.players_off),

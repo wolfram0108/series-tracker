@@ -161,9 +161,9 @@ def planner_inputs(layout: CompositionReply, series: Mapping[str, Any],
     sources = [SeriesSource.model_validate(each).id for each in series.get("sources", [])]
     choices = choices_of(layout.rows, online, [(each.season, each.episode, each.levers) for each in layout.settings],
                          [(each.compilation, each.levers) for each in layout.levels if each.compilation],
-                         players=voices.get("priority") or [], player_groups=Groups.of(voices.get("player_groups") or {}),
+                         players=voices.priority, player_groups=Groups.of(voices.player_groups),
                          sources=sources, voice_order=order, off_episodes=off, titles=layout.voice_titles,
-                         languages=voices.get("voice_languages") or {})
+                         languages=voices.voice_languages)
     return online, choices
 
 

@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .frozen import Frozen
+
 LINE_SEPARATOR = " | "
 # What a read of a page does, told for its dump (modules/sources/table.py tells it, modules/runlog keeps it):
 # {url, site, kind: "begin", fresh} and {url, site, kind: "end", ok, reason, seconds, rows, players, causes, unread}.
@@ -252,7 +254,7 @@ class SiteResolveReply(BaseModel):
     source_type: str | None = None
 
 
-class PlayerPlace(BaseModel):
+class PlayerPlace(Frozen):
     """A site where a player is (of the tracker, or of the provider): `sources` is how many of the sources asked about are its pages
     with rows of the player (0 for a site of the provider that admits the line while none of those sources is a title of it)."""
 
@@ -261,7 +263,7 @@ class PlayerPlace(BaseModel):
     sources: int = 0
 
 
-class PlayerFacts(BaseModel):
+class PlayerFacts(Frozen):
     """A player of the order of sources as the sources know it: a player of the pages of sites, a line of the provider, or
     the torrent (every release of every tracker's page, one place: `torrent.order_name`), the best height its rows of the sources asked about were measured at (None when none was), and where
     it is, the place with the most sources first."""
@@ -270,7 +272,7 @@ class PlayerFacts(BaseModel):
     label: str
     kind: Literal["site", "line", "torrent"]
     height: int | None = None
-    places: list[PlayerPlace] = Field(default_factory=list)
+    places: tuple[PlayerPlace, ...] = Field(default_factory=tuple)
 
 
 class PlayersListRequest(BaseModel):
@@ -280,8 +282,8 @@ class PlayersListRequest(BaseModel):
     urls: list[str] = Field(default_factory=list)
 
 
-class PlayersListReply(BaseModel):
-    players: list[PlayerFacts] = Field(default_factory=list)
+class PlayersListReply(Frozen):
+    players: tuple[PlayerFacts, ...] = Field(default_factory=tuple)
 
 
 class TableProgress(BaseModel):

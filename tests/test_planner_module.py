@@ -18,7 +18,7 @@ from core.module import BaseModule
 from core.runner import Runner
 from core import container as mkv
 from core.contracts import (VOICE_TAKE, CompositionReply, CompositionRow, EffectiveLever, EpisodeSettings, Level,
-                            RowState, group_target)
+                            RowState, VoiceSettingsView, group_target)
 from core.db import Database
 from core.envelope import Envelope
 from modules.planner.files import BuildFailed, Library
@@ -82,8 +82,8 @@ class Neighbours(BaseModule):
     async def on_composition(self, env: Envelope) -> CompositionReply:
         return CompositionReply(series_id=SERIES, rev=1, rows=self.site.rows, settings=self.site.settings)
 
-    async def on_voices(self, env: Envelope) -> dict:
-        return {"priority": ["vk", "cvh", "kodik"], "player_groups": {}}
+    async def on_voices(self, env: Envelope) -> VoiceSettingsView:
+        return VoiceSettingsView(priority=["vk", "cvh", "kodik"], voice_groups={}, default_priority=[], rejected=[])
 
     async def on_workspace(self, env: Envelope) -> dict:
         if env.payload.get("dub_folder"):

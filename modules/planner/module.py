@@ -352,7 +352,7 @@ class BusSync(SeriesSync):
         rule, stage 10), it only gives its sound; the picture of a cut at the height of the setting
         `voices.cut_max_height` (none: the best)."""
         if op.kind == "download_picture":
-            height = int((await self.m.request(VOICES_SETTINGS_GET, {})).get("cut_max_height") or 0)
+            height = (await self.m.reply_of(VOICES_SETTINGS_GET, {})).cut_max_height
             return height or None
         if op.kind == "download_dub":
             return OTHER_MAX_HEIGHT
@@ -927,7 +927,7 @@ class PlannerModule(BaseModule):
     async def _inputs(self, series: dict):
         series_id = series["id"]
         layout = await self.request(COMPOSITION_GET, CompositionGetRequest(series_id=series_id).model_dump(mode="json"))
-        voices = await self.request(VOICES_SETTINGS_GET, {})
+        voices = await self.reply_of(VOICES_SETTINGS_GET, {})
         online, choices, self._members[series_id] = await compute.run(layout_inputs, layout, series, voices)
         return online, choices
 
