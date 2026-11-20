@@ -2,9 +2,13 @@
 
 Owns the table of the asset of every video series (plan_assets: the containers of its library, each with the provenance of
 its video and tracks), the attempts that failed (plan_failures), the commands «Удалить» that wait (plan_commands) and the
-syncs under way (plan_runs). The planner itself is core/plan: a pure function of the tables and the priorities; this module
-reads the inputs over the bus, runs the executor (core/plan/executor.SeriesSync) with the service's own workers, and keeps
-the table.
+syncs under way (plan_runs). The plan itself is calc/plan: a pure function of the tables and the priorities; what the window
+shows of it is calc/view (the view, the cards of the packing); the steps of a sync and the counting over them are
+calc/plan/steps.py. This module reads the inputs over the bus, runs the executor (modules/planner/executor.SeriesSync) with
+the service's own workers, and keeps the table. A count is made in steps, with the questions between them: the neighbours
+are asked (the card, the layout, the settings of the voice-overs), the pure step is one call of calc in the pool, the rule of
+names is asked between the first plan and the second, the view is counted last. Every topic the module handles, asks or tells is
+a record of `core.topics`.
 
 Inputs, read when a sync starts and frozen until it ends: the layout of the composition (`composition.get`: its rows, the
 levers of every episode and compilation, the order of the voice-overs), the settings of the voice-overs (`voices.settings.get`),
@@ -17,7 +21,7 @@ Steps of the graph, each through its owner:
       is still being downloaded (a voice-over that did not come holds none back); a voice-over out of a file of the library
       by its track (`dub_atracks`); its end is `conform.job.finished`. A result is taken by `ok`. A plan made again
       while the episode waits (a voice-over failed and its next source is downloaded) keeps it one job: the voice-overs
-      of the plan in force go together (core/plan/executor.Batch); only a job already sent is not joined.
+      of the plan in force go together (modules/planner/executor.Batch); only a job already sent is not joined.
       Every source of a job (its video, its voice-overs, the episode and the picture of a cut) is in the job's own folder,
       a hard link to the file: the service keeps its temporary files beside the sources of a job and removes all of them
       beside the sources of a job whose record goes, so two jobs never share a folder of sources.
@@ -32,9 +36,9 @@ Steps of the graph, each through its owner:
       voice-over. A sync that falls before its container is in place (the build fails, the process stops) or a job that is
       taken out of the history would lose what hours of the service's work made; a sync that asks the same alignment takes
       it from the keep — the job is not sent and the voice-over not downloaded. The set of an episode goes once its container
-      is in place (core/plan/executor `placed`), when a sync that covers the episode has no container to build for it, and with
+      is in place (modules/planner/executor `placed`), when a sync that covers the episode has no container to build for it, and with
       the series. Nothing is copied: the data is the file of the job while it lasts and the keep's alone after.
-  build and apply: here, by core/plan/files (the container with its provenance, the journal in the folder of the series).
+  build and apply: here, by modules/planner/files (the container with its provenance, the journal in the folder of the series).
 A failure the service judged is recorded and the plan is counted again from the same snapshot; a failure of the moment
 (the network, a service that is down, an answer that never came) is no record and is tried at the next sync. A pair the
 service fell on (its result is there, with no file and no decision of its gates: an exception in it) judged nothing, so it is
@@ -55,7 +59,9 @@ Queries:
       nothing more of it is, and it is not taken up again at the start. A journal of the library under way is not cut:
       the stop waits for its end.
   planner.work.get {series_id} -> WorkState.
-  planner.series.get {series_id} -> PlannerView: the asset, the goal of every episode, the failures and the commands.
+  planner.series.get {series_id} -> PlannerView: the asset, the goal of every episode, the failures and the commands. The
+      models (`PlannerView`, `WorkState`, and the `Reference`s of planner.references.get) go as they are, immutable; the
+      gateway writes them for the window, and `planner.series.changed` carries the same view as a packet.
   planner.delete {series_id, kind: video | track, name, dub?} -> {recorded}: the command «Удалить» of a file or of a track
       in it, carried out by the next sync (a video goes only for another video of its episode).
   planner.delete.cancel {series_id, kind, name, dub?} -> {dropped}.
@@ -67,8 +73,8 @@ Queries:
   planner.files.get {series_id} -> {names}: the files of the asset, relative to the folder of the series.
   planner.downloaded_counts {} -> {counts: {series_id: n}}: the episodes every series holds and shows, specials aside.
   planner.seasons {series_id} -> {seasons}: the seasons its files are of.
-  planner.references.get {series_id} -> [Reference]: the reference of every episode and why it is that one, told by the
-      plan (core/plan/marks): the window shows the choice the sync makes.
+  planner.references.get {series_id} -> (Reference, ...): the reference of every episode and why it is that one, told by the
+      plan (calc/plan/marks): the window shows the choice the sync makes.
 Events out:
   planner.series.changed PlannerView — the asset, the plan, a failure or a command of a series changed.
   series.purged {series_id, owner} — the tables of a deleted series are cleaned.
@@ -110,13 +116,13 @@ from calc.plan.names import filename_of, namer_over, wanted_names
 from calc.plan.planner import Plan, cut_video, name_of, video_op
 from calc.plan.steps import DOWNLOADS, Crashed, Made, Passing, fate_of, judged, video_of
 from calc.plan.tables import Track, Video, label_of
-from calc.view.body import Held, view_body
+from calc.view.body import Held, packet_of, standing_of, view_body
 from calc.view.packing import card_id
 from calc.view.view import placed
 from core import compute, storage
 from core.clock import beat_while
-from core.contracts import (CompositionGetRequest, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, SeriesSource,
-                            SourceType, SubmitOutcome, SubmitReply, SyncScope, job_dir, job_key)
+from core.contracts import (CompositionGetRequest, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView,
+                            Reference, SeriesSource, SourceType, SubmitOutcome, SubmitReply, SyncScope, job_dir, job_key)
 from core.contracts.torrent import fonts_of, parse_link
 from core.contracts.work import WorkState, WorkWithdrawn
 from core.dump import plain
@@ -751,7 +757,7 @@ class PlannerModule(BaseModule):
         self._names: dict[int, tuple[str, dict]] = {}  # the names the rule gave each series, with the card they are of
         # The projection of the view of each series: the last view counted, the series whose inputs changed since it,
         # and the count under way.
-        self._shown: dict[int, dict] = {}
+        self._shown: dict[int, PlannerView] = {}
         self._stale: set[int] = set()
         self._counting: dict[int, asyncio.Task] = {}
         self._members: dict[int, dict] = {}  # the compilations of the layout of a series by their row
@@ -1274,14 +1280,9 @@ class PlannerModule(BaseModule):
         self._activity.setdefault(series_id, {}).update(flags)
         self._tell_status(series_id)
 
-    async def _stand(self, series_id: int, view: dict) -> None:
-        """What the series stands at, told by its view: ready — a file of it is in the library; waiting — the plan has
-        work for the next sync; error — an episode lacks what a recorded attempt was for (`covered` of the view: another
-        source that gave it leaves no error), or work of the last sync failed for the moment and nothing gave it."""
-        work = any(goal["video"]["kind"] != "asset" or any(track["kind"] != "reuse" for track in goal["tracks"])
-                   for goal in view["episodes"]) or bool(view["commands"])
-        flags = {"ready": bool(view["assets"]), "waiting": work and not view["running"],
-                 "error": any(not each["covered"] for each in view["failures"]) or bool(view["problems"])}
+    async def _stand(self, series_id: int, view: PlannerView) -> None:
+        """What the series stands at, told by its view (`standing_of`): the card is told it with what the sync is at."""
+        flags = standing_of(view)
         if flags != self._standing.get(series_id):
             # Kept for the next start: it tells the cards at once, before its recount reaches the series.
             await self.repo.save_standing(series_id, flags)
@@ -1295,15 +1296,15 @@ class PlannerModule(BaseModule):
     def _state(self, series_id: int) -> WorkState:
         self._seq += 1
         running = series_id in self._runs and not self._runs[series_id].done()
-        return WorkState(owner=PLANNER, series_id=series_id, active=running, busy=[], seq=self._seq,
+        return WorkState(owner=PLANNER, series_id=series_id, active=running, busy=(), seq=self._seq,
                          failure=None if running else self._failures.get(series_id))
 
     def _announce_work(self, series_id: int, active: bool) -> None:
         self._seq += 1
-        self.publish_event(WORK_SERIES_STATE, WorkState(owner=PLANNER, series_id=series_id, active=active, busy=[], seq=self._seq,
-                                                 failure=None if active else self._failures.get(series_id)).model_dump())
+        self.publish_event(WORK_SERIES_STATE, WorkState(owner=PLANNER, series_id=series_id, active=active, busy=(), seq=self._seq,
+                                                        failure=None if active else self._failures.get(series_id)).model_dump(mode="json"))
 
-    async def on_work_get(self, env: Envelope) -> dict:
+    async def on_work_get(self, env: Envelope) -> WorkState:
         """Whether the series has work: a sync written down is work even before this process takes it up again at its
         start (`system.started` reaches the modules in no set order); the table is the truth, the task follows it. The
         state is counted before the table is read: an end announced meanwhile is later and stays in force."""
@@ -1311,12 +1312,12 @@ class PlannerModule(BaseModule):
         state = self._state(series_id)
         if not state.active and await self.repo.running(series_id):
             state = state.model_copy(update={"active": True})
-        return state.model_dump()
+        return state
 
     # --- the view and the user's words ----------------------------------------------------------------------------
 
     async def _publish_view(self, series_id: int, sync: SeriesSync | None = None, made: Plan | None = None,
-                            inputs=None) -> dict:
+                            inputs=None) -> PlannerView:
         """The view of a series told to every window. With the plan a sync froze, that plan is shown as it is; else the
         view is counted again from the tables, once for every change however many come meanwhile (`_recount`)."""
         if made is None:
@@ -1325,9 +1326,11 @@ class PlannerModule(BaseModule):
         await self._told(series_id, view)
         return view
 
-    async def _told(self, series_id: int, view: dict) -> None:
+    async def _told(self, series_id: int, view: PlannerView) -> None:
+        # The packet is made in the pool, before the view is kept: what is kept and what is told change together.
+        packet = await compute.run(packet_of, view)
         self._shown[series_id] = view
-        self.publish_event(PLANNER_SERIES_CHANGED, view)
+        self.publish_event(PLANNER_SERIES_CHANGED, packet)
         await self._stand(series_id, view)
 
     def _ask_recount(self, series_id: int) -> asyncio.Task:
@@ -1340,10 +1343,10 @@ class PlannerModule(BaseModule):
             task.add_done_callback(self._count_ended)
         return task
 
-    async def _recount(self, series_id: int) -> dict:
+    async def _recount(self, series_id: int) -> PlannerView:
         return await asyncio.shield(self._ask_recount(series_id))
 
-    async def _count(self, series_id: int) -> dict:
+    async def _count(self, series_id: int) -> PlannerView:
         view = None
         while series_id in self._stale:
             self._stale.discard(series_id)
@@ -1355,7 +1358,7 @@ class PlannerModule(BaseModule):
         if not task.cancelled() and task.exception() is not None:
             self.log.error("вид плана не посчитан: %s", task.exception(), exc_info=task.exception())
 
-    async def _shown_view(self, series_id: int) -> dict:
+    async def _shown_view(self, series_id: int) -> PlannerView:
         """The view as it was last counted; counted now when there is none or an input changed since."""
         counting = self._counting.get(series_id)
         idle = counting is None or counting.done()
@@ -1363,7 +1366,8 @@ class PlannerModule(BaseModule):
             return self._shown[series_id]
         return await self._recount(series_id) if idle else await asyncio.shield(counting)
 
-    async def _counted(self, series_id: int, sync: SeriesSync | None = None, made: Plan | None = None, inputs=None) -> dict:
+    async def _counted(self, series_id: int, sync: SeriesSync | None = None, made: Plan | None = None,
+                       inputs=None) -> PlannerView:
         """The view of a series: the asset, the failures and the commands as the table holds them now, and the plan as
         the tables give it now (between syncs only the tables change, and the plan is counted again from them); while a
         sync runs, the plan it froze. The reference of every episode, and why, is told by that plan. Thousands of rows:
@@ -1398,9 +1402,9 @@ class PlannerModule(BaseModule):
         return await compute.run(view_body, series_id, held_now, made, inputs, dict(self._members.get(series_id, {})),
                                  running, problems)
 
-    async def on_references_get(self, env: Envelope) -> list[dict]:
-        """The reference of every episode of a series, and why it is that one (core/plan/marks)."""
-        return (await self._shown_view(int(env.payload["series_id"])))["references"]
+    async def on_references_get(self, env: Envelope) -> tuple[Reference, ...]:
+        """The reference of every episode of a series, and why it is that one (calc/plan/marks), as the models themselves."""
+        return (await self._shown_view(int(env.payload["series_id"]))).references
 
     async def on_view_input_changed(self, env: Envelope) -> None:
         """An input of the view changed (VIEW_INPUTS): the view of its series is counted again, the views of every series
@@ -1415,7 +1419,7 @@ class PlannerModule(BaseModule):
         for each in targets:
             self._ask_recount(each)
 
-    async def on_series_get(self, env: Envelope) -> dict:
+    async def on_series_get(self, env: Envelope) -> PlannerView:
         return await self._shown_view(int(env.payload["series_id"]))
 
     async def on_delete(self, env: Envelope) -> dict:

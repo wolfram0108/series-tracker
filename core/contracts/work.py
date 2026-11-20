@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .frozen import Frozen
+
 WORK_WITHDRAWN = "work.withdrawn"
 # A sync of a series is one run: it opens with the sync and closes when every work it gave out has ended (scan owns it).
 RUN_CHANGED = "scan.run.changed"
@@ -38,7 +40,7 @@ def slot_of(season: int | None, episode: int, part: int | None) -> Slot:
     return season, episode, part or 0
 
 
-class WorkState(BaseModel):
+class WorkState(Frozen):
     """Whether `owner` has live work of the series: a download that waits or runs, a voice-over admitted and not at
     its end; and `busy`, the episodes that work is of, so that the run makes the container of an episode as soon as no
     work of it is left (each episode is a process of its own). Live work whose episode is not known keeps `active` with
@@ -48,7 +50,7 @@ class WorkState(BaseModel):
     owner: str
     series_id: int
     active: bool
-    busy: list[Slot] = Field(default_factory=list)
+    busy: tuple[Slot, ...] = Field(default_factory=tuple)
     seq: int = 0
     # Why the last work of the owner ended in failure (a reason, core/reasons), told once it is not active; None when it
     # ended well. The run that waited for it ends as failed with this reason, not as a success.

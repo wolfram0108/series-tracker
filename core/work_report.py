@@ -33,7 +33,7 @@ class WorkReport:
         """Counts the work of the series now and tells it when it changed; the record in force is the answer."""
         async with self._locks.setdefault(series_id, asyncio.Lock()):
             active, slots = await self._has_work(series_id)
-            busy = sorted(slots, key=lambda slot: (slot[0] or 0, slot[1], slot[2]))
+            busy = tuple(sorted(slots, key=lambda slot: (slot[0] or 0, slot[1], slot[2])))
             active = active or bool(busy)
             told = self._told.get(series_id)
             if told is None or told.active != active or told.busy != busy:

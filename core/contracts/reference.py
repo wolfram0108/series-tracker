@@ -6,6 +6,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from .compilation import CompilationRef
+from .frozen import Frozen
 
 
 class ReferenceMark(StrEnum):
@@ -20,7 +21,7 @@ class ReferenceMark(StrEnum):
     OFF = "off"
 
 
-class CutPicture(BaseModel):
+class CutPicture(Frozen):
     """The row whose picture a cut video of an episode is: a compilation, or a single row higher than the markup
     reference (stage 14)."""
 
@@ -31,7 +32,7 @@ class CutPicture(BaseModel):
     voice_group: str | None = None
 
 
-class Reference(BaseModel):
+class Reference(Frozen):
     """`reason` is a code of core/reasons: for `other_player` it names the player taken and the one missing.
 
     `compilation` is the compilation the episode stands in (stage 12): its video is cut out of it on the timeline of the

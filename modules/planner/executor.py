@@ -7,7 +7,8 @@ its own steps have ended, whatever the other episodes still do. An attempt that 
 again at once from the asset as it is by then, with the record: a step the new plan asks the same work of is not done
 twice, its episode goes on with the next way while the others run. A group is applied only by a plan made after
 everything known by then. The sync ends when every group is applied or left. The steps are the subclass's: the service
-does them through its modules, the simulator through its models."""
+does them through its modules, the simulator through its models. What a step made and the counting over it (the verdict on a
+result of the service, the asset and the commands once a group is applied) is calc/plan/steps.py."""
 from __future__ import annotations
 
 import asyncio

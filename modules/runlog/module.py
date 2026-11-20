@@ -78,6 +78,8 @@ def _written(payload):
     if isinstance(payload, BaseModel):
         return {"model": type(payload).__name__, **{name: (len(value) if isinstance(value, (list, tuple, dict)) else value)
                                                     for name, value in payload.__dict__.items()}}
+    if isinstance(payload, (list, tuple)) and any(isinstance(each, BaseModel) for each in payload):
+        return [_written(each) for each in payload]  # a reply that is a row of models (the references of a series)
     return redacted(payload)
 
 

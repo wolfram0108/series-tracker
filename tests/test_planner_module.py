@@ -217,6 +217,11 @@ async def world(tmp_path):
     neighbours.close()
 
 
+async def plan_view(planner) -> dict:
+    """The plan of the series as the planner answers it (the model itself), written as the window reads it."""
+    return (await planner.request("planner.series.get", {"series_id": SERIES})).model_dump(mode="json")
+
+
 async def sync(world, download: bool = True, **scope) -> dict:
     """One sync (of the series, or of the `season` and `episode` named); the view it answers is the plan the sync froze, as the
     window is told when the sync starts (a sync without download tells nothing: the view is the plan as the tables give it)."""
@@ -228,7 +233,7 @@ async def sync(world, download: bool = True, **scope) -> dict:
         view = (await told.queue.get()).payload
         if view["running"]:
             return view
-    return await planner.request("planner.series.get", {"series_id": SERIES})
+    return await plan_view(planner)
 
 
 def table(db_path: str) -> dict[str, dict]:
@@ -292,7 +297,7 @@ async def test_the_reset_of_one_episode_forgets_its_failures_and_leaves_the_fail
 
     async def failed() -> set[tuple]:
         return {(each["voice"], tuple(map(tuple, each["episodes"])))
-                for each in (await planner.request("planner.series.get", {"series_id": SERIES}))["failures"]}
+                for each in (await plan_view(planner))["failures"]}
 
     every = {(voice, ((1, number),)) for voice in ("G1", "G2") for number in (1, 2)}
     assert await failed() == every
@@ -325,7 +330,7 @@ async def test_work_that_failed_for_the_moment_is_the_outcome_of_the_sync_and_an
     neighbours.daemon.answers["Сериал s01e01 G1"] = "empty"
     told = planner.bus.subscribe("series.status.contribution")
     await sync(world)
-    view = await planner.request("planner.series.get", {"series_id": SERIES})
+    view = await plan_view(planner)
     (problem,) = view["problems"]
     assert (problem["slot"], problem["kind"], problem["voice"]) == ([1, 1], "align", "G1") and "daemon_no_result" in problem["reason"]
     assert view["failures"] == []
@@ -335,7 +340,7 @@ async def test_work_that_failed_for_the_moment_is_the_outcome_of_the_sync_and_an
     assert last["error"] and last["waiting"] and not last["ready"]  # the file waits for its voice-over: nothing built
     neighbours.daemon.answers.clear()
     await sync(world)
-    view = await planner.request("planner.series.get", {"series_id": SERIES})
+    view = await plan_view(planner)
     assert view["problems"] == [] and len(view["assets"]) == 1
     while not told.queue.empty():
         last = (await told.queue.get()).payload["flags"]

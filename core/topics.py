@@ -374,14 +374,14 @@ PLANNER_PACK_CHANGED = Topic("planner.pack.changed", EVENT, "planner")
 PLANNER_PACK_GET = Topic("planner.pack.get", QUERY, "planner", fuse=STANDARD_S)
 PLANNER_PACK_REMOVE = Topic("planner.pack.remove", COMMAND, "planner", fuse=STANDARD_S)
 # As planner.series.get. The references are counted from the layout as the view is: the layout, the settings of the
-# voice-overs, the names.
+# voice-overs, the names. The answer is a tuple of `Reference` (a row of models has no model of its own).
 PLANNER_REFERENCES_GET = Topic(
     "planner.references.get", QUERY, "planner",
     fuse=after(STANDARD_S, CATALOG_SERIES_GET, COMPOSITION_GET, VOICES_SETTINGS_GET))
 PLANNER_SEASONS = Topic("planner.seasons", QUERY, "planner", fuse=QUICK_S)
 PLANNER_SERIES_CHANGED = Topic("planner.series.changed", EVENT, "planner", request=PlannerView)
 # A projection counted on demand (and published) when it is not there yet: a query. The view of the plan reads the table
-# of the series.
+# of the series. Answered as the model itself (immutable): the gateway writes it for the window.
 PLANNER_SERIES_GET = Topic(
     "planner.series.get", QUERY, "planner", reply=PlannerView,
     fuse=after(STANDARD_S, CATALOG_SERIES_GET, COMPOSITION_GET, VOICES_SETTINGS_GET))

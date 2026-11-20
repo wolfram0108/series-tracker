@@ -6,10 +6,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from .frozen import Frozen
 from .reference import Reference
 
 
-class PlanRowRef(BaseModel):
+class PlanRowRef(Frozen):
     """A row of a source table: the source, the key of the row and the video behind it as its host numbers it."""
 
     source_id: int
@@ -17,7 +18,7 @@ class PlanRowRef(BaseModel):
     video: str = ""
 
 
-class PlanSnapshot(BaseModel):
+class PlanSnapshot(Frozen):
     """Where a file came from, written once when it was obtained: it stays when the source forgets the row."""
 
     source: str = ""
@@ -40,7 +41,7 @@ class PlanAssetTrack(PlanSnapshot):
     online: bool | None = None
 
 
-class PlanVariant(BaseModel):
+class PlanVariant(Frozen):
     """A variant of a queue of single videos: a voice-over at a player of a source, as the window lists it."""
 
     group: str
@@ -48,7 +49,7 @@ class PlanVariant(BaseModel):
     player: str
 
 
-class PlanSubtitle(BaseModel):
+class PlanSubtitle(Frozen):
     """A subtitles track (DESIGN.md 7.1.1): its row, its name, the player of its row, its language and its type; in a goal
     also how it is obtained — `take` (from the file of its row) or `reuse` (from the file that holds it)."""
 
@@ -63,17 +64,17 @@ class PlanSubtitle(BaseModel):
     kind: Literal["take", "reuse"] | None = None
 
 
-class PlanAsset(BaseModel):
+class PlanAsset(Frozen):
     """A file of the library: one video and the tracks aligned to it; `off` is hidden from the media server (`.off`)."""
 
     name: str
     off: bool = False
-    episode: list[int]
+    episode: tuple[int, ...]
     video: PlanAssetVideo
-    tracks: list[PlanAssetTrack] = Field(default_factory=list)
+    tracks: tuple[PlanAssetTrack, ...] = Field(default_factory=tuple)
     # The variant of the queue of the markup reference whose timeline the video lies on (its own for a video that is no cut).
     timeline: PlanVariant | None = None
-    subtitles: list[PlanSubtitle] = Field(default_factory=list)
+    subtitles: tuple[PlanSubtitle, ...] = Field(default_factory=tuple)
 
 
 class PlanGoalVideo(PlanSnapshot):
@@ -97,14 +98,14 @@ class PlanGoalTrack(PlanSnapshot):
     own: bool = False
 
 
-class PlanEpisode(BaseModel):
-    slot: list[int]
+class PlanEpisode(Frozen):
+    slot: tuple[int, ...]
     name: str
     off: bool = False
     video: PlanGoalVideo
-    tracks: list[PlanGoalTrack] = Field(default_factory=list)
+    tracks: tuple[PlanGoalTrack, ...] = Field(default_factory=tuple)
     # The voice-over groups the user switched off for the episode: the plan takes no track of theirs.
-    voices_off: list[str] = Field(default_factory=list)
+    voices_off: tuple[str, ...] = Field(default_factory=tuple)
     # The voice-over of the markup reference of the episode (stage 14): its sound is the last of the file, out of the
     # order of the season; none without one.
     markup: str | None = None
@@ -112,11 +113,11 @@ class PlanEpisode(BaseModel):
     markup_variant: PlanVariant | None = None
     # The subtitles of the file in its order, and the variants it takes that are on no timeline of its video: they wait for
     # the alignment of subtitles to another reference (stage 15, step 10); the group of such a variant is its name.
-    subtitles: list[PlanSubtitle] = Field(default_factory=list)
-    unaligned: list[PlanVariant] = Field(default_factory=list)
+    subtitles: tuple[PlanSubtitle, ...] = Field(default_factory=tuple)
+    unaligned: tuple[PlanVariant, ...] = Field(default_factory=tuple)
 
 
-class PlanFailure(BaseModel):
+class PlanFailure(Frozen):
     """An attempt that failed: a download of a row, an alignment of a voice-over to a video, a cut of an episode out of a
     compilation by its single video. The plan passes over it until the user resets the failures."""
 
@@ -126,7 +127,7 @@ class PlanFailure(BaseModel):
     # Where the attempt belongs, as the layout the view is counted by has its row: the episodes the row gives (a compilation:
     # every one it holds; [season, episode] or [season, episode, part]) and its voice-over group. Empty when the row is
     # offline: the failure is still counted, only not placed.
-    episodes: list[list[int]] = Field(default_factory=list)
+    episodes: tuple[tuple[int, ...], ...] = Field(default_factory=tuple)
     voice: str | None = None
     # The variant of its row in the layout (voice-over, source, player), as the queues name their rows: a queue marks the
     # row whose attempt failed. None when the row is offline.
@@ -136,18 +137,18 @@ class PlanFailure(BaseModel):
     covered: bool = False
 
 
-class PlanProblem(BaseModel):
+class PlanProblem(Frozen):
     """A step of the last sync that failed for the moment (a crash of the service, a download cut short): no failure, the
     next sync tries again. `slot` is the episode (none for the download of a compilation), `voice` the voice-over of an
     alignment or of a download of a voice-over."""
 
-    slot: list[int] | None = None
+    slot: tuple[int, ...] | None = None
     kind: str
     voice: str | None = None
     reason: str = ""
 
 
-class PlanCommand(BaseModel):
+class PlanCommand(Frozen):
     """A command «Удалить» that waits for the next sync: of a file (`video`) or of a track in it (`track`, `dub`)."""
 
     kind: Literal["video", "track"]
@@ -155,17 +156,17 @@ class PlanCommand(BaseModel):
     dub: PlanRowRef | None = None
 
 
-class PlannerView(BaseModel):
+class PlannerView(Frozen):
     series_id: int
     running: bool = False
     # The reference of every episode and why it is that one, told by the plan.
-    references: list[Reference] = Field(default_factory=list)
-    assets: list[PlanAsset] = Field(default_factory=list)
-    episodes: list[PlanEpisode] = Field(default_factory=list)
-    failures: list[PlanFailure] = Field(default_factory=list)
+    references: tuple[Reference, ...] = Field(default_factory=tuple)
+    assets: tuple[PlanAsset, ...] = Field(default_factory=tuple)
+    episodes: tuple[PlanEpisode, ...] = Field(default_factory=tuple)
+    failures: tuple[PlanFailure, ...] = Field(default_factory=tuple)
     # The steps of the last sync that failed for the moment, with why (PlanProblem).
-    problems: list[PlanProblem] = Field(default_factory=list)
-    commands: list[PlanCommand] = Field(default_factory=list)
+    problems: tuple[PlanProblem, ...] = Field(default_factory=tuple)
+    commands: tuple[PlanCommand, ...] = Field(default_factory=tuple)
 
 
 class PlanDelete(BaseModel):
