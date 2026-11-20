@@ -1,6 +1,6 @@
 """The model of qBittorrent on its WebAPI v2, as the stand meets it over real HTTP, and the synthetic releases it is told of.
 
-What the model does is what the real client was measured to do (tools/collectors/qbit_behaviour.py, qBittorrent 5.2.1):
+What the model does is what the real client was measured to do (qBittorrent 5.2.1):
 
 - a torrent added stopped does not look at the disk: its progress is 0 until a recheck; one added started does;
 - a start asked while a check runs is lost (the torrent stays stopped): the model's check is instant, so it does not
