@@ -1,8 +1,8 @@
 """Module renaming — the names of the files of the releases of the old torrent pipeline inside qBittorrent (R-15; it
 leaves with step 11 of stage 15).
 
-Queries:
-  renaming.process_torrent {series_id, qb_hash, dry_run?} — the files of one release are renamed (contract R-14: the
+Commands:
+  renaming.process_torrent {series_id, qb_hash, dry_run?} -> {renamed} — the files of one release are renamed (contract R-14: the
       stage 'renaming' of the pipeline). dry_run only lays the release out by the rules and writes torrent_files
       (status pending_rename) without touching qBit: the files are needed before the download to pick the episodes.
 
@@ -14,45 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 
+from calc.renaming.names import AUDIO_EXT, SUB_EXT, VIDEO_EXT, extract_torrent_root, folder_tag
 from core.contracts import SeriesCard
 from core.module import BaseModule, BusRequestError
 from core.source_types import torrent_profile_id
-from core.topics import CATALOG_SERIES_GET
+from core.topics import (CATALOG_SERIES_GET, RENAMING_PROCESS_TORRENT, RULES_FORMAT_TORRENT_FILE, TORRENTS_DB_FILES_LIST,
+                         TORRENTS_DB_FILES_UPSERT, TORRENTS_FILES_GET, TORRENTS_RENAME_FILE)
 from core.envelope import Envelope
-
-_VIDEO_EXT = (".mkv", ".avi", ".mp4", ".mov", ".wmv", ".webm", ".ts", ".m4v")
-_AUDIO_EXT = (".mka", ".ac3", ".dts", ".aac", ".flac", ".wav", ".ogg", ".eac3", ".m4a")
-_SUB_EXT = (".ass", ".srt", ".vtt", ".sub")
-
-
-def _extract_torrent_root(paths: list[str]) -> str | None:
-    """Если все файлы лежат внутри одной общей директории верхнего уровня
-    (стандартная папка многофайлового торрента), возвращает её имя.
-    Иначе None."""
-    roots = set()
-    for p in paths:
-        parts = p.replace("\\", "/").strip("/").split("/")
-        if len(parts) > 1:
-            roots.add(parts[0])
-        else:
-            return None
-    if len(roots) == 1:
-        return next(iter(roots))
-    return None
-
-
-def _folder_tag(rel_dir: str) -> str:
-    """Нормализует путь подкаталога в тег для имени дорожки:
-    'RUS Sound/AniLiberty' -> 'RUS_Sound_AniLiberty'
-    '/rus/AniLiberty/' -> 'rus_AniLiberty'
-    """
-    cleaned = rel_dir.replace("\\", "/").strip("/")
-    if not cleaned:
-        return ""
-    tag = re.sub(r"[/\\ ]+", "_", cleaned)
-    return re.sub(r"_+", "_", tag).strip("_")
 
 
 class RenamingModule(BaseModule):
@@ -63,9 +32,9 @@ class RenamingModule(BaseModule):
         super().__init__(bus)
 
     def register(self) -> None:
-        self.handle("renaming.process_torrent", self.on_process_torrent, concurrent=True)
+        self.handle(RENAMING_PROCESS_TORRENT, self.on_process_torrent, concurrent=True)
 
-    # --- торренты: файлы внутри qBittorrent ------------------------------------------------
+    # --- torrents: the files inside qBittorrent ---------------------------------------------
 
     async def on_process_torrent(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
@@ -80,18 +49,17 @@ class RenamingModule(BaseModule):
 
     async def _process_torrent(self, series: SeriesCard, qb_hash: str, *,
                                dry_run: bool = False) -> int:
-        """Логика старого renaming_processor: правила по имени файла →
-        'Season NN/строгое имя' → rename внутри qBittorrent.
+        """The logic of the old renaming_processor: the rules by the name of a file ->
+        'Season NN/strict name' -> rename inside qBittorrent.
 
-        dry_run — тот же обход и те же правила, но без касания qBit:
-        состав раздачи попадает в БД до закачки, чтобы пользователь мог
-        отобрать серии, пока торрент стоит на паузе."""
-        files = await self.request("torrents.files.get", {"hash": qb_hash})
+        dry_run is the same walk by the same rules without touching qBit: the content of
+        the torrent reaches the base before the download, so that the user can pick the
+        episodes while the torrent is paused."""
+        files = await self.request(TORRENTS_FILES_GET, {"hash": qb_hash})
         if not files:
             self.log.warning("файлы раздачи %s не получены", qb_hash[:8])
             return 0
-        db_files = await self.request("torrents.db.files.list",
-                                      {"qb_hash": qb_hash})
+        db_files = await self.request(TORRENTS_DB_FILES_LIST, {"qb_hash": qb_hash})
         by_current = {(f.get("renamed_path") or f["original_path"]): f
                       for f in db_files}
 
@@ -108,10 +76,10 @@ class RenamingModule(BaseModule):
                 "file_index": file_index,
                 "original_path": original,
                 "basename": os.path.basename(original),
-                "is_video": original.lower().endswith(_VIDEO_EXT),
+                "is_video": original.lower().endswith(VIDEO_EXT),
             })
 
-        torrent_root = _extract_torrent_root([it["original_path"] for it in all_items])
+        torrent_root = extract_torrent_root([it["original_path"] for it in all_items])
         for it in all_items:
             orig = it["original_path"].replace("\\", "/")
             if torrent_root and orig.startswith(torrent_root + "/"):
@@ -121,15 +89,15 @@ class RenamingModule(BaseModule):
             it["rel_dir"] = os.path.dirname(it["rel_path"])
 
         records, renamed = [], 0
-        assigned: dict[str, str] = {}  # new_path -> original (детект коллизий)
+        assigned: dict[str, str] = {}  # new_path -> original (to detect collisions)
         matched_videos: list[dict] = []
 
-        # 1. Сначала обрабатываем видеофайлы
+        # 1. The video files first
         profile_id = torrent_profile_id(series)
         card = series.model_dump(mode="json")  # the rules read the card by key
         video_items = [it for it in all_items if it["is_video"]]
         for v in video_items:
-            reply = await self.request("rules.format_torrent_file", {
+            reply = await self.request(RULES_FORMAT_TORRENT_FILE, {
                 "series": card,
                 "profile_id": profile_id,
                 "file_basename": v["basename"],
@@ -179,7 +147,7 @@ class RenamingModule(BaseModule):
 
             if new_path != v["current_path"]:
                 try:
-                    await self.request("torrents.rename_file", {
+                    await self.request(TORRENTS_RENAME_FILE, {
                         "hash": qb_hash, "old_path": v["current_path"],
                         "new_path": new_path})
                     renamed += 1
@@ -192,7 +160,7 @@ class RenamingModule(BaseModule):
                             "qb_file_index": v["file_index"],
                             "extracted_metadata": meta})
 
-        # 2. Обрабатываем не-видео файлы (дорожки озвучки, субтитры, шрифты, каталоги экстра)
+        # 2. Then the other files (voice-over tracks, subtitles, fonts, folders of extras)
         non_video_items = [it for it in all_items if not it["is_video"]]
         sorted_videos = sorted(matched_videos, key=lambda x: len(x["video_stem"]), reverse=True)
 
@@ -208,7 +176,7 @@ class RenamingModule(BaseModule):
                         break
 
             if matched_v is not None:
-                tag = _folder_tag(item["rel_dir"])
+                tag = folder_tag(item["rel_dir"])
                 ext = os.path.splitext(base)[1]
                 target_dir = matched_v["target_dir"]
                 target_stem = matched_v["target_stem"]
@@ -234,9 +202,9 @@ class RenamingModule(BaseModule):
 
                 meta = dict(matched_v["extracted"] or {})
                 ext_lower = ext.lower()
-                if ext_lower in _AUDIO_EXT:
+                if ext_lower in AUDIO_EXT:
                     meta["media_type"] = "audio"
-                elif ext_lower in _SUB_EXT:
+                elif ext_lower in SUB_EXT:
                     meta["media_type"] = "subtitles"
                 else:
                     meta["media_type"] = "extra"
@@ -271,7 +239,7 @@ class RenamingModule(BaseModule):
 
             if new_path != item["current_path"]:
                 try:
-                    await self.request("torrents.rename_file", {
+                    await self.request(TORRENTS_RENAME_FILE, {
                         "hash": qb_hash, "old_path": item["current_path"],
                         "new_path": new_path})
                     renamed += 1
@@ -285,6 +253,5 @@ class RenamingModule(BaseModule):
                             "extracted_metadata": meta})
 
         if records:
-            await self.request("torrents.db.files.upsert",
-                               {"qb_hash": qb_hash, "files": records})
+            await self.request(TORRENTS_DB_FILES_UPSERT, {"qb_hash": qb_hash, "files": records})
         return renamed
