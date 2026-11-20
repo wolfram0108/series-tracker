@@ -2,11 +2,9 @@
 //! its goals given back as places in those inputs, out of which the planner makes its `Goal`s with the objects it holds.
 
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyTuple};
-use std::collections::{HashMap, HashSet};
+use pyo3::types::PyTuple;
 
-use crate::plan::{Choices, Container, Failed, Fails, Goal, Inputs, Key, Online, Planner, RowId, Same, Slot, Snap, Snapshot,
-                  Subtitle, Track, Video, VideoWay};
+use crate::plan::{Container, Failed, Fails, Goal, Inputs, Key, RowId, Snap, Snapshot, Subtitle, Track, Video, VideoWay};
 
 fn at<'py, T: FromPyObject<'py>>(object: &Bound<'py, PyAny>, name: &str) -> PyResult<T> {
     object.getattr(name)?.extract()
@@ -23,23 +21,6 @@ fn opt_rid(object: &Bound<'_, PyAny>) -> PyResult<Option<RowId>> {
 fn shot(object: &Bound<'_, PyAny>) -> PyResult<Snapshot> {
     Ok(Snapshot { source: at(object, "source")?, player: at(object, "player")?, group: at(object, "group")?,
                   height: at(object, "height")?, link: at(object, "link")?, label: at(object, "label")? })
-}
-
-pub(crate) fn online(object: &Bound<'_, PyAny>) -> PyResult<Online> {
-    // A row of the core is taken as it is: nothing of it is read field by field.
-    if let Ok(row) = object.downcast::<crate::plan_rows::OnlineRow>() {
-        return Ok(row.get().row.clone());
-    }
-    Ok(Online {
-        id: rid(&object.getattr("id")?)?, season: at(object, "season")?, start: at(object, "start")?, end: at(object, "end")?,
-        player: at(object, "player")?, group: at(object, "group")?, height: at(object, "height")?,
-        source: at(object, "source")?, link: at(object, "link")?, label: at(object, "label")?,
-        position: at(object, "position")?, part: at(object, "part")?, playable: at(object, "playable")?,
-        current: at(object, "current")?, player_label: at(object, "player_label")?, timeline_key: at(object, "timeline_key")?,
-        track: at(object, "track")?, language: at(object, "language")?, subtitle_type: at(object, "subtitle_type")?,
-        timeline_id: RowId { source: 0, key: String::new(), video: String::new() },
-        variant_of: (String::new(), 0, String::new()),
-    }.made())
 }
 
 fn subtitle(object: &Bound<'_, PyAny>) -> PyResult<Subtitle> {
@@ -67,81 +48,6 @@ pub(crate) fn container(object: &Bound<'_, PyAny>) -> PyResult<Container> {
     })
 }
 
-type Variant = (String, i64, String);
-
-/// A map of the choices by episode. An episode with no value of its own holds the value of its level, one object of Python
-/// for hundreds of episodes: each object is read once.
-fn by_slot<'py, T: Clone>(object: &Bound<'py, PyAny>, name: &str, f: impl Fn(&Bound<'py, PyAny>) -> PyResult<T>)
-    -> PyResult<HashMap<Slot, T>> {
-    let found = object.getattr(name)?;
-    let dict = found.downcast::<PyDict>()?;
-    let mut read: HashMap<usize, T> = HashMap::new();
-    dict.iter().map(|(k, v)| {
-        let at = v.as_ptr() as usize;
-        let value = match read.get(&at) {
-            Some(value) => value.clone(),
-            None => {
-                let value = f(&v)?;
-                read.insert(at, value.clone());
-                value
-            }
-        };
-        Ok((k.extract::<Slot>()?, value))
-    }).collect()
-}
-
-fn same(object: &Bound<'_, PyAny>) -> PyResult<Same> {
-    Ok(Same { groups: object.getattr("groups")?.extract::<Vec<HashSet<Variant>>>()? })
-}
-
-fn choices(object: &Bound<'_, PyAny>) -> PyResult<Choices> {
-    let groups = object.getattr("player_groups")?.getattr("index")?;
-    let voice_order = object.getattr("voice_order")?;
-    let mut made = Choices {
-        players: at(object, "players")?, sources: at(object, "sources")?,
-        groups: object.getattr("groups")?.downcast::<PyDict>()?.iter()
-            .map(|(k, v)| Ok((k.extract::<i64>()?, v.extract::<Vec<String>>()?))).collect::<PyResult<_>>()?,
-        player_groups: groups.downcast::<PyDict>()?.iter().map(|(k, v)| Ok((k.extract()?, v.extract()?)))
-            .collect::<PyResult<_>>()?,
-        off_episodes: at(object, "off_episodes")?, off_groups: at(object, "off_groups")?,
-        off_compilations: object.getattr("off_compilations")?.iter()?.map(|r| rid(&r?)).collect::<PyResult<_>>()?,
-        reference: by_slot(object, "reference", |v| v.extract())?,
-        reference_deny: by_slot(object, "reference_deny", |v| v.extract())?,
-        voice_order: voice_order.downcast::<PyDict>()?.iter().map(|(k, v)| {
-            let k = k.downcast_into::<PyTuple>()?;
-            Ok(((k.get_item(0)?.extract::<Slot>()?, k.get_item(1)?.extract::<String>()?), v.extract()?))
-        }).collect::<PyResult<_>>()?,
-        voice_deny: by_slot(object, "voice_deny", |v| v.extract())?,
-        voice_off: by_slot(object, "voice_off", |v| v.extract())?,
-        member: by_slot(object, "member", opt_rid)?,
-        titles: object.getattr("titles")?.downcast::<PyDict>()?.iter().map(|(k, v)| Ok((k.extract()?, v.extract()?)))
-            .collect::<PyResult<_>>()?,
-        languages: object.getattr("languages")?.downcast::<PyDict>()?.iter().map(|(k, v)| Ok((k.extract()?, v.extract()?)))
-            .collect::<PyResult<_>>()?,
-        markup: by_slot(object, "markup", |v| v.extract())?,
-        markup_deny: by_slot(object, "markup_deny", |v| v.extract())?,
-        same: by_slot(object, "same", same)?,
-        markup_same: by_slot(object, "markup_same", same)?,
-        subtitle_order: by_slot(object, "subtitle_order", |v| v.extract())?,
-        subtitle_deny: by_slot(object, "subtitle_deny", |v| v.extract())?,
-        own_reference: at(object, "own_reference")?,
-        ..Default::default()
-    };
-    for each in object.getattr("delete")?.iter()? {
-        let each = each?.downcast_into::<PyTuple>()?;
-        match each.get_item(0)?.extract::<String>()?.as_str() {
-            "video" => {
-                made.delete_videos.insert(each.get_item(1)?.extract()?);
-            }
-            "track" => {
-                made.delete_tracks.insert((each.get_item(1)?.extract()?, rid(&each.get_item(2)?)?));
-            }
-            _ => {}
-        }
-    }
-    Ok(made)
-}
-
 fn fails(object: &Bound<'_, PyAny>) -> PyResult<Fails> {
     let mut made = Fails::default();
     for each in object.iter()? {
@@ -164,10 +70,10 @@ fn fails(object: &Bound<'_, PyAny>) -> PyResult<Fails> {
 
 /// The inputs of the planner of Python (`Inputs`) read into the planner here.
 pub fn inputs(object: &Bound<'_, PyAny>) -> PyResult<Inputs> {
-    let rows: Vec<Online> = object.getattr("online")?.iter()?.map(|r| online(&r?)).collect::<PyResult<_>>()?;
-    let subtitles: Vec<Online> = object.getattr("subtitles")?.iter()?.map(|r| online(&r?)).collect::<PyResult<_>>()?;
+    let rows = crate::plan_inputs::rows_of(&object.getattr("online")?)?;
+    let subtitles = crate::plan_inputs::rows_of(&object.getattr("subtitles")?)?;
     let containers: Vec<Container> = object.getattr("containers")?.iter()?.map(|c| container(&c?)).collect::<PyResult<_>>()?;
-    let choices = choices(&object.getattr("choices")?)?;
+    let choices = crate::plan_inputs::choices_ref(&object.getattr("choices")?)?;
     let failed = fails(&object.getattr("failed")?)?;
     Ok(Inputs { online: rows, subtitles, containers, choices, failed })
 }

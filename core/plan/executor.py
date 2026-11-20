@@ -332,7 +332,7 @@ class SeriesSync:
     def inputs(self, online: tuple[OnlineRow, ...], choices: Choices) -> Inputs:
         return Inputs(online, tuple(sorted((self._as_held(each) for each in self.containers.values()),
                                            key=lambda each: each.name)),
-                      replace(choices, delete=self.commands), frozenset(self.failed | self.skipped))
+                      choices.replaced(delete=self.commands), frozenset(self.failed | self.skipped))
 
     def _as_held(self, container: Container) -> Container:
         """A file as the plans of this sync see it: a track aligned to a row whose video came anew to another length is

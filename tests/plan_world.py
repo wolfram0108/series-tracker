@@ -157,7 +157,7 @@ class World(SeriesSync):
         raise AssertionError(f"the series does not come to rest: {[op.id for op in step.plan.ops][:8]}")
 
     def choose(self, **changes) -> None:
-        self.choices = replace(self.choices, **changes)
+        self.choices = self.choices.replaced(**changes)
 
     def delete(self, *command) -> None:
         self.choose(delete=self.choices.delete | {tuple(command)})

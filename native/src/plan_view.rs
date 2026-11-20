@@ -5,6 +5,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::plan::{voice_of, Container, Goal, Inputs, Online, Planner, RowId, Slot, Snapshot, Subtitle, Variant};
 use crate::plan_py;
@@ -141,7 +142,7 @@ fn slots_of(row: &Online) -> Vec<Slot> {
 }
 
 /// The failed attempts (keys of Python, in the order of their `repr`) with the episodes their row gives and its group.
-fn placed(failed: &Bound<'_, PyAny>, rows: &[Online]) -> PyResult<Vec<Placed>> {
+fn placed(failed: &Bound<'_, PyAny>, rows: &[Arc<Online>]) -> PyResult<Vec<Placed>> {
     let mut by_id: HashMap<&RowId, Vec<&Online>> = HashMap::new();
     for each in rows {
         by_id.entry(&each.id).or_default().push(each);
@@ -315,7 +316,7 @@ fn placed_py<'py>(py: Python<'py>, each: &Placed) -> PyResult<Bound<'py, PyDict>
 /// The failed attempts with where each belongs (modules/planner/view `placed`): each with its `key`.
 #[pyfunction]
 pub fn plan_placed<'py>(py: Python<'py>, failed: &Bound<'py, PyAny>, rows: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyList>> {
-    let rows: Vec<Online> = rows.iter()?.map(|r| plan_py::online(&r?)).collect::<PyResult<_>>()?;
+    let rows = crate::plan_inputs::rows_of(rows)?;
     let found = PyList::empty_bound(py);
     for each in placed(failed, &rows)? {
         let made = placed_py(py, &each)?;
@@ -450,7 +451,7 @@ pub fn plan_view<'py>(py: Python<'py>, series_id: i64, running: bool, containers
         groups: std::iter::once(c.video.snapshot.group.as_deref()).chain(c.tracks.iter().map(|t| t.snapshot.group.as_deref()))
             .collect(),
     }).collect();
-    let rows: &[Online] = planned.map(|p| p.inputs.online.as_slice()).unwrap_or(&[]);
+    let rows: &[Arc<Online>] = planned.map(|p| p.inputs.online.as_slice()).unwrap_or(&[]);
     let failures = PyList::empty_bound(py);
     for each in placed(failed, rows)? {
         let made = placed_py(py, &each)?;

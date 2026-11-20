@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+from collections.abc import Sequence
 from typing import Any
 
 
@@ -27,7 +28,7 @@ def plain(value: Any) -> Any:
         return [[plain(key), plain(each)] for key, each in value.items()]
     if isinstance(value, (set, frozenset)):
         return sorted((plain(each) for each in value), key=repr)
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple)) or (isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray))):
         return [plain(each) for each in value]
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")

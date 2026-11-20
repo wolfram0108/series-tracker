@@ -6,6 +6,7 @@ mod cols;
 mod layout;
 mod plan;
 mod plan_py;
+mod plan_inputs;
 mod plan_rows;
 mod plan_view;
 mod rows;
@@ -573,15 +574,14 @@ impl Rows {
     /// The rows of the output (`in_output`) as the planner reads them (core/plan/tables.OnlineRow), each with its place
     /// in the layout — every row counted, from `first` — and the place of its source (`places`, by source id).
     #[pyo3(signature = (places, first=0))]
-    fn online<'py>(&self, py: Python<'py>, places: HashMap<i64, String>, first: i64) -> PyResult<Bound<'py, PyList>> {
-        let class = py.import_bound("core.plan.tables")?.getattr("RowId")?;
-        let rows = PyList::empty_bound(py);
+    fn online(&self, places: HashMap<i64, String>, first: i64) -> plan_inputs::OnlineRows {
+        let mut rows = Vec::new();
         for (place, row) in self.layout.rows().enumerate() {
             if !row.output() {
                 continue;
             }
             let start = row.episode_start.unwrap_or(0);
-            let made = plan::Online {
+            rows.push(std::sync::Arc::new(plan::Online {
                 id: plan::RowId { source: row.source_id, key: row.row_key.to_string(), video: row.video.to_string() },
                 season: row.season.unwrap_or(0), start, end: row.episode_end.unwrap_or(start), player: row.player.to_string(),
                 group: row.voice_group.as_deref().unwrap_or("").to_string(),
@@ -593,10 +593,9 @@ impl Rows {
                 subtitle_type: row.subtitle_type.to_string(),
                 timeline_id: plan::RowId { source: 0, key: String::new(), video: String::new() },
                 variant_of: (String::new(), 0, String::new()),
-            }.made();
-            rows.append(Py::new(py, plan_rows::OnlineRow::made(py, &class, made)?)?)?;
+            }.made()));
         }
-        Ok(rows)
+        plan_inputs::OnlineRows::of(rows)
     }
 
     /// {(season, episode): the best height of its single videos that play}.
@@ -804,6 +803,9 @@ fn native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Row>()?;
     m.add_class::<plan_rows::OnlineRow>()?;
     m.add_class::<plan_view::Planned>()?;
+    m.add_class::<plan_inputs::OnlineRows>()?;
+    m.add_class::<plan_inputs::ChoicesPy>()?;
+    m.add_function(wrap_pyfunction!(plan_inputs::plan_choices, m)?)?;
     Ok(())
 }
 

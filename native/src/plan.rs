@@ -4,6 +4,7 @@
 
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::text::fold_name;
 
@@ -287,11 +288,12 @@ pub struct Choices {
     pub own_reference: HashSet<Slot>,
 }
 
+// The rows and the choices are shared with the objects of Python that hold them (native.OnlineRows, native.Choices).
 pub struct Inputs {
-    pub online: Vec<Online>,
-    pub subtitles: Vec<Online>,
+    pub online: Vec<Arc<Online>>,
+    pub subtitles: Vec<Arc<Online>>,
     pub containers: Vec<Container>,
-    pub choices: Choices,
+    pub choices: Arc<Choices>,
     pub failed: Fails,
 }
 
@@ -1291,9 +1293,9 @@ impl Inputs {
             }
         }).collect()).unwrap_or_default();
         Inputs {
-            online: v["online"].as_array().map(|a| a.iter().map(online_of).collect()).unwrap_or_default(),
-            subtitles: v["subtitles"].as_array().map(|a| a.iter().map(online_of).collect()).unwrap_or_default(),
-            containers, choices, failed,
+            online: v["online"].as_array().map(|a| a.iter().map(|r| Arc::new(online_of(r))).collect()).unwrap_or_default(),
+            subtitles: v["subtitles"].as_array().map(|a| a.iter().map(|r| Arc::new(online_of(r))).collect()).unwrap_or_default(),
+            containers, choices: Arc::new(choices), failed,
         }
     }
 }

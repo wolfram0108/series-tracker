@@ -143,7 +143,7 @@ def told(rows, *, wanted=(), same=NO_SAME, failed=frozenset()):
     choices = choices_of(rows, online, [], [], players=PRIORITY, player_groups=NO_GROUPS, sources=(1, 2, 3), voice_order={},
                          off_episodes=())
     from dataclasses import replace
-    choices = replace(choices, reference={(1, 1): tuple(wanted)} if wanted else {}, same={(1, 1): same} if same.groups else {})
+    choices = choices.replaced(reference={(1, 1): tuple(wanted)} if wanted else {}, same={(1, 1): same} if same.groups else {})
     inputs = Inputs(online, (), choices, frozenset(failed))
     return {(each.season, each.episode): each for each in references_of(plan(inputs))}[(1, 1)]
 

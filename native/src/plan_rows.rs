@@ -5,6 +5,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use crate::plan::{Online, RowId};
 
@@ -15,7 +16,7 @@ use crate::plan::{Online, RowId};
 /// the row itself. `track`: `sound`, or `subtitles` — a subtitles track, never a voice-over or a video.
 #[pyclass(frozen, module = "core.plan.tables", name = "OnlineRow")]
 pub struct OnlineRow {
-    pub row: Online,
+    pub row: Arc<Online>,
     // The row id and the timeline as the objects of Python they are read as (core/plan/tables.RowId).
     id: PyObject,
     timeline: PyObject,
@@ -32,7 +33,7 @@ fn rid(object: &Bound<'_, PyAny>) -> PyResult<RowId> {
 
 impl OnlineRow {
     /// The row of a row of the core, its ids made as the objects of Python they are read as.
-    pub fn made(py: Python<'_>, class: &Bound<'_, PyAny>, row: Online) -> PyResult<OnlineRow> {
+    pub fn made(py: Python<'_>, class: &Bound<'_, PyAny>, row: Arc<Online>) -> PyResult<OnlineRow> {
         let id = class.call1((row.id.source, row.id.key.as_str(), row.id.video.as_str()))?.unbind();
         let timeline = if row.timeline_key.is_empty() { id.clone_ref(py) } else {
             let t = row.timeline();
@@ -43,7 +44,7 @@ impl OnlineRow {
 
     pub fn of(py: Python<'_>, row: Online) -> PyResult<OnlineRow> {
         let class = row_id_class(py)?;
-        OnlineRow::made(py, &class, row)
+        OnlineRow::made(py, &class, Arc::new(row))
     }
 
     fn fields(&self) -> impl Hash + PartialEq + '_ {
@@ -83,7 +84,7 @@ impl OnlineRow {
     /// The row with some of its fields changed (what `dataclasses.replace` gives a dataclass).
     #[pyo3(signature = (**changes))]
     fn replaced(&self, py: Python<'_>, changes: Option<&Bound<'_, PyDict>>) -> PyResult<OnlineRow> {
-        let mut row = self.row.clone();
+        let mut row = (*self.row).clone();
         for (name, value) in changes.map(|c| c.iter().collect::<Vec<_>>()).unwrap_or_default() {
             let name: String = name.extract()?;
             match name.as_str() {
