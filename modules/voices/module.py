@@ -32,10 +32,8 @@ Events out:
   voices.settings.changed VoiceSettingsView — the settings as they apply after a save, so that every open settings screen
       shows them without asking back.
 
-The counts are those of `calc/voices`, made here without the pool: a parse of the stored values, the view of the screen and
-the group of a name are microseconds each (on 2026-11-21: 80–140 µs on the stored settings of the service), less than a hop
-to the pool, and a request for the settings must not queue behind the count of a page in it (the planner and the layout
-ask for them at every recount).
+The counts of `calc/voices` are made here without the pool: 80–140 µs each (2026-11-21, the stored settings of the service),
+less than a hop to it, and a request for the settings must not queue behind the count of a page in it.
 """
 from __future__ import annotations
 
