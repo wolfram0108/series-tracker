@@ -24,7 +24,14 @@ series and of every profile over HTTP and over the bus, a series of the instrume
 refused, busy, watched, given a source, changed and cleared of sources, deleted with its cascade), the settings (read and written
 by key and by prefix, the paths, a secret) and auth (the login right and wrong, the session, the password changed, the lock of too
 many attempts, an outdated hash renewed by a login), with the tables `series`, `series_sources`, `settings`, `saved_paths` and
-`admin_user` hashed after each command and the events of the three told as the stream writes them. No sync is run: nothing reaches the library or the network. `compare` is byte for byte: to find out whether a
+`admin_user` hashed after each command and the events of the three told as the stream writes them. With `--sources` (a run of its
+own too) the windows of `sources`, `trackerauth` and `metadata` answer: the stored tables of every page of the base, the address of a
+page and its site, the lists of the players and of the trackers, the settings of the sources (the mirrors) and the terms of the sites,
+the provider of the socket as the model of the specification (tests/provider_mock.py) plays it at an address it is pointed at (its
+picture, the search of titles, the read, the stop of a read, the check of pages, the stream and the download of a link, the provider
+down and back, cleared), the credentials of the trackers (synthetic ones, written by the run: no secret of the base is read or shown), the fetch of a
+page through them over a transport that is a model of the trackers, the releases of a tracker page, the files of the releases, and the
+mappings of TMDB over a model of TMDB; the tables of the three are hashed after each command. No sync is run: nothing reaches the library or the network. `compare` is byte for byte: to find out whether a
 change of code left the answers of the window as they were, collect from the tree before the change (`--root`, a commit
 exported into a folder) and from the one after, and compare. `selftest` is the red control of `compare`. Nothing is written to
 the base given; the copy is made again each run. A run ends with `WINDOW_JSON_DONE`; `compare` ends with `IDENTICAL` or
@@ -44,6 +51,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 TABLES = ("composition_rows", "composition_sources", "composition_state", "unknown_voices", "output_settings",
@@ -62,6 +70,15 @@ WATCHED = ("planner.series.changed", "planner.pack.changed", "planner.journal.ch
 OWNERS = ("series", "series_sources", "series_statuses", "saved_paths")
 
 
+# What the modules tell the window as events in the sources run (the table SSE_MAP names them).
+WATCHED_SOURCES = ("sources.table.progress", "sources.table.ready", "sources.table.fresh", "sources.table.failed",
+                   "sources.settings.changed", "sources.provider.changed", "sources.video.progress", "sources.provider.state",
+                   "sources.provider.manifest", "sources.pages.forgotten", "trackerauth.credentials.changed")
+# The tables the three modules own, and the settings: hashed whole after each command of their run.
+SOURCES_OWNED = ("release_tables", "release_rows", "trackers", "provider_manifest", "series_tmdb_mappings")
+# What differs on every run whatever the code (the number of a picture, the seconds of a download, the port of the model of the
+# provider, the folder of the run, the address of an object): filled by a run with `--sources`.
+_RUN_MASKS: list[tuple[re.Pattern, str]] = []
 # The clock readings of a read of a page: they differ on every run whatever the code, so their values are not compared.
 _CLOCK = re.compile(r'("(?:read_at|fresh_until)":\s*)"[^"]*"')
 # The stamp the base keeps (and the window shows) of a moment: `last_scan_time` after a touch.
@@ -70,7 +87,10 @@ _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{6}")
 
 def masked(text: str) -> str:
     """The text with the values of the clock fields replaced (what is there, and that it is a text, stays compared)."""
-    return _STAMP.sub("<stamp>", _CLOCK.sub(r'\1"<time>"', text))
+    text = _STAMP.sub("<stamp>", _CLOCK.sub(r'\1"<time>"', text))
+    for pattern, replacement in _RUN_MASKS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 def plain(value):
@@ -145,6 +165,37 @@ def owners_digest(path: str) -> dict:
     return out
 
 
+def sources_digest(path: str) -> dict:
+    """The tables of `sources`, `trackerauth` and `metadata`, each whole: rows and a hash. What a cipher stores is hashed as the
+    service reads it (a stored secret differs on every write: the cipher takes a new nonce), a clock stamp as `<stamp>`."""
+    from core import crypto
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    out = {}
+    for table in SOURCES_OWNED:
+        if table == "release_rows":
+            # The rows of every page: tens of thousands, taken in the order of the table as they come, one hash (no clock in them).
+            digest, count = hashlib.sha256(), 0
+            for row in conn.execute("SELECT * FROM release_rows ORDER BY url, seq"):
+                digest.update(repr(row).encode())
+                count += 1
+            out[table] = {"rows": count, "sha": digest.hexdigest()}
+            continue
+        rows = sorted(conn.execute(f"SELECT * FROM {table}").fetchall(), key=repr)
+        out[table] = {"rows": len(rows), "sha": hashlib.sha256(masked(repr(rows)).encode()).hexdigest()}
+    rows = sorted(((service, domain, crypto.decrypt(cookies), login, updated, agent, fingerprint) for
+                   service, domain, cookies, login, updated, agent, fingerprint in conn.execute(
+                       "SELECT service, domain, cookies_json, last_login_at, updated_at, user_agent, account_fingerprint "
+                       "FROM tracker_sessions")), key=repr)
+    out["tracker_sessions"] = {"rows": len(rows), "sha": hashlib.sha256(masked(repr(rows)).encode()).hexdigest()}
+    rows = sorted(((kind, name, crypto.decrypt(secret), url) for kind, name, secret, url in conn.execute(
+        "SELECT auth_type, username, password, url FROM auth")), key=repr)
+    out["auth"] = {"rows": len(rows), "sha": hashlib.sha256(repr(rows).encode()).hexdigest()}
+    rows = sorted(((key, crypto.decrypt(value)) for key, value in conn.execute("SELECT key, value FROM settings")), key=repr)
+    out["settings"] = {"rows": len(rows), "sha": hashlib.sha256(masked(repr(rows)).encode()).hexdigest()}
+    conn.close()
+    return out
+
+
 async def quiet(bus, planner, modules=(), sources=None) -> None:
     """Returns when nothing is left to do: every envelope is taken apart, no count of the view of a series is under way (the
     planner counts it beside its handlers) and no module works beside its handlers (a read of a page, a recount). The signal is the end of
@@ -160,7 +211,8 @@ async def quiet(bus, planner, modules=(), sources=None) -> None:
         await asyncio.gather(*under_way, return_exceptions=True)
 
 
-async def collect(root: str, base: str, out: str, series: list[int], windows: bool, owners: bool = False) -> None:
+async def collect(root: str, base: str, out: str, series: list[int], windows: bool, owners: bool = False,
+                  sources_run: bool = False) -> None:
     from core.bus import Bus
     from core.db import Database
     from core.module import BaseModule, BusRequestError
@@ -176,6 +228,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
     from modules.settings import SettingsModule
     from modules.sources import SourcesModule
     from modules.torrents.repository import ReleaseStore
+    from modules.trackerauth import TrackerauthModule
     from modules.unpack import UnpackModule
     from modules.voices import VoicesModule
     from core.contracts.torrent import ReleaseFile, ReleaseState, ReleaseView
@@ -224,6 +277,26 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
     path = os.path.join(folder, "app.db")
     shutil.copy(base, path)
     prune_profiles(path, FIRST_OPEN)
+    if sources_run:
+        # The credentials, the token of TMDB and the address of the provider of the base are not used: the run writes its own.
+        conn = sqlite3.connect(path)
+        conn.execute("DELETE FROM auth")
+        conn.execute("DELETE FROM tracker_sessions")
+        conn.execute("DELETE FROM settings WHERE key IN ('tmdb_token', 'provider.url', 'provider.token')")
+        conn.commit()
+        conn.close()
+        _RUN_MASKS[:] = [
+            (re.compile(r'("seq":\s*)\d+'), r"\1<n>"),
+            (re.compile(r'((?:\\)?"(?:seconds|longest)(?:\\)?":\s*)[0-9.]+'), r"\1<n>"),
+            (re.compile(r"127\.0\.0\.1:\d+"), "127.0.0.1:<port>"),
+            # The pace of a read (steps a second since its phase began) is the speed of the machine.
+            (re.compile(r'("rate":\s*)(?:[0-9.]+|null)'), r"\1<rate>"),
+            # The cause a provider that went down is told with is the one its last attempt met (a closed feed, then a refused
+            # connection): which of them is seen at the moment of a read depends on the pace of the retries, which is no part of the answer.
+            (re.compile(r'(provider_unavailable\\*",\\*"cause\\*":\\*")(?:(?!\\*"\}).)*'), r"\1<cause>"),
+            (re.compile(r"0x[0-9a-fA-F]{6,}"), "0x<address>"),
+            (re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"), "<stamp>"),
+            (re.compile(re.escape(folder)), "<tmp>")]
     db = Database(path)
     bus = Bus()
     composition = CompositionModule(bus, db)
@@ -231,18 +304,25 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
     probe = Probe(bus)
     gateway = GatewayModule(bus, static_dir=folder, templates_dir=folder, auth_required=False, cookie_secure=False)
     # `unpack` starts last, as it does in the service: its start tells every page it keeps, and the sources read them again.
-    reader = SourcesModule(bus, db, torrent_cache_dir=os.path.join(folder, "torrent_cache"))
+    # In the sources run the clock of the tables is the run's own (a page is fresh or stale as the run says) and the feed of the provider
+    # is opened again at once: nothing there waits for a time.
+    clock = {"now": datetime(2026, 11, 20, 13, 30, tzinfo=timezone.utc)}
+    reader = SourcesModule(bus, db, torrent_cache_dir=os.path.join(folder, "torrent_cache"),
+                           **({"table_clock": lambda: clock["now"], "provider_reconnect": (0.05, 0.2)} if sources_run else {}))
     modules = [CatalogModule(bus, db), SettingsModule(bus, db), RulesModule(bus, db), reader, VoicesModule(bus, db),
                composition, planner, probe, gateway, Torrents(bus, db), UnpackModule(bus, db)]
+    metadata = MetadataModule(bus, db)
     if owners:
         # The neighbours of the owners: the mapping of TMDB read from the base (the list of series asks it), the folder a save
         # planned (none), and the reports of the owners that are not on this bus that their data of a deleted series is gone.
-        modules += [MetadataModule(bus, db), AuthModule(bus, db), Neighbours(bus)]
+        modules += [metadata, AuthModule(bus, db), Neighbours(bus)]
+    if sources_run:
+        modules += [metadata, TrackerauthModule(bus, db), Neighbours(bus)]
     # The packets of the events the window is told, as the stream of the gateway writes them (SSE_MAP, json.dumps).
     events: list[tuple[str, str]] = []
 
     def seen(env) -> None:
-        if env.topic in WATCHED:
+        if env.topic in WATCHED or (sources_run and env.topic in WATCHED_SOURCES):
             sse = SSE_MAP.get(env.topic)
             payload = sse.form(env.payload) if sse is not None and sse.form else env.payload
             events.append((env.topic, masked(json.dumps(payload, ensure_ascii=False, default=plain))))
@@ -256,8 +336,9 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
 
     def record(name: str, status: int, body: bytes) -> None:
         body = masked(body.decode("utf-8")).encode("utf-8")
+        # The whole body is hashed; the first 64 KB are kept to find where two answers part (a table of a page is megabytes).
         answers[name] = {"status": status, "length": len(body), "sha": hashlib.sha256(body).hexdigest(),
-                         "body": base64.b64encode(body).decode()}
+                         "body": base64.b64encode(body[:65536]).decode()}
 
     async def ask(client, name, method, url, **kwargs):
         response = await client.request(method, url, **kwargs)
@@ -798,6 +879,463 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                         json={"username": "proto", "password": "proto-password-3"})
         told("owners:auth")
 
+    async def sources_window(client) -> None:
+        """The windows of `sources`, `trackerauth` and `metadata`: stored tables, addresses, lists, settings, terms, the provider
+        of the socket as the model of the specification plays it, the credentials of the trackers, the fetch through them, the
+        releases of a tracker page, the files of the releases and the mappings of TMDB. Every transport that leaves the machine in
+        the service is a model here: the trackers (`requests`), the sites and the API of anilibria (`httpx` of the module), TMDB."""
+        import requests
+        import requests.adapters
+        from collections import Counter
+        from datetime import timedelta
+        from urllib.parse import urlparse
+        from core.topics import TOPICS
+        sys.path.insert(0, os.path.join(root, "tests"))
+        from provider_mock import MockProvider, MockServer, link_of
+
+        sample = os.path.join(root, "tests", "samples", "trackers")
+        samples = {name: open(os.path.join(sample, name), encoding="utf-8").read()
+                   for name in ("kinozal_page.html", "rutracker_page.html", "anilibria_release.json")}
+        torrent = b"d4:infod4:name1:xee"
+        # What the run asks of the trackers over `requests` (the credentials are the run's own), and how they answer: the page of
+        # a release once logged in, the login form before, a file of a torrent, the API of VK.
+        trackers = {"kinozal_in": False}
+
+        def answer(request, text="", *, content=None, status=200, kind="text/html; charset=utf-8", url=None):
+            made = requests.Response()
+            made.url, made.status_code = url or request.url, status
+            made._content = content if content is not None else text.encode("utf-8")
+            made.headers.update({"Content-Type": kind})
+            made.encoding, made.raw, made.request = "utf-8", None, request
+            return made
+
+        def tracker_model(self, request, **kwargs):
+            host, url = urlparse(request.url).hostname or "", request.url
+            if host.endswith(("kinozal.me", "kinozal.tv")):
+                if "takelogin.php" in url:
+                    trackers["kinozal_in"] = True
+                    return answer(request, "<html>userdetails</html>", url=f"https://{host}/userdetails.php")
+                if not trackers["kinozal_in"]:
+                    return answer(request, '<form method="post" action="/takelogin.php">вход</form>')
+                if "download.php" in url:
+                    return answer(request, content=torrent, kind="application/x-bittorrent")
+                return answer(request, samples["kinozal_page.html"])
+            if host.endswith("rutracker.org"):
+                return answer(request, samples["rutracker_page.html"])
+            if host == "api.vk.com":
+                return answer(request, '{"response": {"count": 0, "items": []}}', kind="application/json")
+            return answer(request, "not found", status=404)
+
+        def web_model(request: httpx.Request) -> httpx.Response:
+            if request.url.host in ("anilibria.top", "aniliberty.top") and "/api/v1/anime/releases/" in request.url.path:
+                return httpx.Response(200, text=samples["anilibria_release.json"], headers={"content-type": "application/json"})
+            return httpx.Response(404, text="not found")
+
+        def tmdb_model(request: httpx.Request) -> httpx.Response:
+            if request.headers.get("authorization") != "Bearer probe-tmdb-token":
+                return httpx.Response(401, json={"status_message": "Invalid API key"})
+            ident = request.url.path.rsplit("/", 1)[-1]
+            if request.url.path.endswith("/search/tv"):
+                name = "Во все тяжкие" if request.url.params.get("language") == "ru-RU" else "Breaking Bad"
+                return httpx.Response(200, json={"results": [
+                    {"id": 4638, "name": name, "original_name": "Breaking Bad", "first_air_date": "2008-01-20",
+                     "poster_path": "/p.jpg", "overview": "химия"},
+                    {"id": 7, "name": "Без дат", "original_name": None, "first_air_date": None, "poster_path": None, "overview": None}]})
+            if "/tv/" in request.url.path and ident != "999":
+                return httpx.Response(200, json={"name": "Т", "original_name": "T", "poster_path": "/q.jpg", "status": "Ended", "seasons": [
+                    {"season_number": 0, "episode_count": 10, "air_date": None, "name": "Спешлы"},
+                    {"season_number": 1, "episode_count": 26, "air_date": "2008-01-20", "name": "Сезон 1"},
+                    {"season_number": 2, "episode_count": 24, "air_date": "2009-01-20", "name": "Сезон 2"},
+                    {"season_number": 3, "episode_count": 20, "air_date": "2010-01-20", "name": "Сезон 3"},
+                    {"season_number": 4, "episode_count": None, "air_date": None, "name": "Сезон 4"}]})
+            return httpx.Response(404, json={"status_message": "not found"})
+
+        original_send = requests.adapters.HTTPAdapter.send
+        requests.adapters.HTTPAdapter.send = tracker_model
+        reader._http = httpx.AsyncClient(transport=httpx.MockTransport(web_model), follow_redirects=True)
+        await metadata._http.aclose()
+        metadata._http = httpx.AsyncClient(base_url="https://api.themoviedb.org/3", transport=httpx.MockTransport(tmdb_model),
+                                           timeout=10.0)
+        refresh_topic = "sources.table.refresh" if "sources.table.refresh" in TOPICS else "sources.table.get"
+
+        def refreshing(url: str, **more) -> dict:
+            """What asks the page to be read if its table is not current: the command of the new tree, the query with `refresh` of the old."""
+            return {"url": url, **more} if refresh_topic != "sources.table.get" else {"url": url, "refresh": True, **more}
+
+        async def done(label: str) -> None:
+            """What a command left: the work it began has ended, then the tables of the three modules and the packets told."""
+            await composition.idle()
+            await quiet(bus, planner, modules, reader)
+            answers[f"{label}:sources"] = sources_digest(path)
+            told(label)
+
+        async def socket_is(sub, state: str) -> None:
+            """Returns when the socket of the provider stands in `state`: the event of its change is the signal."""
+            while not ((connector := reader.connector) is not None and connector.state == state):
+                await asyncio.wait_for(sub.queue.get(), 30)
+
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        urls = [row[0] for row in conn.execute("SELECT url FROM release_tables ORDER BY url")]
+        newest = conn.execute("SELECT url FROM release_tables WHERE read_at IS NOT NULL ORDER BY read_at DESC LIMIT 1").fetchone()[0]
+        oldest = conn.execute("SELECT url FROM release_tables WHERE url LIKE 'http%' AND read_at IS NOT NULL "
+                              "AND url NOT LIKE '%kinozal%' AND url NOT LIKE '%rutracker%' ORDER BY read_at LIMIT 1").fetchone()[0]
+        trackers_stored = [row[0] for row in conn.execute("SELECT id FROM trackers ORDER BY id")]
+        multi = [row[0] for row in conn.execute(
+            "SELECT m.series_id FROM series_tmdb_mappings m JOIN series s ON s.id = m.series_id WHERE s.season = '' ORDER BY 1")]
+        mapped = [row[0] for row in conn.execute("SELECT series_id FROM series_tmdb_mappings ORDER BY 1")]
+        conn.close()
+        hosts = [host for host, _ in Counter(urlparse(each).hostname or "" for each in urls if each.startswith("http")).most_common(3)]
+        card = "title://mock/7/X"
+        # What the start of the modules told is not the order of this run's own: the packets of the start come as the reads end.
+        answers.pop("events:start", None)
+        answers["sources:start"] = sources_digest(path)
+        told("sources:start")
+
+        # --- the tables of the pages the base holds, and the pages it does not ------------------------------------------------
+        for url in urls:
+            await over_bus(f"sources:table:{url}", "sources.table.get", {"url": url, "refresh": False})
+        for label, payload in (("absent", {"url": "https://1.ruchime.org/release/never-read", "refresh": False}),
+                               ("no-site", {"url": "https://example.invalid/page", "refresh": False}),
+                               ("provider-card", {"url": card, "refresh": False}), ("no-url", {}), ("empty", {"url": ""})):
+            await over_bus(f"sources:table:{label}", "sources.table.get", payload)
+
+        # --- an address and the site that reads it: every page, its other spellings, and none -----------------------------------
+        for url in urls:
+            await over_bus(f"sources:resolve:{url}", "sources.site.resolve", {"url": url})
+            await ask(client, f"sources:resolve:http:{url}", "POST", "/api/sources/resolve", json={"url": url})
+        for label, url in (("kinozal-dl", "https://dl.kinozal.me/details.php?id=2034617"), ("kinozal-www", "https://www.kinozal.tv/details.php?id=1"),
+                           ("rutracker", "https://rutracker.org/forum/viewtopic.php?t=1"), ("anilibria", "https://anilibria.top/anime/releases/release/x/episodes"),
+                           ("vk", "https://vkvideo.ru/@chan|тайтл"), ("none", "https://example.invalid/x"), ("empty", ""),
+                           ("card", card), ("not-a-url", "хочу смотреть")):
+            await over_bus(f"sources:resolve:{label}", "sources.site.resolve", {"url": url})
+            await ask(client, f"sources:resolve:http:{label}", "POST", "/api/sources/resolve", json={"url": url})
+        await over_bus("sources:resolve:no-url", "sources.site.resolve", {})
+        await ask(client, "sources:resolve:http:no-url", "POST", "/api/sources/resolve", json={})
+
+        # --- the players, the trackers and the settings of the sources ----------------------------------------------------------
+        for label, payload in (("none", {}), ("all", {"urls": urls}), ("some", {"urls": urls[:5]}), ("unknown", {"urls": ["https://example.invalid/x"]}),
+                               ("twice", {"urls": urls[:2] + urls[:2]})):
+            await over_bus(f"sources:players:{label}", "sources.players.list", payload)
+        await ask(client, "sources:settings", "GET", "/api/sources/settings")
+        await over_bus("sources:settings:bus", "sources.settings.get", {})
+        await ask(client, "sources:trackers", "GET", "/api/trackers")
+        await over_bus("sources:trackers:bus", "sources.trackers.list", {})
+        kinozal = trackers_stored[2]
+        for label, body in (("mirrors", {"mirrors": ["kinozal.me", "kinozal.guru", "kinozal.tv", "kinozal.example"]}),
+                            ("same", {"mirrors": ["kinozal.me", "kinozal.guru", "kinozal.tv", "kinozal.example"]}),
+                            ("empty", {"mirrors": []}), ("no-mirrors", {}), ("back", {"mirrors": ["kinozal.me", "kinozal.guru", "kinozal.tv"]})):
+            await ask(client, f"sources:trackers:set:{label}", "PUT", f"/api/trackers/{kinozal}", json=body)
+            await done(f"sources:trackers:set:{label}")
+            await ask(client, f"sources:trackers:set:{label}:settings", "GET", "/api/sources/settings")
+            await ask(client, f"sources:trackers:set:{label}:list", "GET", "/api/trackers")
+        await ask(client, "sources:trackers:set:unknown", "PUT", "/api/trackers/999999", json={"mirrors": ["x.example"]})
+        await done("sources:trackers:set:unknown")
+        await ask(client, "sources:trackers:set:back:list", "GET", "/api/trackers")
+
+        # --- the terms of the sites: read, set, refused, and what the tables say of them ------------------------------------------
+        await ask(client, "sources:terms", "GET", "/api/settings/source_terms")
+        await over_bus("sources:terms:bus", "sources.terms.get", {})
+        await ask(client, "sources:fresh", "POST", "/api/sources/fresh", json={"urls": urls})
+        await over_bus("sources:fresh:bus", "sources.tables.fresh", {"urls": [*urls[:3], "https://example.invalid/x", card]})
+        await over_bus("sources:fresh:bus:none", "sources.tables.fresh", {"urls": []})
+        await over_bus("sources:fresh:bus:no-urls", "sources.tables.fresh", {})
+        for label, body in (("set", {"site": hosts[0], "minutes": 15}), ("padded", {"site": hosts[1], "minutes": " 90 "}),
+                            ("same", {"site": hosts[0], "minutes": 15}), ("zero", {"site": hosts[0], "minutes": 0}),
+                            ("text", {"site": hosts[0], "minutes": "abc"}), ("month", {"site": hosts[2], "minutes": 44640}),
+                            ("over", {"site": hosts[2], "minutes": 44641}), ("bool", {"site": hosts[2], "minutes": True}),
+                            ("no-site", {"minutes": 5}), ("no-minutes", {"site": hosts[2]}), ("none", {})):
+            await ask(client, f"sources:terms:{label}", "POST", "/api/settings/source_terms", json=body)
+            await done(f"sources:terms:{label}")
+            await ask(client, f"sources:terms:{label}:list", "GET", "/api/settings/source_terms")
+        await ask(client, "sources:terms:fresh", "POST", "/api/sources/fresh", json={"urls": urls})
+
+        # --- the credentials of the trackers (the run's own: none of the base is read), TMDB's token among them ----------------------
+        await ask(client, "trackerauth:http:empty", "GET", "/api/auth")
+        for service in ("qbittorrent", "kinozal", "rutracker", "vk", "astar", "nothing"):
+            await over_bus(f"trackerauth:get:empty:{service}", "trackerauth.credentials.get", {"service": service})
+            await over_bus(f"trackerauth:secret:empty:{service}", "trackerauth.secret.get", {"service": service})
+        await ask(client, "trackerauth:http:save", "POST", "/api/auth", json={
+            "qbittorrent": {"url": "http://qb:8080", "username": "admin", "password": "probe-qb-pass"},
+            "kinozal": {"username": " probe-kz ", "password": "probe-kz-pass", "url": ""},
+            "rutracker": {"username": "probe-rt", "password": "probe-rt-pass"},
+            "vk": {"token": "probe-vk-token"}, "tmdb": {"token": "probe-tmdb-token"}})
+        await done("trackerauth:http:save")
+        await ask(client, "trackerauth:http:saved", "GET", "/api/auth")
+        for service in ("qbittorrent", "kinozal", "rutracker", "vk", "tmdb", "astar", "nothing"):
+            await ask(client, f"trackerauth:http:secret:{service}", "GET", f"/api/auth/{service}/secret")
+        for service in ("qbittorrent", "kinozal", "rutracker", "vk", "astar", "nothing"):
+            await over_bus(f"trackerauth:get:{service}", "trackerauth.credentials.get", {"service": service})
+            await over_bus(f"trackerauth:secret:{service}", "trackerauth.secret.get", {"service": service})
+        for label, payload in (("unchanged", {"service": "kinozal", "username": "probe-kz", "password": ""}),
+                               ("no-password", {"service": "rutracker", "username": " probe-rt ", "url": "https://rutracker.org"}),
+                               ("changed", {"service": "rutracker", "username": "probe-rt", "password": "probe-rt-pass-2"}),
+                               ("empty-name", {"service": "astar", "username": "", "password": None}), ("no-service", {"username": "x"})):
+            await over_bus(f"trackerauth:set:{label}", "trackerauth.credentials.set", payload)
+            await done(f"trackerauth:set:{label}")
+            await over_bus(f"trackerauth:set:{label}:get", "trackerauth.credentials.get", {"service": payload.get("service", "kinozal")})
+            await over_bus(f"trackerauth:set:{label}:secret", "trackerauth.secret.get", {"service": payload.get("service", "kinozal")})
+        await ask(client, "trackerauth:http:after", "GET", "/api/auth")
+        await ask(client, "trackerauth:http:save:no-body", "POST", "/api/auth", json={})
+        await ask(client, "trackerauth:http:save:blank", "POST", "/api/auth", json={"kinozal": {"password": ""}, "vk": {}})
+
+        # --- the fetch through them: logged in on the first request, the page, a file, VK, refused, and the login that is not repeated -----
+        kz = "https://kinozal.me/details.php?id=2034617"
+        for label, payload in (("kinozal", {"service": "kinozal", "url": kz}),
+                               ("kinozal-again", {"service": "kinozal", "url": kz}),
+                               ("kinozal-file", {"service": "kinozal", "url": "https://dl.kinozal.me/download.php?id=2034617"}),
+                               ("kinozal-post", {"service": "kinozal", "url": kz, "method": "POST", "data": {"a": "b"}, "timeout": 5}),
+                               ("rutracker", {"service": "rutracker", "url": "https://rutracker.org/forum/viewtopic.php?t=1"}),
+                               ("rutracker-file", {"service": "rutracker", "url": "https://rutracker.org/forum/dl.php?t=1"}),
+                               ("vk", {"service": "vk", "url": "https://api.vk.com/method/video.get", "params": {"owner_id": 1}}),
+                               ("unknown-service", {"service": "nothing", "url": "https://example.invalid/x"}),
+                               ("no-credentials", {"service": "astar", "url": "https://astar.example/x"}), ("no-url", {"service": "kinozal"})):
+            await over_bus(f"trackerauth:fetch:{label}", "trackerauth.fetch", payload)
+            await done(f"trackerauth:fetch:{label}")
+        trackers["kinozal_in"] = False  # the session of the tracker expired: the login is wanted again, within its rate limit
+        await over_bus("trackerauth:fetch:rate-limit", "trackerauth.fetch", {"service": "kinozal", "url": kz})
+        await done("trackerauth:fetch:rate-limit")
+        trackers["kinozal_in"] = True
+
+        # --- the releases of a tracker page, the page parsed, and the file of a release in the cache -------------------------------------
+        for label, url in (("kinozal", kz), ("rutracker", "https://rutracker.org/forum/viewtopic.php?t=1"),
+                           ("unknown", "https://example.invalid/x"), ("not-a-page", "хочу")):
+            await over_bus(f"sources:releases:{label}", "sources.releases.get", {"url": url})
+            await ask(client, f"sources:releases:http:{label}", "POST", "/api/torrent/page", json={"url": url})
+        await over_bus("sources:parse:anilibria", "sources.parse", {"url": "https://anilibria.top/anime/releases/release/x/episodes"})
+        await over_bus("sources:parse:unknown", "sources.parse", {"url": "https://example.invalid/x"})
+        await over_bus("sources:parse:no-url", "sources.parse", {})
+        dl = "https://dl.kinozal.me/download.php?id=2034617"
+        for label, payload in (("miss", {"url": dl, "torrent_id": "t1"}), ("hit", {"url": dl, "torrent_id": "t1"}),
+                               ("unknown-tracker", {"url": "https://example.invalid/x.torrent", "torrent_id": "t2"}),
+                               ("no-id", {"url": dl})):
+            await over_bus(f"sources:torrent-file:{label}", "sources.torrent_file.get", payload)
+        probe.send_command("sources.torrent_file.drop", {"torrent_id": "t1"})
+        probe.send_command("sources.torrent_file.drop", {"torrent_id": "never-cached"})
+        await done("sources:torrent-file:drop")
+        await over_bus("sources:torrent-file:after-drop", "sources.torrent_file.get", {"url": dl, "torrent_id": "t1"})
+
+        # --- a page read again when its table is not current: the term, the reads that fail over the model of the sites, the user's read --
+        await over_bus("sources:refresh:fresh", refresh_topic, refreshing(newest))
+        await over_bus("sources:refresh:stale", refresh_topic, refreshing(oldest))
+        await done("sources:refresh:stale")
+        await over_bus("sources:refresh:stale:get", "sources.table.get", {"url": oldest, "refresh": False})
+        await over_bus("sources:refresh:stale:again", refresh_topic, refreshing(oldest, rows="5"))
+        await done("sources:refresh:stale:again")
+        await over_bus("sources:refresh:no-site", refresh_topic, refreshing("https://example.invalid/page"))
+        await over_bus("sources:refresh:no-url", refresh_topic, {})
+        chines = next((each for each in urls if each.startswith("title://")), card)
+        await over_bus("sources:refresh:provider-page", refresh_topic, refreshing(chines, by_sync=True))
+        await done("sources:refresh:provider-page")
+        probe.send_command("sources.table.read", {"url": oldest, "rows": "-3"})
+        await done("sources:read:oldest")
+        probe.send_command("sources.table.read", {"url": "https://example.invalid/page"})
+        await done("sources:read:no-site")
+        await over_bus("sources:cancel:none", "sources.table.cancel", {"url": oldest})
+        await ask(client, "sources:cancel:http:none", "POST", "/api/sources/cancel", json={"url": oldest})
+        await over_bus("sources:cancel:no-url", "sources.table.cancel", {})
+        clock["now"] += timedelta(days=10)
+        await over_bus("sources:refresh:later", refresh_topic, refreshing(newest))
+        await done("sources:refresh:later")
+        clock["now"] -= timedelta(days=10)
+
+        # --- the provider of the socket: none, refused, pointed at, searched, read, stopped, down and back, cleared -----------------------
+        mock = MockProvider(token="probe-provider-token")
+        mock.add_site("mock", "Мок (Mock)")
+        mock.title("mock", 7, ["名"], [("1", "X", "tok 1", [1080]), ("2", "X", "tok 2", [2160]), ("3", "Y", "tok 3", [])])
+        mock.title("mock", 8, ["他"], [("1", "Z", "tok 4", [720])])
+        mock.sites["mock"].found = [{"id": 7, "name": "名"}, {"id": 8, "name": "他"}]
+        server = MockServer(mock)
+        await server.up()
+        link = link_of("X", "tok 1")
+        pages_asked = [card, "title://mock/8/Z", kz, chines, "title://other/9/X", "https://example.invalid/x"]
+        await ask(client, "provider:none", "GET", "/api/provider")
+        await over_bus("provider:none:bus", "sources.provider.get", {})
+        await ask(client, "provider:none:search", "POST", "/api/sources/search", json={"query": "名"})
+        await over_bus("provider:none:search:bus", "sources.titles.search", {"query": "名", "page": 1})
+        await over_bus("provider:none:pages", "sources.pages.check", {"urls": pages_asked})
+        await over_bus("provider:none:table", "sources.table.get", {"url": card, "refresh": False})
+        probe.send_command("sources.table.read", {"url": card})
+        await done("provider:none:read")
+        await over_bus("provider:none:stream", "sources.video.stream", {"url": link})
+        await over_bus("provider:none:stream:web", "sources.video.stream", {"url": "https://example.invalid/x"})
+        await over_bus("provider:none:fetch", "sources.video.fetch", {"url": link, "target": os.path.join(folder, "dl", "none.mp4")})
+        await over_bus("provider:none:fetch:stop", "sources.video.fetch.stop", {"target": os.path.join(folder, "dl", "none.mp4")})
+        for label, body in (("not-http", {"url": "ftp://x"}), ("spaces", {"url": "http://a b"}), ("no-host", {"url": "http://"}),
+                            ("no-url", {})):
+            await ask(client, f"provider:set:{label}", "PUT", "/api/provider", json=body)
+            await done(f"provider:set:{label}")
+        sub = bus.subscribe("sources.provider.state")
+        await ask(client, "provider:set:wrong-token", "PUT", "/api/provider", json={"url": server.url, "token": "wrong"})
+        await socket_is(sub, "down")
+        await done("provider:set:wrong-token")
+        await ask(client, "provider:wrong-token", "GET", "/api/provider")
+        await ask(client, "provider:set", "PUT", "/api/provider", json={"url": server.url + "/", "token": "probe-provider-token"})
+        await socket_is(sub, "up")
+        await done("provider:set")
+        first = await ask(client, "provider:view", "GET", "/api/provider")
+        second = await ask(client, "provider:view:again", "GET", "/api/provider")
+        answers["provider:view:grows"] = {"grows": second.json()["seq"] > first.json()["seq"]}
+        await over_bus("provider:view:bus", "sources.provider.get", {})
+        await ask(client, "provider:settings", "GET", "/api/sources/settings")
+        await ask(client, "provider:resolve", "POST", "/api/sources/resolve", json={"url": card})
+        await over_bus("provider:players", "sources.players.list", {"urls": [card, *urls[:3]]})
+        await over_bus("provider:players:none", "sources.players.list", {})
+        await ask(client, "provider:search", "POST", "/api/sources/search", json={"query": "名"})
+        await ask(client, "provider:search:page", "POST", "/api/sources/search", json={"query": "名", "page": 2})
+        await over_bus("provider:search:bus", "sources.titles.search", {"query": "他", "page": 1})
+        await over_bus("provider:search:no-query", "sources.titles.search", {})
+        mock.search_status = 500
+        await ask(client, "provider:search:fails", "POST", "/api/sources/search", json={"query": "名"})
+        mock.search_status = 200
+        await over_bus("provider:pages", "sources.pages.check", {"urls": pages_asked})
+        await over_bus("provider:pages:none", "sources.pages.check", {"urls": []})
+        await over_bus("provider:pages:no-urls", "sources.pages.check", {})
+        made = await ask(client, "provider:series", "POST", "/api/series", json={
+            "name": "Прибор", "name_en": "Proto", "site": "kinozal", "save_path": "/media/proto", "season": "",
+            "sources": [{"url": card, "source_type": "web_video", "parser_profile_id": None}],
+            "tmdb_data": {"tmdb_id": 4638, "tmdb_season_number": 1, "total_episodes": 5, "poster_path": "/p.jpg",
+                          "series_name": "Breaking Bad", "year": "2008"}})
+        sid = made.json().get("series_id")
+        await done("provider:series")
+        await ask(client, "provider:view:counted", "GET", "/api/provider")
+        await ask(client, "provider:terms", "GET", "/api/settings/source_terms")
+        await over_bus("provider:refresh:first-read", refresh_topic, refreshing(card))
+        await over_bus("provider:refresh:by-sync", refresh_topic, refreshing(card, by_sync=True))
+        await done("provider:refresh:by-sync")
+        ended = bus.subscribe("sources.table.ready", "sources.table.failed")
+        await ask(client, "provider:read", "POST", "/api/sources/read", json={"url": card})
+        await asyncio.wait_for(ended.queue.get(), 30)
+        await done("provider:read")
+        await over_bus("provider:read:table", "sources.table.get", {"url": card, "refresh": False})
+        await over_bus("provider:read:fresh", "sources.tables.fresh", {"urls": [card]})
+        await ask(client, "provider:read:fresh:http", "POST", "/api/sources/fresh", json={"urls": [card]})
+        await over_bus("provider:refresh:read", refresh_topic, refreshing(card, by_sync=True))
+        clock["now"] += timedelta(days=10)
+        await over_bus("provider:refresh:stale", refresh_topic, refreshing(card))
+        await over_bus("provider:refresh:stale:by-sync", refresh_topic, refreshing(card, by_sync=True))
+        await done("provider:refresh:stale")
+        clock["now"] -= timedelta(days=10)
+        await ask(client, "provider:read:rows", "POST", "/api/sources/read", json={"url": "title://mock/8/Z", "rows": "1"})
+        await done("provider:read:rows")
+        await over_bus("provider:read:rows:table", "sources.table.get", {"url": "title://mock/8/Z", "refresh": False})
+        mock.read_error = json.dumps({"code": "title_unknown"})
+        await ask(client, "provider:read:error", "POST", "/api/sources/read", json={"url": card})
+        await done("provider:read:error")
+        await over_bus("provider:read:error:table", "sources.table.get", {"url": card, "refresh": False})
+        mock.read_error = ""
+        mock.read_breaks = True
+        await ask(client, "provider:read:breaks", "POST", "/api/sources/read", json={"url": card})
+        await done("provider:read:breaks")
+        await over_bus("provider:read:breaks:table", "sources.table.get", {"url": card, "refresh": False})
+        mock.read_breaks = False
+        mock.release.clear()
+        begun = bus.subscribe("sources.table.progress")
+        await ask(client, "provider:read:slow", "POST", "/api/sources/read", json={"url": card})
+        await asyncio.wait_for(begun.queue.get(), 30)  # the read has said where it is: a stop that comes now meets a read that goes
+        bus.unsubscribe(begun)
+        await over_bus("provider:read:slow:table", "sources.table.get", {"url": card, "refresh": False})
+        await over_bus("provider:read:slow:refresh", refresh_topic, refreshing(card, by_sync=True))
+        await ask(client, "provider:cancel", "POST", "/api/sources/cancel", json={"url": card})
+        await done("provider:cancel")
+        mock.release.set()
+        await over_bus("provider:cancel:table", "sources.table.get", {"url": card, "refresh": False})
+        await over_bus("provider:stream", "sources.video.stream", {"url": link})
+        await over_bus("provider:stream:max-height", "sources.video.stream", {"url": link, "max_height": 720})
+        await over_bus("provider:stream:web", "sources.video.stream", {"url": "https://example.invalid/x"})
+        await over_bus("provider:stream:foreign", "sources.video.stream", {"url": "title://other/9/X"})
+        await over_bus("provider:stream:no-url", "sources.video.stream", {})
+        target = os.path.join(folder, "dl", "probe.mp4")
+        await over_bus("provider:fetch", "sources.video.fetch", {"url": link, "target": target, "max_height": 1080, "connections": 2})
+        await done("provider:fetch")
+        mock.download_of(link_of("X", "tok 2"), {"type": "error", "reason": json.dumps({"code": "no_such_file"}), "kind": "final"})
+        await over_bus("provider:fetch:refused", "sources.video.fetch", {"url": link_of("X", "tok 2"), "target": target + ".2"})
+        await over_bus("provider:fetch:not-owned", "sources.video.fetch", {"url": "https://example.invalid/x", "target": target + ".3"})
+        await over_bus("provider:fetch:stop", "sources.video.fetch.stop", {"target": target})
+        await over_bus("provider:fetch:stop:no-target", "sources.video.fetch.stop", {})
+        await over_bus("provider:fetch:no-url", "sources.video.fetch", {"target": target})
+        down = bus.subscribe("sources.provider.state")
+        await server.down()
+        await socket_is(down, "down")
+        await done("provider:down")
+        await ask(client, "provider:down:view", "GET", "/api/provider")
+        await over_bus("provider:down:pages", "sources.pages.check", {"urls": pages_asked})
+        await over_bus("provider:down:search", "sources.titles.search", {"query": "名", "page": 1})
+        await ask(client, "provider:down:search:http", "POST", "/api/sources/search", json={"query": "名"})
+        await over_bus("provider:down:table", "sources.table.get", {"url": card, "refresh": False})
+        await over_bus("provider:down:refresh", refresh_topic, refreshing(card, by_sync=True))
+        probe.send_command("sources.table.read", {"url": card})
+        await done("provider:down:read")
+        await over_bus("provider:down:stream", "sources.video.stream", {"url": link})
+        await over_bus("provider:down:fetch", "sources.video.fetch", {"url": link, "target": target + ".4"})
+        await server.up()
+        await socket_is(down, "up")
+        await done("provider:up-again")
+        await ask(client, "provider:up-again:view", "GET", "/api/provider")
+        await over_bus("provider:up-again:pages", "sources.pages.check", {"urls": pages_asked})
+        applied = bus.subscribe("sources.provider.manifest")
+        mock.changed()
+        await asyncio.wait_for(applied.queue.get(), 30)
+        await done("provider:manifest-changed")
+        mock.add_site("second", "Второй")
+        await asyncio.wait_for(applied.queue.get(), 30)
+        await done("provider:site-added")
+        bus.unsubscribe(applied)
+        await ask(client, "provider:site-added:view", "GET", "/api/provider")
+        await ask(client, "provider:site-added:settings", "GET", "/api/sources/settings")
+        await over_bus("provider:site-added:players", "sources.players.list", {"urls": [card]})
+        await ask(client, "provider:clear", "PUT", "/api/provider", json={"url": "", "token": ""})
+        await done("provider:clear")
+        await ask(client, "provider:cleared", "GET", "/api/provider")
+        await ask(client, "provider:cleared:settings", "GET", "/api/sources/settings")
+        await over_bus("provider:cleared:pages", "sources.pages.check", {"urls": pages_asked})
+        await over_bus("provider:cleared:players", "sources.players.list", {"urls": [card]})
+        await over_bus("provider:cleared:table", "sources.table.get", {"url": card, "refresh": False})
+        await server.down()
+        bus.unsubscribe(sub)
+        bus.unsubscribe(down)
+        bus.unsubscribe(ended)
+
+        # --- the mappings of TMDB: the series with its mapping, the list, the search and the details over the model, the aggregate -------
+        await ask(client, "metadata:http:list", "GET", "/api/series")
+        for each in [*mapped[:6], sid, 999999]:
+            await over_bus(f"metadata:map:get:{each}", "metadata.map.get", {"series_id": each})
+            await ask(client, f"metadata:http:card:{each}", "GET", f"/api/series/{each}")
+        await over_bus("metadata:map:list", "metadata.map.list", {})
+        await over_bus("metadata:map:get:no-id", "metadata.map.get", {})
+        await ask(client, "metadata:http:search", "POST", "/api/tmdb/search", json={"query": "breaking"})
+        await ask(client, "metadata:http:search:empty", "POST", "/api/tmdb/search", json={"query": ""})
+        await over_bus("metadata:search", "metadata.search", {"query": "breaking"})
+        await over_bus("metadata:search:no-query", "metadata.search", {})
+        for ident in (4638, 12, 999):
+            await ask(client, f"metadata:http:details:{ident}", "GET", f"/api/tmdb/details/{ident}")
+            await over_bus(f"metadata:details:{ident}", "metadata.details", {"tmdb_id": ident})
+        await over_bus("metadata:details:text-id", "metadata.details", {"tmdb_id": "x"})
+        await over_bus("metadata:details:no-id", "metadata.details", {})
+        await ask(client, "metadata:http:update", "POST", f"/api/series/{sid}", json={"tmdb_data": {
+            "tmdb_id": 4638, "tmdb_season_number": 2, "total_episodes": 7, "poster_path": "/q.jpg", "series_name": "Breaking Bad 2",
+            "year": "2009"}})
+        await done("metadata:http:update")
+        await ask(client, "metadata:http:update:card", "GET", f"/api/series/{sid}")
+        for label, payload in (("only-name", {"series_id": sid, "tmdb_data": {"series_name": "Только имя"}}),
+                               ("unknown-field", {"series_id": sid, "tmdb_data": {"tmdb_id": 4638, "colour": "red"}}),
+                               ("new", {"series_id": mapped[0] + 100000, "tmdb_data": {"tmdb_id": 1, "tmdb_season_number": 1}}),
+                               ("no-data", {"series_id": sid})):
+            await over_bus(f"metadata:map:set:{label}", "metadata.map.set", payload)
+            await done(f"metadata:map:set:{label}")
+            await over_bus(f"metadata:map:set:{label}:get", "metadata.map.get", {"series_id": payload["series_id"]})
+        for each in [*multi[:4], *mapped[:3], sid, 999999]:
+            await over_bus(f"metadata:recompute:{each}", "metadata.seasons.recompute", {"series_id": each})
+            await done(f"metadata:recompute:{each}")
+        probe.send_command("metadata.seasons.recompute", {"series_id": sid})
+        await done("metadata:recompute:command")
+        await ask(client, "metadata:http:delete", "DELETE", f"/api/series/{sid}")
+        await done("metadata:http:delete")
+        await over_bus("metadata:map:get:deleted", "metadata.map.get", {"series_id": sid})
+        await over_bus("metadata:map:list:after", "metadata.map.list", {})
+        await ask(client, "trackerauth:http:final", "GET", "/api/auth")
+        await ask(client, "sources:settings:final", "GET", "/api/sources/settings")
+        requests.adapters.HTTPAdapter.send = original_send
+
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app), base_url="http://test",
                                  timeout=120) as client:
         for sid in series:
@@ -944,6 +1482,8 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
             await voices_window(client)
         if owners:
             await owners_window(client)
+        if sources_run:
+            await sources_window(client)
     untap()
     await runner.stop()
     with open(out, "w", encoding="utf-8") as sink:
@@ -1027,6 +1567,9 @@ if __name__ == "__main__":
     parser.add_argument("--windows", action="store_true")
     # The windows of the owners of the data (catalog, settings, auth) need no series: `collect --owners` alone is a run of its own.
     parser.add_argument("--owners", action="store_true")
+    # The windows of `sources`, `trackerauth` and `metadata` need no series either and keep their own copy of the base clean of the
+    # credentials: `collect --sources` alone is a run of its own.
+    parser.add_argument("--sources", action="store_true")
     args = parser.parse_intermixed_args()
     if args.what == "selftest":
         sys.exit(selftest())
@@ -1040,4 +1583,7 @@ if __name__ == "__main__":
         os.environ[name] = "http://127.0.0.1:9"
     os.environ.pop("NO_PROXY", None)
     os.environ.pop("no_proxy", None)
-    asyncio.run(collect(root, args.db, args.out, [int(each) for each in args.rest], args.windows, args.owners))
+    if args.sources:
+        # The model of the provider listens on this machine: it is the one address the proxy does not take.
+        os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1"
+    asyncio.run(collect(root, args.db, args.out, [int(each) for each in args.rest], args.windows, args.owners, args.sources))
