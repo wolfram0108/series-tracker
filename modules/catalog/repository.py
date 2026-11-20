@@ -12,7 +12,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
-from core.contracts import SeriesSource
+from core.contracts import WRITABLE_FIELDS, SeriesSource
 from core.db import Database
 from core.reasons import reason
 
@@ -23,9 +23,7 @@ _COLUMNS = ("id, name, name_en, site, save_path, season, quality, "
             "resolution_override, ignored_seasons, ignored_episodes")
 
 # The columns that may be written from outside (no id, and no last_scan_time: only touch_scan_time updates it).
-_WRITABLE = {"name", "name_en", "site", "save_path", "season", "quality",
-             "auto_scan_enabled", "quality_override", "resolution_override",
-             "ignored_seasons", "ignored_episodes"}
+_WRITABLE = frozenset(WRITABLE_FIELDS)
 
 _SOURCE_COLUMNS = ("id, series_id, position, url, source_type, parser_profile_id, "
                    "vibix_season, players_off, rows_per_line, color")

@@ -68,7 +68,8 @@ from __future__ import annotations
 import asyncio
 
 from calc.catalog.aggregator import StatusAggregator
-from calc.catalog.series import absolute_path, card_of, fs_safe, list_of, source_event, status_of, touched_of, updated_of
+from calc.catalog.series import (absolute_path, card_of, fs_safe, list_of, source_event, status_of, touched_of, updated_of,
+                                 written_of)
 from calc.catalog.series_sources import changed_fields, checked_fields, checked_sources, refuse_removed_fields
 from core.contracts import (BusyContribution, SeriesCard, SeriesDeleted, SeriesListReply, SeriesPurged, SeriesSource,
                             SourcesReply, StatusContribution, availability)
@@ -226,11 +227,12 @@ class CatalogModule(BaseModule):
         if "sources" in fields:
             raise ValueError(reason("series_sources_not_written"))
         await self._require_series(series_id)
-        applied = await self.repo.update_series(series_id, fs_safe(fields))
+        written = written_of(series_id, fs_safe(fields))
+        applied = await self.repo.update_series(series_id, written.model_dump(exclude={"series_id"}, exclude_unset=True))
         if applied:
             # The delta for SSE series_updated: the fields applied and the statuses/is_busy it must carry (finding 38).
-            self.publish_event(SERIES_UPDATED, updated_of(series_id, applied, self.agg.statuses(series_id),
-                                                          series_id in self._busy).model_dump(mode="json", exclude_unset=True))
+            self.publish_event(SERIES_UPDATED, updated_of(written, self.agg.statuses(series_id), series_id in self._busy)
+                               .model_dump(mode="json", exclude_unset=True))
         return {"applied": applied}
 
     async def on_series_delete(self, env: Envelope) -> dict:

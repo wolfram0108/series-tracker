@@ -5,7 +5,7 @@ reaches the interface is the same text.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 from .frozen import Frozen
 from .series_sources import SeriesSource
@@ -31,6 +31,12 @@ class SeriesCard(Frozen):
     sources: tuple[SeriesSource, ...]
     statuses: tuple[str, ...]
     is_busy: bool
+
+
+# The columns of a series that a caller may write (the rest are the table's: the number, the scan time that only a touch renews),
+# in the order a card tells them (`SeriesUpdated`).
+WRITABLE_FIELDS: Final = ("name", "name_en", "site", "save_path", "season", "quality", "quality_override", "resolution_override",
+                         "auto_scan_enabled", "ignored_seasons", "ignored_episodes")
 
 
 class SeriesListReply(Frozen):

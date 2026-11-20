@@ -8,7 +8,8 @@ from __future__ import annotations
 import os
 from typing import Collection, Iterable, Mapping, Sequence
 
-from core.contracts import (SeriesCard, SeriesListReply, SeriesSource, SeriesStatusChanged, SeriesUpdated, SourceEvent)
+from core.contracts import (WRITABLE_FIELDS, SeriesCard, SeriesListReply, SeriesSource, SeriesStatusChanged, SeriesUpdated,
+                            SourceEvent)
 from core.fsnames import sanitize_name, sanitize_path
 from core.reasons import reason
 
@@ -50,9 +51,15 @@ def list_of(rows: Iterable[Mapping], statuses: Mapping[int, Sequence[str]], busy
     return SeriesListReply(series=tuple(card_of(row, statuses[row["id"]], row["id"] in busy) for row in rows))
 
 
-def updated_of(series_id: int, applied: Mapping, statuses: Sequence[str], busy: bool) -> SeriesUpdated:
+def written_of(series_id: int, fields: Mapping) -> SeriesUpdated:
+    """What a write of `fields` to the card of a series changes: the fields a caller may write, checked in shape before
+    anything is written (a field of another kind is refused, not stored half-way); the rest of `fields` is not written."""
+    return SeriesUpdated(series_id=series_id, **{name: value for name, value in fields.items() if name in WRITABLE_FIELDS})
+
+
+def updated_of(written: SeriesUpdated, statuses: Sequence[str], busy: bool) -> SeriesUpdated:
     """What was written to a card, with the statuses and `is_busy` every delta of the card must carry (finding 38)."""
-    return SeriesUpdated(series_id=series_id, **applied, statuses=tuple(statuses), is_busy=busy)
+    return written.model_copy(update={"statuses": tuple(statuses), "is_busy": busy})
 
 
 def touched_of(series_id: int, stamp: str) -> SeriesUpdated:

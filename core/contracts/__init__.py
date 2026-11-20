@@ -28,7 +28,7 @@ from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, Rul
 from .series_sources import SeriesSource, SourceChanged, SourceEvent, SourceType
 from .auth import AdminState, LoginReply, PasswordSaved
 from .settings import SavedPath, SavedPaths, SettingValue, SettingValues
-from .series import (BusyContribution, SeriesCard, SeriesDeleted, SeriesListReply, SeriesPurged, SeriesStatusChanged,
+from .series import (WRITABLE_FIELDS, BusyContribution, SeriesCard, SeriesDeleted, SeriesListReply, SeriesPurged, SeriesStatusChanged,
                      SeriesUpdated, SourcesReply, StatusContribution)
 from .voice_groups import GroupsResolveReply, GroupsResolveRequest
 from .availability import Action, NotAllowed, allowed, refusal, require, variant_state
@@ -46,7 +46,7 @@ __all__ = ["TitleCard", "TitleLine", "TitleSearchReply", "TitleSearchRequest", "
            "SeriesReadProgress", "TableProgress", "TableReady", "TableRow", "TableState", "UnreadPart", "line_of", "place_of", "LINE_FIELDS",
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
            "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",
-           "BusyContribution", "SeriesCard", "SeriesDeleted", "SeriesListReply", "SeriesPurged", "SeriesStatusChanged", "SeriesUpdated",
+           "WRITABLE_FIELDS", "BusyContribution", "SeriesCard", "SeriesDeleted", "SeriesListReply", "SeriesPurged", "SeriesStatusChanged", "SeriesUpdated",
            "SourcesReply", "StatusContribution", "AdminState", "LoginReply", "PasswordSaved", "SavedPath", "SavedPaths", "SettingValue", "SettingValues",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan", "VoiceTitleSet",
