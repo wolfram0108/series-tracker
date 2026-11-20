@@ -12,6 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core import BaseModule
+from pydantic import TypeAdapter
+
+from core import native
 from core.contracts import (CompositionRow, ReleaseTable, RowState, StoredTable, TableFailed, TableGetReply, TableGetRequest,
                             TableReady, TableState)
 from core.reasons import reason
@@ -218,3 +221,8 @@ class World(BaseModule):
 
     def failure(self, topic: str = "sources.table.get") -> str:
         return reason("composition_request_failed", topic=topic)
+
+
+def laid_out(rows) -> native.Rows:
+    """Rows of a layout as the layout keeps them (core.native.Rows), of their models."""
+    return native.Rows.from_json(TypeAdapter(list[CompositionRow]).dump_json(list(rows)))

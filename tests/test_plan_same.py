@@ -7,6 +7,7 @@ import pytest
 
 from core.contracts import ReferenceMark
 from core.plan.inputs import choices_of, online_of
+from scan_support import laid_out
 from core.plan.marks import references_of
 from core.plan.planner import plan
 from core.plan.tables import Inputs, RowId
@@ -137,6 +138,7 @@ PRIORITY = ("vk", "cvh", "kodik")
 
 
 def told(rows, *, wanted=(), same=NO_SAME, failed=frozenset()):
+    rows = laid_out(rows)
     online = online_of(rows)
     choices = choices_of(rows, online, [], [], players=PRIORITY, player_groups=NO_GROUPS, sources=(1, 2, 3), voice_order={},
                          off_episodes=())

@@ -76,7 +76,7 @@ def _written(payload):
     """What of a payload goes into a dump: a model handed over in the process whole (the layout, megabytes) is told by its
     kind and the size of its lists; its rows are in the dump as the planner's trace of the inputs of its plan."""
     if isinstance(payload, BaseModel):
-        return {"model": type(payload).__name__, **{name: (len(value) if isinstance(value, (list, dict)) else value)
+        return {"model": type(payload).__name__, **{name: (len(value) if isinstance(value, (list, dict, bytes)) else value)
                                                     for name, value in payload.__dict__.items()}}
     return redacted(payload)
 

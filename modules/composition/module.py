@@ -316,12 +316,14 @@ class CompositionModule(BaseModule):
         return await compute.run(layout_reply, request, stored)
 
     async def on_layout(self, env: Envelope) -> CompositionReply:
-        """The whole layout as the model itself, for a consumer in this process (the planner): the answer of
-        `composition.get` before it is written out — megabytes are not turned into a dict and checked again on the other
-        side. It is made for the one who asks and is his: no other holds it."""
+        """The whole layout as the model itself, for a consumer in this process (the planner): its rows the fields of
+        columns they are kept as (`rows_field`, `subtitles_field`), read in place by the consumer — no row is made into a
+        model, nothing is written out and read back. It is made for the one who asks and is his: no other holds it."""
         request = CompositionGetRequest(series_id=int(env.payload["series_id"]))
         stored = await self.repo.stored(request.series_id)
-        return await compute.run(layout_of, request, stored)
+        reply = await compute.run(layout_of, request, stored, frozenset(_STORED_ROWS))
+        reply.rows_field, reply.subtitles_field = stored.rows.blob, stored.subtitles.blob
+        return reply
 
     async def on_writes(self, env: Envelope) -> dict:
         return {"writes": {str(series_id): count for series_id, count in (await self.repo.writes()).items()}}
@@ -916,10 +918,14 @@ def layout_reply(request: CompositionGetRequest, stored) -> dict:
     return reply
 
 
+# The fields a window gets: those the model writes out (the fields of columns are the consumer's in the process alone).
+_WINDOW_FIELDS = frozenset(name for name, field in CompositionReply.model_fields.items() if not field.exclude)
+
+
 def _wanted(request: CompositionGetRequest) -> set[str]:
     """The fields of the layout a request asks for (`LAYOUT_PARTS`; the whole: every one)."""
     part = "sources" if request.sources_only else request.part
-    return set(CompositionReply.model_fields) - {"series_id", "rev", "writes", "part"} if part == "whole" \
+    return _WINDOW_FIELDS - {"series_id", "rev", "writes", "part"} if part == "whole" \
         else set(LAYOUT_PARTS[part])
 
 

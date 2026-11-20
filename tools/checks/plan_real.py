@@ -137,6 +137,7 @@ async def inputs_of(real: RealSeries, series_id: int, rules: dict[int, list[dict
     rows, info = await real.layout(series_id, rules)
     stored = replace(info["stored"], rows=native.Rows.from_json(ROWS.dump_json(rows)))
     layout = CompositionReply.model_validate_json(orjson.dumps(layout_reply(CompositionGetRequest(series_id=series_id), stored)))
+    layout.rows_field, layout.subtitles_field = stored.rows.blob, stored.subtitles.blob
     voices = editor.view(info["voices"]).model_dump(mode="json")
     online, choices = plan_inputs.planner_inputs(layout, info["card"], voices)
     containers = asset_of(real.path, series_id, list(online))

@@ -311,7 +311,7 @@ async def test_the_whole_layout_holds_every_field_and_a_part_exactly_the_fields_
     s = system
     series_id = await laid_out(s)
     head = {"series_id", "rev", "writes", "part"}  # what every reply carries
-    fields = set(CompositionReply.model_fields) - head
+    fields = {name for name, field in CompositionReply.model_fields.items() if not field.exclude} - head
     whole = await s.probe.request("composition.get", {"series_id": series_id}, timeout=STUCK_S)
     assert set(whole) - head == fields
     for part, held in LAYOUT_PARTS.items():

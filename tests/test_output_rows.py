@@ -28,7 +28,8 @@ def test_a_row_is_of_the_output_when_the_rules_numbered_it_and_a_group_took_it()
 
 
 def test_a_row_no_group_took_reaches_neither_the_planner_nor_the_levels_of_the_window_however_high_it_is():
-    assert [row.id.row_key for row in online_of(ROWS)] == ["ref"]
+    assert [row.id.row_key for row in online_of(native.Rows.from_json(TypeAdapter(list[CompositionRow]).dump_json(ROWS)))] == [
+        "ref"]
     assert [row.row_key for row in lines_of_level(ROWS, 1, 1)] == ["ref"]
 
 

@@ -3,10 +3,12 @@ rows, the levers of every episode and of every compilation, the order of the voi
 and the order of the sources. Pure: the module of the planner and the checks on real series read the same way."""
 from __future__ import annotations
 
+import functools
 import json
 from dataclasses import replace
 from typing import Any, Iterable, Mapping, Sequence
 
+from core import native
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME,
                             SUBTITLES_ALLOW, SUBTITLES_ORDER, VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, CompositionReply, CompositionRow, EffectiveLever, Level, RowState,
@@ -20,21 +22,18 @@ from core.voice_names import Groups
 from .tables import Choices, Container, OnlineRow, RowId
 
 
-def online_of(rows: Sequence[CompositionRow], places: Mapping[int, str] | None = None) -> tuple[OnlineRow, ...]:
+def online_of(rows, places: Mapping[int, str] | None = None, first: int = 0) -> tuple[OnlineRow, ...]:
     """The rows of the output (`CompositionRow.in_output`: the rules gave them an episode or a range, the voice-over groups
-    took them; a row of subtitles needs no group). The place of a row is its place in the layout, every row counted, as the
-    service's rule breaks a tie."""
+    took them; a row of subtitles needs no group), of the rows of a layout as it keeps them (`core.native.Rows`). The place
+    of a row is its place in the layout, every row counted (from `first`: the rows of subtitles come after the rows of
+    sound), as the service's rule breaks a tie."""
     places = places or {}
-    online = []
-    for position, row in enumerate(rows):
-        if not row.in_output:
-            continue
-        online.append(OnlineRow(RowId(row.source_id, row.row_key, row.video or ""), row.season, row.episode_start,
-                                row.episode_end or row.episode_start, row.player, row.voice_group or "",
-                                max(row.heights or [0]), places.get(row.source_id, ""), row.link, row.voice_label, position,
-                                row.part, row.state == RowState.PLAYABLE, not row.stale, row.player_label, row.timeline,
-                                row.track.value, row.language, row.subtitle_type))
-    return tuple(online)
+    return tuple(
+        OnlineRow(RowId(source_id, row_key, video), season, start, end, player, group, height, places.get(source_id, ""), link,
+                  label, first + place, part, playable, current, player_label, timeline, track, language, subtitle_type)
+        for (place, source_id, row_key, video, season, start, end, player),
+            (group, height, link, label, part, playable, current, player_label),
+            (timeline, track, language, subtitle_type) in rows.output())
 
 
 def assets_against(containers: Iterable[Container], online: Iterable[OnlineRow]) -> tuple[Container, ...]:
@@ -84,47 +83,63 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
     same, markup_same = {}, {}
     subtitle_order, subtitle_deny = {}, {}
     own_reference: set = set()
+    # An episode with no value of its own holds the value of its level, one object for its hundreds of episodes: a value is
+    # read once (kept here, so that no other object takes its identity while the choices are made), a target once.
+    read: dict[tuple, tuple] = {}
+
+    def once(kind: str, value, make):
+        key = (kind, id(value))
+        if key not in read:
+            read[key] = (value, make(value))
+        return read[key][1]
+
+    variant_of = functools.cache(parse_variant_target)
+    group_of = functools.cache(parse_group_target)
+
+    def queue(value) -> tuple:
+        return tuple((each["group"], each["source_id"], each["player"]) for each in value
+                     if isinstance(each, dict) and {"group", "source_id", "player"} <= set(each))
+
     for season, episode, levers in episodes:
         slot = (season, episode)
         for lever in levers:
             if lever.lever in (REFERENCE_ORDER, REFERENCE_ALLOW, REFERENCE_SAME) and lever.level == Level.EPISODE:
                 own_reference.add(slot)
             if lever.lever == REFERENCE_ORDER and isinstance(lever.value, list):
-                reference[slot] = tuple((each["group"], each["source_id"], each["player"]) for each in lever.value
-                                        if isinstance(each, dict) and {"group", "source_id", "player"} <= set(each))
+                reference[slot] = once("queue", lever.value, queue)
             elif lever.lever == REFERENCE_SAME and isinstance(lever.value, list):
-                same[slot] = Same.of(lever.value)
+                same[slot] = once("same", lever.value, Same.of)
             elif lever.lever == MARKUP_SAME and isinstance(lever.value, list):
-                markup_same[slot] = Same.of(lever.value)
+                markup_same[slot] = once("same", lever.value, Same.of)
             elif lever.lever == REFERENCE_ALLOW and lever.value is False and lever.target:
-                variant = parse_variant_target(lever.target)
+                variant = variant_of(lever.target)
                 if variant is not None:
                     reference_deny[slot] = reference_deny.get(slot, frozenset()) | {variant}
             elif lever.lever == MARKUP_ORDER and isinstance(lever.value, list) and lever.level != Level.DEFAULT:
                 # A level of the chain has a queue of the markup reference of its own; with none it follows the reference.
-                markup[slot] = tuple((each["group"], each["source_id"], each["player"]) for each in lever.value
-                                     if isinstance(each, dict) and {"group", "source_id", "player"} <= set(each))
+                markup[slot] = once("queue", lever.value, queue)
             elif lever.lever == MARKUP_ALLOW and lever.value is False and lever.target:
-                variant = parse_variant_target(lever.target)
+                variant = variant_of(lever.target)
                 if variant is not None:
                     markup_deny[slot] = markup_deny.get(slot, frozenset()) | {variant}
             elif lever.lever == VOICE_ORDER and isinstance(lever.value, list) and lever.target:
-                group = parse_group_target(lever.target)
+                group = group_of(lever.target)
                 if group is not None:
-                    voice_orders[(slot, group)] = tuple((each["source_id"], each["player"]) for each in lever.value
-                                                        if isinstance(each, dict) and {"source_id", "player"} <= set(each))
+                    voice_orders[(slot, group)] = once("voices", lever.value, lambda value: tuple(
+                        (each["source_id"], each["player"]) for each in value
+                        if isinstance(each, dict) and {"source_id", "player"} <= set(each)))
             elif lever.lever == VOICE_ALLOW and lever.value is False and lever.target:
-                variant = parse_variant_target(lever.target)
+                variant = variant_of(lever.target)
                 if variant is not None:
                     voice_deny[slot] = voice_deny.get(slot, frozenset()) | {variant}
             elif lever.lever == VOICE_TAKE and lever.value is False and lever.target:
-                group = parse_group_target(lever.target)
+                group = group_of(lever.target)
                 if group is not None:
                     voice_off[slot] = voice_off.get(slot, frozenset()) | {group}
             elif lever.lever == SUBTITLES_ORDER and isinstance(lever.value, list):
-                subtitle_order[slot] = tuple(named_of(lever.value))
+                subtitle_order[slot] = once("subtitles", lever.value, lambda value: tuple(named_of(value)))
             elif lever.lever == SUBTITLES_ALLOW and lever.value is False and lever.target:
-                variant = parse_variant_target(lever.target)
+                variant = variant_of(lever.target)
                 if variant is not None:
                     subtitle_deny[slot] = subtitle_deny.get(slot, frozenset()) | {variant}
             elif lever.lever == COMPILATION_MEMBER and lever.value is not None:
@@ -145,8 +160,9 @@ def planner_inputs(layout: CompositionReply, series: Mapping[str, Any],
     `series` the card of the catalog, `voices` the view of the settings of the voice-overs (`voices.settings.get`). The
     module of the planner and the tools on a real series read the series by this one function."""
     places = {each.source_id: " / ".join(each.place) for each in layout.sources}
-    # The rows of subtitles ride among the rows (`Inputs` sets them apart): every reader of the pair takes them as they are.
-    online = online_of([*layout.rows, *layout.subtitles], places)
+    # The rows as the layout keeps them, read in place; the rows of subtitles ride among the rows (`Inputs` sets them apart).
+    rows, subtitles = native.Rows(layout.rows_field), native.Rows(layout.subtitles_field)
+    online = online_of(rows, places) + online_of(subtitles, places, len(rows))
     try:
         ignored_seasons = {int(each) for each in json.loads(series.get("ignored_seasons") or "[]")}
     except (json.JSONDecodeError, TypeError, ValueError):
@@ -159,7 +175,7 @@ def planner_inputs(layout: CompositionReply, series: Mapping[str, Any],
     off = {slot for slot in slots if slot[0] in ignored_seasons or slot[1] in ignored.get(slot[0], set())}
     order = {each.season: [span.label for span in each.voices] for each in layout.voice_orders}
     sources = [SeriesSource.model_validate(each).id for each in series.get("sources", [])]
-    choices = choices_of(layout.rows, online, [(each.season, each.episode, each.levers) for each in layout.settings],
+    choices = choices_of(rows, online, [(each.season, each.episode, each.levers) for each in layout.settings],
                          [(each.compilation, each.levers) for each in layout.levels if each.compilation],
                          players=voices.get("priority") or [], player_groups=Groups.of(voices.get("player_groups") or {}),
                          sources=sources, voice_order=order, off_episodes=off, titles=layout.voice_titles,

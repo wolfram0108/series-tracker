@@ -2,6 +2,7 @@
 plan itself, from the rows of the layout, the levers of the episode, the failures and the episodes switched off."""
 from core.contracts import (MARKUP_ORDER, REFERENCE_ORDER, EffectiveLever, EpisodeSettings, Level, ReferenceMark, RowState)
 from core.plan.inputs import choices_of, online_of
+from scan_support import laid_out
 from core.plan.marks import references_of
 from core.plan.planner import plan
 from core.plan.tables import Inputs, RowId
@@ -14,6 +15,7 @@ SOURCES = (1, 2, 3)
 
 
 def told(rows, settings=(), *, failed=frozenset(), off=()):
+    rows = laid_out(rows)
     online = online_of(rows)
     choices = choices_of(rows, online, [(each.season, each.episode, each.levers) for each in settings], [],
                          players=PRIORITY, player_groups=NO_GROUPS, sources=SOURCES, voice_order={}, off_episodes=off)

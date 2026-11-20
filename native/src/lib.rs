@@ -566,6 +566,29 @@ impl Rows {
         self.layout.compilations()
     }
 
+    /// The rows of the output (`in_output`) as the planner reads them, each with its place in the layout (every row
+    /// counted): (place, source id, row key, video, season, start, end, player, group, height, link, label, part,
+    /// playable, current, player label, timeline, track, language, subtitle type).
+    #[allow(clippy::type_complexity)]
+    fn output<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        let rows = PyList::empty_bound(py);
+        for (place, row) in self.layout.rows().enumerate() {
+            if !row.output() {
+                continue;
+            }
+            let start = row.episode_start.unwrap_or(0);
+            // Three tuples: the binding makes tuples of twelve fields at most.
+            let head = (place, row.source_id, row.row_key, row.video, row.season.unwrap_or(0), start,
+                        row.episode_end.unwrap_or(start), row.player);
+            let body = (row.voice_group.as_deref().unwrap_or(""), row.heights.iter().copied().max().unwrap_or(0), row.link,
+                        row.voice_label.as_ref(), row.part, row.state == "playable", !row.stale, row.player_label);
+            let tail = (row.timeline, row.track, row.language, row.subtitle_type);
+            let made: (PyObject, PyObject, PyObject) = (head.into_py(py), body.into_py(py), tail.into_py(py));
+            rows.append(made)?;
+        }
+        Ok(rows)
+    }
+
     /// {(season, episode): the best height of its single videos that play}.
     fn singles(&self) -> HashMap<(i64, i64), i64> {
         self.layout.singles()

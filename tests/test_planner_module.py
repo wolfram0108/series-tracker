@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from scan_support import laid_out
+
 from core import BaseModule, Bus, Runner
 from core import container as mkv
 from core.contracts import (VOICE_TAKE, CompositionReply, CompositionRow, EffectiveLever, EpisodeSettings, Level,
@@ -88,7 +90,8 @@ class Neighbours(BaseModule):
         return [await self.on_series(env)]
 
     async def on_composition(self, env: Envelope) -> CompositionReply:
-        return CompositionReply(series_id=SERIES, rev=1, writes=self.writes, rows=self.site.rows, settings=self.site.settings)
+        return CompositionReply(series_id=SERIES, rev=1, writes=self.writes, settings=self.site.settings,
+                                rows_field=laid_out(self.site.rows).blob)
 
     async def on_writes(self, env: Envelope) -> dict:
         return {"writes": {str(SERIES): self.writes}}
