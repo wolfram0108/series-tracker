@@ -206,7 +206,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 
 | Метод | Путь | Назначение | Панель |
 |---|---|---|---|
-| GET | `/api/series/{series_id}/composition` | Видео-сериал — раскладка (`composition.get`, query `include_excluded`, `sources_only` — только сводки источников; в ответе `levers` — описания рычагов и `availability` — таблица допустимого по состояниям, по которой окно включает управление); торрент — состав раздач (`torrents.composition`, query `refresh`) | `StatusComposition.vue` (торрент), `StatusOutput.vue`, `SourcesEditor.vue` (видео) |
+| GET | `/api/series/{series_id}/composition` | Видео-сериал — раскладка (`composition.get`, query `include_excluded`, `sources_only` — только сводки источников; в ответе `levers` — описания рычагов и `availability` — таблица допустимого по состояниям, по которой окно включает управление) | `StatusOutput.vue`, `SourcesEditor.vue` |
 | GET | `/api/series/{series_id}/output` | Референс каждой серии и отметка (`scan.output.get`) | — |
 | GET | `/api/series/{series_id}/output/queues?season=&episode=` | Очередь референса и очереди озвучек групп уровня в порядке ядра, со значениями рычагов (`composition.queues.get`); серия без сезона — 422 | — |
 | PUT | `/api/series/{series_id}/output/settings` | Значение рычага на уровне сериала, сезона или серии (`composition.settings.set`); вариант в очереди референса без одиночной играющей строки и вариант в очереди озвучки без играющей строки — отказ `not_allowed` | — |

@@ -1,6 +1,6 @@
 """The module unpack — the reading of the releases of the torrent sources (stage 15): what every file holds, the layout of
 the torrent editor, and the rows of the table of a tracker's page. Tables of the module: unpack_streams, unpack_folders,
-unpack_assignments, unpack_sources (modules/unpack/repository.py).
+unpack_assignments, unpack_hidden, unpack_removed, unpack_sources (modules/unpack/repository.py).
 
 A release `torrents` downloaded is read here: every video, sound and subtitles file by ffprobe once per version and size
 (the video of a source is never compared by content); the files are laid out by the rules of the five tabs of the editor

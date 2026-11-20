@@ -28,7 +28,7 @@ Queries/commands конвейера (контракты Р-12, их ждёт sca
         start_pipeline=false — подготовка состава: метаданные, разбор
         правилами в torrent_files и приоритеты файлов, БЕЗ задачи
         конвейера. Раздача стоит на паузе, пока пользователь отбирает
-        серии; ближайший скан подхватит её штатным drive_incomplete
+        серии; дальше её доводит запрос torrents.drive_incomplete
   torrents.queue.get {series_id?}       → {count, tasks}
   torrents.fs.verify {series_id}        → {missing, recheck_started}
       — проверка файлов на диске + recheck-задачи для пропавших

@@ -1,8 +1,7 @@
 """HTTP points of the output section of a series: its composition, the references and the levers of the output.
 
-Each answer is the answer of one owner, as it is: the layout of `composition`, the references of `scan`, the
-composition of a torrent from `torrents`. The window puts them side by side by (season, episode); the gateway
-does not merge them.
+Each answer is the answer of one owner, as it is: the layout of `composition`, the references of `scan`. The window
+puts them side by side by (season, episode); the gateway does not merge them.
 """
 from __future__ import annotations
 
