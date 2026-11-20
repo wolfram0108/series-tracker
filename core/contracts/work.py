@@ -45,7 +45,7 @@ class WorkState(Frozen):
     its end; and `busy`, the episodes that work is of, so that the run makes the container of an episode as soon as no
     work of it is left (each episode is a process of its own). Live work whose episode is not known keeps `active` with
     no slot. Sent when either changes, and asked as `<owner>.work.get {series_id}` -> WorkState. `seq` grows with every
-    state the owner counts (core.work_report): of two records of one owner the one with the greater `seq` is in force."""
+    state the owner counts: of two records of one owner the one with the greater `seq` is in force."""
 
     owner: str
     series_id: int

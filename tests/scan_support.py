@@ -76,7 +76,7 @@ class World(BaseModule):
         self.work: dict[str, bool] = {}
         # The episodes each executor works on, as its states name them (WorkState.busy).
         self.busy: dict[str, list[list]] = {}
-        # The number of the latest state an executor counted (core.work_report): events and replies carry it.
+        # The number of the latest state an executor counted: events and replies carry it.
         self.seq = 0
         # An executor whose reply to `<owner>.work.get` waits for this gate (the answer is counted when it was asked).
         self.work_gates: dict[str, asyncio.Event] = {}
