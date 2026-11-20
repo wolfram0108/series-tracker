@@ -1,44 +1,21 @@
-"""The cards of the packing (core/contracts/packing.py): one card to one container a sync builds. Pure bookkeeping over a
-clock: the planner tells what happens, the book keeps the stages, the tracks of the container in the numbers of the
-season, what changed against the file before, the progress of the build and the steps of putting it in place."""
+"""The book of the cards of the packing (core/contracts/packing.py): one card to one container a sync builds. Bookkeeping over
+a clock: the planner tells what happens, the book keeps the stages, the progress of the build and the steps of putting it in
+place. The id of a card and the tracks of its container are calc/view/packing.py."""
 from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
 from typing import Callable, Iterable
 
-from core.contracts import PACK_STAGES, DownloadVariant, PackCard, PackJournal, PackTrack
-from core.plan.files import label_of
+from calc.plan.tables import label_of
+from calc.view.packing import card_id, tracks_of
+from core.contracts import PACK_STAGES, DownloadVariant, PackCard, PackJournal
 
 ENDED = ("done", "failed")
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def card_id(series_id: int, slot) -> str:
-    return f"{series_id}:{label_of(slot)}"
-
-
-def tracks_of(goal, before, order: tuple[str, ...]) -> tuple[list[PackTrack], str]:
-    """The tracks of the container a goal builds, in its order, with where each comes from, the tracks of the file before
-    that it does not hold (`gone`), and why it is built when no track came or went."""
-    number = {label: place for place, label in enumerate(order, start=1)}
-    own = goal.video.snapshot.group or "—"
-    placed = [PackTrack(number=number.get(way.snapshot.group or way.voice), label=way.snapshot.group or way.voice,
-                        kind="kept" if way.kind == "reuse" else "new") for way in goal.tracks]
-    placed.insert(goal.own_at, PackTrack(number=number.get(own), label=own, kind="own"))
-    held = [track.snapshot.group or "" for track in before.tracks] if before is not None else []
-    here = {track.label for track in placed}
-    gone = [PackTrack(number=number.get(label), label=label, kind="gone") for label in held if label and label not in here]
-    if any(track.kind == "new" for track in placed) or gone or before is None:
-        return placed + gone, ""
-    if before.video.id != (goal.video.container.video.id if goal.video.container is not None else None):
-        return placed + gone, "video"
-    if [label for label in held] != [track.label for track in placed if track.kind != "own"]:
-        return placed + gone, "order"
-    return placed + gone, "names"
 
 
 class PackBook:

@@ -3,11 +3,18 @@ whether its row is online), the goal of every episode as the last plan counted i
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Iterable
+from typing import Iterable, Mapping, Protocol
 
-from core.plan.executor import SeriesSync
-from core.plan.planner import Plan, timeline_variant, voice_of
-from core.plan.tables import OnlineRow, RowId
+from calc.plan.planner import Plan, timeline_variant, voice_of
+from calc.plan.tables import Container, OnlineRow, RowId
+
+
+class SyncState(Protocol):
+    """What the view reads of a sync: the asset, the attempts recorded and the commands waiting."""
+
+    containers: Mapping[str, Container]
+    failed: Iterable[tuple]
+    commands: Iterable[tuple]
 
 
 def _row(row: RowId | None) -> dict | None:
@@ -60,7 +67,7 @@ def placed(failed: Iterable[tuple], rows: Iterable[OnlineRow] = ()) -> list[dict
     return found
 
 
-def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: bool,
+def view_of(series_id: int, sync: SyncState, made: Plan | None, *, running: bool,
             online: frozenset[RowId] | None = None, rows: Iterable[OnlineRow] = ()) -> dict:
     assets = []
     for container in sorted(sync.containers.values(), key=lambda each: each.name):

@@ -21,6 +21,10 @@ def episode_of(slot: Slot) -> tuple[int, int]:
     return slot[0], slot[1]
 
 
+def label_of(slot: Slot) -> str:
+    return f"s{slot[0]:02d}e{slot[1]:02d}" + (f"pt{slot[2]}" if len(slot) > 2 else "")
+
+
 @dataclass(frozen=True, order=True)
 class RowId:
     """A row of a source table: the source, the key of the row in its table and the video behind it as its host numbers
@@ -50,7 +54,7 @@ class Snapshot:
 
 @dataclass(frozen=True)
 class OnlineRow:
-    """A row of the output (`core/plan/inputs.online_of`): the rules gave it an episode (or a range of them: a compilation)
+    """A row of the output (`calc/plan/inputs.online_of`): the rules gave it an episode (or a range of them: a compilation)
     and `group`, the voice-over group, took it."""
 
     id: RowId

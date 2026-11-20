@@ -3,8 +3,8 @@ planner (tests/plan_world.py): the events С-1…С-20 of the design one by one,
 every sync the world holds its invariants, the markup ones (Э-2…Э-7) among them."""
 
 
-from core.plan.tables import RowId
-from modules.planner.view import view_of
+from calc.plan.tables import RowId
+from calc.view.view import view_of
 from plan_world import World
 
 PVA, ORIGINAL = "ПВА", "Оригинал"

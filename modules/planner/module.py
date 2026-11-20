@@ -116,17 +116,18 @@ from core.envelope import Envelope
 from core.ffprobe import END_SLACK_S, duration_of
 from core.fsnames import sanitize_name
 from core.reasons import describe, reason
-from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, judged, video_of
-from core.plan.files import Library, as_in_file, container_json, container_of, label_of
-from core.plan.inputs import assets_against, planner_inputs
-from core.plan.marks import references_of
-from core.plan.planner import Plan, cut_video, name_of, video_op
-from core.plan.tables import RowId, Track, Video
+from calc.plan.inputs import assets_against, planner_inputs
+from calc.plan.marks import references_of
+from calc.plan.planner import Plan, cut_video, name_of, video_op
+from calc.plan.tables import RowId, Track, Video, label_of
+from calc.view.packing import card_id
+from calc.view.view import placed, view_of
 
+from .executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, judged, video_of
+from .files import Library, as_in_file, container_json, container_of
 from .kept import Kept
-from .packing import PackBook, card_id
+from .packing import PackBook
 from .repository import PlannerRepository
-from .view import placed, view_of
 
 PLANNER = "planner"
 # A safeguard of the copy of a video into the work folder of the alignment service: a 4K episode over the network.

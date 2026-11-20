@@ -1,4 +1,4 @@
-"""Situations on real series: what the planner of the table of an episode (core/plan) does when the sources or the
+"""Situations on real series: what the planner of the table of an episode (calc/plan) does when the sources or the
 choices of a real series change, played in the world of the simulator (tests/plan_world.py).
 
 The series is read by plan_real (a copy of the database, the real constructor). The world knows the truth of every
@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tests")
 import plan_real  # noqa: E402
 from plan_world import SiteRow, World, truth_of  # noqa: E402
 
-from core.plan.tables import Inputs, OnlineRow, RowId  # noqa: E402
+from calc.plan.tables import Inputs, OnlineRow, RowId  # noqa: E402
 
 
 def world_of(inputs: Inputs) -> World:

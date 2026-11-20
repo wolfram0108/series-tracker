@@ -13,12 +13,12 @@ import os
 import shutil
 from dataclasses import asdict, replace
 
+from calc.plan.planner import Goal, Group, Plan, subtitles_op, video_op
+from calc.plan.tables import Container, RowId, Snapshot, Subtitle, Track, Video
 from core import container as mkv
 from core.ffprobe import subtitle_events
 
 from .executor import Made, video_of
-from .planner import Goal, Group, Plan, subtitles_op, video_op
-from .tables import Container, RowId, Snapshot, Subtitle, Track, Video
 
 JOURNAL = ".plan-journal.json"
 STAGING = ".plan-staging"
@@ -56,10 +56,6 @@ def container_of(data: dict) -> Container:
                      tuple(sorted((data.get("languages") or {}).items())),
                      tuple(Subtitle(**{**each, "row": RowId(**each["row"]), "timeline": RowId(**each["timeline"])})
                            for each in data.get("subtitles") or ()))
-
-
-def label_of(slot) -> str:
-    return f"s{slot[0]:02d}e{slot[1]:02d}" + (f"pt{slot[2]}" if len(slot) > 2 else "")
 
 
 def dub_key(dub: RowId) -> str:

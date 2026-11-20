@@ -104,8 +104,8 @@ async def test_the_plan_is_told_a_container_without_its_subtitles_track_that_hol
     """A file the service built before tracks with no events were left out still holds one (the planner keeps what a file
     holds): it is told to the plan without it, so that the next build does not take it into the container again. A track
     with events, and one not asked about, stay."""
-    from core.plan.files import Library, dub_key, without_silent
-    from core.plan.tables import Container, RowId, Snapshot, Subtitle, Video
+    from modules.planner.files import Library, dub_key, without_silent
+    from calc.plan.tables import Container, RowId, Snapshot, Subtitle, Video
     (tmp_path / "empty.ass").write_text(_ASS_HEAD, encoding="utf-8")
     (tmp_path / "full.ass").write_text(_ASS_HEAD + "Dialogue: 0,0:00:01.00,0:00:02.00,Default,Текст\n", encoding="utf-8")
     rows = [RowId(1, name, "v") for name in ("empty", "full")]

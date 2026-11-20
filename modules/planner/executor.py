@@ -15,10 +15,10 @@ from dataclasses import dataclass, field, replace
 from collections.abc import Mapping
 from typing import Callable
 
-from .. import compute
-from ..reasons import reason
-from .planner import Goal, Group, Op, Plan, plan, restricted, video_op
-from .tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
+from calc.plan.planner import Goal, Group, Op, Plan, plan, restricted, video_op
+from calc.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
+from core import compute
+from core.reasons import reason
 
 # The steps that obtain a row; the take of a row of subtitles from its file is one of them (DESIGN.md 7.1.1).
 DOWNLOADS = ("download_video", "download_dub", "download_picture", "take_subtitles")

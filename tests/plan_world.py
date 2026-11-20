@@ -1,4 +1,4 @@
-"""A world for the planner of a series (core/plan): sources, a library and an alignment service with no real files.
+"""A world for the planner of a series (calc/plan): sources, a library and an alignment service with no real files.
 
 The world knows what the planner never sees: the true episode behind every video (`content`). Downloading puts a file
 into the asset, cutting takes a single episode out of a compilation, and aligning succeeds only when the voice-over and
@@ -15,10 +15,10 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable
 
 from core.contracts import PlannerView, SyncScope
-from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, video_of
-from core.plan.planner import Plan, cut_video, own_track, plan, restricted, switched_off, voice_of
-from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video, episode_of
-from modules.planner.view import view_of
+from modules.planner.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, video_of
+from calc.plan.planner import Plan, cut_video, own_track, plan, restricted, switched_off, voice_of
+from calc.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video, episode_of
+from calc.view.view import view_of
 
 
 def truth_of(season: int, episode: int, part: int | None = None) -> int:
@@ -89,7 +89,7 @@ class World(SeriesSync):
     online: dict[int, tuple[OnlineRow, ...]] = field(default_factory=dict)  # source id -> last complete read
     content: dict[tuple, tuple[int, ...]] = field(default_factory=dict)  # video key or ("dub", row) -> true episodes
     history: list[Step] = field(default_factory=list)
-    # The state of the service's own sync (core/plan/executor.SeriesSync) the world runs.
+    # The state of the service's own sync (modules/planner/executor.SeriesSync) the world runs.
     namer: object = None
     commands: frozenset = frozenset()
     passing: set = field(default_factory=set)

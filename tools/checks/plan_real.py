@@ -1,4 +1,4 @@
-"""A real series as the tables of the planner (core/plan), read from a copy of the service's database.
+"""A real series as the tables of the planner (calc/plan), read from a copy of the service's database.
 
 The rows come out of the real constructor: the stored tables of the pages go through the rules of their profiles
 (modules/rules: compile_profile, process_title, result_of, settle_parts) and the layout (calc/layout/project),
@@ -26,9 +26,9 @@ sys.path.insert(0, ROOT)
 from core.contracts import (CompositionGetRequest, CompositionRow, RulesApplyReply,  # noqa: E402
                             SeriesSource, SourceType)
 from core.db import Database  # noqa: E402
-from core.plan import inputs as plan_inputs  # noqa: E402
-from core.plan.files import container_of  # noqa: E402
-from core.plan.tables import Container, Inputs, OnlineRow  # noqa: E402
+from calc.plan import inputs as plan_inputs  # noqa: E402
+from modules.planner.files import container_of  # noqa: E402
+from calc.plan.tables import Container, Inputs, OnlineRow  # noqa: E402
 from modules.catalog.repository import CatalogRepository  # noqa: E402
 from calc.layout import project  # noqa: E402
 from calc.layout.reply import layout_of  # noqa: E402

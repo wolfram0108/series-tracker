@@ -20,10 +20,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import plan_real  # noqa: E402
 
-from core.plan.files import Library, as_in_file  # noqa: E402
-from core.plan.inputs import assets_against  # noqa: E402
-from core.plan.planner import plan  # noqa: E402
-from core.plan.tables import Inputs  # noqa: E402
+from modules.planner.files import Library, as_in_file  # noqa: E402
+from calc.plan.inputs import assets_against  # noqa: E402
+from calc.plan.planner import plan  # noqa: E402
+from calc.plan.tables import Inputs  # noqa: E402
 
 
 async def series_report(real: plan_real.RealSeries, series_id: int) -> tuple[str, Counter]:

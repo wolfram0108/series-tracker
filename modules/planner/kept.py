@@ -15,8 +15,8 @@ import json
 import os
 import shutil
 
+from calc.plan.tables import label_of
 from core.fsnames import sanitize_name
-from core.plan.files import label_of
 
 MANIFEST = "manifest.json"
 

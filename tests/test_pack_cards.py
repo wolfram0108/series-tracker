@@ -3,7 +3,7 @@ season, where each comes from, the tracks of the file before it does not hold, a
 came or went."""
 from types import SimpleNamespace as N
 
-from modules.planner.packing import tracks_of
+from calc.view.packing import tracks_of
 
 ORDER = ("Ref", "A", "B", "C")
 

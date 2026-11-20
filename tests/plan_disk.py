@@ -1,4 +1,4 @@
-"""The world of the planner on a disk (stage 12, the table of an episode): the same plan (core/plan) carried out with real
+"""The world of the planner on a disk (stage 12, the table of an episode): the same plan (calc/plan) carried out with real
 files and the service's own code where it has it.
 
 - Every video and voice-over is a small real file made by ffmpeg; what it truly is (a season and an episode) is in its
@@ -40,10 +40,10 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from core import container as mkv
-from core.plan.executor import DOWNLOADS, Made, Passing, judged, video_of
-from core.plan.files import Library, container_json, container_of, dub_key, label_of  # noqa: F401
-from core.plan.planner import cut_video
-from core.plan.tables import Track, Video
+from modules.planner.executor import DOWNLOADS, Made, Passing, judged, video_of
+from calc.plan.planner import cut_video
+from calc.plan.tables import Track, Video, label_of
+from modules.planner.files import Library, container_json, container_of, dub_key  # noqa: F401
 from modules.conform.client import DaemonClient, Unconfirmed
 from modules.conform.module import ABORT, finished_view
 from modules.downloads import ytdlp

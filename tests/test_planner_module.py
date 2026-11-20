@@ -20,7 +20,7 @@ from core.contracts import (VOICE_TAKE, CompositionReply, CompositionRow, Effect
                             RowState, group_target)
 from core.db import Database
 from core.envelope import Envelope
-from core.plan.files import BuildFailed, Library, container_json, container_of
+from modules.planner.files import BuildFailed, Library, container_json, container_of
 from modules.conform.module import finished_view, job_label
 from modules.downloads import ytdlp
 from modules.planner import PlannerModule
@@ -163,7 +163,7 @@ class Neighbours(BaseModule):
         return {"done": True}
 
     async def on_format_filename(self, env: Envelope) -> dict:
-        # The series of this model has no rule of names: the planner names its files by its own (core/plan name_of).
+        # The series of this model has no rule of names: the planner names its files by its own (calc/plan name_of).
         raise LookupError("правила имён у сериала нет")
 
     async def on_withdraw(self, env: Envelope) -> dict:

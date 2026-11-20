@@ -1,8 +1,8 @@
-"""The choice of the planner (core/plan) for the rows of a layout and the levers of their episodes, read the way the
-service reads them (core/plan/inputs): what the head of a queue a window lists is compared with."""
-from core.plan.inputs import choices_of, online_of
-from core.plan.planner import plan
-from core.plan.tables import Inputs
+"""The choice of the planner (calc/plan) for the rows of a layout and the levers of their episodes, read the way the
+service reads them (calc/plan/inputs): what the head of a queue a window lists is compared with."""
+from calc.plan.inputs import choices_of, online_of
+from calc.plan.planner import plan
+from calc.plan.tables import Inputs
 from calc.voice_names import NO_GROUPS
 
 

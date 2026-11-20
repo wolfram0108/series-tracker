@@ -2,8 +2,8 @@
 in the order of the user's table, taken from their file when they are on the video's timeline, kept from the file that
 holds them, and never taken for a voice-over or a video."""
 
-from core.plan.planner import plan
-from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Snapshot, Subtitle, Video
+from calc.plan.planner import plan
+from calc.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Snapshot, Subtitle, Video
 
 TIMELINE = RowId(1, "page/E01.mkv", "")
 OTHER = RowId(2, "other/E01.mkv", "")

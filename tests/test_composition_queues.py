@@ -1,6 +1,6 @@
 """The queues a window lists (calc/layout/queues.py) are the queues the core takes: the head of the queue of the
 reference is the reference the planner takes, and the head of the queue of a group is the row the planner takes for that
-voice-over (core/plan), for every order the rows of the layout come in, with and without the levers of the user."""
+voice-over (calc/plan), for every order the rows of the layout come in, with and without the levers of the user."""
 import itertools
 
 from core.contracts import (REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, VOICE_ALLOW, VOICE_ORDER, EffectiveLever, EpisodeSettings,

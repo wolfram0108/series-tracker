@@ -1,10 +1,10 @@
-"""Why the video of an episode is the one the plan takes (core/plan/marks.py): the reference the window shows is told by the
+"""Why the video of an episode is the one the plan takes (calc/plan/marks.py): the reference the window shows is told by the
 plan itself, from the rows of the layout, the levers of the episode, the failures and the episodes switched off."""
 from core.contracts import (REFERENCE_ORDER, EffectiveLever, EpisodeSettings, Level, ReferenceMark)
-from core.plan.inputs import choices_of, online_of
-from core.plan.marks import references_of
-from core.plan.planner import plan
-from core.plan.tables import Inputs
+from calc.plan.inputs import choices_of, online_of
+from calc.plan.marks import references_of
+from calc.plan.planner import plan
+from calc.plan.tables import Inputs
 from core.reasons import parse
 from calc.voice_names import NO_GROUPS
 from scan_support import row
