@@ -1,7 +1,7 @@
 """The answers of the window of the layout and of the plan of a series over HTTP, from a tree of code, on a copy of the service's
 database, no network.
 
-    window_json.py collect --root <tree> --db <copy of app.db> --out <answers.json> [--windows] 46 40
+    window_json.py collect --root <tree> --db <copy of app.db> --out <answers.json> [--windows] [--owners] [--sources] [--torrents] 46 40
     window_json.py compare <a.json> <b.json>
     window_json.py selftest
 
@@ -31,7 +31,16 @@ the provider of the socket as the model of the specification (tests/provider_moc
 picture, the search of titles, the read, the stop of a read, the check of pages, the stream and the download of a link, the provider
 down and back, cleared), the credentials of the trackers (synthetic ones, written by the run: no secret of the base is read or shown), the fetch of a
 page through them over a transport that is a model of the trackers, the releases of a tracker page, the files of the releases, and the
-mappings of TMDB over a model of TMDB; the tables of the three are hashed after each command. No sync is run: nothing reaches the library or the network. `compare` is byte for byte: to find out whether a
+mappings of TMDB over a model of TMDB; the tables of the three are hashed after each command. No sync is run: nothing reaches the library or the network.
+With `--torrents` (a run of its own too) the windows of `torrents`, `renaming` and `library` answer over the model of qBittorrent
+(tests/qbit_model.py, on the local address) and a model of the neighbours (the page of a tracker, the open syncs, the files of the plan):
+the releases the base holds (their records point into a folder of the run, never into the library), the monitor, the queue, the picture a
+window that connects is told, the folder the releases download into (refused in every way, set, moved), a release downloaded, followed
+to its end, updated into the same folder, held by a sync of a series with its page, unwatched, archived and taken again, lost by the
+client and forgotten with its series, the registry of the old pipeline read (its rows are the run's own), the folders of the disk listed
+(admitted, refused, missing), and the move of a series planned, replanned, dropped, refused, failed and made; the tables of the three
+modules are hashed after each command and the files of the staging and the library folders listed. Each step ends on the event of the
+work it began. `compare` is byte for byte: to find out whether a
 change of code left the answers of the window as they were, collect from the tree before the change (`--root`, a commit
 exported into a folder) and from the one after, and compare. `selftest` is the red control of `compare`. Nothing is written to
 the base given; the copy is made again each run. A run ends with `WINDOW_JSON_DONE`; `compare` ends with `IDENTICAL` or
@@ -76,6 +85,16 @@ WATCHED_SOURCES = ("sources.table.progress", "sources.table.ready", "sources.tab
                    "sources.provider.manifest", "sources.pages.forgotten", "trackerauth.credentials.changed")
 # The tables the three modules own, and the settings: hashed whole after each command of their run.
 SOURCES_OWNED = ("release_tables", "release_rows", "trackers", "provider_manifest", "series_tmdb_mappings")
+# The tables of the modules torrents and library (the releases of the torrent sources, the old pipeline's registry, the plans of the
+# moves of a series): hashed whole after each command of the torrents run.
+TORRENTS_OWNED = ("torrent_releases", "torrent_release_files", "torrent_release_versions", "torrents", "torrent_files",
+                  "torrent_progress", "agent_tasks", "relocation_tasks")
+# What the modules torrents and library tell the window in the torrents run. The monitor's pictures (`torrents.progress.changed`) and the
+# flags of a status come as often as the client is asked, which is the pace of the machine: they are told apart in the run, once, at a
+# moment of its own (the window that connects).
+WATCHED_TORRENTS = ("torrents.release.changed", "torrents.staging.changed", "library.relocation.planned", "library.relocation.started",
+                    "library.relocation.finished", "series.busy.contribution", "settings.changed")
+_CLIENT_WORD = re.compile(r'"client":\s*"[^"]*"')
 # What differs on every run whatever the code (the number of a picture, the seconds of a download, the port of the model of the
 # provider, the folder of the run, the address of an object): filled by a run with `--sources`.
 _RUN_MASKS: list[tuple[re.Pattern, str]] = []
@@ -206,6 +225,22 @@ def sources_digest(path: str) -> dict:
     return out
 
 
+def torrents_digest(path: str) -> dict:
+    """The tables of `torrents` and `library`, each whole: rows and a hash; the folder the releases download into, and the folders of
+    the series (a move changes one). A clock stamp is `<stamp>`."""
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    out = {}
+    for table in TORRENTS_OWNED:
+        rows = sorted(conn.execute(f"SELECT * FROM {table}").fetchall(), key=repr)
+        out[table] = {"rows": len(rows), "sha": hashlib.sha256(masked(repr(rows)).encode()).hexdigest()}
+    rows = sorted(conn.execute("SELECT key, value FROM settings WHERE key = 'torrents.staging_dir'").fetchall(), key=repr)
+    out["staging"] = {"rows": len(rows), "sha": hashlib.sha256(masked(repr(rows)).encode()).hexdigest()}
+    rows = sorted(conn.execute("SELECT id, save_path FROM series").fetchall(), key=repr)
+    out["series:save_path"] = {"rows": len(rows), "sha": hashlib.sha256(masked(repr(rows)).encode()).hexdigest()}
+    conn.close()
+    return out
+
+
 async def quiet(bus, planner, modules=(), sources=None) -> None:
     """Returns when nothing is left to do: every envelope is taken apart, no count of the view of a series is under way (the
     planner counts it beside its handlers) and no module works beside its handlers (a read of a page, a recount). The signal is the end of
@@ -222,7 +257,7 @@ async def quiet(bus, planner, modules=(), sources=None) -> None:
 
 
 async def collect(root: str, base: str, out: str, series: list[int], windows: bool, owners: bool = False,
-                  sources_run: bool = False) -> None:
+                  sources_run: bool = False, torrents_run: bool = False) -> None:
     from core.bus import Bus
     from core.db import Database
     from core.module import BaseModule, BusRequestError
@@ -232,7 +267,10 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
     from modules.composition import CompositionModule
     from modules.gateway import GatewayModule
     from modules.gateway.module import SSE_MAP
+    from modules.library import LibraryModule
     from modules.metadata import MetadataModule
+    from modules.renaming import RenamingModule
+    from modules.torrents import TorrentsModule
     from modules.planner import PlannerModule
     from modules.rules import RulesModule
     from modules.settings import SettingsModule
@@ -306,7 +344,31 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
             (re.compile(r'(provider_unavailable\\*",\\*"cause\\*":\\*")(?:(?!\\*"\}).)*'), r"\1<cause>"),
             (re.compile(r"0x[0-9a-fA-F]{6,}"), "0x<address>"),
             (re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"), "<stamp>"),
-            (re.compile(re.escape(folder)), "<tmp>")]
+            (re.compile(re.escape(folder)), "<tmp>"),
+            # A validation error shows a long path cut in the middle, with the random end of the run's folder in it.
+            (re.compile(r"window_j\.\.\.\w+(?=/)"), "window_j...<tmp>")]
+    qbit = served = None
+    if torrents_run:
+        # No credential, token or folder of the base is used, and no folder of the library is touched: the releases of the base keep
+        # their records and their files' names, in a folder of the run's own; the staging folder is not set (a download is refused
+        # until the run sets it) and no page is checked by the schedule.
+        conn = sqlite3.connect(path)
+        conn.execute("DELETE FROM auth")
+        conn.execute("DELETE FROM tracker_sessions")
+        conn.execute("DELETE FROM settings WHERE key IN ('torrents.staging_dir', 'scanner_agent_enabled', 'tmdb_token', "
+                     "'provider.url', 'provider.token')")
+        conn.execute("UPDATE torrent_releases SET folder = replace(folder, '/nas/torrents/series-tracker', ?)",
+                     (os.path.join(folder, "legacy"),))
+        conn.commit()
+        conn.close()
+        _RUN_MASKS[:] = [(re.compile(r"127\.0\.0\.1:\d+"), "127.0.0.1:<port>"), (re.compile(r"0x[0-9a-fA-F]{6,}"), "0x<address>"),
+                         (re.compile(re.escape(folder)), "<tmp>"), (re.compile(r"window_j\.\.\.\w+(?=/)"), "window_j...<tmp>")]
+        # The model of qBittorrent listens on this machine: it is the one address the proxy does not take.
+        sys.path.insert(0, os.path.join(root, "tests"))
+        from app_stand import Served
+        from qbit_model import QbitModel
+        qbit = QbitModel()
+        served = Served(qbit.app)
     db = Database(path)
     bus = Bus()
     composition = CompositionModule(bus, db)
@@ -328,15 +390,76 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         modules += [metadata, AuthModule(bus, db), Neighbours(bus)]
     if sources_run:
         modules += [metadata, TrackerauthModule(bus, db), Neighbours(bus)]
+    pages = library = torrents = None
+    if torrents_run:
+        # The modules of the run: the owners of the data the torrents ask (the catalog, the settings, the rules and the credentials), the
+        # three modules themselves with the model of qBittorrent for the client, and the neighbours that are not on this bus (the pages
+        # of the trackers, the open syncs, the files of the plan, the reports of the cascade).
+        class Pages(BaseModule):
+            """What the sources, the scan and the planner answer the three modules: the page a tracker lists now, its files, the
+            open syncs, the files a series lays in its folder."""
+            name = "pages"
+
+            def __init__(self, bus) -> None:
+                super().__init__(bus)
+                self.page: list = []
+                self.files: dict[str, bytes] = {}
+                self.names: list[str] = []
+                self.move_fails = False
+
+            def register(self) -> None:
+                for topic, handler in (("sources.releases.get", self.on_page), ("sources.torrent_file.get", self.on_file),
+                                       ("sources.site.resolve", self.on_resolve), ("scan.runs.get", self.on_runs),
+                                       ("planner.files.get", self.on_names), ("series.deleted", self.on_deleted)):
+                    self.handle(topic, handler)
+
+            async def on_page(self, env):
+                from core.contracts.torrent import PageReleases
+                return PageReleases(url=env.payload["url"], site="kinozal", title="Тайтл", releases=list(self.page))
+
+            async def on_file(self, env):
+                from core.contracts import TorrentFile
+                return TorrentFile(content_b64=base64.b64encode(self.files[env.payload["url"]]).decode(), from_cache=False)
+
+            async def on_resolve(self, env):
+                from core.contracts import SiteResolveReply
+                return SiteResolveReply(site="kinozal", canonical_url=env.payload["url"], source_type="torrent")
+
+            async def on_runs(self, env):
+                return {"runs": [], "as_of": 0}
+
+            async def on_names(self, env):
+                if self.move_fails:
+                    raise RuntimeError("the plan cannot be read")
+                return {"names": list(self.names)}
+
+            async def on_deleted(self, env) -> None:
+                for owner in ("scan", "composition", "planner", "sources"):
+                    self.publish_event("series.purged", {"series_id": env.payload["series_id"], "owner": owner})
+
+        pages = Pages(bus)
+        library_root = os.path.join(folder, "library")
+        os.makedirs(library_root)
+        library = LibraryModule(bus, db, allowed_roots=[library_root, os.path.join(folder, "staging")])
+        # The idle pace of the monitor is an hour: the old pipeline's monitor does not wipe the rows the run puts in its registry, and a
+        # release that moves is followed at the pace of `monitor_active`; what a run waits for is the events, not that pace.
+        torrents = TorrentsModule(bus, db, qbt_url=served.url, qbt_username=qbit.username, qbt_password=qbit.password,
+                                  pipeline_poll=0.02, monitor_active=0.02, monitor_idle=3600)
+        modules = [CatalogModule(bus, db), SettingsModule(bus, db), RulesModule(bus, db), TrackerauthModule(bus, db), probe,
+                   gateway, pages, torrents, RenamingModule(bus), library, metadata]
     # The packets of the events the window is told, as the stream of the gateway writes them (SSE_MAP, json.dumps).
     events: list[tuple[str, str]] = []
 
     def seen(env) -> None:
-        if env.topic in WATCHED or (sources_run and env.topic in WATCHED_SOURCES):
+        if env.topic in WATCHED or (sources_run and env.topic in WATCHED_SOURCES) or (torrents_run and env.topic in WATCHED_TORRENTS):
             sse = SSE_MAP.get(env.topic)
             payload = sse.form(env.payload) if sse is not None and sse.form else env.payload
-            events.append((env.topic, masked(json.dumps(payload, ensure_ascii=False, default=plain))))
+            text = masked(json.dumps(payload, ensure_ascii=False, default=plain))
+            # The word of the client about a torrent taken again after it was given up is told as the tick that asks it comes: before or
+            # after the answer to the one who took it. A step that takes such a torrent says so (`client_free`) and the word is left out.
+            events.append((env.topic, _CLIENT_WORD.sub('"client":null', text) if client_free["on"] else text))
 
+    client_free = {"on": False}
     untap = bus.tap(seen)
     runner = Runner(bus, modules)
     await runner.start()
@@ -369,8 +492,11 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         by_topic: dict[str, list[str]] = {}
         for topic, text in taken:
             by_topic.setdefault(topic, []).append(hashlib.sha256(text.encode()).hexdigest())
-        answers[f"events:{label}"] = {"events": {topic: {"count": len(each), "distinct": sorted(set(each)), "last": each[-1]}
-                                                 for topic, each in sorted(by_topic.items())}}
+        # In the torrents run the news of a release come as often as the client is asked, which is the pace of the machine: which
+        # of the packets between the first and the last were told does not depend on the code, so the last one stands for them.
+        answers[f"events:{label}"] = {"events": {
+            topic: {"count": len(each), "distinct": [each[-1]] if torrents_run and topic == "torrents.release.changed" else sorted(set(each)),
+                    "last": each[-1]} for topic, each in sorted(by_topic.items())}}
 
     async def plan_window(client, label: str, sid: int) -> None:
         """The plan, its references and what the planner tells its neighbours, after the work of the planner has ended."""
@@ -1346,6 +1472,289 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         await ask(client, "sources:settings:final", "GET", "/api/sources/settings")
         requests.adapters.HTTPAdapter.send = original_send
 
+    async def torrents_window(client) -> None:
+        """The windows of `torrents`, `renaming` and `library` on the model of qBittorrent: the releases of the base and what the monitor
+        shows, the folder the releases download into, a release downloaded, updated, held by a sync, unwatched, archived, gone from the
+        client and forgotten with its series, the registry of the old pipeline read (its rows are the run's own), the folders of the disk
+        listed, and the move of a series planned, refused, failed and made. Each step ends when the work it began has: the events
+        and the signals of the modules, never a pause."""
+        from core.contracts.torrent import PageRelease
+        from qbit_model import V1, V2, payload as content_of, release as release_of
+        staging = os.path.join(folder, "staging")
+        shelf = os.path.join(folder, "library")
+        page_a, page_b = "https://kinozal.tv/details.php?id=900001", "https://kinozal.tv/details.php?id=900002"
+        news = bus.subscribe("torrents.release.changed")
+        queue_sub, progress_sub = bus.subscribe("torrents.queue.changed"), bus.subscribe("torrents.progress.changed")
+
+        async def done(label: str) -> None:
+            """What a command left: the work it began has ended, then the tables of the modules and the packets told."""
+            await quiet(bus, planner, modules)
+            answers[f"{label}:torrents"] = torrents_digest(path)
+            told(label)
+
+        def drain(*subs) -> None:
+            for sub in subs:
+                while not sub.queue.empty():
+                    sub.queue.get_nowait()
+
+        async def until(state: str, wanted=lambda each: True) -> dict:
+            """The next news of a release in `state` that `wanted` accepts; the news before it are passed by."""
+            async def wait():
+                while True:
+                    each = (await news.queue.get()).payload
+                    if each["state"] == state and wanted(each):
+                        return each
+            return await asyncio.wait_for(wait(), 60)
+
+        def lists(files, *, published: str, link: str, hold: bool = False) -> str:
+            """The page lists a release whose files the swarm seeds; returns its infohash."""
+            meta, infohash = qbit.seed(files, hold=hold)
+            pages.files[link] = meta
+            pages.page = [PageRelease(release="page", title="1-12", link=link, published=published)]
+            return infohash
+
+        async def window_connects(label: str) -> None:
+            """A window connects: the picture of the queue and of the monitor come again, as the owner tells them."""
+            drain(queue_sub, progress_sub)
+            probe.publish_event("gateway.sse.clients", {"count": 1})
+            record(f"{label}:queue", 200, written((await asyncio.wait_for(queue_sub.queue.get(), 60)).payload).encode())
+            record(f"{label}:progress", 200, written((await asyncio.wait_for(progress_sub.queue.get(), 60)).payload).encode())
+
+        async def releases_of(label: str, url: str) -> None:
+            await over_bus(f"{label}:bus", "torrents.releases.get", {"url": url})
+            await ask(client, f"{label}:http", "POST", "/api/torrent/releases", json={"url": url})
+
+        async def files_of(label: str, *roots: str) -> None:
+            """The files a folder holds, by path with their sizes: what the library or the staging folder has after a command."""
+            found = sorted((os.path.relpath(os.path.join(top, name), folder), os.path.getsize(os.path.join(top, name)))
+                           for each in roots for top, _dirs, names in os.walk(each) for name in names)
+            record(label, 200, masked(json.dumps(found)).encode())
+
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        urls = [row[0] for row in conn.execute("SELECT DISTINCT url FROM torrent_releases ORDER BY url")]
+        conn.close()
+        answers["torrents:start"] = torrents_digest(path)
+        told("torrents:start")
+
+        # --- what the base holds: the releases of every page, the monitor, the queue ------------------------------------------
+        for url in urls:
+            await releases_of(f"torrents:releases:{url}", url)
+        await releases_of("torrents:releases:unknown", "https://kinozal.tv/details.php?id=1")
+        await over_bus("torrents:monitor:bus", "torrents.db.progress.list", {})
+        await ask(client, "torrents:monitor:http", "GET", "/api/series/active_torrents")
+        await over_bus("torrents:queue:bus", "torrents.queue.get", {})
+        await ask(client, "torrents:queue:http", "GET", "/api/agent/queue")
+        await window_connects("torrents:connect:start")
+
+        # --- the series of the run: one with a torrent page for a source, two to lay files in a folder and to hold the old registry ---
+        draft = {"name": "Торрент", "name_en": "Torrent", "site": "kinozal", "season": "1", "quality": "1080p", "auto_scan_enabled": False}
+        sid_page = (await ask(client, "torrents:series:page", "POST", "/api/series", json={
+            **draft, "save_path": os.path.join(shelf, "page"), "sources": [{"url": page_a, "source_type": "torrent"}]})).json()["series_id"]
+        sid_move = (await ask(client, "torrents:series:move", "POST", "/api/series", json={
+            **draft, "name": "Перенос", "name_en": "Move", "save_path": os.path.join(shelf, "old"),
+            "sources": [{"url": "https://proto.invalid/move", "source_type": "web_video"}]})).json()["series_id"]
+        sid_old = (await ask(client, "torrents:series:old", "POST", "/api/series", json={
+            **draft, "name": "Старый", "name_en": "Old", "save_path": os.path.join(shelf, "kept"),
+            "sources": [{"url": "https://proto.invalid/old", "source_type": "web_video"}]})).json()["series_id"]
+        await done("torrents:series")
+
+        # --- the folder the releases download into: read, refused in every way, set; a download is refused until it is set -------------
+        await ask(client, "torrents:staging:get:unset", "GET", "/api/settings/torrent_staging")
+        await over_bus("torrents:staging:bus:get:unset", "torrents.staging.get", {})
+        for label, body in (("relative", {"value": "relative/dir"}), ("empty", {"value": ""}), ("none", {"value": None}),
+                            ("missing", {}), ("number", {"value": 123}), ("spaces", {"value": "   "})):
+            await ask(client, f"torrents:staging:set:{label}", "POST", "/api/settings/torrent_staging", json=body)
+        await over_bus("torrents:staging:bus:refused", "torrents.staging.set", {"value": "rel"}, drop_none=True)
+        await done("torrents:staging:refused")
+        await ask(client, "torrents:download:no-staging", "POST", "/api/torrent/download", json={"url": page_a, "release": "page"})
+        await ask(client, "torrents:staging:set", "POST", "/api/settings/torrent_staging", json={"value": staging})
+        await done("torrents:staging:set")
+        await ask(client, "torrents:staging:get", "GET", "/api/settings/torrent_staging")
+        await over_bus("torrents:staging:bus:get", "torrents.staging.get", {})
+        await over_bus("torrents:staging:bus:set", "torrents.staging.set", {"value": f" {staging} "}, drop_none=True)
+        await done("torrents:staging:set-again")
+
+        # --- a download: refused in the ways it is refused, made, followed to its end ------------------------------------------------
+        await ask(client, "torrents:download:not-on-page", "POST", "/api/torrent/download", json={"url": page_a, "release": "nope"})
+        pages.page = [PageRelease(release="page", title="1-12", published="d0")]
+        await ask(client, "torrents:download:no-torrent", "POST", "/api/torrent/download", json={"url": page_a, "release": "page"})
+        h1 = lists(release_of(V1), published="d1", link="L1", hold=True)
+        drain(news)
+        await ask(client, "torrents:download", "POST", "/api/torrent/download", json={"url": page_a, "release": "page"})
+        await until("downloading", lambda each: bool(each["files"]))
+        await done("torrents:download")
+        await releases_of("torrents:download:releases", page_a)
+        await ask(client, "torrents:download:again", "POST", "/api/torrent/download", json={"url": page_a, "release": "page"})
+        qbit.deliver(h1)
+        first = await until("ready")
+        await done("torrents:ready")
+        await releases_of("torrents:ready:releases", page_a)
+        await files_of("torrents:ready:files", first["folder"])
+        await window_connects("torrents:connect:ready")
+
+        # --- the page, read now: nothing newer; the automatic update off and on; an update into the same folder -------------------------
+        await ask(client, "torrents:check:same", "POST", "/api/torrent/check", json={"url": page_a})
+        await done("torrents:check:same")
+        for label, watched in (("off", False), ("on", True)):
+            await ask(client, f"torrents:watch:{label}", "POST", "/api/torrent/watch", json={"url": page_a, "release": "page", "watched": watched})
+            await done(f"torrents:watch:{label}")
+        await ask(client, "torrents:watch:unknown", "POST", "/api/torrent/watch", json={"url": page_a, "release": "nope", "watched": True})
+        h2 = lists(release_of(V2), published="d2", link="L2")
+        drain(news)
+        await ask(client, "torrents:check:newer", "POST", "/api/torrent/check", json={"url": page_a})
+        await until("updating")
+        second = await until("ready", lambda each: each["infohash"] == h2)
+        await done("torrents:update")
+        await releases_of("torrents:update:releases", page_a)
+        await files_of("torrents:update:files", second["folder"])
+
+        # --- an update held by a sync of a series with the page: it waits for the end of the run, then begins ---------------------------
+        probe.publish_event("scan.run.changed", {"series_id": sid_page, "active": True, "seq": 1})
+        await quiet(bus, planner, modules)
+        h3 = lists(release_of(V1), published="d3", link="L3")
+        drain(news)
+        await ask(client, "torrents:held:check", "POST", "/api/torrent/check", json={"url": page_a})
+        await until("ready", lambda each: each["pending"])
+        await done("torrents:held")
+        await releases_of("torrents:held:releases", page_a)
+        client_free["on"] = True  # the update takes the infohash the release had before, whose client word the module still holds
+        probe.publish_event("scan.run.changed", {"series_id": sid_page, "active": False, "seq": 2})
+        third = await until("ready", lambda each: each["infohash"] == h3 and not each["pending"])
+        await done("torrents:held:over")
+        client_free["on"] = False
+        await files_of("torrents:held:files", third["folder"])
+
+        # --- a release no longer watched gives its files up; taken again it is a new download -----------------------------------------
+        await ask(client, "torrents:watch:off-again", "POST", "/api/torrent/watch", json={"url": page_a, "release": "page", "watched": False})
+        await ask(client, "torrents:check:unwatched", "POST", "/api/torrent/check", json={"url": page_a})
+        drain(news)
+        probe.send_command("torrents.release.drop_files", {"url": page_a, "release": "page"})
+        await until("archived")
+        await done("torrents:archived")
+        await releases_of("torrents:archived:releases", page_a)
+        await files_of("torrents:archived:files", staging)
+        drain(news)
+        client_free["on"] = True
+        reply = await client.request("POST", "/api/torrent/download", json={"url": page_a, "release": "page"})
+        taken = json.loads(reply.content)
+        taken["client"] = None
+        record("torrents:download:archived", reply.status_code, json.dumps(taken, ensure_ascii=False, separators=(",", ":")).encode())
+        await until("ready")
+        await done("torrents:download:archived")
+        client_free["on"] = False
+        await releases_of("torrents:download:archived:releases", page_a)
+
+        # --- a release the client lost, and the folder of the releases moved -----------------------------------------------------------
+        other = [("Other/E01.mkv", content_of("o1", 300_000)), ("Other/E02.mkv", content_of("o2", 300_000))]
+        h4 = lists(other, published="e1", link="L4", hold=True)
+        drain(news)
+        await ask(client, "torrents:download:second-page", "POST", "/api/torrent/download", json={"url": page_b, "release": "page"})
+        await until("downloading", lambda each: bool(each["files"]))
+        qbit.torrents.pop(h4)
+        await until("failed")
+        await done("torrents:lost")
+        await releases_of("torrents:lost:releases", page_b)
+        moved = os.path.join(folder, "staging-moved")
+        drain(news)
+        await ask(client, "torrents:staging:move", "POST", "/api/settings/torrent_staging", json={"value": moved})
+        await done("torrents:staging:move")
+        await releases_of("torrents:staging:move:releases", page_a)
+        await over_bus("torrents:staging:bus:get:moved", "torrents.staging.get", {})
+        await window_connects("torrents:connect:moved")
+
+        # --- the registry of the old pipeline, read: the rows are the run's own (a torrent, its files, its progress) -------------------------
+        rows = sqlite3.connect(path)
+        rows.execute("INSERT INTO torrents (series_id, torrent_id, link, date_time, quality, episodes, is_active, qb_hash) "
+                     "VALUES (?, 't1', 'https://proto.invalid/t1', '2026-01-01', '1080p', '1-12', 1, 'abc123')", (sid_old,))
+        owner = rows.execute("SELECT id FROM torrents WHERE qb_hash = 'abc123'").fetchone()[0]
+        for original, renamed, state, meta in (
+                ("Old/E01.mkv", "Season 01/E01.mkv", "renamed", {"season": 1, "episode": 1, "media_type": "video"}),
+                ("Old/E02.mkv", "Season 01/E02.mkv", "renamed", {"season": 1, "episode": 2, "media_type": "video"}),
+                ("Old/E02.mka", None, "pending_rename", {"season": 1, "episode": 2, "media_type": "audio"}),
+                ("Old/Extras/x.txt", None, "pending_rename", {"is_extra": True, "media_type": "extra"})):
+            rows.execute("INSERT INTO torrent_files (torrent_db_id, original_path, renamed_path, status, extracted_metadata, is_excluded, "
+                         "exclude_reason, qb_file_index) VALUES (?, ?, ?, ?, ?, 0, NULL, 0)", (owner, original, renamed, state, json.dumps(meta)))
+        rows.execute("INSERT INTO torrent_progress (qb_hash, series_id, status, progress, dlspeed, eta, error_message, created_at, updated_at) "
+                     "VALUES ('abc123', ?, 'downloading', 55, 1024, 60, NULL, '2026-11-21 04:00:00.000000', '2026-11-21 04:00:00.000000')",
+                     (sid_old,))
+        rows.commit()
+        rows.close()
+        for label, topic, body in (("counts", "torrents.db.downloaded_counts", {}), ("for-series", "torrents.db.files.for_series", {"series_id": sid_old}),
+                                   ("files", "torrents.db.files.list", {"qb_hash": "abc123"}), ("files:unknown", "torrents.db.files.list", {"qb_hash": "no"}),
+                                   ("history", "torrents.db.history", {"series_id": sid_old}), ("seasons", "torrents.seasons", {"series_id": sid_old}),
+                                   ("composition", "torrents.composition", {"series_id": sid_old}), ("active", "torrents.db.active", {"series_id": sid_old}),
+                                   ("info", "torrents.info.get", {}), ("client-files", "torrents.files.get", {"hash": "abc123"}),
+                                   ("monitor", "torrents.db.progress.list", {}), ("queue", "torrents.queue.get", {})):
+            await over_bus(f"torrents:old:{label}", topic, body)
+        await ask(client, "torrents:old:monitor:http", "GET", "/api/series/active_torrents")
+        await ask(client, "torrents:old:filenames", "GET", f"/api/series/{sid_old}/source-filenames")
+        await ask(client, "torrents:old:list", "GET", "/api/series")
+        await window_connects("torrents:connect:old")
+        await done("torrents:old")
+
+        # --- the series with its page deleted: the releases of its page leave the client with their files and the folder ---------------
+        drain(news)
+        await ask(client, "torrents:delete:page-series", "DELETE", f"/api/series/{sid_page}")
+        await done("torrents:delete:page-series")
+        await releases_of("torrents:delete:releases", page_a)
+        await files_of("torrents:delete:files", staging, moved)
+        await ask(client, "torrents:delete:old-series", "DELETE", f"/api/series/{sid_old}")
+        await done("torrents:delete:old-series")
+
+        # --- the library: the folders of the disk listed, the move of a series planned, refused, failed and made ---------------------------
+        for each in ("b_dir", "A_dir", "c_dir/inner"):
+            os.makedirs(os.path.join(shelf, each), exist_ok=True)
+        open(os.path.join(shelf, "file.txt"), "w").close()
+        for label, query in (("shelf", shelf), ("dotted", os.path.join(shelf, "b_dir", "..", "A_dir")), ("file", os.path.join(shelf, "file.txt")),
+                             ("missing", os.path.join(shelf, "none")), ("outside", "/etc"), ("root", "/"), ("staging", staging)):
+            await ask(client, f"library:directories:{label}", "GET", "/api/directories", params={"path": query})
+        await ask(client, "library:directories:default", "GET", "/api/directories")
+        await over_bus("library:directories:bus", "library.directories.list", {"path": shelf})
+        await over_bus("library:directories:bus:default", "library.directories.list", {})
+        old, fresh = os.path.join(shelf, "old"), os.path.join(shelf, "fresh")
+        names = ["Show/S01E01.mkv", "Show/S01E02.mkv", "Show/Extras/x.mka"]
+        for each in names:
+            os.makedirs(os.path.dirname(os.path.join(old, each)), exist_ok=True)
+            with open(os.path.join(old, each), "wb") as sink:
+                sink.write(each.encode() * 7)
+        pages.names = [*names, "Show/gone.mkv"]  # a file of the plan that is not on the disk is skipped
+        card = f"/api/series/{sid_move}"
+        await ask(client, "library:relocation:get:none", "GET", card)
+        await over_bus("library:relocation:bus:get:none", "library.relocation.get", {"series_id": sid_move})
+        await ask(client, "library:relocation:plan", "POST", card, json={"save_path": fresh})
+        await done("library:relocation:plan")
+        await ask(client, "library:relocation:card", "GET", card)
+        await over_bus("library:relocation:bus:get", "library.relocation.get", {"series_id": sid_move})
+        await ask(client, "library:relocation:replan", "POST", card, json={"save_path": fresh + "-b"})
+        await done("library:relocation:replan")
+        await over_bus("library:relocation:bus:get:replanned", "library.relocation.get", {"series_id": sid_move})
+        await ask(client, "library:relocation:drop", "POST", card, json={"save_path": old})
+        await done("library:relocation:drop")
+        await over_bus("library:relocation:bus:get:dropped", "library.relocation.get", {"series_id": sid_move})
+        for label, new_path in (("relative", "relative/dir"), ("outside", "/nowhere/else"), ("trimmed", f" {fresh} "), ("unsafe", fresh + ":x?")):
+            await over_bus(f"library:relocation:bus:plan:{label}", "library.relocation.plan", {"series_id": sid_move, "new_path": new_path})
+            await done(f"library:relocation:plan:{label}")
+        await over_bus("library:relocation:bus:plan:unknown", "library.relocation.plan", {"series_id": 999999, "new_path": fresh})
+        await over_bus("library:relocation:bus:get:unknown", "library.relocation.get", {"series_id": 999999})
+        await over_bus("library:relocation:bus:apply:unplanned", "library.relocation.apply", {"series_id": sid_old})
+        await over_bus("library:relocation:bus:apply:unplanned-unknown", "library.relocation.apply", {"series_id": 999999})
+        await over_bus("library:relocation:bus:plan:again", "library.relocation.plan", {"series_id": sid_move, "new_path": fresh})
+        pages.move_fails = True
+        await over_bus("library:relocation:bus:apply:fails", "library.relocation.apply", {"series_id": sid_move})
+        await done("library:relocation:apply:fails")
+        await ask(client, "library:relocation:card:after-fail", "GET", card)
+        await files_of("library:relocation:files:after-fail", shelf)
+        pages.move_fails = False
+        await over_bus("library:relocation:bus:apply", "library.relocation.apply", {"series_id": sid_move})
+        await done("library:relocation:apply")
+        await ask(client, "library:relocation:card:after", "GET", card)
+        await over_bus("library:relocation:bus:get:after", "library.relocation.get", {"series_id": sid_move})
+        await files_of("library:relocation:files:after", shelf)
+        await over_bus("library:relocation:bus:apply:again", "library.relocation.apply", {"series_id": sid_move})
+        await ask(client, "library:relocation:delete", "DELETE", card)
+        await done("library:relocation:delete")
+        await over_bus("library:relocation:bus:get:deleted", "library.relocation.get", {"series_id": sid_move})
+
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app), base_url="http://test",
                                  timeout=120) as client:
         for sid in series:
@@ -1494,8 +1903,12 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
             await owners_window(client)
         if sources_run:
             await sources_window(client)
+        if torrents_run:
+            await torrents_window(client)
     untap()
     await runner.stop()
+    if served is not None:
+        served.close()
     with open(out, "w", encoding="utf-8") as sink:
         json.dump({"root": root, "when": time.strftime("%Y-%m-%d %H:%M:%S"), "answers": answers}, sink)
     shutil.rmtree(folder, ignore_errors=True)
@@ -1580,6 +1993,9 @@ if __name__ == "__main__":
     # The windows of `sources`, `trackerauth` and `metadata` need no series either and keep their own copy of the base clean of the
     # credentials: `collect --sources` alone is a run of its own.
     parser.add_argument("--sources", action="store_true")
+    # The windows of `torrents`, `renaming` and `library` need no series either and put the model of qBittorrent (tests/qbit_model.py)
+    # and the model of the neighbours in place of the tracker, the client and the plan: `collect --torrents` alone is a run of its own.
+    parser.add_argument("--torrents", action="store_true")
     args = parser.parse_intermixed_args()
     if args.what == "selftest":
         sys.exit(selftest())
@@ -1593,7 +2009,8 @@ if __name__ == "__main__":
         os.environ[name] = "http://127.0.0.1:9"
     os.environ.pop("NO_PROXY", None)
     os.environ.pop("no_proxy", None)
-    if args.sources:
-        # The model of the provider listens on this machine: it is the one address the proxy does not take.
+    if args.sources or args.torrents:
+        # The model of the provider and the model of qBittorrent listen on this machine: it is the one address the proxy does not take.
         os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1"
-    asyncio.run(collect(root, args.db, args.out, [int(each) for each in args.rest], args.windows, args.owners, args.sources))
+    asyncio.run(collect(root, args.db, args.out, [int(each) for each in args.rest], args.windows, args.owners, args.sources,
+                        args.torrents))
