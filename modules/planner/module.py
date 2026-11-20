@@ -1427,10 +1427,10 @@ class PlannerModule(BaseModule):
         series_id = command.series_id
         held = {data["name"]: data for data in await self.repo.assets(series_id)}
         if command.name not in held:
-            raise ValueError("planner_delete_no_file")  # «Удалить» is only for what is in fact on disk (Д-1)
+            raise ValueError(reason("planner_delete_no_file", name=command.name))  # «Удалить» is only for what is in fact on disk (Д-1)
         if command.kind == "track" and (command.dub is None or not any(
                 track["dub"] == command.dub.model_dump() for track in held[command.name]["tracks"])):
-            raise ValueError("planner_delete_no_track")
+            raise ValueError(reason("planner_delete_no_track", name=command.name))
         await self.repo.add_command(series_id, stored_command(command.model_dump()))
         await self._publish_view(series_id)
         return {"recorded": True}

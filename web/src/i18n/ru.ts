@@ -1061,6 +1061,8 @@ export const ru = {
   "reason.composition_error": "Раскладка не обновлена: внутренняя ошибка, подробности в журнале",
   "reason.scan_step_failed": "Синхронизация остановлена на шаге «{step}», подробности в журнале",
   "reason.planner_sync_failed": "Синхронизация плана прервана сбоем, подробности в журнале",
+  "reason.planner_delete_no_file": "Файла «{name}» уже нет на диске",
+  "reason.planner_delete_no_track": "В файле «{name}» этой дорожки уже нет",
   "reason.scan_no_profile": "Ни одному источнику сериала не назначен профиль правил",
   "reason.sync_pack_failed": "Синхронизация завершена с ошибкой: не собрано контейнеров — {failed}, подробности в журнале",
   "reason.table_wait_timeout": "Страница {url} не прочитана за отведённое время",
