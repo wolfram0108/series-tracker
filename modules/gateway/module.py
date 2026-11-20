@@ -19,7 +19,7 @@ import secrets
 import signal
 
 from fastapi import FastAPI, Request  # Request нужен diag-роуту
-from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
+from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse, Response,
                                StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -29,6 +29,7 @@ from core import BaseModule, BusRequestError
 from core.reasons import reason
 from core.contracts import (CompositionChanged, CompositionFailed, PackJournal, PlannerView,
                             SeriesReadProgress, SourceChanged, TableFailed, TableProgress, TableReady)
+from .routing import as_made
 
 
 class AuthGateMiddleware:
@@ -362,7 +363,7 @@ class GatewayModule(BaseModule):
 
         if self._diag:
             @app.post("/api/_diag/echo")
-            async def diag_echo(request: Request) -> JSONResponse:
+            async def diag_echo(request: Request) -> Response:
                 body = await request.json()
                 try:
                     result = await self.request(
@@ -370,7 +371,7 @@ class GatewayModule(BaseModule):
                         timeout=float(body.get("timeout", 5)))
                 except BusRequestError as exc:
                     return JSONResponse({"error": str(exc)}, status_code=502)
-                return JSONResponse({"reply": result})
+                return await as_made({"reply": result})
 
         from .api_auth import build_router as auth_router
         from .api_media import build_router as media_router

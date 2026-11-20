@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
 
 from core import NO_HANDLER, BusRequestError, compute
 from core.admission import Admission
@@ -17,15 +18,23 @@ from core.admission import current as current_admission
 from core.reasons import code_of, relayed
 
 
+def plain(value: Any) -> Any:
+    """What JSON has no form for: a model is written as a module writes it into a dictionary (`model_dump(mode="json")`),
+    so the text of an answer that is a model, or holds one, is that of the same answer as a dictionary; a date or a set
+    is written the way the framework writes it."""
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    return jsonable_encoder(value)
+
+
 def _text(answer: Any) -> bytes:
-    # A value JSON has no form for (a date, a set) is written the way the framework writes it.
-    return json.dumps(answer, ensure_ascii=False, allow_nan=False, separators=(",", ":"),
-                      default=jsonable_encoder).encode("utf-8")
+    return json.dumps(answer, ensure_ascii=False, allow_nan=False, separators=(",", ":"), default=plain).encode("utf-8")
 
 
 async def as_made(answer: Any) -> Response:
-    """The answer of a module as it came. The module made it of the model of the route, so it is not checked and written
-    again by the framework (four passes over megabytes on the loop); its text is made in the pool of computation."""
+    """The answer of a module as it came: a dictionary or a model, which the module made of the model of the route, so it
+    is not checked and written again by the framework (four passes over megabytes on the loop); its text is made in the
+    pool of computation."""
     return Response(await compute.run(_text, answer), media_type="application/json")
 
 

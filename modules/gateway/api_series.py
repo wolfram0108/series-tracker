@@ -61,10 +61,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return {}
 
-    def _attach_tmdb(series: dict, mapping: dict | None) -> None:
-        if mapping:
-            mapping["last_updated"] = _iso(mapping.get("last_updated"))
-        series["tmdb_info"] = mapping
+    def _card(series: dict, mapping: dict | None, **added) -> dict:
+        """The series as the window shows it: the dict the catalog answered with its date in ISO, the mapping of TMDB
+        (its date in ISO too) and the fields the gateway adds. What a module answered is its own and is not changed."""
+        tmdb = {**mapping, "last_updated": _iso(mapping.get("last_updated"))} if mapping else mapping
+        return {**series, "last_scan_time": _iso(series.get("last_scan_time")), "tmdb_info": tmdb, **added}
 
     # --- список и карточки ----------------------------------------------------
 
@@ -76,11 +77,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         # Each owner counts its own rows and a series has rows with one of them only, so the sum needs no kind.
         counts = [await _counts("planner.downloaded_counts"),
                   await _counts("torrents.db.downloaded_counts")]
-        for s in series:
-            s["last_scan_time"] = _iso(s.get("last_scan_time"))
-            _attach_tmdb(s, mappings.get(s["id"]))
-            s["downloaded_episodes_count"] = sum(each.get(s["id"], 0) for each in counts)
-        return series
+        return [_card(s, mappings.get(s["id"]),
+                      downloaded_episodes_count=sum(each.get(s["id"], 0) for each in counts)) for s in series]
 
     @r.post("/api/series", response_model=CreatedSeries, responses=_ERRORS)
     async def add_series(body: SeriesCreate):
@@ -115,12 +113,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                  {"series_id": series_id})
         except BusRequestError as exc:
             return _error_response(exc, with_success=False)
-        s["last_scan_time"] = _iso(s.get("last_scan_time"))
         reply = await gw.request("metadata.map.get",
                                  {"series_id": series_id})
-        _attach_tmdb(s, reply["mapping"])
-        s["planned_save_path"] = (await gw.request("library.relocation.get", {"series_id": series_id}))["new_path"]
-        return s
+        planned = (await gw.request("library.relocation.get", {"series_id": series_id}))["new_path"]
+        return _card(s, reply["mapping"], planned_save_path=planned)
 
     @r.post("/api/series/{series_id}", response_model=OkResponse,
             response_model_exclude_none=True, responses=_ERRORS)
