@@ -97,6 +97,19 @@ class UnpackModule(BaseModule):
         # The rows of the pages can be asked now: a read of one that began before (a start) is made again from them.
         for url in await self.repo.pages():
             self.publish_event(TABLE_CHANGED_TOPIC, {"url": url})
+        self.spawn(self._read_unfinished(), name="unpack:read")
+
+    async def _read_unfinished(self) -> None:
+        """The releases the database holds as read before the events of their subtitles were counted are read again, the
+        way a change of them reads them (`_read` takes only the files that need it)."""
+        try:
+            for url in await self.repo.pages():
+                for release in await self._releases(url):
+                    if release.state == ReleaseState.READY and release.folder:
+                        await self._read(release)
+                self._changed(url)
+        except Exception:  # noqa: BLE001 - what is not read now is read at the next change of its release
+            self.log.exception("the releases read before the events were counted were not read again")
 
     async def _forget_unlisted(self) -> None:
         """A page no torrent source of any series lists any more: what the module kept of it goes, its profiles too."""
