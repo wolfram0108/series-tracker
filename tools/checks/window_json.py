@@ -18,7 +18,13 @@ writes them). After the series come the modules rules, unpack and voices: the li
 the bus and the lines of the sources, the check of a profile, a profile of its own made, written to, ordered and deleted, the names of
 files; the editor and the table of every torrent page of the base (the first opening of a page whose profiles are gone is one of
 them), the commands of the editor; the settings of the voices read, saved as they are, refused and changed; the tables of the three
-modules are hashed after the start and after each command. No sync is run: nothing reaches the library or the network. `compare` is byte for byte: to find out whether a
+modules are hashed after the start and after each command. With `--owners` the owners of the data answer too (no series is
+needed: `collect --owners` alone is a run of its own): the catalog (the list and every card of the base, the sources of every
+series and of every profile over HTTP and over the bus, a series of the instrument made, changed in every field the window changes,
+refused, busy, watched, given a source, changed and cleared of sources, deleted with its cascade), the settings (read and written
+by key and by prefix, the paths, a secret) and auth (the login right and wrong, the session, the password changed, the lock of too
+many attempts, an outdated hash renewed by a login), with the tables `series`, `series_sources`, `settings`, `saved_paths` and
+`admin_user` hashed after each command and the events of the three told as the stream writes them. No sync is run: nothing reaches the library or the network. `compare` is byte for byte: to find out whether a
 change of code left the answers of the window as they were, collect from the tree before the change (`--root`, a commit
 exported into a folder) and from the one after, and compare. `selftest` is the red control of `compare`. Nothing is written to
 the base given; the copy is made again each run. A run ends with `WINDOW_JSON_DONE`; `compare` ends with `IDENTICAL` or
@@ -49,16 +55,27 @@ OWNED = ("parser_profiles", "parser_rules", "parser_rule_conditions", "unpack_so
 # What the modules tell the window as events: written as the stream of the gateway writes them (the table SSE_MAP).
 WATCHED = ("planner.series.changed", "planner.pack.changed", "planner.journal.changed", "work.series.state",
            "series.status.contribution", "series.downloaded.changed", "rules.profile.changed", "unpack.editor.changed",
-           "unpack.table.changed", "voices.settings.changed")
+           "unpack.table.changed", "voices.settings.changed", "series.added", "series.updated", "series.deleted",
+           "series.status.changed", "series.busy.changed", "series.source.added", "series.source.updated",
+           "series.source.removed", "settings.changed")
+# The tables of the owners of the data: the series and its sources, the settings, the saved paths, the dead table of statuses.
+OWNERS = ("series", "series_sources", "series_statuses", "saved_paths")
 
 
 # The clock readings of a read of a page: they differ on every run whatever the code, so their values are not compared.
 _CLOCK = re.compile(r'("(?:read_at|fresh_until)":\s*)"[^"]*"')
+# The stamp the base keeps (and the window shows) of a moment: `last_scan_time` after a touch.
+_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{6}")
 
 
 def masked(text: str) -> str:
     """The text with the values of the clock fields replaced (what is there, and that it is a text, stays compared)."""
-    return _CLOCK.sub(r'\1"<time>"', text)
+    return _STAMP.sub("<stamp>", _CLOCK.sub(r'\1"<time>"', text))
+
+
+def plain(value):
+    """A reply as the plain data it is told as: a model of the new tree and a dictionary of the old one are the same here."""
+    return value.model_dump(mode="json") if hasattr(value, "model_dump") else value
 
 
 def written(value) -> str:
@@ -109,6 +126,25 @@ def owned_digest(path: str) -> dict:
     return out
 
 
+def owners_digest(path: str) -> dict:
+    """The tables of the catalog, of the settings and of auth, each whole: rows and a hash. A secret setting is hashed as the
+    service reads it (a stored one differs on every write: the cipher takes a new nonce), a clock stamp as `<stamp>`, and the
+    hash of the password by the parameters it was made with (its salt differs on every write)."""
+    from core import crypto
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    out = {}
+    for table in OWNERS:
+        rows = sorted(conn.execute(f"SELECT * FROM {table}").fetchall(), key=repr)
+        out[table] = {"rows": len(rows), "sha": hashlib.sha256(masked(repr(rows)).encode()).hexdigest()}
+    rows = sorted(((key, crypto.decrypt(value)) for key, value in conn.execute("SELECT key, value FROM settings")), key=repr)
+    out["settings"] = {"rows": len(rows), "sha": hashlib.sha256(repr(rows).encode()).hexdigest()}
+    rows = [(name, "$".join(each.split("$")[:4]), each.count("$")) for name, each in
+            conn.execute("SELECT username, password_hash FROM admin_user")]
+    out["admin_user"] = {"rows": len(rows), "sha": hashlib.sha256(repr(rows).encode()).hexdigest(), "made_with": rows}
+    conn.close()
+    return out
+
+
 async def quiet(bus, planner, modules=(), sources=None) -> None:
     """Returns when nothing is left to do: every envelope is taken apart, no count of the view of a series is under way (the
     planner counts it beside its handlers) and no module works beside its handlers (a read of a page, a recount). The signal is the end of
@@ -124,15 +160,17 @@ async def quiet(bus, planner, modules=(), sources=None) -> None:
         await asyncio.gather(*under_way, return_exceptions=True)
 
 
-async def collect(root: str, base: str, out: str, series: list[int], windows: bool) -> None:
+async def collect(root: str, base: str, out: str, series: list[int], windows: bool, owners: bool = False) -> None:
     from core.bus import Bus
     from core.db import Database
     from core.module import BaseModule, BusRequestError
     from core.runner import Runner
+    from modules.auth import AuthModule
     from modules.catalog import CatalogModule
     from modules.composition import CompositionModule
     from modules.gateway import GatewayModule
     from modules.gateway.module import SSE_MAP
+    from modules.metadata import MetadataModule
     from modules.planner import PlannerModule
     from modules.rules import RulesModule
     from modules.settings import SettingsModule
@@ -167,6 +205,21 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                                          checked_at=row["checked_at"]).model_dump(mode="json"))
             return {"releases": views}
 
+    class Neighbours(BaseModule):
+        """What the owners that are not on the bus answer and tell the owners of the data."""
+        name = "neighbours"
+
+        def register(self) -> None:
+            self.handle("library.relocation.get", self.on_planned)
+            self.handle("series.deleted", self.on_deleted)
+
+        async def on_planned(self, env) -> dict:
+            return {"new_path": None}
+
+        async def on_deleted(self, env) -> None:
+            for owner in ("scan", "torrents", "library"):
+                self.publish_event("series.purged", {"series_id": env.payload["series_id"], "owner": owner})
+
     folder = tempfile.mkdtemp(prefix="window_json_")
     path = os.path.join(folder, "app.db")
     shutil.copy(base, path)
@@ -176,11 +229,15 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
     composition = CompositionModule(bus, db)
     planner = PlannerModule(bus, db)
     probe = Probe(bus)
-    gateway = GatewayModule(bus, static_dir=folder, templates_dir=folder, auth_required=False)
+    gateway = GatewayModule(bus, static_dir=folder, templates_dir=folder, auth_required=False, cookie_secure=False)
     # `unpack` starts last, as it does in the service: its start tells every page it keeps, and the sources read them again.
     reader = SourcesModule(bus, db, torrent_cache_dir=os.path.join(folder, "torrent_cache"))
     modules = [CatalogModule(bus, db), SettingsModule(bus, db), RulesModule(bus, db), reader, VoicesModule(bus, db),
                composition, planner, probe, gateway, Torrents(bus, db), UnpackModule(bus, db)]
+    if owners:
+        # The neighbours of the owners: the mapping of TMDB read from the base (the list of series asks it), the folder a save
+        # planned (none), and the reports of the owners that are not on this bus that their data of a deleted series is gone.
+        modules += [MetadataModule(bus, db), AuthModule(bus, db), Neighbours(bus)]
     # The packets of the events the window is told, as the stream of the gateway writes them (SSE_MAP, json.dumps).
     events: list[tuple[str, str]] = []
 
@@ -188,7 +245,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         if env.topic in WATCHED:
             sse = SSE_MAP.get(env.topic)
             payload = sse.form(env.payload) if sse is not None and sse.form else env.payload
-            events.append((env.topic, masked(json.dumps(payload, ensure_ascii=False))))
+            events.append((env.topic, masked(json.dumps(payload, ensure_ascii=False, default=plain))))
 
     untap = bus.tap(seen)
     runner = Runner(bus, modules)
@@ -444,6 +501,303 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
             await ask(client, f"voices:composition:{sid}", "GET", f"/api/series/{sid}/composition")
             await plan_window(client, f"voices:{sid}", sid)
 
+    async def owners_window(client) -> None:
+        """The owners of the data: the catalog (read, a series of the instrument made, changed, refused, busy, watched, given
+        sources, deleted), the settings (read, written, the paths, a secret) and auth (login, session, password, lock)."""
+        from argon2 import PasswordHasher
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        ids = [row[0] for row in conn.execute("SELECT id FROM series ORDER BY id")]
+        profiles = [row[0] for row in conn.execute(
+            "SELECT DISTINCT parser_profile_id FROM series_sources WHERE parser_profile_id IS NOT NULL ORDER BY 1")]
+        conn.close()
+        profile = profiles[0] if profiles else None
+
+        async def settled(label: str) -> None:
+            """What a command left: the work it began has ended, then the tables of the owners and the packets told."""
+            await composition.idle()
+            await quiet(bus, planner, modules, reader)
+            answers[f"{label}:owners"] = owners_digest(path)
+            told(label)
+
+        async def listed(name: str, topic: str, payload: dict, field: str) -> None:
+            """A list over the bus: the new tree answers a model that holds the list, the old one the list itself."""
+            try:
+                reply = await probe.request(topic, payload)
+                record(name, 200, written(getattr(reply, field, reply)).encode())
+            except BusRequestError as exc:
+                record(name, 500, str(exc).encode())
+
+        async def status_of(name: str, method: str, url: str, **kwargs) -> None:
+            """Only the status: a body that holds a moment of the clock or of the lock is no part of the comparison."""
+            record(name, (await client.request(method, url, **kwargs)).status_code, b"")
+
+        answers["owners:start"] = owners_digest(path)
+        told("owners:start")
+
+        # --- the catalog: the list, every card and the sources of every series, over HTTP and over the bus --------------
+        await ask(client, "owners:list", "GET", "/api/series")
+        await listed("owners:bus:list", "catalog.series.list", {}, "series")
+        for each in ids:
+            await ask(client, f"owners:card:{each}", "GET", f"/api/series/{each}")
+            await over_bus(f"owners:bus:get:{each}", "catalog.series.get", {"series_id": each})
+            await ask(client, f"owners:sources:{each}", "GET", f"/api/series/{each}/sources")
+            await listed(f"owners:bus:sources:{each}", "catalog.sources.list", {"series_id": each}, "sources")
+        await ask(client, "owners:card:unknown", "GET", "/api/series/999999")
+        await ask(client, "owners:sources:unknown", "GET", "/api/series/999999/sources")
+        await over_bus("owners:bus:get:unknown", "catalog.series.get", {"series_id": 999999})
+        await listed("owners:bus:sources:unknown", "catalog.sources.list", {"series_id": 999999}, "sources")
+        for each in [*profiles, 999999]:
+            await listed(f"owners:bus:by-profile:{each}", "catalog.sources.by_profile", {"profile_id": each}, "sources")
+        told("owners:read")
+
+        # --- a series of the instrument: made with two sources, refused in the ways a series is refused ------------------
+        draft = {"name": "Прибор", "name_en": "Proto", "site": "kinozal", "save_path": "/media/proto", "season": "1",
+                 "quality": "1080p", "auto_scan_enabled": False,
+                 "sources": [{"url": "https://proto.invalid/a", "source_type": "web_video", "parser_profile_id": profile,
+                              "players_off": ["kodik", "kodik", "vk"], "rows_per_line": " 10 "},
+                             {"url": "https://proto.invalid/b", "source_type": "torrent", "vibix_season": 2}]}
+        made = await ask(client, "owners:create", "POST", "/api/series", json=draft)
+        sid = made.json().get("series_id")
+        await settled("owners:create")
+        await ask(client, "owners:create:card", "GET", f"/api/series/{sid}")
+        await ask(client, "owners:create:list", "GET", "/api/series")
+        base_data = {"name": "Отказ", "name_en": "Refused", "site": "kinozal", "save_path": "/media/refused"}
+        page = {"url": "https://proto.invalid/r", "source_type": "web_video", "parser_profile_id": None}
+        for label, data in (("no-sources", base_data), ("empty-sources", {**base_data, "sources": []}),
+                            ("removed-field", {**base_data, "url": "x", "sources": [page]}),
+                            ("duplicate-source", {**base_data, "sources": [page, page]}),
+                            ("unknown-profile", {**base_data, "sources": [{**page, "parser_profile_id": 999999}]}),
+                            ("relative-path", {**base_data, "save_path": "media/x", "sources": [page]}),
+                            ("source-not-dict", {**base_data, "sources": ["x"]}),
+                            ("source-field-unknown", {**base_data, "sources": [{**page, "color": 3}]}),
+                            ("empty-url", {**base_data, "sources": [{**page, "url": " "}]}),
+                            ("rows-invalid", {**base_data, "sources": [{**page, "rows_per_line": "0"}]}),
+                            ("vibix-zero", {**base_data, "sources": [{**page, "vibix_season": 0}]}),
+                            ("type-unknown", {**base_data, "sources": [{**page, "source_type": "nope"}]})):
+            await over_bus(f"owners:create:refused:{label}", "catalog.series.create", {"data": data})
+        await ask(client, "owners:create:refused:http-no-sources", "POST", "/api/series", json=base_data)
+        await ask(client, "owners:create:refused:http-removed-field", "POST", "/api/series",
+                  json={**base_data, "url": "x", "sources": [page]})
+        await settled("owners:create:refused")
+        # What the owner normalises on the way in: the names that become paths, the path itself.
+        second = plain(await probe.request("catalog.series.create", {"data": {
+            **base_data, "name_en": "a:b/c?", "quality_override": "x|y", "save_path": "/media/a:b/ c",
+            "sources": [{**page, "url": "https://proto.invalid/s"}]}}))["id"]
+        await settled("owners:create:sanitized")
+        await over_bus("owners:create:sanitized:card", "catalog.series.get", {"series_id": second})
+
+        # --- the change of the series: every field the window changes, and what it may not change -------------------------
+        card_url = f"/api/series/{sid}"
+        for label, change in (("name", {"name": "Прибор 2"}), ("season", {"season": "2", "quality": "720p"}),
+                              ("overrides", {"quality_override": "a:b", "resolution_override": "720"}),
+                              ("empty", {}), ("same", {"name": "Прибор 2"}), ("bad-field", {"id": 5})):
+            await ask(client, f"owners:update:{label}", "POST", card_url, json=change)
+            await settled(f"owners:update:{label}")
+            await ask(client, f"owners:update:{label}:card", "GET", card_url)
+        for label, data in (("path", {"save_path": "/media/proto2"}), ("path-relative", {"save_path": "media/x"}),
+                            ("path-unsafe", {"save_path": "/media/p:q"}), ("sources", {"sources": []}),
+                            ("removed-url", {"url": "x"}), ("removed-profile", {"parser_profile_id": 1}),
+                            ("not-writable", {"last_scan_time": "x", "bogus": 1}), ("unsafe-name", {"name_en": "a:b?"})):
+            await over_bus(f"owners:update:bus:{label}", "catalog.series.update", {"series_id": sid, "fields": data})
+            await settled(f"owners:update:bus:{label}")
+        await over_bus("owners:update:bus:unknown", "catalog.series.update", {"series_id": 999999, "fields": {"name": "x"}})
+        await ask(client, "owners:update:http-unknown", "POST", "/api/series/999999", json={"name": "x"})
+        for label, method, route, body in (("auto-scan", "POST", "toggle_auto_scan", {"enabled": True}),
+                                           ("auto-scan-off", "POST", "toggle_auto_scan", {"enabled": False}),
+                                           ("auto-scan-missing", "POST", "toggle_auto_scan", {}),
+                                           ("ignored-seasons", "POST", "ignored-seasons", {"seasons": [1, 3]}),
+                                           ("ignored-seasons-missing", "POST", "ignored-seasons", {}),
+                                           ("ignored-episodes", "PUT", "ignored-episodes", {"episodes": {"1": [2, 4]}}),
+                                           ("ignored-episodes-missing", "PUT", "ignored-episodes", {})):
+            await ask(client, f"owners:flag:{label}", method, f"{card_url}/{route}", json=body)
+            await settled(f"owners:flag:{label}")
+        await ask(client, "owners:flag:card", "GET", card_url)
+        await over_bus("owners:save-path", "catalog.series.set_save_path", {"series_id": sid, "save_path": "/media/proto3"})
+        await over_bus("owners:save-path:relative", "catalog.series.set_save_path", {"series_id": sid, "save_path": "x/y"})
+        await settled("owners:save-path")
+        probe.send_command("catalog.series.touch_scan_time", {"series_id": sid})
+        await settled("owners:touch")
+        await ask(client, "owners:touch:card", "GET", card_url)
+
+        # --- viewing, the contributions to the status, a busy series, the windows gone ---------------------------------------
+        for label, state in (("viewing", ["viewing"]), ("closed", [])):
+            await ask(client, f"owners:state:{label}", "POST", f"{card_url}/state", json={"state": state})
+            await settled(f"owners:state:{label}")
+        probe.publish_event("series.status.contribution", {"series_id": sid, "source": "probe", "flags": {"downloading": True}})
+        await settled("owners:contribution")
+        probe.publish_event("series.status.contribution", {"series_id": sid, "source": "probe", "flags": {"bogus": True}})
+        await settled("owners:contribution:unknown-flag")
+        probe.publish_event("series.status.contribution", {"series_id": sid, "source": "probe", "flags": {"downloading": False}})
+        await settled("owners:contribution:cleared")
+        await ask(client, "owners:state:viewing-again", "POST", f"{card_url}/state", json={"state": ["viewing"]})
+        probe.publish_event("gateway.sse.clients", {"count": 1})
+        await settled("owners:clients:one")
+        probe.publish_event("gateway.sse.clients", {"count": 0})
+        await settled("owners:clients:none")
+        probe.publish_event("series.busy.contribution", {"series_id": sid, "source": "probe", "busy": True})
+        await settled("owners:busy")
+        await ask(client, "owners:busy:card", "GET", card_url)
+        await ask(client, "owners:busy:update", "POST", card_url, json={"name": "занят"})
+        await ask(client, "owners:busy:source-add", "POST", f"{card_url}/sources",
+                  json={"url": "https://proto.invalid/z", "source_type": "web_video"})
+        await settled("owners:busy:refused")
+        probe.publish_event("series.busy.contribution", {"series_id": sid, "source": "probe", "busy": False})
+        await settled("owners:busy:over")
+        probe.publish_event("series.busy.contribution", {"series_id": sid, "source": "probe", "busy": False})
+        await settled("owners:busy:over-again")
+
+        # --- the sources of the series: added, refused, changed, cleared ----------------------------------------------------
+        sources_url = f"{card_url}/sources"
+        first, last = [each["id"] for each in (await client.get(sources_url)).json()][:2]
+        added = await ask(client, "owners:source:add", "POST", sources_url, json={
+            "url": "https://proto.invalid/c", "source_type": "vk_video", "players_off": ["x"], "rows_per_line": "5-9"})
+        extra = added.json().get("id")
+        await settled("owners:source:add")
+        for label, series_of, body in (
+                ("duplicate", sid, {"url": "https://proto.invalid/c", "source_type": "web_video"}),
+                ("unknown-profile", sid, {"url": "https://proto.invalid/d", "source_type": "web_video", "parser_profile_id": 999999}),
+                ("empty-url", sid, {"url": " ", "source_type": "web_video"}),
+                ("rows-invalid", sid, {"url": "https://proto.invalid/d", "source_type": "web_video", "rows_per_line": "x"}),
+                ("unknown-series", 999999, {"url": "https://proto.invalid/d", "source_type": "web_video"}),
+                ("position", sid, {"url": "https://proto.invalid/e", "source_type": "web_video", "position": 0}),
+                ("unknown-field", sid, {"url": "https://proto.invalid/f", "source_type": "web_video", "color": 3})):
+            await ask(client, f"owners:source:add:{label}", "POST", f"/api/series/{series_of}/sources", json=body)
+            await settled(f"owners:source:add:{label}")
+        await ask(client, "owners:source:list", "GET", sources_url)
+        for label, source_id, series_of, body in (
+                ("url", extra, sid, {"url": "https://proto.invalid/c2"}), ("position", extra, sid, {"position": 0}),
+                ("players", extra, sid, {"players_off": ["a", "a", "b"]}), ("rows", extra, sid, {"rows_per_line": "-3"}),
+                ("profile", extra, sid, {"parser_profile_id": profile}),
+                ("profile-cleared", extra, sid, {"parser_profile_id": None}),
+                ("season", extra, sid, {"vibix_season": 3}), ("season-cleared", extra, sid, {"vibix_season": None}),
+                ("same", extra, sid, {"url": "https://proto.invalid/c2", "position": 0}), ("empty", extra, sid, {}),
+                ("duplicate-url", extra, sid, {"url": "https://proto.invalid/a"}), ("season-zero", extra, sid, {"vibix_season": 0}),
+                ("rows-invalid", extra, sid, {"rows_per_line": "0"}), ("unknown-profile", extra, sid, {"parser_profile_id": 999999}),
+                ("unknown-source", 999999, sid, {"url": "https://proto.invalid/g"}),
+                ("source-of-another-series", first, second, {"url": "https://proto.invalid/g"}),
+                ("unknown-field", extra, sid, {"url": "https://proto.invalid/g", "color": 2})):
+            await ask(client, f"owners:source:change:{label}", "PUT", f"/api/series/{series_of}/sources/{source_id}", json=body)
+            await settled(f"owners:source:change:{label}")
+            await ask(client, f"owners:source:change:{label}:list", "GET", sources_url)
+        for label, source_id, series_of in (("added", extra, sid), ("again", extra, sid), ("of-another-series", last, second),
+                                            ("one", last, sid), ("last", first, sid)):
+            await ask(client, f"owners:source:remove:{label}", "DELETE", f"/api/series/{series_of}/sources/{source_id}")
+            await settled(f"owners:source:remove:{label}")
+            await ask(client, f"owners:source:remove:{label}:list", "GET", f"/api/series/{series_of}/sources")
+
+        # --- the series gone: its sources with it, the owners of the rest told by the event and answering by theirs ----------
+        await ask(client, "owners:delete", "DELETE", card_url)
+        await settled("owners:delete")
+        await ask(client, "owners:delete:card", "GET", card_url)
+        await ask(client, "owners:delete:again", "DELETE", card_url)
+        await over_bus("owners:delete:bus", "catalog.series.delete", {"series_id": second})
+        await settled("owners:delete:bus")
+        await ask(client, "owners:delete:list", "GET", "/api/series")
+        await listed("owners:delete:bus:list", "catalog.series.list", {}, "series")
+
+        # --- the settings: by key and by prefix, written one and many, a secret, the saved paths -------------------------------
+        for key in ("voices.source_priority", "debug_enabled_catalog", "scanner_agent_enabled", "no.such.key"):
+            await over_bus(f"owners:settings:get:{key}", "settings.value.get", {"key": key})
+        for prefix in ("voices.", "debug_enabled_", "conform", "tmdb", "no.such.", ""):
+            await over_bus(f"owners:settings:prefix:{prefix}", "settings.values.by_prefix", {"prefix": prefix})
+        for label, topic, payload in (("set", "settings.value.set", {"key": "probe.one", "value": "1"}),
+                                      ("set-again", "settings.value.set", {"key": "probe.one", "value": "1"}),
+                                      ("set-empty", "settings.value.set", {"key": "probe.one", "value": ""}),
+                                      ("set-many", "settings.values.set_many",
+                                       {"values": {"probe.a": "x", "probe.b": 2, "probe.c": True}}),
+                                      ("set-many-empty", "settings.values.set_many", {"values": {}}),
+                                      ("secret", "settings.value.set", {"key": "tmdb_token", "value": "probe-token"}),
+                                      ("secret-many", "settings.values.set_many",
+                                       {"values": {"provider.token": "probe-provider", "probe.d": "1"}})):
+            await over_bus(f"owners:settings:{label}", topic, payload)
+            await settled(f"owners:settings:{label}")
+        for key in ("tmdb_token", "provider.token", "probe.one"):
+            await over_bus(f"owners:settings:after:{key}", "settings.value.get", {"key": key})
+        for prefix in ("probe.", "provider.", "tmdb"):
+            await over_bus(f"owners:settings:after-prefix:{prefix}", "settings.values.by_prefix", {"prefix": prefix})
+        flag = "/api/settings/conform_clear_finished"
+        await ask(client, "owners:settings:http:flag", "GET", flag)
+        await ask(client, "owners:settings:http:flag-set", "POST", flag, json={"enabled": True})
+        await settled("owners:settings:http:flag-set")
+        await ask(client, "owners:settings:http:flag-after", "GET", flag)
+        await ask(client, "owners:settings:http:flag-nothing", "POST", flag, json={})
+        debug = "/api/settings/debug_flags"
+        await ask(client, "owners:settings:http:debug", "GET", debug)
+        await ask(client, "owners:settings:http:debug-set", "POST", debug, json={"module": "catalog", "enabled": True})
+        await settled("owners:settings:http:debug-set")
+        await ask(client, "owners:settings:http:debug-after", "GET", debug)
+        await ask(client, "owners:settings:http:debug-no-module", "POST", debug, json={"enabled": True})
+        await ask(client, "owners:settings:http:tmdb-secret", "GET", "/api/auth/tmdb/secret")
+        paths = "/api/settings/saved_paths"
+        for label, method, body in (("list", "GET", None), ("add", "POST", {"path": "/media/a"}),
+                                    ("add-again", "POST", {"path": "/media/a"}), ("add-unsafe", "POST", {"path": "/media/b:c/ d?"}),
+                                    ("add-empty", "POST", {"path": ""}), ("add-nothing", "POST", {}), ("list-after", "GET", None),
+                                    ("remove-unknown", "DELETE", {"id": 999999})):
+            await ask(client, f"owners:paths:{label}", method, paths, **({} if body is None else {"json": body}))
+            await settled(f"owners:paths:{label}")
+        for number, each in enumerate((await client.get(paths)).json()["paths"]):
+            await ask(client, f"owners:paths:remove:{number}", "DELETE", paths, json={"id": each["id"]})
+            await settled(f"owners:paths:remove:{number}")
+        await over_bus("owners:paths:bus:add", "settings.paths.add", {"path": "/media/c"})
+        await over_bus("owners:paths:bus:list", "settings.paths.list", {})
+        await over_bus("owners:paths:bus:remove", "settings.paths.remove", {"id": "1"})
+        await settled("owners:paths:bus")
+
+        # --- auth: the admin read, a known password set, the login right and wrong, the session, the lock ----------------------
+        await over_bus("owners:auth:exists", "auth.exists", {})
+        await over_bus("owners:auth:set:empty", "auth.password.set", {"username": "", "password": "x"})
+        await over_bus("owners:auth:set:no-password", "auth.password.set", {"username": "proto"})
+        answers["owners:auth:refused:owners"] = owners_digest(path)
+        await over_bus("owners:auth:set", "auth.password.set", {"username": "proto", "password": "proto-password-1"})
+        answers["owners:auth:set:owners"] = owners_digest(path)
+        await over_bus("owners:auth:exists:after", "auth.exists", {})
+        for label, payload in (("right", {"username": "proto", "password": "proto-password-1"}),
+                               ("padded", {"username": " proto ", "password": "proto-password-1"}),
+                               ("wrong", {"username": "proto", "password": "nope"}),
+                               ("unknown", {"username": "ghost", "password": "proto-password-1"}), ("empty", {})):
+            await over_bus(f"owners:auth:login:{label}", "auth.login", payload)
+        answers["owners:auth:login:owners"] = owners_digest(path)
+        await ask(client, "owners:auth:me:before", "GET", "/api/me")
+        await ask(client, "owners:auth:status:before", "GET", "/api/auth/status")
+        await ask(client, "owners:auth:http:wrong", "POST", "/api/login", json={"username": "proto", "password": "nope"})
+        await ask(client, "owners:auth:http:unknown", "POST", "/api/login",
+                  json={"username": "ghost", "password": "proto-password-1"})
+        await ask(client, "owners:auth:password:no-session", "POST", "/api/auth/password", json={"new": "proto-password-2"})
+        await ask(client, "owners:auth:http:right", "POST", "/api/login",
+                  json={"username": "proto", "password": "proto-password-1"})
+        await ask(client, "owners:auth:me", "GET", "/api/me")
+        await ask(client, "owners:auth:status", "GET", "/api/auth/status")
+        await ask(client, "owners:auth:setup", "POST", "/api/setup", json={"username": "other", "password": "other-password-1"})
+        await ask(client, "owners:auth:password:short", "POST", "/api/auth/password", json={"new": "short"})
+        await ask(client, "owners:auth:password", "POST", "/api/auth/password", json={"new": "proto-password-2"})
+        answers["owners:auth:password:owners"] = owners_digest(path)
+        await ask(client, "owners:auth:logout", "POST", "/api/logout")
+        await ask(client, "owners:auth:me:after", "GET", "/api/me")
+        await ask(client, "owners:auth:http:old-password", "POST", "/api/login",
+                  json={"username": "proto", "password": "proto-password-1"})
+        await ask(client, "owners:auth:http:new-password", "POST", "/api/login",
+                  json={"username": "proto", "password": "proto-password-2"})
+        await ask(client, "owners:auth:status:again", "GET", "/api/auth/status")
+        # A hash made with weaker parameters than the service's own: a right password renews it, a wrong one does not.
+        weak = sqlite3.connect(path)
+        weak.execute("UPDATE admin_user SET password_hash = ? WHERE id = 1",
+                     (PasswordHasher(time_cost=1, memory_cost=8, parallelism=1).hash("proto-password-3"),))
+        weak.commit()
+        weak.close()
+        answers["owners:auth:weak:owners"] = owners_digest(path)
+        await over_bus("owners:auth:login:weak-wrong", "auth.login", {"username": "proto", "password": "nope"})
+        answers["owners:auth:weak-wrong:owners"] = owners_digest(path)
+        await over_bus("owners:auth:login:weak", "auth.login", {"username": "proto", "password": "proto-password-3"})
+        answers["owners:auth:rehashed:owners"] = owners_digest(path)
+        await over_bus("owners:auth:login:rehashed", "auth.login", {"username": "proto", "password": "proto-password-3"})
+        # The lock: five wrong passwords from one address, then the right one is refused too.
+        for number in range(5):
+            await status_of(f"owners:auth:lock:wrong:{number}", "POST", "/api/login",
+                            json={"username": "proto", "password": f"nope{number}"})
+        await status_of("owners:auth:lock:right", "POST", "/api/login",
+                        json={"username": "proto", "password": "proto-password-3"})
+        told("owners:auth")
+
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app), base_url="http://test",
                                  timeout=120) as client:
         for sid in series:
@@ -452,7 +806,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                                    (sid,)).fetchall()
             conn.close()
             answers[f"{sid}:tables:start"] = tables_digest(path, sid)
-            cards[sid] = await probe.request("catalog.series.get", {"series_id": sid})
+            cards[sid] = plain(await probe.request("catalog.series.get", {"series_id": sid}))
             await plan_window(client, f"{sid}:start", sid)
             await ask(client, f"{sid}:plan:unknown-series", "GET", "/api/series/999999/plan")
             await ask(client, f"{sid}:output:unknown-series", "GET", "/api/series/999999/output")
@@ -588,6 +942,8 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
             await rules_window(client)
             await unpack_window(client)
             await voices_window(client)
+        if owners:
+            await owners_window(client)
     untap()
     await runner.stop()
     with open(out, "w", encoding="utf-8") as sink:
@@ -669,6 +1025,8 @@ if __name__ == "__main__":
     # The windows of rules, unpack and voices ask what the series before them left (profiles, lines, cards): put them in the run of
     # the series that has what they need; a run is kept under 180 s.
     parser.add_argument("--windows", action="store_true")
+    # The windows of the owners of the data (catalog, settings, auth) need no series: `collect --owners` alone is a run of its own.
+    parser.add_argument("--owners", action="store_true")
     args = parser.parse_intermixed_args()
     if args.what == "selftest":
         sys.exit(selftest())
@@ -682,4 +1040,4 @@ if __name__ == "__main__":
         os.environ[name] = "http://127.0.0.1:9"
     os.environ.pop("NO_PROXY", None)
     os.environ.pop("no_proxy", None)
-    asyncio.run(collect(root, args.db, args.out, [int(each) for each in args.rest], args.windows))
+    asyncio.run(collect(root, args.db, args.out, [int(each) for each in args.rest], args.windows, args.owners))
