@@ -22,7 +22,7 @@ from core.db import Database
 from modules.rules import RulesModule
 from modules.settings import SettingsModule
 from modules.unpack import UnpackModule
-from modules.unpack.layout import Inputs, compose, item_of
+from modules.unpack.layout import Inputs, compose, item_of, lines
 from schema_db import migrated
 
 URL = "https://kinozal.tv/details.php?id=7"
@@ -68,9 +68,13 @@ def test_a_subtitles_track_with_no_events_is_no_row_and_the_others_keep_their_nu
     held["streams"][1]["events"], held["streams"][2]["events"] = 0, 641  # the third was never counted: it is kept
     inputs = Inputs(releases=[r], folders=[], manual={}, streams={"page": {"Show/E01.mkv": held}},
                     results={"files": numbered({"Show/E01.mkv": (1, 1)})})
-    _view, rows = compose(inputs)
+    view, rows = compose(inputs)
     shown = [(row.voice.name, row.link.rsplit("#", 1)[1]) for row in rows if row.track == RowTrack.SUBTITLES]
     assert shown == [("Полные", "1"), ("Не считана", "2")]
+    # The editor does not lay the empty track out either: not in the tab «Суб. конт.», not among the streams of the file.
+    assert [e["stream"]["title"] for e in view["tabs"]["subtitle_streams"]] == ["Полные", "Не считана"]
+    assert [s["title"] for s in view["containers"][0]["streams"] if s["kind"] == "subtitle"] == ["Полные", "Не считана"]
+    assert sorted(lines(inputs)["subtitle_streams"]) == [item_of("page", "Show/E01.mkv", 2), item_of("page", "Show/E01.mkv", 3)]
 
 
 ASS_HEAD = ("[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\n"

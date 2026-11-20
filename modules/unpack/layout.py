@@ -94,9 +94,10 @@ def lines(inputs: Inputs) -> dict[str, dict[str, str]]:
             if kind == FileKind.AUDIO:
                 out[EditorTab.VOICES][item] = track_file_line(f.path, word)
             elif kind == FileKind.SUBTITLES:
-                out[EditorTab.SUBTITLES][item] = track_file_line(f.path, word)
+                if not _has_no_events(_probed(inputs, release.release, f.path)):
+                    out[EditorTab.SUBTITLES][item] = track_file_line(f.path, word)
             elif kind == FileKind.VIDEO:
-                for s in _probed(inputs, release.release, f.path):
+                for s in _with_events(_probed(inputs, release.release, f.path)):
                     if s["kind"] in TRACK_KINDS:
                         out[stream_tab(s["kind"])][item_of(release.release, f.path, s["index"])] = stream_line(
                             s["kind"], s["index"], s["language"], s["title"], s["codec"])
@@ -281,9 +282,9 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                                                         # the line of the stream as the rules of «Озв. конт.» and «Суб. конт.» read it
                                                         "line": stream_line(s["kind"], s["index"], s["language"], s["title"],
                                                                             s["codec"])}
-                                                       for s in streams
+                                                       for s in _with_events(streams)
                                                        if s["kind"] in ("video", *TRACK_KINDS) and not s.get("picture")]})
-                for s in streams:
+                for s in _with_events(streams):
                     if s["kind"] not in TRACK_KINDS:
                         continue
                     item = item_of(release.release, video, s["index"])
@@ -291,7 +292,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                     entry = track(stream_tab(s["kind"]), item, stream_line(s["kind"], s["index"], s["language"], s["title"],
                                                                        s["codec"]), kind, s, video, where)
                     # A red track (no folder or no language yet) is no row: only what the editor placed goes on.
-                    if release.state in SHOWN and not entry["waiting"] and kind in ROW_KINDS and not _no_events(s):
+                    if release.state in SHOWN and not entry["waiting"] and kind in ROW_KINDS:
                         rows.append(_row(release, item, track_link(release.release, video, _nth(streams, s)), video, where,
                                          kind, entry, s, height, state, why))
             if len(paths) != 1:
@@ -305,14 +306,16 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                     continue
                 tab = EditorTab.VOICES if kind == FileKind.AUDIO else EditorTab.SUBTITLES
                 track_kind = "audio" if kind == FileKind.AUDIO else "subtitles"
-                for s in _probed(inputs, release.release, f.path) or [{"index": 0, "kind": "", "language": "",
-                                                                         "title": "", "codec": "", "forced": False}]:
+                probed = _probed(inputs, release.release, f.path)
+                if _has_no_events(probed):
+                    continue
+                for s in probed or [{"index": 0, "kind": "", "language": "", "title": "", "codec": "", "forced": False}]:
                     item = item_of(release.release, f.path)
                     entry = track(tab, item, track_file_line(f.path, where.fields), track_kind, s, f.path, where)
                     if release.state in SHOWN and not entry["waiting"] and s.get("kind") in TRACK_KINDS \
-                            and track_kind in ROW_KINDS and not _no_events(s):
+                            and track_kind in ROW_KINDS:
                         rows.append(_row(release, item_of(release.release, f.path, s["index"]),
-                                         track_link(release.release, video, _nth(_probed(inputs, release.release, f.path), s),
+                                         track_link(release.release, video, _nth(probed, s),
                                                     file=f.path), video, where,
                                          track_kind, entry, s, height, state, why))
         # The tabs are a chain: what «Файлы» placed goes on to «Озвучки» and «Субтитры», a file it left red goes no further.
@@ -320,7 +323,8 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
         for f in release.files:
             kind, item = kind_of(f.path), item_of(release.release, f.path)
             where = places.get(item)
-            if kind not in (FileKind.AUDIO, FileKind.SUBTITLES) or where is None:
+            if kind not in (FileKind.AUDIO, FileKind.SUBTITLES) or where is None \
+                    or _has_no_events(_probed(inputs, release.release, f.path)):
                 continue
             tab = EditorTab.VOICES if kind == FileKind.AUDIO else EditorTab.SUBTITLES
             if any(entry["item"] == item for entry in view["tabs"][tab]):
@@ -353,6 +357,17 @@ def _no_events(stream: dict) -> bool:
     """A subtitles track the read of the file found to hold no events (only a header): it has nothing to show, and a
     container cannot be built with it. A track not counted (`events` absent or None) is not this."""
     return stream.get("kind") == "subtitle" and stream.get("events") == 0
+
+
+def _with_events(streams: list[dict]) -> list[dict]:
+    """The streams of a file without its subtitles tracks that hold no events: what the editor lays out, the rules read
+    and the table shows. A number among the tracks of a kind (`_nth`) is still told by the whole list."""
+    return [each for each in streams if not _no_events(each)]
+
+
+def _has_no_events(streams: list[dict]) -> bool:
+    """A file whose streams are all subtitles tracks with no events (an external subtitles file with only a header)."""
+    return bool(streams) and all(_no_events(each) for each in streams)
 
 
 def _nth(streams: list[dict], stream: dict) -> int:
