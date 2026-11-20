@@ -60,8 +60,9 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    the search of the titles of the provider of the socket (contracts/provider_socket.md), as the
                                    provider gives it, or the reason it gave none (`provider_unavailable` when it cannot be
                                    reached). A title picked is a source by the address the provider gives
-                                   (`title://<site>/<id>`). With the provider not up (none configured, not heard yet, dropped,
-                                   another protocol) the search is refused: NotAllowed `provider_not_connected`
+                                   (`title://<site>/<id>`). With the provider not up (none configured, dropped,
+                                   another protocol) the search is refused: NotAllowed `provider_not_connected`; before the first
+                                   look at the provider (its first hello, or its first failure) the request waits for it
   sources.provider.get {} → ProviderView: the provider of external sources as the tab of the extensions shows it — its address,
                                    whether a token is set (never the token), the state of the socket and why it is not up, what its
                                    last manifest says (id, version, protocol, revision), its sites with the sources of the
@@ -76,7 +77,9 @@ Tables of site pages (the one way to read a site page; sites are registered in `
   sources.pages.check {urls} → {blocked: [{url, reason}]}: the pages among `urls` that cannot be read now because the
                                    provider that reads them is not up (`provider_not_connected`, `provider_incompatible`).
                                    A page of the provider's world is one a site of its manifest reads, or an address that
-                                   is no web address and no site reads (modules/sources/provider/gate.py). Scan asks it
+                                   is no web address and no site reads (modules/sources/provider/gate.py); asked before the first
+                                   look at the provider, the module waits for it (the same for table.get and table.read of
+                                   such a page, and the stream of a link of the provider). Scan asks it
                                    before it opens a sync of a series, whatever else the series is made of
   sources.terms.get {} → {sites: [{site, app, sources, minutes}]}: every site some source of a series reads (not a
                                    tracker: its table is the release `torrents` keeps), whether it is a site of the provider, how
@@ -162,7 +165,7 @@ from . import anilibria, delivery, parsers
 from .browser_pool import BrowserPool, chromium
 from .delivery import Delivery
 from .parsers import SourceParseError
-from .provider import Connector, ProviderClient, ProviderHost, is_web_address, not_connected
+from .provider import Connector, ProviderClient, ProviderHost, belongs_to_provider, is_web_address, not_connected
 from .provider import block as provider_block
 from .releases import page_release
 from .repository import SourcesRepository
@@ -566,12 +569,16 @@ class SourcesModule(BaseModule):
 
     async def on_table_get(self, env: Envelope) -> dict:
         """payload: TableGetRequest; reply: TableGetReply. Never waits for a read: the end of it comes as an event."""
-        reply = await self.tables.get(TableGetRequest.model_validate(env.payload))
+        request = TableGetRequest.model_validate(env.payload)
+        await self._provider_known(request.url)
+        reply = await self.tables.get(request)
         # The table of a page is thousands of rows: it is made into the message off the loop of the service.
         return await compute.run(reply.model_dump, mode="json")
 
     async def on_table_read(self, env: Envelope) -> None:
-        await self.tables.read(TableGetRequest.model_validate(env.payload))
+        request = TableGetRequest.model_validate(env.payload)
+        await self._provider_known(request.url)
+        await self.tables.read(request)
 
     async def on_table_cancel(self, env: Envelope) -> dict:
         """The read of a page stopped by the user (a sync stopped): it ends failed, the last table serves."""
@@ -626,6 +633,7 @@ class SourcesModule(BaseModule):
         """payload: TitleSearchRequest; reply: TitleSearchReply — a page of the search of the titles of the provider of the socket,
         as the provider gives it, or the reason it gave none. No provider, no search: the user is told."""
         request = TitleSearchRequest.model_validate(env.payload)
+        await self.provider.known()
         if (why := not_connected(self.connector)) is not None:
             raise NotAllowed(why)  # the search is the provider's: with none up there is nothing to search, and the user is told
         return (await self.connector.search(request)).model_dump(mode="json")
@@ -640,14 +648,21 @@ class SourcesModule(BaseModule):
     async def on_provider_set(self, env: Envelope) -> dict:
         return (await self.provider.save(env.payload)).model_dump(mode="json")
 
+    async def _provider_known(self, *urls: str) -> None:
+        """A page of the provider's world is answered once the provider has been looked at: until its first hello or its first
+        failure it is not down, it is not known (provider/gate.py). Any other page does not wait."""
+        if any(belongs_to_provider(self.sites, url) for url in urls):
+            await self.provider.known()
+
     def _provider_block(self, url: str) -> str | None:
         """The reason a page cannot be read now because the provider that reads it is not up; None for any other page."""
         return provider_block(self.connector, self.sites, url)
 
     async def on_pages_check(self, env: Envelope) -> dict:
         """payload: {urls}; reply: {blocked: [{url, reason}]} — the pages among them that cannot be read now for want of the
-        provider that reads them (none configured, not heard yet, dropped, another protocol). A synchronization asks before
+        provider that reads them (none configured, dropped, another protocol). A synchronization asks before
         it opens: a series with such a page is not synchronized, whatever its other pages are."""
+        await self._provider_known(*(env.payload.get("urls") or []))
         blocked = [{"url": url, "reason": why} for url in env.payload.get("urls") or []
                    if (why := self._provider_block(url)) is not None]
         return {"blocked": blocked}
@@ -681,6 +696,7 @@ class SourcesModule(BaseModule):
         if not is_web_address(url):
             # A link of the provider's world no player owns: no generic downloader can open it. With the provider not up nobody
             # was asked (`unasked`: asked again later, never the source's failure); with it up the link is nobody's (`final`).
+            await self.provider.known()
             if (why := not_connected(self.connector)) is not None:
                 return {"handled": True, "error": why, "transient": True, "unasked": True}
             return {"handled": True, "error": reason("not_a_link_of_the_provider", url=url), "transient": False}

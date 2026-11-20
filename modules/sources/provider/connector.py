@@ -48,6 +48,9 @@ class Connector:
         self.manifest: Manifest | None = None
         self.state = "connecting"
         self.why = ""  # the reason of the state, as the event gives it (`incompatible` names the protocol it was told)
+        # Set when the first look at the provider is over: its first hello, or its first failure. Until then the state is
+        # `connecting`: the provider is not down, it is not known.
+        self.looked = asyncio.Event()
         # What this connector put into the registries, so that a manifest that changes takes out exactly that.
         self._sites_ours: list[str] = []
         self._players_ours: list[str] = []
@@ -76,6 +79,7 @@ class Connector:
             return
         changed = state != self.state
         self.state, self.why = state, why
+        self.looked.set()
         if changed:
             self._log.info("поставщик %s: %s%s", self.client.url, state, f" ({why})" if why else "")
             self._publish(STATE_TOPIC, ProviderState(provider=self.manifest.provider.id if self.manifest else self.client.url,
@@ -157,10 +161,12 @@ class Connector:
             pause = min(pause * 2, self._reconnect[1])
 
     async def close(self) -> None:
+        self.looked.set()  # nobody waits for a look that will not be made
         await self.client.close()
 
     def release(self) -> None:
         """Take this provider's sites and players out of the registries: another provider (or none) takes the place."""
+        self.looked.set()
         for name in self._sites_ours:
             self._sites.unregister(name)
         for name in self._players_ours:

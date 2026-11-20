@@ -37,6 +37,8 @@ class ProviderHost:
         self._reconnect = reconnect
         self._log = get_logger("sources")
         self._lock = asyncio.Lock()
+        # Set when the start has settled which provider the module talks to, or that it talks to none (`known`).
+        self._decided = asyncio.Event()
         self._feed: asyncio.Task | None = None
         self._seq = 0
         self.connector: Connector | None = self._connector_of(default) if default is not None else None
@@ -66,9 +68,23 @@ class ProviderHost:
         except Exception:  # noqa: BLE001 - a setting that cannot be read leaves what the environment named
             return None
 
+    async def known(self) -> None:
+        """The provider is looked at before anything is said of it: the module reads which provider it talks to at the start, and
+        the feed makes its first attempt after that, so until the attempt ends the provider is not down, it is not known. Whoever
+        asks about a page of the provider's world waits for the end of the attempt (its fuse is that of its topic)."""
+        await self._decided.wait()
+        while (connector := self.connector) is not None and not connector.looked.is_set():
+            await connector.looked.wait()  # a provider put in its place is looked at in its turn
+
     async def start(self) -> None:
         """The provider the owner saved, else the environment's. The sites of its saved manifest first: a provider that is down
         at the start must not take the pages of its tables out of the hands of its sites."""
+        try:
+            await self._start()
+        finally:
+            self._decided.set()
+
+    async def _start(self) -> None:
         url = await self._stored(settings.URL_KEY)
         if url is not None:
             token = await self._stored(settings.TOKEN_KEY) or ""
@@ -84,6 +100,7 @@ class ProviderHost:
 
     async def stop(self) -> None:
         """The feed stops before its client closes: a loop that wakes to a closed client has nothing to read."""
+        self._decided.set()  # nobody waits for a look that will not be made
         await self._stop_feed()
         if self.connector is not None:
             await self.connector.close()

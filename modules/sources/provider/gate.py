@@ -2,10 +2,12 @@
 
 A page of the provider's world is one its sites read (the sites of the manifest, kept while the provider is down) or one whose
 address is no web address at all (`title://…`: no site of the tracker reads it, and no generic reader could): such a page is read
-and downloaded by the provider alone. While the provider is not up — none is configured, the first hello is not in yet, the feed
-dropped, its protocol is not ours — nothing of that world is begun: a read says `provider_not_connected`, a sync of a series
-that has such a page is not opened, a download is not handed to a generic downloader. A page of any other address is the
-business of the sites of the tracker, whatever the provider does."""
+and downloaded by the provider alone. While the provider is not up — none is configured, the feed dropped, its protocol is not
+ours — nothing of that world is begun: a read says `provider_not_connected`, a sync of a series that has such a page is not
+opened, a download is not handed to a generic downloader. Before the first look at the provider (its first hello, or its first
+failure) it is not down, it is not known: whoever asks about such a page waits for the look (`ProviderHost.known`) and is answered
+by what it found, so `connecting` is never an answer. A page of any other address is the business of the sites of the tracker,
+whatever the provider does."""
 from __future__ import annotations
 
 from urllib.parse import urlsplit
