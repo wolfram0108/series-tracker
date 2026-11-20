@@ -14,7 +14,7 @@ from settle import path_free
 async def test_the_duration_query_of_a_stalled_downloader_ends_with_unknown_and_stops_it(tmp_path):
     from modules.downloads import ytdlp
     spy = Spy()
-    with patch("core.proc.asyncio.create_subprocess_exec", spy), \
+    with patch("core.proc.subprocess.Popen", spy), \
             patch.object(ytdlp, "program", return_value=stalled_downloader(tmp_path)), \
             patch.object(ytdlp, "PROBE_TIMEOUT_S", 0.3):
         assert await asyncio.wait_for(ytdlp._probe_duration("https://example.test/v"), 10) == 0.0
@@ -22,8 +22,7 @@ async def test_the_duration_query_of_a_stalled_downloader_ends_with_unknown_and_
 
 
 # --- the end of a program is known whoever reaps it --------------------------------------------------------------------
-# The service runs on uvloop: its loop learns of the end of a child only from its own wait, so a child reaped by another
-# wait is never reported, and `proc.wait()` does not end. `exited` takes the end from the kernel as well.
+# A child reaped by another wait (on uvloop, the loop of the service): its end is the kernel's word through its pidfd.
 
 def test_a_hold_attached_to_a_program_ends_with_the_program_though_the_loop_never_reports_it(tmp_path):
     uvloop = pytest.importorskip("uvloop")

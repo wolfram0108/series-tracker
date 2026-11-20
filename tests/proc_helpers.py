@@ -1,6 +1,6 @@
 """Helpers of tests that start and stop real programs."""
-import asyncio
 import os
+import subprocess
 
 
 def alive(pid: int) -> bool:
@@ -12,17 +12,15 @@ def alive(pid: int) -> bool:
 
 
 class Spy:
-    """Remembers the processes started through asyncio."""
+    """Remembers the processes started (core.proc starts them through subprocess.Popen in its pool)."""
 
     def __init__(self):
         self.started = []
-        self.spawned = asyncio.Event()  # a program is running: the test that waits for it does not guess a pause
-        self._real = asyncio.create_subprocess_exec
+        self._real = subprocess.Popen
 
-    async def __call__(self, *args, **kwargs):
-        process = await self._real(*args, **kwargs)
+    def __call__(self, *args, **kwargs):
+        process = self._real(*args, **kwargs)
         self.started.append(process)
-        self.spawned.set()
         return process
 
 

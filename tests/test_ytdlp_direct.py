@@ -109,7 +109,7 @@ async def test_a_stalled_ffmpeg_is_stopped_and_counted_as_a_transient_failure(fa
 async def test_a_silent_downloader_is_stopped_and_counted_as_a_transient_failure(tmp_path, monkeypatch):
     spy = Spy()
     monkeypatch.setattr(failure, "SILENCE_S", 0.3)
-    with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy), \
+    with patch("core.proc.subprocess.Popen", spy), \
             patch.object(ytdlp, "program", return_value=stalled_downloader(tmp_path)):
         result = await asyncio.wait_for(
             ytdlp._phase_download("https://vk.test/v", str(tmp_path / "e.mp4"), noop, 1, ytdlp.HLS_FORMAT), 10)
@@ -122,7 +122,7 @@ async def test_a_silent_remux_is_stopped_and_leaves_no_partial_file(tmp_path, mo
     spy = Spy()
     monkeypatch.setattr(failure, "SILENCE_S", 0.3)
     target = str(tmp_path / "e.mp4")
-    with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy), \
+    with patch("core.proc.subprocess.Popen", spy), \
             patch.object(ytdlp, "program", return_value=stalled_downloader(tmp_path, "ffmpeg")):
         ok, error = await asyncio.wait_for(ytdlp._phase_remux(str(tmp_path / "raw.ts"), target, noop, 10.0), 10)
     assert not ok and code_of(error) == "program_silent" and kind_of(error) is Failed.BROKEN
