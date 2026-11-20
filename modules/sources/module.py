@@ -153,9 +153,9 @@ from core.contracts.release_table import site_of
 from core.contracts.voices import PLAYERS_OFF_KEY
 from core.contracts import (NotAllowed, ParsedDomains, PlayerFacts, PlayerPlace,
                             PlayersListReply, PlayersListRequest, SiteResolveRequest,
-                            SeriesDeleted, SeriesPurged, SourceType, SourcesSettingsView, TableGetRequest, TitleSearchRequest,
+                            SeriesDeleted, SeriesPurged, SettingValue, SourceType, SourcesSettingsView, TableGetRequest, TitleSearchRequest,
                             TrackerMirrors)
-from core.topics import CATALOG_SERIES_LIST, SERIES_PURGED, TABLE_READ_S
+from core.topics import CATALOG_SERIES_LIST, SERIES_PURGED, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, TABLE_READ_S
 from core.db import Database
 from core.envelope import Envelope
 from core.http_limits import bounded_client
@@ -325,12 +325,12 @@ class SourcesModule(BaseModule):
     async def on_start(self) -> None:
         self._http = bounded_client(timeout=20.0, follow_redirects=True)
         try:
-            stored = (await self.request("settings.value.get", {"key": TERMS_KEY})).get("value")
+            stored = (await self.reply_of(SETTINGS_VALUE_GET, {"key": TERMS_KEY})).value
         except Exception:  # noqa: BLE001 - a setting that cannot be read leaves every site at the default term
             stored = None
         self.term.minutes = terms_of(stored)
         try:
-            players_off = (await self.request("settings.value.get", {"key": PLAYERS_OFF_KEY})).get("value")
+            players_off = (await self.reply_of(SETTINGS_VALUE_GET, {"key": PLAYERS_OFF_KEY})).value
         except Exception:  # noqa: BLE001 - a setting that cannot be read leaves every player asked, as the term stays at its default
             players_off = None
         self._set_players_off(players_off)
@@ -380,19 +380,20 @@ class SourcesModule(BaseModule):
         site, minutes = str(env.payload.get("site") or ""), minutes_of(env.payload.get("minutes"))
         if not site or minutes is None:
             return {"ok": False, "reason": reason("sources_term_invalid", value=str(env.payload.get("minutes")))}
-        await self.request("settings.value.set", {"key": TERMS_KEY,
-                                                   "value": json.dumps({**self.term.minutes, site: minutes}, sort_keys=True)})
+        await self.request(SETTINGS_VALUE_SET, {"key": TERMS_KEY,
+                                                "value": json.dumps({**self.term.minutes, site: minutes}, sort_keys=True)})
         return {"ok": True, "minutes": minutes}
 
     async def on_settings_changed(self, env: Envelope) -> None:
-        if env.payload.get("key") == TERMS_KEY:
-            before, self.term.minutes = self.term.minutes, terms_of(env.payload.get("value"))
+        setting = SettingValue.model_validate(env.payload)
+        if setting.key == TERMS_KEY:
+            before, self.term.minutes = self.term.minutes, terms_of(setting.value)
             for site in {site for site in before.keys() | self.term.minutes.keys()
                          if before.get(site, DEFAULT_MINUTES) != self.term.minutes.get(site, DEFAULT_MINUTES)}:
                 for fresh in await self.tables.fresh_of_site(site):
                     self.publish_event(FRESH_TOPIC, fresh.model_dump(mode="json"))
-        elif env.payload.get("key") == PLAYERS_OFF_KEY:
-            self._set_players_off(env.payload.get("value"))
+        elif setting.key == PLAYERS_OFF_KEY:
+            self._set_players_off(setting.value)
 
     def _set_players_off(self, value) -> None:
         """The players a setting names: a JSON list of names; anything else leaves every player asked."""

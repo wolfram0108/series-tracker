@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable
 from core.module import BusRequestError
 from core.contracts import ProviderSaved, ProviderSettingsDraft, ProviderSite, ProviderView
 from core.logging import get_logger
-from core.topics import CATALOG_SERIES_LIST
+from core.topics import CATALOG_SERIES_LIST, SETTINGS_VALUE_GET, SETTINGS_VALUES_SET_MANY
 
 from ..players.registry import PlayerRegistry
 from ..repository import SourcesRepository
@@ -67,7 +67,7 @@ class ProviderHost:
 
     async def _stored(self, key: str) -> str | None:
         try:
-            return (await self._request("settings.value.get", {"key": key})).get("value")
+            return (await self._reply(SETTINGS_VALUE_GET, {"key": key})).value
         except Exception:  # noqa: BLE001 - a setting that cannot be read leaves what the environment named
             return None
 
@@ -147,7 +147,7 @@ class ProviderHost:
             if draft.token is None:
                 draft = ProviderSettingsDraft(url=draft.url, token=(
                     self.connector.client.token if self.connector is not None else await self._stored(settings.TOKEN_KEY) or ""))
-            await self._request("settings.values.set_many", {"values": settings.stored(draft)})
+            await self._request(SETTINGS_VALUES_SET_MANY, {"values": settings.stored(draft)})
             await self.use(draft.url, draft.token or "")
         return ProviderSaved(saved=not problems, problems=problems, provider=await self.view())
 

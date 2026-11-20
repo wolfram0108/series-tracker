@@ -120,9 +120,10 @@ from datetime import datetime, timezone
 from core import storage
 from core.module import BaseModule, BusRequestError
 from core.source_types import torrent_profile_id
-from core.topics import CATALOG_SERIES_GET, CATALOG_SERIES_LIST, SERIES_PURGED, SERIES_STATUS_CONTRIBUTION
-from core.contracts import (RUN_CHANGED, RunChanged, SeriesCard, SeriesDeleted, SeriesPurged, SeriesUpdated, SourceType,
-                            StatusContribution)
+from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, SERIES_PURGED, SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET,
+                         SETTINGS_VALUE_SET)
+from core.contracts import (RUN_CHANGED, RunChanged, SeriesCard, SeriesDeleted, SeriesPurged, SeriesUpdated, SettingValue,
+                            SourceType, StatusContribution)
 from core.contracts.torrent import RELEASE_CHANGED_TOPIC, STAGING_DIR_KEY
 from core.db import Database
 from core.envelope import Envelope
@@ -1381,7 +1382,7 @@ class TorrentsModule(BaseModule):
 
     async def _start_releases(self) -> None:
         try:
-            stored = (await self.request("settings.value.get", {"key": STAGING_DIR_KEY})).get("value")
+            stored = (await self.reply_of(SETTINGS_VALUE_GET, {"key": STAGING_DIR_KEY})).value
         except Exception:  # noqa: BLE001 - without the setting no download begins; the moving releases are still followed
             self.log.exception("the staging folder of the torrent sources was not read")
             stored = None
@@ -1393,7 +1394,7 @@ class TorrentsModule(BaseModule):
         except Exception:  # noqa: BLE001 - an update that begins in a run is the worse loss: none begins until the next run news
             self.log.exception("the open syncs were not read; the updates wait for the news of a run")
         try:
-            self.releases.checks = parse((await self.request("settings.value.get", {"key": SCHEDULE_KEY})).get("value")).checks()
+            self.releases.checks = parse((await self.reply_of(SETTINGS_VALUE_GET, {"key": SCHEDULE_KEY})).value).checks()
         except Exception:  # noqa: BLE001 - without the schedule no page is checked until it changes
             self.log.exception("the schedule of the checks of the releases was not read")
         self.spawn(self._release_loop(), lasting=True)
@@ -1406,7 +1407,7 @@ class TorrentsModule(BaseModule):
     async def _scheduled_pages(self) -> set[str]:
         """The pages the schedule checks: of the series in the automatic mode, while the automatic sync is on."""
         try:
-            if (await self.request("settings.value.get", {"key": "scanner_agent_enabled"})).get("value") != "true":
+            if (await self.reply_of(SETTINGS_VALUE_GET, {"key": "scanner_agent_enabled"})).value != "true":
                 return set()
             series = (await self.reply_of(CATALOG_SERIES_LIST, {})).series
             return {await self._canonical(source.url) for one in series if one.auto_scan_enabled for source in one.sources}
@@ -1464,25 +1465,26 @@ class TorrentsModule(BaseModule):
             await self.releases.forget(url)
 
     async def on_staging_get(self, env: Envelope) -> dict:
-        return {"value": (await self.request("settings.value.get", {"key": STAGING_DIR_KEY})).get("value") or ""}
+        return {"value": (await self.reply_of(SETTINGS_VALUE_GET, {"key": STAGING_DIR_KEY})).value or ""}
 
     async def on_staging_set(self, env: Envelope) -> dict:
         """The folder of the releases, as the settings of the sources set it: an absolute path, the same for the client."""
         value = str(env.payload.get("value") or "").strip()
         if not os.path.isabs(value):
             return {"ok": False, "value": value, "reason": reason("staging_dir_not_absolute")}
-        await self.request("settings.value.set", {"key": STAGING_DIR_KEY, "value": value})
+        await self.request(SETTINGS_VALUE_SET, {"key": STAGING_DIR_KEY, "value": value})
         return {"ok": True, "value": value}
 
     async def on_settings_changed(self, env: Envelope) -> None:
-        if env.payload.get("key") == STAGING_DIR_KEY:
+        setting = SettingValue.model_validate(env.payload)
+        if setting.key == STAGING_DIR_KEY:
             # Every open window of the settings shows the folder the core holds now, whichever window set it.
-            self.publish_event("torrents.staging.changed", {"value": env.payload.get("value") or ""})
-            await self.releases.relocate(env.payload.get("value") or "")
-        elif env.payload.get("key") == "scanner_agent_enabled":
+            self.publish_event("torrents.staging.changed", {"value": setting.value or ""})
+            await self.releases.relocate(setting.value or "")
+        elif setting.key == "scanner_agent_enabled":
             self._schedule_wake.set()  # switched on: a time missed while it was off is made up now
-        elif env.payload.get("key") == SCHEDULE_KEY:
-            self.releases.checks = parse(env.payload.get("value")).checks()
+        elif setting.key == SCHEDULE_KEY:
+            self.releases.checks = parse(setting.value).checks()
             self._schedule_wake.set()
             await self.releases.told_all()  # the next check of every release moved
 

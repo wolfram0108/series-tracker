@@ -48,16 +48,17 @@ from typing import Final, Literal, Mapping
 from pydantic import BaseModel
 
 from .contracts import (
-    AlignmentJob, BusyContribution, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
-    CompositionPreviewRequest, CompositionReply, ConformParams, ConformSettingsDraft, ConformSettingsSaved,
-    ConformSettingsView, GroupsResolveReply, GroupsResolveRequest, OutputSwitch, PlanDelete, PlanForget, PlannerView,
-    PlayersListReply, PlayersListRequest, ProviderSaved, ProviderSettingsDraft, ProviderView, QueuesGet, QueuesReply,
-    ReverseReply, ReverseSubmit, RulesApplyReply, RulesApplyRequest, RulesProfileChanged, RunChanged, SeriesCard,
-    SeriesDeleted, SeriesListReply, SeriesPurged, SeriesReadProgress, SeriesStatusChanged, SeriesUpdated, SettingsReset,
-    SettingsSet, SettingsSetMany, SiteResolveReply, SiteResolveRequest, SourceEvent, SourcesReply, SourcesSettingsView,
-    StatusContribution, SubmitReply, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady,
-    TitleSearchReply, TitleSearchRequest, VoiceOrderSet, VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView,
-    VoiceTitleSet, WorkState, WorkWithdrawn,
+    AlignmentJob, BusyContribution, CompositionChanged, CompositionFailed, CompositionGetRequest,
+    CompositionPreviewReply, CompositionPreviewRequest, CompositionReply, ConformParams, ConformSettingsDraft,
+    ConformSettingsSaved, ConformSettingsView, GroupsResolveReply, GroupsResolveRequest, OutputSwitch,
+    PlanDelete, PlanForget, PlannerView, PlayersListReply, PlayersListRequest, ProviderSaved, ProviderSettingsDraft, ProviderView,
+    QueuesGet, QueuesReply, ReverseReply, ReverseSubmit, RulesApplyReply, RulesApplyRequest, RulesProfileChanged,
+    RunChanged, SavedPaths, SeriesCard, SeriesDeleted, SeriesListReply, SeriesPurged, SeriesReadProgress,
+    SeriesStatusChanged, SeriesUpdated, SettingsReset, SettingsSet, SettingsSetMany, SettingValue, SettingValues,
+    SiteResolveReply, SiteResolveRequest, SourceEvent, SourcesReply, SourcesSettingsView, StatusContribution,
+    SubmitReply, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TitleSearchReply,
+    TitleSearchRequest, VoiceOrderSet, VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView, VoiceTitleSet,
+    WorkState, WorkWithdrawn,
 )
 from .contracts.provider import ProviderState
 from .contracts.torrent import PageReleases, ReleaseView
@@ -176,14 +177,15 @@ RULES_RULES_REORDER = Topic("rules.rules.reorder", COMMAND, "rules", fuse=QUICK_
 RULES_RULES_UPDATE = Topic("rules.rules.update", COMMAND, "rules", fuse=QUICK_S)
 
 # --- settings ----------------------------------------------------------------------------------------------------
-SETTINGS_CHANGED = Topic("settings.changed", EVENT, "settings")
-SETTINGS_PATHS_ADD = Topic("settings.paths.add", COMMAND, "settings", fuse=QUICK_S)
-SETTINGS_PATHS_LIST = Topic("settings.paths.list", QUERY, "settings", fuse=QUICK_S)
-SETTINGS_PATHS_REMOVE = Topic("settings.paths.remove", COMMAND, "settings", fuse=QUICK_S)
-SETTINGS_VALUE_GET = Topic("settings.value.get", QUERY, "settings", fuse=STANDARD_S)
-SETTINGS_VALUE_SET = Topic("settings.value.set", COMMAND, "settings", fuse=QUICK_S)
-SETTINGS_VALUES_BY_PREFIX = Topic("settings.values.by_prefix", QUERY, "settings", fuse=QUICK_S)
-SETTINGS_VALUES_SET_MANY = Topic("settings.values.set_many", COMMAND, "settings", fuse=QUICK_S)
+# The packet tells the value of a secret as an empty one (SettingValue).
+SETTINGS_CHANGED = Topic("settings.changed", EVENT, "settings", request=SettingValue)
+SETTINGS_PATHS_ADD = Topic("settings.paths.add", COMMAND, "settings", reply=SavedPaths, fuse=QUICK_S)
+SETTINGS_PATHS_LIST = Topic("settings.paths.list", QUERY, "settings", reply=SavedPaths, fuse=QUICK_S)
+SETTINGS_PATHS_REMOVE = Topic("settings.paths.remove", COMMAND, "settings", reply=SavedPaths, fuse=QUICK_S)
+SETTINGS_VALUE_GET = Topic("settings.value.get", QUERY, "settings", reply=SettingValue, fuse=STANDARD_S)
+SETTINGS_VALUE_SET = Topic("settings.value.set", COMMAND, "settings", reply=SettingValue, fuse=QUICK_S)
+SETTINGS_VALUES_BY_PREFIX = Topic("settings.values.by_prefix", QUERY, "settings", reply=SettingValues, fuse=QUICK_S)
+SETTINGS_VALUES_SET_MANY = Topic("settings.values.set_many", COMMAND, "settings", reply=SettingValues, fuse=QUICK_S)
 
 # --- conform -----------------------------------------------------------------------------------------------------
 CONFORM_CANCEL = Topic("conform.cancel", COMMAND, "conform", fuse=STANDARD_S)

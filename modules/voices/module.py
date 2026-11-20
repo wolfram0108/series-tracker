@@ -67,7 +67,7 @@ class VoicesModule(BaseModule):
         """Every setting of the module in one read, or the values a run took (RunSnapshot.voices); a problem with a value
         is logged once, then the default is used."""
         if values is None:
-            values = (await self.request(SETTINGS_VALUES_BY_PREFIX, {"prefix": PREFIX})).get("values") or {}
+            values = (await self.reply_of(SETTINGS_VALUES_BY_PREFIX, {"prefix": PREFIX})).values
         settings = parse(values)
         for problem in sorted(set(settings.problems) - self._reported):
             self.log.warning("озвучки: настройка: %s", problem)
@@ -96,8 +96,8 @@ class VoicesModule(BaseModule):
         return await self.reply_of(SOURCES_PLAYERS_LIST, players_request(series).model_dump(mode="json"))
 
     async def on_settings_export(self, env: Envelope) -> dict:
-        reply = await self.request(SETTINGS_VALUES_BY_PREFIX, {"prefix": PREFIX})
-        return {"values": reply.get("values") or {}}
+        reply = await self.reply_of(SETTINGS_VALUES_BY_PREFIX, {"prefix": PREFIX})
+        return {"values": reply.values}
 
     async def on_settings_set(self, env: Envelope) -> VoiceSettingsSaved:
         draft = VoiceSettingsDraft.model_validate(env.payload)

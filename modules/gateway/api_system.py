@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from core.module import BusRequestError
 from core.contracts import DownloadCard, PackCard
 from core.reasons import reason, relayed
+from core.topics import SETTINGS_VALUE_SET
 
 from .schemas import (ConformJobChange, DynamicObject, ErrorOnly, ErrorResponse, OkResponse, QueueTask, ScannerStatus,
                       ScheduleBody)
@@ -31,7 +32,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def scanner_settings(request: Request):
         data = await request.json()
         if "enabled" in data:
-            await gw.request("settings.value.set", {
+            await gw.request(SETTINGS_VALUE_SET, {
                 "key": "scanner_agent_enabled",
                 "value": str(data["enabled"]).lower()})
         # Пересчёт расписания делает scan по settings.changed (Р-20);

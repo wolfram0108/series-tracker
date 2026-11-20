@@ -22,7 +22,7 @@ from core.module import BaseModule, BusRequestError
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
-from core.topics import CATALOG_SERIES_GET, SERIES_PURGED, SERIES_UPDATED
+from core.topics import CATALOG_SERIES_GET, SERIES_PURGED, SERIES_UPDATED, SETTINGS_VALUE_GET
 
 from .repository import MetadataRepository
 
@@ -56,9 +56,7 @@ class MetadataModule(BaseModule):
         await self._http.aclose()
 
     async def _headers(self) -> dict:
-        reply = await self.request("settings.value.get",
-                                   {"key": "tmdb_token"})
-        token = reply["value"]
+        token = (await self.reply_of(SETTINGS_VALUE_GET, {"key": "tmdb_token"})).value
         if not token:
             raise TmdbError(reason("tmdb_token_missing"))
         return {"accept": "application/json",

@@ -27,6 +27,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core.module import BaseModule, BusRequestError
 from core.reasons import reason
+from core.topics import SETTINGS_VALUES_BY_PREFIX
 from core.contracts import (CompositionChanged, CompositionFailed, PackJournal, PlannerView,
                             SeriesReadProgress, SourceChanged, TableFailed, TableProgress, TableReady)
 from .routing import as_made
@@ -308,14 +309,13 @@ class GatewayModule(BaseModule):
     async def _load_debug_groups(self) -> None:
         from core import logging as core_logging
         try:
-            reply = await self.request("settings.values.by_prefix",
-                                       {"prefix": "debug_enabled_"})
+            reply = await self.reply_of(SETTINGS_VALUES_BY_PREFIX, {"prefix": "debug_enabled_"})
         except (BusRequestError, asyncio.TimeoutError):
             self.log.warning("debug-группы логирования не загружены — "
                              "settings не ответил")
             return
         groups = {k.removeprefix("debug_enabled_")
-                  for k, v in reply["values"].items() if v == "true"}
+                  for k, v in reply.values.items() if v == "true"}
         core_logging.set_debug_groups(groups)
         if groups:
             self.log.info("DEBUG-логирование включено для групп: %s",

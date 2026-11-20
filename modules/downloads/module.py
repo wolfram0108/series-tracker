@@ -61,10 +61,12 @@ from core import notices, storage
 from core.module import BaseModule
 from core.clock import beat_while
 from core.ffprobe import duration_of, film_stream, streams_of
-from core.contracts import RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, SeriesDeleted, WorkWithdrawn
+from core.contracts import (RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, SeriesDeleted, SettingValue,
+                            WorkWithdrawn)
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import describe, reason
+from core.topics import SETTINGS_VALUE_GET, SETTINGS_VALUE_SET
 from core.retry import UNTIMED, Budget, retrying
 
 from . import ytdlp
@@ -195,10 +197,10 @@ class DownloadsModule(BaseModule):
 
     async def _read_setting(self, key: str, default: int) -> int:
         try:
-            reply = await self.request("settings.value.get", {"key": key})
+            reply = await self.reply_of(SETTINGS_VALUE_GET, {"key": key})
         except (Exception,):  # noqa: BLE001 - a setting that cannot be read takes its default
             return default
-        return whole(reply.get("value")) or default
+        return whole(reply.value) or default
 
     async def on_limits_get(self, env: Envelope) -> dict:
         return self.places.limits.as_dict()
@@ -209,7 +211,7 @@ class DownloadsModule(BaseModule):
         if wrong is not None:
             return {"ok": False, "reason": reason("download_limit_invalid", name=wrong, value=str(asked[wrong]))}
         for name, value in asked.items():
-            await self.request("settings.value.set", {"key": KEYS[name], "value": str(whole(value))})
+            await self.request(SETTINGS_VALUE_SET, {"key": KEYS[name], "value": str(whole(value))})
         await self._apply(Limits(**{**vars(self.places.limits), **{name: whole(value) for name, value in asked.items()}}))
         return {"ok": True, "limits": self.places.limits.as_dict()}
 
@@ -222,8 +224,9 @@ class DownloadsModule(BaseModule):
     # --- events -------------------------------------------------------------------
 
     async def on_settings_changed(self, env: Envelope) -> None:
-        name = next((name for name, key in KEYS.items() if key == env.payload.get("key")), None)
-        value = whole(env.payload.get("value"))
+        setting = SettingValue.model_validate(env.payload)
+        name = next((name for name, key in KEYS.items() if key == setting.key), None)
+        value = whole(setting.value)
         if name is not None and value is not None:
             await self._apply(Limits(**{**vars(self.places.limits), name: value}))
 

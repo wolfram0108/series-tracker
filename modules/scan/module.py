@@ -73,9 +73,9 @@ from datetime import datetime, timezone
 
 from core.module import NO_HANDLER, BaseModule, BusRequestError
 from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, EDIT_STUCK_S, SERIES_BUSY_CONTRIBUTION, SERIES_PURGED,
-                         SERIES_STATUS_CONTRIBUTION, TABLE_WAIT_S)
+                         SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, TABLE_WAIT_S)
 from core.contracts import (RUN_CHANGED, WORK_STATE, BusyContribution, RunSnapshot, availability, OutputSwitch, RunChanged,
-                            SeriesCard, SeriesDeleted, SeriesPurged, Slot, StatusContribution, SyncScope, WorkState)
+                            SeriesCard, SeriesDeleted, SeriesPurged, SettingValue, Slot, StatusContribution, SyncScope, WorkState)
 from core.db import Database
 from core.envelope import Envelope
 from core.ignored import parse_memory
@@ -347,7 +347,7 @@ class ScanModule(BaseModule):
         found = checked(env.payload.get("schedule"))
         if isinstance(found, str):
             return {"ok": False, "reason": reason(found)}
-        await self.request("settings.value.set", {"key": SCHEDULE_KEY, "value": json.dumps(found.as_value())})
+        await self.request(SETTINGS_VALUE_SET, {"key": SCHEDULE_KEY, "value": json.dumps(found.as_value())})
         return {"ok": True, "schedule": found.as_value()}
 
     async def on_status_get(self, env: Envelope) -> dict:
@@ -358,7 +358,7 @@ class ScanModule(BaseModule):
         """Р-20: смена настроек сканера пересчитывает расписание от
         текущего момента (вместо немедленного полного скана старой
         системы — лишняя нагрузка на трекеры)."""
-        key = env.payload.get("key")
+        key = SettingValue.model_validate(env.payload).key
         if key not in ("scanner_agent_enabled", SCHEDULE_KEY):
             return
         await self._schedule_next()
@@ -838,13 +838,12 @@ class ScanModule(BaseModule):
         next_time = next_at(schedule.syncs, datetime.now(timezone.utc))
         value = next_time.astimezone(timezone.utc).isoformat() if next_time is not None else ""
         if value != (await self._setting("next_scan_timestamp", None) or ""):
-            await self.request("settings.value.set", {"key": "next_scan_timestamp", "value": value})
+            await self.request(SETTINGS_VALUE_SET, {"key": "next_scan_timestamp", "value": value})
             self.log.info("следующее сканирование: %s", value or "нет в расписании")
         await self._broadcast_status()
 
     async def _setting(self, key: str, default: str | None) -> str | None:
-        reply = await self.request("settings.value.get", {"key": key})
-        value = reply.get("value")
+        value = (await self.reply_of(SETTINGS_VALUE_GET, {"key": key})).value
         return value if value is not None else default
 
     async def _status_payload(self) -> dict:

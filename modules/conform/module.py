@@ -100,6 +100,7 @@ from core.contracts import (AlignmentJob, series_of_job_key, ConformParams, Conf
                             SubmitReply)
 from core.envelope import Envelope
 from core.reasons import describe, reason
+from core.topics import SETTINGS_VALUE_GET, SETTINGS_VALUES_BY_PREFIX, SETTINGS_VALUES_SET_MANY
 
 from .client import DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
 from . import settings as conform_settings
@@ -239,18 +240,18 @@ class ConformModule(BaseModule):
 
     async def _stored(self, key: str) -> str | None:
         try:
-            reply = await self.request("settings.value.get", {"key": key})
+            reply = await self.reply_of(SETTINGS_VALUE_GET, {"key": key})
         except (BusRequestError, asyncio.TimeoutError):
             return None
-        return reply.get("value")
+        return reply.value
 
     async def _values(self) -> dict[str, str | None]:
         """Every setting of the module in one read."""
         try:
-            reply = await self.request("settings.values.by_prefix", {"prefix": PREFIX})
+            reply = await self.reply_of(SETTINGS_VALUES_BY_PREFIX, {"prefix": PREFIX})
         except (BusRequestError, asyncio.TimeoutError):
             return {}
-        return reply.get("values") or {}
+        return reply.values
 
     async def _path_map(self, values: dict[str, str | None] | None = None) -> dict[str, str]:
         values = await self._values() if values is None else values
@@ -264,7 +265,7 @@ class ConformModule(BaseModule):
         problems = conform_settings.check(draft)
         if not problems:
             draft = conform_settings.clean(draft)
-            await self.request("settings.values.set_many", {"values": {
+            await self.request(SETTINGS_VALUES_SET_MANY, {"values": {
                 **conform_settings.stored(draft), **conform_settings.next_revision(await self._values())}})
             await self._use_address(draft.url)
         view = await self._settings_view()
@@ -280,7 +281,7 @@ class ConformModule(BaseModule):
         await self._known()
         problems = conform_settings.check_params(params, self._domain())
         if not problems:
-            await self.request("settings.values.set_many", {"values": {
+            await self.request(SETTINGS_VALUES_SET_MANY, {"values": {
                 **conform_settings.stored_params(params), **conform_settings.next_revision(await self._values())}})
         view = await self._settings_view()
         if not problems:

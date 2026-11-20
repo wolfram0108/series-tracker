@@ -75,8 +75,10 @@ def _written(payload):
     """What of a payload goes into a dump: a model handed over in the process whole (the layout, megabytes) is told by its
     kind and the size of its lists; its rows are in the dump as the planner's trace of the inputs of its plan."""
     if isinstance(payload, BaseModel):
-        return {"model": type(payload).__name__, **{name: (len(value) if isinstance(value, (list, tuple, dict)) else value)
-                                                    for name, value in payload.__dict__.items()}}
+        # A model that carries a secret (a setting read, a password) is masked as its dictionary is: the dump keeps no secret.
+        return redacted({"model": type(payload).__name__,
+                         **{name: (len(value) if isinstance(value, (list, tuple, dict)) else value)
+                            for name, value in payload.__dict__.items()}})
     if isinstance(payload, (list, tuple)) and any(isinstance(each, BaseModel) for each in payload):
         return [_written(each) for each in payload]  # a reply that is a row of models (the references of a series)
     return redacted(payload)

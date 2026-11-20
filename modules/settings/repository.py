@@ -1,11 +1,11 @@
-"""Репозиторий settings: таблица settings (key/value, схема прод-БД)."""
+"""The repository of settings: the table settings (key/value, the schema of the production database) and saved_paths."""
 from __future__ import annotations
 
 from core import crypto
 from core.db import Database
 from core.secrets import SECRET_SETTING_KEYS
 
-# Ключи-секреты: их значения хранятся в БД зашифрованными (Этап 3Б).
+# The secret keys: their values are kept in the database encrypted (stage 3Б).
 SECRET_KEYS = SECRET_SETTING_KEYS
 
 
@@ -36,8 +36,8 @@ class SettingsRepository:
             for key, value in values.items()])
 
     async def encrypt_legacy_secrets(self) -> int:
-        """Одноразовая миграция секретных ключей в шифр (Этап 3Б).
-        Идемпотентна. Возвращает число перешифрованных значений."""
+        """The one-time migration of the secret keys into the cipher (stage 3Б). Idempotent. Returns the number of values
+        encrypted."""
         migrated = 0
         for key in SECRET_KEYS:
             row = await self._db.fetch_one(
@@ -56,7 +56,7 @@ class SettingsRepository:
         # A secret is read by its key alone, never in bulk.
         return {r["key"]: r["value"] for r in rows if r["key"] not in SECRET_KEYS}
 
-    # --- saved_paths (отдельная таблица, тот же владелец) ------------------
+    # --- saved_paths (a table of its own, the same owner) ------------------
 
     async def list_paths(self) -> list[dict]:
         return await self._db.fetch_all(

@@ -20,6 +20,8 @@ from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, Co
                             PlayersListReply, ProviderSaved, ProviderSettingsDraft, ProviderView, VoiceSettingsDraft,
                             VoiceSettingsSaved, VoiceSettingsView)
 from core.reasons import code_of, reason, relayed
+from core.topics import (SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST, SETTINGS_PATHS_REMOVE, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET,
+                         SETTINGS_VALUES_BY_PREFIX)
 
 from .routing import refusal, route_per_method
 from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse
@@ -81,9 +83,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             reply = await gw.request("trackerauth.credentials.get",
                                      {"service": service})
             out[service] = reply["credentials"] or {}
-        tmdb = await gw.request("settings.value.get",
-                                {"key": "tmdb_token"})
-        out["tmdb"] = {"configured": bool(tmdb.get("value"))}
+        tmdb = await gw.reply_of(SETTINGS_VALUE_GET, {"key": "tmdb_token"})
+        out["tmdb"] = {"configured": bool(tmdb.value)}
         return out
 
     @r.get("/api/auth/{service}/secret", response_model=DynamicObject)
@@ -91,8 +92,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The secret of one service, as the eye of its field asks it (Этап 3, docs/security.md: a secret is never given with the
         credentials, only on this request, to the administrator who is signed in): {secret}, empty when none is set. Not cached."""
         if service == "tmdb":
-            reply = await gw.request("settings.value.get", {"key": "tmdb_token"})
-            secret = reply.get("value") or ""
+            secret = (await gw.reply_of(SETTINGS_VALUE_GET, {"key": "tmdb_token"})).value or ""
         elif service in AUTH_SERVICES:
             secret = (await gw.request("trackerauth.secret.get", {"service": service}))["secret"]
         else:
@@ -117,8 +117,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 "service": "vk", "username": "vk_token",
                 "password": vk.get("token") or None})
         if (tmdb := data.get("tmdb")) and tmdb.get("token"):
-            await gw.request("settings.value.set", {
-                "key": "tmdb_token", "value": tmdb["token"]})
+            await gw.request(SETTINGS_VALUE_SET, {"key": "tmdb_token", "value": tmdb["token"]})
         return {"success": True}
 
     # --- настройки -------------------------------------------------------------------
@@ -128,11 +127,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         if request.method == "POST":
             data = await request.json()
             if response_key in data:
-                await gw.request("settings.value.set", {
+                await gw.request(SETTINGS_VALUE_SET, {
                     "key": key, "value": str(data[response_key]).lower()})
             return {"success": True}
-        reply = await gw.request("settings.value.get", {"key": key})
-        return {response_key: (reply.get("value") or "false") == "true"}
+        reply = await gw.reply_of(SETTINGS_VALUE_GET, {"key": key})
+        return {response_key: (reply.value or "false") == "true"}
 
 
     @route_per_method(r, "/api/settings/conform_clear_finished", methods=["GET", "POST"],
@@ -185,16 +184,13 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         Источник истины — модуль settings (таблица saved_paths)."""
         if request.method == "POST":
             data = await request.json()
-            reply = await gw.request("settings.paths.add",
-                                     {"path": data.get("path", "")})
-            return {"paths": reply["paths"]}
-        if request.method == "DELETE":
+            reply = await gw.reply_of(SETTINGS_PATHS_ADD, {"path": data.get("path", "")})
+        elif request.method == "DELETE":
             data = await request.json()
-            reply = await gw.request("settings.paths.remove",
-                                     {"id": data.get("id")})
-            return {"paths": reply["paths"]}
-        reply = await gw.request("settings.paths.list", {})
-        return {"paths": reply["paths"]}
+            reply = await gw.reply_of(SETTINGS_PATHS_REMOVE, {"id": data.get("id")})
+        else:
+            reply = await gw.reply_of(SETTINGS_PATHS_LIST, {})
+        return {"paths": [each.model_dump() for each in reply.paths]}
 
     # Checking and storing belong to the voices module; the gateway only forwards.
 
@@ -239,9 +235,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return await gw.request("sources.provider.set", draft.model_dump(mode="json"))
 
     async def _refresh_debug_groups():
-        reply = await gw.request("settings.values.by_prefix",
-                                 {"prefix": "debug_enabled_"})
-        flags = reply["values"]
+        flags = (await gw.reply_of(SETTINGS_VALUES_BY_PREFIX, {"prefix": "debug_enabled_"})).values
         groups = {key.removeprefix("debug_enabled_")
                   for key, value in flags.items() if value == "true"}
         core_logging.set_debug_groups(groups)
@@ -257,7 +251,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 return JSONResponse(
                     {"success": False,
                      "error": reason("module_missing")}, status_code=400)
-            await gw.request("settings.value.set", {
+            await gw.request(SETTINGS_VALUE_SET, {
                 "key": f"debug_enabled_{module}",
                 "value": str(data.get("enabled")).lower()})
             await _refresh_debug_groups()
