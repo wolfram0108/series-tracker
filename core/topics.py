@@ -288,10 +288,11 @@ VOICES_SETTINGS_SET = Topic(
 # --- composition -------------------------------------------------------------------------------------------------
 COMPOSITION_CHANGED = Topic("composition.changed", EVENT, "composition", request=CompositionChanged)
 COMPOSITION_FAILED = Topic("composition.failed", EVENT, "composition", request=CompositionFailed)
+# Answered as the model itself (immutable): the gateway writes it for the window, a module of the process reads it as it is.
 COMPOSITION_GET = Topic(
     "composition.get", QUERY, "composition", request=CompositionGetRequest, reply=CompositionReply,
     fuse=STANDARD_S)
-# The layout as the model itself, for a consumer in this process.
+# The same answer by the same handler: the name the planner asks the whole layout by.
 COMPOSITION_LAYOUT = Topic(
     "composition.layout", QUERY, "composition", request=CompositionGetRequest, reply=CompositionReply,
     fuse=STANDARD_S)

@@ -368,9 +368,9 @@ async def test_lines_the_window_holds_get_the_answer_of_the_profile_and_no_page_
     reply = await s.probe.request("composition.preview", {
         "lines": ["Серия 1 [Мой дубляж]", "Трейлер"], "profile_id": 7, "series_season": "4"}, timeout=STUCK_S)
     reply = CompositionPreviewReply.model_validate(reply)
-    assert (reply.state, reply.summary, reply.names) == (TableState.READY, None, [])
+    assert (reply.state, reply.summary, reply.names) == (TableState.READY, None, ())
     assert [(each.key, each.line) for each in reply.lines] == [("0", "Серия 1 [Мой дубляж]"), ("1", "Трейлер")]
-    assert [each.heights for each in reply.lines] == [[], []]
+    assert [each.heights for each in reply.lines] == [(), ()]
     [call] = s.rules.calls
     assert (call.profile_id, call.series_season, [(l.key, l.text) for l in call.lines]) == (
         7, "4", [("0", "Серия 1 [Мой дубляж]"), ("1", "Трейлер")])
@@ -382,7 +382,7 @@ async def test_lines_the_window_holds_get_the_answer_of_the_profile_and_no_page_
 async def test_a_request_that_asks_for_no_read_of_a_page_nothing_was_read_of_gives_the_state_alone(system):
     s = system
     reply = await preview(s, refresh=False)
-    assert (reply.state, reply.reason, reply.summary, reply.lines) == (TableState.ABSENT, None, None, [])
+    assert (reply.state, reply.reason, reply.summary, reply.lines) == (TableState.ABSENT, None, None, ())
     assert s.sources.reads_begun == [] and s.sources.requests[-1].refresh is False
     nothing_was_written(s)
 

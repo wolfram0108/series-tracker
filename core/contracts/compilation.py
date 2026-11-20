@@ -10,7 +10,9 @@ from __future__ import annotations
 import json
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from .frozen import Frozen
 
 _PREFIX = "compilation:"
 
@@ -51,7 +53,7 @@ class Absence(StrEnum):
     OFF = "off"
 
 
-class CompilationRef(BaseModel):
+class CompilationRef(Frozen):
     """The compilation an episode stands in, whole, so that the reference and the plan need no second request: its key,
     the row of the layout whose video it is (the best of the rows with that key), and what the file name takes from it."""
 
@@ -65,7 +67,7 @@ class CompilationRef(BaseModel):
     end: int
 
 
-class CompilationEpisode(BaseModel):
+class CompilationEpisode(Frozen):
     """An episode a compilation covers: whether it stands in it, else why not (and where it stands instead)."""
 
     episode: int
@@ -76,7 +78,7 @@ class CompilationEpisode(BaseModel):
     own: bool = False
 
 
-class CompilationView(BaseModel):
+class CompilationView(Frozen):
     """A compilation of a season as the window of the output draws it: the block of its episodes. `index` is its place
     among the compilations of the season (the colour and the letter of the window), `take` whether it is switched on."""
 
@@ -84,4 +86,4 @@ class CompilationView(BaseModel):
     index: int
     ref: CompilationRef
     take: bool = True
-    episodes: list[CompilationEpisode] = Field(default_factory=list)
+    episodes: tuple[CompilationEpisode, ...] = Field(default_factory=tuple)

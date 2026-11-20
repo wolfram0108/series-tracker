@@ -385,7 +385,8 @@ class CompositionModule(BaseModule):
         writes = items
         if any(record.lever in edit.MARKUP_LEVERS for record in items):
             # The queue of the markup reference is made by the order of players, asked once for all the items.
-            writes = await compute.run(edit.writes_of, stored, items, await self._voices())
+            voices = await self._voices()
+            writes = await compute.run(edit.writes_of, stored, items, voices)
         return await self._edit(series_id, edit.with_writes, writes)
 
     def _require_editable(self, series_id: int) -> None:

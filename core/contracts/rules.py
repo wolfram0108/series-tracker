@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .frozen import Frozen
+
 
 class RuleLine(BaseModel):
     """`player` and `voice` are the player and the voice-over of the row the text was made from: the constructor tells
@@ -26,7 +28,7 @@ class RulesApplyRequest(BaseModel):
     rules: list[dict[str, Any]] | None = None
 
 
-class RuleResult(BaseModel):
+class RuleResult(Frozen):
     """The only source of episode, season, range and part numbers; an excluded line has none of them."""
 
     model_config = ConfigDict(extra="allow")
@@ -38,8 +40,8 @@ class RuleResult(BaseModel):
     end: int | None = None
     part: int | None = None
     voiceover: str | None = None
-    events: list[dict[str, Any]] = Field(default_factory=list)
-    errors: list[Any] = Field(default_factory=list)
+    events: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+    errors: tuple[Any, ...] = Field(default_factory=tuple)
 
 
 class RulesApplyReply(BaseModel):

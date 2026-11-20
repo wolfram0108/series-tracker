@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from .compilation import CompilationView
+from .frozen import Frozen
 from .output_settings import EpisodeSettings, LeverSpec, LevelSettings
 from .release_table import RowState, RowTrack, SubtitleType, TableState
 from .rules import RuleResult
@@ -30,7 +31,7 @@ CHOSEN_EXCLUSIONS = frozenset({Exclusion.RULE, Exclusion.SOURCE, Exclusion.SETTI
 LEFT_BEFORE_RULES = frozenset({Exclusion.SOURCE, Exclusion.SETTINGS})
 
 
-class CompositionRow(BaseModel):
+class CompositionRow(Frozen):
     """A table row of a source of the series with the answer of its profile and its voice-over group.
 
     A single episode has `episode_end` equal to `episode_start`; `episode_end` greater than `episode_start` is a
@@ -55,7 +56,7 @@ class CompositionRow(BaseModel):
     player_label: str = ""
     group: str = ""
     text: str = ""
-    heights: list[int] = Field(default_factory=list)
+    heights: tuple[int, ...] = Field(default_factory=tuple)
     state: RowState
     published: str | None = None
     link: str = ""
@@ -116,7 +117,7 @@ class SourceStatus(StrEnum):
     FAILED = "failed"
 
 
-class PlayerSummary(BaseModel):
+class PlayerSummary(Frozen):
     """What a window may show of a player before any rule has read its rows: how many rows it has and how a catalog
     splits them. Episodes, voice-overs and resolutions of a player are the constructor's answer: the rows of the layout."""
 
@@ -125,10 +126,10 @@ class PlayerSummary(BaseModel):
     rows: int = 0
     groups: int = 0
     # The groups of the player as it names them, in the order of the table (a season of a catalog is one).
-    group_names: list[str] = Field(default_factory=list)
+    group_names: tuple[str, ...] = Field(default_factory=tuple)
 
 
-class SourceSummary(BaseModel):
+class SourceSummary(Frozen):
     """`source_id` is 0 for an address that is not yet a source of a series (the add window, the test of rules)."""
 
     source_id: int = 0
@@ -138,9 +139,9 @@ class SourceSummary(BaseModel):
     status: SourceStatus
     reason: str | None = None
     read_at: str | None = None
-    players: list[PlayerSummary] = Field(default_factory=list)
+    players: tuple[PlayerSummary, ...] = Field(default_factory=tuple)
     # Where the rows of its table come from (release_table.place_of); empty before a table was read.
-    place: list[str] = Field(default_factory=list)
+    place: tuple[str, ...] = Field(default_factory=tuple)
     # The name its site gives the source for the head of a window (ReleaseTable.title); empty when it gives none.
     title: str = ""
 
@@ -181,18 +182,18 @@ class CompositionGetRequest(BaseModel):
 TITLE_MAX = 100
 
 
-class VoiceSpan(BaseModel):
+class VoiceSpan(Frozen):
     """A voice-over group of a season and the episodes it has, as the window words them (`1–50, 52`)."""
 
     label: str
     episodes: str
 
 
-class SeasonVoiceOrder(BaseModel):
+class SeasonVoiceOrder(Frozen):
     """The order of the voice-overs of a season in the container of every episode: the first is the default track."""
 
     season: int
-    voices: list[VoiceSpan] = Field(default_factory=list)
+    voices: tuple[VoiceSpan, ...] = Field(default_factory=tuple)
 
 
 class VoiceOrderSet(BaseModel):
@@ -229,31 +230,30 @@ class VoiceTitleSet(BaseModel):
         return title
 
 
-class CompositionReply(BaseModel):
-    """The layout of a series, or a part of it. It is written with the fields it holds only (`model_dump`, whoever calls it): what
-    a part leaves out is not in the answer, so that a window keeps what it holds of it."""
-
+# The layout of a series, or a part of it. It is written with the fields it holds only (`model_dump`, whoever calls it): what a
+# part leaves out is not in the answer, so that a window keeps what it holds of it.
+class CompositionReply(Frozen):
     series_id: int
     rev: int
     # The part of the layout the reply holds (`LayoutPart`): what is not in the part is left out, not empty.
     part: LayoutPart = "whole"
-    rows: list[CompositionRow] = Field(default_factory=list)
+    rows: tuple[CompositionRow, ...] = Field(default_factory=tuple)
     # The rows of subtitles (DESIGN.md 7.1.1), apart from the rows of sound: no voice-over, no variant of the reference.
-    subtitles: list[CompositionRow] = Field(default_factory=list)
-    sources: list[SourceSummary] = Field(default_factory=list)
-    levels: list[LevelSettings] = Field(default_factory=list)
-    settings: list[EpisodeSettings] = Field(default_factory=list)
+    subtitles: tuple[CompositionRow, ...] = Field(default_factory=tuple)
+    sources: tuple[SourceSummary, ...] = Field(default_factory=tuple)
+    levels: tuple[LevelSettings, ...] = Field(default_factory=tuple)
+    settings: tuple[EpisodeSettings, ...] = Field(default_factory=tuple)
     # The levers there are, as the registry has them: a window draws the controls of the output from them.
-    levers: list[LeverSpec] = Field(default_factory=list)
+    levers: tuple[LeverSpec, ...] = Field(default_factory=tuple)
     # What may be done with an object in each of its states (core/contracts/availability.py): a window draws a control only
     # where this allows it.
-    availability: dict[str, list[str]] = Field(default_factory=dict)
+    availability: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     # The order of the voice-overs of each season (stage 11): the order of the tracks in the container.
-    voice_orders: list[SeasonVoiceOrder] = Field(default_factory=list)
+    voice_orders: tuple[SeasonVoiceOrder, ...] = Field(default_factory=tuple)
     # The user's names of the tracks of the voice-over groups in the containers (group -> title).
     voice_titles: dict[str, str] = Field(default_factory=dict)
     # The compilations of every season and the episodes each holds (stage 12): the blocks of the view «Компиляции».
-    compilations: list[CompilationView] = Field(default_factory=list)
+    compilations: tuple[CompilationView, ...] = Field(default_factory=tuple)
 
     def model_dump(self, **options):
         options.setdefault("exclude_unset", True)
@@ -283,14 +283,14 @@ class CompositionFailed(BaseModel):
     reason: str
 
 
-class PreviewLine(BaseModel):
+class PreviewLine(Frozen):
     """A row of a page as the constructor gets it (`line` is `line_of`), with its answer when a profile is given."""
 
     key: str
     line: str
     result: RuleResult | None = None
     # The resolutions the page gives the row, when the row can be played; empty for a line a window holds itself.
-    heights: list[int] = Field(default_factory=list)
+    heights: tuple[int, ...] = Field(default_factory=tuple)
 
 
 class CompositionPreviewRequest(BaseModel):
@@ -315,16 +315,16 @@ class CompositionPreviewRequest(BaseModel):
         return self
 
 
-class CompositionPreviewReply(BaseModel):
+class CompositionPreviewReply(Frozen):
     """`state` is the state of the table of the page; `summary` and `lines` come from the last complete table."""
 
     url: str
     state: TableState
     reason: str | None = None
     # The names of the release as the site writes them (the series gets its own from them).
-    names: list[str] = Field(default_factory=list)
+    names: tuple[str, ...] = Field(default_factory=tuple)
     summary: SourceSummary | None = None
-    lines: list[PreviewLine] = Field(default_factory=list)
+    lines: tuple[PreviewLine, ...] = Field(default_factory=tuple)
     # The rows of the layout this address would make with the profile, without the rows the constructor left out: the
     # same rows a series keeps (source_id 0), so a window draws the episodes and voice-overs of a draft from them too.
-    rows: list[CompositionRow] = Field(default_factory=list)
+    rows: tuple[CompositionRow, ...] = Field(default_factory=tuple)

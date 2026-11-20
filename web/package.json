@@ -10,7 +10,7 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "gen:api": "cd .. && .venv/bin/python -c \"import json; from core import Bus; from modules.gateway import GatewayModule; json.dump(GatewayModule(Bus(), docs_enabled=True)._create_app().openapi(), open('web/node_modules/.openapi.json', 'w'))\" && cd web && openapi-typescript node_modules/.openapi.json -o src/api/schema.d.ts"
+    "gen:api": "cd .. && .venv/bin/python -c \"import json; from core.bus import Bus; from modules.gateway import GatewayModule; json.dump(GatewayModule(Bus(), docs_enabled=True)._create_app().openapi(), open('web/node_modules/.openapi.json', 'w'))\" && cd web && openapi-typescript node_modules/.openapi.json -o src/api/schema.d.ts"
   },
   "dependencies": {
     "@primevue/themes": "^4.2.5",

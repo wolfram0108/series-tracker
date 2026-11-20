@@ -19,6 +19,7 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from .compilation import CompilationRef
+from .frozen import Frozen
 
 
 # The levers every consumer reads by name; the registry that gives them meaning is the composition module's.
@@ -152,7 +153,7 @@ class _Scope(BaseModel):
         return Level.SEASON if self.season is not None else Level.SERIES
 
 
-class LeverSpec(BaseModel):
+class LeverSpec(Frozen):
     """What a lever is, as the registry of the composition module has it: its name, what its value is about, the
     shape of its value, its default and the module that acts on it. A window needs nothing else to draw it."""
 
@@ -218,7 +219,7 @@ class SettingsReset(_Scope):
         return self
 
 
-class EffectiveLever(BaseModel):
+class EffectiveLever(Frozen):
     """The value a lever has for an episode and the level it comes from."""
 
     lever: str
@@ -227,29 +228,29 @@ class EffectiveLever(BaseModel):
     level: Level
 
 
-class EpisodeSettings(BaseModel):
+class EpisodeSettings(Frozen):
     """The levers of an episode, and the compilation it stands in (stage 12): the level between its season and itself."""
 
     season: int
     episode: int
-    levers: list[EffectiveLever] = Field(default_factory=list)
+    levers: tuple[EffectiveLever, ...] = Field(default_factory=tuple)
     compilation: CompilationRef | None = None
 
 
-class LevelSettings(BaseModel):
+class LevelSettings(Frozen):
     """The levers as they stand on the series (season None) or on one season: what the header of the level shows
     and what its episodes inherit."""
 
     season: int | None = None
     compilation: str | None = None
-    levers: list[EffectiveLever] = Field(default_factory=list)
+    levers: tuple[EffectiveLever, ...] = Field(default_factory=tuple)
 
 
 class QueuesGet(_Scope):
     """The query `composition.queues.get`: the queues of a level, as its window lists them."""
 
 
-class QueueRow(BaseModel):
+class QueueRow(Frozen):
     """A variant of a queue in its place: a voice-over group at a player of a source, the best height it has on the level,
     the episodes of the level it plays in (`1–10, 12`), and whether the queue takes it (`allowed`, from `allowed_level`)."""
 
@@ -274,10 +275,10 @@ class QueueRow(BaseModel):
     forced: bool = False
 
 
-class QueueView(BaseModel):
+class QueueView(Frozen):
     """The variants of one queue in the order they are tried; `order_level` is the level the user's order comes from."""
 
-    rows: list[QueueRow] = Field(default_factory=list)
+    rows: tuple[QueueRow, ...] = Field(default_factory=tuple)
     order_level: Level = Level.DEFAULT
     # The level the groups of equal variants come from (the levers `reference.same`, `markup.same`).
     same_level: Level = Level.DEFAULT
@@ -291,7 +292,7 @@ class GroupQueue(QueueView):
     take_level: Level = Level.DEFAULT
 
 
-class QueuesReply(BaseModel):
+class QueuesReply(Frozen):
     """The queue of the reference and the queue of each group of the level, the groups in the order of the tracks of the
     container (a season, an episode) or by name (the series)."""
 
@@ -300,7 +301,7 @@ class QueuesReply(BaseModel):
     episode: int | None = None
     compilation: str | None = None
     reference: QueueView = Field(default_factory=QueueView)
-    groups: list[GroupQueue] = Field(default_factory=list)
+    groups: tuple[GroupQueue, ...] = Field(default_factory=tuple)
     # The queue of the markup reference (stage 14); while `markup_follows` it is the queue of the reference itself: no
     # level of the chain has an order of its own, and the timeline is the video the reference takes.
     markup: QueueView = Field(default_factory=QueueView)

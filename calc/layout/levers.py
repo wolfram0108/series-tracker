@@ -5,6 +5,7 @@ and change nothing. The window draws a lever by its target and the shape of its 
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -134,7 +135,8 @@ class Lever:
         return found | {variant[1]} if variant is not None else found
 
     def spec(self) -> LeverSpec:
-        return LeverSpec(name=self.name, target=self.target, shape=self.shape, default=self.default,
+        # The description is handed over as it is: it holds a copy of the default, not the registry's own list.
+        return LeverSpec(name=self.name, target=self.target, shape=self.shape, default=deepcopy(self.default),
                          consumer=self.consumer, queue=self.queue)
 
 

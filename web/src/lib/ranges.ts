@@ -1,5 +1,5 @@
 // The one writing of the runs of episode numbers the window shows — `1–50, 52`, as the core words them
-// (modules/composition/project.py, `spans`) — and what is read back out of it.
+// (calc/layout/project.py, `spans`) — and what is read back out of it.
 
 /** A run of episode numbers, both ends in it. */
 export type Run = readonly [from: number, to: number]
