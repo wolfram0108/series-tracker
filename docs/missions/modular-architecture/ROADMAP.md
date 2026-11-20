@@ -4,13 +4,15 @@
 
 ## ГДЕ СЕЙЧАС (2026-11-20)
 
-Этапы 0–3 закрыты и выкачены. Реестр `core/topics.py` — 230 записей; `core/__init__.py` без переэкспорта; шлюз не
+Этапы 0–4 закрыты и выкачены. Реестр `core/topics.py` — 230 записей; `core/__init__.py` без переэкспорта; шлюз не
 меняет полученные ответы. composition: счёт в `calc/layout`, очереди вариантов и имена озвучек — в `calc/`, обработчики
 ступенями «запросы → чистая ступень в пуле», топики константами реестра, ответы — неизменяемыми моделями (`Frozen`,
 `core/contracts/frozen.py`); JSON окна сверен байт в байт на сериалах 40, 46, 49 (`tools/checks/window_json.py`);
 пересчёт в пределах разброса. planner: `core/plan` нет — чистое в `calc/plan`, `calc/view`, исполнитель и файлы плана
 в `modules/planner`, `core` не импортирует `calc`; `composition.layout` удалён; JSON окна плана и отчёты
-`plan_on_asset` сверены байт в байт на 40, 46, 49. Набор 300 из 300. Следующий — этап 4.
+`plan_on_asset` сверены байт в байт на 40, 46, 49. rules, unpack, voices: счёт в `calc/rules`, `calc/unpack`, `calc/voices`;
+`unpack.editor.get` разделён на запрос и команду `unpack.editor.open`; ответ соседа моделью — `BaseModule.reply_of`;
+JSON окон трёх модулей сверен, `rules.apply` в раскладке быстрее на 7–28 %. Набор 300 из 300. Следующий — этап 5.
 
 Исходное состояние снято разбором импортов и вызовов шины по `core/` и `modules/` (227 файлов):
 
@@ -36,9 +38,9 @@
 | 1 | Основа в `core`: реестр топиков, вид конверта по реестру, ответ — неизменяемой моделью без JSON, разбор больших ответов вне цикла; `core/__init__.py` без переэкспорта шины и модуля; шлюз собирает свой ответ, а не меняет полученный | ✅ | `core/topics.py`; `deadlines` выводится из него, `SSE_MAP` ссылается на его записи; поведение то же |
 | 2 | composition — один проход | ✅ | счёт в `calc/layout`, обработчики «входы → счёт → публикация», топики по реестру; журнал из `settings.retarget` — в модуле; `voices.settings.get` — до цикла по пунктам команды; ответ `composition.get` моделью сохраняет нынешний JSON окна (`exclude_unset`, `composition/module.py:788-791`) |
 | 3 | planner — один проход | ✅ | `core/plan` чистое → `calc/plan`, `calc/view`; исполнитель, файлы плана и книга карточек упаковки → `modules/planner`; топики по реестру; планировщик спрашивает `composition.get`, запись `composition.layout` (второе имя того же обработчика) удаляется; в `core` не остаётся импортов `calc` |
-| 4 | rules, unpack, voices — по проходу на модуль | ⛔ | `calc/rules`, `calc/unpack`; очереди и имена озвучек → `calc` |
-| 5 | Остальные модули — перевод на реестр | ⛔ | catalog, settings, sources, torrents, downloads, scan, conform, library, metadata, renaming, trackerauth, auth, runlog, gateway; модели ответов `catalog.series.get/list`, `catalog.sources.by_profile`; события `composition.*` — моделями после прохода их потребителей; чтения `sources` (`table.get`, `table.read`, `pages.check`, `titles.search`, `video.stream`) — `concurrent`, чтобы ожидание первого взгляда на поставщика не держало очередь; у torrents один путь к клиенту — через ожидание `_looked` (`releases.py`, `qbt_not_configured`) |
-| 6 | Итог | ⛔ | `core` — только инфраструктура; `contracts/bus_topics.md` из реестра; замер до и после; README, раздел «Архитектура» |
+| 4 | rules, unpack, voices — по проходу на модуль | ✅ | `calc/rules`, `calc/unpack`; очереди и имена озвучек → `calc` |
+| 5 | Остальные модули — перевод на реестр | ⛔ | catalog, settings, sources, torrents, downloads, scan, conform, library, metadata, renaming, trackerauth, auth, runlog, gateway; модели ответов `catalog.series.get/list`, `catalog.sources.by_profile`; события `composition.*` — моделями после прохода их потребителей; чтения `sources` (`table.get`, `table.read`, `pages.check`, `titles.search`, `video.stream`) — `concurrent`, чтобы ожидание первого взгляда на поставщика не держало очередь; у torrents один путь к клиенту — через ожидание `_looked` (`releases.py`, `qbt_not_configured`); `SiteResolveReply` — `Frozen` с проходом sources |
+| 6 | Итог | ⛔ | `core` — только инфраструктура; место чистых листьев `core.fsnames`, `core.ignored`, `core.reasons`; что из ответов-моделей пишет дамп синхронизации (`modules/runlog/module.py:77-79`); `contracts/bus_topics.md` из реестра; замер до и после; README, раздел «Архитектура» |
 
 Один модуль — один коммит, после него — тесты модуля и основной набор, выкатка. Этапы 2–4 повторяют перенос файлов на
 текущем `main` по образцу ветки прототипа и добавляют к нему проход модуля.
@@ -54,7 +56,7 @@
 | О-5 | снят | Остановки цикла за ~19 ч: 4 158, сумма 864 с, из них 430 с — запуск программ (`core/proc.py:127`), 60 с — код будущего `calc`. Пересчёт сериала 46: раскладка 1,55–2,06 с, план и вид 0,71–1,09 с. Разброс до трети при `loadavg` 36–45 | требование 7 различает только разницу больше трети |
 
 Правила этапа 1, выведенные из этапа 0:
-- `calc` импортирует `core.contracts`, `core.reasons`, `core.ignored` (чистые листья `core`) и `calc`. Мемоизация
+- `calc` импортирует `core.contracts`, `core.reasons`, `core.ignored`, `core.fsnames` (чистые листья `core`) и `calc`. Мемоизация
   (`lru_cache`, `cached_property`) и таблицы, заполняемые при импорте, допустимы: выход по-прежнему зависит только
   от входа.
 - Вид смешанного топика: чтение с флагом действия (`sources.table.get` с `refresh`) делится на query и command по
@@ -120,5 +122,6 @@
 
 ## СЛЕДУЮЩИЙ ШАГ
 
-Этап 4: проходы rules, unpack, voices — счёт в `calc/rules`, `calc/unpack`, чистое из `voices` в `calc`, топики
-константами реестра, ответы моделями; сверка JSON окна и замер тем же способом. Служит требованиям 1, 3, 4 CHARTER.
+Этап 5: проходы остальных модулей (catalog, settings, sources, torrents, downloads, scan, conform, library, metadata,
+renaming, trackerauth, auth, runlog, gateway) — чистое в `calc`, топики константами реестра, ответы и события моделями,
+записанные в строке этапа хвосты; сверка JSON и замер тем же способом. Служит требованиям 1, 3, 4 CHARTER.
