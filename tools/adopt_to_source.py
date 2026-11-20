@@ -21,7 +21,6 @@ import argparse
 import json
 import os
 import sqlite3
-import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable

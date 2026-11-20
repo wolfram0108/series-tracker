@@ -7,7 +7,6 @@ from __future__ import annotations
 import pytest
 from playwright.async_api import expect
 
-from test_ui_stand import series_in_browser
 from ui_stand import UiStand, text, ui  # noqa: F401 - the fixture
 
 pytestmark = [pytest.mark.ui, pytest.mark.asyncio]

@@ -1,13 +1,9 @@
 """Sources that lose what they gave, in a browser (tests/ui_stand.py): a row, a part of the list, the whole page, the source
 itself, a compilation; what the files keep, what is made anew and what the window says. The work of the service is counted
 by its models: the files the site gave out (`host.served`) and the jobs of the alignment service (`daemon.jobs`)."""
-import os
-import re
-
 import pytest
 from playwright.async_api import expect
 
-from core import container as mkv
 from ui_stand import state, text, ui  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.ui

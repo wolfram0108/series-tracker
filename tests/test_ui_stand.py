@@ -1,15 +1,12 @@
 """The whole application in a browser (tests/ui_stand.py): the user's way through the screens on a stand whose site,
 player and alignment service are models."""
 import asyncio
-import re
-import os
 
 import pytest
 from playwright.async_api import expect
 
 from app_stand import STAND_LIMIT_S
 from core import container as mkv
-from plan_world import truth_of
 from ui_stand import SERIES, state, text, ui  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.ui

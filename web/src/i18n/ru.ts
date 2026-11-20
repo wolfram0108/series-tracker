@@ -1431,7 +1431,6 @@ export const ru = {
   "reason.internal_error": "внутренняя ошибка: {cause}",
   "reason.qbt_error": "qBittorrent: ошибка раздачи — проверьте путь сохранения",
   "reason.qbt_files_missing": "qBittorrent: файлы недоступны или перемещены",
-  "reason.qbt_not_configured": "qBittorrent не настроен",
   "reason.qbt_login_rejected": "qBittorrent отверг логин (HTTP {status})",
   "reason.qbt_session_broken": "Логин в qBittorrent принят, но сессия не работает (HTTP {status})",
   "reason.qbt_retries_exhausted": "{method} {path}: не удалось за {attempts} попыток ({detail})",
