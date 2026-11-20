@@ -59,7 +59,7 @@ class Neighbours(BaseModule):
 
     def register(self) -> None:
         self.handle("catalog.series.get", self.on_series)
-        self.handle("composition.layout", self.on_composition)
+        self.handle("composition.get", self.on_composition)
         self.handle("voices.settings.get", self.on_voices)
         self.handle("conform.workspace", self.on_workspace)
         self.handle("downloads.fetch", self.on_fetch, concurrent=True)

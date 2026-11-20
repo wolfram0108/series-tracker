@@ -115,16 +115,28 @@ from calc.view.packing import card_id
 from calc.view.view import placed
 from core import compute, storage
 from core.clock import beat_while
-from core.contracts import (WORK_WITHDRAWN, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, SeriesSource, SourceType,
-                            SubmitOutcome, SubmitReply, SyncScope, job_dir, job_key)
+from core.contracts import (CompositionGetRequest, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, SeriesSource,
+                            SourceType, SubmitOutcome, SubmitReply, SyncScope, job_dir, job_key)
 from core.contracts.torrent import fonts_of, parse_link
-from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
+from core.contracts.work import WorkState, WorkWithdrawn
 from core.dump import plain
 from core.envelope import Envelope
 from core.ffprobe import END_SLACK_S, duration_of
 from core.fsnames import sanitize_name
 from core.module import NO_HANDLER, BaseModule, BusRequestError
 from core.reasons import describe, reason
+from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, CATALOG_SERIES_TOUCH_SCAN_TIME, COMPOSITION_CHANGED,
+                         COMPOSITION_GET, CONFORM_CANCEL, CONFORM_JOB_FIND, CONFORM_JOB_FINISHED, CONFORM_JOB_GET,
+                         CONFORM_JOB_KEYS, CONFORM_JOB_REMOVED, CONFORM_REVERSE, CONFORM_SETTINGS_GET, CONFORM_SUBMIT,
+                         CONFORM_WORKSPACE, DOWNLOADS_FETCH, DOWNLOADS_FETCH_FINISHED, DOWNLOADS_WITHDRAW,
+                         GATEWAY_SSE_CLIENTS, PLANNER_DELETE, PLANNER_DELETE_CANCEL, PLANNER_DOWNLOADED_COUNTS,
+                         PLANNER_FAILURES_FORGET, PLANNER_FILES_GET, PLANNER_JOURNAL_CHANGED, PLANNER_PACK_CHANGED,
+                         PLANNER_PACK_GET, PLANNER_PACK_REMOVE, PLANNER_REFERENCES_GET, PLANNER_SEASONS,
+                         PLANNER_SERIES_CHANGED, PLANNER_SERIES_GET, PLANNER_SYNC, PLANNER_SYNC_CANCEL,
+                         PLANNER_SYNC_TRACE, PLANNER_WORK_GET, RULES_FORMAT_FILENAME, SERIES_DELETED,
+                         SERIES_DOWNLOADED_CHANGED, SERIES_PURGED, SERIES_STATUS_CONTRIBUTION, SERIES_UPDATED,
+                         SYSTEM_STARTED, TORRENTS_RELEASE_DROP_FILES, TORRENTS_RELEASES_GET, VOICES_SETTINGS_CHANGED,
+                         VOICES_SETTINGS_GET, WORK_SERIES_STATE, WORK_WITHDRAWN, Topic)
 
 from .executor import SeriesSync
 from .files import Library, as_in_file
@@ -149,11 +161,11 @@ OTHER_MAX_HEIGHT = 720
 # event that tells that the answer changed: one table, so that an input added to the view is an input whose change counts
 # the view again. Its own tables (the asset, the failures, the commands) are written by the module itself, which counts the
 # view again after it writes them. The tests of the module check that a count asks nothing that is not here.
-VIEW_INPUTS: dict[str, str] = {
-    "catalog.series.get": "series.updated",
-    "composition.layout": "composition.changed",
-    "voices.settings.get": "voices.settings.changed",
-    "rules.format_filename": "series.updated",  # the rule of names reads the card and the numbers of the episode
+VIEW_INPUTS: dict[Topic, Topic] = {
+    CATALOG_SERIES_GET: SERIES_UPDATED,
+    COMPOSITION_GET: COMPOSITION_CHANGED,
+    VOICES_SETTINGS_GET: VOICES_SETTINGS_CHANGED,
+    RULES_FORMAT_FILENAME: SERIES_UPDATED,  # the rule of names reads the card and the numbers of the episode
 }
 
 
@@ -218,11 +230,11 @@ class BusSync(SeriesSync):
     async def trace(self, kind: str, data: dict) -> None:
         # The tables of a plan of a big series are large: they are made plain off the loop.
         body = await compute.run(plain, data) if kind == "plan" else plain(data)
-        self.m.publish_event("planner.sync.trace", {"series_id": self.series["id"], "run": self.run_mark, "kind": kind,
+        self.m.publish_event(PLANNER_SYNC_TRACE, {"series_id": self.series["id"], "run": self.run_mark, "kind": kind,
                                                     "download": self.download, "data": body})
 
     async def prepare(self) -> None:
-        folders = await self.m.request("conform.workspace", {})
+        folders = await self.m.request(CONFORM_WORKSPACE, {})
         if folders.get("downloads") and folders.get("conform"):
             self.downloads_dir = os.path.join(folders["downloads"], WORK, str(self.series["id"]))
             self.conform_dir = os.path.join(folders["conform"], WORK, str(self.series["id"]))
@@ -237,7 +249,7 @@ class BusSync(SeriesSync):
         for key, (slot, video, item) in wanted.items():
             off = key[-1]
             try:
-                made_name = (await self.m.request("rules.format_filename", {"series": self.series, "media_item": item}))["filename"]
+                made_name = (await self.m.request(RULES_FORMAT_FILENAME, {"series": self.series, "media_item": item}))["filename"]
                 self.names[key] = filename_of(made_name, off)
             except (BusRequestError, KeyError):
                 self.names[key] = name_of(slot, video.snapshot, off)  # the rule refused: the planner's own name
@@ -334,7 +346,7 @@ class BusSync(SeriesSync):
         rule, stage 10), it only gives its sound; the picture of a cut at the height of the setting
         `voices.cut_max_height` (none: the best)."""
         if op.kind == "download_picture":
-            height = int((await self.m.request("voices.settings.get", {})).get("cut_max_height") or 0)
+            height = int((await self.m.request(VOICES_SETTINGS_GET, {})).get("cut_max_height") or 0)
             return height or None
         if op.kind == "download_dub":
             return OTHER_MAX_HEIGHT
@@ -374,7 +386,7 @@ class BusSync(SeriesSync):
         step reads it there. Nothing is copied, and the file is never removed by the sync: it is the release's."""
         release, video, file, stream = parse_link(row.link)
         url = self.source_urls.get(row.id.source_id)
-        reply = await self.m.request("torrents.releases.get", {"url": url}) if url else {}
+        reply = await self.m.request(TORRENTS_RELEASES_GET, {"url": url}) if url else {}
         kept = next((each for each in reply.get("releases") or [] if each["release"] == release), None)
         if kept is None or kept["state"] != "ready" or not kept.get("folder"):
             raise Passing(reason("torrent_not_ready", release=release))
@@ -550,7 +562,7 @@ class BusSync(SeriesSync):
         key = self._job_key("align", goal.slot, timeline,
                             sorted((op.subject[1].voice, repr(op.subject[1].dub)) for op in ops))
         folder = os.path.join(self.conform_dir, job_dir(key))
-        places = await self.m.request("conform.workspace", {"dub_folder": folder})
+        places = await self.m.request(CONFORM_WORKSPACE, {"dub_folder": folder})
         of_dub = {}
         for op in ops:  # the name the file of each voice-over has in the job (the job taken up again has the same)
             way = op.subject[1]
@@ -613,7 +625,7 @@ class BusSync(SeriesSync):
                 copied.setdefault(path, dub)
             dubs.append(dub)
             streams.append(stream)
-        return await self.m.job(key, "conform.submit", body={
+        return await self.m.job(key, CONFORM_SUBMIT, body={
             "ref": ref, "dubs": dubs, "dub_atracks": streams, "out_dir": places["out_dir"],
             "cache_dir": places["cache_dir"], "label": label, "key": key,
             **({"ref_atrack": ref_atrack} if ref_atrack else {})})
@@ -625,7 +637,7 @@ class BusSync(SeriesSync):
         key = self._job_key("cut", op.slot, way.row.id, ref2)
         label = f"{self.series['name']} {label_of(op.slot)}"
         folder = os.path.join(self.conform_dir, f"{label_of(op.slot)} #{job_dir(key)}")
-        places = await self.m.request("conform.workspace", {"dub_folder": folder})
+        places = await self.m.request(CONFORM_WORKSPACE, {"dub_folder": folder})
         self.keys.add(key)
         job_id = await self.m.find_job(key)
         if job_id:
@@ -642,7 +654,7 @@ class BusSync(SeriesSync):
             else:
                 picture, picture_atrack = results[f"picture:{way.row.id}"].file, 0
             picture = await self._copy(picture, os.path.join(folder, "picture"))
-            found = await self.m.job(key, "conform.reverse", body={
+            found = await self.m.job(key, CONFORM_REVERSE, body={
                 "compilation": picture, "compilation_atrack": picture_atrack,
                 "episodes": [{"path": episode, "atrack": atrack}], "out_dir": places["out_dir"], "label": label})
         if found is None:
@@ -719,7 +731,7 @@ class BusSync(SeriesSync):
         self.m._ask_recount(self.series["id"])  # the files of the series changed: every window is told now, not at the end
         if staged and any(step[0] == "publish" for step in staged):
             # A new file of the series: the card shows when the series last got one (catalog: last_scan_time).
-            self.m.send_command("catalog.series.touch_scan_time", {"series_id": self.series["id"]})
+            self.m.send_command(CATALOG_SERIES_TOUCH_SCAN_TIME, {"series_id": self.series["id"]})
             await self.m.count_changed(self.series["id"])
 
 
@@ -757,27 +769,27 @@ class PlannerModule(BaseModule):
         self._standing: dict[int, dict[str, bool]] = {}
 
     def register(self) -> None:
-        self.handle("planner.sync", self.on_sync)
-        self.handle("planner.sync.cancel", self.on_sync_cancel, concurrent=True)
-        self.handle("planner.work.get", self.on_work_get)
-        self.handle("planner.series.get", self.on_series_get, concurrent=True)
-        self.handle("planner.delete", self.on_delete)
-        self.handle("planner.delete.cancel", self.on_delete_cancel)
-        self.handle("planner.failures.forget", self.on_failures_forget)
-        self.handle("planner.files.get", self.on_files_get)
-        self.handle("planner.references.get", self.on_references_get)
-        self.handle("planner.downloaded_counts", self.on_downloaded_counts)
-        self.handle("planner.seasons", self.on_seasons)
-        self.handle("downloads.fetch.finished", self.on_fetch_finished)
-        self.handle("conform.job.finished", self.on_job_finished)
-        self.handle("conform.job.removed", self.on_job_removed)
-        self.handle("system.started", self.on_system_started)
-        self.handle("series.deleted", self.on_series_deleted)
-        for changed in sorted(set(VIEW_INPUTS.values())):
+        self.handle(PLANNER_SYNC, self.on_sync)
+        self.handle(PLANNER_SYNC_CANCEL, self.on_sync_cancel, concurrent=True)
+        self.handle(PLANNER_WORK_GET, self.on_work_get)
+        self.handle(PLANNER_SERIES_GET, self.on_series_get, concurrent=True)
+        self.handle(PLANNER_DELETE, self.on_delete)
+        self.handle(PLANNER_DELETE_CANCEL, self.on_delete_cancel)
+        self.handle(PLANNER_FAILURES_FORGET, self.on_failures_forget)
+        self.handle(PLANNER_FILES_GET, self.on_files_get)
+        self.handle(PLANNER_REFERENCES_GET, self.on_references_get)
+        self.handle(PLANNER_DOWNLOADED_COUNTS, self.on_downloaded_counts)
+        self.handle(PLANNER_SEASONS, self.on_seasons)
+        self.handle(DOWNLOADS_FETCH_FINISHED, self.on_fetch_finished)
+        self.handle(CONFORM_JOB_FINISHED, self.on_job_finished)
+        self.handle(CONFORM_JOB_REMOVED, self.on_job_removed)
+        self.handle(SYSTEM_STARTED, self.on_system_started)
+        self.handle(SERIES_DELETED, self.on_series_deleted)
+        for changed in sorted(set(VIEW_INPUTS.values()), key=lambda topic: topic.name):
             self.handle(changed, self.on_view_input_changed)
-        self.handle("gateway.sse.clients", self.on_sse_clients)
-        self.handle("planner.pack.get", self.on_pack_get)
-        self.handle("planner.pack.remove", self.on_pack_remove)
+        self.handle(GATEWAY_SSE_CLIENTS, self.on_sse_clients)
+        self.handle(PLANNER_PACK_GET, self.on_pack_get)
+        self.handle(PLANNER_PACK_REMOVE, self.on_pack_remove)
 
     async def on_start(self) -> None:
         for card in await self.repo.pack_cards():
@@ -803,7 +815,7 @@ class PlannerModule(BaseModule):
 
     async def _sync(self, series_id: int, download: bool, scope: SyncScope | None = None) -> None:
         try:
-            series = await self.request("catalog.series.get", {"series_id": series_id})
+            series = await self.request(CATALOG_SERIES_GET, {"series_id": series_id})
             await self.repo.drop_pack_cards(self.packing.sync_started(series_id))
             sync = self._syncs[series_id] = BusSync(self, series, download, scope)
             sync.run_mark = await self.repo.run_started(series_id)
@@ -908,16 +920,16 @@ class PlannerModule(BaseModule):
 
     async def _inputs(self, series: dict):
         series_id = series["id"]
-        layout = await self.request("composition.layout", {"series_id": series_id})
-        voices = await self.request("voices.settings.get", {})
+        layout = await self.request(COMPOSITION_GET, CompositionGetRequest(series_id=series_id).model_dump(mode="json"))
+        voices = await self.request(VOICES_SETTINGS_GET, {})
         online, choices, self._members[series_id] = await compute.run(layout_inputs, layout, series, voices)
         return online, choices
 
     # --- the picture of the packing ------------------------------------------------------------------------------
 
     def pack_publish(self) -> None:
-        self.publish_event("planner.pack.changed", {"tasks": [card.model_dump(mode="json") for card in self.packing.view()]})
-        self.publish_event("planner.journal.changed",
+        self.publish_event(PLANNER_PACK_CHANGED, {"tasks": [card.model_dump(mode="json") for card in self.packing.view()]})
+        self.publish_event(PLANNER_JOURNAL_CHANGED,
                            {"journals": [each.model_dump(mode="json") for each in self.packing.journals_view()]})
 
     def pack_going(self) -> None:
@@ -1027,18 +1039,18 @@ class PlannerModule(BaseModule):
             task.cancel()
         await self.repo.purge(series_id)
         try:
-            root = (await self.request("conform.workspace", {})).get("conform")
+            root = (await self.request(CONFORM_WORKSPACE, {})).get("conform")
             if root:
                 await storage.call(Kept.of(root, series_id).drop, timeout=storage.REMOVE_TIMEOUT_S)
         except (BusRequestError, asyncio.TimeoutError, OSError):
             self.log.warning("сериал %d: сохранённые выравнивания не убраны с удалением сериала", series_id)
-        self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})
+        self.publish_event(SERIES_PURGED, {"series_id": series_id, "owner": self.name})
 
     # --- the workers' signals ------------------------------------------------------------------------------------
 
     async def fetch(self, key: str, job: dict) -> dict:
         future = self._fetches.setdefault(key, asyncio.get_running_loop().create_future())
-        self.send_command("downloads.fetch", job)
+        self.send_command(DOWNLOADS_FETCH, job)
         try:
             return await future
         finally:
@@ -1049,7 +1061,7 @@ class PlannerModule(BaseModule):
         if future is not None and not future.done():
             future.set_result(env.payload)
 
-    async def job(self, key: str, topic: str, body: dict) -> tuple[str, dict] | None:
+    async def job(self, key: str, topic: Topic, body: dict) -> tuple[str, dict] | None:
         """A job at the alignment service: its number and how it ended (the result of each of its files, judged by the
         caller), None when the service refused the job; `Passing` when it could not be asked or its answer never came.
         Every end but a success is written to the log with its reason: the service keeps the reason of a crash, and
@@ -1062,10 +1074,10 @@ class PlannerModule(BaseModule):
                              describe(str(passing.args[0])) if passing.args else "ответа сервиса нет")
             raise
 
-    async def _job(self, key: str, topic: str, body: dict) -> tuple[str, dict] | None:
+    async def _job(self, key: str, topic: Topic, body: dict) -> tuple[str, dict] | None:
         label = body.get("label") or key
         try:
-            if topic == "conform.submit":
+            if topic is CONFORM_SUBMIT:
                 reply = SubmitReply.model_validate(await self.request(topic, body))
                 outcome, refusal, job_id = reply.outcome, reply.reason, reply.job_id
             else:
@@ -1077,7 +1089,7 @@ class PlannerModule(BaseModule):
                 raise Passing from None
             outcome, refusal, job_id = SubmitOutcome.UNCERTAIN, str(exc), None
         if outcome is SubmitOutcome.UNCERTAIN and job_id is None:
-            found = await self.request("conform.job.find", {"key": key})
+            found = await self.request(CONFORM_JOB_FIND, {"key": key})
             job_id = found.get("job_id")
             if not job_id:
                 raise Passing(reason("daemon_job_lost", cause=str(refusal)))
@@ -1125,7 +1137,7 @@ class PlannerModule(BaseModule):
         """The downloads of the series stop, and the stop is over only once their programs have: asked and waited for;
         without an executor that answers, told (work.withdrawn)."""
         try:
-            await self.request("downloads.withdraw", {"series_id": series_id})
+            await self.request(DOWNLOADS_WITHDRAW, {"series_id": series_id})
         except (BusRequestError, asyncio.TimeoutError) as exc:
             if NO_HANDLER not in str(exc):
                 self.log.warning("сериал %d: загрузки не остановлены по запросу: %s", series_id, exc)
@@ -1135,7 +1147,7 @@ class PlannerModule(BaseModule):
         """A job of a stopped sync: stopped if it waits or runs, then its record leaves the history (its folder with it)."""
         for _ in range(2):  # the first stops a job under way, the second removes the record of a job that ended
             try:
-                if not (await self.request("conform.cancel", {"job_id": job_id})).get("done"):
+                if not (await self.request(CONFORM_CANCEL, {"job_id": job_id})).get("done"):
                     return
             except (BusRequestError, asyncio.TimeoutError):
                 self.log.warning("задача %s сервиса выравнивания не снята: сервис не ответил", job_id)
@@ -1152,17 +1164,17 @@ class PlannerModule(BaseModule):
                      if source.source_type == SourceType.TORRENT]
             if not pages:
                 return
-            listing = await self.request("catalog.series.list", {})
+            listing = await self.request(CATALOG_SERIES_LIST, {})
             for url in pages:
                 shared = any(other["id"] != series["id"] and any(each["url"] == url for each in other.get("sources") or [])
                              for other in listing)
                 if shared:
                     continue
-                for release in (await self.request("torrents.releases.get", {"url": url})).get("releases") or []:
+                for release in (await self.request(TORRENTS_RELEASES_GET, {"url": url})).get("releases") or []:
                     if not release["watched"] and release["state"] == "ready":
                         self.log.info("сериал %d: раздача %s %s без слежения собрана — её файлы удаляются", series["id"],
                                       url, release["release"])
-                        self.send_command("torrents.release.drop_files", {"url": url, "release": release["release"]})
+                        self.send_command(TORRENTS_RELEASE_DROP_FILES, {"url": url, "release": release["release"]})
         except Exception:  # noqa: BLE001 - the files of a release stay until the next sync; nothing is lost by waiting
             self.log.exception("сериал %d: раздачи без слежения не разобраны", series["id"])
 
@@ -1178,7 +1190,7 @@ class PlannerModule(BaseModule):
     async def find_job(self, key: str) -> str | None:
         """The job of the service a stop left behind, by its key: taken up instead of being sent again."""
         try:
-            return (await self.request("conform.job.find", {"key": key})).get("job_id")
+            return (await self.request(CONFORM_JOB_FIND, {"key": key})).get("job_id")
         except (BusRequestError, asyncio.TimeoutError):
             return None
 
@@ -1189,7 +1201,7 @@ class PlannerModule(BaseModule):
             ended = self._ended.pop(job_id, None)
             if ended is None:
                 try:
-                    state = await self.request("conform.job.get", {"job_id": job_id})
+                    state = await self.request(CONFORM_JOB_GET, {"job_id": job_id})
                 except (BusRequestError, asyncio.TimeoutError):
                     state = {}  # not told now: the end of the job comes as its event
                 if state.get("status") in ENDED:
@@ -1205,10 +1217,10 @@ class PlannerModule(BaseModule):
     async def sweep(self, series_ids=None) -> None:
         """A folder of a job stays while the record of the job is in the service's history (the plots are shown from
         it); a record gone takes its folder. A series whose sync is under way is left to the end of its sync."""
-        root = (await self.request("conform.workspace", {})).get("conform")
+        root = (await self.request(CONFORM_WORKSPACE, {})).get("conform")
         if not root:
             return
-        known = await self.request("conform.job.keys", {})
+        known = await self.request(CONFORM_JOB_KEYS, {})
         if not known.get("reachable"):
             return
         keys, base = {job_dir(key) for key in known.get("keys") or []}, os.path.join(root, WORK)
@@ -1231,11 +1243,11 @@ class PlannerModule(BaseModule):
     async def clear_finished(self, jobs: list[tuple[str, bool]]) -> None:
         """The setting conform.clear_finished: a job that ended with every result taken leaves the service's history at
         once (its folder goes with it); one that ended in an error stays for the owner."""
-        if not jobs or not (await self.request("conform.settings.get", {})).get("clear_finished"):
+        if not jobs or not (await self.request(CONFORM_SETTINGS_GET, {})).get("clear_finished"):
             return
         for job_id, clean in jobs:
             if clean:
-                await self.request("conform.cancel", {"job_id": job_id})
+                await self.request(CONFORM_CANCEL, {"job_id": job_id})
 
     async def on_job_finished(self, env: Envelope) -> None:
         job_id = env.payload.get("job_id")
@@ -1278,7 +1290,7 @@ class PlannerModule(BaseModule):
 
     def _tell_status(self, series_id: int) -> None:
         flags = {**self._standing.get(series_id, {}), **self._activity.get(series_id, {})}
-        self.publish_event("series.status.contribution", {"source": PLANNER, "series_id": series_id, "flags": flags})
+        self.publish_event(SERIES_STATUS_CONTRIBUTION, {"source": PLANNER, "series_id": series_id, "flags": flags})
 
     def _state(self, series_id: int) -> WorkState:
         self._seq += 1
@@ -1288,7 +1300,7 @@ class PlannerModule(BaseModule):
 
     def _announce_work(self, series_id: int, active: bool) -> None:
         self._seq += 1
-        self.publish_event(WORK_STATE, WorkState(owner=PLANNER, series_id=series_id, active=active, busy=[], seq=self._seq,
+        self.publish_event(WORK_SERIES_STATE, WorkState(owner=PLANNER, series_id=series_id, active=active, busy=[], seq=self._seq,
                                                  failure=None if active else self._failures.get(series_id)).model_dump())
 
     async def on_work_get(self, env: Envelope) -> dict:
@@ -1315,7 +1327,7 @@ class PlannerModule(BaseModule):
 
     async def _told(self, series_id: int, view: dict) -> None:
         self._shown[series_id] = view
-        self.publish_event("planner.series.changed", view)
+        self.publish_event(PLANNER_SERIES_CHANGED, view)
         await self._stand(series_id, view)
 
     def _ask_recount(self, series_id: int) -> asyncio.Task:
@@ -1363,7 +1375,7 @@ class PlannerModule(BaseModule):
             made, inputs = self._views[series_id]
         if sync is None or made is None:
             try:
-                series = await self.request("catalog.series.get", {"series_id": series_id})
+                series = await self.request(CATALOG_SERIES_GET, {"series_id": series_id})
             except (BusRequestError, asyncio.TimeoutError):
                 series = None
             fresh = BusSync(self, series, False) if series is not None else SeriesSync()
@@ -1429,7 +1441,7 @@ class PlannerModule(BaseModule):
     async def count_changed(self, series_id: int) -> None:
         """The series holds another number of files: told to whoever shows it."""
         held = (await self.repo.episodes(series_id)).get(series_id, set())
-        self.publish_event("series.downloaded.changed",
+        self.publish_event(SERIES_DOWNLOADED_CHANGED,
                            {"series_id": series_id, "count": sum(1 for season, _ in held if season != 0)})
 
     async def on_downloaded_counts(self, env: Envelope) -> dict:
@@ -1447,7 +1459,7 @@ class PlannerModule(BaseModule):
         stop cut short and what it put aside: they go with the folder and are carried out there."""
         series_id = int(env.payload["series_id"])
         names = [data["name"] for data in await self.repo.assets(series_id)]
-        series = await self.request("catalog.series.get", {"series_id": series_id})
+        series = await self.request(CATALOG_SERIES_GET, {"series_id": series_id})
         files = Library(series["save_path"])
         journal = await storage.call(files.read_journal)
         if journal is not None:
@@ -1476,7 +1488,7 @@ class PlannerModule(BaseModule):
 
     async def _failures_of(self, series_id: int, forget: PlanForget) -> list[tuple]:
         """The failed attempts of the series that belong to the level, placed by the rows the sources give now."""
-        series = await self.request("catalog.series.get", {"series_id": series_id})
+        series = await self.request(CATALOG_SERIES_GET, {"series_id": series_id})
         held = {failure_of_key(each) for each in await self.repo.failures(series_id)}
         rows, choices = await self._inputs(series)
         inputs = BusSync(self, series, False).inputs(rows, choices)

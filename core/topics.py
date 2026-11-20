@@ -292,10 +292,6 @@ COMPOSITION_FAILED = Topic("composition.failed", EVENT, "composition", request=C
 COMPOSITION_GET = Topic(
     "composition.get", QUERY, "composition", request=CompositionGetRequest, reply=CompositionReply,
     fuse=STANDARD_S)
-# The same answer by the same handler: the name the planner asks the whole layout by.
-COMPOSITION_LAYOUT = Topic(
-    "composition.layout", QUERY, "composition", request=CompositionGetRequest, reply=CompositionReply,
-    fuse=STANDARD_S)
 # Mixed as sources.table.get (`refresh`); with `lines` a pure query. A preview reads the table, applies the profile to
 # its lines and asks for the groups of the names, one after another.
 COMPOSITION_PREVIEW = Topic(
@@ -381,14 +377,14 @@ PLANNER_PACK_REMOVE = Topic("planner.pack.remove", COMMAND, "planner", fuse=STAN
 # voice-overs, the names.
 PLANNER_REFERENCES_GET = Topic(
     "planner.references.get", QUERY, "planner",
-    fuse=after(STANDARD_S, CATALOG_SERIES_GET, COMPOSITION_LAYOUT, VOICES_SETTINGS_GET))
+    fuse=after(STANDARD_S, CATALOG_SERIES_GET, COMPOSITION_GET, VOICES_SETTINGS_GET))
 PLANNER_SEASONS = Topic("planner.seasons", QUERY, "planner", fuse=QUICK_S)
 PLANNER_SERIES_CHANGED = Topic("planner.series.changed", EVENT, "planner", request=PlannerView)
 # A projection counted on demand (and published) when it is not there yet: a query. The view of the plan reads the table
 # of the series.
 PLANNER_SERIES_GET = Topic(
     "planner.series.get", QUERY, "planner", reply=PlannerView,
-    fuse=after(STANDARD_S, CATALOG_SERIES_GET, COMPOSITION_LAYOUT, VOICES_SETTINGS_GET))
+    fuse=after(STANDARD_S, CATALOG_SERIES_GET, COMPOSITION_GET, VOICES_SETTINGS_GET))
 # The sync of the plan of a series is written down and started: its work is told by work.series.state.
 PLANNER_SYNC = Topic("planner.sync", COMMAND, "planner", fuse=QUICK_S)
 PLANNER_SYNC_CANCEL = Topic("planner.sync.cancel", COMMAND, "planner", fuse=STANDARD_S)

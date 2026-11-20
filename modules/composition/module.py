@@ -21,8 +21,8 @@ compilation that covers it, is switched on (`compilation.take`) and is higher th
 `compilation.member` to a compilation that is no higher are refused (`compilation_not_better`).
 
 Queries:
-  composition.get {series_id, include_excluded?, sources_only?, part?, episodes?} → CompositionReply (`composition.layout
-      {series_id}` is the same answer for the planner, which asks for the whole layout): the rows of the layout in the order of the sources
+  composition.get {series_id, include_excluded?, sources_only?, part?, episodes?} → CompositionReply (the planner asks it for the
+      whole layout, `{series_id}`): the rows of the layout in the order of the sources
       (rows the constructor excluded, gave no episode number, the source's own choice left out — a player switched off
       for it, another season of a catalog, `exclusion='source'` —, or whose player is switched off in the settings for
       every source, `exclusion='settings'`; only with include_excluded), the summary of every
@@ -136,7 +136,7 @@ from core.envelope import Envelope
 from core.module import BaseModule
 from core.reasons import reason
 from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, CATALOG_SOURCES_BY_PROFILE, COMPOSITION_CHANGED,
-                         COMPOSITION_FAILED, COMPOSITION_GET, COMPOSITION_LAYOUT, COMPOSITION_PREVIEW,
+                         COMPOSITION_FAILED, COMPOSITION_GET, COMPOSITION_PREVIEW,
                          COMPOSITION_QUEUES_GET, COMPOSITION_RECOMPUTE, COMPOSITION_SERIES_READING,
                          COMPOSITION_SETTINGS_RESET, COMPOSITION_SETTINGS_SET, COMPOSITION_SETTINGS_SET_MANY,
                          COMPOSITION_VOICE_ORDER_SET, COMPOSITION_VOICE_TITLE_SET, RULES_APPLY, RULES_PROFILE_CHANGED,
@@ -207,7 +207,6 @@ class CompositionModule(BaseModule):
 
     def register(self) -> None:
         self.handle(COMPOSITION_GET, self.on_get)
-        self.handle(COMPOSITION_LAYOUT, self.on_get)
         self.handle(COMPOSITION_QUEUES_GET, self.on_queues_get)
         # Waits for a whole count, so the requests for different series must not queue behind each other.
         self.handle(COMPOSITION_RECOMPUTE, self.on_recompute, concurrent=True)
