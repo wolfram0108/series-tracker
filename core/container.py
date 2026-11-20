@@ -110,6 +110,8 @@ class SubtitleOut:
     language: str = ""
     forced: bool = False
     default: bool = False
+    # The statistics tag of the file says the track ends where it begins: it holds no events (to be told by counting them).
+    at_start: bool = False
 
 
 @dataclass(frozen=True)
@@ -416,7 +418,8 @@ async def contents(path: str, *, timeout: float = READ_TIMEOUT_S) -> Contents | 
         subtitles.append(SubtitleOut(index=number, key=own.get("st_sub", ""), title=own.get("title", ""),
                                      language=own.get("language", ""),
                                      forced=bool((stream.get("disposition") or {}).get("forced")),
-                                     default=bool((stream.get("disposition") or {}).get("default"))))
+                                     default=bool((stream.get("disposition") or {}).get("default")),
+                                     at_start=bool(own.get("duration")) and set(own["duration"]) <= set("0:.")))
     try:
         duration = float(info.get("format", {}).get("duration") or 0.0)
     except ValueError:

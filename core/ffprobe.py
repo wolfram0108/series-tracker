@@ -221,22 +221,27 @@ EVENTS_TIMEOUT_S = 300.0
 
 
 async def subtitle_events(path: str, *, timeout: float = EVENTS_TIMEOUT_S) -> dict[int, int] | None:
-    """How many events (lines of text) each subtitles stream of a file holds, by the stream's index: the packets are what
-    is counted, since a header says nothing of them (a track of an Aegisub script with no lines still has its styles).
-    A stream with none is absent; None when ffprobe could not tell."""
+    """How many events (lines of text) each subtitles stream of a file holds, by the stream's index, in the order of the
+    streams (so the n-th item is the n-th subtitles track): the packets are what is counted, since a header says nothing
+    of them (a track of an Aegisub script with no lines still has its styles). None when ffprobe could not tell."""
     executable = program("ffprobe")
     if not executable:
         return None
     try:
         async with _probes():
             code, out, _ = await run_capture([executable, "-v", "error", "-select_streams", "s", "-show_entries",
-                                              "packet=stream_index", "-of", "csv=p=0", path], timeout=timeout)
+                                              "stream=index:packet=stream_index", "-of", "default=nw=1", path], timeout=timeout)
     except (OSError, TimeoutError):
         return None
     if code not in (0, LOST):
         return None
+    # The packets come before the list of the streams in the answer: the streams give the order, the packets the numbers.
+    streams: list[int] = []
     counts: dict[int, int] = {}
     for line in out.decode(errors="replace").splitlines():
-        if line.strip().isdigit():
-            counts[int(line)] = counts.get(int(line), 0) + 1
-    return counts
+        name, _, value = line.strip().partition("=")
+        if value.isdigit() and name == "index":
+            streams.append(int(value))
+        elif value.isdigit() and name == "stream_index":
+            counts[int(value)] = counts.get(int(value), 0) + 1
+    return {index: counts.get(index, 0) for index in streams}

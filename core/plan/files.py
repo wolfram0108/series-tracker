@@ -14,6 +14,7 @@ import shutil
 from dataclasses import asdict, replace
 
 from core import container as mkv
+from core.ffprobe import subtitle_events
 
 from .executor import Made, video_of
 from .planner import Goal, Group, Plan, subtitles_op, video_op
@@ -72,9 +73,27 @@ def key_in(container: Container, dub: RowId) -> str:
     return track.tag if track is not None and track.tag else dub_key(dub)
 
 
+async def without_silent(files: "Library", container: Container) -> Container:
+    """The container without the subtitles tracks its file holds with no events (a header and nothing else): the plan
+    keeps what a file holds, and a track with nothing to show can be neither kept nor built into a container again. The
+    statistics tag of the file names the suspects; only these are counted, which reads the whole file."""
+    if not container.subtitles:
+        return container
+    path = files.path(container.name)
+    held = await mkv.contents(path)
+    suspects = [each for each in (held.subtitles if held is not None else ()) if each.at_start]
+    if not suspects:
+        return container
+    counts = await subtitle_events(path)
+    ordered = list(counts.values()) if counts is not None else []
+    silent = {each.key for each in suspects if each.index < len(ordered) and ordered[each.index] == 0}
+    return replace(container, subtitles=tuple(each for each in container.subtitles if dub_key(each.row) not in silent))
+
+
 async def as_in_file(files: "Library", container: Container) -> Container:
     """A file made before the planner (its tracks keyed by the voice-over, `tag`) is told by the table in an order of its
     own: the order of its tracks is the order of the file, read from its tags, so that the table is the file."""
+    container = await without_silent(files, container)
     if not any(track.tag for track in container.tracks):
         return container
     held = await mkv.contents(files.path(container.name))
