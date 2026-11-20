@@ -133,52 +133,9 @@ SUMMARIES = {
     "POST /api/database/clear_table": "Очистка таблицы БД",
 }
 
-# Панель вызывает эти пути через общие хелперы loadFlag/saveFlag/loadNum/saveNum,
-# поэтому прямой литерал в api.METHOD() не виден. Список — вызовы хелпера.
-DYNAMIC_PANEL_CALLS = {
-    ("GET", "/api/settings/force_replace"):
-        ["components/settings/SettingsDebug.vue:55",
-         "components/settings/SettingsDebug.vue:165",
-         "components/settings/SettingsDebug.vue:203"],
-    ("POST", "/api/settings/force_replace"):
-        ["components/settings/SettingsDebug.vue:59",
-         "components/settings/SettingsDebug.vue:203"],
-    ("GET", "/api/settings/less_strict_scan"):
-        ["components/settings/SettingsDebug.vue:55",
-         "components/settings/SettingsDebug.vue:166",
-         "components/settings/SettingsDebug.vue:207"],
-    ("POST", "/api/settings/less_strict_scan"):
-        ["components/settings/SettingsDebug.vue:59",
-         "components/settings/SettingsDebug.vue:207"],
-    ("GET", "/api/settings/slicing_delete_source"):
-        ["components/settings/SettingsDebug.vue:55",
-         "components/settings/SettingsDebug.vue:167",
-         "components/settings/SettingsDebug.vue:211"],
-    ("POST", "/api/settings/slicing_delete_source"):
-        ["components/settings/SettingsDebug.vue:59",
-         "components/settings/SettingsDebug.vue:211"],
-    ("GET", "/api/settings/conform_clear_finished"):
-        ["components/settings/SettingsDebug.vue:55",
-         "components/settings/SettingsDebug.vue:168",
-         "components/settings/SettingsDebug.vue:215"],
-    ("POST", "/api/settings/conform_clear_finished"):
-        ["components/settings/SettingsDebug.vue:59",
-         "components/settings/SettingsDebug.vue:215"],
-    ("GET", "/api/settings/parallel_downloads"):
-        ["components/settings/SettingsDebug.vue:70",
-         "components/settings/SettingsDebug.vue:169",
-         "components/settings/SettingsDebug.vue:226"],
-    ("POST", "/api/settings/parallel_downloads"):
-        ["components/settings/SettingsDebug.vue:75",
-         "components/settings/SettingsDebug.vue:226"],
-    ("GET", "/api/settings/concurrent_fragments"):
-        ["components/settings/SettingsDebug.vue:70",
-         "components/settings/SettingsDebug.vue:170",
-         "components/settings/SettingsDebug.vue:235"],
-    ("POST", "/api/settings/concurrent_fragments"):
-        ["components/settings/SettingsDebug.vue:75",
-         "components/settings/SettingsDebug.vue:235"],
-}
+# Calls the panel makes through a helper, which the static parse of api.METHOD("/literal") cannot see: {(method, path): [sites]}.
+# None now: every call of the panel is a literal.
+DYNAMIC_PANEL_CALLS: dict[tuple[str, str], list[str]] = {}
 
 PUBLIC_EXACT = {"/", "/legacy", "/v2", "/v2/", "/favicon.svg",
                 "/api/login", "/api/setup", "/api/auth/status"}
