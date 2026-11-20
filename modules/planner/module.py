@@ -1521,7 +1521,7 @@ class PlannerModule(BaseModule):
         everything but the reading of the tables is counted in the pool of computation. With the view, the print of the
         inputs it was counted from; none when it shows what a sync froze."""
         running = series_id in self._runs and not self._runs[series_id].done()
-        printed = None
+        printed, problems = None, None
         if made is not None:
             self._views[series_id] = made
         elif running and series_id in self._views:
@@ -1533,12 +1533,12 @@ class PlannerModule(BaseModule):
             except (BusRequestError, asyncio.TimeoutError):
                 series = None
             fresh = BusSync(self, series, False) if series is not None else SeriesSync()
-            # Read before the tables it stands for: a write between the two makes the print older than the view, and
-            # the next start counts the series again rather than keeping a view the print does not tell.
-            own = await self.repo.own_print(series_id)
-            fresh.containers = {each.name: each for each in await self.repo.containers(series_id)}
-            fresh.failed = {_failure_decoded(each) for each in await self.repo.failures(series_id)}
-            fresh.commands = frozenset(_decoded(each) for each in await self.repo.commands(series_id))
+            # The tables with their print, read at one moment: the print tells the very tables the view is counted of.
+            tables = await self.repo.own_tables(series_id)
+            own, problems = tables.print, tables.outcome
+            fresh.containers = {each.name: each for each in tables.containers}
+            fresh.failed = {_failure_decoded(each) for each in tables.failures}
+            fresh.commands = frozenset(_decoded(each) for each in tables.commands)
             if made is None and series is not None:
                 try:
                     rows, choices, seen = await self._inputs_seen(series)
@@ -1555,7 +1555,8 @@ class PlannerModule(BaseModule):
             sync = sync or fresh
         # What the view reads of the sync, as it is now: the sync goes on while the view is counted in the pool.
         held_now = _Held(dict(sync.containers), frozenset(sync.failed), frozenset(sync.commands))
-        problems = await self.repo.outcome(series_id)
+        if problems is None:
+            problems = await self.repo.outcome(series_id)
         view = await compute.run(_view_body, series_id, held_now, shown, dict(self._members.get(series_id, {})), running,
                                  problems)
         return view, printed

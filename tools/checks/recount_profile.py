@@ -91,7 +91,7 @@ async def main(series: list[int], base: str | None = None, rounds: int = 1) -> N
     timed(planner_module, "count", "planner: the goals, counted by the core (pool)")
     timed(executor, "plan", "planner: the plan of a sync (pool)")
     timed(planner_module, "_view_body", "planner: the view (pool)")
-    timed(planner.repo, "containers", "planner: read the asset")
+    timed(planner.repo, "own_tables", "planner: read its tables (asset, failures, commands, outcome, print)")
     # What the counts at the start changed: a layout whose rows came out other than stored is told with part `whole`.
     started = bus.subscribe("composition.changed")
     runner = Runner(bus, modules)
