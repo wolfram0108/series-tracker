@@ -3,10 +3,12 @@ of the data (catalog, settings, rules, sources, voices, composition, planner) on
 to a proxy that does not exist), no sync, no download. A series is counted as the service counts it after a change: its
 layout (`composition.recompute`, from the stored tables), then its plan and view (`composition.changed` → the planner).
 
-Told: the wall time of each count, every request over the bus by topic (count, total, longest), and the steps inside the
+Told: the layouts whose rows the counts of the start changed, the wall time of each count, the processor time of all the
+threads of the process in it (what the work took, apart from waiting on a busy host) and whether it changed the stored
+layout, every request over the bus by topic (count, total, longest), and the steps inside the
 modules (reading and writing the tables, the projection, the plan, the view), each by its total.
 
-    systemd-run --scope -q -p MemoryMax=1500M .venv/bin/python tools/checks/recount_profile.py 46 40
+    systemd-run --scope -q -p MemoryMax=1500M .venv/bin/python tools/checks/recount_profile.py 46 40 [--db <base>]
 """
 from __future__ import annotations
 
@@ -57,7 +59,7 @@ class Probe(BaseModule):
     name = "probe"
 
 
-async def main(series: list[int]) -> None:
+async def main(series: list[int], base: str | None = None) -> None:
     import core.plan.executor as executor
     import modules.composition.module as composition_module
     import modules.planner.module as planner_module
@@ -70,7 +72,7 @@ async def main(series: list[int]) -> None:
     from modules.voices import VoicesModule
 
     folder = tempfile.mkdtemp(prefix="recount_profile_")
-    path = copy_db(os.path.join(folder, "app.db"))
+    path = copy_db(os.path.join(folder, "app.db"), *([base] if base else []))
     db = Database(path)
     bus = Bus()
     probe = Probe(bus)
@@ -79,17 +81,27 @@ async def main(series: list[int]) -> None:
                SourcesModule(bus, db, torrent_cache_dir=os.path.join(folder, "torrent_cache")), VoicesModule(bus, db),
                composition, planner, probe]
     # The steps inside the modules.
-    timed(composition.repo, "stored", "composition: read the stored layout (sqlite + models)")
+    timed(composition.repo, "stored", "composition: read the stored layout")
     timed(composition.repo, "write", "composition: write the layout")
+    timed(composition, "_gather", "composition: what the neighbours say (tables, answers, groups)")
     timed(composition_module, "_derive", "composition: projection and comparison (pool)")
+    timed(composition_module, "layout_print", "composition: the print of the inputs (pool)")
     timed(composition_module, "layout_of", "composition: the layout as the model for the planner (pool)")
     timed(planner_module, "_inputs_of", "planner: the inputs of the plan from the layout (pool)")
     timed(executor, "plan", "planner: the plan (pool)")
     timed(planner_module, "_view_body", "planner: the view (pool)")
     timed(planner.repo, "containers", "planner: read the asset")
+    # What the counts at the start changed: a layout whose rows came out other than stored is told with part `whole`.
+    started = bus.subscribe("composition.changed")
     runner = Runner(bus, modules)
     await runner.start()
     await composition.idle()
+    whole = []
+    while not started.queue.empty():
+        env = started.queue.get_nowait()
+        if env.payload.get("part") == "whole":
+            whole.append(env.payload["series_id"])
+    print(f"START: layouts whose rows the counts of the start changed: {len(whole)} {sorted(set(whole))}")
     links: dict[str, list[float]] = defaultdict(list)
     asked: dict[str, tuple[str, float]] = {}
 
@@ -106,9 +118,9 @@ async def main(series: list[int]) -> None:
         for series_id in series:
             STEPS.clear()
             links.clear()
-            start = time.perf_counter()
-            await probe.request("composition.recompute", {"series_id": series_id}, timeout=170)
-            layout = time.perf_counter() - start
+            start, cpu = time.perf_counter(), time.process_time()
+            answer = await probe.request("composition.recompute", {"series_id": series_id}, timeout=170)
+            layout, layout_cpu = time.perf_counter() - start, time.process_time() - cpu
             while not told.queue.empty():
                 told.queue.get_nowait()
             start = time.perf_counter()
@@ -119,7 +131,8 @@ async def main(series: list[int]) -> None:
                 if env.payload.get("series_id") == series_id:
                     break
             plan = time.perf_counter() - start
-            print(f"SERIES {series_id}: layout counted in {layout * 1000:.0f} ms, plan and view in {plan * 1000:.0f} ms")
+            print(f"SERIES {series_id}: layout counted in {layout * 1000:.0f} ms, processor {layout_cpu * 1000:.0f} ms of all "
+                  f"threads (changed: {answer.get('changed')}), plan and view in {plan * 1000:.0f} ms")
             print("  requests over the bus (count, total ms, longest ms):")
             for topic, times in sorted(links.items(), key=lambda item: -sum(item[1])):
                 print(f"    {topic:34} {len(times):4} {sum(times) * 1000:8.1f} {max(times) * 1000:8.1f}")
@@ -135,4 +148,6 @@ async def main(series: list[int]) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("series", type=int, nargs="+")
-    asyncio.run(main(parser.parse_args().series))
+    parser.add_argument("--db", help="the base to copy instead of the service's (a fixed one, for counts to compare)")
+    arguments = parser.parse_args()
+    asyncio.run(main(arguments.series, arguments.db))

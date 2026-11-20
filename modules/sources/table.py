@@ -20,7 +20,6 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from core import compute
 from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress,
                             TableReady, TableRow, TableState, UnreadPart)
 from core.contracts.release_table import TABLE_TRACE_TOPIC, site_of
@@ -151,12 +150,13 @@ class TableReader:
     # --- requests -----------------------------------------------------------------------
 
     async def get(self, request: TableGetRequest) -> dict:
-        """The reply of `sources.table.get` as the JSON of `TableGetReply`: the table is given as it is stored (its rows
-        parsed in one pass), with no model made of thousands of rows."""
+        """The reply of `sources.table.get` (`TableGetReply`): the table is given as it is stored, its rows the field of
+        columns they are kept as — nothing is parsed, no model is made of thousands of rows."""
         state, url, stored, why = await self._get(request)
-        table = await compute.run(stored.table_json) if stored is not None else None
-        fresh = self._fresh_until_of(url if table is None else table["url"], table["read_at"]) if table is not None else None
-        return {"url": url, "state": state.value, "table": table, "reason": why, "fresh_until": fresh}
+        record = stored.record() if stored is not None else None
+        fresh = self._fresh_until_of(record.url, record.read_at) if record is not None else None
+        return {"url": url, "state": state.value, "table": record.model_dump() if record is not None else None,
+                "reason": why, "fresh_until": fresh}
 
     def fresh_until(self, table: ReleaseTable | None) -> str | None:
         """The end of the term of a table: its read and the term of its site (term.py); none for a table never read."""
@@ -207,8 +207,13 @@ class TableReader:
                 held = None
             return TableState.FAILED, request.url, held, self._blocked(request.url) or reason("site_not_found")
         site, key = found
+        # The record is read outside the gate, so the pages of a series are read side by side; in the gate it is the one the
+        # decision is made on unless the page was written since, and then it is read again there.
+        seen = self._repo.version(key)
+        stored = await self._repo.stored(key)
         async with self._gate:
-            stored = await self._repo.stored(key)
+            if self._repo.version(key) != seen:
+                stored = await self._repo.stored(key)
             if not request.refresh:
                 return self._as_it_is(key, stored)
             if stored.head is not None and self._fresh_at(key, stored.head["read_at"]):

@@ -73,11 +73,22 @@ def episode_settings(records: Sequence[SettingRecord], episodes: Iterable[tuple[
                      members: Mapping[tuple[int, int], CompilationRef | None]) -> list[EpisodeSettings]:
     """The levers of each episode with the compilation it stands in, in the order of season and episode."""
     index = _index(records)
+    # An episode with no value of its own inherits the levers of the level above it whole: those are resolved once for each
+    # level (a season, the compilation it stands in), not once for each of its hundreds of episodes.
+    own = {(scope[0], scope[1]) for by_target in index.values() for values in by_target.values() for scope in values
+           if scope[1] is not None}
+    above: dict[tuple[int, str | None], list[EffectiveLever]] = {}
     result = []
     for season, episode in sorted(set(episodes)):
         member = members.get((season, episode))
-        result.append(EpisodeSettings(season=season, episode=episode, compilation=member,
-                                      levers=_resolve(index, season, episode, member.key if member else None)))
+        key = member.key if member else None
+        if (season, episode) in own:
+            found = _resolve(index, season, episode, key)
+        else:
+            found = above.get((season, key))
+            if found is None:
+                found = above[(season, key)] = _resolve(index, season, episode, key)
+        result.append(EpisodeSettings(season=season, episode=episode, compilation=member, levers=found))
     return result
 
 

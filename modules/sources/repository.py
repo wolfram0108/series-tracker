@@ -1,7 +1,7 @@
 """Репозиторий sources: таблица trackers (зеркала, типы аутентификации) и таблицы страниц сайтов.
 
 Tables of pages: `release_tables` holds, per page, the last complete table — its head (with the parts its read could not
-get) and its rows as one field (`rows`, the JSON of their models) — and the state of the read in progress. A new complete
+get) and its rows as one field (`rows`, kept by columns: core.native) — and the state of the read in progress. A new complete
 table replaces the record in one statement. `provider_manifest` holds the last manifest of the provider of the socket
 (modules/sources/provider), by its address.
 """
@@ -14,9 +14,9 @@ from functools import cached_property
 from urllib.parse import urlparse
 
 import orjson
-from pydantic import TypeAdapter
 
-from core.contracts import ReleaseTable, TableRow
+from core import native
+from core.contracts import ReleaseTable, StoredTable, rows_field
 from core.contracts.provider import Manifest
 from core.contracts.torrent import order_name
 from core.db import Database
@@ -42,19 +42,14 @@ _SAVE_HEAD = (
     " read_at = excluded.read_at, complete = 1, state = 'ready', reason = NULL, reading_since = NULL,"
     " writes = excluded.writes")
 
-# The rows of a table are kept as the JSON of their model, one field for the page: thousands of rows are read and given
-# on as one value, never made into objects one column at a time.
-ROWS = TypeAdapter(list[TableRow])
-
-
 @dataclass(frozen=True)
 class Stored:
     """What the page has: the last complete table (None while there is none) and how the last read ended.
     `state` is `reading`, `ready` or `failed` (None for a page never asked for); `reason` is the failure of the last read.
     `parted` is False for a table stored before its rows named their parts: a part of it cannot keep its rows.
 
-    The table is kept as it is stored: its head (`head`, the JSON of every field but the rows) and its rows (`rows`, their
-    JSON). `table_json` gives it on as JSON with no model made; `table` is the model, made once when a reader needs it."""
+    The table is kept as it is stored: its head (`head`, every field but the rows) and its rows (`rows`, kept by columns).
+    `record` gives it on as it is; `table` is the model, made once when a reader needs it."""
     head: dict | None
     rows: bytes | None
     state: str | None
@@ -63,13 +58,12 @@ class Stored:
 
     @cached_property
     def table(self) -> ReleaseTable | None:
-        if self.head is None:
-            return None
-        return ReleaseTable(**self.head, rows=ROWS.validate_json(self.rows or b"[]"))
+        record = self.record()
+        return None if record is None else record.table()
 
-    def table_json(self) -> dict | None:
-        """The table as the JSON of its model (`ReleaseTable`), the rows parsed in one pass."""
-        return None if self.head is None else {**self.head, "rows": orjson.loads(self.rows or b"[]")}
+    def record(self) -> StoredTable | None:
+        """The table as it is given on: its head and its rows as they are stored."""
+        return None if self.head is None else StoredTable(**self.head, rows=self.rows or rows_field([]))
 
 
 def _stored(conn, url: str) -> Stored:
@@ -87,6 +81,17 @@ class SourcesRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
         self._cache: list[dict] | None = None
+        # The writes of the record of every page made here, the only writer of the records: a reader that looked at a page
+        # outside the gate of the reads tells by it whether the page was written since.
+        self._versions: dict[str, int] = {}
+
+    def version(self, url: str) -> int:
+        """How many writes of the record of the page this process has made."""
+        return self._versions.get(url, 0)
+
+    def _wrote(self, *urls: str) -> None:
+        for url in urls:
+            self._versions[url] = self._versions.get(url, 0) + 1
 
     async def all_trackers(self) -> list[dict]:
         if self._cache is None:
@@ -133,7 +138,8 @@ class SourcesRepository:
         await self._db.execute_many([_COUNT, (_SAVE_HEAD, (
             table.url, table.site, json.dumps(table.names, ensure_ascii=False), table.title, table.site_voice, table.channel,
             table.read_at, json.dumps([each.model_dump(mode="json") for each in table.unread], ensure_ascii=False),
-            ROWS.dump_json(table.rows)))])
+            rows_field(table.rows)))])
+        self._wrote(table.url)
 
     async def writes(self) -> dict[str, int]:
         """The number of the last write of the record of every page."""
@@ -147,6 +153,7 @@ class SourcesRepository:
     async def forget_pages(self, urls: list[str]) -> None:
         """The records of these pages go with their rows, in one transaction."""
         await self._db.execute_many([("DELETE FROM release_tables WHERE url = ?", (url,)) for url in urls])
+        self._wrote(*urls)
 
     async def mark_reading(self, url: str, site: str, since: str) -> None:
         """Record that a read of the page began; the last complete table stays as it is."""
@@ -155,6 +162,7 @@ class SourcesRepository:
             + _NEXT_WRITE + ") ON CONFLICT (url) DO UPDATE SET state = 'reading', reading_since = excluded.reading_since,"
             " reason = NULL, writes = excluded.writes",
             (url, site, since))])
+        self._wrote(url)
 
     async def mark_failed(self, url: str, site: str, reason: str) -> None:
         """Record that the read failed; the last complete table stays as it is."""
@@ -163,6 +171,7 @@ class SourcesRepository:
             " ON CONFLICT (url) DO UPDATE SET state = 'failed', reason = excluded.reason, reading_since = NULL,"
             " writes = excluded.writes",
             (url, site, reason))])
+        self._wrote(url)
 
 
     async def players_of_pages(self, urls: list[str]) -> tuple[dict[tuple[str, str], int], dict[str, int]]:
@@ -178,7 +187,7 @@ class SourcesRepository:
             heights: dict[str, int] = {}
             for url, site, rows in conn.execute(
                     f"SELECT url, site, rows FROM release_tables WHERE complete = 1 AND url IN ({marks})", urls):
-                for row in orjson.loads(rows or b"[]"):
+                for row in orjson.loads(native.table_json(rows)) if rows else ():
                     player = order_name(row["player"])
                     held.setdefault((player, site), set()).add(url)
                     height = max(row["heights"] or [0])

@@ -9,7 +9,9 @@ from enum import StrEnum
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+
+from core import native
 
 LINE_SEPARATOR = " | "
 # What a read of a page does, told for its dump (modules/sources/table.py tells it, modules/runlog keeps it):
@@ -125,6 +127,45 @@ class ReleaseTable(BaseModel):
         return next((row for row in self.rows if row.key == key), None)
 
 
+_ROWS = TypeAdapter(list[TableRow])
+
+
+def rows_field(rows: list[TableRow]) -> bytes:
+    """The rows of a table as they are stored and given on: kept by columns (core.native)."""
+    return native.encode_table(_ROWS.dump_json(rows))
+
+
+class StoredTable(BaseModel):
+    """The last complete table of a page as it is stored and given on: the head of `ReleaseTable` and its rows kept by
+    columns (`rows_field`). A count reads them in place; `table()` makes the model for a reader of a few rows."""
+
+    model_config = ConfigDict(extra="forbid", ser_json_bytes="base64", val_json_bytes="base64")
+
+    url: str
+    site: str
+    names: list[str] = Field(default_factory=list)
+    title: str = ""
+    site_voice: str = ""
+    channel: str = ""
+    read_at: str | None = None
+    complete: bool = False
+    rows: bytes
+    unread: list[UnreadPart] = Field(default_factory=list)
+
+    @classmethod
+    def of(cls, table: ReleaseTable) -> "StoredTable":
+        """The table as it is stored, of its model."""
+        return cls(**table.model_dump(exclude={"rows"}), rows=rows_field(table.rows))
+
+    def table(self) -> ReleaseTable:
+        return ReleaseTable(**self.model_dump(exclude={"rows"}), rows=_ROWS.validate_json(native.table_json(self.rows)))
+
+    def head(self) -> dict:
+        """What a count reads of the table besides its rows (core.native)."""
+        return {"url": self.url, "names": self.names, "title": self.title, "channel": self.channel, "read_at": self.read_at,
+                "unread": [each.part for each in self.unread]}
+
+
 def site_of(url: str) -> str:
     """The site of an address: its host (the channels of VK are one site, a title of the provider `title://<site>/…` is its site)."""
     return (urlparse(url.split("|")[0].strip()).hostname or "").lower()
@@ -207,7 +248,7 @@ class TableGetReply(BaseModel):
 
     url: str
     state: TableState
-    table: ReleaseTable | None = None
+    table: StoredTable | None = None
     reason: str | None = None
     # The end of the term of the table (its read and the term of its site, term.py); none without a table.
     fresh_until: str | None = None

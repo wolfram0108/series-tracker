@@ -7,15 +7,19 @@
 приходит параметром запроса, использование профиля спрашивается у catalog.
 
 Queries:
-  rules.apply {profile_id, lines: [{key, text}], series_season?}
-      → {results: {key: {excluded, season, episode, start, end, part,
-                         voiceover, events, errors, <прочие извлечённые>}},
-         invalid_rules: [...]}
-      — модели RulesApplyRequest / RulesApplyReply. series_season — сезон
-      карточки сериала, запасной, когда правило сезон не извлекло
-      (core.season.resolve); у исключённой строки номеров нет. voiceover —
-      результат действия «назначить озвучку». Повторяющиеся ключи в запросе —
-      отказ ValueError; пустой список строк — пустой ответ.
+  rules.apply {profile_id, lines, series_season?, rules?}
+      → {results, invalid_rules: [...]}
+      — модели RulesApplyRequest / RulesApplyReply. Строки и ответы — записи
+      по столбцам (core.native): строки — key, text, player, voice (список
+      RuleLine приводится к ним моделью запроса); ответ строки — excluded,
+      season, episode, start, end, part, voiceover, events, errors и прочие
+      извлечённые, по ключу — RulesApplyReply.by_key(). series_season — сезон
+      карточки сериала, запасной, когда правило сезон не извлекло (первое
+      число его текста; без обоих — сезон 1); у исключённой строки номеров нет.
+      Одиночная серия без части — часть 1, где у её места (плеер, озвучка,
+      сезон, серия) есть одиночные серии с частями. voiceover — результат
+      действия «назначить озвучку». Повторяющиеся ключи в запросе — отказ
+      ValueError (`apply_keys_repeated`); нет строк — пустой ответ.
       Неисправные правила (решение Б) не применяются и возвращаются в
       invalid_rules каждого ответа и пишутся в лог ошибкой.
   rules.format_filename {series, media_item, episode_override?, original_filename?}
@@ -64,53 +68,28 @@ Events (исходящие):
 
 Кэш скомпилированных профилей — внутреннее дело CRUD; снаружи его не сбросить.
 
-Сборка профиля и ответ на строки rules.apply считаются в пуле вычислений (core.compute): страница — это тысячи строк
-и десятые доли секунды работы, а цикл процесса обслуживает все модули и окна.
+Движок правил — скомпилированный (core.native): профиль собирается один раз, строки читаются им без интерпретатора.
+Сборка профиля и ответ на строки rules.apply идут в пуле вычислений (core.compute): цикл процесса обслуживает все модули и
+окна и их не ждёт.
 """
 from __future__ import annotations
 
 import sqlite3
-from collections import Counter
 
 from core import BaseModule, compute
-from core.contracts import (RuleResult, RulesApplyReply, RulesApplyRequest,
-                            RulesProfileChanged)
+from core.contracts import RulesApplyRequest, RulesProfileChanged
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
 
 from . import formatter
 from .engine import CompiledProfile, compile_profile, process_title, validate_rule
-from .numbering import season_of, settle_parts
 from .repository import RulesRepository
 
-# The numbers the answer names itself; every other extracted key rides along as an extra field.
-_NUMBER_KEYS = ("episode", "start", "end", "part")
+def answer_lines(profile: CompiledProfile, lines: bytes, card: str | None) -> bytes:
+    """The answer of the profile to the lines (columns in, columns out): every line read by the compiled engine at once."""
+    return profile.compiled.apply(lines, card)
 
-
-def result_of(outcome: dict, series_season) -> RuleResult:
-    """The constructor's answer for one line, built from the engine's outcome."""
-    events, errors = outcome.get("events") or [], outcome.get("errors") or []
-    if outcome.get("excluded"):
-        return RuleResult(excluded=True, events=events, errors=errors)
-    extracted = dict(outcome.get("extracted") or {})
-    season = season_of(series_season, extracted.pop("season", None))
-    voiceover = extracted.pop("voiceover", None)
-    numbers = {key: extracted.pop(key, None) for key in _NUMBER_KEYS}
-    return RuleResult(season=season, voiceover=voiceover, events=events,
-                      errors=errors, **numbers, **extracted)
-
-
-
-def answers_of(profile: CompiledProfile, request: RulesApplyRequest) -> dict:
-    """The answer of the profile for every line of the request, by its key."""
-    return settle_parts(request.lines, {line.key: result_of(process_title(profile, line.text), request.series_season)
-                                        for line in request.lines})
-
-
-def reply_of(profile: CompiledProfile, request: RulesApplyRequest) -> dict:
-    """`rules.apply` answered: every line by its key, and the rules of the profile that are broken."""
-    return RulesApplyReply(results=answers_of(profile, request), invalid_rules=profile.invalid_rules).model_dump()
 
 class RulesModule(BaseModule):
     name = "rules"
@@ -123,7 +102,8 @@ class RulesModule(BaseModule):
         super().__init__(bus)
 
     def register(self) -> None:
-        self.handle("rules.apply", self.on_apply)
+        # The answers to the sources of a series are independent: they are made side by side (the engine lets the interpreter go).
+        self.handle("rules.apply", self.on_apply, concurrent=True)
         self.handle("rules.profiles.export", self.on_profiles_export)
         self.handle("rules.profiles.list", self.on_profiles_list)
         self.handle("rules.format_filename", self.on_format_filename)
@@ -168,18 +148,15 @@ class RulesModule(BaseModule):
     # --- queries -------------------------------------------------------------
 
     async def on_apply(self, env: Envelope) -> dict:
-        request = await compute.run(RulesApplyRequest.model_validate, env.payload)
-        repeated = sorted(key for key, n in Counter(
-            line.key for line in request.lines).items() if n > 1)
-        if repeated:
-            raise ValueError(reason("apply_keys_repeated", keys=repeated))
+        request = RulesApplyRequest.model_validate(env.payload)
         if request.rules is None:
             profile = await self._profile(request.profile_id)
         else:  # the profile as a run took it: what was saved since does not count for that run
             profile = await compute.run(compile_profile, request.profile_id, request.rules)
-        # A page holds thousands of lines (3649 at most on 2026-11-10, 0.1–0.2 s of work): the loop of the service, which
-        # serves every module and window, does not wait for them.
-        return await compute.run(reply_of, profile, request)
+        # A page holds thousands of lines: the loop of the service, which serves every module and window, does not wait for
+        # them. Keys that repeat are refused (`apply_keys_repeated`).
+        results = await compute.run(answer_lines, profile, request.lines, request.card)
+        return {"results": results, "invalid_rules": profile.invalid_rules}
 
     async def on_profiles_export(self, env: Envelope) -> dict:
         """The stored rules of the profiles named, as `rules.apply` takes them back (RunSnapshot.profiles)."""

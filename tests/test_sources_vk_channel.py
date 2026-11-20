@@ -7,6 +7,8 @@ import re
 
 import pytest
 
+from sources_support import rows_of
+
 from core import BaseModule, Bus
 from core.contracts import RowState
 from core.db import Database
@@ -495,7 +497,7 @@ async def test_the_module_reads_a_channel_of_vk_through_the_session_of_the_api(s
 
     assert first["state"] == "reading" and first["url"] == "https://vkvideo.ru/@chan|тайтл"
     assert done["url"] == first["url"]
-    assert again["state"] == "ready" and [row["text"] for row in again["table"]["rows"]] == [
+    assert again["state"] == "ready" and [row["text"] for row in rows_of(again["table"]["rows"])] == [
         "Тайтл 1 серия", "Тайтл 2 серия"]
     assert [call["params"]["offset"] for call in trackerauth.calls if call["method"] == "video.get"] == [0, 2]
 

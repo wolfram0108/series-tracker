@@ -14,7 +14,8 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    begun, a read failed); a page written again never has a number it had, so a reader
                                    that kept the number knows whether the page was written since.
   sources.table.get {url, refresh?, rows?, by_sync?} → TableGetReply {url, state: ready | reading | failed | absent,
-                                   table?, reason?}. A complete table within the term (term.py) is `ready`. Otherwise the page is read — by one
+                                   table?, reason?}; `table` is StoredTable: the head and the rows as they are stored, kept by
+                                   columns (core.native), nothing parsed. A complete table within the term (term.py) is `ready`. Otherwise the page is read — by one
                                    task however many ask — and the reply is `reading` at once, with the last
                                    complete table when there is one; the end comes as the events below.
                                    `failed` in the reply means no read began (`site_not_found`: no site for the
@@ -264,7 +265,8 @@ class SourcesModule(BaseModule):
         self.handle("sources.video.stream", self.on_video_stream)
         self.handle("sources.video.fetch", self.on_video_fetch, concurrent=True)
         self.handle("sources.video.fetch.stop", self.on_video_fetch_stop)
-        self.handle("sources.table.get", self.on_table_get)
+        # The pages of a series are asked for at once: each is answered as it is read (the gate of the reads keeps the decisions).
+        self.handle("sources.table.get", self.on_table_get, concurrent=True)
         self.handle("sources.tables.writes", self.on_tables_writes)
         self.handle("sources.table.read", self.on_table_read)
         self.handle("sources.table.cancel", self.on_table_cancel)

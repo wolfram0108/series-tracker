@@ -6,6 +6,8 @@ time. The one number below (STUCK_S) only ends a test that is stuck.
 """
 import asyncio
 import json
+
+import orjson
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
@@ -15,7 +17,7 @@ import pytest
 
 from composition_fakes import (HOST, OTHER_PAGE, PAGE, FakeCatalog, FakeRules, FakeSources, FakeVoices, lecturer,
                                source)
-from core import BaseModule, Bus, BusRequestError, Runner
+from core import BaseModule, Bus, BusRequestError, Runner, native
 from core.contracts import (CompositionPreviewReply, CompositionReply, EffectiveLever, Level, QueuesReply, ReleaseTable, RowState,
                             Queue, TargetKind, ValueShape,
                             RowVoice, SettingsReset, SettingsSet, SettingsSetMany, SourceStatus, TableRow, TableState,
@@ -35,8 +37,19 @@ def db_path(tmp_path):
     return migrated(tmp_path / "composition.db")
 
 
+def plain(reply):
+    """A reply as a window gets it: the parts the module gives written (the rows of a layout, `orjson.Fragment`) read."""
+    if isinstance(reply, dict):
+        return {key: orjson.loads(orjson.dumps(value)) if isinstance(value, orjson.Fragment) else value
+                for key, value in reply.items()}
+    return reply
+
+
 class Probe(BaseModule):
     name = "probe"
+
+    async def request(self, topic, payload=None, *args, **kwargs):
+        return plain(await super().request(topic, payload, *args, **kwargs))
 
 
 @dataclass
@@ -99,9 +112,9 @@ class System:
             return conn.execute(query, params).fetchall()
 
     def stored_rows(self, series_id: int) -> list[dict]:
-        """The rows of sound of the layout as its record keeps them (one field of their JSON)."""
+        """The rows of sound of the layout as its record keeps them (one field of columns), as the JSON of their models."""
         found = self.sql("SELECT rows FROM composition_state WHERE series_id = ?", series_id)
-        return json.loads(found[0][0]) if found and found[0][0] is not None else []
+        return json.loads(native.Rows(found[0][0]).json()) if found and found[0][0] is not None else []
 
 
 @pytest.fixture
@@ -878,7 +891,7 @@ class Consumer(BaseModule):
 
     async def on_changed(self, env) -> None:
         reply = await self.request("composition.get", {"series_id": env.payload["series_id"]}, timeout=STUCK_S)
-        self.seen.put_nowait((env.payload, CompositionReply.model_validate(reply)))
+        self.seen.put_nowait((env.payload, CompositionReply.model_validate(plain(reply))))
 
 
 @pytest.mark.asyncio

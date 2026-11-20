@@ -1,29 +1,43 @@
 """The numbers the constructor settles beyond one line: the default season and the first part."""
+import json
+
 import pytest
 
-from core.contracts import RuleLine, RuleResult
-from modules.rules.numbering import DEFAULT_SEASON, season_of, settle_parts
+from core import native
+from core.contracts import RuleLine, RulesApplyReply, lines_of
+
+DEFAULT_SEASON = 1
 
 
 def line(key, player="vk", voice="V") -> RuleLine:
     return RuleLine(key=key, text=key, player=player, voice=voice)
 
 
-def answer(**fields) -> RuleResult:
-    return RuleResult(**fields)
+def answer(**fields) -> dict:
+    """What the rules made of a line: excluded, or the numbers and the voice-over they extracted."""
+    if fields.pop("excluded", False):
+        return {"excluded": True}
+    return {"excluded": False, "extracted": fields}
+
+
+def settled(lines, outcomes, card=None):
+    """The answer of the constructor of these outcomes, by key."""
+    made = native.answers(lines_of(lines), json.dumps([outcomes[each.key] for each in lines]), card)
+    return RulesApplyReply(results=made).by_key()
 
 
 def parts(lines, results):
-    settled = settle_parts(lines, results)
-    return [(each.key, settled[each.key].part) for each in lines]
+    answers = settled(lines, results)
+    return [(each.key, answers[each.key].part) for each in lines]
 
 
 @pytest.mark.parametrize("series, extracted, expected", [
     (None, None, DEFAULT_SEASON), ("", None, DEFAULT_SEASON), ("Сезон 4", None, 4), (2, None, 2),
     (None, 3, 3), ("Сезон 4", 0, 0), (None, 0, 0)])
 def test_the_season_is_the_extracted_one_then_the_card_s_then_the_default(series, extracted, expected):
-    assert season_of(series, extracted) == expected
-    assert DEFAULT_SEASON == 1
+    given = answer(**({"season": extracted} if extracted is not None else {}))
+    card = str(series) if series else None
+    assert settled([line("a")], {"a": given}, card)["a"].season == expected
 
 
 def test_a_single_without_a_part_takes_part_one_where_the_slot_has_parts():
@@ -45,7 +59,8 @@ def test_a_slot_is_a_player_a_voice_a_season_and_an_episode():
 
 def test_the_voice_the_constructor_assigned_beats_the_voice_of_the_table():
     lines = [line("a", voice="X"), line("b", voice="Y")]
-    results = {"a": answer(season=1, episode=1, part=2, voiceover="AniStar"), "b": answer(season=1, episode=1, voiceover="anistar")}
+    results = {"a": answer(season=1, episode=1, part=2, voiceover="AniStar"),
+               "b": answer(season=1, episode=1, voiceover="anistar")}
     assert parts(lines, results) == [("a", 2), ("b", 1)]
 
 
@@ -60,10 +75,3 @@ def test_a_line_without_a_number_or_excluded_takes_no_part():
     lines = [line("a"), line("x"), line("t")]
     results = {"a": answer(season=1, episode=1, part=2), "x": answer(season=1), "t": answer(excluded=True)}
     assert parts(lines, results) == [("a", 2), ("x", None), ("t", None)]
-
-
-def test_the_answers_given_are_left_as_they_were():
-    lines = [line("a"), line("b")]
-    results = {"a": answer(season=1, episode=1, part=2), "b": answer(season=1, episode=1)}
-    settle_parts(lines, results)
-    assert results["b"].part is None

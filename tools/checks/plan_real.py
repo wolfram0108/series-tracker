@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+
+import orjson
 from dataclasses import replace
 import os
 import sqlite3
@@ -25,17 +27,16 @@ sys.path.insert(0, ROOT)
 
 from core.contracts import (CompositionGetRequest, CompositionReply, CompositionRow, RulesApplyReply,  # noqa: E402
                             SeriesSource, SourceType)
+from core import native  # noqa: E402
 from core.db import Database  # noqa: E402
 from core.plan import inputs as plan_inputs  # noqa: E402
 from core.plan.files import container_of  # noqa: E402
 from core.plan.tables import Container, Inputs, OnlineRow  # noqa: E402
 from modules.catalog.repository import CatalogRepository  # noqa: E402
 from modules.composition import project  # noqa: E402
-from modules.composition.module import layout_reply  # noqa: E402
+from modules.composition.module import ROWS, layout_reply  # noqa: E402
 from modules.composition.repository import CompositionRepository  # noqa: E402
-from modules.rules.engine import compile_profile, process_title  # noqa: E402
-from modules.rules.module import result_of  # noqa: E402
-from modules.rules.numbering import settle_parts  # noqa: E402
+from modules.rules.engine import compile_profile  # noqa: E402
 from modules.rules.repository import RulesRepository  # noqa: E402
 from modules.settings.repository import SettingsRepository  # noqa: E402
 from modules.sources.repository import SourcesRepository  # noqa: E402
@@ -45,11 +46,11 @@ from modules.voices.settings import PREFIX, parse  # noqa: E402
 PROD_DB = os.path.join(ROOT, "app.db")
 
 
-def copy_db(target: str) -> str:
-    """A copy of the service's database, made through a read-only connection and brought to the head of the migrations of
-    this code (the copy only: the service's database may wait for its update)."""
+def copy_db(target: str, source_path: str = PROD_DB) -> str:
+    """A copy of the service's database (or of the one given), made through a read-only connection and brought to the head
+    of the migrations of this code (the copy only: the service's database may wait for its update)."""
     os.makedirs(os.path.dirname(target), exist_ok=True)
-    source = sqlite3.connect(f"file:{PROD_DB}?mode=ro", uri=True)
+    source = sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)
     copy = sqlite3.connect(target)
     source.backup(copy)
     copy.close()
@@ -85,23 +86,23 @@ class RealSeries:
                 continue
             source = SeriesSource.model_validate(each)
             url = urls.get(source.id)
-            table = (await self.sources.stored(url)).table if url else None
+            table = (await self.sources.stored(url)).record() if url else None
             answer = None
             if table is not None and source.parser_profile_id is not None:
-                lines = project.lines_for(source, table)
+                lines = project.lines_for(project.SourceInput(source, table))
                 raw = (rules or {}).get(source.parser_profile_id)
                 profile = compile_profile(source.parser_profile_id,
                                           raw if raw is not None else await self.rules_of(source.parser_profile_id))
-                results = settle_parts(lines, {line.key: result_of(process_title(profile, line.text), card.get("season"))
-                                               for line in lines})
-                answer = RulesApplyReply(results=results, invalid_rules=profile.invalid_rules)
+                season = card.get("season")
+                answer = RulesApplyReply(results=profile.compiled.apply(lines, str(season) if season else None),
+                                         invalid_rules=profile.invalid_rules)
             inputs.append(project.SourceInput(source, table, answer, None, url))
         voices = parse(await self.settings.by_prefix(PREFIX))
         names = project.voice_names(inputs)
         groups = {name: voices.voices.group_of(name) for name in names}
         made = project.project(inputs, groups, stored.numbering)
         places = {each.source_id: " / ".join(each.summary.place or []) or (each.table_url or "") for each in stored.sources}
-        return made.rows, {"card": card, "stored": stored, "places": places, "voices": voices}
+        return ROWS.validate_json(made.rows.json()), {"card": card, "stored": stored, "places": places, "voices": voices}
 
 
 def asset_of(path: str, series_id: int, online: list[OnlineRow]) -> list[Container]:
@@ -134,8 +135,8 @@ async def inputs_of(real: RealSeries, series_id: int, rules: dict[int, list[dict
     real constructor makes, answered as `composition.get` answers it, read by the planner's own function."""
     skipped: Counter = Counter()
     rows, info = await real.layout(series_id, rules)
-    stored = replace(info["stored"], rows=rows)
-    layout = CompositionReply.model_validate(layout_reply(CompositionGetRequest(series_id=series_id), stored))
+    stored = replace(info["stored"], rows=native.Rows.from_json(ROWS.dump_json(rows)))
+    layout = CompositionReply.model_validate_json(orjson.dumps(layout_reply(CompositionGetRequest(series_id=series_id), stored)))
     voices = editor.view(info["voices"]).model_dump(mode="json")
     online, choices = plan_inputs.planner_inputs(layout, info["card"], voices)
     containers = asset_of(real.path, series_id, list(online))
@@ -143,7 +144,7 @@ async def inputs_of(real: RealSeries, series_id: int, rules: dict[int, list[dict
     return Inputs(online, tuple(containers), choices), skipped, info
 
 
-def same_layout(rows: list[CompositionRow], stored: list[CompositionRow]) -> list[str]:
+def same_layout(rows, stored) -> list[str]:
     """Where the layout of the real constructor here differs from the one the service wrote; empty when it is the same."""
     def key(row: CompositionRow) -> tuple:
         return (row.source_id, row.row_key, row.excluded, row.season, row.episode_start, row.episode_end, row.part,

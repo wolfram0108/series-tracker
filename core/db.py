@@ -2,15 +2,21 @@
 
 Каждый модуль работает ТОЛЬКО со своими таблицами (карта владения — ТЗ,
 раздел 6); это соглашение, инструмент его не навязывает. Блокирующие
-вызовы sqlite уходят в поток (to_thread) — событийный цикл не виснет.
-Соединение на операцию: дёшево для SQLite и снимает вопросы потоков;
-WAL позволяет параллельное чтение.
+вызовы sqlite уходят в потоки базы — событийный цикл не виснет.
+У каждого потока базы одно постоянное соединение: его кэш страниц и
+отображение файла в память (mmap) живут между операциями, так что поле
+строк раскладки в мегабайты читается копированием из памяти, а не обходом
+файла заново на каждом запросе. Соединение не покидает свой поток; WAL
+позволяет параллельное чтение.
 """
 from __future__ import annotations
 
 import asyncio
 import sqlite3
+import threading
 import time
+import weakref
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterable, TypeVar
 
 T = TypeVar("T")
@@ -19,17 +25,25 @@ T = TypeVar("T")
 # эксклюзивной блокировки и не ждёт busy-timeout.
 _WAL_TIMEOUT = 5.0
 _WAL_RETRY = 0.05
+# The threads of a database: as many operations at once as the modules ask (readers run side by side under WAL).
+THREADS = 8
+# How much of the file a connection maps into memory: the whole base of the service, with room to grow.
+MMAP_BYTES = 1 << 30
 
 
 class Database:
     def __init__(self, path: str) -> None:
         self._path = path
         self._inflight: set[asyncio.Future] = set()
+        self._pool = ThreadPoolExecutor(max_workers=THREADS, thread_name_prefix="db")
+        self._local = threading.local()
+        # A database nobody holds any more lets its threads go, and with them their connections.
+        weakref.finalize(self, self._pool.shutdown, wait=False)
 
     async def _threaded(self, fn: Callable[..., T], *args: Any) -> T:
-        """A call into sqlite on a thread. A thread cannot be called back, so the call outlives the cancellation of its
-        caller; it is kept on record until it ends, and `drained` waits for the last of them."""
-        future = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+        """A call into sqlite on a thread of the database. A thread cannot be called back, so the call outlives the
+        cancellation of its caller; it is kept on record until it ends, and `drained` waits for the last of them."""
+        future = asyncio.ensure_future(asyncio.get_running_loop().run_in_executor(self._pool, fn, *args))
         self._inflight.add(future)
         future.add_done_callback(self._ended)
         return await asyncio.shield(future)
@@ -45,11 +59,18 @@ class Database:
             await asyncio.wait(set(self._inflight))
 
     def _connect(self, *, enforce_fk: bool = True) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        self._ensure_wal(conn)
-        if enforce_fk:
-            conn.execute("PRAGMA foreign_keys=ON")
+        """The connection of this thread, made on its first operation; foreign keys as the operation asks (a pragma is
+        no part of a transaction, and no transaction is open between operations)."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self._path, timeout=30)
+            conn.row_factory = sqlite3.Row
+            self._ensure_wal(conn)
+            conn.execute(f"PRAGMA mmap_size={MMAP_BYTES}")
+            self._local.conn, self._local.fk = conn, None
+        if self._local.fk is not enforce_fk:
+            conn.execute(f"PRAGMA foreign_keys={'ON' if enforce_fk else 'OFF'}")
+            self._local.fk = enforce_fk
         return conn
 
     @staticmethod

@@ -2,8 +2,8 @@
 output settings.
 
 A series is read and written whole and in one transaction, so a reader never sees rows of one revision with the
-revision number of another. Its rows are two fields of its record (composition_state.rows and .subtitles, the JSON of their
-models in the order of the layout): ten thousand rows are read and written as one value each.
+revision number of another. Its rows are two fields of its record (composition_state.rows and .subtitles, kept by columns
+in the order of the layout: core.native): ten thousand rows are read and written as one value each, and read in place.
 """
 from __future__ import annotations
 
@@ -11,12 +11,9 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 
-from pydantic import TypeAdapter
-
-from core.contracts import CompositionRow, SettingRecord, SourceSummary
+from core import native
+from core.contracts import SettingRecord, SourceSummary
 from core.db import Database
-
-ROWS = TypeAdapter(list[CompositionRow])
 
 
 @dataclass(frozen=True)
@@ -34,15 +31,12 @@ class Stored:
     """A series as the module last wrote it; a series never counted has revision 0 and nothing else."""
 
     rev: int = 0
-    # The rows as they are stored (the JSON of their models), for a reader that gives them on with no model made.
-    rows_json: bytes = b"[]"
-    subtitles_json: bytes = b"[]"
     # Every write of the series raises it, whatever it changes (`rev` moves only with what a window shows): a reader that
     # counted from the series at one count knows whether anything was written since.
     writes: int = 0
-    rows: list[CompositionRow] = field(default_factory=list)
+    rows: native.Rows = field(default_factory=native.Rows)
     # The rows of subtitles, apart from the rows of sound (DESIGN.md 7.1.1); one table keeps both.
-    subtitles: list[CompositionRow] = field(default_factory=list)
+    subtitles: native.Rows = field(default_factory=native.Rows)
     sources: list[StoredSource] = field(default_factory=list)
     numbering: dict[str, int] = field(default_factory=dict)
     records: list[SettingRecord] = field(default_factory=list)
@@ -74,8 +68,7 @@ class CompositionRepository:
 
     # --- writes ---------------------------------------------------------------------------
 
-    async def write(self, series_id: int, *, rows: list[CompositionRow] | None = None,
-                    subtitles: list[CompositionRow] | None = None,
+    async def write(self, series_id: int, *, rows: native.Rows | None = None, subtitles: native.Rows | None = None,
                     sources: list[StoredSource] | None = None, numbering: dict[str, int] | None = None,
                     records: list[SettingRecord] | None = None, rev: int | None = None,
                     orders: dict[int, list[str]] | None = None, titles: dict[str, str] | None = None) -> None:
@@ -95,8 +88,10 @@ class CompositionRepository:
     async def save_print(self, series_id: int, inputs: str | None) -> None:
         """The print of the inputs the layout was counted from, kept beside it; it is no content of the layout and raises
         no counter."""
+        # A print the record holds already is not written again: an unchanged page is no write to commit to the disk.
         await self._db.execute("INSERT INTO composition_state (series_id, inputs) VALUES (?, ?) ON CONFLICT (series_id)"
-                               " DO UPDATE SET inputs = excluded.inputs", (series_id, inputs))
+                               " DO UPDATE SET inputs = excluded.inputs WHERE inputs IS NOT excluded.inputs",
+                               (series_id, inputs))
 
     async def writes(self) -> dict[int, int]:
         """The counter of the writes of every series that has one."""
@@ -111,8 +106,8 @@ class CompositionRepository:
 def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
     state = conn.execute("SELECT rev, writes, rows, subtitles FROM composition_state WHERE series_id = ?",
                          (series_id,)).fetchone()
-    rows_json = (state["rows"] if state is not None else None) or b"[]"
-    subtitles_json = (state["subtitles"] if state is not None else None) or b"[]"
+    rows = native.Rows(state["rows"] if state is not None else None)
+    subtitles = native.Rows(state["subtitles"] if state is not None else None)
     sources = conn.execute(
         "SELECT source_id, position, table_url, summary FROM composition_sources WHERE series_id = ?"
         " ORDER BY position, source_id", (series_id,)).fetchall()
@@ -127,8 +122,7 @@ def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
         titles={row["label"]: row["title"] for row in titles},
         rev=state["rev"] if state is not None else 0,
         writes=state["writes"] if state is not None else 0,
-        rows_json=rows_json, subtitles_json=subtitles_json,
-        rows=ROWS.validate_json(rows_json), subtitles=ROWS.validate_json(subtitles_json),
+        rows=rows, subtitles=subtitles,
         sources=[StoredSource(row["source_id"], row["position"], row["table_url"],
                               SourceSummary.model_validate_json(row["summary"])) for row in sources],
         numbering={row["name_key"]: row["number"] for row in numbering},
@@ -140,7 +134,7 @@ def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
 
 def _write(conn: sqlite3.Connection, series_id: int, rows: tuple[list, list] | None, sources, numbering, records, rev,
            orders=None, titles=None) -> None:
-    """`rows`: the rows of sound and of subtitles, written out here, on the thread of the query."""
+    """`rows`: the rows of sound and of subtitles, written as the fields they are kept as."""
     # The time a table of a source was read is no content of the layout (a window is not told it either): sources that
     # differ from the stored ones by it alone are written without raising the counter.
     moved = any(part is not None for part in (rows, numbering or None, records, orders, titles)) or rev is not None or (
@@ -157,7 +151,7 @@ def _write(conn: sqlite3.Connection, series_id: int, rows: tuple[list, list] | N
     if rows is not None:
         conn.execute("INSERT INTO composition_state (series_id, rows, subtitles) VALUES (?, ?, ?) ON CONFLICT (series_id)"
                      " DO UPDATE SET rows = excluded.rows, subtitles = excluded.subtitles",
-                     (series_id, ROWS.dump_json(rows[0]), ROWS.dump_json(rows[1])))
+                     (series_id, rows[0].blob, rows[1].blob))
     if sources is not None:
         conn.execute("DELETE FROM composition_sources WHERE series_id = ?", (series_id,))
         conn.executemany(

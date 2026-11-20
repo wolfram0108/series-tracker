@@ -114,12 +114,13 @@ UI — `http://<host>:5000/`. Старый фронт (аварийный отк
 cd /home/user/series-tracker
 git pull origin main
 .venv/bin/pip install -r requirements.txt          # если менялись зависимости
+native/build.sh                                    # собрать ядро счёта core.native (до миграций: они его читают)
 .venv/bin/alembic upgrade head                     # если есть новые миграции
 cd web && npm ci && npm run build && cd ..          # пересобрать фронт
 sudo systemctl restart series-tracker
 ```
 
-Рабочие данные (`app.db`, `.venv`, `logs/`, `web/dist`) — вне git
+Рабочие данные (`app.db`, `.venv`, `logs/`, `web/dist`, `core/native.abi3.so`) — вне git
 (см. `.gitignore`), при `git pull` сохраняются. `web/dist` собирается на месте
 и в репозиторий не коммитится — **не забыть `npm run build`** после правок
 фронта, иначе UI останется старым.
@@ -130,6 +131,7 @@ sudo systemctl restart series-tracker
 |---|---|
 | git | `runuser -u user -- git …`; от root git отказывается («detected dubious ownership») |
 | Сборка фронта | `runuser -u user -- bash -c "cd web && npm run build"` |
+| Сборка ядра счёта | `runuser -u user -- native/build.sh` (Rust, `cargo` системный; результат `core/native.abi3.so` вне git) |
 | Зависимости, миграции | `runuser -u user -- .venv/bin/pip …`, `runuser -u user -- .venv/bin/alembic upgrade head` |
 | Проверка | `find . -xdev \( -user root -o ! -group user \) \| wc -l` даёт 0; иначе `find . -xdev \( -user root -o ! -group user \) -exec chown -h user:user {} +` |
 

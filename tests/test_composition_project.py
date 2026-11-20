@@ -1,15 +1,69 @@
 """The projection of a series: rows of all its sources with the numbers the constructor gave, voice-over groups and
 unknown voice-overs, the summaries a window shows before any number exists."""
+import json
 import re
 
 import pytest
+from pydantic import TypeAdapter
 
+from core import native
 from core.contracts import (CompositionRow, Exclusion, PlayerSummary, ReleaseTable, RowState, RowVoice, RuleLine, RuleResult,
-                            RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, UnreadPart, line_of)
+                            RulesApplyReply, SeriesSource, SourceStatus, SourceType, StoredTable, TableRow, UnreadPart,
+                            line_of)
 from core.voice_names import fold_name
 from sources_support import json_of, text_of
-from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, group_renames, layout_episodes, left_out, lines_for,
-                                         project, selected_rows, touched_episodes, voice_name_of, voice_names)
+from modules.composition import project as projection
+from modules.composition.project import UNKNOWN_VOICE_LABEL, SourceInput, project, voice_names
+
+ROWS = TypeAdapter(list[CompositionRow])
+
+
+def stored(tbl) -> StoredTable:
+    return tbl if isinstance(tbl, StoredTable) else StoredTable.of(tbl)
+
+
+# --- the parts of the count of a layout, asked as the count answers them (core.native) ------------------------------
+
+def lines_for(src: SeriesSource, tbl, everywhere=()) -> list[RuleLine]:
+    """The lines the constructor is asked about the rows in play."""
+    blob = projection.lines_for(SourceInput(src, stored(tbl), players_off=frozenset(everywhere)))
+    return [RuleLine.model_validate(each) for each in json.loads(native.records(blob))]
+
+
+def selected_rows(src: SeriesSource, tbl, everywhere=()) -> list[TableRow]:
+    """The rows of the table the choices of the user leave in play: those the constructor is asked about."""
+    keys = {each.key for each in lines_for(src, tbl, everywhere)}
+    return [row for row in stored(tbl).table().rows if row.key in keys]
+
+
+def left_out(src: SeriesSource, tbl, everywhere=()) -> dict[str, Exclusion]:
+    """The rows the choices of the user leave out, with whose choice it is, as the layout tells them."""
+    made = project([SourceInput(src, stored(tbl), RulesApplyReply(), players_off=frozenset(everywhere))], {}, {})
+    return {row.row_key: Exclusion(row.exclusion) for rows in (made.rows, made.subtitles) for row in rows
+            if row.exclusion in (Exclusion.SOURCE, Exclusion.SETTINGS)}
+
+
+def voice_name_of(tbl_row: TableRow, result: RuleResult | None) -> str:
+    """The voice-over the layout gives a row with this answer."""
+    reply = RulesApplyReply.of({tbl_row.key: result} if result is not None else {})
+    return project([SourceInput(source(), stored(table(tbl_row)), reply)], {}, {}).rows[0].voice_name
+
+
+def rows_of(models) -> native.Rows:
+    return models if isinstance(models, native.Rows) else native.Rows.from_json(ROWS.dump_json(list(models)))
+
+
+def layout_episodes(rows) -> set:
+    return rows_of(rows).episodes()
+
+
+def touched_episodes(before, after):
+    return rows_of(after).touched(rows_of(before))
+
+
+def group_renames(before, after) -> dict:
+    return dict(rows_of(after).renames(rows_of(before)))
+
 
 def source(id=1, position=0, profile=7, **fields) -> SeriesSource:
     return SeriesSource(id=id, series_id=5, position=position, url=f"https://example.org/{id}",
@@ -29,12 +83,13 @@ def table(*rows, names=("Название",), site="ruchime") -> ReleaseTable:
 
 
 def reply(results: dict) -> RulesApplyReply:
-    return RulesApplyReply(results={key: RuleResult(**fields) for key, fields in results.items()})
+    return RulesApplyReply.of({key: RuleResult(**fields) for key, fields in results.items()})
 
 
 def item(src: SeriesSource, tbl: ReleaseTable | None = None, results: dict | None = None,
          failure: str | None = None) -> SourceInput:
-    return SourceInput(src, tbl, reply(results) if results is not None else None, failure)
+    return SourceInput(src, stored(tbl) if tbl is not None else None, reply(results) if results is not None else None,
+                       failure)
 
 
 def one(inp: SourceInput, groups=None, unknown=None) -> list[CompositionRow]:
@@ -135,20 +190,20 @@ def test_a_source_without_a_profile_is_only_in_the_summary():
 def test_a_stale_answer_does_not_give_numbers_to_a_source_whose_profile_was_taken_off():
     stale = item(source(profile=None), table(row("a", "Серия 1")), {"a": {"episode": 1}})
     out = project([stale], {}, {})
-    assert out.rows == [] and out.sources[0].status == SourceStatus.NO_PROFILE
+    assert len(out.rows) == 0 and out.sources[0].status == SourceStatus.NO_PROFILE
 
 
 def test_a_source_the_page_of_which_is_not_read_yet_waits():
     out = project([item(source())], {}, {})
     summary = out.sources[0]
-    assert out.rows == []
+    assert len(out.rows) == 0
     assert (summary.source_id, summary.url, summary.status) == (1, "https://example.org/1", SourceStatus.WAITING)
     assert (summary.players, summary.read_at, summary.reason) == ([], None, None)
 
 
 def test_a_source_with_a_profile_waits_for_the_answer_of_the_constructor():
     out = project([item(source(), table(row("a")))], {}, {})
-    assert out.rows == [] and out.sources[0].status == SourceStatus.WAITING
+    assert len(out.rows) == 0 and out.sources[0].status == SourceStatus.WAITING
     assert out.sources[0].players[0].rows == 1
 
 
@@ -162,7 +217,7 @@ def test_a_failed_read_keeps_the_last_complete_table_in_force_and_names_the_reas
 
 def test_a_failed_read_without_any_table_gives_the_reason_and_nothing_else():
     out = project([item(source(), failure='{"code":"read_failed"}')], {}, {})
-    assert out.rows == [] and out.sources[0].players == []
+    assert len(out.rows) == 0 and out.sources[0].players == []
     assert (out.sources[0].status, out.sources[0].reason) == (SourceStatus.FAILED, '{"code":"read_failed"}')
 
 
@@ -296,8 +351,8 @@ def test_a_player_switched_off_in_the_settings_leaves_every_source_as_the_settin
 
 def test_a_source_without_a_profile_or_an_answer_still_has_no_rows():
     tbl = catalog_table()
-    assert project([item(source(profile=None, players_off=["kodik"]), tbl, {})], {}, {}).rows == []
-    assert project([item(source(players_off=["kodik"]), tbl)], {}, {}).rows == []
+    assert len(project([item(source(profile=None, players_off=["kodik"]), tbl, {})], {}, {}).rows) == 0
+    assert len(project([item(source(players_off=["kodik"]), tbl)], {}, {}).rows) == 0
 
 
 # ---- the lines the constructor is asked about --------------------------------------------------------------------
@@ -716,14 +771,15 @@ def test_a_new_voice_takes_the_end_and_the_voices_there_keep_their_places_whatev
     from modules.composition.project import season_orders
     for previous in itertools.permutations(["A", "B", "C"]):
         for present in itertools.permutations(["A", "B", "C", "D"], 3):
-            order = season_orders({1: list(previous)}, voiced(*[(label, n) for n, label in enumerate(present, 1)]), {})[1]
+            order = season_orders({1: list(previous)}, rows_of(voiced(*[(label, n) for n, label in enumerate(present, 1)])),
+                                  {})[1]
             assert order[:3] == list(previous)  # nothing that was there moved
             assert order[3:] == [label for label in present if label not in previous]  # what is new takes the end
 
 
 def test_the_default_order_is_the_order_of_the_layout_and_a_group_absent_now_keeps_its_place():
     from modules.composition.project import season_orders, season_voices
-    rows = voiced(("Ruchime", 1), ("ПВА", 1), ("Ruchime", 2), ("Anistar", 3))
+    rows = rows_of(voiced(("Ruchime", 1), ("ПВА", 1), ("Ruchime", 2), ("Anistar", 3)))
     assert season_orders({}, rows, {}) == {1: ["Ruchime", "ПВА", "Anistar"]}
     kept = season_orders({1: ["X", "ПВА", "Ruchime"]}, rows, {})
     assert kept == {1: ["X", "ПВА", "Ruchime", "Anistar"]}
@@ -734,15 +790,15 @@ def test_the_default_order_is_the_order_of_the_layout_and_a_group_absent_now_kee
 
 def test_a_renamed_group_keeps_its_place_and_two_groups_made_one_keep_the_higher_place():
     from modules.composition.project import season_orders
-    rows = voiced(("Стар", 1), ("B", 1), ("C", 1))
+    rows = rows_of(voiced(("Стар", 1), ("B", 1), ("C", 1)))
     assert season_orders({1: ["A", "B", "C"]}, rows, {"A": "Стар"}) == {1: ["Стар", "B", "C"]}
-    merged = voiced(("G", 1), ("C", 1))
+    merged = rows_of(voiced(("G", 1), ("C", 1)))
     assert season_orders({1: ["C", "A", "B"]}, merged, {"A": "G", "B": "G"}) == {1: ["C", "G"]}
 
 
 def test_the_seasons_have_orders_of_their_own():
     from modules.composition.project import season_orders
-    rows = voiced(("A", 1), ("B", 1)) + voiced(("B", 1), ("C", 1), season=2)
+    rows = rows_of(voiced(("A", 1), ("B", 1)) + voiced(("B", 1), ("C", 1), season=2))
     assert season_orders({}, rows, {}) == {1: ["A", "B"], 2: ["B", "C"]}
 
 

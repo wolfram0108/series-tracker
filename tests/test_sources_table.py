@@ -13,6 +13,8 @@ from urllib.parse import urlparse
 
 import pytest
 
+from sources_support import readable, rows_of
+
 from core import BaseModule, Bus
 from core.contracts import ReleaseTable, RowState, RowVoice, TableGetRequest, TableRow, UnreadPart
 from core.contracts.release_table import site_of
@@ -124,7 +126,7 @@ class System:
     progress: object
 
     async def get(self, url: str = PAGE, **request) -> dict:
-        return await self.probe.request("sources.table.get", {"url": url, **request}, timeout=STUCK_S)
+        return readable(await self.probe.request("sources.table.get", {"url": url, **request}, timeout=STUCK_S))
 
     async def next(self, subscription) -> dict:
         return (await asyncio.wait_for(subscription.queue.get(), STUCK_S)).payload
@@ -139,9 +141,9 @@ class System:
         return await self.db.fetch_one("SELECT state, reason, complete, read_at FROM release_tables WHERE url = ?", (url,))
 
     async def stored_rows(self, url: str = PAGE) -> list[dict]:
-        """The rows of the stored table of the page, as the record keeps them (one field of their JSON)."""
+        """The rows of the stored table of the page, as the record keeps them (one field of columns), as JSON."""
         record = await self.db.fetch_one("SELECT rows FROM release_tables WHERE url = ?", (url,))
-        return json.loads(record["rows"]) if record is not None and record["rows"] is not None else []
+        return rows_of(record["rows"]) if record is not None else []
 
     async def stored_texts(self, url: str = PAGE) -> list[str]:
         return [row["text"] for row in await self.stored_rows(url)]

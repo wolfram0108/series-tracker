@@ -7,18 +7,19 @@ code (`CODE:value`) is the text of the row; "Серия 3" and "3 серия" ar
 anywhere in the line is the season (else the season of the card), and "[Имя]" in the text, else the field `V:` of the line, tags the voice-over.
 """
 import asyncio
+import json
+from dataclasses import dataclass
 import itertools
 import re
 from datetime import datetime, timezone
 from typing import Callable
 
-from core import BaseModule
-from core.contracts import (GroupsResolveReply, GroupsResolveRequest, ReleaseTable, RuleResult, RulesApplyReply,
+from core import BaseModule, native
+from core.contracts import (GroupsResolveReply, GroupsResolveRequest, ReleaseTable, RuleLine, RuleResult, RulesApplyReply, StoredTable,
                             RulesApplyRequest, TableFailed, TableGetReply, TableGetRequest, TableReady, TableState,
                             VoiceSettingsView)
 from core.reasons import reason
 from core.voice_names import fold_name
-from modules.rules.numbering import season_of, settle_parts
 
 HOST = "https://fake.test"
 PAGE = f"{HOST}/p/1"
@@ -189,7 +190,8 @@ class FakeSources(BaseModule):
                 self.verdicts.pop(key, None)
                 if key in self.finish_at_once:
                     asyncio.get_running_loop().call_soon(self.finish, key, self.finish_at_once.pop(key))
-        return TableGetReply(url=key, state=state, table=table, reason=why).model_dump(mode="json")
+        stored = StoredTable.of(table) if table is not None else None
+        return TableGetReply(url=key, state=state, table=stored, reason=why).model_dump()
 
     # --- the end of a read ------------------------------------------------------------------------
 
@@ -233,6 +235,16 @@ def lecturer(text: str) -> dict:
     return found
 
 
+@dataclass(frozen=True)
+class Asked:
+    """A request of the constructor as a test reads it: its lines one by one."""
+
+    profile_id: int
+    lines: list[RuleLine]
+    series_season: object
+    rules: list | None
+
+
 class FakeRules(BaseModule):
     """The constructor. `gate` holds every answer; `entered` has one token per request that arrived."""
 
@@ -240,7 +252,7 @@ class FakeRules(BaseModule):
 
     def __init__(self, bus) -> None:
         self.profiles: dict[int, Constructor] = {7: lecturer, 8: lecturer}
-        self.calls: list[RulesApplyRequest] = []
+        self.calls: list[Asked] = []
         self.entered: asyncio.Queue[int] = asyncio.Queue()
         self.gate = asyncio.Event()
         self.gate.set()
@@ -268,19 +280,20 @@ class FakeRules(BaseModule):
 
     async def on_apply(self, env) -> dict:
         request = RulesApplyRequest.model_validate(env.payload)
-        self.calls.append(request)
+        texts = json.loads(native.records(request.lines))
+        self.calls.append(Asked(request.profile_id, [RuleLine.model_validate(each) for each in texts], request.series_season,
+                                request.rules))
         self.entered.put_nowait(request.profile_id)
         await self.gate.wait()
         if self.broken:
             raise RuntimeError("конструктор недоступен")
         extract = self.profiles[request.profile_id]
-        results = {}
-        for line in request.lines:
-            found = extract(line.text)
-            if not found.get("excluded"):
-                found["season"] = season_of(request.series_season, found.get("season"))
-            results[line.key] = RuleResult(**found)
-        return RulesApplyReply(results=settle_parts(request.lines, results)).model_dump(mode="json")
+        outcomes = []
+        for line in texts:
+            found = dict(extract(line["text"]))
+            outcomes.append({"excluded": True} if found.pop("excluded", False) else {"excluded": False, "extracted": found})
+        # The default season and the first part are the constructor's own: the one function of the engine settles them.
+        return {"results": native.answers(request.lines, json.dumps(outcomes), request.card), "invalid_rules": []}
 
 
 class FakeVoices(BaseModule):
