@@ -251,7 +251,7 @@ class UnpackModule(BaseModule):
         # A file read before the events of its subtitles were counted is read again: a track with none is no row.
         todo = [f for f in release.files if kind_of(f.path) in READ and f.priority != 0 and not (
             (stored := known.get(f.path)) and stored["infohash"] == release.infohash and stored["size"] == f.size
-            and not any(s["kind"] == "subtitle" and "events" not in s for s in stored["streams"]))]
+            and not any(s["kind"] == "subtitle" and s.get("events") is None for s in stored["streams"]))]
         key = (release.url, release.release)
         try:
             for done, f in enumerate(todo):
@@ -269,14 +269,18 @@ class UnpackModule(BaseModule):
         await self.repo.drop_streams(release.url, release.release, {f.path for f in release.files})
 
     async def _count_events(self, name: str, path: str, layout: dict) -> None:
-        """Each subtitles stream of the file gets its number of events; None when it could not be counted (then the track
-        is taken as it is: only a track known to hold none is left out of the table)."""
+        """Each subtitles stream of the file gets its number of events. When they could not be counted the streams keep none
+        (the tracks are taken as they are: only a track known to hold none is left out) and the file is counted again at its
+        next read: a count that failed is not an answer to keep."""
         tracks = [s for s in layout["streams"] if s["kind"] == "subtitle"]
         if not tracks:
             return
         counts = await subtitle_events(path)
+        if counts is None:
+            self.log.warning("в файле %s реплики дорожек субтитров не посчитаны: будут посчитаны при следующем чтении", name)
+            return
         for s in tracks:
-            s["events"] = None if counts is None else counts.get(s["index"], 0)
+            s["events"] = counts.get(s["index"], 0)
             if s["events"] == 0:
                 self.log.info("в файле %s дорожка субтитров %d (%s) без реплик: в таблицу не попадёт", name, s["index"],
                               s["title"] or s["language"] or "без названия")
