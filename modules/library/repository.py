@@ -1,4 +1,4 @@
-"""Репозиторий library: таблица relocation_tasks."""
+"""Library repository: table relocation_tasks."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -10,8 +10,8 @@ class LibraryRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    # planned — written by a save, made by the next sync (I-59); in_progress — being made; pending — a move written
-    # before the plans, made when found.
+    # planned — written by a save, performed by the next sync (I-59); in_progress — being performed;
+    # pending — a move written before the plans, performed when found.
     async def plan(self, series_id: int, new_path: str) -> None:
         """One plan per series: a later save replaces the path of the earlier one."""
         if not await self._db.execute(
@@ -51,6 +51,6 @@ class LibraryRepository:
             "DELETE FROM relocation_tasks WHERE id=?", (task_id,))
 
     async def delete_for_series(self, series_id: int) -> None:
-        """Каскад Р-19: серия удалена — задачи перемещения."""
+        """Cascade Р-19: the series is deleted — its relocation tasks go with it."""
         await self._db.execute(
             "DELETE FROM relocation_tasks WHERE series_id=?", (series_id,))

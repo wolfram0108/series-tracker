@@ -109,7 +109,7 @@ async def test_a_later_save_replaces_the_plan_and_the_path_the_series_is_in_drop
     await plan(probe, new_dir)
     await plan(probe, other)
     assert [(t["new_path"], t["status"]) for t in _tasks(db_path)] == [(other, "planned")]
-    assert await plan(probe, old_dir) == {"new_path": None}
+    assert (await plan(probe, old_dir)).new_path is None
     assert _tasks(db_path) == []
 
 
@@ -135,7 +135,7 @@ async def test_a_failed_move_fails_the_sync_keeps_its_plan_and_releases_busy(sys
     assert series.is_busy is False
     assert _save_path(db_path) == old_dir  # the path is not switched
     fake.fail_set_location = False  # the next sync makes the move
-    assert await apply(probe) == {"moved": True} and _save_path(db_path) == new_dir
+    assert (await apply(probe)).moved is True and _save_path(db_path) == new_dir
 
 
 @pytest.mark.asyncio
