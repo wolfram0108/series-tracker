@@ -126,19 +126,21 @@ async def main(series: list[int], base: str | None = None, rounds: int = 1) -> N
                 layout, layout_cpu = time.perf_counter() - start, time.process_time() - cpu
                 while not told.queue.empty():
                     told.queue.get_nowait()
-                start = time.perf_counter()
+                start, cpu = time.perf_counter(), time.process_time()
                 probe.publish_event("composition.changed", {"series_id": series_id, "rev": 0, "summary_only": False,
                                                             "part": "whole", "episodes": []})
                 while True:
                     env = await asyncio.wait_for(told.queue.get(), 170)
+                    # Taken when the view comes: reading it (a text of JSON made into a dict) is no part of the count.
+                    came, came_cpu = time.perf_counter() - start, time.process_time() - cpu
                     if env.payload.get("series_id") == series_id:
                         break
-                plans.append(time.perf_counter() - start)
-            plan = plans[-1]
-            row = ", ".join(f"{each * 1000:.0f}" for each in plans)
+                plans.append((came, came_cpu))
+            plan, plan_cpu = plans[-1]
+            row = ", ".join(f"{each * 1000:.0f}/{used * 1000:.0f}" for each, used in plans)
             print(f"SERIES {series_id}: layout counted in {layout * 1000:.0f} ms, processor {layout_cpu * 1000:.0f} ms of all "
-                  f"threads (changed: {answer.get('changed')}), plan and view in {plan * 1000:.0f} ms"
-                  + (f" (counts in a row: {row} ms)" if rounds > 1 else ""))
+                  f"threads (changed: {answer.get('changed')}), plan and view in {plan * 1000:.0f} ms, processor "
+                  f"{plan_cpu * 1000:.0f} ms" + (f" (counts in a row, wall/processor: {row} ms)" if rounds > 1 else ""))
             print("  requests over the bus (count, total ms, longest ms):")
             for topic, times in sorted(links.items(), key=lambda item: -sum(item[1])):
                 print(f"    {topic:34} {len(times):4} {sum(times) * 1000:8.1f} {max(times) * 1000:8.1f}")
