@@ -19,7 +19,8 @@ async def test_the_plate_of_the_series_in_the_agents_of_its_window_has_the_whole
     await page.locator(".series-card", has_text=SERIES).first.locator("[title='Статус']").click()
     await page.get_by_label(text("seriesForm.nameRu")).fill(LONG)
     await page.locator(".modern-footer").get_by_role("button", name=text("common.save")).click()
-    await expect(page.locator(".p-toast-message", has_text=text("properties.saved"))).to_be_visible()
+    # Told by its own words: «Сохранено» alone is also the notice of the rule saved on the way to this window.
+    await expect(page.locator(".p-toast-message", has_text=text("properties.savedDetail"))).to_be_visible()
     await page.locator(".st-tab[title='Агенты']").click()
     plate = page.locator(".agents-select")
     await expect(plate).to_be_visible()
