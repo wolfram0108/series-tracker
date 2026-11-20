@@ -8,7 +8,7 @@ import pytest
 
 from core.bus import Bus
 from core.module import BaseModule
-from core.contracts import TableGetRequest
+from core.contracts import TableRead
 from core.contracts.torrent import player_of, track_link
 from core.db import Database
 from modules.sources import parsers
@@ -61,7 +61,7 @@ async def stand(tmp_path):
 async def test_a_trackers_page_without_unpack_running_fails_with_that_reason(stand):
     sources, unpack, bus = stand
     failed = bus.subscribe("sources.table.failed")
-    await sources.tables.read(TableGetRequest(url=PAGE))
+    await sources.tables.read(TableRead(url=PAGE))
     assert "unpack_not_running" in (await asyncio.wait_for(failed.queue.get(), 5)).payload["reason"]
 
 
@@ -75,8 +75,8 @@ async def test_the_releases_of_a_page_are_read_from_the_tracker_with_their_ids(s
     monkeypatch.setattr(sources, "_parse_by_service", delivered)
     await unpack.start()
     page = await unpack.request("sources.releases.get", {"url": "https://kinozal.me/details.php?id=2034617"})
-    assert (page["url"], page["site"], page["title"]) == (PAGE, "kinozal", "Тайтл / Title / 2026 / ПМ / WEB-DL (1080p)")
-    assert [(each["release"], each["link"], each["published"]) for each in page["releases"]] == [
+    assert (page.url, page.site, page.title) == (PAGE, "kinozal", "Тайтл / Title / 2026 / ПМ / WEB-DL (1080p)")
+    assert [(each.release, each.link, each.published) for each in page.releases] == [
         ("page", "https://dl.kinozal.me/download.php?id=2034617", "05.05.2026 10:15:00")]
 
 

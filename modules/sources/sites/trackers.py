@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 from core.module import NO_HANDLER, BusRequestError
 from core.contracts import SourceType
 from core.reasons import code_of, reason
+from core.topics import TORRENTS_RELEASE_CHECK, UNPACK_TABLE_GET
 
 from . import PHASE_RELEASE, ReadContext, SiteError, TableDraft, on_domain
 
@@ -71,13 +72,13 @@ class TrackerSite:
         if ctx.fresh:
             # «Перечитать» of the source also checks its releases on the tracker: one button for the page and its releases.
             try:
-                await ctx.ask("torrents.release.check", {"url": url})
+                await ctx.ask(TORRENTS_RELEASE_CHECK, {"url": url})
             except BusRequestError as exc:
                 if code_of(str(exc)) != NO_HANDLER:
                     raise SiteError(str(exc)) from exc
         ctx.progress(PHASE_RELEASE, 1, 1)
         try:
-            answer = await ctx.ask("unpack.table.get", {"url": url})
+            answer = await ctx.ask(UNPACK_TABLE_GET, {"url": url})
         except BusRequestError as exc:
             if code_of(str(exc)) == NO_HANDLER:
                 raise SiteError(reason("unpack_not_running")) from exc

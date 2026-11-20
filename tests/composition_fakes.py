@@ -15,7 +15,7 @@ from typing import Callable
 from core.module import BaseModule
 from core.contracts import (GroupsResolveReply, GroupsResolveRequest, ReleaseTable, RuleResult, RulesApplyReply,
                             RulesApplyRequest, SeriesCard, SeriesListReply, SourcesReply, TableFailed, TableGetReply,
-                            TableGetRequest, TableReady, TableState, VoiceSettingsView)
+                            TableGetRequest, TableReady, TableRefresh, TableState, VoiceSettingsView)
 from core.reasons import reason
 from calc.voice_names import fold_name
 from calc.rules.numbering import season_of, settle_parts
@@ -123,7 +123,7 @@ class FakeSources(BaseModule):
 
     def __init__(self, bus) -> None:
         self.tables: dict[str, ReleaseTable] = {}
-        self.requests: list[TableGetRequest] = []
+        self.requests: list[TableGetRequest | TableRefresh] = []
         self.reading: set[str] = set()
         self.verdicts: dict[str, str] = {}
         self.reads_begun: list[str] = []
@@ -139,6 +139,7 @@ class FakeSources(BaseModule):
 
     def register(self) -> None:
         self.handle("sources.table.get", self.on_get, concurrent=True)
+        self.handle("sources.table.refresh", self.on_refresh, concurrent=True)
 
     def hold(self) -> None:
         while not self.asked.empty():
@@ -149,20 +150,24 @@ class FakeSources(BaseModule):
         self.gate.set()
 
     async def on_get(self, env) -> dict:
-        reply = self._answer(env)
+        return await self._held(self._answer(TableGetRequest.model_validate(env.payload), refresh=False))
+
+    async def on_refresh(self, env) -> dict:
+        return await self._held(self._answer(TableRefresh.model_validate(env.payload), refresh=True))
+
+    async def _held(self, reply: dict) -> dict:
         self.asked.put_nowait(reply["url"])
         await self.gate.wait()
         return reply
 
-    def _answer(self, env) -> dict:
-        request = TableGetRequest.model_validate(env.payload)
+    def _answer(self, request, refresh: bool) -> dict:
         self.requests.append(request)
         if not request.url.startswith(HOST):
             return TableGetReply(url=request.url, state=TableState.FAILED,
                                  reason=reason("site_not_found")).model_dump(mode="json")
         key = canonical(request.url)
         table, why = self.tables.get(key), None
-        if not request.refresh:
+        if not refresh:
             if key in self.reading:
                 state = TableState.READING
             elif key in self.verdicts:

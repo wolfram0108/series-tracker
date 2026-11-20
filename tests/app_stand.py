@@ -594,7 +594,7 @@ class AppStand:
     async def read_card(self, url: str) -> None:
         """The user's read of a title of the provider, as the button of its source asks it: the first read of a card
         waits for it, and nothing but it begins one."""
-        key = (await self.module("sources").request("sources.site.resolve", {"url": url}))["canonical_url"]
+        key = (await self.module("sources").request("sources.site.resolve", {"url": url})).canonical_url
         ended = self.bus.subscribe("sources.table.ready", "sources.table.failed")
         await self.call("POST", "/api/sources/read", {"url": url})
         while True:

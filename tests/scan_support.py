@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.module import BaseModule
-from core.contracts import (CompositionRow, ReleaseTable, RowState, TableFailed, TableGetReply, TableGetRequest,
+from core.contracts import (CompositionRow, ReleaseTable, RowState, TableFailed, TableGetReply, TableRefresh,
                             TableReady, TableState)
 from core.reasons import reason
 from schema_db import migrated
@@ -101,7 +101,7 @@ class World(BaseModule):
         h("composition.recompute", self.on_recompute)
         h("rules.profiles.export", self.on_profiles_export)
         h("voices.settings.export", self.on_voices_export)
-        h("sources.table.get", self.on_table)
+        h("sources.table.refresh", self.on_table)
         h("sources.pages.check", self.on_pages_check)
         h("sources.table.cancel", self.on_table_cancel)
         h("planner.sync.cancel", self.on_planner_cancel)
@@ -178,9 +178,9 @@ class World(BaseModule):
         return {"changed": False}
 
     async def on_table(self, env) -> dict:
-        request = TableGetRequest.model_validate(env.payload)
+        request = TableRefresh.model_validate(env.payload)
         page = self.pages.setdefault(request.url, Page())
-        self.order.append(f"sources.table.get {request.url}")
+        self.order.append(f"sources.table.refresh {request.url}")
         table = ReleaseTable(url=request.url, site="ruchime", complete=True, read_at=READ_AT) if page.held else None
         reply = TableGetReply(url=request.url, state=page.state, table=table, reason=page.why)
         if page.event_first:
@@ -215,5 +215,5 @@ class World(BaseModule):
         self.order.append(f"table.failed {url}")
         self.publish_event("sources.table.failed", TableFailed(url=url, reason=why).model_dump())
 
-    def failure(self, topic: str = "sources.table.get") -> str:
+    def failure(self, topic: str = "sources.table.refresh") -> str:
         return reason("composition_request_failed", topic=topic)

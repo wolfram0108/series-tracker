@@ -10,13 +10,15 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from .frozen import Frozen
+
 
 class TitleSearchRequest(BaseModel):
     query: str
     page: int = Field(default=1, ge=1)
 
 
-class TitleLine(BaseModel):
+class TitleLine(Frozen):
     """A line of a title: the archive its episodes come from, and the one thing a series takes as its source. `url` is the address it
     is a source by; `rows` is how many it holds when the provider knows, `routes` how many independent ways to it the provider
     has (a reserve: nothing in the tracker depends on it). `aka` are the other addresses the same line was issued under: a title merged
@@ -27,10 +29,10 @@ class TitleLine(BaseModel):
     label: str = ""
     rows: int | None = None
     routes: int = 0
-    aka: list[str] = Field(default_factory=list)
+    aka: tuple[str, ...] = Field(default_factory=tuple)
 
 
-class TitleCard(BaseModel):
+class TitleCard(Frozen):
     """A title as the search of its provider gives it. A title is no source: each of its `lines` is."""
 
     id: str
@@ -42,19 +44,19 @@ class TitleCard(BaseModel):
     remarks: str = ""      # what the source says of the episodes out ("更新至第499集")
     blurb: str = ""
     pic: str = ""          # the poster, an address of the source's host
-    lines: list[TitleLine] = Field(default_factory=list)
+    lines: tuple[TitleLine, ...] = Field(default_factory=tuple)
 
 
-class TitleSearchReply(BaseModel):
+class TitleSearchReply(Frozen):
     """A page of the search: the titles, how many pages and titles the provider says there are and whether a page follows (None when
     it does not say), how many titles of the page it left out for having no line it plays, the codes of what the answer lacks (a
     part of the sources did not answer) and the reason it gave no title."""
 
-    titles: list[TitleCard] = Field(default_factory=list)
+    titles: tuple[TitleCard, ...] = Field(default_factory=tuple)
     page: int = 1
     pages: int | None = None
     total: int | None = None
     more: bool | None = None  # whether a page follows this one, when the provider says; None: it does not
     without_lines: int = 0  # the titles of this page left out because none of their lines is one the provider plays
-    notes: list[str] = Field(default_factory=list)
+    notes: tuple[str, ...] = Field(default_factory=tuple)
     reason: str | None = None

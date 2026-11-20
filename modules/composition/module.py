@@ -129,8 +129,8 @@ from core.contracts import (CompositionChanged, CompositionFailed, CompositionGe
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, GroupsResolveRequest, QueuesGet,
                             QueuesReply, ReleaseTable, RulesApplyReply, RulesProfileChanged, RunChanged, RunSnapshot,
                             SeriesCard, SeriesDeleted, SeriesPurged, SeriesReadProgress, SeriesSource, SeriesUpdated, SettingsReset, SettingsSet,
-                            SettingsSetMany, SourceEvent, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableState, VoiceOrderSet,
-                            VoiceSettingsView, VoiceTitleSet, availability)
+                            SettingsSetMany, SourceEvent, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableRefresh,
+                            TableState, VoiceOrderSet, VoiceSettingsView, VoiceTitleSet, availability)
 from core.db import Database
 from core.envelope import Envelope
 from core.module import BaseModule
@@ -142,7 +142,8 @@ from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, CATALOG_SOURCE
                          COMPOSITION_VOICE_ORDER_SET, COMPOSITION_VOICE_TITLE_SET, RULES_APPLY, RULES_PROFILE_CHANGED,
                          SCAN_RUN_CHANGED, SERIES_ADDED, SERIES_DELETED, SERIES_PURGED, SERIES_SOURCE_ADDED,
                          SERIES_SOURCE_REMOVED, SERIES_SOURCE_UPDATED, SERIES_UPDATED, SOURCES_TABLE_FAILED,
-                         SOURCES_TABLE_GET, SOURCES_TABLE_PROGRESS, SOURCES_TABLE_READY, VOICES_GROUPS_RESOLVE,
+                         SOURCES_TABLE_GET, SOURCES_TABLE_PROGRESS, SOURCES_TABLE_READY, SOURCES_TABLE_REFRESH,
+                         VOICES_GROUPS_RESOLVE,
                          VOICES_SETTINGS_CHANGED, VOICES_SETTINGS_GET, Topic)
 
 from .repository import CompositionRepository
@@ -316,8 +317,7 @@ class CompositionModule(BaseModule):
         if request.lines is not None:
             return await self._preview_lines(request)
         try:
-            got = await self._ask(SOURCES_TABLE_GET, TableGetRequest(
-                url=request.url, refresh=request.refresh).model_dump(mode="json"))
+            got = await self._page(request.url, request.refresh)
             table = got.table if got.table is not None and got.table.complete else None
             if table is None:
                 return tableless_preview(got)
@@ -618,8 +618,14 @@ class CompositionModule(BaseModule):
         return table, reply.reason if reply.state == TableState.FAILED else None, reply.url
 
     async def _table_reply(self, source: SeriesSource, begin: bool) -> TableGetReply:
-        request = TableGetRequest(url=source.url, refresh=begin, rows=source.rows_per_line)
-        return await self._ask(SOURCES_TABLE_GET, request.model_dump(mode="json"))
+        return await self._page(source.url, begin, source.rows_per_line)
+
+    async def _page(self, url: str, refresh: bool, rows: str = "all") -> TableGetReply:
+        """The page as it stands, or, when it is to be read (`refresh`), the page after its read was asked: a read begins when its
+        table is not current, and the answer says how the page stands after that."""
+        if refresh:
+            return await self._ask(SOURCES_TABLE_REFRESH, TableRefresh(url=url, rows=rows).model_dump(mode="json"))
+        return await self._ask(SOURCES_TABLE_GET, TableGetRequest(url=url).model_dump(mode="json"))
 
     async def _players_off(self, snapshot: RunSnapshot | None = None) -> frozenset[str]:
         """The players switched off in the settings for every source, as they are now or as the run took them."""

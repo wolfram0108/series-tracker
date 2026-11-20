@@ -109,7 +109,7 @@ async def read(web: Web, url: str = JISU, players: PlayerRegistry | None = None,
 async def test_the_label_of_a_master_playlist_is_not_taken_for_the_frame(pictures):
     draft = await read(lzi_web(pictures), LZI)
 
-    assert [(row.text, row.state, row.heights) for row in draft.rows] == [("第01集", RowState.PLAYABLE, [720])]
+    assert [(row.text, row.state, row.heights) for row in draft.rows] == [("第01集", RowState.PLAYABLE, (720,))]
 
 
 async def test_a_row_the_last_table_could_not_measure_is_asked_again(pictures):
@@ -121,7 +121,7 @@ async def test_a_row_the_last_table_could_not_measure_is_asked_again(pictures):
     web.route("/A/plist0.ts", lambda request: ts(encrypted(pictures[1080], bytes.fromhex("0123456789abcdef" * 2))),
               first=True)
     again = await read(web, last_rows=tuple(first.rows))
-    assert [(row.state, row.heights) for row in again.rows] == [(RowState.PLAYABLE, [1080]), (RowState.PLAYABLE, [1080])]
+    assert [(row.state, row.heights) for row in again.rows] == [(RowState.PLAYABLE, (1080,)), (RowState.PLAYABLE, (1080,))]
 
 
 # --- the stream of an episode ---------------------------------------------------------------------------------------------

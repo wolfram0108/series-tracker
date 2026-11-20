@@ -13,6 +13,7 @@ from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .frozen import Frozen
 from .release_table import SubtitleType
 
 TORRENT_PLAYER = "torrent"
@@ -72,7 +73,7 @@ class ReleaseView(BaseModel):
     client: str | None = None
 
 
-class PageRelease(BaseModel):
+class PageRelease(Frozen):
     """A release as the page lists it. `release` is its id on the page, the same for every version of it: the page itself
     for a page of one release (kinozal, rutracker), the quality for a catalog of a release per quality (anilibria), the
     episodes and the quality for a catalog of a release per episode (astar)."""
@@ -89,7 +90,7 @@ class PageRelease(BaseModel):
     infohash: str | None = None
 
 
-class PageReleases(BaseModel):
+class PageReleases(Frozen):
     """`sources.releases.get {url}`: what the page lists now, read from the tracker; `url` is the canonical address."""
 
     model_config = ConfigDict(extra="forbid")
@@ -97,7 +98,7 @@ class PageReleases(BaseModel):
     url: str
     site: str
     title: str = ""
-    releases: list[PageRelease] = Field(default_factory=list)
+    releases: tuple[PageRelease, ...] = Field(default_factory=tuple)
 
 
 def order_name(player: str) -> str:

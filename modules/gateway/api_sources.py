@@ -9,7 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from core.module import BusRequestError
-from core.topics import CATALOG_SOURCES_LIST
+from core.topics import (CATALOG_SOURCES_LIST, SOURCES_SETTINGS_GET, SOURCES_SITE_RESOLVE, SOURCES_TABLE_CANCEL,
+                         SOURCES_TABLE_READ, SOURCES_TABLES_FRESH, SOURCES_TITLES_SEARCH)
 from core.contracts import (TitleSearchReply, TitleSearchRequest, CompositionPreviewReply, CompositionPreviewRequest,
                             SeriesSource, SourcesSettingsView, SiteResolveReply, SiteResolveRequest)
 
@@ -83,7 +84,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The settings screen of the sources: the mirrors of each tracker, and the domains the service reads pages of
         now — the trackers with their mirrors, the sites of the registry."""
         try:
-            return await gw.request("sources.settings.get", {})
+            return await gw.reply_of(SOURCES_SETTINGS_GET, {})
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 
@@ -91,7 +92,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def resolve_source(body: SiteResolveRequest):
         """Which site reads an address, and the address in its canonical form; no network."""
         try:
-            return await gw.request("sources.site.resolve", body.model_dump(mode="json"))
+            return await gw.reply_of(SOURCES_SITE_RESOLVE, body.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 
@@ -100,31 +101,31 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The search of the titles of the provider of external sources: a page of them as it gives them; a title is a source by
         its address."""
         try:
-            return await gw.request("sources.titles.search", body.model_dump(mode="json"))
+            return await gw.reply_of(SOURCES_TITLES_SEARCH, body.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 
     @r.post("/api/sources/read", response_model=OkResponse, responses=_ERR1)
     async def read_source(body: TableReadRequest):
         """Read the page now, whatever the age of its table (the hour of a table is the term of a sync, not of a user)."""
-        gw.send_command("sources.table.read", body.model_dump(mode="json", exclude_none=True))
+        gw.send_command(SOURCES_TABLE_READ, body.model_dump(mode="json", exclude_none=True))
         return {"success": True}
 
     @r.post("/api/sources/fresh", response_model=DynamicObject, responses=_ERR1)
     async def tables_fresh(body: FreshRequest):
         """When the tables of the pages were read and until when they are current; the events `sources_table_ready` and
         `sources_table_fresh` carry it on."""
-        return await gw.request("sources.tables.fresh", body.model_dump(mode="json"))
+        return (await gw.reply_of(SOURCES_TABLES_FRESH, body.model_dump(mode="json"))).model_dump(mode="json")
 
     @r.post("/api/sources/cancel", response_model=ReadCancelled, responses=_ERR1)
     async def cancel_read(body: TableReadRequest):
         """Stop the read of the page going now (the user stopped it on the card of the source): it ends failed, the last
         table serves, and it is not begun again at the start."""
         try:
-            done = await gw.request("sources.table.cancel", body.model_dump(mode="json", exclude_none=True))
+            done = await gw.reply_of(SOURCES_TABLE_CANCEL, body.model_dump(mode="json", exclude_none=True))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
-        return {"success": True, "cancelled": bool(done.get("cancelled"))}
+        return {"success": True, "cancelled": done.cancelled}
 
     @r.post("/api/parser-profiles/test", response_model=CompositionPreviewReply, responses=_ERR1)
     async def rules_test(body: RulesTestRequest):

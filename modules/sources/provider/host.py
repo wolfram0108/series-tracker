@@ -4,28 +4,30 @@ of the provider shows.
 
 An address saved is taken at once, without a restart: the feed of the old provider ends, its sites and players leave the
 registries, the new one (or none) takes their place. The picture is told by the event `sources.provider.changed` whenever the
-socket, the manifest, the address or the pages of the sources change, so that every open screen shows the same."""
+socket, the manifest, the address or the pages of the sources change, so that every open screen shows the same. What the picture
+holds is counted in calc/sources/views.py; what a tab may write is calc/sources/provider_settings.py."""
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 from typing import Any, Awaitable, Callable
 
+from calc.sources import provider_settings as settings
+from calc.sources.terms import sources_by_site
+from calc.sources.views import provider_view
 from core.module import BusRequestError
-from core.contracts import ProviderSaved, ProviderSettingsDraft, ProviderSite, ProviderView
+from core.contracts import ProviderSaved, ProviderSettingsDraft, ProviderView
 from core.logging import get_logger
-from core.topics import CATALOG_SERIES_LIST, SETTINGS_VALUE_GET, SETTINGS_VALUES_SET_MANY
+from core.topics import (CATALOG_SERIES_LIST, CONFORM_WORKSPACE, SETTINGS_VALUE_GET, SETTINGS_VALUES_SET_MANY,
+                         SOURCES_PROVIDER_CHANGED, Topic)
 
 from ..players.registry import PlayerRegistry
 from ..repository import SourcesRepository
 from ..sites import SiteRegistry
 from ..term import Term
-from . import settings
 from .client import ProviderClient
 from .connector import Connector
 
-CHANGED_TOPIC = "sources.provider.changed"
-Publish = Callable[[str, dict], None]
+Publish = Callable[[Topic, dict], None]
 Request = Callable[..., Awaitable[dict]]
 # The answer of a neighbour as the model of its topic (`BaseModule.reply_of`).
 Reply = Callable[..., Awaitable[Any]]
@@ -52,7 +54,7 @@ class ProviderHost:
         return Connector(client, self._repo, sites=self._sites, players=self._players, term=self._term, publish=self._told,
                          **({"reconnect": self._reconnect} if self._reconnect else {}))
 
-    def _told(self, topic: str, payload: dict) -> None:
+    def _told(self, topic: Topic, payload: dict) -> None:
         """What the connector says goes out as it is, and the screen is told the whole picture again."""
         self._publish(topic, payload)
         self.announce()
@@ -61,7 +63,7 @@ class ProviderHost:
         self._spawn(self._announce(), name="sources.provider.announce")
 
     async def _announce(self) -> None:
-        self._publish(CHANGED_TOPIC, (await self.view()).model_dump(mode="json"))
+        self._publish(SOURCES_PROVIDER_CHANGED, (await self.view()).model_dump(mode="json"))
 
     # --- the life of it -----------------------------------------------------------------------------------------------
 
@@ -151,22 +153,16 @@ class ProviderHost:
             await self.use(draft.url, draft.token or "")
         return ProviderSaved(saved=not problems, problems=problems, provider=await self.view())
 
-    async def _sources_by_app(self) -> Counter:
+    async def _sources_by_app(self) -> dict[str, int]:
         try:
             series = (await self._reply(CATALOG_SERIES_LIST, {})).series
         except (BusRequestError, asyncio.TimeoutError):
-            return Counter()
-        found = Counter()
-        for one in series:
-            for source in one.sources:
-                site = self._site_of(source.url or "")
-                if site:
-                    found[site] += 1
-        return found
+            return {}
+        return sources_by_site((source.url for one in series for source in one.sources), self._site_of)
 
     async def _downloads_dir(self) -> str:
         try:
-            return str((await self._request("conform.workspace", {})).get("downloads") or "")
+            return str((await self._request(CONFORM_WORKSPACE, {})).get("downloads") or "")
         except (BusRequestError, asyncio.TimeoutError):
             return ""
 
@@ -178,15 +174,9 @@ class ProviderHost:
         seq = self._seq
         connector = self.connector
         manifest = connector.manifest if connector is not None else None
-        fixed = dict(
-            url=connector.client.url if connector is not None else "", has_token=bool(connector and connector.client.token),
-            state=connector.state if connector is not None else "none", reason=(connector.why or None) if connector is not None else None,
-            provider=manifest.provider.id if manifest else None, version=manifest.provider.version if manifest else None,
-            protocol=manifest.protocol if manifest else None, revision=manifest.revision if manifest else None)
-        sites: list[ProviderSite] = []
-        if manifest is not None:
-            lines = Counter(place.name for each in manifest.players if each.kind == "line" for place in each.places)
-            sources = await self._sources_by_app()
-            sites = [ProviderSite(name=each.name, label=each.label or each.name, sources=sources.get(each.name, 0),
-                                lines=lines.get(each.name, 0)) for each in manifest.sites]
-        return ProviderView(**fixed, sites=sites, downloads_dir=await self._downloads_dir(), seq=seq)
+        socket = dict(url=connector.client.url if connector is not None else "", has_token=bool(connector and connector.client.token),
+                      state=connector.state if connector is not None else "none",
+                      why=(connector.why or None) if connector is not None else None)
+        # The catalog is asked only for a provider that has told its manifest: no manifest, no site to count sources for.
+        sources = await self._sources_by_app() if manifest is not None else {}
+        return provider_view(**socket, manifest=manifest, sources=sources, downloads_dir=await self._downloads_dir(), seq=seq)

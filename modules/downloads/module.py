@@ -66,7 +66,8 @@ from core.contracts import (RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadV
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import describe, reason
-from core.topics import SETTINGS_VALUE_GET, SETTINGS_VALUE_SET
+from core.topics import (SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SOURCES_VIDEO_FETCH, SOURCES_VIDEO_FETCH_STOP,
+                         SOURCES_VIDEO_PROGRESS, SOURCES_VIDEO_STREAM)
 from core.retry import UNTIMED, Budget, retrying
 
 from . import ytdlp
@@ -176,7 +177,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.queue.clear", self.on_queue_clear)
         self.handle("downloads.cancel", self.on_cancel)
         self.handle("downloads.fetch", self.on_fetch)
-        self.handle("sources.video.progress", self.on_player_progress)
+        self.handle(SOURCES_VIDEO_PROGRESS, self.on_player_progress)
         self.handle(WORK_WITHDRAWN, self.on_work_withdrawn)
         self.handle("downloads.withdraw", self.on_withdraw, concurrent=True)
         self.handle("series.deleted", self.on_series_deleted)
@@ -361,16 +362,16 @@ class DownloadsModule(BaseModule):
         player is no stream and yt-dlp would scrape a foreign player."""
         payload = {"url": url, **({"max_height": max_height} if max_height else {})}
         try:
-            reply = await self.request("sources.video.stream", payload)
-            if reply.get("error"):
+            reply = await self.reply_of(SOURCES_VIDEO_STREAM, payload)
+            if reply.error:
                 # `unasked`: the player was not reached (a provider that is not up), the failure is nobody's.
-                kind = Failed.UNASKED if reply.get("unasked") else Failed.BROKEN if reply.get("transient") else Failed.FINAL
-                return Stream(url, error=(reply["error"], kind))
-            if reply.get("handled"):
-                by_player = bool(reply.get("player_fetch"))
-                return Stream(reply["stream_url"], reply.get("headers"), progressive=bool(reply.get("progressive")),
-                              playlist=bool(reply.get("playlist")) or by_player, by_player=by_player,
-                              by_provider=reply.get("fetch_by") == "provider")
+                kind = Failed.UNASKED if reply.unasked else Failed.BROKEN if reply.transient else Failed.FINAL
+                return Stream(url, error=(reply.error, kind))
+            if reply.handled:
+                by_player = bool(reply.player_fetch)
+                return Stream(reply.stream_url, reply.headers, progressive=bool(reply.progressive),
+                              playlist=bool(reply.playlist) or by_player, by_player=by_player,
+                              by_provider=reply.fetch_by == "provider")
         except Exception as exc:
             if not await ytdlp_fallback():
                 return Stream(url, error=(reason("stream_not_got", cause=str(exc)), Failed.UNASKED))
@@ -585,19 +586,19 @@ class DownloadsModule(BaseModule):
         self._player_progress[path] = told
         payload = {"url": link, "target": path, **({"max_height": max_height} if max_height else {})}
         try:
-            reply = await self.request("sources.video.fetch", payload)
+            reply = await self.reply_of(SOURCES_VIDEO_FETCH, payload)
         except asyncio.CancelledError:
             # The file is given up: the provider is told by the closed connection, and the transfer stops.
-            self.spawn(self.request("sources.video.fetch.stop", {"target": path}))
+            self.spawn(self.request(SOURCES_VIDEO_FETCH_STOP, {"target": path}))
             raise
         except Exception as exc:  # noqa: BLE001 - a provider that did not answer said nothing of the source
             return False, Unasked(reason("player_fetch_silent", cause=str(exc)))
         finally:
             self._player_progress.pop(path, None)
-        if reply.get("ok"):
+        if reply.ok:
             return True, ""
-        words = reason("player_fetch_failed", cause=reply["error"]) if reply.get("error") else reason("player_fetch_refused")
-        kind = reply.get("kind") or ("final" if reply.get("final") else "broken")
+        words = reason("player_fetch_failed", cause=reply.error) if reply.error else reason("player_fetch_refused")
+        kind = reply.kind or ("final" if reply.final else "broken")
         return False, Final(words) if kind == "final" else Unasked(words) if kind == "unasked" else words
 
     def _by_player(self, url: str, max_height: int | None, connections: int):
@@ -608,20 +609,19 @@ class DownloadsModule(BaseModule):
             payload = {"url": url, "target": target, "connections": connections,
                        **({"max_height": max_height} if max_height else {})}
             try:
-                reply = await self.request("sources.video.fetch", payload)
+                reply = await self.reply_of(SOURCES_VIDEO_FETCH, payload)
             except asyncio.CancelledError:
                 # The file is given up: the player stops taking it.
-                self.spawn(self.request("sources.video.fetch.stop", {"target": target}))
+                self.spawn(self.request(SOURCES_VIDEO_FETCH_STOP, {"target": target}))
                 raise
             except Exception as exc:  # noqa: BLE001 - a player that did not answer said nothing of the source
                 return False, Unasked(reason("player_fetch_silent", cause=str(exc))), 0.0, 0.0
             finally:
                 self._player_progress.pop(target, None)
-            if not reply.get("ok"):
-                words = reason("player_fetch_failed", cause=reply["error"]) if reply.get("error") \
-                    else reason("player_fetch_refused")
-                return False, Final(words) if reply.get("final") else words, 0.0, 0.0
-            return True, "", float(reply.get("seconds") or 0), float(reply.get("longest") or 0)
+            if not reply.ok:
+                words = reason("player_fetch_failed", cause=reply.error) if reply.error else reason("player_fetch_refused")
+                return False, Final(words) if reply.final else words, 0.0, 0.0
+            return True, "", float(reply.seconds or 0), float(reply.longest or 0)
         return fetch
 
     async def on_player_progress(self, env: Envelope) -> None:

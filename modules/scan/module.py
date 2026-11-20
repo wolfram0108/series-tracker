@@ -74,9 +74,11 @@ from datetime import datetime, timezone
 from core.module import NO_HANDLER, BaseModule, BusRequestError
 from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, EDIT_STUCK_S, METADATA_SEASONS_RECOMPUTE,
                          SERIES_BUSY_CONTRIBUTION, SERIES_PURGED, SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET,
-                         SETTINGS_VALUE_SET, TABLE_WAIT_S)
+                         SETTINGS_VALUE_SET, SOURCES_PAGES_CHECK, SOURCES_TABLE_CANCEL, SOURCES_TABLE_FAILED,
+                         SOURCES_TABLE_READY, TABLE_WAIT_S)
 from core.contracts import (RUN_CHANGED, WORK_STATE, BusyContribution, RunSnapshot, availability, OutputSwitch, RunChanged,
-                            SeriesCard, SeriesDeleted, SeriesPurged, SettingValue, Slot, StatusContribution, SyncScope, WorkState)
+                            SeriesCard, SeriesDeleted, SeriesPurged, SettingValue, Slot, StatusContribution, SyncScope, TableFailed, TableReady,
+                            WorkState)
 from core.db import Database
 from core.envelope import Envelope
 from core.ignored import parse_memory
@@ -186,8 +188,8 @@ class ScanModule(BaseModule):
         self.handle("scan.status.get", self.on_status_get)
         self.handle("scan.schedule.set", self.on_schedule_set)
         self.handle("system.started", self.on_system_started)
-        self.handle("sources.table.ready", self.on_table_ready)
-        self.handle("sources.table.failed", self.on_table_failed)
+        self.handle(SOURCES_TABLE_READY, self.on_table_ready)
+        self.handle(SOURCES_TABLE_FAILED, self.on_table_failed)
         self.handle(WORK_STATE, self.on_work_state)
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("settings.changed", self.on_settings_changed)
@@ -374,10 +376,11 @@ class ScanModule(BaseModule):
     # --- signals of the neighbours ---------------------------------------------------------------
 
     def on_table_ready(self, env: Envelope) -> None:
-        self._signals.ready(env.payload["url"])
+        self._signals.ready(TableReady.model_validate(env.payload).url)
 
     def on_table_failed(self, env: Envelope) -> None:
-        self._signals.failed(env.payload["url"], env.payload.get("reason"))
+        failed = TableFailed.model_validate(env.payload)
+        self._signals.failed(failed.url, failed.reason)
 
     def _lock(self, series_id: int) -> asyncio.Lock:
         return self._locks.setdefault(series_id, asyncio.Lock())
@@ -425,10 +428,10 @@ class ScanModule(BaseModule):
             urls = [each.url for each in series.sources]
             if not urls:
                 return None
-            blocked = (await self.request("sources.pages.check", {"urls": urls})).get("blocked") or []
+            blocked = (await self.reply_of(SOURCES_PAGES_CHECK, {"urls": urls})).blocked
         except (BusRequestError, asyncio.TimeoutError):
             return None
-        return blocked[0]["reason"] if blocked else None
+        return blocked[0].reason if blocked else None
 
     async def on_run_cancel(self, env: Envelope) -> dict:
         """The user stops the sync of a series: the pass of the scan, the reads of its pages (failed, and not begun again
@@ -448,8 +451,7 @@ class ScanModule(BaseModule):
             series = await self.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
             for source in series.sources:
                 try:
-                    reply = await self.request("sources.table.cancel", {"url": source.url})
-                    stopped = bool((reply or {}).get("cancelled")) or stopped
+                    stopped = (await self.reply_of(SOURCES_TABLE_CANCEL, {"url": source.url})).cancelled or stopped
                 except (BusRequestError, asyncio.TimeoutError) as exc:
                     self.log.warning("сериал %d: чтение %s не остановлено: %s", series_id, source.url, exc)
             try:

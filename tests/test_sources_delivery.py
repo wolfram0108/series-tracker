@@ -12,6 +12,7 @@ import pytest
 
 from core import ids
 from core.bus import Bus
+from core.contracts import Tracker
 from modules.sources import parsers
 from modules.sources.module import SourcesModule
 
@@ -19,8 +20,8 @@ from modules.sources.module import SourcesModule
 TORRENT = b"d8:announce15:http://tr/annce4:infod4:name4:fileee"
 SITE_STUB = ("<html><body>Мы просим Вас проявить терпение на проекте"
              "<br>ведутся технические работы</body></html>")
-KINOZAL = {"canonical_name": "kinozal",
-           "mirrors": ["kinozal.me", "kinozal.guru", "kinozal.tv"]}
+KINOZAL = Tracker(id=3, canonical_name="kinozal", display_name="Kinozal.me", mirrors=["kinozal.me", "kinozal.guru", "kinozal.tv"],
+                  parser_class="KinozalParser", auth_type="kinozal", ui_features={})
 
 
 def _module(tmp_path=None, tracker=KINOZAL, monkeypatch=None):

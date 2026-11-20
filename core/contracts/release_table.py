@@ -14,9 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .frozen import Frozen
 
 LINE_SEPARATOR = " | "
-# What a read of a page does, told for its dump (modules/sources/table.py tells it, modules/runlog keeps it):
-# {url, site, kind: "begin", fresh} and {url, site, kind: "end", ok, reason, seconds, rows, players, causes, unread}.
-TABLE_TRACE_TOPIC = "sources.table.trace"
 
 
 # The type of subtitles a source gives: full (every line) or signs (the signs and songs alone); empty when it says none.
@@ -39,14 +36,14 @@ class RowTrack(StrEnum):
     SUBTITLES = "subtitles"
 
 
-class RowVoice(BaseModel):
+class RowVoice(Frozen):
     """The voice-over as the player or the site words it; `kind` is the type the player names (voice, subtitles, ...)."""
 
     name: str = ""
     kind: str = ""
 
 
-class TableRow(BaseModel):
+class TableRow(Frozen):
     """One element of one player's list, as the site gave it."""
 
     model_config = ConfigDict(extra="forbid")
@@ -61,7 +58,7 @@ class TableRow(BaseModel):
     episode: str = ""
     text: str = ""
     voice: RowVoice = Field(default_factory=RowVoice)
-    heights: list[int] = Field(default_factory=list)
+    heights: tuple[int, ...] = Field(default_factory=tuple)
     state: RowState
     reason: str | None = None
     duration_s: float | None = None
@@ -91,7 +88,7 @@ class TableRow(BaseModel):
         return max(self.heights) if self.heights else None
 
 
-class UnreadPart(BaseModel):
+class UnreadPart(Frozen):
     """A part of a page the read could not get: its rows are the ones it gave the last read that got it, if any.
     `names` are what the site calls its content (the voice-overs of a catalog, the title of an episode)."""
 
@@ -99,11 +96,11 @@ class UnreadPart(BaseModel):
 
     part: str
     player_label: str = ""
-    names: list[str] = Field(default_factory=list)
+    names: tuple[str, ...] = Field(default_factory=tuple)
     reason: str
 
 
-class ReleaseTable(BaseModel):
+class ReleaseTable(Frozen):
     """The head and the rows of one page; published to consumers only when `complete`. A page some part of which could
     not be read is still complete: the part is named in `unread` and keeps its rows of the read before."""
 
@@ -111,7 +108,7 @@ class ReleaseTable(BaseModel):
 
     url: str
     site: str
-    names: list[str] = Field(default_factory=list)
+    names: tuple[str, ...] = Field(default_factory=tuple)
     # The name of the source a window shows in its head, when its site gives one (a title of the provider: its name and
     # year, `万界独尊 (2021)`); empty when the place of the address is the name.
     title: str = ""
@@ -120,8 +117,8 @@ class ReleaseTable(BaseModel):
     channel: str = ""
     read_at: str | None = None
     complete: bool = False
-    rows: list[TableRow] = Field(default_factory=list)
-    unread: list[UnreadPart] = Field(default_factory=list)
+    rows: tuple[TableRow, ...] = Field(default_factory=tuple)
+    unread: tuple[UnreadPart, ...] = Field(default_factory=tuple)
 
     def row(self, key: str) -> TableRow | None:
         return next((row for row in self.rows if row.key == key), None)
@@ -184,17 +181,19 @@ class TableState(StrEnum):
 
 
 class TableGetRequest(BaseModel):
-    """`refresh` False reads nothing: the last complete table is returned as it is, old or not, so that recounting
-    a layout never costs a read of the site."""
+    """`sources.table.get`: the page as it stands, read from nothing. The last complete table is returned as it is, old or not, so
+    that recounting a layout never costs a read of the site."""
 
     url: str
-    refresh: bool = True
+
+
+class TableRead(BaseModel):
+    """`sources.table.read`: read the page now, whatever the age of its table."""
+
+    url: str
     # How many rows of each line of a title a provider source reads (calc/row_limit.py): the setting of the source
     # the read is for; a site that reads no lines ignores it. None is all.
     rows: str = "all"
-    # The request is a synchronization's own. The page of a site that waits for the user (a title of the provider) is begun
-    # by the user's command or by a synchronization, never by a window, a preview or the recount of a layout.
-    by_sync: bool = False
 
     @field_validator("rows", mode="before")
     @classmethod
@@ -202,7 +201,16 @@ class TableGetRequest(BaseModel):
         return "all" if value is None else value
 
 
-class TableGetReply(BaseModel):
+class TableRefresh(TableRead):
+    """`sources.table.refresh`: read the page if its table is not current, and answer how the page stands.
+
+    `by_sync`: the request is a synchronization's own. The page of a site that waits for the user (a title of the provider) is begun
+    by the user's command or by a synchronization, never by a window, a preview or the recount of a layout."""
+
+    by_sync: bool = False
+
+
+class TableGetReply(Frozen):
     """`url` is the canonical address of the page: the one the events `ready` and `failed` carry.
 
     `table` is the last complete table: present with `reading` and `failed` when an earlier read finished."""
@@ -219,33 +227,33 @@ class SiteResolveRequest(BaseModel):
     url: str
 
 
-class ParsedDomains(BaseModel):
+class ParsedDomains(Frozen):
     """The domains a reader of pages takes addresses of: a tracker (its domain and mirrors, as the settings hold them) or
     a site of the registry (its own domains)."""
 
     name: str
     kind: str  # "tracker" | "site"
-    domains: list[str] = Field(default_factory=list)
+    domains: tuple[str, ...] = Field(default_factory=tuple)
 
 
-class TrackerMirrors(BaseModel):
+class TrackerMirrors(Frozen):
     """A tracker as the settings of the sources show it: the domain and the mirrors its pages are read on."""
 
     id: int
     display_name: str
-    mirrors: list[str] = Field(default_factory=list)
+    mirrors: tuple[str, ...] = Field(default_factory=tuple)
 
 
-class SourcesSettingsView(BaseModel):
+class SourcesSettingsView(Frozen):
     """`sources.settings.get` and the event `sources.settings.changed`: the settings screen of the sources whole — the
     trackers with their mirrors, and every reader of pages the service has now (trackers first, then the sites in the
     order of their registry)."""
 
-    trackers: list[TrackerMirrors] = Field(default_factory=list)
-    readers: list[ParsedDomains] = Field(default_factory=list)
+    trackers: tuple[TrackerMirrors, ...] = Field(default_factory=tuple)
+    readers: tuple[ParsedDomains, ...] = Field(default_factory=tuple)
 
 
-class SiteResolveReply(BaseModel):
+class SiteResolveReply(Frozen):
     """Which site reads an address and the canonical form of it; both None when no site does."""
 
     site: str | None = None
@@ -286,7 +294,7 @@ class PlayersListReply(Frozen):
     players: tuple[PlayerFacts, ...] = Field(default_factory=tuple)
 
 
-class TableProgress(BaseModel):
+class TableProgress(Frozen):
     """How far a read of a page is; `rate` is the steps of the phase per second since the phase began (None before the
     first step)."""
 
@@ -312,7 +320,7 @@ class SeriesReadProgress(BaseModel):
     active: bool = True
 
 
-class TableReady(BaseModel):
+class TableReady(Frozen):
     """A complete table is stored (`sources.table.ready`), or the term of its site changed (`sources.table.fresh`): the
     time it was read and the end of its term (term.py)."""
 
@@ -321,6 +329,6 @@ class TableReady(BaseModel):
     fresh_until: str | None = None
 
 
-class TableFailed(BaseModel):
+class TableFailed(Frozen):
     url: str
     reason: str

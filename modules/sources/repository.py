@@ -1,4 +1,4 @@
-"""Репозиторий sources: таблица trackers (зеркала, типы аутентификации) и таблицы страниц сайтов.
+"""Repository of sources: the table trackers (the mirrors, the kinds of authentication) and the tables of the pages of sites.
 
 Tables of pages: `release_tables` holds, per page, the head of the last complete table (with the parts its read could
 not get) and the state of the read in progress; `release_rows` holds the rows of that complete table. A new complete table
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from core.contracts import ReleaseTable, RowState, RowVoice, TableRow, UnreadPart
+from core.contracts import ReleaseTable, RowState, RowVoice, TableRow, Tracker, UnreadPart
 from core.contracts.provider import Manifest
 from core.contracts.torrent import order_name
 from core.db import Database
@@ -80,22 +80,22 @@ def _stored(conn, url: str) -> Stored:
 class SourcesRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
-        self._cache: list[dict] | None = None
+        # The trackers as the table holds them, read once: models nobody can change, so one object serves every asker.
+        self._cache: tuple[Tracker, ...] | None = None
 
-    async def all_trackers(self) -> list[dict]:
+    async def all_trackers(self) -> tuple[Tracker, ...]:
         if self._cache is None:
-            rows = await self._db.fetch_all("SELECT * FROM trackers")
-            for row in rows:
-                row["mirrors"] = json.loads(row["mirrors"] or "[]")
-                row["ui_features"] = json.loads(row["ui_features"] or "{}")
-            self._cache = rows
+            rows = await self._db.fetch_all(
+                "SELECT id, canonical_name, display_name, mirrors, parser_class, auth_type, ui_features FROM trackers")
+            self._cache = tuple(Tracker(**{**row, "mirrors": json.loads(row["mirrors"] or "[]"),
+                                           "ui_features": json.loads(row["ui_features"] or "{}")}) for row in rows)
         return self._cache
 
-    async def resolve(self, url: str) -> dict | None:
-        """Определяет трекер по домену URL (префиксы доставки — hosts)."""
+    async def resolve(self, url: str) -> Tracker | None:
+        """The tracker that owns the domain of a URL (the prefixes of the delivery are in hosts)."""
         domain = hosts.canonical_host(urlparse(url).netloc)
         for tracker in await self.all_trackers():
-            if domain in tracker["mirrors"]:
+            if domain in tracker.mirrors:
                 return tracker
         return None
 
@@ -104,7 +104,7 @@ class SourcesRepository:
         await self._db.execute(
             "UPDATE trackers SET mirrors=? WHERE id=?",
             (json.dumps(mirrors), tracker_id))
-        self._cache = None  # список зеркал изменился
+        self._cache = None  # the list of the mirrors changed
 
     # --- tables of site pages ----------------------------------------------------------
 

@@ -104,7 +104,7 @@ async def test_a_video_the_listing_gives_without_files_is_asked_of_the_player_by
     web = Web().route("video_ext.php", embed)
     draft = await Run(Api(videos), web).read(f"{CHANNEL}|противостояние")
 
-    assert draft.rows[0].state is RowState.PLAYABLE and draft.rows[0].heights == [720, 1080]
+    assert draft.rows[0].state is RowState.PLAYABLE and draft.rows[0].heights == (720, 1080)
     assert draft.rows[1].state is RowState.ABSENT and parse(draft.rows[1].reason)["code"] == "video_private"
     links = [url for _method, url, _body in web.asked if "video_ext.php" in url]
     assert links and all("hash=" in url and "api_hash" not in url for url in links)
@@ -213,9 +213,9 @@ async def test_another_series_of_the_channel_takes_the_listing_and_the_reread_of
     ready = bus.subscribe("sources.table.ready")
     listed = lambda: len([call for call in trackerauth.calls if call["method"] == "video.get"])  # noqa: E731
 
-    await probe.request("sources.table.get", {"url": "https://vkvideo.ru/@chan|тайтл"}, timeout=5)
+    await probe.request("sources.table.refresh", {"url": "https://vkvideo.ru/@chan|тайтл"}, timeout=5)
     await asyncio.wait_for(ready.queue.get(), 5)
-    await probe.request("sources.table.get", {"url": "https://vkvideo.ru/@chan|трейлер"}, timeout=5)
+    await probe.request("sources.table.refresh", {"url": "https://vkvideo.ru/@chan|трейлер"}, timeout=5)
     other = (await asyncio.wait_for(ready.queue.get(), 5)).payload
     assert other["url"] == "https://vkvideo.ru/@chan|трейлер" and listed() == 2
 

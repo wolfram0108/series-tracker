@@ -15,10 +15,11 @@ import logging
 from contextlib import aclosing
 from typing import Callable, Iterable
 
-from core.contracts import TitleSearchReply, TitleSearchRequest
+from core.contracts import ManifestApplied, TitleSearchReply, TitleSearchRequest
 from core.contracts.provider import (EVENT_CHANGED, EVENT_HELLO, PROTOCOL, PROVIDER_INCOMPATIBLE, PROVIDER_UNAVAILABLE, DownloadRequest, Manifest,
                                      ManifestPlayer, ProviderState, ReadRequest)
 from core.reasons import reason
+from core.topics import SOURCES_PROVIDER_MANIFEST, SOURCES_PROVIDER_STATE, Topic
 
 from ..players.registry import PlayerRegistry
 from ..repository import SourcesRepository
@@ -32,9 +33,7 @@ from .remote import RemoteFamily, RemoteSite
 RECONNECT_FROM_S = 1.0
 RECONNECT_UP_TO_S = 30.0
 
-Publish = Callable[[str, dict], None]
-STATE_TOPIC = "sources.provider.state"
-MANIFEST_TOPIC = "sources.provider.manifest"
+Publish = Callable[[Topic, dict], None]
 
 
 class Connector:
@@ -82,7 +81,7 @@ class Connector:
         self.looked.set()
         if changed:
             self._log.info("поставщик %s: %s%s", self.client.url, state, f" ({why})" if why else "")
-            self._publish(STATE_TOPIC, ProviderState(provider=self.manifest.provider.id if self.manifest else self.client.url,
+            self._publish(SOURCES_PROVIDER_STATE, ProviderState(provider=self.manifest.provider.id if self.manifest else self.client.url,
                                                      state=state, revision=self.manifest.revision if self.manifest else "",
                                                      reason=why).model_dump(mode="json"))
 
@@ -105,7 +104,8 @@ class Connector:
             self._players.unregister(name)
         self._sites_ours, self._players_ours = [], []
         self.manifest = manifest
-        self._publish(MANIFEST_TOPIC, {"provider": manifest.provider.id, "revision": manifest.revision})
+        self._publish(SOURCES_PROVIDER_MANIFEST, ManifestApplied(provider=manifest.provider.id, revision=manifest.revision)
+                      .model_dump(mode="json"))
         for entry in manifest.sites:
             try:
                 self._sites.register(RemoteSite(entry, self))

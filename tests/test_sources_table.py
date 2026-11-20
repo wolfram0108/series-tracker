@@ -123,8 +123,10 @@ class System:
     failed: object
     progress: object
 
-    async def get(self, url: str = PAGE, **request) -> dict:
-        return await self.probe.request("sources.table.get", {"url": url, **request}, timeout=STUCK_S)
+    async def get(self, url: str = PAGE, refresh: bool = True, **request) -> dict:
+        """The page after its read was asked (`refresh`, the default: the page is read when its table is not current), or as it stands."""
+        topic = "sources.table.refresh" if refresh else "sources.table.get"
+        return (await self.probe.request(topic, {"url": url, **request}, timeout=STUCK_S)).model_dump(mode="json")
 
     async def next(self, subscription) -> dict:
         return (await asyncio.wait_for(subscription.queue.get(), STUCK_S)).payload
@@ -184,8 +186,9 @@ async def test_the_term_of_a_table_is_the_term_of_its_site_kept_over_a_start_and
     try:
         for wrong in ("0", "1.5", "час", None, 50000):
             refused = await system.probe.request("sources.terms.set", {"site": site, "minutes": wrong})
-            assert (refused["ok"], parse(refused["reason"])["code"]) == (False, "sources_term_invalid")
-        assert await system.probe.request("sources.terms.set", {"site": site, "minutes": 180}) == {"ok": True, "minutes": 180}
+            assert (refused.ok, parse(refused.reason)["code"]) == (False, "sources_term_invalid")
+        assert (await system.probe.request("sources.terms.set", {"site": site, "minutes": 180})).model_dump(exclude_none=True) == {
+            "ok": True, "minutes": 180}
         first = await system.get()
         ready = await system.next(system.ready)
         read_at = datetime.fromisoformat(ready["read_at"])
@@ -195,10 +198,11 @@ async def test_the_term_of_a_table_is_the_term_of_its_site_kept_over_a_start_and
         assert served["state"] == "ready" and len(system.site.reads) == 1 and first["state"] == "reading"
         assert datetime.fromisoformat(served["fresh_until"]) == read_at + timedelta(minutes=180)
         fresh = bus.subscribe("sources.table.fresh")
-        assert (await system.probe.request("sources.terms.set", {"site": site, "minutes": 240}))["ok"]
+        assert (await system.probe.request("sources.terms.set", {"site": site, "minutes": 240})).ok
         told = await system.next(fresh)
         assert (told["url"], datetime.fromisoformat(told["fresh_until"])) == (PAGE, read_at + timedelta(minutes=240))
-        assert (await system.probe.request("sources.tables.fresh", {"urls": [PAGE, OTHER_PAGE]}))["pages"] == [told]
+        assert [each.model_dump(mode="json") for each in (await system.probe.request(
+            "sources.tables.fresh", {"urls": [PAGE, OTHER_PAGE]})).pages] == [told]
         system.clock.advance(hours=1, minutes=1)
         assert (await system.get())["state"] == "reading"
         await system.next(system.ready)

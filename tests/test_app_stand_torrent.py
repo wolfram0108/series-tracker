@@ -59,11 +59,11 @@ async def sound_rule(stand: AppStand, profile_id: int) -> None:
 
 async def until_table(stand: AppStand, url: str, rows: int) -> None:
     """The table of the page has its rows: the read the end of the read of the release starts (sources.table.ready)."""
-    key = (await stand.module("sources").request("sources.site.resolve", {"url": url}))["canonical_url"]
+    key = (await stand.module("sources").request("sources.site.resolve", {"url": url})).canonical_url
     ready = stand.bus.subscribe("sources.table.ready")
     while True:
         got = await stand.module("sources").request("sources.table.get", {"url": key})
-        if got.get("state") == "ready" and len((got.get("table") or {}).get("rows") or []) >= rows:
+        if got.state == "ready" and len(got.table.rows if got.table else ()) >= rows:
             return
         await asyncio.wait_for(ready.queue.get(), STAND_LIMIT_S)
 

@@ -9,38 +9,35 @@ A read that could not get some parts of a page (a catalog of a player, the page 
 parts are named in the table (`unread`), and the rows the last read gave of every part not read this time are kept, so a
 part that did not answer is not taken for one that is gone. A read that got no part at all is a failed read, and so is one
 with parts unread over a table stored before its rows named their parts.
+
+What is counted of the state of a page (is its table current, what a request to read it comes to, which pages to forget, what the rows of
+a read that did not ask everything are) is calc/sources/pages.py; here are the store, the sites, the tasks of the reads and the events.
 """
 from __future__ import annotations
 
 import asyncio
 import time
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 import httpx
 
-from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress,
-                            TableReady, TableRow, TableState, UnreadPart)
-from core.contracts.release_table import TABLE_TRACE_TOPIC, site_of
-from core.contracts.torrent import order_name
-from core.topics import TABLE_READ_S
+from calc.row_limit import limit_of
+from calc.sources import pages
+from calc.sources.pages import Step
+from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableRead,
+                            TableReady, TableRefresh, TableRow, TableState, UnreadPart)
+from core.contracts.release_table import site_of
 from core.logging import get_logger
 from core.reasons import EXTERNAL, describe, parse, reason
-from calc.row_limit import limit_of
+from core.topics import (SOURCES_TABLE_FAILED, SOURCES_TABLE_PROGRESS, SOURCES_TABLE_READY, SOURCES_TABLE_TRACE, TABLE_READ_S,
+                         Topic)
 
 from .players.registry import PlayerRegistry
-from .repository import SourcesRepository, Stored
+from .repository import SourcesRepository
 from .sites import ReadContext, Site, SiteError, SiteRegistry
 from .term import Term
-
-PROGRESS_TOPIC = "sources.table.progress"
-READY_TOPIC = "sources.table.ready"
-FRESH_TOPIC = "sources.table.fresh"
-FAILED_TOPIC = "sources.table.failed"
-# What a read does, told as it happens for its dump (modules/runlog): `begin` when a page is taken for a read, `end`
-# with what the read came to — how long it took and what every player of the page gave.
-TRACE_TOPIC = TABLE_TRACE_TOPIC
 
 
 def _cause(exc: Exception) -> str:
@@ -53,27 +50,7 @@ def _cause(exc: Exception) -> str:
     return text if found["code"] != EXTERNAL else f"{type(exc).__name__}: {text}"
 
 
-def read_summary(table: ReleaseTable) -> dict:
-    """What a read gave, player by player: its rows by state, the frames of the rows that play, and every cause a row
-    was left without a video with, counted. The debugging of a source begins here, not at the rows one by one."""
-    players: dict[str, dict] = {}
-    causes: dict[tuple[str, str, str], int] = {}
-    for row in table.rows:
-        held = players.setdefault(row.player, {"player": row.player, "label": row.player_label or row.player, "rows": 0,
-                                               "states": {}, "heights": {}})
-        held["rows"] += 1
-        held["states"][row.state.value] = held["states"].get(row.state.value, 0) + 1
-        if row.height:
-            held["heights"][str(row.height)] = held["heights"].get(str(row.height), 0) + 1
-        if row.state.value != "playable":
-            key = (row.player, row.state.value, row.reason or "")
-            causes[key] = causes.get(key, 0) + 1
-    return {"rows": len(table.rows), "players": list(players.values()),
-            "causes": [{"player": player, "state": state, "reason": why, "rows": count}
-                       for (player, state, why), count in sorted(causes.items(), key=lambda item: -item[1])],
-            "unread": [part.model_dump(mode="json") for part in table.unread]}
-
-Publish = Callable[[str, dict], None]
+Publish = Callable[[Topic, dict], None]
 
 
 def utc_now() -> datetime:
@@ -102,21 +79,6 @@ async def _nothing():
     yield
 
 
-def _merged(old: list[TableRow], new: list[TableRow], off: frozenset[str], limited_read: bool) -> list[TableRow]:
-    """The rows of a read that did not ask everything: the earlier rows in their places, each replaced by its new row when
-    this read took it, and kept as it was when it did not (a player switched off, a line read in part); the new rows that
-    were not there come after them in the order the site listed them. The row of a player asked and no longer listed is
-    gone, as in any read."""
-    taken = {row.key: row for row in new}
-    merged = []
-    for row in old:
-        if row.key in taken:
-            merged.append(taken.pop(row.key))
-        elif limited_read or order_name(row.player) in off:
-            merged.append(row)
-    return merged + [row for row in new if row.key in taken]
-
-
 class TableReader:
     """Answers for the table of a page, and reads the page when its table is missing or past its term."""
 
@@ -126,7 +88,7 @@ class TableReader:
                  holding: Callable[[], AbstractAsyncContextManager] | None = None,
                  off: Callable[[], frozenset[str]] | None = None,
                  blocked: Callable[[str], str | None] | None = None,
-                 ask: Callable[[str, dict], Awaitable[Any]] | None = None) -> None:
+                 ask: Callable[[Topic, dict], Awaitable[Any]] | None = None) -> None:
         self._repo, self._sites, self._publish, self._http, self._players = repo, sites, publish, http, players
         # The reason a page cannot be read now for want of the provider that reads it (modules/sources/provider/gate.py), or
         # None: a read of such a page is not begun, it says why.
@@ -150,85 +112,76 @@ class TableReader:
     # --- requests -----------------------------------------------------------------------
 
     async def get(self, request: TableGetRequest) -> TableGetReply:
-        reply = await self._get(request)
-        return reply.model_copy(update={"fresh_until": self.fresh_until(reply.table)}) if reply.table is not None else reply
-
-    def fresh_until(self, table: ReleaseTable | None) -> str | None:
-        """The end of the term of a table: its read and the term of its site (term.py); none for a table never read."""
-        if table is None or not table.read_at:
-            return None
-        try:
-            read_at = datetime.fromisoformat(table.read_at)
-        except ValueError:
-            return None
-        return (read_at + self._term.of(table.url)).astimezone(timezone.utc).isoformat()
-
-    async def fresh_of(self, urls: list[str]) -> list[TableReady]:
-        """The stored tables of the addresses (by their canonical page) with the end of their term; an address with no
-        table read is left out."""
-        read = {page["url"]: page["read_at"] for page in await self._repo.pages() if page["read_at"]}
-        found = {}
-        for url in urls:
-            resolved = self._resolve(url)
-            key = resolved[1] if resolved is not None else url
-            if key in read:
-                table = ReleaseTable(url=key, site="", read_at=read[key])
-                found[key] = TableReady(url=key, read_at=read[key], fresh_until=self.fresh_until(table))
-        return list(found.values())
-
-    async def fresh_of_site(self, site: str) -> list[TableReady]:
-        """The stored tables of a site with the end of their term: what a change of its term changes."""
-        found = []
-        for page in await self._repo.pages():
-            if site_of(page["url"]) == site and page["read_at"]:
-                table = ReleaseTable(url=page["url"], site="", read_at=page["read_at"])
-                found.append(TableReady(url=page["url"], read_at=page["read_at"], fresh_until=self.fresh_until(table)))
-        return found
-
-    async def _get(self, request: TableGetRequest) -> TableGetReply:
+        """The page as it stands, read from nothing: how a recount of a layout, a window or a preview asks."""
         found = self._resolve(request.url)
         if found is None:
-            # No site reads the address now (the provider of the socket is not up and was never heard of): the page is not read,
-            # but the table it had still serves, as after any failed read — a source never loses its rows for a missing reader.
-            try:
-                held = (await self._repo.stored(request.url)).table
-            except Exception:  # noqa: BLE001 - a store that cannot be read has no table to give; the refusal is the answer
-                self._log.exception("the table of %s could not be read for a page no site reads", request.url)
-                held = None
-            return TableGetReply(url=request.url, state=TableState.FAILED, table=held,
-                                 reason=self._blocked(request.url) or reason("site_not_found"))
+            return await self._unreadable(request.url)
+        _site, key = found
+        async with self._gate:
+            stored = await self._repo.stored(key)
+            return self._served(pages.standing(key, stored.table, stored.state, stored.reason, key in self._reading))
+
+    async def refresh(self, request: TableRefresh) -> TableGetReply:
+        """Read the page if its table is not current and say how the page stands after that (what `get` would say, but the read begun)."""
+        found = self._resolve(request.url)
+        if found is None:
+            return await self._unreadable(request.url)
         site, key = found
         async with self._gate:
             stored = await self._repo.stored(key)
             table = stored.table
-            if not request.refresh:
-                return self._as_it_is(key, stored)
-            if table is not None and self._fresh(table):
-                return TableGetReply(url=key, state=TableState.READY, table=table)
-            if getattr(site, "first_read_by_user", False) and (table is None or not request.by_sync):
-                # The page of such a site is begun by the user's command; a page nobody has read waits for it, and a page
-                # that was read is read again by a synchronization only (its rows are the setting of its source).
-                return self._as_it_is(key, stored)
-            if key not in self._reading:
-                if (why := self._blocked(key)) is not None:
-                    # The page would be read by a provider that is not up: no read begins, the last table stays in force.
-                    return TableGetReply(url=key, state=TableState.FAILED, table=table, reason=why)
-                self._launch(site, key, rows=request.rows)
-            return TableGetReply(url=key, state=TableState.READING, table=table)
+            blocked = self._blocked(key)
+            step = pages.refresh_step(
+                has_table=table is not None, table_fresh=table is not None and self._fresh(table),
+                waits_for_user=getattr(site, "first_read_by_user", False), by_sync=request.by_sync, reading=key in self._reading,
+                blocked=blocked)
+            if step is Step.READY:
+                reply = TableGetReply(url=key, state=TableState.READY, table=table)
+            elif step is Step.STANDING:
+                reply = pages.standing(key, table, stored.state, stored.reason, key in self._reading)
+            elif step is Step.BLOCKED:
+                # The page would be read by a provider that is not up: no read begins, the last table stays in force.
+                reply = TableGetReply(url=key, state=TableState.FAILED, table=table, reason=blocked)
+            else:
+                if step is Step.LAUNCH:
+                    self._launch(site, key, rows=request.rows)
+                reply = TableGetReply(url=key, state=TableState.READING, table=table)
+            return self._served(reply)
 
-    def _as_it_is(self, key: str, stored: Stored) -> TableGetReply:
-        """The page as it stands, with no read: a recount of a layout must not cost a read of the site. A read that goes
-        is `reading`, a last read that failed is `failed` with its reason, any other complete table is `ready` however old,
-        and a page nothing was read of is `absent`. All of it with the last complete table, when there is one."""
-        if key in self._reading:
-            return TableGetReply(url=key, state=TableState.READING, table=stored.table)
-        if stored.state == "failed":
-            return TableGetReply(url=key, state=TableState.FAILED, table=stored.table, reason=stored.reason)
-        if stored.table is not None:
-            return TableGetReply(url=key, state=TableState.READY, table=stored.table)
-        return TableGetReply(url=key, state=TableState.ABSENT)
+    async def _unreadable(self, url: str) -> TableGetReply:
+        """No site reads the address now (the provider of the socket is not up and was never heard of): the page is not read, but the
+        table it had still serves, as after any failed read — a source never loses its rows for a missing reader."""
+        try:
+            held = (await self._repo.stored(url)).table
+        except Exception:  # noqa: BLE001 - a store that cannot be read has no table to give; the refusal is the answer
+            self._log.exception("the table of %s could not be read for a page no site reads", url)
+            held = None
+        return self._served(TableGetReply(url=url, state=TableState.FAILED, table=held,
+                                          reason=self._blocked(url) or reason("site_not_found")))
 
-    async def read(self, request: TableGetRequest, *, changed: bool = False) -> None:
+    def _served(self, reply: TableGetReply) -> TableGetReply:
+        """The reply with the end of the term of its table."""
+        return reply.model_copy(update={"fresh_until": self.fresh_until(reply.table)}) if reply.table is not None else reply
+
+    def fresh_until(self, table: ReleaseTable | None) -> str | None:
+        """The end of the term of a table: its read and the term of its site (term.py); none for a table never read."""
+        return None if table is None else pages.fresh_until(table.read_at, self._term.of(table.url))
+
+    async def _read_times(self) -> dict[str, str | None]:
+        return {page["url"]: page["read_at"] for page in await self._repo.pages()}
+
+    async def fresh_of(self, urls: list[str]) -> list[TableReady]:
+        """The stored tables of the addresses (by their canonical page) with the end of their term; an address with no
+        table read is left out."""
+        resolved = (self._resolve(url) for url in urls)
+        keys = [found[1] if found is not None else url for found, url in zip(resolved, urls)]
+        return pages.fresh_pages(await self._read_times(), keys, self._term.of)
+
+    async def fresh_of_site(self, site: str) -> list[TableReady]:
+        """The stored tables of a site with the end of their term: what a change of its term changes."""
+        return pages.fresh_pages_of_site(await self._read_times(), site, self._term.of)
+
+    async def read(self, request: TableRead, *, changed: bool = False) -> None:
         """Read the page now, term or not, unless a read of it is already going. The user asked for it: the read takes
         nothing that an earlier read left for sharing (`ReadContext.fresh`). `changed`: what the page is read from changed
         (the tracks of a release laid out anew) — no one asked to read the site, so the read is not `fresh` (a tracker's
@@ -236,7 +189,7 @@ class TableReader:
         page is read once more when it ends; a second ask of the same matter makes no second read."""
         found = self._resolve(request.url)
         if found is None:
-            self._publish(FAILED_TOPIC, TableFailed(url=request.url, reason=self._blocked(request.url) or reason("site_not_found"))
+            self._publish(SOURCES_TABLE_FAILED, TableFailed(url=request.url, reason=self._blocked(request.url) or reason("site_not_found"))
                           .model_dump(mode="json"))
             return
         site, key = found
@@ -245,7 +198,7 @@ class TableReader:
                 self._again[key] = request.rows
             return
         if (why := self._blocked(key)) is not None:
-            self._publish(FAILED_TOPIC, TableFailed(url=key, reason=why).model_dump(mode="json"))
+            self._publish(SOURCES_TABLE_FAILED, TableFailed(url=key, reason=why).model_dump(mode="json"))
             return
         self._launch(site, key, fresh=not changed, rows=request.rows)
 
@@ -272,8 +225,7 @@ class TableReader:
         table is past the term, so that a page the user looked at and is about to add is not lost. A read that goes is
         stopped first: its end must not write the page again. Returns the keys forgotten."""
         async with self._gate:
-            gone = [page["url"] for page in await self._repo.pages() if page["url"] not in listed
-                    and (page["url"] in was_listed or not self._fresh_at(page["url"], page["read_at"]))]
+            gone = pages.forgotten(await self._read_times(), listed, was_listed, self._clock(), self._term.of)
         stopping = [self._reading[key] for key in gone if key in self._reading]
         for key in gone:
             self._again.pop(key, None)
@@ -284,14 +236,6 @@ class TableReader:
         async with self._gate:
             await self._repo.forget_pages(gone)
         return gone
-
-    def _fresh_at(self, url: str, read_at: str | None) -> bool:
-        try:
-            age = self._clock() - datetime.fromisoformat(read_at or "")
-        except (TypeError, ValueError):
-            return False
-        # A table "from the future" means the clock moved back: it is not trusted.
-        return timedelta(0) <= age < self._term.of(url)
 
     def resolve(self, url: str) -> SiteResolveReply:
         """Which site reads the address and its canonical form, with no network."""
@@ -311,7 +255,7 @@ class TableReader:
                     # A read of a page that waits for the user is not begun again by a start: its rows are the user's to ask.
                     problem = reason("read_cancelled")
                     await self._repo.mark_failed(found[1], found[0].name, problem)
-                    self._publish(FAILED_TOPIC, TableFailed(url=found[1], reason=problem).model_dump(mode="json"))
+                    self._publish(SOURCES_TABLE_FAILED, TableFailed(url=found[1], reason=problem).model_dump(mode="json"))
                 elif found[1] not in self._reading:
                     self._launch(*found)
 
@@ -329,7 +273,7 @@ class TableReader:
         return (site, site.canonical_url(url)) if site is not None else None
 
     def _fresh(self, table: ReleaseTable) -> bool:
-        return self._fresh_at(table.url, table.read_at)
+        return pages.is_fresh(table.read_at, self._clock(), self._term.of(table.url))
 
     def _stamp(self) -> str:
         return self._clock().astimezone(timezone.utc).isoformat()
@@ -345,7 +289,7 @@ class TableReader:
         table: ReleaseTable | None = None
         problem: str | None = None
         began = time.monotonic()
-        self._publish(TRACE_TOPIC, {"url": key, "site": site.name, "kind": "begin", "fresh": fresh})
+        self._publish(SOURCES_TABLE_TRACE, {"url": key, "site": site.name, "kind": "begin", "fresh": fresh})
         try:
             await self._repo.mark_reading(key, site.name, self._stamp())
             async with self._holding():
@@ -364,15 +308,14 @@ class TableReader:
         async with self._gate:
             problem = await self._settle(site, key, table, problem)
             self._reading.pop(key, None)
-        self._publish(TRACE_TOPIC, {"url": key, "site": site.name, "kind": "end", "ok": problem is None,
-                                    "reason": problem, "seconds": round(time.monotonic() - began, 1),
-                                    **(read_summary(table) if problem is None and table is not None else {})})
+        self._publish(SOURCES_TABLE_TRACE, {"url": key, "site": site.name, "kind": "end", "ok": problem is None,
+                                            "reason": problem, "seconds": round(time.monotonic() - began, 1),
+                                            **(pages.read_summary(table) if problem is None and table is not None else {})})
         if problem is None and table is not None:
-            self._publish(READY_TOPIC, TableReady(url=key, read_at=table.read_at or "",
-                                                  fresh_until=self.fresh_until(table)).model_dump(mode="json"))
+            self._publish(SOURCES_TABLE_READY, pages.ready_of(key, table.read_at or "", self._term.of(key)).model_dump(mode="json"))
         else:
             self._log.warning("table of %s not read: %s", key, describe(problem))
-            self._publish(FAILED_TOPIC, TableFailed(url=key, reason=problem or "").model_dump(mode="json"))
+            self._publish(SOURCES_TABLE_FAILED, TableFailed(url=key, reason=problem or "").model_dump(mode="json"))
         again = self._again.pop(key, None)
         if again is not None and key not in self._reading:
             self._launch(site, key, rows=again)
@@ -381,8 +324,8 @@ class TableReader:
         pace = Pace()
 
         def progress(phase: str, current: int, total: int) -> None:
-            self._publish(PROGRESS_TOPIC, TableProgress(url=key, phase=phase, current=current, total=total,
-                                                        rate=pace.rate(phase, current)).model_dump(mode="json"))
+            self._publish(SOURCES_TABLE_PROGRESS, TableProgress(url=key, phase=phase, current=current, total=total,
+                                                                rate=pace.rate(phase, current)).model_dump(mode="json"))
 
         stored = (await self._repo.stored(key)).table
         off = self._off()
@@ -396,18 +339,15 @@ class TableReader:
             if limit.expired():
                 raise SiteError(reason("read_timeout", seconds=int(self._safeguard_s))) from None
             raise
-        seen: set[str] = set()
-        for row in draft.rows:
-            if row.key in seen:
-                raise SiteError(reason("duplicate_key", key=row.key, player=row.player))
-            seen.add(row.key)
+        if (repeated := pages.first_repeated_key(draft.rows)) is not None:
+            raise SiteError(reason("duplicate_key", key=repeated.key, player=repeated.player))
         # Which video each row is, read by its player from its link: the one place a table learns it, whatever site read it.
         rows = [row.model_copy(update={"video": self._players.video_of(row.player, row.link)}) for row in draft.rows]
         # What this read did not ask stays as the last read left it: a player switched off was not asked (a file downloaded
         # from one of its rows must not look withdrawn by a source nobody asked), and a read of the first or the last
         # rows of each line did not take the others. A read of the whole page replaces the table.
         if stored is not None and (off or limit_of(context.rows) is not None):
-            rows = _merged(stored.rows, rows, off, limit_of(context.rows) is not None)
+            rows = pages.merged_rows(stored.rows, rows, off, limit_of(context.rows) is not None)
         if draft.unread:
             rows = rows + await self._kept(key, rows, draft.unread)
         return ReleaseTable(url=key, site=site.name, names=draft.names, title=draft.title, site_voice=draft.site_voice, channel=draft.channel,
@@ -424,8 +364,7 @@ class TableReader:
         elif not stored.parted:
             raise SiteError(unread[0].reason)
         else:
-            parts, keys = {row.part for row in rows} | {""}, {row.key for row in rows}
-            kept = [row for row in stored.table.rows if row.part not in parts and row.key not in keys]
+            kept = pages.kept_rows(rows, stored.table.rows)
         self._log.warning("table of %s read without %d of its parts (%s); %d rows kept from the read of %s", key,
                           len(unread), "; ".join(f"{each.part}: {describe(each.reason)}" for each in unread), len(kept),
                           stored.table.read_at if stored.table is not None else "none")
@@ -451,4 +390,4 @@ class TableReader:
         """A page recorded as being read whose site is no longer registered: it cannot be read, say so."""
         problem = reason("site_not_found")
         await self._repo.mark_failed(url, site, problem)
-        self._publish(FAILED_TOPIC, TableFailed(url=url, reason=problem).model_dump(mode="json"))
+        self._publish(SOURCES_TABLE_FAILED, TableFailed(url=url, reason=problem).model_dump(mode="json"))

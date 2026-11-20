@@ -12,6 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from .frozen import Frozen
+
 PROTOCOL = 2
 # The provider says it is alive at least this often while a read or the event feed is silent; silence for SILENCE_S is a
 # dead connection (detection of a failure, not a way to wait).
@@ -190,7 +192,7 @@ class AdoptReply(BaseModel):
     items: list[AdoptItem] = Field(default_factory=list)
 
 
-class ProviderState(BaseModel):
+class ProviderState(Frozen):
     """The event `sources.provider.state`: how the socket stands (`absent` is never published: no provider, no event)."""
 
     provider: str

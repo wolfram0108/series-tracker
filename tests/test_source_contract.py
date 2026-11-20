@@ -25,7 +25,7 @@ async def stand(tmp_path):
 async def tables_of(stand: AppStand, urls: list[str]) -> list[dict]:
     """The table of each address as a window gets it: read now, then taken from the store."""
     sources = stand.module("sources")
-    keys = [(await sources.request("sources.site.resolve", {"url": url}))["canonical_url"] for url in urls]
+    keys = [(await sources.request("sources.site.resolve", {"url": url})).canonical_url for url in urls]
     ended = stand.bus.subscribe("sources.table.ready", "sources.table.failed")
     for url in urls:
         await stand.call("POST", "/api/sources/read", {"url": url})
@@ -36,7 +36,7 @@ async def tables_of(stand: AppStand, urls: list[str]) -> list[dict]:
         waiting.discard(packet.payload["url"])
     tables = []
     for key in keys:
-        got = await sources.request("sources.table.get", {"url": key})
+        got = (await sources.request("sources.table.get", {"url": key})).model_dump(mode="json")
         assert got["state"] == "ready", got
         tables.append(got["table"])
     return tables

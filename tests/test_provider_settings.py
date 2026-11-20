@@ -58,13 +58,11 @@ class World:
                 return got
 
     async def view(self) -> dict:
-        return await self.probe.request("sources.provider.get", {})
+        return (await self.probe.request("sources.provider.get", {})).model_dump(mode="json")
 
     async def save(self, url: str, token: str | None = None) -> dict:
-        return await self.probe.request("sources.provider.set", {"url": url, **({} if token is None else {"token": token})})
-
-    async def stored(self, key: str):
-        return (await self.probe.request("settings.value.get", {"key": key})).value
+        return (await self.probe.request("sources.provider.set", {"url": url, **({} if token is None else {"token": token})})
+                ).model_dump(mode="json")
 
 
 async def build(tmp_path, *, default: ProviderClient | None = None, addresses=("title://mock/7/X",)) -> World:

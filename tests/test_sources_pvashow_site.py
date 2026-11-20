@@ -73,9 +73,9 @@ async def test_a_row_is_a_video_of_allvideo_with_the_text_and_the_heights_the_pl
     table = await read(web)
 
     assert [(row.key, row.text, row.group, row.voice.name, row.heights, row.state) for row in table.rows] == [
-        ("allvideo:655613", "Боевой Мастер - 1 серия", "", "ПВА ШОУ", [360, 720, 1080], RowState.PLAYABLE),
-        ("allvideo:1029408", "Боевой мастер - 677 серия", "", "ПВА ШОУ", [360], RowState.PLAYABLE),
-        ("allvideo:700001", "Спецвыпуск 1", "Спецвыпуски", "ПВА ШОУ", [360, 720], RowState.PLAYABLE)]
+        ("allvideo:655613", "Боевой Мастер - 1 серия", "", "ПВА ШОУ", (360, 720, 1080), RowState.PLAYABLE),
+        ("allvideo:1029408", "Боевой мастер - 677 серия", "", "ПВА ШОУ", (360,), RowState.PLAYABLE),
+        ("allvideo:700001", "Спецвыпуск 1", "Спецвыпуски", "ПВА ШОУ", (360, 720), RowState.PLAYABLE)]
     # The link is the embed of the video at the host of the playlist: the one AllVideo resolves a stream of.
     assert table.rows[0].link == "https://csst.online/embed/655613/"
     assert AllVideoPlayer.video_of(table.rows[0].link) == "655613" and AllVideoPlayer.owns(table.rows[0].link)

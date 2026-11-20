@@ -16,6 +16,8 @@ from core.contracts import TableRow, UnreadPart
 if TYPE_CHECKING:
     import httpx
 
+    from core.topics import Topic
+
 # (phase, current, total): `phase` is one of the codes below, the counts are those of the phase.
 Progress = Callable[[str, int, int], None]
 
@@ -56,9 +58,9 @@ class ReadContext:
     # The players the owner switched off for every source (their names in the order of sources: `kodik`, `line:CO4K`):
     # a site asks none of them and lists no new row of them; the core keeps their rows of the last read as they were.
     off: frozenset[str] = frozenset()
-    # A request to another module over the bus (topic, payload) → answer: the table of a site whose rows another module
-    # makes (a tracker's page: the tracks `unpack` read); None where the reader has no bus (a test of a site alone).
-    ask: "Callable[[str, dict], Awaitable[Any]] | None" = None
+    # A request to another module over the bus (the record of the topic, the payload) → answer: the table of a site whose rows
+    # another module makes (a tracker's page: the tracks `unpack` read); None where the reader has no bus (a test of a site alone).
+    ask: "Callable[[Topic, dict], Awaitable[Any]] | None" = None
 
 
 class TableDraft(BaseModel):

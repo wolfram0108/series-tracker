@@ -56,7 +56,7 @@ class World(BaseModule):
         return PageReleases(url=PAGE, site="kinozal", title="Тайтл", releases=self.page).model_dump(mode="json")
 
     async def on_file(self, env):
-        return {"content_b64": base64.b64encode(self.torrents[env.payload["url"]]).decode()}
+        return {"content_b64": base64.b64encode(self.torrents[env.payload["url"]]).decode(), "from_cache": False}
 
     async def on_resolve(self, env):
         return {"site": "kinozal", "canonical_url": env.payload["url"], "source_type": "torrent"}

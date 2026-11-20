@@ -72,7 +72,7 @@ async def test_every_player_says_where_it_is_among_the_pages_asked_about_and_the
     await sources.repo.save_table(page("app://banri/7", "banri", ("n1", "line:NBY", [1080]), ("n2", "line:NBY", [2160])))
     await sources.repo.save_table(page("https://dunhuatv.ru/other.html", "dunhuatv", ("k1", "kodik", [2160])))
 
-    asked = await probe.request("sources.players.list", {"urls": [DOLLS, ruchime, "app://banri/7"]}, timeout=5)
+    asked = (await probe.request("sources.players.list", {"urls": [DOLLS, ruchime, "app://banri/7"]}, timeout=5)).model_dump(mode="json")
     facts = {each["name"]: each for each in asked["players"]}
     # A page not asked about says nothing, whatever it holds.
     assert facts["kodik"]["kind"] == "site" and facts["kodik"]["height"] == 720
@@ -84,7 +84,7 @@ async def test_every_player_says_where_it_is_among_the_pages_asked_about_and_the
     assert facts["line:NBY"]["places"] == [{"name": "banri", "label": "半日 (Banri)", "sources": 1}]
     assert facts["line:CO4K"]["places"] == [{"name": "banri", "label": "半日 (Banri)", "sources": 0}]
 
-    bare = {each["name"]: each for each in (await probe.request("sources.players.list", {}, timeout=5))["players"]}
+    bare = {each["name"]: each for each in (await probe.request("sources.players.list", {}, timeout=5)).model_dump(mode="json")["players"]}
     assert set(bare) == set(facts) and bare["kodik"]["places"] == [] and bare["line:NBY"]["places"][0]["sources"] == 0
 
 
@@ -100,7 +100,7 @@ async def test_a_link_a_player_owns_that_it_cannot_resolve_is_an_error_and_never
 
     reply = await probe.request("sources.video.stream", {"url": OWNED[name]}, timeout=STEP_LIMIT_S)
 
-    assert reply["handled"] is True and reply["transient"] is True and reply["error"]
+    assert reply.handled is True and reply.transient is True and reply.error
 
 
 # --- the class guards ---------------------------------------------------------------------------------------------------------

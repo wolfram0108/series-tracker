@@ -57,7 +57,7 @@ class System:
         return await nxt(self.table_end)
 
     async def table(self, url: str = CARD) -> dict:
-        return await self.probe.request("sources.table.get", {"url": url, "refresh": False})
+        return (await self.probe.request("sources.table.get", {"url": url})).model_dump(mode="json")
 
 
 async def start(tmp_path, mock: MockProvider, server, *, token: str = "", saved=None, path=None) -> System:
@@ -113,7 +113,7 @@ async def test_a_read_that_is_stopped_closes_the_connection_and_the_provider_sto
     system.mock.release.clear()
     system.probe.send_command("sources.table.read", {"url": CARD})
     await asyncio.wait_for(system.mock.began.wait(), WAIT_S)
-    assert (await system.probe.request("sources.table.cancel", {"url": CARD})) == {"cancelled": True}
+    assert (await system.probe.request("sources.table.cancel", {"url": CARD})).cancelled is True
     # The provider learned it from the closed connection: nothing else was said to it.
     await asyncio.wait_for(system.mock.cancelled.wait(), WAIT_S)
     failed = await nxt(system.table_end)
@@ -125,7 +125,7 @@ async def test_a_read_that_is_stopped_closes_the_connection_and_the_provider_sto
 
 async def fetch(system, link: str = LINK, target: str = "", **more) -> dict:
     """The file of a link into a path, as the downloads ask for it (`sources.video.fetch`)."""
-    return await system.probe.request("sources.video.fetch", {"url": link, "target": target, **more})
+    return (await system.probe.request("sources.video.fetch", {"url": link, "target": target, **more})).model_dump(mode="json")
 
 
 async def test_a_download_that_ends_with_no_outcome_is_a_failure_that_says_nothing_of_the_source(system, tmp_path):
@@ -139,7 +139,7 @@ async def test_a_download_that_is_stopped_closes_the_connection_and_the_provider
     target = str(tmp_path / "e.mp4")
     work = asyncio.ensure_future(fetch(system, target=target))
     await asyncio.wait_for(system.mock.download_begun.wait(), WAIT_S)
-    assert (await system.probe.request("sources.video.fetch.stop", {"target": target})) == {"stopped": True}
+    assert (await system.probe.request("sources.video.fetch.stop", {"target": target})).stopped is True
     got = await asyncio.wait_for(work, WAIT_S)
     # The provider learned it from the closed connection: nothing else was said to it.
     await asyncio.wait_for(system.mock.download_cancelled.wait(), WAIT_S)
@@ -150,15 +150,15 @@ async def test_a_download_that_is_stopped_closes_the_connection_and_the_provider
 # --- the search ----------------------------------------------------------------------------------------------------------------
 
 async def test_the_search_gives_the_titles_of_the_provider_or_its_reason(system):
-    got = await system.probe.request("sources.titles.search", {"query": "名", "page": 1})
+    got = (await system.probe.request("sources.titles.search", {"query": "名", "page": 1})).model_dump(mode="json")
     assert [line["url"] for title in got["titles"] for line in title["lines"]] == [CARD, "title://mock/7/Y"]  # a line is the source
     assert got["page"] == 1 and got["reason"] is None and "url" not in got["titles"][0]
     assert got["more"] is None and got["without_lines"] == 0  # a provider that does not say whether a page follows: not said
     system.mock.search_page = {"more": True, "without_lines": 3}  # what the provider left out of the page, and that another follows
-    said = await system.probe.request("sources.titles.search", {"query": "名", "page": 1})
+    said = (await system.probe.request("sources.titles.search", {"query": "名", "page": 1})).model_dump(mode="json")
     assert said["more"] is True and said["without_lines"] == 3
     system.mock.search_status = 500
-    failed = await system.probe.request("sources.titles.search", {"query": "名"})
+    failed = (await system.probe.request("sources.titles.search", {"query": "名"})).model_dump(mode="json")
     assert failed["titles"] == [] and json.loads(failed["reason"])["code"] == "provider_unavailable"
 
 
@@ -178,11 +178,11 @@ async def test_with_no_provider_every_try_of_the_user_at_its_world_says_it_is_no
         assert got["url"] == CARD and json.loads(got["reason"]) == {"code": "provider_not_connected", "state": "none"}
         # What a synchronization asks before it opens: the pages of the provider's world, whether or not a site was ever heard of.
         asked = [CARD, "https://example.org/p/1", "title://other/3/X/"]
-        assert [each["url"] for each in (await probe.request("sources.pages.check", {"urls": asked}))["blocked"]] == [CARD, "title://other/3/X/"]
+        assert [each.url for each in (await probe.request("sources.pages.check", {"urls": asked})).blocked] == [CARD, "title://other/3/X/"]
         # A link of that world is nobody's failure and never goes to the generic downloader; a web address is the downloader's.
-        link = await probe.request("sources.video.stream", {"url": LINK})
+        link = (await probe.request("sources.video.stream", {"url": LINK})).model_dump(mode="json")
         assert link["handled"] and link["unasked"] and link["transient"] and json.loads(link["error"])["code"] == "provider_not_connected"
-        assert await probe.request("sources.video.stream", {"url": "https://example.org/x"}) == {"handled": False}
+        assert (await probe.request("sources.video.stream", {"url": "https://example.org/x"})).handled is False
     finally:
         await probe.stop()
         await sources.stop()

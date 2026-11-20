@@ -21,8 +21,9 @@ from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, Co
                             VoiceSettingsSaved, VoiceSettingsView)
 from core.reasons import code_of, reason, relayed
 from core.topics import (METADATA_DETAILS, METADATA_SEARCH, SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST, SETTINGS_PATHS_REMOVE,
-                         SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SETTINGS_VALUES_BY_PREFIX, TRACKERAUTH_CREDENTIALS_GET,
-                         TRACKERAUTH_CREDENTIALS_SET, TRACKERAUTH_SECRET_GET)
+                         SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SETTINGS_VALUES_BY_PREFIX, SOURCES_PROVIDER_GET,
+                         SOURCES_PROVIDER_SET, SOURCES_TERMS_GET, SOURCES_TERMS_SET, SOURCES_TRACKER_SET_MIRRORS,
+                         SOURCES_TRACKERS_LIST, TRACKERAUTH_CREDENTIALS_GET, TRACKERAUTH_CREDENTIALS_SET, TRACKERAUTH_SECRET_GET)
 
 from .routing import refusal, route_per_method
 from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse
@@ -158,11 +159,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         {site, minutes} sets one; a value the sources refuse is 400 with its reason."""
         if request.method == "POST":
             data = await request.json()
-            reply = await gw.request("sources.terms.set", {"site": data.get("site"), "minutes": data.get("minutes")})
-            if not reply.get("ok"):
-                return JSONResponse({"error": reply["reason"]}, status_code=400)
-            return {"success": True, "minutes": reply["minutes"]}
-        return await gw.request("sources.terms.get", {})
+            reply = await gw.reply_of(SOURCES_TERMS_SET, {"site": data.get("site"), "minutes": data.get("minutes")})
+            if not reply.ok:
+                return JSONResponse({"error": reply.reason}, status_code=400)
+            return {"success": True, "minutes": reply.minutes}
+        return (await gw.reply_of(SOURCES_TERMS_GET, {})).model_dump(mode="json")
 
     @route_per_method(r, "/api/settings/torrent_staging", methods=["GET", "POST"], response_model=DynamicObject,
                       responses=_ERR1)
@@ -227,12 +228,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/provider", response_model=ProviderView)
     async def provider_view():
         """The provider of external sources as it stands: its address, the state of the socket, what its manifest says."""
-        return await gw.request("sources.provider.get", {})
+        return await gw.reply_of(SOURCES_PROVIDER_GET, {})
 
     @r.put("/api/provider", response_model=ProviderSaved)
     async def save_provider(draft: ProviderSettingsDraft):
         """The address and the token: written whole and taken at once, or refused with coded reasons (`saved: false`)."""
-        return await gw.request("sources.provider.set", draft.model_dump(mode="json"))
+        return await gw.reply_of(SOURCES_PROVIDER_SET, draft.model_dump(mode="json"))
 
     async def _refresh_debug_groups():
         flags = (await gw.reply_of(SETTINGS_VALUES_BY_PREFIX, {"prefix": "debug_enabled_"})).values
@@ -300,7 +301,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/trackers", response_model=list[DynamicObject])
     async def trackers_list():
-        return await gw.request("sources.trackers.list", {})
+        return [each.model_dump(mode="json") for each in (await gw.reply_of(SOURCES_TRACKERS_LIST, {})).trackers]
 
     @r.put("/api/trackers/{tracker_id}", response_model=OkResponse,
            response_model_exclude_none=True, responses=_ERR1)
@@ -310,7 +311,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         if mirrors is None:
             return JSONResponse({"error": reason("mirrors_missing")},
                                 status_code=400)
-        await gw.request("sources.tracker.set_mirrors", {
+        await gw.request(SOURCES_TRACKER_SET_MIRRORS, {
             "tracker_id": tracker_id, "mirrors": mirrors})
         return {"success": True, "message": reason("mirrors_saved")}
 

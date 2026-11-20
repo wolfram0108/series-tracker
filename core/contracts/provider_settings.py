@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from .frozen import Frozen
 from .voices import SettingProblem
 
 
@@ -15,7 +16,7 @@ class ProviderSettingsDraft(BaseModel):
     token: str | None = None
 
 
-class ProviderSite(BaseModel):
+class ProviderSite(Frozen):
     """A site of the provider's manifest: how many sources of the series are its titles, how many lines of the order of sources
     are its."""
 
@@ -25,7 +26,7 @@ class ProviderSite(BaseModel):
     lines: int = 0
 
 
-class ProviderView(BaseModel):
+class ProviderView(Frozen):
     """The reply of `sources.provider.get` and the body of `sources.provider.changed`: everything the tab shows, every value
     stated. `state` is that of the socket (`none`: no address); `reason` is why it is not up, as the event of the state gives
     it. The manifest facts and the sites are those of the last manifest, kept while the provider is down.
@@ -40,14 +41,14 @@ class ProviderView(BaseModel):
     version: str | None = None
     protocol: int | None = None
     revision: str | None = None
-    sites: list[ProviderSite] = Field(default_factory=list)
+    sites: tuple[ProviderSite, ...] = Field(default_factory=tuple)
     downloads_dir: str = ""
     seq: int = 0
 
 
-class ProviderSaved(BaseModel):
+class ProviderSaved(Frozen):
     """The reply of `sources.provider.set`: saved, or the problems that kept it from being saved."""
 
     saved: bool
-    problems: list[SettingProblem]
+    problems: tuple[SettingProblem, ...]
     provider: ProviderView

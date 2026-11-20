@@ -121,7 +121,8 @@ from core import storage
 from core.module import BaseModule, BusRequestError
 from core.source_types import torrent_profile_id
 from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, METADATA_SEASONS_RECOMPUTE, SERIES_PURGED,
-                         SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, TRACKERAUTH_CREDENTIALS_CHANGED,
+                         SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SOURCES_SITE_RESOLVE,
+                         SOURCES_TORRENT_FILE_DROP, SOURCES_TORRENT_FILE_GET, TRACKERAUTH_CREDENTIALS_CHANGED,
                          TRACKERAUTH_CREDENTIALS_GET)
 from core.contracts import (RUN_CHANGED, CredentialsChanged, RunChanged, SeriesCard, SeriesDeleted, SeriesPurged, SeriesUpdated,
                             SettingValue, SourceType, StatusContribution)
@@ -197,7 +198,7 @@ class TorrentsModule(BaseModule):
         # A change of the schedule wakes the loop of the checks of the releases (_watch_loop).
         self._schedule_wake = asyncio.Event()
         self.releases = Releases(
-            ReleaseStore(db), client=lambda: self.qbt, request=lambda topic, payload: self.request(topic, payload),
+            ReleaseStore(db), client=lambda: self.qbt, reply=lambda topic, payload: self.reply_of(topic, payload),
             publish=self._release_event, wake=self._release_wake.set)
         super().__init__(bus)
 
@@ -415,16 +416,14 @@ class TorrentsModule(BaseModule):
         """A .torrent by its link: sources gives the file (cache, polite pauses to the tracker), the file
         list is read locally."""
         try:
-            reply = await self.request(
-                "sources.torrent_file.get",
-                {"url": link, "torrent_id": tid})
+            reply = await self.reply_of(SOURCES_TORRENT_FILE_GET, {"url": link, "torrent_id": tid})
         except (BusRequestError, asyncio.TimeoutError) as exc:
             detail = relayed(str(exc))
             failed = (reason("preview_torrent_download_failed", detail=detail) if detail
                       else reason("preview_torrent_no_answer"))
             self._emit_preview_failed(tid, None, failed)
             return
-        self._preview_parse_torrent(tid, reply["content_b64"])
+        self._preview_parse_torrent(tid, reply.content_b64)
 
     def _preview_parse_torrent(self, tid, content_b64: str) -> None:
         """A .torrent to its file list locally (bencode), without qBit; the result is torrents.preview.ready,
@@ -998,8 +997,7 @@ class TorrentsModule(BaseModule):
                                  "удалены: %s", series_id, exc)
         for r in rows:
             if r.get("torrent_id"):
-                self.send_command("sources.torrent_file.drop",
-                                  {"torrent_id": r["torrent_id"]})
+                self.send_command(SOURCES_TORRENT_FILE_DROP, {"torrent_id": r["torrent_id"]})
         await self.repo.delete_for_series(series_id)
         dropped = [h for h, t in self._pipe.items()
                    if t["series_id"] == series_id]
@@ -1400,8 +1398,8 @@ class TorrentsModule(BaseModule):
         self.spawn(self._watch_loop(), lasting=True)
 
     async def _canonical(self, url: str) -> str:
-        resolved = await self.request("sources.site.resolve", {"url": url})
-        return resolved.get("canonical_url") or url
+        resolved = await self.reply_of(SOURCES_SITE_RESOLVE, {"url": url})
+        return resolved.canonical_url or url
 
     async def _scheduled_pages(self) -> set[str]:
         """The pages the schedule checks: of the series in the automatic mode, while the automatic sync is on."""

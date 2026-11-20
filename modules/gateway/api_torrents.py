@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from core.module import BusRequestError
 from core.contracts import SubtitleType
+from core.topics import SOURCES_RELEASES_GET
 
 from .routing import as_made, refusal
 from .schemas import DynamicObject, ErrorResponse, OkResponse
@@ -117,7 +118,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/torrent/page", response_model=DynamicObject, responses=_ERR)
     async def page(body: PageBody):
         """What the page of the tracker lists now (read from the tracker): every release with its id on the page."""
-        return await asked("sources.releases.get", body.model_dump())
+        return await asked(SOURCES_RELEASES_GET, body.model_dump())
 
     @r.post("/api/torrent/releases", response_model=DynamicObject, responses=_ERR)
     async def releases(body: PageBody):

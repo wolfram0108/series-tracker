@@ -167,7 +167,7 @@ async def test_an_unread_page_of_an_episode_is_an_unread_part_and_the_other_page
     draft = await Run().read(a_site(), web)
 
     assert [(part.part, part.names, parse(part.reason)["code"]) for part in draft.unread] == [
-        (f"{RELEASE}/episode-2", ["Серия 2"], "page_status")]
+        (f"{RELEASE}/episode-2", ("Серия 2",), "page_status")]
     page_rows = [row for row in draft.rows if row.player in ("vk", "allvideo")]
     assert sorted({row.site_fields["number"] for row in page_rows}) == [1, 3]
     assert {row.part for row in page_rows} == {f"{RELEASE}/episode-1", f"{RELEASE}/episode-3"}

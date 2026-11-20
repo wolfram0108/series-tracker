@@ -7,23 +7,18 @@ ours — nothing of that world is begun: a read says `provider_not_connected`, a
 opened, a download is not handed to a generic downloader. Before the first look at the provider (its first hello, or its first
 failure) it is not down, it is not known: whoever asks about such a page waits for the look (`ProviderHost.known`) and is answered
 by what it found, so `connecting` is never an answer. A page of any other address is the business of the sites of the tracker,
-whatever the provider does."""
+whatever the provider does.
+
+What an address is and what the state of the socket says is calc/sources/address.py; here is the part that looks at the registry of
+the sites and at the connector."""
 from __future__ import annotations
 
-from urllib.parse import urlsplit
-
-from core.reasons import reason
+from calc.sources import address
+from calc.sources.address import is_web_address
 
 from ..sites import SiteRegistry
 from .connector import Connector
 from .remote import RemoteSite
-
-NOT_CONNECTED = "provider_not_connected"
-WEB_SCHEMES = ("http", "https")
-
-
-def is_web_address(url: str) -> bool:
-    return urlsplit(url).scheme.lower() in WEB_SCHEMES
 
 
 def belongs_to_provider(sites: SiteRegistry, url: str) -> bool:
@@ -34,13 +29,7 @@ def belongs_to_provider(sites: SiteRegistry, url: str) -> bool:
 
 def not_connected(connector: Connector | None) -> str | None:
     """The reason the provider cannot be asked now (a code of core/reasons); None when it is up."""
-    if connector is None:
-        return reason(NOT_CONNECTED, state="none")
-    if connector.state == "up":
-        return None
-    if connector.state == "incompatible" and connector.why:
-        return connector.why
-    return reason(NOT_CONNECTED, state=connector.state)
+    return address.not_connected(None if connector is None else connector.state, "" if connector is None else connector.why)
 
 
 def block(connector: Connector | None, sites: SiteRegistry, url: str) -> str | None:

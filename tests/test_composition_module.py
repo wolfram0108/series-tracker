@@ -17,7 +17,7 @@ from composition_fakes import (PAGE, FakeCatalog, FakeRules, FakeSources, FakeVo
 from core.bus import Bus
 from core.module import BaseModule, BusRequestError
 from core.runner import Runner
-from core.contracts import (CompositionPreviewReply, CompositionReply, Level, QueuesReply, ReleaseTable, RowState, RowVoice,
+from core.contracts import (TableGetRequest, CompositionPreviewReply, CompositionReply, Level, QueuesReply, ReleaseTable, RowState, RowVoice,
                             SettingsReset, SettingsSet, SettingsSetMany,
                             SourceStatus, TableRow, TableState, group_target, variant_target)
 from core.db import Database
@@ -383,7 +383,7 @@ async def test_a_request_that_asks_for_no_read_of_a_page_nothing_was_read_of_giv
     s = system
     reply = await preview(s, refresh=False)
     assert (reply.state, reply.reason, reply.summary, reply.lines) == (TableState.ABSENT, None, None, ())
-    assert s.sources.reads_begun == [] and s.sources.requests[-1].refresh is False
+    assert s.sources.reads_begun == [] and type(s.sources.requests[-1]) is TableGetRequest
     nothing_was_written(s)
 
 

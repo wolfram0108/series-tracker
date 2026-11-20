@@ -48,6 +48,10 @@ from typing import Final, Literal, Mapping
 from pydantic import BaseModel
 
 from .contracts import (
+    BlockedPage, ManifestApplied, MirrorsSaved, MirrorsSet, PageUrl, PagesCheck, PagesCheckReply, PagesForgotten, StreamReply,
+    TableCancel, TableCancelled, TableRead, TableRefresh, TablesFresh, TablesFreshReply, TermSaved, TermSet, TermsReply,
+    TorrentFile, TorrentFileDrop, TorrentFileGet, TrackersReply, VideoFetch, VideoFetched, VideoFetchStop, VideoFetchStopped,
+    VideoStream,
     CredentialsChanged, CredentialsReply, CredentialsSaved, CredentialsSet, FetchReply, FetchRequest, SecretReply, ServiceRef,
     MapGet, MapListReply, MapReply, MapSaved, MapSet, SeasonsRecompute, SeasonsRecounted, TmdbDetails, TmdbDetailsRequest,
     TmdbSearchReply, TmdbSearchRequest,
@@ -217,9 +221,13 @@ CONFORM_SUBMIT = Topic("conform.submit", COMMAND, "conform", reply=SubmitReply, 
 CONFORM_WORKSPACE = Topic("conform.workspace", QUERY, "conform", fuse=after(QUICK_S, SETTINGS_VALUE_GET))
 
 # --- sources -----------------------------------------------------------------------------------------------------
-SOURCES_PAGES_CHECK = Topic("sources.pages.check", QUERY, "sources", fuse=STANDARD_S)
-SOURCES_PAGES_FORGOTTEN = Topic("sources.pages.forgotten", EVENT, "sources")
-# The network is read, the table is not written.
+# The reads of sources (a table, a check of pages, a search, a stream) wait for the first look at the provider when a page of its world
+# is asked; they take no order from one another, so their handlers are concurrent and a wait does not hold the queue.
+SOURCES_PAGES_CHECK = Topic(
+    "sources.pages.check", QUERY, "sources", request=PagesCheck, reply=PagesCheckReply, fuse=STANDARD_S)
+SOURCES_PAGES_FORGOTTEN = Topic("sources.pages.forgotten", EVENT, "sources", request=PagesForgotten)
+# The network is read, the table is not written. Nobody asks it over the bus: it leaves with the old torrent pipeline (stage 15 of the
+# mission voice-alignment, step 11), `sources.releases.get` is its live user (inside the module). Its answer stays a dictionary.
 SOURCES_PARSE = Topic("sources.parse", QUERY, "sources", fuse=RULES_S)
 SOURCES_PLAYERS_LIST = Topic(
     "sources.players.list", QUERY, "sources", request=PlayersListRequest, reply=PlayersListReply,
@@ -230,49 +238,67 @@ SOURCES_PROVIDER_CHANGED = Topic("sources.provider.changed", EVENT, "sources", r
 SOURCES_PROVIDER_GET = Topic(
     "sources.provider.get", QUERY, "sources", reply=ProviderView,
     fuse=after(SERVICE_S, CATALOG_SERIES_LIST, CONFORM_WORKSPACE))
-SOURCES_PROVIDER_MANIFEST = Topic("sources.provider.manifest", EVENT, "sources")
+SOURCES_PROVIDER_MANIFEST = Topic("sources.provider.manifest", EVENT, "sources", request=ManifestApplied)
 SOURCES_PROVIDER_SET = Topic(
     "sources.provider.set", COMMAND, "sources", request=ProviderSettingsDraft, reply=ProviderSaved,
     fuse=after(SERVICE_S, CATALOG_SERIES_LIST, CONFORM_WORKSPACE, SETTINGS_VALUE_GET, SETTINGS_VALUES_SET_MANY))
 SOURCES_PROVIDER_STATE = Topic("sources.provider.state", EVENT, "sources", request=ProviderState)
-SOURCES_RELEASES_GET = Topic("sources.releases.get", QUERY, "sources", reply=PageReleases, fuse=RULES_S)
+SOURCES_RELEASES_GET = Topic(
+    "sources.releases.get", QUERY, "sources", request=PageUrl, reply=PageReleases, fuse=RULES_S)
 SOURCES_SETTINGS_CHANGED = Topic("sources.settings.changed", EVENT, "sources", request=SourcesSettingsView)
 SOURCES_SETTINGS_GET = Topic("sources.settings.get", QUERY, "sources", reply=SourcesSettingsView, fuse=QUICK_S)
 SOURCES_SITE_RESOLVE = Topic(
     "sources.site.resolve", QUERY, "sources", request=SiteResolveRequest, reply=SiteResolveReply,
     fuse=QUICK_S)
-SOURCES_TABLE_CANCEL = Topic("sources.table.cancel", COMMAND, "sources", fuse=STANDARD_S)
+SOURCES_TABLE_CANCEL = Topic(
+    "sources.table.cancel", COMMAND, "sources", request=TableCancel, reply=TableCancelled, fuse=STANDARD_S)
 SOURCES_TABLE_FAILED = Topic("sources.table.failed", EVENT, "sources", request=TableFailed)
 SOURCES_TABLE_FRESH = Topic("sources.table.fresh", EVENT, "sources", request=TableReady)
-# Mixed: with `refresh` it also begins a read of the page; split into a query and a command in the pass of sources.
+# The page as it stands, read from nothing: the last complete table with how the page stands (ready, reading, failed, absent).
+# Asking the page to be read is `sources.table.refresh`.
 SOURCES_TABLE_GET = Topic(
     "sources.table.get", QUERY, "sources", request=TableGetRequest, reply=TableGetReply,
     fuse=SERVICE_S)
 SOURCES_TABLE_PROGRESS = Topic("sources.table.progress", EVENT, "sources", request=TableProgress)
-SOURCES_TABLE_READ = Topic("sources.table.read", COMMAND, "sources", request=TableGetRequest, fuse=STANDARD_S)
+SOURCES_TABLE_READ = Topic("sources.table.read", COMMAND, "sources", request=TableRead, fuse=STANDARD_S)
 SOURCES_TABLE_READY = Topic("sources.table.ready", EVENT, "sources", request=TableReady)
-# What the read of a page does, for the dump of a run (kinds `begin` and `end`).
+# Reads the page if its table is not current (the term, a page that waits for the user, a provider that is up) and answers how the
+# page stands after that: the same answer as the query, taken in the step that decided.
+SOURCES_TABLE_REFRESH = Topic(
+    "sources.table.refresh", COMMAND, "sources", request=TableRefresh, reply=TableGetReply, fuse=SERVICE_S)
+# What the read of a page does, for the dump of a run (kinds `begin` and `end`): {url, site, kind: "begin", fresh} and {url, site, kind:
+# "end", ok, reason, seconds, rows, players, causes, unread}. A dictionary: the dump of the runs and its reader take it so.
 SOURCES_TABLE_TRACE = Topic("sources.table.trace", EVENT, "sources")
-SOURCES_TABLES_FRESH = Topic("sources.tables.fresh", QUERY, "sources", fuse=STANDARD_S)
-SOURCES_TERMS_GET = Topic("sources.terms.get", QUERY, "sources", fuse=STANDARD_S)
-SOURCES_TERMS_SET = Topic("sources.terms.set", COMMAND, "sources", fuse=STANDARD_S)
+SOURCES_TABLES_FRESH = Topic(
+    "sources.tables.fresh", QUERY, "sources", request=TablesFresh, reply=TablesFreshReply, fuse=STANDARD_S)
+SOURCES_TERMS_GET = Topic("sources.terms.get", QUERY, "sources", reply=TermsReply, fuse=STANDARD_S)
+SOURCES_TERMS_SET = Topic(
+    "sources.terms.set", COMMAND, "sources", request=TermSet, reply=TermSaved,
+    fuse=STANDARD_S)
 # The search of the titles: the sources of the provider asked (a session opened, two requests, again after a refusal)
 # and a page of the search.
 SOURCES_TITLES_SEARCH = Topic(
     "sources.titles.search", QUERY, "sources", request=TitleSearchRequest, reply=TitleSearchReply,
     fuse=HEAVY_S)
-SOURCES_TORRENT_FILE_DROP = Topic("sources.torrent_file.drop", COMMAND, "sources", fuse=STANDARD_S)
-# A miss fetches the file and writes the cache of the module.
-SOURCES_TORRENT_FILE_GET = Topic("sources.torrent_file.get", QUERY, "sources", fuse=FETCH_S)
-SOURCES_TRACKER_SET_MIRRORS = Topic("sources.tracker.set_mirrors", COMMAND, "sources", fuse=QUICK_S)
-SOURCES_TRACKERS_LIST = Topic("sources.trackers.list", QUERY, "sources", fuse=QUICK_S)
+SOURCES_TORRENT_FILE_DROP = Topic(
+    "sources.torrent_file.drop", COMMAND, "sources", request=TorrentFileDrop, fuse=STANDARD_S)
+# A miss fetches the file and writes the cache of the module: a cache is no state of the module another reads, so it is a query.
+SOURCES_TORRENT_FILE_GET = Topic(
+    "sources.torrent_file.get", QUERY, "sources", request=TorrentFileGet, reply=TorrentFile, fuse=FETCH_S)
+SOURCES_TRACKER_SET_MIRRORS = Topic(
+    "sources.tracker.set_mirrors", COMMAND, "sources", request=MirrorsSet, reply=MirrorsSaved, fuse=QUICK_S)
+SOURCES_TRACKERS_LIST = Topic("sources.trackers.list", QUERY, "sources", reply=TrackersReply, fuse=QUICK_S)
 # A file a player downloads itself is as long as its episode: the asker watches its progress events under its fuse of
 # silence.
-SOURCES_VIDEO_FETCH = Topic("sources.video.fetch", COMMAND, "sources", fuse=None)
-SOURCES_VIDEO_FETCH_STOP = Topic("sources.video.fetch.stop", COMMAND, "sources", fuse=QUICK_S)
+SOURCES_VIDEO_FETCH = Topic(
+    "sources.video.fetch", COMMAND, "sources", request=VideoFetch, reply=VideoFetched, fuse=None)
+SOURCES_VIDEO_FETCH_STOP = Topic(
+    "sources.video.fetch.stop", COMMAND, "sources", request=VideoFetchStop, reply=VideoFetchStopped, fuse=QUICK_S)
+# How far a download goes: {target, phase, progress, ...the figures the player gives}, which differ by player, so a dictionary.
 SOURCES_VIDEO_PROGRESS = Topic("sources.video.progress", EVENT, "sources")
-# A link of Vibix also writes the manifest file and the key.
-SOURCES_VIDEO_STREAM = Topic("sources.video.stream", QUERY, "sources", fuse=HEAVY_S)
+# A link of Vibix also writes the manifest file and the key: a cache, as the file of a release.
+SOURCES_VIDEO_STREAM = Topic(
+    "sources.video.stream", QUERY, "sources", request=VideoStream, reply=StreamReply, fuse=HEAVY_S)
 
 # --- voices ------------------------------------------------------------------------------------------------------
 VOICES_GROUPS_RESOLVE = Topic(

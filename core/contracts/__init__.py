@@ -22,13 +22,17 @@ from .reference import CutPicture, OutputSwitch, Reference, ReferenceChanged, Re
 from .release_table import (LINE_FIELDS, LINE_SEPARATOR, ParsedDomains, PlayerFacts, PlayerPlace, PlayersListReply,
                             PlayersListRequest, ReleaseTable, RowState, RowTrack, RowVoice, SubtitleType,
                             SiteResolveReply, SiteResolveRequest, SourcesSettingsView, TrackerMirrors,
-                            SeriesReadProgress, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableRow,
+                            SeriesReadProgress, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableRead, TableReady, TableRefresh, TableRow,
                             TableState, UnreadPart, line_of, place_of)
 from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, RulesProfileChanged
 from .series_sources import SeriesSource, SourceChanged, SourceEvent, SourceType
 from .auth import AdminState, LoginReply, PasswordSaved
 from .metadata import (MapGet, MapListReply, MapReply, MapSaved, MapSet, SeasonsRecompute, SeasonsRecounted, TmdbDetails,
                        TmdbDetailsRequest, TmdbFound, TmdbMapping, TmdbSearchReply, TmdbSearchRequest, TmdbSeason)
+from .sources import (BlockedPage, ManifestApplied, MirrorsSaved, MirrorsSet, PageUrl, PagesCheck, PagesCheckReply, PagesForgotten,
+                      StreamReply, TableCancel, TableCancelled, TablesFresh, TablesFreshReply, TermSaved, TermSet, TermSite,
+                      TermsReply, TorrentFile, TorrentFileDrop, TorrentFileGet, Tracker, TrackersReply, VideoFetch, VideoFetched,
+                      VideoFetchStop, VideoFetchStopped, VideoStream)
 from .trackerauth import (Credentials, CredentialsChanged, CredentialsReply, CredentialsSaved, CredentialsSet, FetchReply,
                           FetchRequest, SecretReply, ServiceRef)
 from .settings import SavedPath, SavedPaths, SettingValue, SettingValues
@@ -53,6 +57,10 @@ __all__ = ["TitleCard", "TitleLine", "TitleSearchReply", "TitleSearchRequest", "
            "WRITABLE_FIELDS", "BusyContribution", "SeriesCard", "SeriesDeleted", "SeriesListReply", "SeriesPurged", "SeriesStatusChanged", "SeriesUpdated",
            "SourcesReply", "StatusContribution", "AdminState", "LoginReply", "PasswordSaved", "Credentials", "CredentialsChanged",
            "CredentialsReply", "CredentialsSaved", "CredentialsSet", "FetchReply", "FetchRequest", "SecretReply", "ServiceRef", "MapGet", "MapListReply", "MapReply", "MapSaved", "MapSet",
+           "BlockedPage", "ManifestApplied", "MirrorsSaved", "MirrorsSet", "PageUrl", "PagesCheck", "PagesCheckReply", "PagesForgotten",
+           "StreamReply", "TableCancel", "TableCancelled", "TablesFresh", "TablesFreshReply", "TermSaved", "TermSet", "TermSite",
+           "TermsReply", "TorrentFile", "TorrentFileDrop", "TorrentFileGet", "Tracker", "TrackersReply", "VideoFetch", "VideoFetched",
+           "VideoFetchStop", "VideoFetchStopped", "VideoStream", "TableRead", "TableRefresh",
            "SeasonsRecompute", "SeasonsRecounted", "TmdbDetails", "TmdbDetailsRequest", "TmdbFound", "TmdbMapping",
            "TmdbSearchReply", "TmdbSearchRequest", "TmdbSeason", "SavedPath", "SavedPaths", "SettingValue", "SettingValues",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",

@@ -49,7 +49,7 @@ class FakeSources(BaseModule):
         found = self.files[env.payload["url"]]
         if isinstance(found, Exception):
             raise found
-        return {"content_b64": found}
+        return {"content_b64": found, "from_cache": False}
 
 
 class FakeQbt:

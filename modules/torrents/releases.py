@@ -25,6 +25,7 @@ from core.contracts.torrent import (RELEASE_CHANGED_TOPIC, PageRelease, PageRele
                                     ReleaseView)
 from core.fsnames import sanitize_name
 from core.logging import get_logger
+from core.topics import SOURCES_RELEASES_GET, SOURCES_TORRENT_FILE_GET
 from core.reasons import reason
 from core.schedule import next_at
 
@@ -80,7 +81,7 @@ class Releases:
 
     store: ReleaseStore
     client: Callable[[], QbtClient | None]
-    request: Request
+    reply: Request  # `BaseModule.reply_of`: the answer of a neighbour as the model of its topic
     publish: Callable[[str, dict], None]
     wake: Callable[[], None]
     staging: str = ""
@@ -142,7 +143,7 @@ class Releases:
         return qbt
 
     async def _page(self, url: str) -> PageReleases:
-        return PageReleases.model_validate(await self.request("sources.releases.get", {"url": url}))
+        return await self.reply(SOURCES_RELEASES_GET, {"url": url})
 
     async def download(self, url: str, release: str) -> ReleaseView:
         """The user's «Скачать»: the release as the page lists it now goes to the client, into its folder."""
@@ -164,9 +165,9 @@ class Releases:
         """The version the page lists goes to the client, started, into `folder`; recorded before anything is told."""
         qbt = self._client()
         if page_release.link:
-            got = await self.request("sources.torrent_file.get", {
+            got = await self.reply(SOURCES_TORRENT_FILE_GET, {
                 "url": page_release.link, "torrent_id": ids.torrent_id(page_release.link, page_release.published)})
-            content = base64.b64decode(got["content_b64"])
+            content = base64.b64decode(got.content_b64)
             try:
                 candidates = infohash_candidates(content)
             except TorrentParseError as exc:
