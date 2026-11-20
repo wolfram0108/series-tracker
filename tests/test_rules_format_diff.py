@@ -4,7 +4,7 @@
 Плюс юнит-кейсы формата.
 """
 
-from modules.rules import formatter
+from calc.rules import formatter
 
 
 # --- юнит-кейсы формата --------------------------------------------------------------

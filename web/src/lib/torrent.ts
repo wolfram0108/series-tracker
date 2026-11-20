@@ -146,7 +146,7 @@ export function sourceState(kept: ReleaseView | undefined, reading: { done: numb
 // --- the rules that placed an item ----------------------------------------------------------------------------------
 
 /** The rule an item was placed by, as the window words it: a row of a table is told by its number. The engine names the
- *  rule of a row of a table «name · N» (modules/rules/engine.table_rules). */
+ *  rule of a row of a table «name · N» (calc/rules/engine.table_rules). */
 export function ruleOf(by: string | null): { rule: string; row: number | null } | null {
   if (!by || by === "manual" || by === FROM_META) return null
   const found = /^(.*) · (\d+)$/.exec(by)

@@ -1,7 +1,7 @@
 """A real series as the tables of the planner (calc/plan), read from a copy of the service's database.
 
 The rows come out of the real constructor: the stored tables of the pages go through the rules of their profiles
-(modules/rules: compile_profile, process_title, result_of, settle_parts) and the layout (calc/layout/project),
+(calc/rules: compile_profile, process_title, result_of, settle_parts) and the layout (calc/layout/project),
 with the groups of voice-overs of the settings — the same functions the service runs. Other rules can be given in place of
 the stored ones: a situation «this rule is changed» is the real constructor run with them. The asset (files and tracks)
 is the table the planner keeps (plan_assets), read against the rows as the planner reads it; the choices come from the
@@ -33,9 +33,9 @@ from modules.catalog.repository import CatalogRepository  # noqa: E402
 from calc.layout import project  # noqa: E402
 from calc.layout.reply import layout_of  # noqa: E402
 from modules.composition.repository import CompositionRepository  # noqa: E402
-from modules.rules.engine import compile_profile, process_title  # noqa: E402
-from modules.rules.module import result_of  # noqa: E402
-from modules.rules.numbering import settle_parts  # noqa: E402
+from calc.rules.engine import compile_profile, process_title  # noqa: E402
+from calc.rules.numbering import settle_parts  # noqa: E402
+from calc.rules.reply import result_of  # noqa: E402
 from modules.rules.repository import RulesRepository  # noqa: E402
 from modules.settings.repository import SettingsRepository  # noqa: E402
 from modules.sources.repository import SourcesRepository  # noqa: E402
@@ -113,9 +113,9 @@ def asset_of(path: str, series_id: int, online: list[OnlineRow]) -> list[Contain
 
 
 def namer_of(series: dict):
-    """The series' own rule of names (modules/rules/formatter), as the container of an episode is named: an .mkv; a
+    """The series' own rule of names (calc/rules/formatter), as the container of an episode is named: an .mkv; a
     switched-off one hidden with `.off`."""
-    from modules.rules import formatter
+    from calc.rules import formatter
 
     def name(slot, video, off: bool) -> str:
         snapshot = video.snapshot

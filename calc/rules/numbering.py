@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from typing import Mapping, Sequence
 
-from core import season as season_rule
 from core.contracts import RuleLine, RuleResult
 from calc.voice_names import fold_name
+
+from . import season as season_rule
 
 # A season that neither the rules nor the card of the series gave is season 1, as the plan and the file name read it.
 DEFAULT_SEASON = 1

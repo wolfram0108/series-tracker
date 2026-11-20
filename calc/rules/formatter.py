@@ -11,15 +11,16 @@ import json
 import os
 import re
 
-from core import season as season_rule
 from core.fsnames import sanitize_name as sanitize
+
+from . import season as season_rule
 
 
 def merge_series_defaults(series: dict, metadata: dict,
                           extracted: dict | None = None) -> dict:
     """Карточка сериала — дефолт: правило, сработавшее на этом файле, важнее.
 
-    Тот же принцип, что у сезона (core.season): извлечённое побеждает,
+    Тот же принцип, что у сезона (calc/rules/season.py): извлечённое побеждает,
     значение карточки используется, только если правило ничего не дало.
     """
     extracted = extracted or {}

@@ -30,7 +30,7 @@ export function reasonText(reason: Reason | string | null | undefined): string {
     return typeof fact === "string" && coded(fact) ? reasonText(fact) : fact
   }
   const facts: Record<string, unknown> = Object.fromEntries(Object.entries(params).map(([name, fact]) => [name, worded(fact)]))
-  // A refused template names its block, the block before it and its place by their codes (modules/rules/engine.py).
+  // A refused template names its block, the block before it and its place by their codes (calc/rules/engine.py).
   for (const fact of ["block", "after"]) {
     const block = `rules.block.${String(params[fact] ?? "")}.label`
     if (fact in params && block in ru) facts[fact] = t(block as MessageKey)

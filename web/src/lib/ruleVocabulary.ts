@@ -3,14 +3,14 @@ import { LANGUAGES } from "./languages"
 import { attachmentBlockCount, isAttachmentType, numberBlockCount, type PatternBlock } from "./patternBlocks"
 
 /** The vocabulary of the rules constructor the panel offers: one place for every card of it. Each list is written out
- *  in full, so tests/test_rules_vocabulary.py checks it against the engine (modules/rules/engine.py) as it is. */
+ *  in full, so tests/test_rules_vocabulary.py checks it against the engine (calc/rules/engine.py) as it is. */
 export const CONDITION_TYPES = ["contains", "not_contains"] as const
 export const EXTRACT_TYPES = ["extract_single", "extract_range", "extract_season"] as const
 export const ASSIGN_TYPES = ["assign_voiceover", "assign_episode", "assign_season", "assign_part", "assign_quality",
   "assign_resolution", "assign_range"] as const
 export const ACTION_TYPES = ["exclude", "extract_single", "extract_range", "extract_season", "assign_voiceover",
   "assign_episode", "assign_season", "assign_part", "assign_quality", "assign_resolution", "assign_range"] as const
-/** The actions of the editor of a release (modules/rules/engine.py EDITOR_ASSIGN): a track into a folder of a voice-over or of
+/** The actions of the editor of a release (calc/rules/engine.py EDITOR_ASSIGN): a track into a folder of a voice-over or of
  *  subtitles, its language, its type of subtitles. Offered by the cards of the tabs of the tracks of a release only: a row
  *  of a site has none of them. */
 export const EDITOR_ACTIONS = ["assign_video_tag", "assign_voice_folder", "assign_subtitle_folder", "assign_language",
@@ -74,7 +74,7 @@ export function choicesOf(type: string): { value: string; label: string }[] | nu
 
 /** «В каталог озвучки», «В каталог субтитров»: one «ТО» of several fields, the name of the folder, its language and — a folder of
  *  subtitles — its type (full, signs). The value is `{"name", "language", "type"}` as JSON, or the name alone when nothing else
- *  is given (modules/rules/engine.py folder_value). */
+ *  is given (calc/rules/engine.py folder_value). */
 export const FOLDER_ACTIONS = ["assign_voice_folder", "assign_subtitle_folder"] as const
 export const isFolderAction = (type: string): boolean => (FOLDER_ACTIONS as readonly string[]).includes(type)
 export interface FolderValue { name: string; language: string; type?: string }

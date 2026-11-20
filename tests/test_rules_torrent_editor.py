@@ -6,7 +6,7 @@ seasons and OVA in folders of their own."""
 import json
 
 
-from modules.rules import compile_profile, process_title
+from calc.rules.engine import compile_profile, process_title
 
 
 def rule(rule_id, name, actions, conditions=()):

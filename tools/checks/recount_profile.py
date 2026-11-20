@@ -84,6 +84,7 @@ class Probe(BaseModule):
 async def main(series: list[int], base: str, rounds: int, out: str | None) -> None:
     composition_module = importlib.import_module("modules.composition.module")
     planner_module = importlib.import_module("modules.planner.module")
+    rules_module = importlib.import_module("modules.rules.module")
     executor = first_module("modules.planner.executor", "core.plan.executor")
     from modules.catalog import CatalogModule
     from modules.composition import CompositionModule
@@ -111,6 +112,7 @@ async def main(series: list[int], base: str, rounds: int, out: str | None) -> No
             (composition_module, "_derive", "composition: projection and comparison (pool)"),
             (composition_module, "derive", "composition: projection and comparison (pool)"),
             (composition_module, "layout_of", "composition: the layout as the model for the planner (pool)"),
+            (rules_module, "reply_of", "rules: the answer to the lines of a page (pool)"),
             (planner_module, "_inputs_of", "planner: the inputs of the plan from the layout (pool)"),
             (planner_module, "layout_inputs", "planner: the inputs of the plan from the layout (pool)"),
             (executor, "plan", "planner: the plan (pool)"),

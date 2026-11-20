@@ -139,7 +139,7 @@ class UnpackModule(BaseModule):
             return {}
         reply = await self.request("rules.apply", {"profile_id": profile_id,
                                                    "lines": [{"key": key, "text": text} for key, text in keyed.items()]})
-        return reply.get("results") or {}
+        return {key: result.model_dump() for key, result in reply.results.items()}
 
     async def _inputs(self, url: str, releases: list[ReleaseView] | None = None) -> Inputs:
         releases = releases if releases is not None else await self._releases(url)

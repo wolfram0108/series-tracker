@@ -18,7 +18,7 @@ from core.contracts import (GroupsResolveReply, GroupsResolveRequest, ReleaseTab
                             VoiceSettingsView)
 from core.reasons import reason
 from calc.voice_names import fold_name
-from modules.rules.numbering import season_of, settle_parts
+from calc.rules.numbering import season_of, settle_parts
 
 HOST = "https://fake.test"
 PAGE = f"{HOST}/p/1"

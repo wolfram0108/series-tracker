@@ -44,9 +44,9 @@ class RuleResult(Frozen):
     errors: tuple[Any, ...] = Field(default_factory=tuple)
 
 
-class RulesApplyReply(BaseModel):
+class RulesApplyReply(Frozen):
     results: dict[str, RuleResult]
-    invalid_rules: list[dict[str, Any]] = Field(default_factory=list)
+    invalid_rules: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
 
 
 class RulesProfileChanged(BaseModel):
