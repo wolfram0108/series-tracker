@@ -984,7 +984,7 @@ export const ru = {
   "conform.settings.url": "Адрес демона",
   "reason.work_dir_here_missing": "Назовите рабочую папку здесь",
   "reason.work_dir_daemon_missing": "Назовите ту же папку, как её видит демон",
-  "reason.work_dir_not_absolute": "Путь папки должен начинаться с «/»: {path}",
+  "reason.work_dir_not_absolute": "Путь папки должен быть полным («/…», у демона на Windows — «Z:\\…» или «\\\\сервер\\ресурс\\…»): {path}",
   "reason.work_dir_is_root": "Папка не может быть корнем хранилища: {path}",
   "reason.conform_no_work_dir": "не названа рабочая папка здесь и на демоне (расширения, вкладка «Conform»)",
   "reason.conform_params_unknown": "Демон ещё не сообщил, какие значения принимает: параметры выравнивания не сохранены",

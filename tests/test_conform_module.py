@@ -299,6 +299,24 @@ async def test_submit_sends_the_episode_with_daemon_paths_and_returns_the_job():
         await runner.stop()
 
 
+WINDOWS_MAP = {"conform.work_dir": "/nas", "conform.work_dir_remote": "Z:\\media"}
+
+
+@pytest.mark.asyncio
+async def test_a_windows_daemon_is_given_the_paths_in_its_own_style():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    _, probe, runner = await started(client, WINDOWS_MAP)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        assert (await probe.request("conform.submit", SUBMIT, timeout=5))["outcome"] == "accepted"
+        sent = client.enqueued[0]
+        assert sent["ref"] == "Z:\\media\\lib\\S\\ep1.mp4"
+        assert sent["dubs"] == ["Z:\\media\\torrents\\series-tracker\\7\\s01e01\\a.mp4"]
+        assert sent["out_dir"] == "Z:\\media\\torrents\\series-tracker\\7\\s01e01\\_aligned"
+    finally:
+        await runner.stop()
+
+
 @pytest.mark.asyncio
 async def test_without_a_work_folder_nothing_is_sent_and_the_reason_says_so():
     client = FakeClient([("conform.snapshot", {"items": []})])
@@ -393,6 +411,23 @@ async def test_a_finished_job_is_announced_once_with_local_paths():
         assert (second["job_id"], second["status"], second["error"]) == ("j2", "failed", "boom")
         await asyncio.wait_for(client.drained.wait(), 3)  # the whole script is taken in and announced
         assert sub.queue.empty()
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_job_of_a_windows_daemon_is_announced_with_local_paths_and_file_names():
+    answer = ended("j1", dubs=["Z:\\media\\torrents\\series-tracker\\7\\s01e01\\a.mp4"])
+    answer["results"][0]["out_path"] = "Z:\\media\\torrents\\series-tracker\\7\\s01e01\\_aligned\\a.flac"
+    bus = Bus()
+    sub = bus.subscribe("conform.job.finished")
+    runner = Runner(bus, [ConformModule(bus, FakeClient([("conform.snapshot", {"items": [answer]})]), backoff_start=0.01),
+                          Settings(bus, WINDOWS_MAP), Probe(bus)])
+    await runner.start()
+    try:
+        done = (await asyncio.wait_for(sub.queue.get(), 3)).payload
+        assert done["results"][0]["out_path"] == "/nas/torrents/series-tracker/7/s01e01/_aligned/a.flac"
+        assert compact_job(answer)["dubs"] == ["a.mp4"]
     finally:
         await runner.stop()
 

@@ -6,7 +6,9 @@ The daemon owns the state; this module keeps no database. The daemon address is 
 (`ST_CONFORM_URL` while none is stored; without an address the module is idle) and a saved address is taken at once,
 without a restart. The work folder is two settings, `conform.work_dir` (as this server names it) and
 `conform.work_dir_remote` (the same folder as the daemon names it); no default, the owner names both. Everything the
-daemon is given or writes lies inside it, and the paths cross the boundary through these two names.
+daemon is given or writes lies inside it, and the paths cross the boundary through these two names. The daemon may run
+on Windows: its folder is written as `Z:\\...` or `\\\\server\\share\\...`, and a path of the daemon is read by its own syntax
+(`paths.py`), so it is the same location whatever separators and letter case the daemon writes it with.
 
 Query:
   conform.submit {ref, dubs: [path], out_dir, cache_dir, label?, key?, ref_atrack?, dub_atracks?} -> SubmitReply
@@ -96,7 +98,7 @@ from core.reasons import describe, reason
 
 from .client import DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
 from . import settings as conform_settings
-from .paths import reverse, roots, translate, workspace
+from .paths import name_of, reverse, roots, translate, workspace
 from .settings import PREFIX, REMOTE_DIR_KEY, URL_KEY, WORK_DIR_KEY, mapping_of
 
 BACKOFF_START_S = 2.0
@@ -114,7 +116,7 @@ def compact_job(job: dict[str, Any]) -> dict[str, Any]:
     view = {field: job.get(field) for field in _JOB_FIELDS}
     view["label"], view["key"] = split_label(job.get("label"))
     view["series_id"] = series_of_job_key(view["key"])
-    view["dubs"] = [os.path.basename(str(dub)) for dub in job.get("dubs") or []]
+    view["dubs"] = [name_of(str(dub)) for dub in job.get("dubs") or []]
     view["results"] = [{
         "dub": result.get("dub"), "plot": plot_of(result),
         "ok": bool(result.get("ok")), "refused": refused_by_service(result), "skipped": bool(result.get("skipped")),

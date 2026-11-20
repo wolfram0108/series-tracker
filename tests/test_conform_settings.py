@@ -184,6 +184,24 @@ def test_the_work_folder_here_is_never_the_top_of_a_storage(monkeypatch):
     assert found(here="/") == ["work_dir_is_root"]
 
 
+@pytest.mark.parametrize("there", ["Z:\\torrents\\x", "Z:/torrents/x", "\\\\nas\\media\\x"])
+def test_the_folder_of_a_windows_daemon_is_accepted_as_the_owner_wrote_it(there):
+    assert conform_settings.check(draft(there=there)) == []
+    assert conform_settings.clean(draft(there=f" {there}\\ ")).work_dir_remote == there.rstrip("\\")
+
+
+@pytest.mark.parametrize("there, code", [
+    ("Z:torrents\\x", "work_dir_not_absolute"), ("torrents\\x", "work_dir_not_absolute"),
+    ("Z:\\", "work_dir_is_root"), ("Z:/", "work_dir_is_root"), ("\\\\nas\\media", "work_dir_is_root")])
+def test_a_folder_of_a_windows_daemon_that_is_not_complete_or_is_a_whole_storage_is_refused(there, code):
+    assert [problem.detail.code for problem in conform_settings.check(draft(there=there))] == [code]
+
+
+def test_this_server_names_its_own_folder_in_its_own_style():
+    found = [problem.detail.code for problem in conform_settings.check(draft(here="Z:\\torrents\\x"))]
+    assert found == ["work_dir_not_absolute"]
+
+
 def test_a_draft_is_cleaned_before_it_is_checked_and_written():
     cleaned = conform_settings.clean(draft(url=" http://d:1// ", here=" /storage/w/ ", there="/m/w/"))
     assert (cleaned.url, cleaned.work_dir, cleaned.work_dir_remote) == ("http://d:1", "/storage/w", "/m/w")

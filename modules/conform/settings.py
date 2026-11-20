@@ -17,6 +17,8 @@ from core.contracts import (ConformDomain, ConformParams, ConformSettingsDraft, 
                             SettingProblem)
 from core.reasons import parse as parse_reason, reason
 
+from . import paths
+
 PREFIX = "conform."
 URL_KEY = "conform.url"
 WORK_DIR_KEY = "conform.work_dir"
@@ -37,10 +39,6 @@ def _problem(field: str, stored: str) -> SettingProblem:
     return SettingProblem(field=field, detail=Reason.model_validate(parse_reason(stored)))
 
 
-def _folder(path: str) -> str:
-    return path.strip().rstrip("/") or ("/" if path.strip().startswith("/") else "")
-
-
 def mapping_of(work_dir: str | None, work_dir_remote: str | None) -> dict[str, str]:
     """{folder here: the same folder at the daemon}; empty until the owner names both."""
     return {work_dir: work_dir_remote} if work_dir and work_dir_remote else {}
@@ -48,13 +46,14 @@ def mapping_of(work_dir: str | None, work_dir_remote: str | None) -> dict[str, s
 
 def clean(draft: ConformSettingsDraft) -> ConformSettingsDraft:
     """Address and folders trimmed."""
-    return ConformSettingsDraft(url=draft.url.strip().rstrip("/"), work_dir=_folder(draft.work_dir),
-                                work_dir_remote=_folder(draft.work_dir_remote))
+    return ConformSettingsDraft(url=draft.url.strip().rstrip("/"), work_dir=paths.folder(draft.work_dir),
+                                work_dir_remote=paths.folder(draft.work_dir_remote))
 
 
 def check(draft: ConformSettingsDraft) -> list[SettingProblem]:
     """What is wrong with the draft once it is cleaned: an address needs both folders, a folder is absolute and is
-    not the top of a storage (results would be written beside everything else that lives there)."""
+    not the top of a storage (results would be written beside everything else that lives there). The folder here is a
+    path of this server; the folder of the daemon is a path in the daemon's own style (POSIX or Windows)."""
     draft = clean(draft)
     problems = []
     if draft.url:
@@ -65,10 +64,12 @@ def check(draft: ConformSettingsDraft) -> list[SettingProblem]:
             problems.append(_problem("work_dir", reason("work_dir_here_missing")))
         if not draft.work_dir_remote:
             problems.append(_problem("work_dir_remote", reason("work_dir_daemon_missing")))
-    for field, path in (("work_dir", draft.work_dir), ("work_dir_remote", draft.work_dir_remote)):
-        if path and not os.path.isabs(path):
+    here = (draft.work_dir, os.path.isabs, lambda path: path == "/" or os.path.ismount(path))
+    there = (draft.work_dir_remote, paths.is_absolute, paths.is_root)
+    for field, (path, is_absolute, is_root) in (("work_dir", here), ("work_dir_remote", there)):
+        if path and not is_absolute(path):
             problems.append(_problem(field, reason("work_dir_not_absolute", path=path)))
-        elif path == "/" or (field == "work_dir" and path and os.path.ismount(path)):
+        elif path and is_root(path):
             problems.append(_problem(field, reason("work_dir_is_root", path=path)))
     return problems
 
