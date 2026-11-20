@@ -94,3 +94,26 @@ def test_external_subtitles_take_the_font_files_beside_them_once_each(media):
     assert sorted(s["filename"] for s in layout["streams"] if s["kind"] == "attachment") == [
         "Arial.ttf", "Bold.otf", container.PROVENANCE]
     assert [each.key for each in asyncio.run(container.contents(out)).subtitles] == ["1:ext:", "1:ext2:"]
+
+
+_ASS_HEAD = ("[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n\n"
+             "[Events]\nFormat: Layer, Start, End, Style, Text\n")
+
+
+async def test_the_plan_is_told_a_container_without_its_subtitles_track_that_holds_no_events(tmp_path):
+    """A file the service built before tracks with no events were left out still holds one (the planner keeps what a file
+    holds): it is told to the plan without it, so that the next build does not take it into the container again. A track
+    with events, and one not asked about, stay."""
+    from core.plan.files import Library, dub_key, without_silent
+    from core.plan.tables import Container, RowId, Snapshot, Subtitle, Video
+    (tmp_path / "empty.ass").write_text(_ASS_HEAD, encoding="utf-8")
+    (tmp_path / "full.ass").write_text(_ASS_HEAD + "Dialogue: 0,0:00:01.00,0:00:02.00,Default,Текст\n", encoding="utf-8")
+    rows = [RowId(1, name, "v") for name in ("empty", "full")]
+    make(tmp_path / "E01.mkv", "-f", "lavfi", "-i", "testsrc=duration=3:size=160x90:rate=10", "-i", str(tmp_path / "empty.ass"),
+         "-i", str(tmp_path / "full.ass"), "-map", "0", "-map", "1", "-map", "2", "-c:v", "mpeg4", "-c:s", "copy",
+         "-metadata:s:s:0", f"ST_SUB={dub_key(rows[0])}", "-metadata:s:s:1", f"ST_SUB={dub_key(rows[1])}")
+    timeline = RowId(1, "video", "v")
+    asked = Container("E01.mkv", Video(timeline, Snapshot("s", "p", None, 1080), (1, 1), timeline), (), False, 0, (), (),
+                      tuple(Subtitle(row, row.row_key, "p", timeline) for row in rows))
+    told = await without_silent(Library(str(tmp_path)), asked)
+    assert [each.row.row_key for each in told.subtitles] == ["full"]

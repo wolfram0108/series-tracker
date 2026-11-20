@@ -38,7 +38,7 @@ async def test_a_title_found_by_the_search_of_the_provider_is_added_read_by_its_
     mock.sites["chines"].found = [{"id": "k3f9a1", "name": "万界独尊"}]
     await ui.first_run()
     await ui.set_up([ORIGINAL], languages={ORIGINAL: "chi"})
-    await ui.profile("серии 半日", [{"name": "серия", "if": LABEL,
+    await ui.profile_by_hand("серии 半日", [{"name": "серия", "if": LABEL,
                                     "then": [("extract_single", LABEL), ("assign_voiceover", ORIGINAL)]}])
     async with serving(mock) as server:
         await ui.use_provider(server.url)

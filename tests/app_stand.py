@@ -572,11 +572,11 @@ class AppStand:
                 "conditions": [{"condition_type": "contains", "pattern": blocks, "logical_operator": "AND"}]})
         return made["id"]
 
-    async def series(self, name: str, slugs: list[str]) -> int:
+    async def series(self, name: str, slugs: list[str], name_en: str | None = None) -> int:
         """A series of the releases of these slugs, each source with a profile of its own voice-over."""
         sources = [{"url": self.site.releases[slug].url, "source_type": "web_video",
                     "parser_profile_id": await self.profile(self.site.releases[slug].voice)} for slug in slugs]
-        made = await self.call("POST", "/api/series", {"name": name, "name_en": name, "site": "ruchime",
+        made = await self.call("POST", "/api/series", {"name": name, "name_en": name_en or name, "site": "ruchime",
                                                         "save_path": self.library, "sources": sources})
         return made["series_id"]
 

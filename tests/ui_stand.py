@@ -121,15 +121,6 @@ class UiStand(AppStand):
             os.makedirs(SHOTS, exist_ok=True)
             await self.page.screenshot(path=os.path.join(SHOTS, f"{name}.png"), full_page=True)
 
-    async def shot_around(self, target, name: str, below: int) -> None:
-        """A picture of one element and the `below` pixels under it: what opens under it into the body of the page (a card)."""
-        if SHOTS:
-            os.makedirs(SHOTS, exist_ok=True)
-            await target.scroll_into_view_if_needed()
-            box = await target.bounding_box()
-            await self.page.screenshot(path=os.path.join(SHOTS, f"{name}.png"), clip={
-                "x": box["x"], "y": box["y"], "width": box["width"], "height": box["height"] + below})
-
     async def shot_of(self, target, name: str) -> None:
         """A picture of one element (scrolled into view), when pictures are asked for."""
         if SHOTS:
@@ -195,7 +186,7 @@ class UiStand(AppStand):
                 text(f"voices.language.{code}"))
         await self.close_settings()
 
-    async def profile(self, name: str, rules: list[dict]) -> None:
+    async def profile_by_hand(self, name: str, rules: list[dict]) -> None:
         """A profile of the constructor, made by hand: each rule its conditions and actions, every template dragged
         block by block from the palette. A rule: {"name", "if": [blocks], "then": [(kind, blocks or value)]}."""
         page = self.page
@@ -267,11 +258,13 @@ class UiStand(AppStand):
         in its window with a source per release."""
         voices = list(dict.fromkeys([self.site.releases[slug].voice for slug in slugs] + list(also)))
         await self.first_run()
-        await self.set_up(voices)
+        await self.configure(voices)
         for voice in voices:
-            await self.profile(f"серии {voice}", lines_of(voice))
-        return await self.add_series(SERIES, SERIES_EN, [(self.site.releases[slug].url, f"серии {self.site.releases[slug].voice}")
-                                                        for slug in slugs])
+            await self.profile(voice)
+        series_id = await self.series(SERIES, slugs, SERIES_EN)
+        await self.page.reload()
+        await self.page.locator(".series-card", has_text=SERIES).first.wait_for()
+        return series_id
 
     async def tab(self, title: str) -> None:
         await self.page.locator(f".st-tab[title='{title}']").click()

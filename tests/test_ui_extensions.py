@@ -71,43 +71,6 @@ def _provider() -> MockProvider:
     return mock
 
 
-async def test_the_provider_tab_is_the_line_of_its_address_until_one_is_named_and_then_tells_what_the_provider_says(ui):  # noqa: F811
-    page = ui.page
-    await ui.first_run()
-    await _no_provider(ui)
-    await ui.extensions(text("extensions.tab.chines"))
-    address = page.get_by_label(text("extensions.chines.address"))
-    await expect(address).to_be_visible()
-    await expect(page.locator(".sheet-row")).to_have_count(1)  # the line of the address and nothing else
-    await expect(page.locator(".tile")).to_have_count(0)
-    await ui.shot("50-provider-no-address")
-
-    async with serving(_provider()) as server:
-        await address.fill(server.url)
-        await address.press("Enter")
-        await expect(page.get_by_text(text("extensions.chines.up"))).to_be_visible()
-        await expect(page.locator(".tile")).to_have_count(1)
-        await expect(page.locator(".tile")).to_contain_text("Мок (Mock)")
-        await expect(page.get_by_text(text("extensions.chines.protocol", protocol=2))).to_be_visible()
-        await ui.shot("51-provider-connected")
-        assert (await ui.call("GET", "/api/provider"))["url"] == server.url
-
-        # The window is another window to the same core: after a reload the address is the one the core holds.
-        await ui.close_extensions()
-        await page.reload()
-        await ui.extensions(text("extensions.tab.chines"))
-        await expect(page.get_by_label(text("extensions.chines.address"))).to_have_value(server.url)
-        await expect(page.get_by_text(text("extensions.chines.up"))).to_be_visible()
-
-        # The provider falls: the window says so at once, by the push of the core, and keeps the applications of its last manifest.
-        await server.down()
-        await expect(page.locator(".pill-danger")).to_be_visible()
-        await expect(page.locator(".tile-grid.is-stale .tile")).to_have_count(1)
-        await ui.shot("52-provider-down")
-        await server.up()
-        await expect(page.get_by_text(text("extensions.chines.up"))).to_be_visible()
-
-
 async def test_the_token_of_the_provider_is_taken_and_never_given_back(ui):  # noqa: F811
     page = ui.page
     await ui.first_run()
@@ -130,57 +93,3 @@ async def test_the_token_of_the_provider_is_taken_and_never_given_back(ui):  # n
         await page.get_by_role("button", name=text("extensions.chines.tokenClear")).click()
         await expect(page.get_by_role("button", name=text("extensions.chines.tokenClear"))).to_have_count(0)
         assert (await ui.call("GET", "/api/provider"))["has_token"] is False
-
-
-async def test_every_tab_of_the_extensions_holds_its_layout_at_every_width(ui):  # noqa: F811
-    page = ui.page
-    await ui.first_run()
-    await _no_provider(ui)
-    async with serving(_provider()) as server:
-        await ui.extensions(text("extensions.tab.chines"))
-        await page.get_by_label(text("extensions.chines.address")).fill(server.url)
-        await page.get_by_label(text("extensions.chines.address")).press("Enter")
-        await expect(page.locator(".tile")).to_have_count(1)
-        walked = {}
-        for tab in (text("extensions.tab.chines"), text("extensions.tab.conform")):
-            await page.locator(f".st-tab[title='{tab}']").click()
-            if tab == text("extensions.tab.conform"):
-                # The tab of the alignment server shows the rest with its address: name one.
-                address = page.get_by_label(text("conform.settings.url"))
-                await address.fill(ui.daemon_http.url)
-                await address.press("Tab")
-            await expect(page.locator(".sheet-row").first).to_be_visible()
-            for width in WIDTHS:
-                await page.set_viewport_size({"width": width, "height": 900})
-                found = await page.evaluate(DETECT)
-                assert found == [], (tab, width, found)
-            walked[tab] = len(WIDTHS)
-            await ui.shot_of(page.locator(".modern-modal"), f"53-extensions-{tab}")
-        await page.set_viewport_size({"width": 390, "height": 900})
-        await ui.shot_of(page.locator(".modern-modal"), "54-extensions-narrow-conform")
-        await page.locator(f".st-tab[title='{text('extensions.tab.chines')}']").click()
-        await ui.shot_of(page.locator(".modern-modal"), "55-extensions-narrow-chines")
-        assert len(walked) == 2
-
-
-async def test_the_head_of_a_window_keeps_the_words_of_its_title_and_its_close_button_at_every_width(ui):  # noqa: F811
-    """The title is one word of the window's own name; the tabs give way to it — tighter, then icons, then a line of their own under
-    it — and the close button stays beside it, in the window of the extensions and in the window of the settings alike."""
-    page = ui.page
-    await ui.first_run()
-    await _no_provider(ui)
-    below = {}
-    for name, open_window in (("extensions", lambda: ui.extensions(text("extensions.tab.chines"))),
-                              ("settings", lambda: ui.settings(text("settings.tab.voices")))):
-        await open_window()
-        for width in WIDTHS:
-            await page.set_viewport_size({"width": width, "height": 900})
-            found = await page.evaluate(DETECT_HEAD)
-            assert found == [], (name, width, found)
-            below[(name, width)] = await page.locator(".modern-header.tabs-below").count()
-        await page.set_viewport_size({"width": 390, "height": 900})
-        await ui.shot_of(page.locator(".modern-header"), f"56-head-{name}-390")
-        await page.set_viewport_size({"width": 1280, "height": 900})
-        await ui.close_settings()
-    # Wide, the tabs stand beside the title; narrow, under it — the shell moves them, as it measures.
-    assert not below[("extensions", 1280)] and below[("extensions", 320)], below

@@ -91,7 +91,7 @@ async def test_the_events_of_each_subtitles_track_of_a_real_file_are_counted_and
     made = tmp_path / "both.mkv"
     subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-i", str(tmp_path / "empty.ass"), "-i", str(tmp_path / "full.ass"),
                     "-map", "0", "-map", "1", "-c", "copy", str(made)], check=True)
-    assert await subtitle_events(str(made)) == {1: 3}  # the first stream (index 0) is absent: it holds none
+    assert await subtitle_events(str(made)) == {0: 0, 1: 3}  # in the order of the streams, the empty one counted as 0
     assert await subtitle_events(str(tmp_path / "missing.mkv")) is None
 
 
