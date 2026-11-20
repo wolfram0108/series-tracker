@@ -9,11 +9,14 @@ language) is no row, and every file of a release is downloaded — nothing tells
 from __future__ import annotations
 
 import json
+import subprocess
 
 import pytest
 
 from core import BaseModule, Bus
+from core.ffprobe import subtitle_events
 from core.envelope import Envelope
+from core.contracts import RowTrack
 from core.contracts.torrent import ReleaseFile, ReleaseState, ReleaseView
 from core.db import Database
 from modules.rules import RulesModule
@@ -56,6 +59,36 @@ def test_a_sound_of_an_episode_with_two_videos_waits_for_the_user():
                     results={"files": numbered({p.path: (1, 1) for p in r.files})})
     view, rows = compose(inputs)
     assert rows == [] and view["unplaced"]["voices"] == 1
+
+
+def test_a_subtitles_track_with_no_events_is_no_row_and_the_others_keep_their_numbers():
+    r = release(["Show/E01.mkv"])
+    held = streams(("video", 0, "", ""), ("subtitle", 1, "rus", "Надписи"), ("subtitle", 2, "rus", "Полные"),
+                   ("subtitle", 3, "rus", "Не считана"))
+    held["streams"][1]["events"], held["streams"][2]["events"] = 0, 641  # the third was never counted: it is kept
+    inputs = Inputs(releases=[r], folders=[], manual={}, streams={"page": {"Show/E01.mkv": held}},
+                    results={"files": numbered({"Show/E01.mkv": (1, 1)})})
+    _view, rows = compose(inputs)
+    shown = [(row.voice.name, row.link.rsplit("#", 1)[1]) for row in rows if row.track == RowTrack.SUBTITLES]
+    assert shown == [("Полные", "1"), ("Не считана", "2")]
+
+
+ASS_HEAD = ("[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\n"
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, "
+            "Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, "
+            "MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,"
+            "10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
+
+
+async def test_the_events_of_each_subtitles_track_of_a_real_file_are_counted_and_a_header_only_track_has_none(tmp_path):
+    (tmp_path / "empty.ass").write_text(ASS_HEAD, encoding="utf-8")
+    lines = "".join(f"Dialogue: 0,0:00:0{n}.00,0:00:0{n}.50,Default,,0,0,0,,line {n}\n" for n in range(1, 4))
+    (tmp_path / "full.ass").write_text(ASS_HEAD + lines, encoding="utf-8")
+    made = tmp_path / "both.mkv"
+    subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-i", str(tmp_path / "empty.ass"), "-i", str(tmp_path / "full.ass"),
+                    "-map", "0", "-map", "1", "-c", "copy", str(made)], check=True)
+    assert await subtitle_events(str(made)) == {1: 3}  # the first stream (index 0) is absent: it holds none
+    assert await subtitle_events(str(tmp_path / "missing.mkv")) is None
 
 
 # --- the module on the bus -------------------------------------------------------------------------------------------

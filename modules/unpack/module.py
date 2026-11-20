@@ -6,7 +6,9 @@ A release `torrents` downloaded is read here: every video, sound and subtitles f
 (the video of a source is never compared by content); the files are laid out by the rules of the five tabs of the editor
 and by what the user placed by hand (modules/unpack/layout.py). The editor places, it never leaves out: an item is placed
 (green) or not (red); every placed sound and subtitles track of a placed video is a row of the table of the page, as a row
-of a site, and a red one is no row — what goes out of the output is the work of the constructor of the series. Every file
+of a site, and a red one is no row — what goes out of the output is the work of the constructor of the series. The one
+exception is a subtitles track with no events at all (only a header; the read counts the packets of each subtitles stream):
+it has nothing to show and a container cannot be built with it, so it is no row; the tracks not counted are kept. Every file
 of a release is downloaded: nothing here tells `torrents` what not to download. Every tab of the editor of a source («Файлы», «Озвучки», «Субтитры»,
 «Озв. конт.», «Суб. конт.») has its own profile of rules (the kind `torrent`), empty until the owner writes rules in it, made when the
 editor is first opened; nothing is placed by rules no one wrote. A page no torrent source lists any more is forgotten with
@@ -48,7 +50,7 @@ from core import BaseModule
 from core.contracts.torrent import (RELEASE_CHANGED_TOPIC, EditorTab, FileKind, ReleaseState, ReleaseView, kind_of)
 from core.db import Database
 from core.envelope import Envelope
-from core.ffprobe import layout_of
+from core.ffprobe import layout_of, subtitle_events
 
 from .layout import Inputs, compose, lines
 from .repository import UnpackRepository
@@ -232,13 +234,18 @@ class UnpackModule(BaseModule):
     async def _read(self, release: ReleaseView) -> None:
         """Every video, sound and subtitles file of the version, read once per version and size."""
         known = await self.repo.streams(release.url, release.release)
+        # A file read before the events of its subtitles were counted is read again: a track with none is no row.
         todo = [f for f in release.files if kind_of(f.path) in READ and f.priority != 0 and not (
-            (stored := known.get(f.path)) and stored["infohash"] == release.infohash and stored["size"] == f.size)]
+            (stored := known.get(f.path)) and stored["infohash"] == release.infohash and stored["size"] == f.size
+            and not any(s["kind"] == "subtitle" and "events" not in s for s in stored["streams"]))]
         key = (release.url, release.release)
         try:
             for done, f in enumerate(todo):
                 self._progress(key, done, len(todo))
-                layout, said = await layout_of(os.path.join(release.folder, f.path))
+                path = os.path.join(release.folder, f.path)
+                layout, said = await layout_of(path)
+                if layout is not None:
+                    await self._count_events(f.path, path, layout)
                 await self.repo.save_streams(release.url, release.release, f.path, release.infohash or "", f.size, layout,
                                              None if layout is not None else said)
         finally:
@@ -246,6 +253,19 @@ class UnpackModule(BaseModule):
                 self._progress(key, len(todo), len(todo))
             self._reading.pop(key, None)
         await self.repo.drop_streams(release.url, release.release, {f.path for f in release.files})
+
+    async def _count_events(self, name: str, path: str, layout: dict) -> None:
+        """Each subtitles stream of the file gets its number of events; None when it could not be counted (then the track
+        is taken as it is: only a track known to hold none is left out of the table)."""
+        tracks = [s for s in layout["streams"] if s["kind"] == "subtitle"]
+        if not tracks:
+            return
+        counts = await subtitle_events(path)
+        for s in tracks:
+            s["events"] = None if counts is None else counts.get(s["index"], 0)
+            if s["events"] == 0:
+                self.log.info("в файле %s дорожка субтитров %d (%s) без реплик: в таблицу не попадёт", name, s["index"],
+                              s["title"] or s["language"] or "без названия")
 
     def _progress(self, key: tuple[str, str], done: int, total: int) -> None:
         self._reading[key] = (done, total)

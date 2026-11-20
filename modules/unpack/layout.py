@@ -291,7 +291,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                     entry = track(stream_tab(s["kind"]), item, stream_line(s["kind"], s["index"], s["language"], s["title"],
                                                                        s["codec"]), kind, s, video, where)
                     # A red track (no folder or no language yet) is no row: only what the editor placed goes on.
-                    if release.state in SHOWN and not entry["waiting"] and kind in ROW_KINDS:
+                    if release.state in SHOWN and not entry["waiting"] and kind in ROW_KINDS and not _no_events(s):
                         rows.append(_row(release, item, track_link(release.release, video, _nth(streams, s)), video, where,
                                          kind, entry, s, height, state, why))
             if len(paths) != 1:
@@ -310,7 +310,7 @@ def compose(inputs: Inputs) -> tuple[dict[str, Any], list[TableRow]]:
                     item = item_of(release.release, f.path)
                     entry = track(tab, item, track_file_line(f.path, where.fields), track_kind, s, f.path, where)
                     if release.state in SHOWN and not entry["waiting"] and s.get("kind") in TRACK_KINDS \
-                            and track_kind in ROW_KINDS:
+                            and track_kind in ROW_KINDS and not _no_events(s):
                         rows.append(_row(release, item_of(release.release, f.path, s["index"]),
                                          track_link(release.release, video, _nth(_probed(inputs, release.release, f.path), s),
                                                     file=f.path), video, where,
@@ -347,6 +347,12 @@ _STREAM_KEYS = ("index", "kind", "codec", "language", "title", "channels", "heig
 def _place_json(where: "Place | str | None") -> dict | None:
     return {"season": where.season, "episode": where.episode, "last": where.last, "tag": where.tag} \
         if isinstance(where, Place) else None
+
+
+def _no_events(stream: dict) -> bool:
+    """A subtitles track the read of the file found to hold no events (only a header): it has nothing to show, and a
+    container cannot be built with it. A track not counted (`events` absent or None) is not this."""
+    return stream.get("kind") == "subtitle" and stream.get("events") == 0
 
 
 def _nth(streams: list[dict], stream: dict) -> int:

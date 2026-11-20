@@ -214,3 +214,29 @@ async def layout_of(path: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> tuple[d
                         "default": bool(disposition.get("default")), "forced": bool(disposition.get("forced")),
                         "picture": bool(disposition.get("attached_pic"))})
     return {"streams": streams, "chapters": len(answer.get("chapters") or [])}, said
+
+
+# A whole file is read to count the events of its subtitles tracks: a big release on a slow disk takes longer than a probe.
+EVENTS_TIMEOUT_S = 300.0
+
+
+async def subtitle_events(path: str, *, timeout: float = EVENTS_TIMEOUT_S) -> dict[int, int] | None:
+    """How many events (lines of text) each subtitles stream of a file holds, by the stream's index: the packets are what
+    is counted, since a header says nothing of them (a track of an Aegisub script with no lines still has its styles).
+    A stream with none is absent; None when ffprobe could not tell."""
+    executable = program("ffprobe")
+    if not executable:
+        return None
+    try:
+        async with _probes():
+            code, out, _ = await run_capture([executable, "-v", "error", "-select_streams", "s", "-show_entries",
+                                              "packet=stream_index", "-of", "csv=p=0", path], timeout=timeout)
+    except (OSError, TimeoutError):
+        return None
+    if code not in (0, LOST):
+        return None
+    counts: dict[int, int] = {}
+    for line in out.decode(errors="replace").splitlines():
+        if line.strip().isdigit():
+            counts[int(line)] = counts.get(int(line), 0) + 1
+    return counts
