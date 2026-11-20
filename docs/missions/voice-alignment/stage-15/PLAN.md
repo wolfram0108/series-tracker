@@ -45,8 +45,8 @@
 `renaming.reprocess` с таблицей `renaming_tasks` (миграция 0072), флаг `delete_from_qb` (раздачи старого конвейера
 уходят из клиента вместе с сериалом, файлы остаются), `sources.tracker.resolve`, флаги отладки `force_replace` и
 `less_strict_scan`. На шаг 11 осталось: старый конвейер модуля `torrents` (`torrents.register`, `.db.*`, `.preview.*`,
-`.composition`, `.seasons`, агент и мониторинг), `sources.parse`, `renaming.process_torrent` и
-`rules.format_torrent_file`.
+`.composition`, `.seasons`, агент и мониторинг, клиентские команды без вызовов `torrents.add`, `.info.get`, `.pause`,
+`.resume`, `.recheck`, `.delete`), `sources.parse`, `renaming.process_torrent` и `rules.format_torrent_file`.
 
 ## 3. Зависимости и риски
 

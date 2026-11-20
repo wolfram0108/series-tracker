@@ -4,7 +4,7 @@
 
 ## ГДЕ СЕЙЧАС (2026-11-20)
 
-Этапы 0–4 и подэтапы 5а, 5б закрыты и выкачены. Реестр `core/topics.py` — 230 записей; `core/__init__.py` без переэкспорта; шлюз не
+Этапы 0–4 и подэтапы 5а–5в закрыты и выкачены. Реестр `core/topics.py` — 230 записей; `core/__init__.py` без переэкспорта; шлюз не
 меняет полученные ответы. composition: счёт в `calc/layout`, очереди вариантов и имена озвучек — в `calc/`, обработчики
 ступенями «запросы → чистая ступень в пуле», топики константами реестра, ответы — неизменяемыми моделями (`Frozen`,
 `core/contracts/frozen.py`); JSON окна сверен байт в байт на сериалах 40, 46, 49 (`tools/checks/window_json.py`);
@@ -50,7 +50,7 @@ JSON окон трёх модулей сверен, `rules.apply` в раскл�
 |---|---|---|
 | 5а ✅ | catalog, settings, auth | владельцы данных, которые спрашивают все; модели ответов каталога и потребители по всему проекту |
 | 5б ✅ | sources, trackerauth, metadata | чтение страниц и внешние службы; маскировка секретов в дампе `runlog` для моделей с паролями; мёртвый помощник `World.stored` (`tests/test_provider_settings.py:66`) |
-| 5в | torrents, renaming, library | торрентный путь и библиотека; пароль qBittorrent из таблицы `auth` через `trackerauth.secret.get` (`modules/torrents/module.py:264`, сейчас всегда пустой; прод берёт адрес из окружения); лишний `import re` в `modules/trackerauth/providers.py:148` |
+| 5в ✅ | torrents, renaming, library | торрентный путь и библиотека; пароль qBittorrent из таблицы `auth` через `trackerauth.secret.get` (`modules/torrents/module.py:264`, сейчас всегда пустой; прод берёт адрес из окружения); лишний `import re` в `modules/trackerauth/providers.py:148` |
 | 5г | downloads, conform, scan | исполнение и прогоны; событие `sources.video.progress` моделью (`modules/downloads/module.py:627`) |
 | 5д | runlog, gateway | последние потребители: события моделями, ключи `SSE_MAP` — записи реестра, `contracts/endpoints.md`; ответы-подтверждения каталога (`{ok}`, `{id}`, `{applied}`) моделями; пробный хеш `auth` — в `on_start` через пул (`modules/auth/module.py:49`); ключи `SSE_MAP` источников; событие `sources.table.trace` моделью (`modules/runlog/module.py:240-249`); маскировка секретов во вложенных моделях дампа (`modules/runlog/module.py:77`) | Этапы 2–4 повторяют перенос файлов на
 текущем `main` по образцу ветки прототипа и добавляют к нему проход модуля.
