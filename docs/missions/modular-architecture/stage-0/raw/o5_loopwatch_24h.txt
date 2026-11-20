@@ -1,0 +1,27 @@
+STALLS 4158; total 864526 ms; min 101 median 191 p90 304 p99 607 max 1530 ms
+by length (ms): {'100-199': 2210, '200-499': 1862, '500-999': 80, '1000-1999': 6}
+first 2026-11-19T19:15:49.079438+00:00 last 2026-11-20T14:28:27.393117+00:00
+stalls per UTC hour (top): [('2026-11-20T10', 800), ('2026-11-20T00', 794), ('2026-11-20T13', 647), ('2026-11-19T23', 439), ('2026-11-19T22', 415), ('2026-11-20T11', 351)]
+where (innermost frame): count, total ms, max ms
+  2492  429974    509  core/proc.py:127 spawn
+   442   97889    600  код вне проекта
+    42   15864   1121  core/proc.py:89 _group_for
+    67   15669    371  modules/downloads/cards.py:185 view
+    33   13805    797  код вне проекта; интерпретатор в это время держал поток compute_1: modules/composition/settings.py:307 <genexpr>
+    54   12872    364  modules/downloads/module.py:301 _queue
+    34   10076    648  core/http_limits.py:48 handle_async_request
+    27    9201   1033  core/proc.py:86 _group_for
+    30    8393   1331  код вне проекта; интерпретатор в это время держал поток compute_1: core/secrets.py:14 redacted
+    44    8229   1011  core/proc.py:110 _released
+    42    7857    287  modules/downloads/ranged.py:82 ask
+    19    6026    657  код вне проекта; интерпретатор в это время держал поток compute_1: modules/rules/engine.py:556 <genexpr>
+stalls with a frame of the code that goes to calc (any thread): 174, 60388 ms total, max 1121 ms
+stalls where a thread of the pool of computation held the interpreter: 448, 125450 ms total
+stalls with a frame of core/proc.py (starting a program): 2623, 468290 ms total
+longest 5:
+  2026-11-20T14:27:03.708629+00:00 1530 ms (254/256) core/container.py:258 _build ← core/container.py:167 build ← core/plan/files.py:219 build ← modules/planner/module.py:784 stage ← core/plan/executor.py:518 apply
+  2026-11-19T20:59:09.500755+00:00 1331 ms (1/1) код вне проекта; интерпретатор в это время держал поток compute_1: core/secrets.py:14 redacted ← core/secrets.py:20 redacted ← core/secrets.py:23 redacted ← core/secrets.py:23 redacted ← core/secrets.py:20 redacted ← core/secrets.
+  2026-11-19T20:55:24.319091+00:00 1121 ms (6/10) core/proc.py:89 _group_for ← core/proc.py:123 spawn ← core/proc.py:216 run_capture ← core/ffprobe.py:65 probe ← core/ffprobe.py:84 streams_of ← modules/downloads/module.py:520 _fetch_one; интерпретатор в это время держал поток com
+  2026-11-20T11:06:26.977407+00:00 1063 ms (16/17) modules/planner/module.py:1017 pack_publish ← core/clock.py:16 beat_while ← modules/planner/module.py:1029 _pack_ticker; интерпретатор в это время держал поток ThreadPoolExecutor-0_3: modules/sources/repository.py:67 _stored ← mod
+  2026-11-19T20:55:18.256193+00:00 1033 ms (1/2) core/proc.py:86 _group_for ← core/proc.py:123 spawn ← core/proc.py:216 run_capture ← core/ffprobe.py:119 readable_length ← modules/downloads/ytdlp.py:314 _local_duration ← modules/downloads/ytdlp.py:544 _as_long_as_announced ← mod
+READ_DONE

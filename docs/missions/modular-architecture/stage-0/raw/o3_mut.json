@@ -1,0 +1,58 @@
+[
+ {
+  "file": "modules/gateway/api_series.py",
+  "line": 67,
+  "func": "build_router",
+  "kind": "assign",
+  "origin": "request('catalog.series.list')",
+  "code": "series['tmdb_info'] = mapping"
+ },
+ {
+  "file": "modules/gateway/api_series.py",
+  "line": 80,
+  "func": "list_series",
+  "kind": "assign",
+  "origin": "request('catalog.series.list') (loop item)",
+  "code": "s['last_scan_time'] = _iso(s.get('last_scan_time'))"
+ },
+ {
+  "file": "modules/gateway/api_series.py",
+  "line": 81,
+  "func": "list_series",
+  "kind": "passed to _attach_tmdb() which mutates it",
+  "origin": "request('catalog.series.list') (loop item)",
+  "code": "_attach_tmdb(s, mappings.get(s['id']))"
+ },
+ {
+  "file": "modules/gateway/api_series.py",
+  "line": 82,
+  "func": "list_series",
+  "kind": "assign",
+  "origin": "request('catalog.series.list') (loop item)",
+  "code": "s['downloaded_episodes_count'] = sum((each.get(s['id'], 0) for each in counts))"
+ },
+ {
+  "file": "modules/gateway/api_series.py",
+  "line": 118,
+  "func": "series_details",
+  "kind": "assign",
+  "origin": "request('catalog.series.get')",
+  "code": "s['last_scan_time'] = _iso(s.get('last_scan_time'))"
+ },
+ {
+  "file": "modules/gateway/api_series.py",
+  "line": 121,
+  "func": "series_details",
+  "kind": "passed to _attach_tmdb() which mutates it",
+  "origin": "request('metadata.map.get')",
+  "code": "_attach_tmdb(s, reply['mapping'])"
+ },
+ {
+  "file": "modules/gateway/api_series.py",
+  "line": 122,
+  "func": "series_details",
+  "kind": "assign",
+  "origin": "request('catalog.series.get')",
+  "code": "s['planned_save_path'] = (await gw.request('library.relocation.get', {'series_id': series_id}))['new_path']"
+ }
+]
