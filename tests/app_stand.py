@@ -465,6 +465,8 @@ class AppStand:
         self.now = datetime.now(timezone.utc)
         # The lock of the gateway (a session for every request): off for the stand, a scenario of the login sets it before `start()`.
         self.locked = False
+        # The address of the alignment service is stored (`configure`): a start of the process waits for its connection.
+        self.conform_named = False
 
     async def start(self, before_started=None) -> None:
         self.bus = Bus()
@@ -474,6 +476,9 @@ class AppStand:
             torrent_cache_dir=os.path.join(self.root, "cache"), table_clock=lambda: self.now,
             **({"qbit_url": self.qbit_http.url, "qbit_username": self.qbit.username, "qbit_password": self.qbit.password}
                if self.qbit else {})))
+        # The service the process finds up is connected by the module on its own (an event): the work the process takes up at its
+        # start (a sync a stop cut short) asks that service, so it waits for the connection, as it does after `configure`.
+        connected = self.bus.subscribe("conform.daemon.up") if self.conform_named else None
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()
         self.module("sources")._http = self.site.web().client()
@@ -484,6 +489,8 @@ class AppStand:
                                                                 alloha_client=self.site.alloha.client)
         if before_started is not None:
             before_started()
+        if connected is not None:
+            await asyncio.wait_for(connected.queue.get(), STAND_LIMIT_S)
         self.bus.publish(Envelope(topic="system.started", kind="event"))
         self.api = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.gateway.app), base_url="http://stand")
 
@@ -554,6 +561,7 @@ class AppStand:
         await self.call("PUT", "/api/conform/settings", {"url": self.daemon_http.url, "work_dir": work,
                                                           "work_dir_remote": work})
         await asyncio.wait_for(connected.queue.get(), STAND_LIMIT_S)
+        self.conform_named = True
         saved = await self.call("PUT", "/api/voices/settings", {"priority": ["vk", "cvh", "allvideo", "kodik"],
                                                          "voice_groups": {each: [] for each in groups},
                                                          "voice_languages": {each: (languages or {}).get(each, "rus")
