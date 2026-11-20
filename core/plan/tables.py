@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping
 
+from core import native
 from core.variant_queue import Same
 from core.voice_names import NO_GROUPS, Groups
 
@@ -57,63 +58,10 @@ class Snapshot:
                 "label": self.label}
 
 
-@dataclass(frozen=True)
-class OnlineRow:
-    """A row of the output (`core/plan/inputs.online_of`): the rules gave it an episode (or a range of them: a compilation)
-    and `group`, the voice-over group, took it."""
-
-    id: RowId
-    season: int
-    start: int
-    end: int
-    player: str
-    group: str
-    height: int
-    source: str = ""
-    link: str = ""
-    label: str = ""  # the name of the voice-over as the layout calls it
-    position: int = 0  # the place of the row in the layout: the last tie-break of the service's rule
-    part: int | None = None  # the part of the episode the row is (an episode in parts is several videos)
-    # The player answered that it plays the video. A row that is not (no video, an answer that stayed unsure) is online
-    # all the same — the read gave it — but no work is made of it.
-    playable: bool = True
-    # The source gave the row in its last read; one that stands from an earlier read is planned all the same, and the
-    # window shows what the file holds of it as not online now.
-    current: bool = True
-    player_label: str = ""  # the player as the layout names it (the window «Выход» shows this)
-    # The key of the row's video as a timeline (TableRow.timeline, DESIGN.md stage 15, 7.0): rows of one source with one
-    # timeline are one video in step with each other; empty is the row itself.
-    timeline_key: str = ""
-    # What the row carries (TableRow.track): `subtitles` is a subtitles track (DESIGN.md 7.1.1), never a voice-over or a
-    # video; with its language and its type.
-    track: str = "sound"
-    language: str = ""
-    subtitle_type: str = ""
-
-    @property
-    def timeline(self) -> RowId:
-        """The timeline of the row's video: the row itself, or the video its rows share."""
-        return RowId(self.id.source_id, self.timeline_key, self.id.video) if self.timeline_key else self.id
-
-    @property
-    def source_id(self) -> int:
-        return self.id.source_id
-
-    @property
-    def variant(self) -> tuple[str, int, str]:
-        """(voice-over, source, player): what the user's levers name."""
-        return self.label or self.group or "", self.id.source_id, self.player
-
-    @property
-    def compilation(self) -> bool:
-        return self.end > self.start
-
-    @property
-    def slot(self) -> Slot:
-        return (self.season, self.start) if self.part is None else (self.season, self.start, self.part)
-
-    def snapshot(self) -> Snapshot:
-        return Snapshot(self.source, self.player, self.group, self.height, self.link, self.label)
+# A row of the output (`core/plan/inputs.online_of`): kept by the core, read here as a row of the tables (its fields and
+# properties: id, season, start, end, player, group, height, source, link, label, position, part, playable, current,
+# player_label, timeline_key, track, language, subtitle_type; timeline, source_id, variant, compilation, slot, snapshot()).
+OnlineRow = native.OnlineRow
 
 
 @dataclass(frozen=True)

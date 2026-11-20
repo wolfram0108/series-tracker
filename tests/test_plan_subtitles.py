@@ -80,7 +80,7 @@ def test_what_the_file_holds_on_the_timeline_stays_and_a_file_that_is_the_goal_i
 def test_subtitles_whose_release_is_archived_are_kept_from_the_file_that_holds_them():
     """After a clean sync the files of a release are dropped (archived): its rows stand, not playable; the container is the
     one place the subtitles are, and they stay."""
-    archived = tuple(replace(row, playable=False) for row in ROWS)
+    archived = tuple(row.replaced(playable=False) for row in ROWS)
     items = (Subtitle(ROWS[1].id, "Полные", "torrent:page", TIMELINE, "rus", "full"),)
     file = held("s01e01.mkv", items)
     goal = goal_of(archived, containers=(file,))

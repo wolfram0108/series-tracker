@@ -27,13 +27,7 @@ def online_of(rows, places: Mapping[int, str] | None = None, first: int = 0) -> 
     took them; a row of subtitles needs no group), of the rows of a layout as it keeps them (`core.native.Rows`). The place
     of a row is its place in the layout, every row counted (from `first`: the rows of subtitles come after the rows of
     sound), as the service's rule breaks a tie."""
-    places = places or {}
-    return tuple(
-        OnlineRow(RowId(source_id, row_key, video), season, start, end, player, group, height, places.get(source_id, ""), link,
-                  label, first + place, part, playable, current, player_label, timeline, track, language, subtitle_type)
-        for (place, source_id, row_key, video, season, start, end, player),
-            (group, height, link, label, part, playable, current, player_label),
-            (timeline, track, language, subtitle_type) in rows.output())
+    return tuple(rows.online(dict(places or {}), first))
 
 
 def assets_against(containers: Iterable[Container], online: Iterable[OnlineRow]) -> tuple[Container, ...]:

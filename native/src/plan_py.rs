@@ -12,7 +12,7 @@ fn at<'py, T: FromPyObject<'py>>(object: &Bound<'py, PyAny>, name: &str) -> PyRe
     object.getattr(name)?.extract()
 }
 
-fn rid(object: &Bound<'_, PyAny>) -> PyResult<RowId> {
+pub(crate) fn rid(object: &Bound<'_, PyAny>) -> PyResult<RowId> {
     Ok(RowId { source: at(object, "source_id")?, key: at(object, "row_key")?, video: at(object, "video")? })
 }
 
@@ -25,7 +25,11 @@ fn shot(object: &Bound<'_, PyAny>) -> PyResult<Snapshot> {
                   height: at(object, "height")?, link: at(object, "link")?, label: at(object, "label")? })
 }
 
-fn online(object: &Bound<'_, PyAny>) -> PyResult<Online> {
+pub(crate) fn online(object: &Bound<'_, PyAny>) -> PyResult<Online> {
+    // A row of the core is taken as it is: nothing of it is read field by field.
+    if let Ok(row) = object.downcast::<crate::plan_rows::OnlineRow>() {
+        return Ok(row.get().row.clone());
+    }
     Ok(Online {
         id: rid(&object.getattr("id")?)?, season: at(object, "season")?, start: at(object, "start")?, end: at(object, "end")?,
         player: at(object, "player")?, group: at(object, "group")?, height: at(object, "height")?,
@@ -44,7 +48,7 @@ fn subtitle(object: &Bound<'_, PyAny>) -> PyResult<Subtitle> {
                   subtitle_type: at(object, "subtitle_type")?, default: at(object, "default")?, forced: at(object, "forced")? })
 }
 
-fn container(object: &Bound<'_, PyAny>) -> PyResult<Container> {
+pub(crate) fn container(object: &Bound<'_, PyAny>) -> PyResult<Container> {
     let video = object.getattr("video")?;
     let timeline_snapshot = video.getattr("timeline_snapshot")?;
     let tracks = object.getattr("tracks")?.iter()?.map(|t| {
@@ -65,11 +69,25 @@ fn container(object: &Bound<'_, PyAny>) -> PyResult<Container> {
 
 type Variant = (String, i64, String);
 
-fn by_slot<'py, T>(object: &Bound<'py, PyAny>, name: &str, f: impl Fn(&Bound<'py, PyAny>) -> PyResult<T>)
+/// A map of the choices by episode. An episode with no value of its own holds the value of its level, one object of Python
+/// for hundreds of episodes: each object is read once.
+fn by_slot<'py, T: Clone>(object: &Bound<'py, PyAny>, name: &str, f: impl Fn(&Bound<'py, PyAny>) -> PyResult<T>)
     -> PyResult<HashMap<Slot, T>> {
     let found = object.getattr(name)?;
     let dict = found.downcast::<PyDict>()?;
-    dict.iter().map(|(k, v)| Ok((k.extract::<Slot>()?, f(&v)?))).collect()
+    let mut read: HashMap<usize, T> = HashMap::new();
+    dict.iter().map(|(k, v)| {
+        let at = v.as_ptr() as usize;
+        let value = match read.get(&at) {
+            Some(value) => value.clone(),
+            None => {
+                let value = f(&v)?;
+                read.insert(at, value.clone());
+                value
+            }
+        };
+        Ok((k.extract::<Slot>()?, value))
+    }).collect()
 }
 
 fn same(object: &Bound<'_, PyAny>) -> PyResult<Same> {
@@ -106,6 +124,7 @@ fn choices(object: &Bound<'_, PyAny>) -> PyResult<Choices> {
         markup_same: by_slot(object, "markup_same", same)?,
         subtitle_order: by_slot(object, "subtitle_order", |v| v.extract())?,
         subtitle_deny: by_slot(object, "subtitle_deny", |v| v.extract())?,
+        own_reference: at(object, "own_reference")?,
         ..Default::default()
     };
     for each in object.getattr("delete")?.iter()? {
@@ -145,13 +164,12 @@ fn fails(object: &Bound<'_, PyAny>) -> PyResult<Fails> {
 
 /// The inputs of the planner of Python (`Inputs`) read into the planner here.
 pub fn inputs(object: &Bound<'_, PyAny>) -> PyResult<Inputs> {
-    Ok(Inputs {
-        online: object.getattr("online")?.iter()?.map(|r| online(&r?)).collect::<PyResult<_>>()?,
-        subtitles: object.getattr("subtitles")?.iter()?.map(|r| online(&r?)).collect::<PyResult<_>>()?,
-        containers: object.getattr("containers")?.iter()?.map(|c| container(&c?)).collect::<PyResult<_>>()?,
-        choices: choices(&object.getattr("choices")?)?,
-        failed: fails(&object.getattr("failed")?)?,
-    })
+    let rows: Vec<Online> = object.getattr("online")?.iter()?.map(|r| online(&r?)).collect::<PyResult<_>>()?;
+    let subtitles: Vec<Online> = object.getattr("subtitles")?.iter()?.map(|r| online(&r?)).collect::<PyResult<_>>()?;
+    let containers: Vec<Container> = object.getattr("containers")?.iter()?.map(|c| container(&c?)).collect::<PyResult<_>>()?;
+    let choices = choices(&object.getattr("choices")?)?;
+    let failed = fails(&object.getattr("failed")?)?;
+    Ok(Inputs { online: rows, subtitles, containers, choices, failed })
 }
 
 fn rid_py(py: Python<'_>, row: &RowId) -> PyObject {
@@ -195,7 +213,7 @@ fn way_py(py: Python<'_>, way: &VideoWay, inputs: &Inputs) -> PyObject {
     (way.kind, key_py(py, &way.key), rid_py(py, &way.timeline), snapshot, way.row, container, ref2, way.picture).into_py(py)
 }
 
-fn goal_py(py: Python<'_>, goal: &Goal, inputs: &Inputs) -> PyObject {
+pub(crate) fn goal_py(py: Python<'_>, goal: &Goal, inputs: &Inputs) -> PyObject {
     let tracks: Vec<PyObject> = goal.tracks.iter().map(|t| {
         (t.voice.as_str(), rid_py(py, &t.dub), snap_py(py, &t.snapshot, inputs, t.row, t.container), t.kind, t.row,
          t.container, t.own).into_py(py)
@@ -220,17 +238,9 @@ fn goal_py(py: Python<'_>, goal: &Goal, inputs: &Inputs) -> PyObject {
     parts.into_py(py)
 }
 
-/// The goals of the planner's inputs (`Inputs`), each as places in them: what `core.plan.planner` makes its goals of.
+/// The goals of the planner's inputs (`Inputs`), counted: what `core.plan.planner` makes its goals of (`specs`), and
+/// what the view of the window is counted from.
 #[pyfunction]
-pub fn plan_goals<'py>(py: Python<'py>, given: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyList>> {
-    let inputs = self::inputs(given)?;
-    let goals = py.allow_threads(|| {
-        let planner = Planner::new(&inputs);
-        planner.goals()
-    });
-    let made = PyList::empty_bound(py);
-    for goal in &goals {
-        made.append(goal_py(py, goal, &inputs))?;
-    }
-    Ok(made)
+pub fn plan_goals(py: Python<'_>, given: &Bound<'_, PyAny>) -> PyResult<crate::plan_view::Planned> {
+    crate::plan_view::Planned::of(py, given)
 }

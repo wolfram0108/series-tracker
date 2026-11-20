@@ -6,6 +6,8 @@ mod cols;
 mod layout;
 mod plan;
 mod plan_py;
+mod plan_rows;
+mod plan_view;
 mod rows;
 mod rules;
 mod table;
@@ -568,25 +570,31 @@ impl Rows {
         self.layout.compilations()
     }
 
-    /// The rows of the output (`in_output`) as the planner reads them, each with its place in the layout (every row
-    /// counted): (place, source id, row key, video, season, start, end, player, group, height, link, label, part,
-    /// playable, current, player label, timeline, track, language, subtitle type).
-    #[allow(clippy::type_complexity)]
-    fn output<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+    /// The rows of the output (`in_output`) as the planner reads them (core/plan/tables.OnlineRow), each with its place
+    /// in the layout — every row counted, from `first` — and the place of its source (`places`, by source id).
+    #[pyo3(signature = (places, first=0))]
+    fn online<'py>(&self, py: Python<'py>, places: HashMap<i64, String>, first: i64) -> PyResult<Bound<'py, PyList>> {
+        let class = py.import_bound("core.plan.tables")?.getattr("RowId")?;
         let rows = PyList::empty_bound(py);
         for (place, row) in self.layout.rows().enumerate() {
             if !row.output() {
                 continue;
             }
             let start = row.episode_start.unwrap_or(0);
-            // Three tuples: the binding makes tuples of twelve fields at most.
-            let head = (place, row.source_id, row.row_key, row.video, row.season.unwrap_or(0), start,
-                        row.episode_end.unwrap_or(start), row.player);
-            let body = (row.voice_group.as_deref().unwrap_or(""), row.heights.iter().copied().max().unwrap_or(0), row.link,
-                        row.voice_label.as_ref(), row.part, row.state == "playable", !row.stale, row.player_label);
-            let tail = (row.timeline, row.track, row.language, row.subtitle_type);
-            let made: (PyObject, PyObject, PyObject) = (head.into_py(py), body.into_py(py), tail.into_py(py));
-            rows.append(made)?;
+            let made = plan::Online {
+                id: plan::RowId { source: row.source_id, key: row.row_key.to_string(), video: row.video.to_string() },
+                season: row.season.unwrap_or(0), start, end: row.episode_end.unwrap_or(start), player: row.player.to_string(),
+                group: row.voice_group.as_deref().unwrap_or("").to_string(),
+                height: row.heights.iter().copied().max().unwrap_or(0),
+                source: places.get(&row.source_id).cloned().unwrap_or_default(), link: row.link.to_string(),
+                label: row.voice_label.to_string(), position: first + place as i64, part: row.part,
+                playable: row.state == "playable", current: !row.stale, player_label: row.player_label.to_string(),
+                timeline_key: row.timeline.to_string(), track: row.track.to_string(), language: row.language.to_string(),
+                subtitle_type: row.subtitle_type.to_string(),
+                timeline_id: plan::RowId { source: 0, key: String::new(), video: String::new() },
+                variant_of: (String::new(), 0, String::new()),
+            }.made();
+            rows.append(Py::new(py, plan_rows::OnlineRow::made(py, &class, made)?)?)?;
         }
         Ok(rows)
     }
@@ -787,9 +795,15 @@ fn native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(project, m)?)?;
     m.add_function(wrap_pyfunction!(preview_lines, m)?)?;
     m.add_function(wrap_pyfunction!(plan_py::plan_goals, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_view::plan_view, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_view::plan_references, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_view::plan_placed, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_view::plan_covered, m)?)?;
     m.add_class::<Profile>()?;
     m.add_class::<Rows>()?;
     m.add_class::<Row>()?;
+    m.add_class::<plan_rows::OnlineRow>()?;
+    m.add_class::<plan_view::Planned>()?;
     Ok(())
 }
 

@@ -248,7 +248,7 @@ pub struct Same {
 }
 
 impl Same {
-    fn members(&self, variant: &Variant) -> Vec<Variant> {
+    pub(crate) fn members(&self, variant: &Variant) -> Vec<Variant> {
         match self.groups.iter().find(|g| g.contains(variant)) {
             Some(group) => group.iter().cloned().collect(),
             None => vec![variant.clone()],
@@ -283,6 +283,8 @@ pub struct Choices {
     pub markup_same: HashMap<Slot, Same>,
     pub subtitle_order: HashMap<Slot, Vec<Variant>>,
     pub subtitle_deny: HashMap<Slot, HashSet<Variant>>,
+    // The episodes whose reference the user chose on the episode itself (its own levers), for the view.
+    pub own_reference: HashSet<Slot>,
 }
 
 pub struct Inputs {
@@ -316,7 +318,7 @@ impl Fails {
         }
     }
 
-    fn download(&self, row: &RowId) -> bool {
+    pub(crate) fn download(&self, row: &RowId) -> bool {
         self.download.contains(row)
     }
 
@@ -338,7 +340,7 @@ pub enum Snap<'a> {
 }
 
 impl<'a> Snap<'a> {
-    fn get(&self) -> &Snapshot {
+    pub(crate) fn get(&self) -> &Snapshot {
         match self {
             Snap::Of(s) => s,
             Snap::Row(s) => s,
@@ -441,7 +443,7 @@ fn way_json(w: &VideoWay, inputs: &Inputs) -> Value {
 }
 
 /// The key of a voice-over in a container: its group; an unknown voice-over is a voice of its own row.
-fn voice_of(group: Option<&str>, dub: &RowId) -> String {
+pub(crate) fn voice_of(group: Option<&str>, dub: &RowId) -> String {
     match group {
         Some(g) => g.to_string(),
         None => format!("?{}:{}:{}", dub.source, dub.key, dub.video),

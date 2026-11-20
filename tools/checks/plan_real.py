@@ -113,20 +113,17 @@ def asset_of(path: str, series_id: int, online: list[OnlineRow]) -> list[Contain
     return list(plan_inputs.assets_against([container_of(json.loads(data)) for (data,) in rows], online))
 
 
-def namer_of(series: dict):
-    """The series' own rule of names (modules/rules/formatter), as the container of an episode is named: an .mkv; a
-    switched-off one hidden with `.off`."""
+def names_of(series: dict, counted) -> list[str]:
+    """The series' own rule of names (modules/rules/formatter) for every goal counted (`planner.count`), as the planner asks
+    it: the container of an episode is an .mkv, a switched-off one hidden with `.off`."""
+    from modules.planner.module import media_item_of
     from modules.rules import formatter
 
-    def name(slot, video, off: bool) -> str:
-        snapshot = video.snapshot
-        item = {"season": slot[0], "episode_start": slot[1], "episode_end": None, "part": None,
-                "resolution": snapshot.height, "voiceover_tag": snapshot.group, "source_url": snapshot.link}
-        if video.kind == "cut" or (video.container is not None and video.container.video.cut_of is not None):
-            item["cut"] = json.dumps({"height": snapshot.height, "voice_group": snapshot.group})
-        made = formatter.format_name(series, formatter.build_metadata(series, item))
-        return os.path.splitext(made)[0] + ".mkv" + (".off" if off else "")
-    return name
+    names = []
+    for item in counted.items():
+        made = formatter.format_name(series, formatter.build_metadata(series, media_item_of(item)))
+        names.append(os.path.splitext(made)[0] + ".mkv" + (".off" if item[-1] else ""))
+    return names
 
 
 async def inputs_of(real: RealSeries, series_id: int, rules: dict[int, list[dict]] | None = None

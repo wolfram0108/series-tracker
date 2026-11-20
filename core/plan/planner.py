@@ -25,7 +25,7 @@ align from onto the new video, and the file goes only when nothing in it is need
 switched-off episode, a deleted video with no other one) stays as it is, and the command waits."""
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable
 
 from core import native
@@ -161,6 +161,8 @@ class Plan:
     goals: tuple[Goal, ...]
     ops: tuple[Op, ...]
     groups: tuple[Group, ...]
+    # The goals as the core counted them (core.native.Planned): what the view of the window is counted from.
+    counted: object = field(default=None, compare=False, repr=False)
 
     def goal(self, slot: Slot) -> Goal | None:
         return next((each for each in self.goals if each.slot == slot), None)
@@ -173,7 +175,7 @@ def restricted(made: Plan, holds: Callable[[Slot], bool]) -> Plan:
     nothing of the others is done, applied, removed or hidden."""
     groups = tuple(group for group in made.groups if any(holds(slot) for slot in group.slots))
     wanted = {op for group in groups for op in group.ops}
-    return Plan(made.goals, tuple(op for op in made.ops if op.id in wanted), groups)
+    return Plan(made.goals, tuple(op for op in made.ops if op.id in wanted), groups, made.counted)
 
 
 def voice_of(group: str | None, dub: RowId) -> str:
@@ -181,9 +183,12 @@ def voice_of(group: str | None, dub: RowId) -> str:
     return group if group is not None else f"?{dub.source_id}:{dub.row_key}:{dub.video}"
 
 
-def name_of(slot: Slot, snapshot: Snapshot, off: bool) -> str:
+def name_of(item: tuple) -> str:
+    """The plain name of a goal by what the rule of names is asked of it (`count(...).items()`): the episode, the group and
+    the height."""
+    slot, height, group, _link, _cut, off = item
     part = f" pt{slot[2]}" if len(slot) > 2 else ""
-    return f"s{slot[0]:02d}e{slot[1]:02d}{part} [{snapshot.group or '—'}] {snapshot.height}p.mkv" + (OFF if off else "")
+    return f"s{slot[0]:02d}e{slot[1]:02d}{part} [{group or '—'}] {height}p.mkv" + (OFF if off else "")
 
 
 def own_track(container: Container) -> Track:
@@ -206,23 +211,21 @@ def switched_off(choices: Choices, track: Track, slot: Slot) -> bool:
             or variant_of(track) in choices.voice_deny.get(episode, frozenset()))
 
 
-def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = None) -> Plan:
-    """The goal, the graph and the groups of a series. `namer` is the rule of the name of a file (the series' own rule of
-    names in the service); without it a plain name of the episode, the group and the height. Its rows are rows of the
-    output only (`online_of`): a file made before of a row no group took stays as it is and takes no new work."""
-    frame = _Frame(inputs)
-    return _planned(inputs, frame, _goals(inputs, frame, namer or default_name))
+def count(inputs: Inputs):
+    """The goals of the inputs, counted by the core (core.native.Planned): what a plan is made of, what the rule of names is
+    asked (`items()`: slot, height, group, link, whether the video is cut, whether the episode is off) and what the view of
+    the window is counted from."""
+    return native.plan_goals(inputs)
 
 
-def renamed(inputs: Inputs, made: Plan, namer: Callable[[Slot, VideoWay, bool], str]) -> Plan:
-    """The plan `made` of these inputs with the names `namer` gives: a name is no input of a goal, only its name, so the goals
-    stay and their steps and groups — which read the names — are made again."""
-    goals = tuple(replace(goal, name=namer(goal.slot, goal.video, goal.off)) for goal in made.goals)
-    return _planned(inputs, _Frame(inputs), goals)
-
-
-def default_name(slot: Slot, video: VideoWay, off: bool) -> str:
-    return name_of(slot, video.snapshot, off)
+def plan(inputs: Inputs, names: Iterable[str] | None = None, counted=None) -> Plan:
+    """The goal, the graph and the groups of a series. `names` is the name of the file of every goal of `counted` (the
+    series' own rule of names in the service); without them a plain name of the episode, the group and the height. Its rows
+    are rows of the output only (`online_of`): a file made before of a row no group took stays as it is and takes no new
+    work."""
+    counted = count(inputs) if counted is None else counted
+    names = [name_of(item) for item in counted.items()] if names is None else list(names)
+    return _planned(inputs, _Frame(inputs), _goals(inputs, counted, names), counted)
 
 
 class _Frame:
@@ -247,17 +250,17 @@ class _Frame:
         return row.slot if row is not None and not row.compilation else track.episode
 
 
-def _planned(inputs: Inputs, frame: _Frame, goals) -> Plan:
+def _planned(inputs: Inputs, frame: _Frame, goals, counted) -> Plan:
     """The steps and the groups of the goals."""
     choices = inputs.choices
     ops = _ops(goals, frame.containers)
     groups = _groups(goals, ops, frame.containers, frame.deleted_videos, frame.video_slot, frame.track_slot,
                      lambda track, slot: switched_off(choices, track, slot), frame.deleted_tracks,
                      lambda variant, slot: variant in choices.subtitle_deny.get(episode_of(slot), frozenset()))
-    return Plan(tuple(goals), tuple(ops), tuple(groups))
+    return Plan(tuple(goals), tuple(ops), tuple(groups), counted)
 
 
-def _goals(inputs: Inputs, frame: _Frame, namer: Callable[[Slot, VideoWay, bool], str]) -> list[Goal]:
+def _goals(inputs: Inputs, counted, names: list[str]) -> list[Goal]:
     """The goal of every episode the rows or the files have, by the rule of the module docstring: counted by the core
     (core.native, the same rule step for step), made here of the objects of the inputs it names by their places."""
     online, files, subtitles = inputs.online, inputs.containers, inputs.subtitles
@@ -289,8 +292,8 @@ def _goals(inputs: Inputs, frame: _Frame, namer: Callable[[Slot, VideoWay, bool]
                                     forced), "take", row=row)
 
     goals = []
-    for (slot, video, tracks, off, voices_off, own_at), (titles, markup, languages, held, unaligned) in native.plan_goals(
-            inputs):
+    for ((slot, video, tracks, off, voices_off, own_at), (titles, markup, languages, held, unaligned)), name in zip(
+            counted.specs(), names, strict=True):
         slot = tuple(slot)
         made = way(video)
         ways = tuple(TrackWay(voice, RowId(*dub), snapshot(snap), kind, row=None if row is None else online[row],
@@ -298,7 +301,7 @@ def _goals(inputs: Inputs, frame: _Frame, namer: Callable[[Slot, VideoWay, bool]
                      for voice, dub, snap, kind, row, container, own in tracks)
         mark = None if markup is None else Markup(RowId(*markup[0]), markup[1], markup[2],
                                                   None if markup[3] is None else online[markup[3]], markup[4])
-        goals.append(Goal(slot, made, ways, namer(slot, made, off), off, frozenset(voices_off), own_at, tuple(titles), mark,
+        goals.append(Goal(slot, made, ways, name, off, frozenset(voices_off), own_at, tuple(titles), mark,
                           tuple(languages), tuple(subtitle(each) for each in held), tuple(unaligned)))
     return goals
 

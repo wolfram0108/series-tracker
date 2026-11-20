@@ -22,11 +22,11 @@ Queries:
       ValueError (`apply_keys_repeated`); нет строк — пустой ответ.
       Неисправные правила (решение Б) не применяются и возвращаются в
       invalid_rules каждого ответа и пишутся в лог ошибкой.
-  rules.format_filename {series, media_item, episode_override?, original_filename?}
-      → {filename}
-      — имя по готовым номерам media_item (season, episode_start/end, part,
-      resolution, voiceover_tag) и карточке сериала; профиль не читается.
-      series.kind == 'video' даёт расширение .mp4.
+  rules.format_filenames {series, items: [{media_item, episode_override?, original_filename?}]}
+      → {filenames}
+      — имя каждого элемента по готовым номерам media_item (season,
+      episode_start/end, part, resolution, voiceover_tag) и карточке сериала,
+      в порядке items, одним запросом на все; профиль не читается.
   rules.format_torrent_file {series, profile_id, file_basename, original_path}
       → {filename, extracted}
       — имя файла торрента с сезонной папкой; правила профиля profile_id
@@ -106,7 +106,7 @@ class RulesModule(BaseModule):
         self.handle("rules.apply", self.on_apply, concurrent=True)
         self.handle("rules.profiles.export", self.on_profiles_export)
         self.handle("rules.profiles.list", self.on_profiles_list)
-        self.handle("rules.format_filename", self.on_format_filename)
+        self.handle("rules.format_filenames", self.on_format_filenames)
         self.handle("rules.format_torrent_file", self.on_format_torrent_file)
         self.handle("rules.profiles.create", self.on_profile_create)
         self.handle("rules.profiles.update", self.on_profile_update)
@@ -259,17 +259,19 @@ class RulesModule(BaseModule):
 
     # --- file names ----------------------------------------------------------------
 
-    async def on_format_filename(self, env: Envelope) -> dict:
-        """The name comes from the numbers of media_item and the series card; no rule is applied, no profile read."""
-        p = env.payload
-        series, item = p["series"], p["media_item"]
-        metadata = formatter.build_metadata(series, item)
-        if (override := p.get("episode_override")) is not None:
-            metadata["episode"] = override
-            metadata.pop("start", None)
-            metadata.pop("end", None)
-        return {"filename": formatter.format_name(
-            series, metadata, original_filename=p.get("original_filename"))}
+    async def on_format_filenames(self, env: Envelope) -> dict:
+        """The name of every item comes from the numbers of its media_item and the series card; no rule is applied, no
+        profile read. One request for the hundreds of episodes of a series."""
+        series = env.payload["series"]
+        names = []
+        for each in env.payload["items"]:
+            metadata = formatter.build_metadata(series, each["media_item"])
+            if (override := each.get("episode_override")) is not None:
+                metadata["episode"] = override
+                metadata.pop("start", None)
+                metadata.pop("end", None)
+            names.append(formatter.format_name(series, metadata, original_filename=each.get("original_filename")))
+        return {"filenames": names}
 
     async def on_format_torrent_file(self, env: Envelope) -> dict:
         """Torrent file name in its 'Season NN' folder; the profile comes from the request, not from the series."""

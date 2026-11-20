@@ -78,7 +78,7 @@ class Neighbours(BaseModule):
         self.handle("conform.settings.get", self.on_conform_settings)
         self.handle("conform.cancel", self.on_cancel)
         self.handle("downloads.withdraw", self.on_withdraw)
-        self.handle("rules.format_filename", self.on_format_filename)
+        self.handle("rules.format_filenames", self.on_format_filenames)
 
     async def on_series(self, env: Envelope) -> dict:
         return {"id": SERIES, "name": "Сериал", "save_path": self.library, "ignored_seasons": "[]",
@@ -177,7 +177,7 @@ class Neighbours(BaseModule):
         self.daemon.jobs.pop(env.payload["job_id"], None)
         return {"done": True}
 
-    async def on_format_filename(self, env: Envelope) -> dict:
+    async def on_format_filenames(self, env: Envelope) -> dict:
         # The series of this model has no rule of names: the planner names its files by its own (core/plan name_of).
         raise LookupError("правила имён у сериала нет")
 
@@ -557,26 +557,25 @@ async def test_the_window_is_told_the_end_of_a_sync_with_the_view_the_tables_giv
 
 async def test_the_names_of_the_files_are_asked_of_the_rule_once_for_a_card_and_the_plan_is_made_once(world, monkeypatch):
     """A view of the window and a sync of the same card do not ask the rule of names again: what the rule reads (the card and
-    the numbers of the episode) did not change. Names known before the plan, the plan made with them stands."""
-    import core.plan.executor as executor
+    the numbers of the episode) did not change. The names of all the goals are asked at once, the goals counted once."""
+    import modules.planner.module as module
     neighbours, planner, _ = world
     episode(neighbours, 1, 1)
     episode(neighbours, 1, 2)
     seen, untap = tapped(planner)
-    made, named = [], []
-    counted, renamed = executor.plan, executor.renamed
-    monkeypatch.setattr(executor, "plan", lambda *args: made.append(1) or counted(*args))
-    monkeypatch.setattr(executor, "renamed", lambda *args: named.append(1) or renamed(*args))
+    made = []
+    counted = module.count
+    monkeypatch.setattr(module, "count", lambda *args: made.append(1) or counted(*args))
     try:
         await planner.request("planner.series.get", {"series_id": SERIES})
-        asked = len([each for each in seen if each.topic == "rules.format_filename" and each.kind == "query"])
+        asked = len([each for each in seen if each.topic == "rules.format_filenames" and each.kind == "query"])
         plans = len(made)
         await planner.request("planner.series.get", {"series_id": SERIES})
-        again = len([each for each in seen if each.topic == "rules.format_filename" and each.kind == "query"]) - asked
+        again = len([each for each in seen if each.topic == "rules.format_filenames" and each.kind == "query"]) - asked
     finally:
         untap()
-    # The first view: the goals counted once, the names asked, then the goals named with them (no goal counted again).
-    assert asked >= 1 and plans == 1 and named == [1]
+    # The first view: the goals counted once, the names of all of them asked in one request.
+    assert asked == 1 and plans == 1
     assert again == 0 and len(made) == plans  # nothing changed: the second read takes the view as it was counted
 
 
@@ -655,16 +654,14 @@ async def test_a_start_counts_again_only_a_series_whose_inputs_changed_since_it_
     """What a series stood at is told at a start and stands while its inputs are those it was counted from; a change of any
     of them while the service was stopped — the card, a write of the layout, the settings of the voice-overs, a table of
     the module, the code — counts it again, and a start after that count counts nothing."""
-    import core.plan.executor as executor
     import modules.planner.module as planner_module
     neighbours, planner, db_path = world
     episode(neighbours, 1, 1)
     await sync(world)
     await planner.request("planner.series.get", {"series_id": SERIES})  # the view of the tables after the sync
-    made, named = [], []
-    counted, renamed = executor.plan, executor.renamed
-    monkeypatch.setattr(executor, "plan", lambda *args: made.append(1) or counted(*args))
-    monkeypatch.setattr(executor, "renamed", lambda *args: named.append(1) or renamed(*args))
+    made = []
+    counted = planner_module.count
+    monkeypatch.setattr(planner_module, "count", lambda *args: made.append(1) or counted(*args))
     running = [planner]
 
     async def restarted() -> int:
@@ -709,14 +706,13 @@ def drain_queue(subscription) -> list[Envelope]:
 async def test_the_view_is_counted_once_for_changes_that_come_together_and_every_window_is_told_the_last(world, monkeypatch):
     """The view of a series is a projection of its inputs: changes that come while it is counted make one more count with
     all of them, not one count each, and the view every window is told last is the one a read then gives."""
-    import core.plan.executor as executor
+    import modules.planner.module as planner_module
     neighbours, planner, _ = world
     episode(neighbours, 1, 1)
     await planner.request("planner.series.get", {"series_id": SERIES})
-    made, named = [], []
-    counted, renamed = executor.plan, executor.renamed
-    monkeypatch.setattr(executor, "plan", lambda *args: made.append(1) or counted(*args))
-    monkeypatch.setattr(executor, "renamed", lambda *args: named.append(1) or renamed(*args))
+    made = []
+    counted = planner_module.count
+    monkeypatch.setattr(planner_module, "count", lambda *args: made.append(1) or counted(*args))
     told = planner.bus.subscribe("planner.series.changed")
     for _ in range(5):
         planner.bus.publish(Envelope(topic="composition.changed", kind="event", payload={"series_id": SERIES}))

@@ -20,7 +20,7 @@ from core.plan.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, vi
 from core.plan.planner import OFF, Goal, Plan, cut_video, own_track, plan, restricted, switched_off, voice_of
 from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video, episode_of
 from core.variant_queue import Same
-from modules.planner.view import view_of
+from modules.planner.view import shown_of, view_of
 
 
 def truth_of(season: int, episode: int, part: int | None = None) -> int:
@@ -121,14 +121,14 @@ class World(SeriesSync):
         """A rule gives the row another number; what the video truly is does not change."""
         for each in self.site.get(source_id, []):
             if each.row.id.row_key == key:
-                each.row = replace(each.row, start=episode, end=episode)
+                each.row = each.row.replaced(start=episode, end=episode)
 
     def move(self, source_id: int, key: str, season: int, episode: int) -> None:
         """A rule gives the row another season and number."""
         for each in self.site.get(source_id, []):
             if each.row.id.row_key == key:
                 span = each.row.end - each.row.start
-                each.row = replace(each.row, season=season, start=episode, end=episode + span)
+                each.row = each.row.replaced(season=season, start=episode, end=episode + span)
 
     def lose_file(self, name: str) -> None:
         """The file is gone from the disk by no doing of the service (deleted by hand, a disk failed)."""
@@ -173,7 +173,7 @@ class World(SeriesSync):
                 for each in table:
                     self.content.setdefault(("site", each.row.id), each.content)
         # The layout lists the rows source by source, as they come: the place of a row is its place in that list.
-        rows = tuple(replace(row, position=place) for place, row in
+        rows = tuple(row.replaced(position=place) for place, row in
                      enumerate(row for source in sorted(self.online) for row in self.online[source]))
         self.commands = self.choices.delete
         self.fetched = Counter()
@@ -305,7 +305,7 @@ class World(SeriesSync):
             again = restricted(again, step.holds)
         assert repr(again) == repr(step.plan), "the plan is not a function of its inputs"
         # Whatever the plan is, the window is told it in the terms of its contract.
-        PlannerView.model_validate(view_of(0, self, step.plan, running=False, rows=step.online))
+        PlannerView.model_validate(view_of(0, self, shown_of(step.plan), running=False))
         online = {row.id: row for row in step.online}
 
         def slot_of_track(track: Track) -> Slot:
@@ -535,7 +535,7 @@ class Chaos:
             shift = rng.choice((-1, 1))
             for each in world.site.get(source, []):
                 if each.row.start + shift >= 1:
-                    each.row = replace(each.row, start=each.row.start + shift, end=each.row.end + shift)
+                    each.row = each.row.replaced(start=each.row.start + shift, end=each.row.end + shift)
         elif action in ("higher", "swap_video") and rows:
             source, each = rng.choice(rows)
             row = each.row

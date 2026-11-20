@@ -445,7 +445,7 @@ async def test_the_layout_that_hears_the_event_gets_the_new_rules_at_once(system
     assert recounter.answers[-1].by_key()["k"].episode == 14, "the event came after the write and the cache reset"
 
 
-# --- rules.format_filename: numbers are ready, no rule is applied ---------------------------------
+# --- rules.format_filenames: numbers are ready, no rule is applied ---------------------------------
 
 def card(**fields) -> dict:
     return {"name_en": "Show", "season": None, **fields}
@@ -457,9 +457,9 @@ def item(**fields) -> dict:
 
 
 async def filename(probe, series, media_item, **extra) -> str:
-    reply = await probe.request("rules.format_filename", {"series": series, "media_item": media_item, **extra},
+    reply = await probe.request("rules.format_filenames", {"series": series, "items": [{"media_item": media_item, **extra}]},
                                 timeout=5)
-    return reply["filename"]
+    return reply["filenames"][0]
 
 
 @pytest.mark.asyncio

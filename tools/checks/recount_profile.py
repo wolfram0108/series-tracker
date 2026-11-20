@@ -88,7 +88,8 @@ async def main(series: list[int], base: str | None = None) -> None:
     timed(composition_module, "layout_print", "composition: the print of the inputs (pool)")
     timed(composition_module, "layout_of", "composition: the layout as the model for the planner (pool)")
     timed(planner_module, "_inputs_of", "planner: the inputs of the plan from the layout (pool)")
-    timed(executor, "plan", "planner: the plan (pool)")
+    timed(planner_module, "count", "planner: the goals, counted by the core (pool)")
+    timed(executor, "plan", "planner: the plan of a sync (pool)")
     timed(planner_module, "_view_body", "planner: the view (pool)")
     timed(planner.repo, "containers", "planner: read the asset")
     # What the counts at the start changed: a layout whose rows came out other than stored is told with part `whole`.

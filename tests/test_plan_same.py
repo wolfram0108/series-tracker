@@ -145,7 +145,7 @@ def told(rows, *, wanted=(), same=NO_SAME, failed=frozenset()):
     from dataclasses import replace
     choices = replace(choices, reference={(1, 1): tuple(wanted)} if wanted else {}, same={(1, 1): same} if same.groups else {})
     inputs = Inputs(online, (), choices, frozenset(failed))
-    return {(each.season, each.episode): each for each in references_of(inputs, plan(inputs))}[(1, 1)]
+    return {(each.season, each.episode): each for each in references_of(plan(inputs))}[(1, 1)]
 
 
 def test_the_variant_the_user_put_first_is_missing_and_one_equal_to_it_is_taken_the_reference_is_not_another_player():
