@@ -230,6 +230,9 @@ class VoiceTitleSet(BaseModel):
 
 
 class CompositionReply(BaseModel):
+    """The layout of a series, or a part of it. It is written with the fields it holds only (`model_dump`, whoever calls it): what
+    a part leaves out is not in the answer, so that a window keeps what it holds of it."""
+
     series_id: int
     rev: int
     # The part of the layout the reply holds (`LayoutPart`): what is not in the part is left out, not empty.
@@ -251,6 +254,14 @@ class CompositionReply(BaseModel):
     voice_titles: dict[str, str] = Field(default_factory=dict)
     # The compilations of every season and the episodes each holds (stage 12): the blocks of the view «Компиляции».
     compilations: list[CompilationView] = Field(default_factory=list)
+
+    def model_dump(self, **options):
+        options.setdefault("exclude_unset", True)
+        return super().model_dump(**options)
+
+    def model_dump_json(self, **options):
+        options.setdefault("exclude_unset", True)
+        return super().model_dump_json(**options)
 
 
 class CompositionChanged(BaseModel):

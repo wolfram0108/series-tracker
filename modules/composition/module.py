@@ -1,11 +1,19 @@
 """Module composition — the layout of a series with several sources, and the output settings that go with it (stage 10).
 
 The layout is the rows of the tables of all sources of a series, each with the numbers the constructor of rules gave it
-and the group of its voice-over; the pure rules are in `project.py`, the levers in `levers.py`, their inheritance in
-`settings.py`. The module owns the tables `composition_rows`, `composition_state`, `composition_sources`,
+and the group of its voice-over. The module owns the tables `composition_rows`, `composition_state`, `composition_sources`,
 `unknown_voices` and `output_settings`. It reads no site, picks no reference and downloads nothing. Torrent sources of a series are not its business.
 
-Compilations (stage 12, `compilations.py`): a row whose video holds several episodes is a compilation, named by its key in
+What a handler does is: read what the neighbours and its own tables say, count it with the pure functions of `calc/layout`
+(the projection in `project.py`, the levers in `levers.py`, their inheritance in `settings.py`, the queues in `queues.py`, the
+steps of a count in `recount.py`, of a command in `edit.py`, the replies in `reply.py` and `preview.py`), write, and tell what
+changed. A count that needs an answer of a neighbour is made in steps, with the question between them. Every topic the module
+handles, asks or tells is a record of `core.topics`.
+
+The replies of the queries (`CompositionReply`, `CompositionPreviewReply`, `QueuesReply`) go as the models themselves, immutable,
+as they are in the process; the gateway writes them for the window. `CompositionReply` is written with the fields of its part only.
+
+Compilations (stage 12, `calc/layout/compilations.py`): a row whose video holds several episodes is a compilation, named by its key in
 domain terms (group, source, player, season, range). It is a level of the levers between a season and an episode
 (`output_settings.compilation`): an episode inherits from the compilation it stands in. An episode stands in at most one: the
 user's word (`compilation.member`: a key, or "" for none) while that compilation still takes it, else the shortest
@@ -13,7 +21,8 @@ compilation that covers it, is switched on (`compilation.take`) and is higher th
 `compilation.member` to a compilation that is no higher are refused (`compilation_not_better`).
 
 Queries:
-  composition.get {series_id, include_excluded?} → CompositionReply: the rows of the layout in the order of the sources
+  composition.get {series_id, include_excluded?, sources_only?, part?, episodes?} → CompositionReply (`composition.layout
+      {series_id}` is the same answer for the planner, which asks for the whole layout): the rows of the layout in the order of the sources
       (rows the constructor excluded, gave no episode number, the source's own choice left out — a player switched off
       for it, another season of a catalog, `exclusion='source'` —, or whose player is switched off in the settings for
       every source, `exclusion='settings'`; only with include_excluded), the summary of every
@@ -43,8 +52,8 @@ Queries:
       asked: the reply is `ready`, has no summary, and its lines are those given (key = their place in the list),
       each with the answer of the profile when one is given.
   composition.queues.get {series_id, season?, episode?} → QueuesReply: the queue of the reference and of the voice-over of
-      each group of a level, in the order the core tries their variants (`calc.variant_queue`), with the value and the
-      level of every lever of the level that acts on them (`queues.py`). The order of players is asked of voices. Also the
+      each group of a level, in the order the core tries their variants (`core.variant_queue`), with the value and the
+      level of every lever of the level that acts on them (`calc/layout/queues.py`). The order of players is asked of voices. Also the
       queue of the markup reference (stage 14) and `markup_follows`: with no `markup.order` on the chain of levels it is
       the queue of the reference itself. The variants the user declared equal (Р-99, the levers `reference.same` and
       `markup.same`: lists of groups of variants) stand in the queue as one place, and a row of a group carries its number
@@ -94,7 +103,8 @@ Events (incoming) — every one of them only asks for a recount of the series it
 
 Neighbours (all over the bus): catalog.series.get / .list, catalog.sources.by_profile, sources.table.get,
 rules.apply (one request per source with a profile, all lines of its table at once), voices.settings.get (the order of
-players, for the queues, and the players switched off for every source, at each count), voices.groups.resolve (all
+players, for the queues and for the markup copy of a command — once for all its items —, and the players switched off for
+every source, at each count), voices.groups.resolve (all
 names in one request). A source without a table or without a profile does not stop the others. Start this module
 after the modules it asks; a request that gets no answer fails the recount, not the start.
 
@@ -108,23 +118,34 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from calc.layout import edit, project, queues, settings
+from calc.layout.preview import draft_source, lines_preview, lines_request, page_preview, tableless_preview
+from calc.layout.project import SourceInput
+from calc.layout.recount import derive, rules_request
+from calc.layout.reply import layout_of
+from calc.layout.stored import StoredSource
 from core import compute
-from core.module import BaseModule
-from core.contracts import (LAYOUT_PARTS, COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ORDER, REFERENCE_SAME, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
-                            CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
-                            GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
-                            RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet, SettingsSetMany,
-                            QueuesGet, QueuesReply, SourceEvent, SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState,
-                            VoiceOrderSet, VoiceSettingsView, VoiceTitleSet, SeriesReadProgress, TableProgress)
+from core.contracts import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+                            CompositionPreviewRequest, CompositionReply, EpisodeRef, GroupsResolveRequest, QueuesGet,
+                            QueuesReply, ReleaseTable, RulesApplyReply, RulesProfileChanged, RunChanged, RunSnapshot,
+                            SeriesReadProgress, SeriesSource, SettingsReset, SettingsSet, SettingsSetMany, SourceEvent,
+                            TableGetReply, TableGetRequest, TableProgress, TableState, VoiceOrderSet, VoiceSettingsView,
+                            VoiceTitleSet, availability)
 from core.db import Database
 from core.envelope import Envelope
+from core.module import BaseModule
 from core.reasons import reason
-from calc.variant_queue import Order
-from calc.voice_names import Groups
+from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, CATALOG_SOURCES_BY_PROFILE, COMPOSITION_CHANGED,
+                         COMPOSITION_FAILED, COMPOSITION_GET, COMPOSITION_LAYOUT, COMPOSITION_PREVIEW,
+                         COMPOSITION_QUEUES_GET, COMPOSITION_RECOMPUTE, COMPOSITION_SERIES_READING,
+                         COMPOSITION_SETTINGS_RESET, COMPOSITION_SETTINGS_SET, COMPOSITION_SETTINGS_SET_MANY,
+                         COMPOSITION_VOICE_ORDER_SET, COMPOSITION_VOICE_TITLE_SET, RULES_APPLY, RULES_PROFILE_CHANGED,
+                         SCAN_RUN_CHANGED, SERIES_ADDED, SERIES_DELETED, SERIES_PURGED, SERIES_SOURCE_ADDED,
+                         SERIES_SOURCE_REMOVED, SERIES_SOURCE_UPDATED, SERIES_UPDATED, SOURCES_TABLE_FAILED,
+                         SOURCES_TABLE_GET, SOURCES_TABLE_PROGRESS, SOURCES_TABLE_READY, VOICES_GROUPS_RESOLVE,
+                         VOICES_SETTINGS_CHANGED, VOICES_SETTINGS_GET, Topic)
 
-from calc.layout import compilations, levers, project, queues, settings
-from calc.layout.project import SourceInput
-from .repository import CompositionRepository, StoredSource
+from .repository import CompositionRepository
 
 OWNER = "composition"
 # The fields of a source that change what is read of its page: a change of any other is no new read.
@@ -185,29 +206,29 @@ class CompositionModule(BaseModule):
         super().__init__(bus)
 
     def register(self) -> None:
-        self.handle("composition.get", self.on_get)
-        self.handle("composition.layout", self.on_layout)
-        self.handle("composition.queues.get", self.on_queues_get)
+        self.handle(COMPOSITION_GET, self.on_get)
+        self.handle(COMPOSITION_LAYOUT, self.on_get)
+        self.handle(COMPOSITION_QUEUES_GET, self.on_queues_get)
         # Waits for a whole count, so the requests for different series must not queue behind each other.
-        self.handle("composition.recompute", self.on_recompute, concurrent=True)
-        self.handle("composition.preview", self.on_preview, concurrent=True)
-        self.handle("composition.settings.set", self.on_settings_set)
-        self.handle("composition.settings.set_many", self.on_settings_set_many)
-        self.handle("composition.settings.reset", self.on_settings_reset)
-        self.handle("series.added", self.on_series_added)
-        self.handle("series.updated", self.on_series_updated)
-        self.handle("series.deleted", self.on_series_deleted)
-        self.handle("series.source.added", self.on_source_changed)
-        self.handle("series.source.updated", self.on_source_changed)
-        self.handle("series.source.removed", self.on_source_changed)
-        self.handle("sources.table.progress", self.on_table_progress)
-        self.handle("sources.table.ready", self.on_table_ready)
-        self.handle("sources.table.failed", self.on_table_failed)
-        self.handle("rules.profile.changed", self.on_profile_changed)
-        self.handle("voices.settings.changed", self.on_groups_changed)
-        self.handle(RUN_CHANGED, self.on_run_changed)
-        self.handle("composition.voice_order.set", self.on_voice_order_set)
-        self.handle("composition.voice_title.set", self.on_voice_title_set)
+        self.handle(COMPOSITION_RECOMPUTE, self.on_recompute, concurrent=True)
+        self.handle(COMPOSITION_PREVIEW, self.on_preview, concurrent=True)
+        self.handle(COMPOSITION_SETTINGS_SET, self.on_settings_set)
+        self.handle(COMPOSITION_SETTINGS_SET_MANY, self.on_settings_set_many)
+        self.handle(COMPOSITION_SETTINGS_RESET, self.on_settings_reset)
+        self.handle(SERIES_ADDED, self.on_series_added)
+        self.handle(SERIES_UPDATED, self.on_series_updated)
+        self.handle(SERIES_DELETED, self.on_series_deleted)
+        self.handle(SERIES_SOURCE_ADDED, self.on_source_changed)
+        self.handle(SERIES_SOURCE_UPDATED, self.on_source_changed)
+        self.handle(SERIES_SOURCE_REMOVED, self.on_source_changed)
+        self.handle(SOURCES_TABLE_PROGRESS, self.on_table_progress)
+        self.handle(SOURCES_TABLE_READY, self.on_table_ready)
+        self.handle(SOURCES_TABLE_FAILED, self.on_table_failed)
+        self.handle(RULES_PROFILE_CHANGED, self.on_profile_changed)
+        self.handle(VOICES_SETTINGS_CHANGED, self.on_groups_changed)
+        self.handle(SCAN_RUN_CHANGED, self.on_run_changed)
+        self.handle(COMPOSITION_VOICE_ORDER_SET, self.on_voice_order_set)
+        self.handle(COMPOSITION_VOICE_TITLE_SET, self.on_voice_title_set)
 
     # --- start ------------------------------------------------------------------------------
 
@@ -220,7 +241,7 @@ class CompositionModule(BaseModule):
             self.log.exception("пересчёт раскладок при старте не начат")
 
     async def _resume(self) -> None:
-        listing = await self._ask("catalog.series.list", {})
+        listing = await self._ask(CATALOG_SERIES_LIST, {})
         known = set(await self.repo.series_ids())
         present = {each["id"] for each in listing}
         for each in listing:
@@ -237,52 +258,37 @@ class CompositionModule(BaseModule):
 
     # --- queries and commands ------------------------------------------------------------------
 
-    async def on_get(self, env: Envelope) -> dict:
+    async def on_get(self, env: Envelope) -> CompositionReply:
+        """The layout of a series, or the part of it asked, as the model itself: whoever asks in this process is given it
+        as it is (the gateway writes it for the window, the planner reads it) and nobody changes it."""
         request = CompositionGetRequest.model_validate(env.payload)
         stored = await self.repo.stored(request.series_id)
         # The layout of a series is thousands of rows: the reply is made off the loop.
-        return await compute.run(layout_reply, request, stored)
-
-    async def on_layout(self, env: Envelope) -> CompositionReply:
-        """The whole layout as the model itself, for a consumer in this process (the planner): the answer of
-        `composition.get` before it is written out — megabytes are not turned into a dict and checked again on the other
-        side. It is made for the one who asks and is his: no other holds it."""
-        request = CompositionGetRequest(series_id=int(env.payload["series_id"]))
-        stored = await self.repo.stored(request.series_id)
         return await compute.run(layout_of, request, stored)
 
-    async def on_queues_get(self, env: Envelope) -> dict:
+    async def on_queues_get(self, env: Envelope) -> QueuesReply:
         """The queues of a level in the order the core tries their variants: the same rule, the same order of players and
         of sources, and the same levers the choice of the reference and the plan of voice-overs read."""
         request = QueuesGet.model_validate(env.payload)
         stored = await self.repo.stored(request.series_id)
-        voices = VoiceSettingsView.model_validate(await self.request("voices.settings.get", {}))
+        voices = await self._voices()
         # The queues walk the rows and the levers of the level: counted off the loop.
-        return await compute.run(_queues_reply, stored, voices, request)
-
-    async def _level_of(self, stored, records, scope) -> tuple[list, list, Order, list[str]]:
-        voices = VoiceSettingsView.model_validate(await self.request("voices.settings.get", {}))
-        return await compute.run(_level, stored, records, scope, voices)
+        return await compute.run(queues.reply_of, stored, voices, request)
 
     async def on_voice_order_set(self, env: Envelope) -> dict:
         """The user's order of the voice-overs of a season: the order of the tracks in its containers (ЭТАП_11). It is a
         plan: the containers follow it at the next sync."""
         command = VoiceOrderSet.model_validate(env.payload)
         self._require_editable(command.series_id)
-        await self.request("catalog.series.get", {"series_id": command.series_id})
+        await self.request(CATALOG_SERIES_GET, {"series_id": command.series_id})
         async with self._lock(command.series_id):
             stored = await self.repo.stored(command.series_id)
-            orders = project.season_orders(stored.orders, stored.rows, {})
-            current = orders.get(command.season, [])
-            wanted = project.reorder(current, command.labels)
-            if wanted == current and orders == stored.orders:
+            change = await compute.run(edit.reordered, stored, command)
+            if change is None:
                 return {"ok": True}
-            orders[command.season] = wanted
             rev = stored.rev + 1
-            await self.repo.write(command.series_id, orders=orders, rev=rev)
-            episodes = sorted(number for season, number in project.layout_episodes(stored.rows) if season == command.season)
-            self._publish_changed(command.series_id, rev, {(command.season, number) for number in episodes},
-                                  summary_only=False, part="levers")
+            await self.repo.write(command.series_id, orders=change.orders, rev=rev)
+            self._publish_changed(command.series_id, rev, change.touched, summary_only=False, part="levers")
         return {"ok": True}
 
     async def on_voice_title_set(self, env: Envelope) -> dict:
@@ -290,72 +296,55 @@ class CompositionModule(BaseModule):
         containers take it at the next sync (their tracks are copied into a file that bears the name)."""
         command = VoiceTitleSet.model_validate(env.payload)
         self._require_editable(command.series_id)
-        await self.request("catalog.series.get", {"series_id": command.series_id})
+        await self.request(CATALOG_SERIES_GET, {"series_id": command.series_id})
         async with self._lock(command.series_id):
             stored = await self.repo.stored(command.series_id)
-            titles = dict(stored.titles)
-            if command.title and command.title != command.label:
-                titles[command.label] = command.title
-            else:
-                titles.pop(command.label, None)
-            if titles == stored.titles:
+            change = await compute.run(edit.renamed, stored, command)
+            if change is None:
                 return {"ok": True}
             rev = stored.rev + 1
-            await self.repo.write(command.series_id, titles=titles, rev=rev)
-            self._publish_changed(command.series_id, rev, set(project.layout_episodes(stored.rows)), summary_only=False,
-                                  part="levers")
+            await self.repo.write(command.series_id, titles=change.titles, rev=rev)
+            self._publish_changed(command.series_id, rev, change.touched, summary_only=False, part="levers")
         return {"ok": True}
 
-    async def on_preview(self, env: Envelope) -> dict:
+    async def on_preview(self, env: Envelope) -> CompositionPreviewReply:
         """An address that is no source of a series yet, as the add window and the test of rules show it. It reads
         the table, builds the summary and the lines of the constructor by the same code as for a series, and writes
         nothing: no row, no source, no revision."""
         request = CompositionPreviewRequest.model_validate(env.payload)
         if request.lines is not None:
-            return await self._preview_lines(request, request.lines)
+            return await self._preview_lines(request)
         try:
-            got = await self._ask("sources.table.get", TableGetRequest(
-                url=request.url, refresh=request.refresh).model_dump(mode="json"),
-                model=TableGetReply)
+            got = await self._ask(SOURCES_TABLE_GET, TableGetRequest(
+                url=request.url, refresh=request.refresh).model_dump(mode="json"))
             table = got.table if got.table is not None and got.table.complete else None
-            summary, lines, rows = None, [], []
-            if table is not None:
-                source = SeriesSource(id=0, series_id=0, url=request.url, source_type=SourceType.WEB_VIDEO,
-                                      parser_profile_id=request.profile_id,
-                                      players_off=request.players_off, vibix_season=request.vibix_season)
-                answer = None
-                off = await self._players_off()
-                if request.profile_id is not None:
-                    answer = await self._answer(source, table, request.series_season, everywhere=off)
-                item = SourceInput(source, table, answer, got.reason if got.state == TableState.FAILED else None,
-                                   got.url, players_off=off)
-                names = await compute.run(project.voice_names, [item])
-                groups = await self._groups(names) if names else {}
-                # The page is thousands of rows: its projection and the reply are made off the loop.
-                return await compute.run(_page_preview, got, table, source, item, answer, groups)
+            if table is None:
+                return tableless_preview(got)
+            source = draft_source(request)
+            off = await self._players_off()
+            answer = None
+            if request.profile_id is not None:
+                answer = await self._answer(source, table, request.series_season, everywhere=off)
+            item = SourceInput(source, table, answer, got.reason if got.state == TableState.FAILED else None,
+                               got.url, players_off=off)
+            names = await compute.run(project.voice_names, [item])
+            groups = await self._groups(names) if names else {}
         except _Unavailable as exc:
             raise ValueError(exc.reason) from exc
-        return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason,
-                                       names=list(table.names) if table is not None else [], summary=summary,
-                                       lines=lines, rows=rows).model_dump(mode="json")
+        # The page is thousands of rows: its projection and the reply are made off the loop.
+        return await compute.run(page_preview, got, item, groups)
 
-    async def _preview_lines(self, request: CompositionPreviewRequest, texts: list[str]) -> dict:
+    async def _preview_lines(self, request: CompositionPreviewRequest) -> CompositionPreviewReply:
         """Lines the window holds itself: no page and no table, only the profile's answer to each line."""
-        lines = [RuleLine(key=str(place), text=text) for place, text in enumerate(texts)]
+        # The lines a window holds can be thousands: the question and the reply are made off the loop.
+        payload = await compute.run(lines_request, request)
         results = {}
-        if request.profile_id is not None and lines:
-            payload = await compute.run(lambda: RulesApplyRequest(
-                profile_id=request.profile_id, lines=lines, series_season=request.series_season).model_dump(mode="json"))
+        if payload is not None:
             try:
-                answer = await self._ask("rules.apply", payload, model=RulesApplyReply)
+                results = (await self._ask(RULES_APPLY, payload)).results
             except _Unavailable as exc:
                 raise ValueError(exc.reason) from exc
-            results = answer.results
-        # The lines a window holds can be thousands: the reply is made off the loop.
-        return await compute.run(lambda: CompositionPreviewReply(
-            url=request.url, state=TableState.READY,
-            lines=[PreviewLine(key=line.key, line=line.text, result=results.get(line.key)) for line in lines],
-        ).model_dump(mode="json"))
+        return await compute.run(lines_preview, request, results)
 
     async def on_recompute(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
@@ -390,51 +379,14 @@ class CompositionModule(BaseModule):
                 raise ValueError(problem)
         series_id = items[0].series_id
         self._require_editable(series_id)
-        for record in items:
-            await self._require_pickable(record)
-            if record.lever == COMPILATION_MEMBER and record.value:
-                stored = await self.repo.stored(series_id)
-                if not compilations.fits(stored.rows, settings.canonical(stored.records), record.season, record.episode,
-                                         record.value, _source_order(stored)):
-                    raise ValueError(reason("compilation_not_better"))
-        writes = await self._writes_of(series_id, items)
-        return await self._edit(series_id, lambda records: _applied(records, writes))
-
-    async def _writes_of(self, series_id: int, items: list[SettingsSet]) -> list[SettingRecord]:
-        """What the items write, in order. The first edit of the markup reference on a level that follows the reference
-        makes its queue its own (stage 14): the queue of the reference as the level shows it — its order, the variants it
-        leaves out and the groups of equal variants — is written before the edit, so that from then on the two queues are
-        apart. Each item is read against the records the items before it left."""
-        if not any(record.lever in (MARKUP_ORDER, MARKUP_ALLOW, MARKUP_SAME) for record in items):
-            return list(items)
-        stored = await self.repo.stored(series_id)
-        records = settings.canonical(stored.records)
-        writes: list[SettingRecord] = []
-        for record in items:
-            if record.lever in (MARKUP_ORDER, MARKUP_ALLOW, MARKUP_SAME):
-                for copy in await self._markup_copy(stored, records, record):
-                    records = settings.apply_set(records, copy)
-                    writes.append(copy)
-            records = settings.apply_set(records, record)
-            writes.append(record)
-        return writes
-
-    async def _markup_copy(self, stored, records: list[SettingRecord], record: SettingsSet) -> list[SettingRecord]:
-        lines, levers, order, _ = await self._level_of(stored, records, record)
-        if not queues.follows_reference(levers):
-            return []
-        shown, _ = queues.markup(lines, levers, order, record.episode)
-        scope = dict(series_id=record.series_id, season=record.season, episode=record.episode,
-                     compilation=record.compilation)
-        copied = [SettingRecord(**scope, lever=MARKUP_ORDER, value=[
-            {"group": row.group, "source_id": row.source_id, "player": row.player} for row in shown.rows])]
-        copied += [SettingRecord(**scope, lever=MARKUP_ALLOW, target=variant_target(row.group, row.source_id, row.player),
-                                 value=False) for row in shown.rows if not row.allowed]
-        # The variants the reference's queue shows as equal are equal in the queue that is made its own.
-        same = queues.same_groups(shown.rows)
-        if same:
-            copied.append(SettingRecord(**scope, lever=MARKUP_SAME, value=same))
-        return copied
+        stored = await self.repo.stored(series_id) if edit.reads_layout(items) else None
+        if stored is not None:
+            await compute.run(edit.checked, stored, items)
+        writes = items
+        if any(record.lever in edit.MARKUP_LEVERS for record in items):
+            # The queue of the markup reference is made by the order of players, asked once for all the items.
+            writes = await compute.run(edit.writes_of, stored, items, await self._voices())
+        return await self._edit(series_id, edit.with_writes, writes)
 
     def _require_editable(self, series_id: int) -> None:
         """A lever of a series whose sync is under way is not changed: the sync works by what it found (the table of
@@ -442,51 +394,31 @@ class CompositionModule(BaseModule):
         availability.require(availability.Action.EDIT,
                              availability.SERIES_SCANNING if series_id in self._frozen else availability.SERIES_IDLE)
 
-    async def _require_pickable(self, record: SettingsSet) -> None:
-        """A variant is put into the order of the reference, or of a group, only where the table of what is allowed lets
-        it: the same rule the window lists the variants of a queue by."""
-        if not isinstance(record.value, list) or not record.value or record.lever not in (
-                REFERENCE_ORDER, MARKUP_ORDER, VOICE_ORDER, REFERENCE_SAME, MARKUP_SAME):
-            return
-        single = record.lever in (REFERENCE_ORDER, MARKUP_ORDER, REFERENCE_SAME, MARKUP_SAME)
-        action = availability.Action.CHOOSE_REFERENCE if single else availability.Action.PREFER_VARIANT
-        stored = await self.repo.stored(record.series_id)
-        # The state is that of the level the setting is for, as the window shows it: the lines of that season or episode.
-        lines = availability.lines_of_level(stored.rows, record.season, record.episode)
-        # The groups of equal variants are lists of variants: each variant of them is put to the same test as one of an order.
-        items = [item for group in record.value for item in group] if record.lever in (REFERENCE_SAME, MARKUP_SAME) \
-            else record.value
-        for item in items:
-            group = item.get("group") if single else parse_group_target(record.target or "")
-            found = [row for row in lines if row.voice_label == group and row.source_id == item.get("source_id")
-                     and row.player == item.get("player")]
-            availability.require(action, availability.variant_state(found))
-
     async def on_settings_reset(self, env: Envelope) -> dict:
         scope = SettingsReset.model_validate(env.payload)
         problem = settings.validate_reset(scope)
         if problem is not None:
             raise ValueError(problem)
         self._require_editable(scope.series_id)
-        return await self._edit(scope.series_id, lambda records: settings.apply_reset(records, scope))
+        return await self._edit(scope.series_id, edit.with_reset, scope)
 
-    async def _edit(self, series_id: int, change) -> dict:
+    async def _edit(self, series_id: int, change, argument) -> dict:
+        """Applies a command to the records of the series: `change(stored, argument)` is the pure step of `calc.layout.edit`
+        that makes the records after it and what it touches."""
         # A command about a series the catalog does not have is refused with the catalog's own answer.
-        await self.request("catalog.series.get", {"series_id": series_id})
+        await self.request(CATALOG_SERIES_GET, {"series_id": series_id})
         async with self._lock(series_id):
             if series_id in self._deleted:
                 raise LookupError(reason("series_not_found", series_id=series_id))
             stored = await self.repo.stored(series_id)
-            before = settings.canonical(stored.records)
-            after = change(before)
-            if after == before:
-                return {"ok": True}
             # The levers of every episode counted twice is tenths of a second over a big layout: off the loop.
-            touched, shown = await compute.run(_effect_of, stored, before, after)
-            rev = stored.rev + 1 if shown else None
-            await self.repo.write(series_id, records=after, rev=rev)
-            if shown:
-                self._publish_changed(series_id, rev, touched, summary_only=not touched, part="levers")
+            made = await compute.run(change, stored, argument)
+            if not made.changed:
+                return {"ok": True}
+            rev = stored.rev + 1 if made.shown else None
+            await self.repo.write(series_id, records=made.records, rev=rev)
+            if made.shown:
+                self._publish_changed(series_id, rev, made.touched, summary_only=not made.touched, part="levers")
         return {"ok": True}
 
     # --- events -----------------------------------------------------------------------------
@@ -503,13 +435,14 @@ class CompositionModule(BaseModule):
         series_id = env.payload["series_id"]
         self._deleted.add(series_id)
         await self._purge(series_id)
-        self.publish_event("series.purged", {"series_id": series_id, "owner": OWNER})
+        self.publish_event(SERIES_PURGED, {"series_id": series_id, "owner": OWNER})
 
     def on_source_changed(self, env: Envelope) -> None:
         """A source came, went or changed: the layout is counted again. Its page is read anew only when it is new or an
         update changed what is read of it; any other field (its profile, its place, its colour) needs no read."""
         event = SourceEvent.model_validate(env.payload)
-        fresh = env.topic.endswith(".added") or (env.topic.endswith(".updated") and bool(set(event.changed) & READ_FIELDS))
+        fresh = env.topic == SERIES_SOURCE_ADDED.name or (
+            env.topic == SERIES_SOURCE_UPDATED.name and bool(set(event.changed) & READ_FIELDS))
         self._schedule(event.series_id, (event.source_id,) if fresh else ())
 
     def on_table_progress(self, env: Envelope) -> None:
@@ -519,14 +452,15 @@ class CompositionModule(BaseModule):
             told = SeriesReadProgress(series_id=series_id, source_id=source_id, url=packet.url, phase=packet.phase,
                                       current=packet.current, total=packet.total, rate=packet.rate)
             self._reading[(series_id, source_id)] = told
-            self.publish_event("composition.series.reading", told.model_dump(mode="json"))
+            self.publish_event(COMPOSITION_SERIES_READING, told.model_dump(mode="json"))
 
     def _read_ended(self, url: str) -> None:
         """The read of a page ended (read or failed): the series that were told of it are told it is over."""
         for source_id, series_id in self._pages.get(url, {}).items():
             last = self._reading.pop((series_id, source_id), None)
             if last is not None:
-                self.publish_event("composition.series.reading", last.model_copy(update={"active": False}).model_dump(mode="json"))
+                self.publish_event(COMPOSITION_SERIES_READING,
+                                   last.model_copy(update={"active": False}).model_dump(mode="json"))
 
     def on_table_ready(self, env: Envelope) -> None:
         self._read_ended(env.payload["url"])
@@ -540,7 +474,7 @@ class CompositionModule(BaseModule):
     async def on_profile_changed(self, env: Envelope) -> None:
         profile_id = RulesProfileChanged.model_validate(env.payload).profile_id
         try:
-            sources = await self._ask("catalog.sources.by_profile", {"profile_id": profile_id})
+            sources = await self._ask(CATALOG_SOURCES_BY_PROFILE, {"profile_id": profile_id})
         except _Unavailable:
             return  # logged by the request; no series is known to tell the failure about
         for series_id in sorted({each["series_id"] for each in sources}):
@@ -640,14 +574,16 @@ class CompositionModule(BaseModule):
             else:
                 self.log.exception("пересчёт раскладки сериала %d не удался", series_id)
                 failure = reason("composition_error")
-            self.publish_event("composition.failed",
+            self.publish_event(COMPOSITION_FAILED,
                                CompositionFailed(series_id=series_id, reason=failure).model_dump(mode="json"))
             return _Outcome(failure=failure)
 
     async def _gather(self, series_id: int, flight: _Flight, refresh: set[int]
                       ) -> tuple[list[SourceInput], dict[str, str | None]]:
-        """What the neighbours say about the series; nothing is written here."""
-        card = await self._ask("catalog.series.get", {"series_id": series_id})
+        """What the neighbours say about the series, in the steps of the count: the card, the players switched off, then for
+        every source its table and the answer of its rules, then the groups of the voice-overs of all of them (the names the
+        groups are asked about are counted from the answers of the rules); nothing is written here."""
+        card = await self._ask(CATALOG_SERIES_GET, {"series_id": series_id})
         sources = [SeriesSource.model_validate(each) for each in card.get("sources", [])]
         snapshot = self._snapshots.get(series_id)
         off = await self._players_off(snapshot)
@@ -679,26 +615,25 @@ class CompositionModule(BaseModule):
 
     async def _table_reply(self, source: SeriesSource, begin: bool) -> TableGetReply:
         request = TableGetRequest(url=source.url, refresh=begin, rows=source.rows_per_line)
-        return await self._ask("sources.table.get", request.model_dump(mode="json"), model=TableGetReply)
+        return await self._ask(SOURCES_TABLE_GET, request.model_dump(mode="json"))
 
     async def _players_off(self, snapshot: RunSnapshot | None = None) -> frozenset[str]:
         """The players switched off in the settings for every source, as they are now or as the run took them."""
         values = snapshot.voices if snapshot is not None else None
-        view = await self._ask("voices.settings.get", {"values": values}, model=VoiceSettingsView)
+        view = await self._ask(VOICES_SETTINGS_GET, {"values": values})
         return frozenset(view.players_off)
 
     async def _answer(self, source: SeriesSource, table: ReleaseTable, season,
                       snapshot: RunSnapshot | None = None, everywhere: frozenset[str] = frozenset()) -> RulesApplyReply:
         rules = snapshot.profiles.get(source.parser_profile_id) if snapshot is not None else None
-        payload = await compute.run(_rules_request, source, table, season, rules, everywhere)
+        payload = await compute.run(rules_request, source, table, season, rules, everywhere)
         if payload is None:
             return RulesApplyReply(results={})
-        return await self._ask("rules.apply", payload, model=RulesApplyReply)
+        return await self._ask(RULES_APPLY, payload)
 
     async def _groups(self, names: list[str], snapshot: RunSnapshot | None = None) -> dict[str, str | None]:
         values = snapshot.voices if snapshot is not None else None
-        reply = await self._ask("voices.groups.resolve", GroupsResolveRequest(names=names, values=values).model_dump(),
-                                model=GroupsResolveReply)
+        reply = await self._ask(VOICES_GROUPS_RESOLVE, GroupsResolveRequest(names=names, values=values).model_dump())
         return reply.groups
 
     async def _settle(self, series_id: int, inputs: list[SourceInput], groups: dict[str, str | None]) -> _Outcome:
@@ -710,7 +645,10 @@ class CompositionModule(BaseModule):
             if not inputs and not stored.sources and not stored.rows and not stored.records:
                 return _Outcome(rev=stored.rev)
             # The projection and its comparison with what is stored are pure work over thousands of rows: off the loop.
-            derived = await compute.run(_derive, series_id, inputs, groups, stored, self.log)
+            derived = await compute.run(derive, inputs, groups, stored)
+            for group in derived.conflicts:
+                self.log.info("сериал %d: у слитых групп расходящиеся настройки %s — выбор возвращён уровню выше",
+                              series_id, group[0].lever)
             result = derived.result
             sources = [StoredSource(item.source.id, item.source.position, self._page_of.get(item.source.id), summary)
                        for item, summary in zip(sorted(inputs, key=lambda i: (i.source.position, i.source.id)),
@@ -745,7 +683,7 @@ class CompositionModule(BaseModule):
                          summary_only: bool = False, part: str = "whole") -> None:
         changed = CompositionChanged(series_id=series_id, rev=rev, summary_only=summary_only, part=part, episodes=[
             EpisodeRef(season=season, episode=episode) for season, episode in sorted(episodes)])
-        self.publish_event("composition.changed", changed.model_dump(mode="json"))
+        self.publish_event(COMPOSITION_CHANGED, changed.model_dump(mode="json"))
 
     async def _purge(self, series_id: int) -> None:
         """Takes the series away after the count that may be running for it has ended."""
@@ -776,209 +714,22 @@ class CompositionModule(BaseModule):
         if url is not None:
             self._pages.get(url, {}).pop(source_id, None)
 
-    async def _ask(self, topic: str, payload, *, model=None):
+    async def _voices(self) -> VoiceSettingsView:
+        """The settings of the voice-overs as they stand now: the order of players and sources the queues are made by."""
+        return await self._reply_of(VOICES_SETTINGS_GET, {})
+
+    async def _reply_of(self, topic: Topic, payload=None):
+        """The answer of the owner of `topic` as the model of its record. An answer that came as that model is taken as it
+        is; a dictionary is checked, off the loop (the tables and the answers of the rules are thousands of rows)."""
+        answer = await self.request(topic, payload)
+        if topic.reply is None or isinstance(answer, topic.reply):
+            return answer
+        return await compute.run(topic.reply.model_validate, answer)
+
+    async def _ask(self, topic: Topic, payload=None):
+        """`_reply_of` for a count: any failure of a neighbour is one signal, that the count did not happen."""
         try:
-            answer = await self.request(topic, payload)
-            # The tables and the answers of the rules are thousands of rows: their check runs off the loop.
-            return await compute.run(model.model_validate, answer) if model is not None else answer
-        except Exception as exc:  # noqa: BLE001 — any failure of a neighbour is one signal: the recount did not happen
-            self.log.error("запрос %s не выполнен: %s: %s", topic, type(exc).__name__, exc)
-            raise _Unavailable(topic) from exc
-
-
-def layout_reply(request: CompositionGetRequest, stored) -> dict:
-    """`composition.get` answered from what is stored; pure, it runs in the pool of computation. A part holds its own
-    fields only: what it leaves out is not in the answer, so a window keeps what it holds of it."""
-    return layout_of(request, stored).model_dump(mode="json", exclude_unset=True)
-
-
-def layout_of(request: CompositionGetRequest, stored) -> CompositionReply:
-    """The layout, or the part of it asked (`LAYOUT_PARTS`), as the model: every field is made one way, for the whole and
-    for a part, and only the fields asked are made."""
-    part = "sources" if request.sources_only else request.part
-    known: dict[str, object] = {}
-
-    def once(name: str, make):
-        if name not in known:
-            known[name] = make()
-        return known[name]
-
-    def shown(rows):
-        return [row for row in rows if request.include_excluded or not row.excluded]
-
-    def records():
-        return once("records", lambda: settings.canonical(stored.records))
-
-    def episodes():
-        return once("episodes", lambda: project.layout_episodes(stored.rows))
-
-    def outcome():
-        return once("outcome", lambda: compilations.resolve(stored.rows, records(), _source_order(stored)))
-
-    def chosen():
-        # The levers of the episodes named (a part `levers` after a change of some), of all in any other case.
-        named = {(each.season, each.episode) for each in request.episodes} if part == "levers" else set()
-        return {each for each in episodes() if not named or each in named}
-
-    fields = {
-        "rows": lambda: shown(stored.rows),
-        "subtitles": lambda: shown(stored.subtitles),
-        "sources": lambda: [each.summary for each in stored.sources],
-        "levels": lambda: settings.levels(records(), {season for season, _ in episodes()},
-                                          [(view.season, view.ref.key) for view in outcome().views]),
-        "settings": lambda: settings.episode_settings(records(), chosen(), outcome().members),
-        "compilations": lambda: outcome().views,
-        "levers": levers.specs,
-        "availability": availability.table,
-        # A series counted before the orders were kept shows its default order until its next count writes it.
-        "voice_orders": lambda: project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows),
-        "voice_titles": lambda: stored.titles,
-    }
-    wanted = fields.keys() if part == "whole" else LAYOUT_PARTS[part]
-    return CompositionReply(series_id=request.series_id, rev=stored.rev, part=part,
-                            **{name: fields[name]() for name in wanted})
-
-
-def _rules_request(source: SeriesSource, table: ReleaseTable, season, rules,
-                   everywhere: frozenset[str] = frozenset()) -> dict | None:
-    """The request of the rules for the lines of a table; None when the table has none for the source."""
-    lines = project.lines_for(source, table, everywhere)
-    if not lines:
-        return None
-    return RulesApplyRequest(profile_id=source.parser_profile_id, lines=lines, series_season=season,
-                             rules=rules).model_dump(mode="json")
-
-
-def _page_preview(got: TableGetReply, table: ReleaseTable, source: SeriesSource, item: SourceInput,
-                  answer: RulesApplyReply | None, groups: dict[str, str | None]) -> dict:
-    """The preview of a page with its table: the summary, the lines with their answers and the rows the profile makes;
-    pure, it runs in the pool of computation."""
-    projection = project.project([item], groups, {})
-    results = answer.results if answer is not None else {}
-    heights = {row.key: list(row.heights) for row in table.rows if row.state == RowState.PLAYABLE}
-    lines = [PreviewLine(key=line.key, line=line.text, result=results.get(line.key), heights=heights.get(line.key, []))
-             for line in project.lines_for(source, table, item.players_off)]
-    return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason, names=list(table.names),
-                                   summary=projection.sources[0], lines=lines,
-                                   rows=[row for row in projection.rows if not row.excluded]).model_dump(mode="json")
-
-
-@dataclass
-class _Derived:
-    """What a recount makes of its inputs and of the stored layout: the rows, the settings and what changed."""
-    result: "project.Projection"
-    gone: list[int]
-    records: list[SettingRecord]
-    records_changed: bool
-    orders: dict[int, list[str]]
-    moved: set[tuple[int, int]]
-    headers_changed: bool
-    rows_changed: bool
-    summaries_changed: bool
-    touched: set[tuple[int, int]] | None
-
-
-def _derive(series_id: int, inputs: list[SourceInput], groups: dict[str, str | None], stored, log) -> _Derived:
-    """The projection of a recount and its comparison with what is stored; pure, it runs in the pool of computation."""
-    result = project.project(inputs, groups, stored.numbering)
-    gone = [each.source_id for each in stored.sources if each.source_id not in {i.source.id for i in inputs}]
-    before = settings.canonical(stored.records)
-    renames = project.group_renames(stored.rows, result.rows)
-    orders = project.season_orders(stored.orders, result.rows, renames)
-    # What was set for a voice-over group follows the voice-over when the user names it, renames it or dissolves its group.
-    records = settings.retarget(
-        before, renames,
-        lambda group: log.info("сериал %d: у слитых групп расходящиеся настройки %s — выбор возвращён уровню выше",
-                               series_id, group[0].lever))
-    for source_id in gone:
-        records = settings.without_source(records, source_id)
-    layout = project.layout_episodes(result.rows)
-    if any(summary.status == SourceStatus.READY for summary in result.sources):
-        # Without an answered source the layout says nothing of which episodes exist, so nothing is taken away.
-        records = settings.within_episodes(records, layout)
-    order = {item.source.id: item.source.position for item in inputs}
-    # The membership of an episode follows the rows as well as the levers: what it changes is a change of the episode.
-    was, now = _shape(stored.rows, before, layout, order), _shape(result.rows, records, layout, order)
-    moved = settings.affected(was[0], now[0])
-    headers_changed = was[1] != now[1]
-    rows_changed = result.rows != stored.rows or result.subtitles != stored.subtitles
-    # The time of a reading is stored with the summary but is no change of it: a page read again is no news.
-    shown = [summary.model_copy(update={"read_at": None}) for summary in result.sources]
-    summaries_changed = shown != [each.summary.model_copy(update={"read_at": None}) for each in stored.sources]
-    touched = project.touched_episodes(stored.rows, result.rows) if rows_changed else set()
-    return _Derived(result, gone, records, records != before, orders, moved, headers_changed, rows_changed,
-                    summaries_changed, touched)
-
-
-def _level(stored, records, scope, voices) -> tuple[list, list, Order, list[str]]:
-    """The lines of a level, its levers as it inherits them, the order of players and sources and the groups of its
-    tracks: what its queues are made of (pure, in the pool of computation)."""
-    order = Order(tuple(voices.priority), {each.summary.source_id: place for place, each in enumerate(stored.sources)},
-                  Groups.of(voices.player_groups))
-    orders = project.season_orders(stored.orders, stored.rows, {})
-    groups = (orders.get(scope.season, []) if scope.season is not None
-              else [label for season in sorted(orders) for label in orders[season]])
-    lines = availability.lines_of_level(stored.rows, scope.season, scope.episode)
-    compilation = scope.compilation
-    if scope.episode is not None and compilation is None:
-        # An episode inherits from the compilation it stands in: its queues read the levers of that level.
-        member = compilations.resolve(stored.rows, records, _source_order(stored)).members.get(
-            (scope.season, scope.episode))
-        compilation = member.key if member is not None else None
-    elif compilation is not None:
-        found = parse_compilation_key(compilation)
-        if found is None or found[3] != scope.season:
-            raise ValueError(reason("bad_target", lever=""))
-        lines = [row for row in lines if row.episode_start is not None and found[4] <= row.episode_start <= found[5]
-                 and not row.is_compilation]
-    return (lines, settings.effective(records, scope.season, scope.episode, compilation), order,
-            list(dict.fromkeys(groups)))
-
-
-def _queues_reply(stored, voices, request) -> dict:
-    """The queues of a level, as `composition.queues.get` answers them (pure, in the pool of computation)."""
-    records = settings.canonical(stored.records)
-    lines, levers, order, groups = _level(stored, records, request, voices)
-    reference, by_group = queues.build(lines, levers, order, groups, request.episode)
-    markup, follows = queues.markup(lines, levers, order, request.episode)
-    # The subtitles have a table on the series, on a season and on an episode, each with its own levers over those above it;
-    # a compilation has none of its own: it shows the series'.
-    season = None if request.compilation else request.season
-    subtitles = queues.subtitles(
-        availability.lines_of_level(stored.subtitles, season, request.episode),
-        settings.effective(records, season, request.episode), _source_order(stored), request.episode)
-    return QueuesReply(series_id=request.series_id, season=request.season, episode=request.episode,
-                       compilation=request.compilation, reference=reference, groups=by_group, markup=markup,
-                       markup_follows=follows, subtitles=subtitles).model_dump(mode="json")
-
-
-def _applied(records: list[SettingRecord], writes: list[SettingRecord]) -> list[SettingRecord]:
-    """The records after the writes of one command, in order."""
-    for each in writes:
-        records = settings.apply_set(records, each)
-    return records
-
-
-def _source_order(stored) -> dict[int, int]:
-    """The place of every source of the series, for the rule of compilations."""
-    return {each.source_id: place for place, each in enumerate(stored.sources)}
-
-
-def _effect_of(stored, before, after) -> tuple[set[tuple[int, int]], bool]:
-    """What a change of the records does: the episodes whose levers come out differently (told to consumers), and whether
-    a window has anything new to show. A header that no episode follows still changes on the screen: that is told to
-    windows, not to consumers."""
-    episodes = project.layout_episodes(stored.rows)
-    order = _source_order(stored)
-    was, now = _shape(stored.rows, before, episodes, order), _shape(stored.rows, after, episodes, order)
-    touched = settings.affected(was[0], now[0])
-    return touched, bool(touched) or was[1] != now[1]
-
-
-def _shape(rows, records, episodes, order) -> tuple[list[EpisodeSettings], tuple]:
-    """The levers and the compilation of every episode of the layout, and what the headers of the levels and the blocks
-    of compilations show (told to windows when it changes): of one resolution of the compilations."""
-    outcome = compilations.resolve(rows, records, order)
-    return (settings.episode_settings(records, episodes, outcome.members),
-            (settings.levels(records, {season for season, _ in episodes},
-                             [(view.season, view.ref.key) for view in outcome.views]), outcome.views))
+            return await self._reply_of(topic, payload)
+        except Exception as exc:  # noqa: BLE001
+            self.log.error("запрос %s не выполнен: %s: %s", topic.name, type(exc).__name__, exc)
+            raise _Unavailable(topic.name) from exc

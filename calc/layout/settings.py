@@ -8,7 +8,7 @@ is the absence of a record, so it is asked for by a reset of the lever, never by
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
+from typing import Any, Collection, Iterable, Mapping, NamedTuple, Sequence
 
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, SUBTITLES_ALLOW,
                             SUBTITLES_ORDER, CompilationRef, EffectiveLever, EpisodeSettings, Level,
@@ -134,15 +134,21 @@ def without_source(records: Sequence[SettingRecord], source_id: int) -> list[Set
     return canonical(kept)
 
 
-def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
-             on_conflict: Callable[[list[SettingRecord]], None] | None = None) -> list[SettingRecord]:
+class Retargeted(NamedTuple):
+    """The records after a rename of groups, and the groups of records that could not be one (each of them, as they were)."""
+
+    records: list[SettingRecord]
+    conflicts: list[list[SettingRecord]]
+
+
+def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str]) -> Retargeted:
     """The records after voice-over groups changed their names: what was set for a group (or for a variant of it, or as
     the group of a variant in an order) is set for the group it became. A record that would meet one the new name has already
     set at the same level meets it with the rest. Records of several groups that became one meet each other: a flag that is off
     stands over one that is on (what the user switched off is not switched on by a merge); orders that are the same are
-    one, and orders that differ go back to the level above, which `on_conflict` is told."""
+    one, and orders that differ go back to the level above, and the records of them are the `conflicts`."""
     if not renames:
-        return list(records)
+        return Retargeted(list(records), [])
 
     def renamed_key(key: Any) -> Any:
         found = parse_compilation_key(key)
@@ -193,13 +199,14 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
             arrived[_slot(record)].append(record)
         else:
             settled.append(record)
+    conflicts = []
     for group in arrived.values():
         merged = _merged(group)
         if merged is not None:
             settled.append(merged)
-        elif on_conflict is not None:
-            on_conflict(group)
-    return canonical(settled)
+        else:
+            conflicts.append(group)
+    return Retargeted(canonical(settled), conflicts)
 
 
 def _deduplicated(items: list) -> list:

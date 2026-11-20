@@ -50,7 +50,7 @@ def test_the_user_may_put_an_episode_only_where_the_compilation_takes_it():
 def test_a_renamed_group_takes_its_compilation_keys_along_and_a_gone_source_takes_its_levels():
     comp = key(1, 1, 4)
     records = [rec("reference.order", [], compilation=comp), rec(COMPILATION_MEMBER, comp, episode=2)]
-    moved = settings.retarget(records, {"ПВА ШОУ": "PVA"})
+    moved = settings.retarget(records, {"ПВА ШОУ": "PVA"}).records
     assert {each.compilation for each in moved} == {key(1, 1, 4, group="PVA"), None}
     assert next(each.value for each in moved if each.lever == COMPILATION_MEMBER) == key(1, 1, 4, group="PVA")
     assert settings.without_source(records, 1) == []

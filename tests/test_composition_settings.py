@@ -81,13 +81,13 @@ def canonical_of(records):
 
 
 def test_a_pick_of_a_group_that_takes_the_name_of_an_existing_group_goes_back_to_the_level_above_when_the_picks_differ():
-    told = []
     different = [rec(PLAYER, [{"source_id": 1, "player": "vk"}], target=group_target("A")),
                  rec(PLAYER, [{"source_id": 2, "player": "kodik"}], target=group_target("B"))]
-    assert retarget(different, {"A": "B"}, told.append) == [] and len(told) == 1
+    kept, conflicts = retarget(different, {"A": "B"})
+    assert kept == [] and len(conflicts) == 1
     equal = [rec(PLAYER, [{"source_id": 1, "player": "vk"}], target=group_target("A")),
              rec(PLAYER, [{"source_id": 1, "player": "vk"}], target=group_target("B"))]
-    assert [(each.target, each.value) for each in retarget(equal, {"A": "B"})] == [
+    assert [(each.target, each.value) for each in retarget(equal, {"A": "B"}).records] == [
         (group_target("B"), [{"source_id": 1, "player": "vk"}])]
 
 
@@ -112,7 +112,7 @@ def test_a_source_that_leaves_takes_its_variants_out_of_the_groups_and_a_group_l
 def test_voice_over_groups_that_became_one_make_the_groups_that_share_a_variant_one_group():
     records = [rec(SAME, [[variant("Неизвестная озвучка 1", 1, "vk"), variant("A", 2, "vk")],
                           [variant("A", 2, "vk"), variant("B", 3, "vk")]], season=1)]
-    after = retarget(records, {"Неизвестная озвучка 1": "A"})
+    after = retarget(records, {"Неизвестная озвучка 1": "A"}).records
     assert [each.value for each in after] == [[[variant("A", 1, "vk"), variant("A", 2, "vk"), variant("B", 3, "vk")]]]
     alone = [rec(SAME, [[variant("Неизвестная озвучка 1", 1, "vk"), variant("A", 1, "vk")]], season=1)]
-    assert retarget(alone, {"Неизвестная озвучка 1": "A"}) == []  # one variant is no group: the level above speaks again
+    assert retarget(alone, {"Неизвестная озвучка 1": "A"}).records == []  # one variant is no group: the level above speaks again

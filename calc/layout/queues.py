@@ -10,14 +10,19 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Sequence
 
-from core.contracts import (MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME,
-                            SUBTITLES_ALLOW, SUBTITLES_ORDER, VOICE_ALLOW,
-                            VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, GroupQueue, Level, QueueRow, QueueView,
-                            RowState, group_target, variant_target)
 from calc.subtitle_queue import flags, named_of, ordered
 from calc.variant_queue import VOICE_RANKING, Candidate, Order, Same, ranked, ranked_singles
+from calc.voice_names import Groups
+from core.contracts import (MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME,
+                            SUBTITLES_ALLOW, SUBTITLES_ORDER, VOICE_ALLOW,
+                            VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, GroupQueue, Level, QueueRow, QueuesGet,
+                            QueuesReply, QueueView, RowState, SettingRecord, VoiceSettingsView, availability, group_target,
+                            parse_compilation_key, variant_target)
+from core.reasons import reason
 
+from . import compilations, project, settings
 from .project import spans
+from .stored import Stored, source_order
 
 Variant = tuple[str, int, str]  # (group, source id, player)
 
@@ -125,9 +130,8 @@ def subtitles(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever],
                              stale=spans(stale), allowed=allowed is not False, allowed_level=allowed_level,
                              language=first.language, subtitle_type=first.subtitle_type))
     # The tracks the level takes lie in the container by the one rule of the planner.
-    taken = [row for row in rows if row.allowed]
-    for row, (default, forced) in zip(taken, flags([row.subtitle_type for row in taken])):
-        row.default, row.forced = default, forced
+    marks = iter(flags([row.subtitle_type for row in rows if row.allowed]))
+    rows = [row.model_copy(update=dict(zip(("default", "forced"), next(marks)))) if row.allowed else row for row in rows]
     return QueueView(rows=rows, order_level=order_level)
 
 
@@ -180,3 +184,46 @@ def _episodes(row: CompositionRow, episode: int | None) -> list[int]:
     end = row.episode_end if row.episode_end is not None else row.episode_start
     numbers = range(row.episode_start, max(end, row.episode_start) + 1)
     return [episode] if episode is not None and episode in numbers else ([] if episode is not None else list(numbers))
+
+
+def level_of(stored: Stored, records: Sequence[SettingRecord], scope: QueuesGet, voices: VoiceSettingsView
+             ) -> tuple[list[CompositionRow], list[EffectiveLever], Order, list[str]]:
+    """The lines of a level, its levers as it inherits them, the order of players and sources and the groups of its
+    tracks: what its queues are made of."""
+    order = Order(tuple(voices.priority), {each.summary.source_id: place for place, each in enumerate(stored.sources)},
+                  Groups.of(voices.player_groups))
+    orders = project.season_orders(stored.orders, stored.rows, {})
+    groups = (orders.get(scope.season, []) if scope.season is not None
+              else [label for season in sorted(orders) for label in orders[season]])
+    lines = availability.lines_of_level(stored.rows, scope.season, scope.episode)
+    compilation = scope.compilation
+    if scope.episode is not None and compilation is None:
+        # An episode inherits from the compilation it stands in: its queues read the levers of that level.
+        member = compilations.resolve(stored.rows, records, source_order(stored)).members.get(
+            (scope.season, scope.episode))
+        compilation = member.key if member is not None else None
+    elif compilation is not None:
+        found = parse_compilation_key(compilation)
+        if found is None or found[3] != scope.season:
+            raise ValueError(reason("bad_target", lever=""))
+        lines = [row for row in lines if row.episode_start is not None and found[4] <= row.episode_start <= found[5]
+                 and not row.is_compilation]
+    return (lines, settings.effective(records, scope.season, scope.episode, compilation), order,
+            list(dict.fromkeys(groups)))
+
+
+def reply_of(stored: Stored, voices: VoiceSettingsView, request: QueuesGet) -> QueuesReply:
+    """The queues of a level, as `composition.queues.get` answers them."""
+    records = settings.canonical(stored.records)
+    lines, levers, order, groups = level_of(stored, records, request, voices)
+    reference, by_group = build(lines, levers, order, groups, request.episode)
+    markup_queue, follows = markup(lines, levers, order, request.episode)
+    # The subtitles have a table on the series, on a season and on an episode, each with its own levers over those above it;
+    # a compilation has none of its own: it shows the series'.
+    season = None if request.compilation else request.season
+    subtitle_queue = subtitles(
+        availability.lines_of_level(stored.subtitles, season, request.episode),
+        settings.effective(records, season, request.episode), source_order(stored), request.episode)
+    return QueuesReply(series_id=request.series_id, season=request.season, episode=request.episode,
+                       compilation=request.compilation, reference=reference, groups=by_group, markup=markup_queue,
+                       markup_follows=follows, subtitles=subtitle_queue)

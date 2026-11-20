@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, Iterator, Mapping, Sequence
 
 from core.contracts.composition import LEFT_BEFORE_RULES
-from core.contracts import (CompositionRow, Exclusion, PlayerSummary, SeasonVoiceOrder, VoiceSpan, ReleaseTable, RowState, RowTrack, RuleLine, RuleResult,
+from core.contracts import (CompositionRow, Exclusion, PlayerSummary, SeasonVoiceOrder, VoiceSpan, ReleaseTable, RowTrack, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, line_of, place_of)
 from core.contracts.torrent import order_name
 from calc.voice_names import fold_name

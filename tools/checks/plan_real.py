@@ -23,7 +23,7 @@ from collections import Counter
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from core.contracts import (CompositionGetRequest, CompositionReply, CompositionRow, RulesApplyReply,  # noqa: E402
+from core.contracts import (CompositionGetRequest, CompositionRow, RulesApplyReply,  # noqa: E402
                             SeriesSource, SourceType)
 from core.db import Database  # noqa: E402
 from core.plan import inputs as plan_inputs  # noqa: E402
@@ -31,7 +31,7 @@ from core.plan.files import container_of  # noqa: E402
 from core.plan.tables import Container, Inputs, OnlineRow  # noqa: E402
 from modules.catalog.repository import CatalogRepository  # noqa: E402
 from calc.layout import project  # noqa: E402
-from modules.composition.module import layout_reply  # noqa: E402
+from calc.layout.reply import layout_of  # noqa: E402
 from modules.composition.repository import CompositionRepository  # noqa: E402
 from modules.rules.engine import compile_profile, process_title  # noqa: E402
 from modules.rules.module import result_of  # noqa: E402
@@ -135,7 +135,7 @@ async def inputs_of(real: RealSeries, series_id: int, rules: dict[int, list[dict
     skipped: Counter = Counter()
     rows, info = await real.layout(series_id, rules)
     stored = replace(info["stored"], rows=rows)
-    layout = CompositionReply.model_validate(layout_reply(CompositionGetRequest(series_id=series_id), stored))
+    layout = layout_of(CompositionGetRequest(series_id=series_id), stored)
     voices = editor.view(info["voices"]).model_dump(mode="json")
     online, choices = plan_inputs.planner_inputs(layout, info["card"], voices)
     containers = asset_of(real.path, series_id, list(online))

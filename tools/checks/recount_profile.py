@@ -109,6 +109,7 @@ async def main(series: list[int], base: str, rounds: int, out: str | None) -> No
             (composition.repo, "write", "composition: write the layout"),
             (composition, "_gather", "composition: what the neighbours say (tables, answers, groups)"),
             (composition_module, "_derive", "composition: projection and comparison (pool)"),
+            (composition_module, "derive", "composition: projection and comparison (pool)"),
             (composition_module, "layout_of", "composition: the layout as the model for the planner (pool)"),
             (planner_module, "_inputs_of", "planner: the inputs of the plan from the layout (pool)"),
             (executor, "plan", "planner: the plan (pool)"),
