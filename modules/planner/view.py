@@ -4,11 +4,15 @@ episode and why it is that one (core/plan/marks), the failures and the commands 
 native/src/plan_view.rs) from the goals it counted."""
 from __future__ import annotations
 
-from typing import Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any, Iterable, Mapping
+
+import orjson
 
 from core import native
 from core.contracts import PlanProblem
 from core.plan.executor import SeriesSync
+from core.plan.marks import members_text
 from core.plan.planner import Plan
 from core.plan.tables import OnlineRow
 
@@ -31,12 +35,33 @@ def placed(failed: Iterable[tuple], rows: Iterable[OnlineRow] = ()) -> list[dict
     return native.plan_placed(list(failed), list(rows))
 
 
-def view_of(series_id: int, sync: SeriesSync, shown: tuple | None, *, running: bool,
-            members: Mapping | None = None, problems: Iterable[dict] = ()) -> dict:
-    """The view, as `PlannerView.model_dump(mode="json")` gives it. `shown` is the goals counted (`planner.count`) and the
-    name of each (`shown_of` of a plan), none when no plan was counted; `members` the compilations of the layout by their row
-    (source id, row key)."""
+@dataclass(frozen=True)
+class CountedView:
+    """A view counted: the view and its references as texts of JSON (native.JsonText: what the gateway writes out as they
+    are, read here as the dict and the list they are), and what the card of the series is told of it."""
+
+    view: Any
+    references: Any
+    ready: bool  # a file of the series is in the library
+    work: bool  # the plan has work for a sync, or a command waits
+    error: bool  # an episode lacks what a recorded attempt was for, or a step of the last sync failed for the moment
+    running: bool
+
+
+def counted_view(series_id: int, sync: SeriesSync, shown: tuple | None, *, running: bool,
+                 members: Mapping | None = None, problems: Iterable[dict] = ()) -> CountedView:
+    """The view, as `PlannerView.model_dump(mode="json")` gives it, counted by the core. `shown` is the goals counted
+    (`planner.count`) and the name of each (`shown_of` of a plan), none when no plan was counted; `members` the
+    compilations of the layout by their row (source id, row key)."""
     counted, names = shown if shown is not None else (None, None)
-    return native.plan_view(series_id, running, list(sync.containers.values()), sync.failed, sync.commands,
-                            [PlanProblem.model_validate(each).model_dump(mode="json") for each in problems], counted, names,
-                            {key: each.model_dump(mode="json") for key, each in (members or {}).items()})
+    view, references, (ready, work, error) = native.plan_view(
+        series_id, running, list(sync.containers.values()), sync.failed, sync.commands,
+        orjson.dumps([PlanProblem.model_validate(each).model_dump(mode="json") for each in problems]), counted, names,
+        members_text(members))
+    return CountedView(view, references, ready, work, error, running)
+
+
+def view_of(series_id: int, sync: SeriesSync, shown: tuple | None, *, running: bool,
+            members: Mapping | None = None, problems: Iterable[dict] = ()):
+    """The view alone (`counted_view`)."""
+    return counted_view(series_id, sync, shown, running=running, members=members, problems=problems).view

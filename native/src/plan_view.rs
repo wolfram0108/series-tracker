@@ -3,7 +3,11 @@
 //! and why it is that one (core/plan/marks), the failed attempts placed by the rows, the commands that wait.
 
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::sync::GILOnceCell;
+use pyo3::types::{PyBytes, PyList, PyTuple};
+use serde::Serialize;
+use serde_json::value::RawValue;
+use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -64,46 +68,244 @@ impl Planned {
     }
 }
 
-macro_rules! dict {
-    ($py:expr, { $($key:literal : $value:expr),* $(,)? }) => {{
-        let made = PyDict::new_bound($py);
-        $( made.set_item(pyo3::intern!($py, $key), $value)?; )*
-        made
-    }};
+// --- a text of JSON ----------------------------------------------------------------------------------------------------
+
+/// A value as a text of JSON (`__json__`): what the gateway writes out as it is; read by Python as the value it is (a dict,
+/// a list), made of the text when first read.
+#[pyclass(frozen, module = "core.native", name = "JsonText")]
+pub struct JsonText {
+    text: Py<PyBytes>,
+    value: GILOnceCell<PyObject>,
 }
 
-fn row<'py>(py: Python<'py>, id: &RowId) -> PyResult<Bound<'py, PyDict>> {
-    Ok(dict!(py, {"source_id": id.source, "row_key": id.key.as_str(), "video": id.video.as_str()}))
+impl JsonText {
+    pub fn of(py: Python<'_>, text: &[u8]) -> JsonText {
+        JsonText { text: PyBytes::new_bound(py, text).unbind(), value: GILOnceCell::new() }
+    }
+
+    fn value<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let made = self.value.get_or_try_init(py, || -> PyResult<PyObject> {
+            Ok(py.import_bound("orjson")?.call_method1("loads", (self.text.bind(py),))?.unbind())
+        })?;
+        Ok(made.bind(py).clone())
+    }
 }
 
-fn opt_row(py: Python<'_>, id: Option<&RowId>) -> PyResult<PyObject> {
-    Ok(match id {
-        Some(id) => row(py, id)?.into_any().unbind(),
-        None => py.None(),
-    })
+#[pymethods]
+impl JsonText {
+    fn __json__<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        self.text.bind(py).clone()
+    }
+    fn __getitem__<'py>(&self, py: Python<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        self.value(py)?.get_item(key)
+    }
+    fn __iter__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyIterator>> {
+        self.value(py)?.iter()
+    }
+    fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
+        self.value(py)?.len()
+    }
+    fn __contains__(&self, py: Python<'_>, key: &Bound<'_, PyAny>) -> PyResult<bool> {
+        self.value(py)?.contains(key)
+    }
+    fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+        match other.downcast::<JsonText>() {
+            Ok(other) => Ok(other.get().text.bind(py).as_bytes() == self.text.bind(py).as_bytes()
+                || other.get().value(py)?.eq(self.value(py)?)?),
+            Err(_) => self.value(py)?.eq(other),
+        }
+    }
+    /// What the value is read as besides its items: `keys`, `items`, `get` of a dict.
+    fn __getattr__<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyAny>> {
+        self.value(py)?.getattr(name)
+    }
+    fn __repr__(&self, py: Python<'_>) -> String {
+        format!("JsonText({} bytes)", self.text.bind(py).as_bytes().len())
+    }
 }
 
-fn shot_into(made: &Bound<'_, PyDict>, shot: &Snapshot) -> PyResult<()> {
-    made.set_item(pyo3::intern!(made.py(), "source"), shot.source.as_str())?;
-    made.set_item(pyo3::intern!(made.py(), "player"), shot.player.as_str())?;
-    made.set_item(pyo3::intern!(made.py(), "group"), shot.group.as_deref())?;
-    made.set_item(pyo3::intern!(made.py(), "height"), shot.height)?;
-    made.set_item(pyo3::intern!(made.py(), "link"), shot.link.as_str())?;
-    made.set_item(pyo3::intern!(made.py(), "label"), shot.label.as_str())
+// --- the view ------------------------------------------------------------------------------------------------------------
+// The view is written as the models of core/contracts/planner.py are dumped, field for field in their order, of the data
+// of the core as it is: nothing is copied into a tree of values first.
+
+#[derive(Serialize)]
+struct RowOut<'a> {
+    source_id: i64,
+    row_key: &'a str,
+    video: &'a str,
 }
 
-fn variant(py: Python<'_>, found: Option<&Variant>) -> PyResult<PyObject> {
-    Ok(match found {
-        Some((group, source, player)) => dict!(py, {"group": group.as_str(), "source_id": *source, "player": player.as_str()})
-            .into_any().unbind(),
-        None => py.None(),
-    })
+fn row(id: &RowId) -> RowOut<'_> {
+    RowOut { source_id: id.source, row_key: &id.key, video: &id.video }
 }
 
-fn subtitle<'py>(py: Python<'py>, item: &Subtitle, kind: Option<&str>) -> PyResult<Bound<'py, PyDict>> {
-    Ok(dict!(py, {"row": row(py, &item.row)?, "name": item.name.as_str(), "player": item.player.as_str(),
-                  "language": item.language.as_str(), "subtitle_type": item.subtitle_type.as_str(),
-                  "default": item.default, "forced": item.forced, "kind": kind}))
+#[derive(Serialize)]
+struct VariantOut<'a> {
+    group: &'a str,
+    source_id: i64,
+    player: &'a str,
+}
+
+fn variant(found: &Variant) -> VariantOut<'_> {
+    VariantOut { group: &found.0, source_id: found.1, player: &found.2 }
+}
+
+#[derive(Serialize)]
+struct SubtitleOut<'a> {
+    row: RowOut<'a>,
+    name: &'a str,
+    player: &'a str,
+    language: &'a str,
+    subtitle_type: &'a str,
+    default: bool,
+    forced: bool,
+    kind: Option<&'a str>,
+}
+
+fn subtitle<'a>(item: &'a Subtitle, kind: Option<&'a str>) -> SubtitleOut<'a> {
+    SubtitleOut { row: row(&item.row), name: &item.name, player: &item.player, language: &item.language,
+                  subtitle_type: &item.subtitle_type, default: item.default, forced: item.forced, kind }
+}
+
+#[derive(Serialize)]
+struct AssetVideoOut<'a> {
+    source: &'a str,
+    player: &'a str,
+    group: Option<&'a str>,
+    height: i64,
+    link: &'a str,
+    label: &'a str,
+    row: RowOut<'a>,
+    cut_of: Option<RowOut<'a>>,
+    online: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct AssetTrackOut<'a> {
+    source: &'a str,
+    player: &'a str,
+    group: Option<&'a str>,
+    height: i64,
+    link: &'a str,
+    label: &'a str,
+    row: RowOut<'a>,
+    online: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct AssetOut<'a> {
+    name: &'a str,
+    off: bool,
+    episode: &'a [i64],
+    video: AssetVideoOut<'a>,
+    tracks: Vec<AssetTrackOut<'a>>,
+    timeline: Option<TimelineOut>,
+    subtitles: Vec<SubtitleOut<'a>>,
+}
+
+#[derive(Serialize)]
+struct TimelineOut {
+    group: String,
+    source_id: i64,
+    player: String,
+}
+
+#[derive(Serialize)]
+struct GoalVideoOut<'a> {
+    source: &'a str,
+    player: &'a str,
+    group: Option<&'a str>,
+    height: i64,
+    link: &'a str,
+    label: &'a str,
+    kind: &'a str,
+    row: RowOut<'a>,
+    file: Option<&'a str>,
+    cut_of: Option<RowOut<'a>>,
+}
+
+#[derive(Serialize)]
+struct GoalTrackOut<'a> {
+    source: &'a str,
+    player: &'a str,
+    group: Option<&'a str>,
+    height: i64,
+    link: &'a str,
+    label: &'a str,
+    voice: &'a str,
+    kind: &'a str,
+    row: RowOut<'a>,
+    own: bool,
+}
+
+#[derive(Serialize)]
+struct EpisodeOut<'a> {
+    slot: &'a [i64],
+    name: &'a str,
+    off: bool,
+    video: GoalVideoOut<'a>,
+    tracks: Vec<GoalTrackOut<'a>>,
+    voices_off: Vec<&'a str>,
+    markup: Option<String>,
+    markup_variant: Option<VariantOut<'a>>,
+    subtitles: Vec<SubtitleOut<'a>>,
+    unaligned: Vec<VariantOut<'a>>,
+}
+
+#[derive(Serialize)]
+struct FailureOut<'a> {
+    kind: &'a str,
+    row: RowOut<'a>,
+    video: Option<RowOut<'a>>,
+    episodes: &'a [Slot],
+    voice: Option<&'a str>,
+    variant: Option<VariantOut<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    covered: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct CommandOut<'a> {
+    kind: &'a str,
+    name: &'a str,
+    dub: Option<RowOut<'a>>,
+}
+
+#[derive(Serialize)]
+struct PictureOut<'a> {
+    source_id: i64,
+    player: &'a str,
+    height: i64,
+    voice_group: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct ReferenceOut<'a> {
+    season: i64,
+    episode: i64,
+    part: Option<i64>,
+    mark: &'a str,
+    source_id: Option<i64>,
+    row_key: Option<&'a str>,
+    player: Option<&'a str>,
+    voice_group: Option<&'a str>,
+    height: Option<i64>,
+    reason: Option<String>,
+    compilation: Option<&'a Value>,
+    picture: Option<PictureOut<'a>>,
+    markup: bool,
+}
+
+#[derive(Serialize)]
+struct ViewOut<'a> {
+    series_id: i64,
+    running: bool,
+    references: &'a RawValue,
+    assets: Vec<AssetOut<'a>>,
+    episodes: Vec<EpisodeOut<'a>>,
+    failures: Vec<FailureOut<'a>>,
+    problems: &'a RawValue,
+    commands: Vec<CommandOut<'a>>,
 }
 
 /// What the timeline a file lies on is (core/plan/planner `timeline_shot`).
@@ -124,14 +326,38 @@ fn timeline_variant(container: &Container) -> Option<Variant> {
 }
 
 /// A failed attempt with where it belongs, as the layout the rows are of has it (modules/planner/view `placed`).
-struct Placed {
+struct Placed<'a> {
+    failure: &'a Failure,
+    episodes: Vec<Slot>,
+    voice: Option<&'a str>,
+    variant: Option<&'a Variant>,
+}
+
+impl<'a> Placed<'a> {
+    fn out(&'a self, covered: Option<bool>) -> FailureOut<'a> {
+        let failure = self.failure;
+        FailureOut { kind: &failure.kind, row: row(&failure.row), video: failure.video.as_ref().map(row),
+                     episodes: &self.episodes, voice: self.voice, variant: self.variant.map(variant), covered }
+    }
+}
+
+/// A failed attempt as Python gave it: its key, its kind and rows, and the `repr` of the key it is ordered by.
+struct Failure {
     key: PyObject,
+    repr: String,
     kind: String,
     row: RowId,
     video: Option<RowId>,
-    episodes: Vec<Slot>,
-    voice: Option<String>,
-    variant: Option<Variant>,
+}
+
+fn failures_of(failed: &Bound<'_, PyAny>) -> PyResult<Vec<Failure>> {
+    let mut found: Vec<Failure> = failed.iter()?.map(|key| {
+        let key = key?;
+        Ok(Failure { repr: key.repr()?.extract()?, kind: key.get_item(0)?.extract()?, row: plan_py::rid(&key.get_item(1)?)?,
+                     video: if key.len()? > 2 { Some(plan_py::rid(&key.get_item(2)?)?) } else { None }, key: key.unbind() })
+    }).collect::<PyResult<_>>()?;
+    found.sort_by(|a, b| a.repr.cmp(&b.repr));
+    Ok(found)
 }
 
 fn slots_of(row: &Online) -> Vec<Slot> {
@@ -141,25 +367,18 @@ fn slots_of(row: &Online) -> Vec<Slot> {
     }
 }
 
-/// The failed attempts (keys of Python, in the order of their `repr`) with the episodes their row gives and its group.
-fn placed(failed: &Bound<'_, PyAny>, rows: &[Arc<Online>]) -> PyResult<Vec<Placed>> {
+/// The failed attempts (in the order of the `repr` of their keys) with the episodes their row gives and its group.
+fn placed<'a>(failed: &'a [Failure], rows: &'a [Arc<Online>]) -> Vec<Placed<'a>> {
     let mut by_id: HashMap<&RowId, Vec<&Online>> = HashMap::new();
     for each in rows {
         by_id.entry(&each.id).or_default().push(each);
     }
-    let mut keys: Vec<(String, Bound<'_, PyAny>)> = failed.iter()?
-        .map(|key| { let key = key?; Ok((key.repr()?.extract::<String>()?, key)) }).collect::<PyResult<_>>()?;
-    keys.sort_by(|a, b| a.0.cmp(&b.0));
-    keys.into_iter().map(|(_, key)| {
-        let id = plan_py::rid(&key.get_item(1)?)?;
-        let video = if key.len()? > 2 { Some(plan_py::rid(&key.get_item(2)?)?) } else { None };
-        let held: &[&Online] = by_id.get(&id).map(|each| each.as_slice()).unwrap_or(&[]);
-        let episodes: BTreeSet<Slot> = held.iter().flat_map(|each| slots_of(each)).collect();
-        Ok(Placed {
-            kind: key.get_item(0)?.extract()?, video, episodes: episodes.into_iter().collect(),
-            voice: held.iter().find(|each| !each.group.is_empty()).map(|each| each.group.clone()),
-            variant: held.first().map(|each| each.variant().clone()), row: id, key: key.unbind(),
-        })
+    failed.iter().map(|failure| {
+        let held: &[&Online] = by_id.get(&failure.row).map(|found| found.as_slice()).unwrap_or(&[]);
+        let episodes: BTreeSet<Slot> = held.iter().flat_map(|row| slots_of(row)).collect();
+        Placed { failure, episodes: episodes.into_iter().collect(),
+                 voice: held.iter().find(|row| !row.group.is_empty()).map(|row| row.group.as_str()),
+                 variant: held.first().map(|row| row.variant()) }
     }).collect()
 }
 
@@ -180,10 +399,10 @@ fn covered(episodes: &[Slot], voice: Option<&str>, assets: &[Holds<'_>]) -> bool
 }
 
 /// `core.reasons.reason`: the code and its parameters as one JSON text, in their order.
-fn reason(code: &str, params: &[(&str, serde_json::Value)]) -> String {
-    let mut text = format!("{{\"code\":{}", serde_json::to_string(code).expect("a text"));
+fn reason(code: &str, params: &[(&str, Value)]) -> String {
+    let mut text = format!("{{\"code\":{}", Value::from(code));
     for (name, value) in params {
-        text.push_str(&format!(",\"{name}\":{}", serde_json::to_string(value).expect("a value")));
+        text.push_str(&format!(",\"{name}\":{value}"));
     }
     text.push('}');
     text
@@ -193,8 +412,23 @@ fn episode_of(slot: &Slot) -> Slot {
     slot[..2].to_vec()
 }
 
-/// The reference of every place the layout or the asset has, in the order of season, episode, part (core/plan/marks).
-fn references<'py>(py: Python<'py>, planned: &Planned, members: &Bound<'py, PyDict>) -> PyResult<Bound<'py, PyList>> {
+fn some(text: &str) -> Option<&str> {
+    if text.is_empty() { None } else { Some(text) }
+}
+
+/// The compilations of the layout by their row (source id, row key), as `CompilationRef` dumps them.
+type Members = HashMap<(i64, String), Value>;
+
+fn members_of(text: Option<&[u8]>) -> PyResult<Members> {
+    let Some(text) = text else { return Ok(Members::new()) };
+    let found: Vec<(i64, String, Value)> = serde_json::from_slice(text)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(found.into_iter().map(|(source, key, value)| ((source, key), value)).collect())
+}
+
+/// The reference of every place the layout or the asset has, in the order of season, episode, part (core/plan/marks), as
+/// the text of a list of `Reference`.
+fn references(planned: &Planned, members: &Members) -> Vec<u8> {
     let inputs = &*planned.inputs;
     let choices = &inputs.choices;
     let mut online: HashMap<&RowId, &Online> = HashMap::new();
@@ -217,7 +451,7 @@ fn references<'py>(py: Python<'py>, planned: &Planned, members: &Bound<'py, PyDi
             slots.insert(vec![*season, *episode]);
         }
     }
-    let found = PyList::empty_bound(py);
+    let mut found: Vec<ReferenceOut> = Vec::with_capacity(slots.len());
     for slot in &slots {
         let episode = episode_of(slot);
         let part = slot.get(2).copied();
@@ -229,9 +463,8 @@ fn references<'py>(py: Python<'py>, planned: &Planned, members: &Bound<'py, PyDi
                 "unfit" => Some(reason("reference_unfit", &[])),
                 _ => Some(reason("reference_none", &[])),
             };
-            found.append(dict!(py, {"season": slot[0], "episode": slot[1], "part": part, "mark": mark,
-                "source_id": py.None(), "row_key": py.None(), "player": py.None(), "voice_group": py.None(),
-                "height": py.None(), "reason": why, "compilation": py.None(), "picture": py.None(), "markup": false}))?;
+            found.push(ReferenceOut { season: slot[0], episode: slot[1], part, mark, source_id: None, row_key: None,
+                player: None, voice_group: None, height: None, reason: why, compilation: None, picture: None, markup: false });
             continue;
         };
         let video = &goal.video;
@@ -267,60 +500,45 @@ fn references<'py>(py: Python<'py>, planned: &Planned, members: &Bound<'py, PyDi
         let cut_of: Option<&RowId> = if video.kind == "cut" { video.row.map(|r| &inputs.online[r].id) }
             else { held.and_then(|c| c.video.cut_of.as_ref()) };
         // The picture of a cut video: the row it is cut out of, as the plan has it now or as its file was made.
-        let picture: PyObject = match cut_of {
-            Some(cut) => {
-                let shot = if video.kind == "cut" { video.snapshot.get() } else { &held.expect("a file").video.snapshot };
-                let label = shot.variant_label();
-                dict!(py, {"source_id": cut.source, "player": shot.player.as_str(), "height": shot.height,
-                           "voice_group": if label.is_empty() { None } else { Some(label) }}).into_any().unbind()
-            }
-            None => py.None(),
-        };
-        let compilation: PyObject = match cut_of {
-            Some(cut) => match members.get_item((cut.source, cut.key.as_str()))? {
-                Some(found) => found.unbind(),
-                None => py.None(),
-            },
-            None => py.None(),
-        };
-        let label = snapshot.variant_label();
+        let picture = cut_of.map(|cut| {
+            let shot = if video.kind == "cut" { video.snapshot.get() } else { &held.expect("a file").video.snapshot };
+            PictureOut { source_id: cut.source, player: &shot.player, height: shot.height, voice_group: some(shot.variant_label()) }
+        });
+        let compilation = cut_of.and_then(|cut| members.get(&(cut.source, cut.key.clone())));
         let (player, voice_group, height) = match row {
             Some(row) => (row.player.as_str(), Some(if row.label.is_empty() { row.group.as_str() } else { row.label.as_str() }),
                           row.height),
-            None => (snapshot.player.as_str(), if label.is_empty() { None } else { Some(label) }, snapshot.height),
+            None => (snapshot.player.as_str(), some(snapshot.variant_label()), snapshot.height),
         };
         let markup = goal.markup.as_ref().map_or(false, |m| single.timeline == m.id);
-        found.append(dict!(py, {"season": slot[0], "episode": slot[1], "part": part, "mark": mark,
-            "source_id": single.timeline.source, "row_key": single.timeline.key.as_str(), "player": player,
-            "voice_group": voice_group, "height": height, "reason": why, "compilation": compilation, "picture": picture,
-            "markup": markup}))?;
+        found.push(ReferenceOut { season: slot[0], episode: slot[1], part, mark, source_id: Some(single.timeline.source),
+            row_key: Some(&single.timeline.key), player: Some(player), voice_group, height: Some(height), reason: why,
+            compilation, picture, markup });
     }
-    Ok(found)
+    serde_json::to_vec(&found).expect("a list of references")
 }
 
-/// The reference of every episode (core/plan/marks `references_of`), as `Reference` dumps it.
+/// The reference of every episode (core/plan/marks `references_of`), as `Reference` dumps them: `members` the JSON of
+/// [[source id, row key, compilation]].
 #[pyfunction]
-pub fn plan_references<'py>(py: Python<'py>, planned: &Planned, members: &Bound<'py, PyDict>) -> PyResult<Bound<'py, PyList>> {
-    references(py, planned, members)
-}
-
-fn placed_py<'py>(py: Python<'py>, each: &Placed) -> PyResult<Bound<'py, PyDict>> {
-    let episodes = PyList::empty_bound(py);
-    for slot in &each.episodes {
-        episodes.append(PyList::new_bound(py, slot))?;
-    }
-    Ok(dict!(py, {"kind": each.kind.as_str(), "row": row(py, &each.row)?, "video": opt_row(py, each.video.as_ref())?,
-                  "episodes": episodes, "voice": each.voice.as_deref(), "variant": variant(py, each.variant.as_ref())?}))
+#[pyo3(signature = (planned, members=None))]
+pub fn plan_references(py: Python<'_>, planned: &Planned, members: Option<&[u8]>) -> PyResult<JsonText> {
+    let members = members_of(members)?;
+    let made = py.allow_threads(|| references(planned, &members));
+    Ok(JsonText::of(py, &made))
 }
 
 /// The failed attempts with where each belongs (modules/planner/view `placed`): each with its `key`.
 #[pyfunction]
 pub fn plan_placed<'py>(py: Python<'py>, failed: &Bound<'py, PyAny>, rows: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyList>> {
     let rows = crate::plan_inputs::rows_of(rows)?;
+    let failures = failures_of(failed)?;
     let found = PyList::empty_bound(py);
-    for each in placed(failed, &rows)? {
-        let made = placed_py(py, &each)?;
-        made.set_item(pyo3::intern!(made.py(), "key"), each.key.bind(py))?;
+    let loads = py.import_bound("orjson")?.getattr("loads")?;
+    for each in placed(&failures, &rows) {
+        let text = serde_json::to_vec(&each.out(None)).expect("a failure");
+        let made = loads.call1((PyBytes::new_bound(py, &text),))?;
+        made.set_item("key", each.failure.key.bind(py))?;
         found.append(made)?;
     }
     Ok(found)
@@ -346,17 +564,25 @@ pub fn plan_covered(failure: &Bound<'_, PyAny>, assets: &Bound<'_, PyAny>) -> Py
     Ok(covered(&episodes, voice.as_deref(), &holds))
 }
 
-/// The view of the window (core/contracts/planner.PlannerView, as `model_dump(mode="json")` gives it): `containers` the
-/// asset, `failed` the attempts recorded, `commands` the commands «Удалить», `problems` the steps of the last sync that
-/// failed for the moment (dumped); `planned` the goals the plan counted and `names` the name of each, none when no plan was
-/// counted; `members` the compilations of the layout by their row (source id, row key), dumped.
+/// A command «Удалить» as Python gave it, with the `repr` it is ordered by.
+struct Command {
+    repr: String,
+    kind: String,
+    name: String,
+    dub: Option<RowId>,
+}
+
+/// The view of the window (core/contracts/planner.PlannerView, as `model_dump(mode="json")` gives it), as a text of JSON,
+/// with the references alone and what the card of the series is told of the view: (view, references, (ready, work,
+/// error)). `containers` the asset, `failed` the attempts recorded, `commands` the commands «Удалить», `problems` the JSON
+/// of the steps of the last sync that failed for the moment (dumped); `planned` the goals the plan counted and `names` the
+/// name of each, none when no plan was counted; `members` the JSON of [[source id, row key, compilation]].
 #[pyfunction]
 #[pyo3(signature = (series_id, running, containers, failed, commands, problems, planned=None, names=None, members=None))]
 #[allow(clippy::too_many_arguments)]
-pub fn plan_view<'py>(py: Python<'py>, series_id: i64, running: bool, containers: &Bound<'py, PyAny>,
-                      failed: &Bound<'py, PyAny>, commands: &Bound<'py, PyAny>, problems: &Bound<'py, PyAny>,
-                      planned: Option<&Planned>, names: Option<Vec<String>>, members: Option<&Bound<'py, PyDict>>)
-                      -> PyResult<Bound<'py, PyDict>> {
+pub fn plan_view(py: Python<'_>, series_id: i64, running: bool, containers: &Bound<'_, PyAny>, failed: &Bound<'_, PyAny>,
+                 commands: &Bound<'_, PyAny>, problems: &[u8], planned: Option<&Planned>, names: Option<Vec<String>>,
+                 members: Option<&[u8]>) -> PyResult<(JsonText, JsonText, (bool, bool, bool))> {
     // A file the plan was counted with is the one read then; another one (a sync under way changed it) is read now.
     let known: HashMap<usize, usize> = planned.map(|p| p.files.iter().enumerate().map(|(at, f)| (f.as_ptr() as usize, at))
         .collect()).unwrap_or_default();
@@ -372,6 +598,26 @@ pub fn plan_view<'py>(py: Python<'py>, series_id: i64, running: bool, containers
             }
         }
     }
+    let failures = failures_of(failed)?;
+    let mut waiting: Vec<Command> = commands.iter()?.map(|each| {
+        let each = each?;
+        Ok(Command { repr: each.repr()?.extract()?, kind: each.get_item(0)?.extract()?, name: each.get_item(1)?.extract()?,
+                     dub: if each.len()? > 2 { Some(plan_py::rid(&each.get_item(2)?)?) } else { None } })
+    }).collect::<PyResult<_>>()?;
+    waiting.sort_by(|a, b| a.repr.cmp(&b.repr));
+    let problems: Box<RawValue> = serde_json::from_slice(problems)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    let members = members_of(members)?;
+    let (view, references, flags) = py.allow_threads(|| {
+        view_of(series_id, running, &files, &read, &failures, &waiting, &problems, planned, names.as_deref(), &members)
+    });
+    Ok((JsonText::of(py, &view), JsonText::of(py, &references), flags))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn view_of(series_id: i64, running: bool, files: &[(bool, usize)], read: &[Container], failures: &[Failure],
+           waiting: &[Command], problems: &RawValue, planned: Option<&Planned>, names: Option<&[String]>, members: &Members)
+           -> (Vec<u8>, Vec<u8>, (bool, bool, bool)) {
     let mut asset: Vec<&Container> = files.iter()
         .map(|(theirs, at)| if *theirs { &planned.expect("a plan").inputs.containers[*at] } else { &read[*at] }).collect();
     asset.sort_by(|a, b| a.name.cmp(&b.name));
@@ -379,70 +625,55 @@ pub fn plan_view<'py>(py: Python<'py>, series_id: i64, running: bool, containers
     let online: Option<HashSet<&RowId>> = planned.map(|p| p.inputs.online.iter().filter(|r| r.current).map(|r| &r.id).collect());
     let is_online = |id: &RowId| online.as_ref().map(|set| set.contains(id));
 
-    let assets = PyList::empty_bound(py);
-    for container in &asset {
+    let assets: Vec<AssetOut> = asset.iter().map(|container| {
         let video = &container.video;
-        let shown = dict!(py, {});
-        shot_into(&shown, &video.snapshot)?;
-        shown.set_item(pyo3::intern!(shown.py(), "row"), row(py, &video.id)?)?;
-        shown.set_item(pyo3::intern!(shown.py(), "cut_of"), opt_row(py, video.cut_of.as_ref())?)?;
-        shown.set_item(pyo3::intern!(shown.py(), "online"), is_online(&video.id))?;
-        let tracks = PyList::empty_bound(py);
-        for track in &container.tracks {
-            let made = dict!(py, {});
-            shot_into(&made, &track.snapshot)?;
-            made.set_item(pyo3::intern!(made.py(), "row"), row(py, &track.dub)?)?;
-            made.set_item(pyo3::intern!(made.py(), "online"), is_online(&track.dub))?;
-            tracks.append(made)?;
+        let shot = &video.snapshot;
+        AssetOut {
+            name: &container.name, off: container.off, episode: &video.episode,
+            video: AssetVideoOut { source: &shot.source, player: &shot.player, group: shot.group.as_deref(), height: shot.height,
+                link: &shot.link, label: &shot.label, row: row(&video.id), cut_of: video.cut_of.as_ref().map(row),
+                online: is_online(&video.id) },
+            tracks: container.tracks.iter().map(|track| {
+                let shot = &track.snapshot;
+                AssetTrackOut { source: &shot.source, player: &shot.player, group: shot.group.as_deref(), height: shot.height,
+                    link: &shot.link, label: &shot.label, row: row(&track.dub), online: is_online(&track.dub) }
+            }).collect(),
+            timeline: timeline_variant(container).map(|(group, source_id, player)| TimelineOut { group, source_id, player }),
+            subtitles: container.subtitles.iter().map(|item| subtitle(item, None)).collect(),
         }
-        let subtitles = PyList::empty_bound(py);
-        for item in &container.subtitles {
-            subtitles.append(subtitle(py, item, None)?)?;
-        }
-        assets.append(dict!(py, {"name": container.name.as_str(), "off": container.off,
-            "episode": PyList::new_bound(py, &video.episode), "video": shown, "tracks": tracks,
-            "timeline": variant(py, timeline_variant(container).as_ref())?, "subtitles": subtitles}))?;
-    }
+    }).collect();
 
-    let episodes = PyList::empty_bound(py);
-    if let (Some(planned), Some(names)) = (planned, names.as_ref()) {
+    let mut episodes = Vec::new();
+    let mut work = !waiting.is_empty();
+    if let (Some(planned), Some(names)) = (planned, names) {
         let inputs = &*planned.inputs;
         for (goal, name) in planned.goals.iter().zip(names) {
             let way = &goal.video;
             let held = way.container.map(|c| &inputs.containers[c]);
-            let video = dict!(py, {});
-            shot_into(&video, way.snapshot.get())?;
-            video.set_item(pyo3::intern!(video.py(), "kind"), way.kind)?;
-            video.set_item(pyo3::intern!(video.py(), "row"), row(py, &way.timeline)?)?;
-            video.set_item(pyo3::intern!(video.py(), "file"), held.map(|c| c.name.as_str()))?;
+            let shot = way.snapshot.get();
             let cut_of = if way.kind == "cut" { way.row.map(|r| &inputs.online[r].id) }
                 else { held.and_then(|c| c.video.cut_of.as_ref()) };
-            video.set_item(pyo3::intern!(video.py(), "cut_of"), opt_row(py, cut_of)?)?;
-            let tracks = PyList::empty_bound(py);
-            for track in &goal.tracks {
-                let made = dict!(py, {});
-                shot_into(&made, track.snapshot.get())?;
-                made.set_item(pyo3::intern!(made.py(), "voice"), track.voice.as_str())?;
-                made.set_item(pyo3::intern!(made.py(), "kind"), track.kind)?;
-                made.set_item(pyo3::intern!(made.py(), "row"), row(py, &track.dub)?)?;
-                made.set_item(pyo3::intern!(made.py(), "own"), track.own)?;
-                tracks.append(made)?;
-            }
-            let mut voices_off = goal.voices_off.clone();
+            // What the card is told: the plan has work for the next sync.
+            work |= way.kind != "asset" || goal.tracks.iter().any(|track| track.kind != "reuse");
+            let mut voices_off: Vec<&str> = goal.voices_off.iter().map(String::as_str).collect();
             voices_off.sort();
-            let subtitles = PyList::empty_bound(py);
-            for way in &goal.subtitles {
-                subtitles.append(subtitle(py, &way.subtitle, Some(way.kind))?)?;
-            }
-            let unaligned = PyList::empty_bound(py);
-            for each in &goal.unaligned {
-                unaligned.append(variant(py, Some(each))?)?;
-            }
-            episodes.append(dict!(py, {"slot": PyList::new_bound(py, &goal.slot), "name": name.as_str(), "off": goal.off,
-                "video": video, "tracks": tracks, "voices_off": voices_off,
-                "markup": goal.markup.as_ref().map(|m| voice_of(m.group.as_deref(), &m.id)),
-                "markup_variant": variant(py, goal.markup.as_ref().and_then(|m| m.variant.as_ref()))?,
-                "subtitles": subtitles, "unaligned": unaligned}))?;
+            episodes.push(EpisodeOut {
+                slot: &goal.slot, name, off: goal.off,
+                video: GoalVideoOut { source: &shot.source, player: &shot.player, group: shot.group.as_deref(),
+                    height: shot.height, link: &shot.link, label: &shot.label, kind: way.kind, row: row(&way.timeline),
+                    file: held.map(|c| c.name.as_str()), cut_of: cut_of.map(row) },
+                tracks: goal.tracks.iter().map(|track| {
+                    let shot = track.snapshot.get();
+                    GoalTrackOut { source: &shot.source, player: &shot.player, group: shot.group.as_deref(), height: shot.height,
+                        link: &shot.link, label: &shot.label, voice: &track.voice, kind: track.kind, row: row(&track.dub),
+                        own: track.own }
+                }).collect(),
+                voices_off,
+                markup: goal.markup.as_ref().map(|m| voice_of(m.group.as_deref(), &m.id)),
+                markup_variant: goal.markup.as_ref().and_then(|m| m.variant.as_ref()).map(variant),
+                subtitles: goal.subtitles.iter().map(|way| subtitle(&way.subtitle, Some(way.kind))).collect(),
+                unaligned: goal.unaligned.iter().map(variant).collect(),
+            });
         }
     }
 
@@ -452,26 +683,23 @@ pub fn plan_view<'py>(py: Python<'py>, series_id: i64, running: bool, containers
             .collect(),
     }).collect();
     let rows: &[Arc<Online>] = planned.map(|p| p.inputs.online.as_slice()).unwrap_or(&[]);
-    let failures = PyList::empty_bound(py);
-    for each in placed(failed, rows)? {
-        let made = placed_py(py, &each)?;
-        made.set_item(pyo3::intern!(made.py(), "covered"), covered(&each.episodes, each.voice.as_deref(), &holds))?;
-        failures.append(made)?;
-    }
-
-    let mut waiting: Vec<(String, Bound<'py, PyAny>)> = commands.iter()?
-        .map(|each| { let each = each?; Ok((each.repr()?.extract::<String>()?, each)) }).collect::<PyResult<_>>()?;
-    waiting.sort_by(|a, b| a.0.cmp(&b.0));
-    let shown_commands = PyList::empty_bound(py);
-    for (_, each) in waiting {
-        let dub: PyObject = if each.len()? > 2 { row(py, &plan_py::rid(&each.get_item(2)?)?)?.into_any().unbind() } else { py.None() };
-        shown_commands.append(dict!(py, {"kind": each.get_item(0)?, "name": each.get_item(1)?, "dub": dub}))?;
-    }
-
-    let references = match (planned, names.as_ref()) {
-        (Some(planned), Some(_)) => references(py, planned, &members.cloned().unwrap_or_else(|| PyDict::new_bound(py)))?,
-        _ => PyList::empty_bound(py),
+    let placed = placed(failures, rows);
+    let mut lacking = false;
+    let shown_failures: Vec<FailureOut> = placed.iter().map(|each| {
+        let held = covered(&each.episodes, each.voice, &holds);
+        lacking |= !held;
+        each.out(Some(held))
+    }).collect();
+    let commands: Vec<CommandOut> = waiting.iter()
+        .map(|each| CommandOut { kind: &each.kind, name: &each.name, dub: each.dub.as_ref().map(row) }).collect();
+    let references = match (planned, names) {
+        (Some(planned), Some(_)) => references(planned, members),
+        _ => b"[]".to_vec(),
     };
-    Ok(dict!(py, {"series_id": series_id, "running": running, "references": references, "assets": assets,
-                  "episodes": episodes, "failures": failures, "problems": problems, "commands": shown_commands}))
+    let referenced: &RawValue = serde_json::from_slice(&references).expect("the text of the references");
+    let failing = serde_json::from_str::<Vec<&RawValue>>(problems.get()).map_or(false, |found| !found.is_empty());
+    let flags = (!assets.is_empty(), work, lacking || failing);
+    let view = ViewOut { series_id, running, references: referenced, assets, episodes, failures: shown_failures,
+                         problems, commands };
+    (serde_json::to_vec(&view).expect("a view"), references, flags)
 }

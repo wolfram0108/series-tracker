@@ -305,7 +305,7 @@ class World(SeriesSync):
             again = restricted(again, step.holds)
         assert repr(again) == repr(step.plan), "the plan is not a function of its inputs"
         # Whatever the plan is, the window is told it in the terms of its contract.
-        PlannerView.model_validate(view_of(0, self, shown_of(step.plan), running=False))
+        PlannerView.model_validate_json(view_of(0, self, shown_of(step.plan), running=False).__json__())
         online = {row.id: row for row in step.online}
 
         def slot_of_track(track: Track) -> Slot:

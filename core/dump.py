@@ -10,6 +10,8 @@ import enum
 from collections.abc import Sequence
 from typing import Any
 
+import orjson
+
 
 def plain(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, float, str)):
@@ -19,6 +21,8 @@ def plain(value: Any) -> Any:
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {"@": type(value).__name__,
                 **{each.name: plain(getattr(value, each.name)) for each in dataclasses.fields(value)}}
+    if hasattr(type(value), "__json__"):  # a value kept as its text of JSON (core.native.JsonText)
+        return orjson.loads(value.__json__())
     named = getattr(type(value), "__fields__", None)
     if isinstance(named, (list, tuple)):
         return {"@": type(value).__name__, **{name: plain(getattr(value, name)) for name in named}}

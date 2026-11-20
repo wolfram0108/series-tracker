@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Mapping
 
+import orjson
+
 from core import native
 from core.contracts import CompilationRef, Reference
 
@@ -20,5 +22,9 @@ def references_of(made: Plan, members: Mapping[tuple[int, str], CompilationRef] 
     """One reference for every place the layout or the asset has, in the order of season, episode, part, counted by the core
     (native/src/plan_view.rs) from the goals of the plan. `members` are the compilations of the layout by their row (source
     id, row key), for the episode whose video is cut out of one."""
-    return [Reference.model_validate(each) for each in native.plan_references(
-        made.counted, {key: each.model_dump(mode="json") for key, each in (members or {}).items()})]
+    return [Reference.model_validate(each) for each in native.plan_references(made.counted, members_text(members))]
+
+
+def members_text(members: Mapping[tuple[int, str], CompilationRef] | None) -> bytes:
+    """The compilations of the layout by their row, as the core reads them: [[source id, row key, compilation]]."""
+    return orjson.dumps([[key[0], key[1], each.model_dump(mode="json")] for key, each in (members or {}).items()])
