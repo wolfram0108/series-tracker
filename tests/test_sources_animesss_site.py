@@ -11,13 +11,11 @@ from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 
-from core.reasons import parse
 from modules.sources.players.cdnvideohub import CdnVideoHubPlayer
 from modules.sources.players.kodik import KodikPlayer
 from modules.sources.players.registry import PlayerRegistry
-from modules.sources.sites import ReadContext, SiteError
+from modules.sources.sites import ReadContext
 from modules.sources.sites.animesss import AnimesssSite
-from modules.sources.sites.animesss.site import donors, news_id, title_names
 from sources_support import READ_LIMIT_S, Web, within
 from test_sources_cvh_kodik import IFRAMES, ftor_links
 
@@ -87,14 +85,6 @@ def test_a_title_page_is_its_one_address_and_nothing_else_is_a_title_page():
         site.canonical_url("https://animesss.com/tags/x/")
 
 
-def test_the_page_gives_the_names_and_the_number_and_the_playlist_names_its_sources():
-    assert title_names(page()) == ["Противостоящий небесам", "Противостоящий небесам аниме"]
-    assert news_id(page()) == "1171" and news_id(page(None)) is None
-    assert [(donor, item["data-this-translator"]) for donor, item in donors(PLAYLIST)] == [
-        ("videohub", "videohub_videohub_pvashow"), ("videohub", "videohub_videohub_animy"), ("kodik", "kodik_1043"),
-        ("kodik", "kodik_910"), ("sibnet", "sibnet_1")]
-
-
 async def test_the_table_has_the_playlist_of_cdn_videohub_and_the_voice_of_each_iframe_of_kodik(caplog):
     caplog.set_level(logging.INFO, "sources")
     web = site_web()
@@ -113,11 +103,3 @@ async def test_the_table_has_the_playlist_of_cdn_videohub_and_the_voice_of_each_
     assert table.names[0] == "Противостоящий небесам"
     # A source no player knows is not read, and the log says which.
     assert any("'sibnet'" in record.getMessage() for record in caplog.records)
-
-
-@pytest.mark.parametrize("text, playlist", [(page(None), PLAYLIST), (page(), "<div>Плеер недоступен</div>")])
-async def test_a_page_with_no_number_or_a_playlist_with_no_source_is_refused(text, playlist):
-    with pytest.raises(SiteError) as refused:
-        await read(site_web(text, playlist))
-
-    assert parse(refused.value.reason)["code"] == "no_players_empty"

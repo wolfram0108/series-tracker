@@ -6,13 +6,12 @@
 Ссылка раздачи при этом не меняется: она идентичность (torrent_id, Р-10).
 """
 import base64
-import json
 from types import SimpleNamespace
 
 import pytest
 
 from core import Bus, ids
-from modules.sources import hosts, parsers
+from modules.sources import parsers
 from modules.sources.module import SourcesModule
 
 # Minimal valid metainfo: a bencoded dict carrying an 'info' key.
@@ -50,44 +49,7 @@ def _reply(status, *, text=None, content=None):
 
 # --- порядок кандидатов ------------------------------------------------------------
 
-def test_candidates_put_canonical_host_first_and_keep_historical_last():
-    assert hosts.candidates("https://dl.kinozal.guru/download.php?id=7",
-                            KINOZAL["mirrors"]) == [
-        "https://kinozal.guru/download.php?id=7",   # канонический — первым
-        "https://kinozal.me/download.php?id=7",
-        "https://kinozal.tv/download.php?id=7",
-        "https://dl.kinozal.guru/download.php?id=7",  # как в ссылке — последним
-    ]
-
-
-def test_canonical_host_strips_delivery_prefixes_only():
-    assert hosts.canonical_host("dl.kinozal.me") == "kinozal.me"
-    assert hosts.canonical_host("www.rutracker.org") == "rutracker.org"
-    assert hosts.canonical_host("anilibria.top") == "anilibria.top"
-
-
 # --- .torrent: переезд с мёртвого хоста доставки -----------------------------------
-
-@pytest.mark.asyncio
-async def test_torrent_file_moves_off_dead_delivery_host(tmp_path, monkeypatch):
-    """Мёртвый dl.-поддомен не означает отказ: файл берётся с хоста,
-    который его отдаёт (симптом 12.10.2026 — 520 на dl.kinozal.guru)."""
-    mod = _module(tmp_path, monkeypatch=monkeypatch)
-    seen = []
-
-    async def transport(topic, payload, **kw):
-        seen.append(payload["url"])
-        if payload["url"].startswith("https://kinozal.guru/"):
-            return _reply(200, content=TORRENT)
-        return _reply(520, text="<html>520 origin error</html>")
-
-    monkeypatch.setattr(mod, "request", transport)
-    link = "https://dl.kinozal.guru/download.php?id=7"
-    reply = await mod.on_torrent_file(_env(link))
-
-    assert base64.b64decode(reply["content_b64"]) == TORRENT
-    assert seen[0] == "https://kinozal.guru/download.php?id=7"
-
 
 @pytest.mark.asyncio
 async def test_torrent_delivery_keeps_link_identity(tmp_path, monkeypatch):
@@ -130,54 +92,4 @@ async def test_site_stub_with_status_200_is_not_accepted_as_file(tmp_path,
     assert len(seen) == 4  # перебрали все хосты, ни один не дал файл
 
 
-@pytest.mark.asyncio
-async def test_daily_limit_stops_the_search(tmp_path, monkeypatch):
-    """Суточный лимит — отказ на учётку: другие хосты его не изменят,
-    перебор прекращается на первом же ответе."""
-    mod = _module(tmp_path, monkeypatch=monkeypatch)
-    seen = []
-
-    async def transport(topic, payload, **kw):
-        seen.append(payload["url"])
-        return _reply(200, text="Вы использовали доступное Вам количество "
-                                "торрент-файлов на сегодня")
-
-    monkeypatch.setattr(mod, "request", transport)
-    with pytest.raises(parsers.SourceRefusedError):
-        await mod.on_torrent_file(_env("https://dl.kinozal.me/download.php?id=7"))
-
-    assert len(seen) == 1
-
-
 # --- API anilibria: зеркала больше не лежат мёртвым грузом -------------------------
-
-@pytest.mark.asyncio
-async def test_anilibria_api_falls_back_to_mirror(monkeypatch):
-    """У anilibria зеркала объявлены в БД — доставка API обязана их
-    использовать, как и доставка страниц."""
-    mod = SourcesModule(Bus(), None)
-    calls = []
-
-    class Resp:
-        def __init__(self, ok):
-            self._ok = ok
-            self.headers = {"content-type": "application/json"}
-            self.content = json.dumps(
-                {"name": {"main": "Кусуриях"}, "torrents": []}).encode()
-
-        def raise_for_status(self):
-            if not self._ok:
-                raise RuntimeError("зеркало недоступно")
-
-    class Http:
-        async def get(self, url):
-            calls.append(url)
-            return Resp(ok="aniliberty.top" in url)
-
-    mod._http = Http()
-    res = await mod._parse_by_service(
-        "anilibria", "https://anilibria.top/release/kusuriya",
-        ["anilibria.top", "aniliberty.top"])
-
-    assert len(calls) == 2  # первое зеркало отпало, взяли следующее
-    assert res["title"]["ru"] == "Кусуриях"

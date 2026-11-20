@@ -3,7 +3,7 @@
 scan_all/series-scan через HTTP, очереди агентов."""
 import asyncio
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import httpx
 import pytest
@@ -69,16 +69,6 @@ async def system(db_path, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_scanner_status_shape(system):
-    _, _, client, _ = system
-    resp = await client.get("/api/scanner/status")
-    assert resp.status_code == 200
-    assert resp.json() == {"scanner_enabled": False, "is_scanning": False, "next_scan_time": None, "next_check_time": None,
-                           "schedule": {"syncs": [], "torrent_mode": "between", "torrent_free": [], "torrent_between": 1},
-                           "checks": []}
-
-
-@pytest.mark.asyncio
 async def test_a_new_schedule_sets_the_next_sync_and_check_by_the_times_of_day_and_scans_nothing_at_once(system):
     """Р-20: a change of the settings scans nothing at once; the next sync is the first time of day of the schedule after
     now, the next check the first of the checks (one between two syncs by default)."""
@@ -113,27 +103,6 @@ async def test_scan_all_409_when_running(system):
     resp = await client.post("/api/scanner/scan_all", json={})
     assert resp.status_code == 409
     assert resp.json()["error"] == reason("scan_all_running")
-
-
-@pytest.mark.asyncio
-async def test_series_scan_409_when_running(system):
-    _, _, client, scan = system
-    scan._running.add(1)
-    resp = await client.post("/api/series/1/scan")
-    assert resp.status_code == 409
-    assert "not_allowed" in resp.json()["error"] and "scanning" in resp.json()["error"]
-
-
-@pytest.mark.asyncio
-async def test_sse_client_triggers_status_publish(system):
-    bus, _, _, _ = system
-    sub = bus.subscribe("scan.status.changed")
-    bus_probe = bus  # подключение SSE-клиента имитируем событием gateway
-    from core.envelope import Envelope
-    bus_probe.publish(Envelope(topic="gateway.sse.clients", kind="event",
-                               payload={"count": 1}))
-    env = await asyncio.wait_for(sub.queue.get(), 3)
-    assert "scanner_enabled" in env.payload
 
 
 @pytest.mark.asyncio

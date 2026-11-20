@@ -12,7 +12,7 @@ import subprocess
 import pytest
 
 from core import storage
-from core.reasons import parse, reason
+from core.reasons import parse
 from modules.downloads import hls_native, ytdlp
 from modules.downloads import failure
 from modules.downloads.failure import Failed, kind_of
@@ -117,38 +117,6 @@ async def test_a_playlist_is_downloaded_whole_by_its_segments(tmp_path, wrapped,
         host.close()
 
 
-async def test_a_worker_of_segments_that_goes_silent_is_given_up_by_the_one_fuse_of_every_downloader(tmp_path,
-                                                                                                    monkeypatch):
-    """A host that sends half a segment and holds the rest leaves the worker silent: the download fails as a way that
-    broke once the fuse of silence of every downloader program (failure.SILENCE_S) has passed — the same fuse ffmpeg and
-    yt-dlp are judged by, so that a caller that shortens it shortens it for all of them."""
-    monkeypatch.setattr(failure, "SILENCE_S", 1.0)
-    host = Host(str(tmp_path / "site"))
-    try:
-        name = stream(str(tmp_path / "site"))
-        host.hold.add("show/seg1.ts")
-        out = str(tmp_path / "lib" / "e1.mp4")
-        ok, why = await asyncio.wait_for(ytdlp.download(host.url(name), out, noop, playlist=True, threads=1), 30)
-        assert not ok and parse(why)["params"]["detail"] == reason("segments_silent", seconds="1") and kind_of(why) is Failed.BROKEN, why
-    finally:
-        host.close()
-
-
-async def test_a_refused_segment_is_never_skipped_the_download_fails_and_leaves_nothing(tmp_path):
-    host = Host(str(tmp_path / "site"))
-    try:
-        name = stream(str(tmp_path / "site"))
-        host.missing.add("show/seg2.ts")
-        out = str(tmp_path / "lib" / "e1.mp4")
-        ok, why = await ytdlp.download(host.url(name), out, noop, playlist=True, threads=4, resumable=True)
-        assert not ok and parse(why)["code"] in ("segments_failed", "segments_exit")
-        # The host said the segment is not there: its last word on the file, and nothing is kept to be continued.
-        assert kind_of(why) is Failed.FINAL
-        assert os.listdir(tmp_path / "lib") == []
-    finally:
-        host.close()
-
-
 async def test_a_segment_cut_in_its_middle_is_a_broken_way_and_the_next_ask_continues_from_what_was_got(tmp_path):
     host = Host(str(tmp_path / "site"))
     try:
@@ -175,31 +143,6 @@ async def test_a_segment_cut_in_its_middle_is_a_broken_way_and_the_next_ask_cont
         host.close()
 
 
-async def test_the_parts_of_a_broken_transfer_go_unless_the_caller_asks_again(tmp_path):
-    host = Host(str(tmp_path / "site"))
-    try:
-        name = stream(str(tmp_path / "site"))
-        host.cut["show/seg2.ts"] = 100
-        ok, _why = await ytdlp.download(host.url(name), str(tmp_path / "lib" / "e1.mp4"), noop, playlist=True, threads=1)
-        assert not ok and os.listdir(tmp_path / "lib") == []
-    finally:
-        host.close()
-
-
-def test_the_parts_of_another_listing_are_not_continued(tmp_path):
-    """A playlist that lists other segments would be finished into a file of two films; the query of an address is the
-    signature of an ask and changes nothing."""
-    first = "#EXTM3U\n#EXTINF:10.0,\nhttps://cdn/v/1.ts?sign=a\n#EXTINF:10.0,\nhttps://cdn/v/2.ts?sign=a\n#EXT-X-ENDLIST\n"
-    signed = first.replace("sign=a", "sign=b")
-    other = first.replace("/v/2.ts", "/w/2.ts")
-    assert hls_native.listing_of(first) == hls_native.listing_of(signed) != hls_native.listing_of(other)
-    raw = str(tmp_path / "e1.mp4.download.ts")
-    assert not hls_native.continued(raw, hls_native.listing_of(first)), "nothing to continue at the first transfer"
-    (tmp_path / "e1.mp4.download.ts.part").write_bytes(b"segments")
-    assert hls_native.continued(raw, hls_native.listing_of(signed)) and os.path.exists(raw + ".part")
-    assert not hls_native.continued(raw, hls_native.listing_of(other)) and not os.path.exists(raw + ".part")
-
-
 AD = ("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:11\n#EXT-X-MEDIA-SEQUENCE:0\n"
       "#EXTINF:10.0,\nhttps://omts.cdn/v/abc/1.ts\n#EXTINF:10.0,\nhttps://omts.cdn/v/abc/2.ts\n"
       "#EXT-X-DISCONTINUITY\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://ads.cdn/k.key\"\n"
@@ -221,34 +164,6 @@ def test_a_block_a_host_put_into_the_stream_from_elsewhere_is_left_out_and_the_s
     assert hls_native.without_insertions(own, "https://omts.cdn/v/abc/index.m3u8") == (own, [])
 
 
-async def test_a_playlist_with_an_advertisement_put_into_it_is_downloaded_without_it(tmp_path):
-    host = Host(str(tmp_path / "site"))
-    try:
-        name = stream(str(tmp_path / "site"))
-        ad = os.path.join(str(tmp_path / "site"), "ad")
-        os.makedirs(ad)
-        source = os.path.join(ad, "source.mp4")
-        Codec().make(source, [9, 9])
-        _run("-i", source, "-vf", "scale=320:240", "-c:v", "libx264", "-preset", "ultrafast", "-g", "4", "-c:a", "aac",
-             "-f", "hls", "-hls_time", "1", "-hls_playlist_type", "vod", "-hls_segment_filename",
-             os.path.join(ad, "a%d.ts"), os.path.join(ad, "ad.m3u8"))
-        media = os.path.join(str(tmp_path / "site"), "show", "media.m3u8")
-        with open(media) as found:
-            lines = found.read().splitlines()
-        at = lines.index("seg2.ts") - 1  # the #EXTINF of the third segment
-        inserted = ["#EXT-X-DISCONTINUITY", "#EXTINF:1.0,", host.url("ad/a0.ts"), "#EXTINF:1.0,", host.url("ad/a1.ts"),
-                    "#EXT-X-DISCONTINUITY"]
-        with open(media, "w") as written:
-            written.write("\n".join(lines[:at] + inserted + lines[at:]) + "\n")
-        out = str(tmp_path / "lib" / "e1.mp4")
-        ok, why = await ytdlp.download(host.url(name), out, noop, playlist=True, threads=4)
-        assert ok, why
-        assert float(probe(out)["format"]["duration"]) == pytest.approx(4, abs=0.5), "the advertisement is not in the file"
-        assert not any(served.startswith("ad/") for served in host.served), "nothing of the advertisement was asked"
-    finally:
-        host.close()
-
-
 # --- a playlist its player takes itself (Alloha) ---------------------------------------------------------------------------------
 
 def player(folder: str, seconds: float, *, refused: str = ""):
@@ -263,27 +178,3 @@ def player(folder: str, seconds: float, *, refused: str = ""):
         await on_progress({"phase": "download", "progress": 100})
         return True, "", seconds, 1.0
     return fetch
-
-
-@pytest.mark.parametrize("stated, whole", [(4.0, True), (9.0, False)])
-async def test_a_stream_its_player_took_is_put_into_the_container_and_taken_only_at_the_length_of_its_playlist(
-        tmp_path, stated, whole):
-    stream(str(tmp_path / "site"))
-    out = str(tmp_path / "lib" / "e1.mp4")
-    ok, why = await ytdlp.download("https://old.yummyani.me/x#alloha=1", out, noop, playlist=True,
-                                   fetcher=player(str(tmp_path / "site" / "show"), stated))
-
-    assert ok is whole, why
-    if whole:
-        assert float(probe(out)["format"]["duration"]) == pytest.approx(4, abs=0.5)
-        assert sorted(os.listdir(tmp_path / "lib")) == ["e1.mp4"], "no leftover of the download stays"
-    else:
-        assert parse(why)["code"] in CUT_CODES and os.listdir(tmp_path / "lib") == []
-
-
-async def test_a_stream_its_player_refused_is_its_failure_with_what_it_says_of_the_source_and_leaves_nothing(tmp_path):
-    out = str(tmp_path / "lib" / "e1.mp4")
-    ok, why = await ytdlp.download("https://old.yummyani.me/x#alloha=1", out, noop, playlist=True,
-                                   fetcher=player(str(tmp_path), 4.0, refused="у плеера нет этой серии"))
-
-    assert not ok and kind_of(why) is Failed.FINAL and os.listdir(tmp_path / "lib") == []

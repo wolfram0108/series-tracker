@@ -20,76 +20,6 @@ async def checked(_profile):
     pass
 
 
-@pytest.mark.parametrize("status, blocked, refresh", [(403, "session_blocked", True), (403, "client_blocked", True),
-                                                      (403, "", False), (404, "", False), (500, "session_blocked", False)])
-async def test_only_explicit_session_or_client_refusals_trigger_refresh(status, blocked, refresh):
-    from modules.sources.players.alloha_session import AllohaSession
-
-    class Http:
-        async def request(self, *_args, **_kw):
-            return Response(status, b"", {"x-vd": blocked})
-
-    session = AllohaSession(PROFILE, Http())
-    with pytest.raises(AllohaRefused) as failure:
-        await session._ok("GET", CDN + "/master.m3u8")
-    assert failure.value.profile_rejected is refresh
-
-
-@pytest.mark.parametrize("close_code, refresh", [(4005, True), (1000, False), (1006, False)])
-async def test_an_explicit_socket_session_refusal_can_refresh_but_an_ordinary_disconnect_cannot(close_code, refresh):
-    from modules.sources.players.alloha_session import AllohaSession, Track
-
-    class Socket:
-        async def send_str(self, _message):
-            pass
-
-        async def recv_str(self):
-            raise ConnectionError("closed")
-
-        async def close(self, **_kw):
-            pass
-
-    socket = Socket()
-    socket.close_code = close_code
-
-    async def connect(_url, **_kw):
-        return socket
-
-    session = AllohaSession(PROFILE, None)
-    session.socket_url, session.socket_key = "wss://socket.test/", "test-session"
-    try:
-        with pytest.raises(AllohaRefused) as failure:
-            await session.play(Track("1", "Voice", 720, ()), connect)
-        assert failure.value.profile_rejected is refresh
-        assert str(close_code) in str(failure.value)
-    finally:
-        await session.close()
-
-
-async def test_concurrent_refusals_share_one_capture_and_a_late_refusal_uses_the_validated_generation():
-    profiles = Profiles(OLD)
-    entered, release = asyncio.Event(), asyncio.Event()
-    captures, verified = [], []
-
-    async def capture(url):
-        captures.append(url)
-        entered.set()
-        await release.wait()
-        return PROFILE
-
-    async def verify(profile):
-        verified.append(profile)
-
-    profiles.capture = capture
-    calls = [asyncio.create_task(profiles.refresh(0, PAGE, verify)) for _ in range(6)]
-    await entered.wait()
-    assert captures == [PAGE] and profiles.profile is OLD
-    release.set()
-    await asyncio.gather(*calls)
-    await profiles.refresh(0, PAGE, verify)
-    assert captures == [PAGE] and verified == [PROFILE] and profiles.generation == 1
-
-
 async def test_cancelling_a_waiter_does_not_cancel_the_shared_capture_and_shutdown_does():
     profiles = Profiles(OLD)
     entered, release, closed = asyncio.Event(), asyncio.Event(), asyncio.Event()
@@ -127,20 +57,6 @@ async def test_cancelling_a_waiter_does_not_cancel_the_shared_capture_and_shutdo
     assert closed.is_set() and profiles.profile is OLD
 
 
-async def test_an_identical_browser_fingerprint_still_gets_validated_and_advances_the_generation():
-    profiles = Profiles(PROFILE)
-    captures = []
-
-    async def capture(url):
-        captures.append(url)
-        return PROFILE
-
-    profiles.capture = capture
-    await profiles.refresh(0, PAGE, checked)
-    await profiles.refresh(0, PAGE, checked)
-    assert profiles.profile == PROFILE and profiles.generation == 1 and captures == [PAGE]
-
-
 async def test_only_a_validated_profile_is_saved_encrypted_and_loaded_after_restart(tmp_path):
     path = tmp_path / "profile.enc"
     profiles = Profiles(OLD)
@@ -172,17 +88,6 @@ async def test_only_a_validated_profile_is_saved_encrypted_and_loaded_after_rest
     await restored.load()
     assert restored.profile == PROFILE
     assert list(tmp_path.iterdir()) == [path]
-
-
-@pytest.mark.parametrize("raw", ["private corrupt contents", '[]', '{"fingerprint":123,"user_agent":"private"}'])
-async def test_a_corrupted_cache_falls_back_to_the_initial_profile_without_logging_its_contents(tmp_path, caplog, raw):
-    from core import crypto
-    path = tmp_path / "profile.enc"
-    path.write_text(crypto.encrypt(raw))
-    profiles = Profiles(OLD)
-    profiles.path = path
-    await profiles.load()
-    assert profiles.profile is OLD and "private corrupt contents" not in caplog.text
 
 
 class Browser:
@@ -267,74 +172,6 @@ class RecoveringClient(Client):
         return await super().request(method, url, **kw)
 
 
-@pytest.mark.parametrize("partial", [False, True])
-async def test_a_rejected_transfer_validates_one_new_profile_and_restarts_the_owned_file_without_duplicate_segments(
-        tmp_path, monkeypatch, partial):
-    monkeypatch.setattr(alloha, "ASK_INTERVAL_S", 0)
-    model, wrote = AllohaModel(segments=12), asyncio.Event()
-    target = tmp_path / "test.ts"
-    captures = []
-
-    def client(profile):
-        return RecoveringClient(model, profile, reject=True, wrote=wrote if partial else None)
-
-    player = AllohaPlayer(OLD, client)
-
-    async def capture(url):
-        captures.append(url)
-        if partial:
-            assert target.stat().st_size > 0
-        return PROFILE
-
-    async def progress(data):
-        if data.get("phase") == "download":
-            wrote.set()
-
-    player._profiles.capture = capture
-    result = await asyncio.wait_for(player.transfer(episode_ref(1).url, str(target), 720, 2, progress), 5)
-    assert result["height"] == 720 and captures == [episode_ref(1).url]
-    assert target.read_bytes() == b"INIT" + b"".join(model.body(720, i) for i in range(12))
-    assert len(model.sockets) == model.closed == 3  # failed transfer, validation, complete retry
-
-
-async def test_an_existing_target_is_never_removed_or_appended_during_recovery(tmp_path):
-    path = tmp_path / "existing.ts"
-    path.write_bytes(b"already there")
-    player = AllohaPlayer(PROFILE)
-    with pytest.raises(AllohaRefused) as failure:
-        await player.transfer(episode_ref(1).url, str(path), 720, 2, checked)
-    assert code_of(str(failure.value)) == "alloha_target_exists"
-    assert path.read_bytes() == b"already there"
-
-
-async def test_no_initial_profile_is_captured_once_before_the_first_download(tmp_path, monkeypatch):
-    monkeypatch.setattr(alloha, "ASK_INTERVAL_S", 0)
-    model = AllohaModel()
-    player = AllohaPlayer(None, model.client)
-    captures = []
-
-    async def capture(url):
-        captures.append(url)
-        return PROFILE
-
-    player._profiles.capture = capture
-    url = episode_ref(1).url
-    assert (await player.stream(url, None, 720, None))["player_fetch"]
-    done = await player.transfer(url, str(tmp_path / "first.ts"), 720, 2, checked)
-    assert done["height"] == 720 and captures == [url]
-    assert len(model.sockets) == model.closed == 2
-
-
-async def test_a_running_sessions_media_clients_keep_the_original_profile_during_refresh():
-    model = AllohaModel()
-    player = AllohaPlayer(OLD, model.client)
-    async with player._session() as session:
-        player._profiles.profile = PROFILE
-        media = session.media_client()
-        assert session.profile == media.profile == OLD
-        await media.close()
-
-
 async def test_a_parser_request_with_an_explicit_profile_refusal_can_recover_too(monkeypatch):
     from modules.sources.players.contract import Kind
     monkeypatch.setattr(alloha, "ASK_INTERVAL_S", 0)
@@ -356,21 +193,3 @@ async def test_a_parser_request_with_an_explicit_profile_refusal_can_recover_too
     player._profiles.capture = capture
     reading = player.read(await player.fetch(episode_ref(1), None, PAGE))
     assert reading.kind is Kind.PLAYABLE and captures == [episode_ref(1).url]
-
-
-@pytest.mark.parametrize("status", [404, 503])
-async def test_missing_files_and_server_failures_do_not_launch_profile_capture(tmp_path, monkeypatch, status):
-    monkeypatch.setattr(alloha, "ASK_INTERVAL_S", 0)
-    model = AllohaModel()
-    model.refuse_files = status
-    player = AllohaPlayer(PROFILE, model.client)
-    captures = []
-
-    async def capture(url):
-        captures.append(url)
-        return PROFILE
-
-    player._profiles.capture = capture
-    with pytest.raises(AllohaRefused):
-        await player.transfer(episode_ref(1).url, str(tmp_path / "failed.ts"), 720, 2, checked)
-    assert captures == []

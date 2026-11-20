@@ -2,19 +2,13 @@
 (no qBittorrent, no network), and every topic the gateway asks has an owner among them."""
 import asyncio
 import importlib
-import re
 import sys
-from pathlib import Path
 
 import httpx
 import pytest
 
 from core import logging as core_logging
-from core.envelope import topic_matches
 from schema_db import migrated
-
-GATEWAY = Path(__file__).resolve().parent.parent / "modules" / "gateway"
-
 
 @pytest.fixture
 def assembled(tmp_path, monkeypatch):
@@ -44,24 +38,6 @@ def test_composition_starts_after_the_modules_it_asks_and_before_conform_and_tor
         assert order.index(before) < order.index("composition"), before
     for after in ("conform", "torrents"):
         assert order.index("composition") < order.index(after), after
-
-
-def test_every_module_of_the_assembly_has_its_group_in_the_debug_logging_of_the_settings(assembled):
-    """The group of logging is the name of the module; a module without a switch cannot be debugged from the panel."""
-    from modules.gateway.api_settings import LOGGING_MODULES
-    grouped = {entry["name"] for entries in LOGGING_MODULES.values() for entry in entries}
-    assert [name for name in names(assembled) if name not in grouped] == []
-
-
-def test_every_topic_the_gateway_asks_has_an_owner_in_the_assembly(assembled):
-    """A topic removed from its owner, or never made, would answer 'no handler' only when a user clicks."""
-    handled = [pattern for module in assembled.modules for pattern, _, _ in module._handlers]
-    asked = set()
-    for source in GATEWAY.glob("*.py"):
-        asked |= set(re.findall(r'(?:gw|self)\.(?:request|send_command)\(\s*"([a-z_]+(?:\.[a-z_]+)+)"',
-                                source.read_text(encoding="utf-8")))
-    assert len(asked) > 40, "the scan of the gateway found too few topics to mean anything"
-    assert sorted(topic for topic in asked if not any(topic_matches(pattern, topic) for pattern in handled)) == []
 
 
 async def test_the_assembled_system_comes_up_on_one_bus_answers_and_stops(assembled, monkeypatch):

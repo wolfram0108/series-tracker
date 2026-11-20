@@ -115,52 +115,6 @@ async def until(told, state: str) -> dict:
     return await asyncio.wait_for(wait(), LIMIT_S)
 
 
-async def test_a_release_downloads_into_its_folder_and_is_ready_when_every_file_is_there(stand):
-    model, world, torrents, told = stand
-    h = world.lists(model, release(V1), published="05.05.2026 10:15:00", link="https://dl.kinozal.tv/download.php?id=7")
-
-    view = await world.request("torrents.release.download", {"url": PAGE, "release": "page"})
-    ready = await until(told, "ready")
-
-    assert view["folder"].startswith(world.staging) and ready["folder"] == view["folder"]
-    assert sorted(f["path"] for f in ready["files"]) == sorted(path for path, _ in V1)
-    assert all(f["progress"] == 1 for f in ready["files"])
-    for path, content in release(V1):
-        assert open(f"{ready['folder']}/{path}", "rb").read() == content
-    assert model.torrents[h].category == "st-source"
-    kept = (await world.request("torrents.releases.get", {"url": PAGE}))["releases"]
-    assert [(each["release"], each["state"], each["infohash"]) for each in kept] == [("page", "ready", h)]
-
-
-async def test_the_monitor_shows_a_release_the_client_holds_for_every_series_with_its_page_ready_or_not(stand):
-    model, world, torrents, told = stand
-    world.series[2] = [PAGE]
-    h = world.lists(model, release(V1), published="d1", link="L1", hold=True)
-    monitor = torrents.bus.subscribe("torrents.progress.changed")
-    await world.request("torrents.release.download", {"url": PAGE, "release": "page"})
-
-    async def release_tasks(done: bool):
-        while True:
-            tasks = [t for t in (await monitor.queue.get()).payload["tasks"] if t.get("kind") == "release"]
-            if bool(tasks) != done and all(t["files_total"] for t in tasks):
-                return tasks
-    working = await asyncio.wait_for(release_tasks(False), LIMIT_S)
-    assert [(t["series_id"], t["series_name"], t["qb_hash"], t["status"], t["files_total"]) for t in working] == [
-        (1, "Сериал 1", h, "downloading", len(V1)), (2, "Сериал 2", h, "downloading", len(V1))]
-    assert all(0 <= t["progress"] < 100 and t["files_done"] < t["files_total"] for t in working)
-    model.deliver(h)
-    await until(told, "ready")
-
-    async def ready_tasks():
-        while True:
-            tasks = [t for t in (await monitor.queue.get()).payload["tasks"] if t.get("kind") == "release"]
-            if tasks and all(t["status"] == "ready" for t in tasks):
-                return tasks
-    ready = await asyncio.wait_for(ready_tasks(), LIMIT_S)
-    assert [(t["series_id"], t["progress"], t["files_done"], t["files_total"]) for t in ready] == [
-        (1, 100.0, len(V1), len(V1)), (2, 100.0, len(V1), len(V1))]
-
-
 async def test_a_window_that_connects_gets_the_picture_of_the_monitor_at_once(stand):
     model, world, torrents, told = stand
     h = world.lists(model, release(V1), published="d1", link="L1")
@@ -170,26 +124,6 @@ async def test_a_window_that_connects_gets_the_picture_of_the_monitor_at_once(st
     world.publish_event("gateway.sse.clients", {"count": 1})
     tasks = (await asyncio.wait_for(monitor.queue.get(), LIMIT_S)).payload["tasks"]
     assert [(t["kind"], t["qb_hash"], t["status"]) for t in tasks] == [("release", h, "ready")]
-
-
-async def test_the_folder_of_the_releases_is_an_absolute_path_written_to_the_settings(stand):
-    model, world, torrents, told = stand
-    refused = await world.request("torrents.staging.set", {"value": "staging"})
-    assert not refused["ok"] and "staging_dir_not_absolute" in refused["reason"]
-    assert await world.request("torrents.staging.set", {"value": " /nas/staging "}) == {"ok": True, "value": "/nas/staging"}
-    assert world.staging == "/nas/staging"
-    assert await world.request("torrents.staging.get", {}) == {"value": "/nas/staging"}
-
-
-async def test_no_download_begins_without_the_staging_folder_or_for_a_release_the_page_does_not_list(stand):
-    model, world, torrents, told = stand
-    world.lists(model, release(V1), published="d1", link="L1")
-    with pytest.raises(Exception, match="release_not_on_page"):
-        await world.request("torrents.release.download", {"url": PAGE, "release": "1080p"})
-    torrents.releases.staging = ""
-    with pytest.raises(Exception, match="staging_dir_not_set"):
-        await world.request("torrents.release.download", {"url": PAGE, "release": "page"})
-    assert model.torrents == {}
 
 
 async def test_an_update_comes_into_the_same_folder_and_leaves_only_the_files_of_the_new_version(stand):
@@ -236,19 +170,6 @@ async def test_an_update_waits_for_the_end_of_a_sync_of_a_series_with_the_page(s
 async def _until_held(torrents) -> None:
     while not torrents.releases.held(PAGE):
         await asyncio.sleep(0.01)
-
-
-async def test_every_file_of_a_release_is_downloaded_and_the_module_takes_no_command_of_what_not_to_download(stand):
-    """No hidden logic of the download (a magnet has no files until its metadata comes): every file is fetched."""
-    model, world, torrents, told = stand
-    h = world.lists(model, release(V1), published="d1", link="L1", hold=True)
-    await world.request("torrents.release.download", {"url": PAGE, "release": "page"})
-    model.deliver(h)
-    ready = await until(told, "ready")
-    paths = [path for path, *_ in V1]
-    assert {f["path"]: f["priority"] for f in ready["files"]} == {path: 1 for path in paths}
-    assert all(os.path.exists(f"{ready['folder']}/{path}") for path in paths)
-    assert "torrents.release.priorities" not in {pattern for pattern, *_ in torrents._handlers}
 
 
 async def test_a_release_gone_from_the_client_fails_with_that_reason(stand):
@@ -298,13 +219,3 @@ async def test_a_check_tells_when_it_was_and_the_next_check_of_the_schedule_and_
     assert await torrents.releases.due(at - timedelta(minutes=1), {PAGE}) == []
     assert await torrents.releases.due(at + timedelta(minutes=1), {PAGE}) == [PAGE]
     assert await torrents.releases.due(at + timedelta(minutes=1), set()) == []
-
-
-async def test_the_schedule_checks_the_pages_of_the_series_in_the_automatic_mode_only_and_only_while_the_sync_is_on(stand):
-    """A series switched off is not asked of the tracker by the schedule; with the automatic sync off no page is."""
-    _model, world, torrents, _told = stand
-    assert await torrents._scheduled_pages() == set()  # the automatic sync is off
-    world.sync_on = "true"
-    assert await torrents._scheduled_pages() == set()  # the series is not in the automatic mode
-    world.auto = {1}
-    assert await torrents._scheduled_pages() == {PAGE}

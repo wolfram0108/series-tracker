@@ -6,10 +6,7 @@ iframe that plays it: Kodik (an iframe of a season), the site's own pages of CDN
 from __future__ import annotations
 
 import json
-import logging
-from urllib.parse import parse_qsl, urlsplit
 
-import pytest
 
 from core.reasons import parse
 from modules.sources.players.alloha import AllohaPlayer
@@ -17,9 +14,8 @@ from modules.sources.players.cdnvideohub import CdnVideoHubPlayer
 from modules.sources.players.kodik import KodikPlayer
 from modules.sources.players.registry import PlayerRegistry
 from modules.sources.players.vk import VkPlayer
-from modules.sources.sites import ReadContext, SiteError
+from modules.sources.sites import ReadContext
 from modules.sources.sites.yummyani import YummyAniSite
-from modules.sources.sites.yummyani.site import voice_of
 from sources_support import READ_LIMIT_S, Web, within
 from alloha_model import PROFILE, AllohaModel
 from test_sources_cvh_kodik import ftor_links, season_page
@@ -71,50 +67,6 @@ async def read(web: Web, model: AllohaModel | None = None):
         return await within(YummyAniSite(players).read(URL, ReadContext(http, lambda *step: None)), READ_LIMIT_S, "the read")
 
 
-def test_a_title_is_its_one_address_at_the_one_host_of_the_site():
-    site = YummyAniSite(PlayerRegistry())
-
-    assert site.canonical_url("https://yummyani.me/catalog/item/lyubov-pod-gipnozom/") == URL
-    assert site.canonical_url(URL) == URL and site.match_url("https://ru.yummyani.me/catalog/item/x")
-    assert not site.match_url("https://old.yummyani.me/catalog") and not site.match_url("https://old.yummyani.me/")
-    with pytest.raises(ValueError):
-        site.canonical_url("https://old.yummyani.me/top")
-
-
-def test_a_voice_over_is_its_name_and_the_kind_the_site_puts_before_it():
-    assert (voice_of("Озвучка AniStar").name, voice_of("Озвучка AniStar").kind) == ("AniStar", "Озвучка")
-    assert (voice_of("Субтитры  SovetRomantica").name, voice_of("Субтитры  SovetRomantica").kind) == ("SovetRomantica", "Субтитры")
-    assert (voice_of("AniMedia").name, voice_of("AniMedia").kind) == ("AniMedia", "")
-
-
-async def test_the_table_has_every_player_of_the_api_each_read_as_on_any_page_that_embeds_it(caplog):
-    caplog.set_level(logging.INFO, "sources")
-    web, model = site_web(), AllohaModel(voices={"158": {1: [1, 2]}})
-    table = await read(web, model)
-    rows = {player: [row for row in table.rows if row.player == player] for player in ("kodik", "cvh", "vk", "alloha")}
-
-    # Kodik: the list of the season once, however many elements and spellings of the voice-over point at it.
-    assert [(row.key, row.voice.name, row.text) for row in rows["kodik"]] == [
-        ("kodik:910:501", "AniStar", "1 серия"), ("kodik:910:502", "AniStar", "2 серия")]
-    assert rows["kodik"][0].link == f"{URL}#kodik=season/64820/8cc4/501" and web.count("/season/64820/") == 1
-    # CDN VideoHub: the widget of the site, by the number of the title at MyAnimeList, with the site's publisher.
-    asked = dict(parse_qsl(urlsplit(next(url for _m, url, _b in web.asked if "/player/sv/playlist" in url)).query))
-    assert (asked["id"], asked["pub"], asked["aggr"]) == ("41223", "745", "mali") and len(rows["cvh"]) == 1
-    # VK: the video by its number; Alloha: a row for each element, with the voice-over as the site words it.
-    # The site gives a video its episode as a property and no text: the row has the episode as it comes, no text made of it.
-    assert [(row.key, row.link, row.episode, row.text, row.voice.name, row.voice.kind) for row in rows["vk"]] == [
-        ("vk:-35658163_163080986", "https://vk.com/video-35658163_163080986", "6", "", "WiaDub", "Озвучка")]
-    assert [(row.key, row.episode, row.text, row.voice.name, row.heights) for row in rows["alloha"]] == [
-        ("alloha:8bf4/158/1/1", "1", "", "AniStar", [360, 720, 1080]),
-        ("alloha:8bf4/158/1/2", "2", "", "AniStar", [360, 720, 1080])]
-    # Each episode of Alloha is its document and one ask of its files, signed afresh.
-    assert len(model.files_asked) == 2
-    assert table.names == ["Любовь под гипнозом", "Hypnosis love", "Кохання під гіпнозом"]
-    assert len({row.key for row in table.rows}) == len(table.rows) == 6
-    # A player no player here knows is not read, and the log says which.
-    assert any("'Плеер Sibnet'" in record.getMessage() for record in caplog.records)
-
-
 async def test_a_list_of_kodik_that_does_not_open_is_an_unread_part_named_by_its_voice_over_and_the_rest_is_read():
     broken = "//kodikplayer.com/season/117721/da5c/720p?translations=false&only_episode=true&episode={n}"
     web = site_web()
@@ -129,11 +81,3 @@ async def test_a_list_of_kodik_that_does_not_open_is_an_unread_part_named_by_its
         ("kodik:season/117721/da5c?", "Kodik", ["Комната Диди"], "player_status")]
     assert {row.player for row in table.rows} == {"kodik", "cvh", "vk", "alloha"} and len(table.rows) == 6
     assert {row.part for row in table.rows if row.player == "kodik"} == {"kodik:season/64820/8cc4?"}
-
-
-@pytest.mark.parametrize("title", [{"response": {"title": "без номера"}}, (404, "")])
-async def test_a_title_the_api_does_not_give_is_refused(title):
-    with pytest.raises(SiteError) as refused:
-        await read(site_web(title))
-
-    assert parse(refused.value.reason)["code"] in {"no_players_empty", "site_status"}

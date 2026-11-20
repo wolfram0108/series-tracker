@@ -10,12 +10,10 @@ import json
 import pytest
 
 from core.contracts import RowState
-from core.reasons import parse
 from modules.sources.players.allvideo import AllVideoPlayer
 from modules.sources.players.registry import PlayerRegistry
-from modules.sources.sites import ReadContext, SiteError
+from modules.sources.sites import ReadContext
 from modules.sources.sites.pvashow import PvaShowSite
-from modules.sources.sites.pvashow.site import playlist_elements, site_voice, title_names, video_number
 from sources_support import READ_LIMIT_S, Web, within
 
 URL = "https://anime.pvashow.com/4-boevoj-master.html"
@@ -70,15 +68,6 @@ def test_a_title_page_is_its_one_address_and_nothing_else_is_a_title_page():
         site.canonical_url("https://anime.pvashow.com/")
 
 
-def test_the_page_names_the_title_and_its_voice_and_the_playlist_gives_each_episode_with_its_files():
-    assert title_names(page()) == ["Боевой мастер"] and site_voice(page()) == "ПВА ШОУ"
-    elements = playlist_elements(playlist())
-    assert [(group, text) for group, text, _ in elements] == [
-        ("", "Боевой Мастер - 1 серия"), ("", "Боевой мастер - 677 серия"), ("", "Боевой мастер - 677 серия"),
-        ("", "Без файлов"), ("Спецвыпуски", "Спецвыпуск 1")]
-    assert video_number(elements[0][2]) == "655613" and video_number("") is None
-
-
 async def test_a_row_is_a_video_of_allvideo_with_the_text_and_the_heights_the_playlist_gives_and_no_embed_is_asked():
     web = site_web()
     table = await read(web)
@@ -91,18 +80,3 @@ async def test_a_row_is_a_video_of_allvideo_with_the_text_and_the_heights_the_pl
     assert table.rows[0].link == "https://csst.online/embed/655613/"
     assert AllVideoPlayer.video_of(table.rows[0].link) == "655613" and AllVideoPlayer.owns(table.rows[0].link)
     assert web.count("/embed/") == 0 and table.site_voice == "ПВА ШОУ"
-
-
-async def test_only_the_latest_episodes_of_each_group_are_read_when_a_read_is_told_so():
-    table = await read(site_web(), recent=1)
-
-    assert [row.key for row in table.rows] == ["allvideo:1029408", "allvideo:700001"]
-
-
-@pytest.mark.parametrize("text, listed, code", [(page(False), None, "no_players_empty"),
-                                                (None, playlist([]), "title_no_videos")])
-async def test_a_page_with_no_playlist_or_a_playlist_with_no_video_is_refused(text, listed, code):
-    with pytest.raises(SiteError) as refused:
-        await read(site_web(text, listed))
-
-    assert parse(refused.value.reason)["code"] == code

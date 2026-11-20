@@ -90,7 +90,6 @@ def kodik_ftor() -> str:
 
 # --- 1.ruchime.org: the release, its list of episodes, the page of an episode ---------------------------------------------------
 
-RUCHIME_SLUG = "praktikuia-ci-sto-tysiac-let"
 # The players of the first and of the last episode page: VK id and key, AllVideo embed.
 RUCHIME_PLAYERS = {1: ("456246539", "8edfdb802d04778c", "688273"), 390: ("456256559", "844d706ebb47dffa", "1081867")}
 KODIK_SWITCH = "https://kodikplayer.com/serial/50228/7bbb4c6b2524cdda200216964479c303/720p?only_translations=1043"

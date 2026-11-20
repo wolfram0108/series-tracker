@@ -1,7 +1,6 @@
 """The model of qBittorrent on its WebAPI v2, as the stand meets it over real HTTP, and the synthetic releases it is told of.
 
-What the model does is what the real client was measured to do (tools/collectors/qbit_behaviour.py, qBittorrent 5.2.1;
-the observations are kept in tests/samples/qbit/update_5_2_1.json and replayed by tests/test_qbit_model.py):
+What the model does is what the real client was measured to do (tools/collectors/qbit_behaviour.py, qBittorrent 5.2.1):
 
 - a torrent added stopped does not look at the disk: its progress is 0 until a recheck; one added started does;
 - a start asked while a check runs is lost (the torrent stays stopped): the model's check is instant, so it does not
@@ -16,10 +15,8 @@ or on `deliver()` when the release is seeded on hold — the moment a download e
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import secrets
-import time
 import threading
 from dataclasses import dataclass, field
 from email.parser import BytesParser
@@ -488,7 +485,6 @@ class QbitModel:
 
 # --- the update scenario: recorded on the real client, replayed on the model -----------------------------------------
 
-CHECKING = {"checkingUP", "checkingDL", "checkingResumeData", "moving", "allocating"}
 SIZES = {"E01": PIECE * 5 + 1000, "E02": PIECE * 4 + 7777, "E03": PIECE * 3 + 333, "old": PIECE * 2 + 55,
          "snd": PIECE + 999}
 V1 = [("Show/E01.mkv", ("E01", SIZES["E01"])), ("Show/E02.mkv", ("E02", SIZES["E02"])),
@@ -508,133 +504,3 @@ def disk(folder: Path) -> list[dict]:
         return []
     return [{"path": str(p.relative_to(folder)), "dir": p.is_dir(), "size": 0 if p.is_dir() else p.stat().st_size,
              "mtime_ns": 0 if p.is_dir() else p.stat().st_mtime_ns} for p in sorted(folder.rglob("*"))]
-
-
-class UpdateScenario:
-    """v1 complete on disk → told to the client and rechecked; v1 leaves without files, v2 comes on the same files and is
-    rechecked; priority 0 for the new file, a start with nobody seeding, a stop; v2 deleted with its files."""
-
-    def __init__(self, client, folder: Path, save_path: str, record, *, category: str = "st-probe") -> None:
-        self.client, self.folder, self.save_path, self.record = client, folder, save_path, record
-        self.category = category
-        self.hashes: list[str] = []
-
-    async def observe(self, scenario: str, step: str, h: str | None) -> None:
-        listed = await self.client.torrents_info([h]) if h else []
-        info = listed[0] if listed else None
-        files = await self.client.torrent_files(h) if info else None
-        pieces = None
-        if info:
-            got = await self.client._request("GET", "/api/v2/torrents/pieceStates", params={"hash": h})
-            pieces = got.json() if got else None
-        keep = ("state", "progress", "amount_left", "size", "total_size")
-        self.record(scenario, step, hash=h, info={k: info.get(k) for k in keep} if info else None,
-                    files=[{k: f.get(k) for k in ("index", "name", "size", "progress", "priority", "piece_range")}
-                           for f in files] if files else None,
-                    pieces=pieces, disk=disk(self.folder))
-
-    async def settle(self, h: str, until, *, budget_s: float = 60.0) -> dict:
-        """The WebAPI pushes nothing: the state is read until the awaited one; the budget is a safeguard only."""
-        deadline = time.monotonic() + budget_s
-        while True:
-            got = await self.client.torrents_info([h])
-            if got and until(got[0]):
-                return got[0]
-            if time.monotonic() > deadline:
-                raise TimeoutError(f"{h}: {got[0]['state'] if got else 'absent'}")
-            await asyncio.sleep(0.05)
-
-    async def add(self, meta: bytes, h: str, *, stopped: bool = True) -> None:
-        flag = "true" if stopped else "false"
-        got = await self.client._request(
-            "POST", "/api/v2/torrents/add", conflict_ok=True,
-            data={"savepath": self.save_path, "category": self.category, "paused": flag, "stopped": flag},
-            files={"torrents": ("probe.torrent", meta, "application/x-bittorrent")})
-        if got.status_code == 409:
-            raise RuntimeError(f"{h} already in the client")
-        await self.settle(h, lambda t: t["state"] not in CHECKING)
-
-    async def recheck(self, scenario: str, h: str) -> None:
-        before = (await self.client.torrents_info([h]))[0]["progress"]
-        await self.client.recheck([h])
-        # The end of a check is the check seen running or the progress moved; a check too small to be seen between two
-        # reads is recorded as such instead of guessed.
-        try:
-            await self.settle(h, lambda t: t["state"] in CHECKING or t["progress"] != before, budget_s=10)
-            await self.settle(h, lambda t: t["state"] not in CHECKING)
-        except TimeoutError as exc:
-            self.record(scenario, "recheck_unobserved", hash=h, detail=str(exc), progress_before=before)
-
-    async def gone(self, h: str) -> None:
-        deadline = time.monotonic() + 30
-        while await self.client.torrents_info([h]):
-            if time.monotonic() > deadline:
-                raise TimeoutError(f"{h} still listed")
-            await asyncio.sleep(0.05)
-
-    async def run(self) -> list[str]:
-        v1, v2 = release(V1), release(V2)
-        meta1, h1 = make_torrent(v1)
-        meta2, h2 = make_torrent(v2)
-        self.hashes = [h1, h2]
-        self.record("env", "layout", v1=[[p, len(c)] for p, c in v1], v2=[[p, len(c)] for p, c in v2],
-                    piece=PIECE, h1=h1, h2=h2)
-        self.folder.mkdir(mode=0o777)
-        self.folder.chmod(0o777)
-        self._lay(v1)
-        await self.observe("A", "disk_before_add", None)
-        await self.add(meta1, h1)
-        await self.observe("A", "added_stopped", h1)
-        await self.recheck("A", h1)
-        await self.observe("A", "rechecked", h1)
-
-        await self.client.delete([h1], delete_files=False)
-        await self.gone(h1)
-        await self.observe("B", "v1_deleted_keep_files", None)
-        await self.add(meta2, h2)
-        await self.observe("B", "v2_added_stopped", h2)
-        await self.recheck("B", h2)
-        await self.observe("B", "v2_rechecked", h2)
-
-        files = await self.client.torrent_files(h2)
-        await self.client.set_file_priority(h2, [f["index"] for f in files if f["name"].endswith("E03.mkv")], 0)
-        await self.observe("C", "e03_priority_0", h2)
-        await self.client.resume([h2])
-        await self.settle(h2, lambda t: t["state"] not in CHECKING and not t["state"].startswith("stopped"))
-        await self.observe("C", "started", h2)
-        await self.client.pause([h2])
-        await self.settle(h2, lambda t: t["state"].startswith("stopped"))
-        await self.observe("C", "stopped_again", h2)
-
-        await self.client.delete([h2], delete_files=True)
-        await self.gone(h2)
-        await self.observe("D", "v2_deleted_with_files", None)
-
-        # E: the update added started on the files of v1, no recheck asked: does the client look at the disk by itself?
-        self._lay(v1)
-        await self.add(meta2, h2, stopped=False)
-        await self.settle(h2, lambda t: t["state"] not in CHECKING)
-        await self.observe("E", "v2_added_started", h2)
-        await self.client.delete([h2], delete_files=True)
-        await self.gone(h2)
-
-        # F: added stopped, the recheck asked and the start asked at once, not after the check (measured: the start is lost).
-        self._lay(v1)
-        await self.add(meta2, h2)
-        await self.client.recheck([h2])
-        await self.client.resume([h2])
-        await self.settle(h2, lambda t: t["state"] not in CHECKING and t["progress"] > 0)
-        await self.observe("F", "v2_rechecked_and_started_at_once", h2)
-        await self.client.delete([h2], delete_files=True)
-        await self.gone(h2)
-        await self.observe("F", "v2_deleted_with_files", None)
-        return [h1, h2]
-
-    def _lay(self, files: list[tuple[str, bytes]]) -> None:
-        for rel, content in files:
-            target = self.folder / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content)
-            target.chmod(0o666)
-            for parent in target.relative_to(self.folder).parents:
-                (self.folder / parent).chmod(0o777)

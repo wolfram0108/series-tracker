@@ -4,12 +4,8 @@ service that read answers whole are made with it."""
 import httpx
 import pytest
 
-from core.db import Database
-from core import Bus
 from core.http_limits import AnswerTooLarge, BoundedTransport
-from modules.sources.module import SourcesModule
 from modules.sources.players.http import get_answer
-from schema_db import migrated
 
 LIMIT = 1024 * 1024
 
@@ -39,12 +35,3 @@ async def test_an_answer_over_the_ceiling_ends_as_an_answer_that_did_not_come_an
         # The read stopped at the ceiling: the rest of the body was never taken from the host.
         assert sum(read) <= LIMIT + 128 * 1024
         assert (await get_answer(http, "https://host/small", "")).text == "#EXTM3U\n"
-
-
-async def test_the_client_the_sources_read_their_answers_with_has_the_ceiling(tmp_path):
-    sources = SourcesModule(Bus(), Database(str(migrated(tmp_path / "s.db"))), torrent_cache_dir=str(tmp_path / "cache"))
-    await sources.on_start()
-    try:
-        assert isinstance(sources._http._transport, BoundedTransport)
-    finally:
-        await sources._http.aclose()

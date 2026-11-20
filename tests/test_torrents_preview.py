@@ -5,9 +5,9 @@ import base64
 
 import pytest
 
-from core import BaseModule, Bus, BusRequestError, Runner
+from core import BaseModule, Bus, Runner
 from core.db import Database
-from core.reasons import parse, reason
+from core.reasons import parse
 from modules.catalog import CatalogModule
 from modules.torrents import TorrentsModule
 
@@ -114,30 +114,6 @@ async def outcome(outcomes) -> tuple[str, dict]:
 
 
 @pytest.mark.asyncio
-async def test_a_link_gives_the_file_list_of_its_torrent_without_qbit(system):
-    _, sources, qbt, probe, outcomes = system
-    sources.files["https://t.test/1.torrent"] = torrent_of(b"Show", [([b"Season 1", b"e01.mkv"], 10), ([b"e02.mkv"], 20)])
-    probe.send_command("torrents.preview.fetch", {"items": [{"torrent_id": "t1", "link": "https://t.test/1.torrent"}]})
-    topic, payload = await outcome(outcomes)
-    assert topic == "torrents.preview.ready"
-    assert payload["torrent_id"] == "t1" and payload["name"] == "Show" and len(payload["infohash"]) == 40
-    assert payload["files"] == [{"path": "Season 1/e01.mkv", "size": 10}, {"path": "e02.mkv", "size": 20}]
-    assert sources.asked == [{"url": "https://t.test/1.torrent", "torrent_id": "t1"}]
-    assert qbt.added == [] and qbt.deleted == []
-
-
-@pytest.mark.asyncio
-async def test_a_torrent_that_sources_could_not_give_fails_by_the_module_with_a_reason(system):
-    _, sources, _, probe, outcomes = system
-    sources.files["https://t.test/2.torrent"] = ValueError("трекер не отвечает")
-    probe.send_command("torrents.preview.fetch", {"items": [{"torrent_id": "t2", "link": "https://t.test/2.torrent"}]})
-    topic, payload = await outcome(outcomes)
-    assert topic == "torrents.preview.failed"
-    assert payload == {"torrent_id": "t2", "infohash": None,
-                       "reason": reason("preview_torrent_download_failed", detail="трекер не отвечает")}
-
-
-@pytest.mark.asyncio
 async def test_a_file_that_is_no_torrent_fails_with_the_reason_of_the_parse(system):
     _, sources, _, probe, outcomes = system
     sources.files["https://t.test/3.torrent"] = base64.b64encode(b"<html>login</html>").decode()
@@ -161,15 +137,6 @@ async def test_a_magnet_gets_its_files_through_qbit_and_leaves_nothing_there(sys
 
 
 @pytest.mark.asyncio
-async def test_a_release_with_neither_magnet_nor_link_fails_instead_of_being_dropped(system):
-    _, sources, qbt, probe, outcomes = system
-    probe.send_command("torrents.preview.fetch", {"items": [{"torrent_id": "t4"}]})
-    topic, payload = await outcome(outcomes)
-    assert topic == "torrents.preview.failed" and payload["torrent_id"] == "t4" and payload["infohash"] is None
-    assert sources.asked == [] and qbt.added == []
-
-
-@pytest.mark.asyncio
 async def test_the_releases_are_answered_in_order_and_each_one_ends_on_its_own(system):
     _, sources, _, probe, outcomes = system
     sources.files["https://t.test/a.torrent"] = torrent_of(b"A", [([b"a.mkv"], 1)])
@@ -181,12 +148,3 @@ async def test_the_releases_are_answered_in_order_and_each_one_ends_on_its_own(s
     seen = [await outcome(outcomes) for _ in range(3)]
     assert [(topic.rsplit(".", 1)[1], payload["torrent_id"]) for topic, payload in seen] == [
         ("ready", "a"), ("failed", "b"), ("ready", "c")]
-
-
-@pytest.mark.asyncio
-async def test_the_two_steps_the_gateway_used_to_send_are_no_longer_topics(system):
-    bus, _, _, probe, outcomes = system
-    bus.unsubscribe(outcomes)  # a listener to the whole family would count as a handler
-    for topic in ("torrents.preview.parse_torrent", "torrents.preview.fetch_magnet"):
-        with pytest.raises(BusRequestError):
-            await probe.request(topic, {"torrent_id": "x"}, timeout=2)

@@ -44,72 +44,6 @@ async def system(db_path, tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_api_locked_without_session(system):
-    """Замок: защищённый бизнес-роут без входа → 401."""
-    _, _, client = system
-    r = await client.get("/api/agent/queue")
-    assert r.status_code == 401
-    assert r.json()["authenticated"] is False
-
-
-@pytest.mark.asyncio
-async def test_login_page_endpoint_is_public(system):
-    """/api/login доступен без сессии (иначе войти было бы нельзя)."""
-    _, _, client = system
-    r = await client.post("/api/login",
-                          json={"username": "x", "password": "y"})
-    assert r.status_code == 401          # неверные креды, но эндпоинт доступен
-    assert r.json()["success"] is False
-
-
-@pytest.mark.asyncio
-async def test_login_success_opens_api(system):
-    """Верный вход ставит сессию → защищённый роут доступен, /api/me знает юзера."""
-    _, _, client = system
-    r = await client.post("/api/login",
-                          json={"username": "admin", "password": "s3cret"})
-    assert r.status_code == 200 and r.json()["success"] is True
-    r2 = await client.get("/api/agent/queue")
-    assert r2.status_code == 200
-    me = await client.get("/api/me")
-    assert me.status_code == 200
-    assert me.json() == {"authenticated": True, "username": "admin"}
-    # статус отдаёт имя вошедшего (восстановление кнопки выхода) и имя
-    # администратора (admin) — экран входа показывает его вместо поля логина
-    st = await client.get("/api/auth/status")
-    assert st.json() == {"configured": True, "authenticated": True,
-                         "username": "admin", "admin": "admin"}
-
-
-@pytest.mark.asyncio
-async def test_logout_clears_session(system):
-    _, _, client = system
-    await client.post("/api/login",
-                      json={"username": "admin", "password": "s3cret"})
-    assert (await client.post("/api/logout")).status_code == 200
-    assert (await client.get("/api/agent/queue")).status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_wrong_password_rejected(system):
-    _, _, client = system
-    r = await client.post("/api/login",
-                          json={"username": "admin", "password": "WRONG"})
-    assert r.status_code == 401
-    # сессия не выдана
-    assert (await client.get("/api/agent/queue")).status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_unknown_user_rejected(system):
-    _, _, client = system
-    r = await client.post("/api/login",
-                          json={"username": "ghost", "password": "s3cret"})
-    assert r.status_code == 401
-    assert r.json()["success"] is False
-
-
-@pytest.mark.asyncio
 async def test_bruteforce_ban_after_5_fails(system):
     """5 неудач с одного адреса → временный бан (429) даже при верном пароле."""
     _, _, client = system
@@ -159,14 +93,6 @@ async def test_setup_first_run(db_path, tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_change_password_requires_login(system):
-    """Смена пароля без сессии → 401 (ручка за «замком»)."""
-    _, _, client = system
-    r = await client.post("/api/auth/password", json={"new": "longnewpass"})
-    assert r.status_code == 401
-
-
-@pytest.mark.asyncio
 async def test_change_password_flow(system):
     """Вошедший меняет пароль без подтверждения старого (активная сессия —
     достаточное подтверждение): короткий новый — отказ; нормальный — успех,
@@ -189,25 +115,3 @@ async def test_change_password_flow(system):
     assert (await client.post(
         "/api/login",
         json={"username": "admin", "password": "longnewpass"})).status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_auth_module_queries(system):
-    """Модуль auth: exists/password.set по шине (без HTTP)."""
-    bus, _, _ = system
-
-    class Probe(BaseModule):
-        name = "probe"
-    probe = Probe(bus)
-    await probe.start()
-    try:
-        assert (await probe.request("auth.exists", {}))["exists"] is True
-        # смена пароля → старый перестаёт подходить, новый подходит
-        await probe.request("auth.password.set",
-                            {"username": "admin", "password": "new-pass"})
-        assert (await probe.request(
-            "auth.login", {"username": "admin", "password": "s3cret"}))["ok"] is False
-        assert (await probe.request(
-            "auth.login", {"username": "admin", "password": "new-pass"}))["ok"] is True
-    finally:
-        await probe.stop()

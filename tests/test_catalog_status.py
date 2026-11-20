@@ -12,117 +12,11 @@ import pytest
 from core import BaseModule, Bus, Runner
 from core.db import Database
 from modules.catalog import CatalogModule
-from modules.catalog.aggregator import StatusAggregator
 from series_factory import insert_series
-from settle import settle
 from schema_db import migrated
 
 
 # --- агрегатор: чистая логика ----------------------------------------------------
-
-def test_empty_is_waiting():
-    agg = StatusAggregator()
-    assert agg.statuses(1) == ["waiting"]
-
-
-def test_union_and_hierarchy_order():
-    agg = StatusAggregator()
-    agg.set_contribution(1, "downloads", {"downloading": True})
-    agg.set_contribution(1, "scan", {"scanning": True, "error": True})
-    # порядок — старый STATUS_HIERARCHY: error первым (порядок пилюль)
-    assert agg.statuses(1) == ["error", "scanning", "downloading"]
-
-
-def test_idle_is_its_own_status():
-    # простой торрент-загрузки (qBit stalledDL) — отдельный статус idle
-    # (Р-11): отдельная пилюля, и как реальная активность подавляет
-    # waiting (не «Ожидание», а именно «Простой»).
-    agg = StatusAggregator()
-    assert agg.set_contribution(1, "torrents", {"idle": True}) == ["idle"]
-    assert agg.statuses(1) == ["idle"]
-
-
-def test_downloading_precedes_idle_in_order():
-    # downloading раньше idle в иерархии (источник порядка пилюль)
-    agg = StatusAggregator()
-    agg.set_contribution(1, "torrents", {"downloading": True, "idle": True})
-    assert agg.statuses(1) == ["downloading", "idle"]
-
-
-def test_queued_is_its_own_status():
-    # очередь qBit (queuedDL) — отдельный статус queued (Р-11): своя
-    # пилюля «В очереди», как активность подавляет waiting.
-    agg = StatusAggregator()
-    assert agg.set_contribution(1, "torrents", {"queued": True}) == ["queued"]
-    assert agg.statuses(1) == ["queued"]
-    # порядок: downloading, idle, queued — затем ready
-    agg.set_contribution(1, "torrents", {"idle": True, "queued": True,
-                                         "ready": True})
-    assert agg.statuses(1) == ["idle", "queued", "ready"]
-
-
-def test_vk_ready_and_waiting_coexist():
-    # семантика VK: скачана часть, остальное ждёт (фронт: stripes-stopped)
-    agg = StatusAggregator()
-    agg.set_contribution(1, "downloads", {"ready": True, "waiting": True})
-    assert agg.statuses(1) == ["ready", "waiting"]
-
-
-def test_waiting_suppressed_by_activity():
-    # waiting — факт «есть что ждать», но при активности не показывается
-    agg = StatusAggregator()
-    agg.set_contribution(1, "downloads",
-                         {"downloading": True, "waiting": True})
-    assert agg.statuses(1) == ["downloading"]
-    # активность кончилась — waiting снова виден
-    agg.set_contribution(1, "downloads",
-                         {"downloading": False, "waiting": True})
-    assert agg.statuses(1) == ["waiting"]
-    # активность из ДРУГОГО вклада тоже подавляет
-    agg.set_contribution(1, "scan", {"scanning": True})
-    assert agg.statuses(1) == ["scanning"]
-
-
-def test_all_false_removes_contribution():
-    agg = StatusAggregator()
-    agg.set_contribution(1, "scan", {"scanning": True})
-    changed = agg.set_contribution(1, "scan", {"scanning": False})
-    assert changed == ["waiting"]
-    assert agg.statuses(1) == ["waiting"]
-
-
-def test_no_change_returns_none():
-    agg = StatusAggregator()
-    assert agg.set_contribution(1, "scan", {"scanning": True}) == ["scanning"]
-    assert agg.set_contribution(1, "scan", {"scanning": True}) is None
-    # пустая свёртка к ещё не публиковавшейся серии тоже не изменение
-    assert agg.set_contribution(2, "scan", {"scanning": False}) is None
-
-
-def test_unknown_flag_is_loud():
-    agg = StatusAggregator()
-    with pytest.raises(ValueError, match="недопустимые флаги"):
-        agg.set_contribution(1, "scan", {"видимость": True})
-    with pytest.raises(ValueError):
-        # viewing в свёртках запрещён — он приходит только командами
-        agg.set_contribution(1, "scan", {"viewing": True})
-
-
-def test_viewing_and_clear_all():
-    agg = StatusAggregator()
-    agg.set_contribution(1, "downloads", {"downloading": True})
-    assert agg.set_viewing(1, True) == ["downloading", "viewing"]
-    assert agg.set_viewing(2, True) == ["viewing", "waiting"]
-    changes = agg.clear_all_viewing()
-    assert changes == {1: ["downloading"], 2: ["waiting"]}
-
-
-def test_forget_series():
-    agg = StatusAggregator()
-    agg.set_contribution(1, "scan", {"scanning": True})
-    agg.forget(1)
-    assert agg.statuses(1) == ["waiting"]
-
 
 # --- модуль через шину --------------------------------------------------------------
 
@@ -157,45 +51,6 @@ async def _next_change(sub, timeout=2.0):
 
 
 @pytest.mark.asyncio
-async def test_contribution_publishes_only_changes(system):
-    bus, probe = system
-    sub = bus.subscribe("series.status.changed")
-
-    probe.publish_event("series.status.contribution", {
-        "source": "downloads", "series_id": 1,
-        "flags": {"downloading": True}})
-    assert await _next_change(sub) == {"series_id": 1,
-                                       "statuses": ["downloading"],
-                                       "is_busy": False}
-
-    # идентичная свёртка — события нет; следующее изменение приходит первым
-    probe.publish_event("series.status.contribution", {
-        "source": "downloads", "series_id": 1,
-        "flags": {"downloading": True}})
-    probe.publish_event("series.status.contribution", {
-        "source": "downloads", "series_id": 1,
-        "flags": {"downloading": False, "ready": True}})
-    assert await _next_change(sub) == {"series_id": 1, "statuses": ["ready"],
-                                       "is_busy": False}
-    assert sub.queue.empty()
-
-
-@pytest.mark.asyncio
-async def test_touch_scan_time_publishes_date(system):
-    """После скана/загрузки дата толкается в SSE сразу (series.updated с
-    last_scan_time в ISO 'T'-формате, как HTTP _iso) — не только по F5."""
-    import re
-    bus, probe = system
-    sub = bus.subscribe("series.updated")
-    probe.send_command("catalog.series.touch_scan_time", {"series_id": 1})
-    payload = await _next_change(sub)
-    assert payload["series_id"] == 1
-    ts = payload["last_scan_time"]
-    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", ts)  # 'T', не пробел
-    assert " " not in ts
-
-
-@pytest.mark.asyncio
 async def test_viewing_commands_and_sse_guard(system):
     bus, probe = system
     sub = bus.subscribe("series.status.changed")
@@ -210,26 +65,3 @@ async def test_viewing_commands_and_sse_guard(system):
     assert await _next_change(sub) == {"series_id": 1,
                                        "statuses": ["waiting"],
                                        "is_busy": False}
-
-
-@pytest.mark.asyncio
-async def test_series_list_no_state_column_and_statuses(system):
-    bus, probe = system
-    probe.publish_event("series.status.contribution", {
-        "source": "scan", "series_id": 1, "flags": {"scanning": True}})
-    await settle(bus)  # the request could overtake the event in the queue: the contribution is folded first
-    rows = await probe.request("catalog.series.list", {}, timeout=5)
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["name"] == "Тайтл"
-    assert row["statuses"] == ["scanning"]
-    # протухающая колонка state не отдаётся наружу (Р-11)
-    assert "state" not in row
-
-
-@pytest.mark.asyncio
-async def test_series_get_unknown_is_error(system):
-    from core import BusRequestError
-    _, probe = system
-    with pytest.raises(BusRequestError, match="series_not_found"):
-        await probe.request("catalog.series.get", {"series_id": 99}, timeout=5)

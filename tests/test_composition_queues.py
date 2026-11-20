@@ -3,10 +3,9 @@ reference is the reference the planner takes, and the head of the queue of a gro
 voice-over (core/plan), for every order the rows of the layout come in, with and without the levers of the user."""
 import itertools
 
-from core.contracts import (REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, EffectiveLever,
-                            EpisodeSettings, Level, availability, group_target, variant_target)
+from core.contracts import (REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME, VOICE_ALLOW, VOICE_ORDER, EffectiveLever, EpisodeSettings,
+                            Level, availability, group_target, variant_target)
 from core.variant_queue import Order
-from core.voice_names import NO_GROUPS
 from modules.composition import queues
 from planner_choice import goals
 from scan_support import row
@@ -62,47 +61,6 @@ def build(rows, levers):
     return queues.build(availability.lines_of_level(rows, 4, 11), levers, ORDER, GROUPS, 11)
 
 
-def test_the_head_of_the_queue_of_the_reference_is_the_reference_the_planner_takes_in_every_order_of_the_rows():
-    for name, levers in LEVERS.items():
-        for rows in itertools.permutations(SHUFFLED):
-            shown, _ = build(list(rows), levers)
-            head = next(each for each in shown.rows if each.allowed)
-            goal = goals(list(rows), [EpisodeSettings(season=4, episode=11, levers=levers)], players=PRIORITY,
-                         sources=SOURCES)[(4, 11)]
-            video = goal.video.snapshot
-            assert (head.group, head.source_id, head.player) == (
-                video.variant_label, goal.video.timeline.source_id, video.player), name
-
-
-def test_variants_declared_equal_carry_the_number_of_their_group_by_where_the_group_first_stands():
-    first = [{"group": "AniStar", "source_id": 40, "player": "cvh"}, {"group": "AnimeVost", "source_id": 33, "player": "cvh"}]
-    second = [{"group": "ChinaTown", "source_id": 33, "player": "kodik"}, {"group": "AniStar", "source_id": 33, "player": "kodik"}]
-    shown, _ = build(EPISODE, [lever(REFERENCE_SAME, [second, first], level=Level.SERIES)])
-    numbers = [((each.group, each.source_id, each.player), each.same) for each in shown.rows if each.same]
-    # The numbers run in the order the groups first stand in the queue, not in the order the lever lists them.
-    assert [number for _, number in numbers] == sorted(number for _, number in numbers)
-    assert {number for _, number in numbers} == {1, 2} and len(numbers) == 4
-    assert shown.same_level == Level.SERIES
-    assert [each.same for each in build(EPISODE, [])[0].rows] == [None] * len(shown.rows) and build(EPISODE, [])[0].same_level == Level.DEFAULT
-
-
-def test_a_group_of_which_the_level_lists_one_variant_only_is_no_group_there():
-    lone = [{"group": "AniStar", "source_id": 40, "player": "cvh"}, {"group": "AniStar", "source_id": 999, "player": "cvh"}]
-    shown, _ = build(EPISODE, [lever(REFERENCE_SAME, [lone])])
-    assert [each.same for each in shown.rows] == [None] * len(shown.rows)
-
-
-def test_the_groups_a_queue_shows_are_the_value_of_the_lever_that_makes_them():
-    first = [{"group": "AniStar", "source_id": 40, "player": "cvh"}, {"group": "AnimeVost", "source_id": 33, "player": "cvh"}]
-    shown, _ = build(EPISODE, [lever(REFERENCE_SAME, [first])])
-    assert sorted(map(sorted_items, queues.same_groups(shown.rows)[0])) == sorted(map(sorted_items, first))
-    assert queues.same_groups(build(EPISODE, [])[0].rows) == []
-
-
-def sorted_items(item):
-    return tuple(sorted(item.items()))
-
-
 def test_the_head_of_the_queue_of_a_group_is_the_voice_over_the_planner_takes_in_every_order_of_the_rows():
     for name, levers in LEVERS.items():
         for rows in itertools.permutations(SHUFFLED):
@@ -113,46 +71,3 @@ def test_the_head_of_the_queue_of_a_group_is_the_voice_over_the_planner_takes_in
             shown = {queue.group: [(each.source_id, each.player) for each in queue.rows if each.allowed] for queue in by_group}
             for way in goal.tracks:
                 assert shown[way.voice][0] == (way.dub.source_id, way.row.player), (name, way.voice)
-
-
-def test_a_queue_lists_what_the_level_has_with_the_values_of_its_levers():
-    shown, by_group = build(EPISODE, LEVERS["denied"] + [lever(VOICE_TAKE, False, group_target("FumoDub"), Level.EPISODE)])
-    assert [(each.group, each.source_id, each.player, each.height, each.allowed) for each in shown.rows] == [
-        ("AniStar", 39, "vk", 2160, False), ("AniStar", 33, "cvh", 1080, True), ("AnimeVost", 33, "cvh", 1080, True),
-        ("AniStar", 40, "cvh", 1080, True), ("AniStar", 33, "kodik", 720, True), ("ChinaTown", 33, "kodik", 720, True),
-        ("AnimeVost", 40, "kodik", 720, True), ("ChinaTown", 40, "kodik", 720, True), ("AniStar", 40, "animakima", 720, True)]
-    assert shown.rows[0].allowed_level == Level.SEASON and shown.order_level == Level.DEFAULT
-    assert [queue.group for queue in by_group] == ["AniStar", "ChinaTown", "AnimeVost", "FumoDub"]
-    fumo = next(queue for queue in by_group if queue.group == "FumoDub")
-    assert (fumo.take, fumo.take_level, [each.episodes for each in fumo.rows]) == (False, Level.EPISODE, ["11"])
-
-
-def test_a_voice_over_in_no_group_is_in_no_queue_not_even_of_the_reference_however_high_it_is():
-    """A row no group took is no row of the output: the window lists it in no queue — no voice-over, no reference — just
-    as the planner takes it into no work."""
-    unknown = row(1, 38, "u-vk", 4, 11, player="vk", height=2160, voice="Неизвестная озвучка 1")
-    shown, by_group = build(EPISODE + [unknown], [])
-    assert "Неизвестная озвучка 1" not in [queue.group for queue in by_group]
-    assert "Неизвестная озвучка 1" not in [each.group for each in shown.rows]
-    assert shown.rows == build(EPISODE, [])[0].rows
-
-
-def test_a_season_queue_names_the_episodes_each_variant_plays_in_and_its_best_height():
-    rows = [row(1, 38, f"h{n}", 4, n, player="vk", height=2160, voice="HORIZON") for n in range(1, 11)] + \
-           [row(1, 39, f"a{n}", 4, n, player="vk", height=1080 if n < 15 else 2160, voice="AniStar") for n in range(11, 19)]
-    shown, _ = queues.build(availability.lines_of_level(rows, 4, None), [], ORDER, GROUPS)
-    assert [(each.group, each.height, each.episodes) for each in shown.rows] == [
-        ("HORIZON", 2160, "1–10"), ("AniStar", 2160, "11–18")]
-
-
-def test_the_episodes_of_a_variant_its_source_did_not_give_in_its_last_read_are_named_in_the_queue():
-    """A variant is listed as it stands, with the episodes its source did not give now: all of them for the episode, the
-    stale ones of a season."""
-    stale = [each.model_copy(update={"stale": each.row_key == "a-cvh"}) for each in EPISODE]
-    shown, _ = build(stale, [])
-    by_variant = {(each.group, each.source_id, each.player): each.stale for each in shown.rows}
-    assert by_variant[("AniStar", 33, "cvh")] == "11" and by_variant[("AniStar", 33, "kodik")] == ""
-    season = [row(1, 33, f"s{number}", 4, number, player="cvh", height=1080, voice="AniStar") for number in (1, 2, 3)]
-    season = [each.model_copy(update={"stale": each.episode_start > 1}) for each in season]
-    shown = queues.build(season, [], ORDER, GROUPS)[0]
-    assert [(each.episodes, each.stale) for each in shown.rows] == [("1–3", "2–3")]

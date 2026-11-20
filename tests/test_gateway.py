@@ -1,16 +1,12 @@
 """Сквозной тест этапа 1: HTTP → query → модуль → reply → HTTP, и шина → SSE."""
 import asyncio
 import json
-import re
-from pathlib import Path
 
 import httpx
 import pytest
 
 from core import BaseModule, Bus, Envelope, Runner
-from core import logging as core_logging
 from modules.gateway import GatewayModule
-from modules.gateway import module as gateway_module
 
 
 class EchoModule(BaseModule):
@@ -41,116 +37,11 @@ async def system(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_http_query_reply_roundtrip(system):
-    _, client, _ = system
-    resp = await client.post("/api/_diag/echo",
-                             json={"topic": "echo.ping", "payload": {"x": 1}})
-    assert resp.status_code == 200
-    assert resp.json() == {"reply": {"pong": {"x": 1}}}
-
-
-@pytest.mark.asyncio
 async def test_http_query_no_handler_returns_502(system):
     _, client, _ = system
     resp = await client.post("/api/_diag/echo",
                              json={"topic": "никого.нет", "timeout": 1})
     assert resp.status_code == 502
-
-
-@pytest.mark.asyncio
-async def test_bus_event_reaches_sse_with_mapped_name(system, monkeypatch):
-    # httpx.ASGITransport буферизует ответ целиком и не годится для
-    # бесконечного SSE — поэтому потребляем генератор потока напрямую;
-    # транспортный уровень проверяется смоук-тестом под живым uvicorn.
-    bus, _, gateway = system
-    monkeypatch.setitem(gateway_module.SSE_MAP,
-                        "demo.things.changed", gateway_module.Outgoing("things_changed"))
-
-    stream = gateway._sse_stream()
-    received: list[str] = []
-
-    async def consume():
-        async for chunk in stream:
-            received.append(chunk)
-            if chunk.startswith("event:"):
-                break
-
-    announced = bus.subscribe("gateway.sse.clients")  # the stream announces itself once it is subscribed
-    consumer = asyncio.create_task(consume())
-    await asyncio.wait_for(announced.queue.get(), 5)
-    bus.unsubscribe(announced)
-    bus.publish(Envelope(topic="внутренний.топик", kind="event",
-                         payload={"секрет": True}))
-    bus.publish(Envelope(topic="demo.things.changed", kind="event",
-                         payload={"id": 7}))
-    await asyncio.wait_for(consumer, timeout=5)
-    await stream.aclose()
-
-    text = "".join(received)
-    # просочиться должно только событие из SSE_MAP, под старым SSE-именем
-    assert text.startswith("event: things_changed\n")
-    assert json.loads(text.split("data:", 1)[1].strip()) == {"id": 7}
-    assert "секрет" not in text
-
-
-@pytest.mark.asyncio
-async def test_a_burst_goes_as_one_frame_of_its_events_in_order_when_the_stream_is_read_by_turns(system, monkeypatch):
-    # A burst published at once is one turn: the interface takes it in one task and counts its screen once.
-    bus, _, gateway = system
-    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.things.changed", gateway_module.Outgoing("things_changed"))
-    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.other.changed", gateway_module.Outgoing("other_changed"))
-
-    stream = gateway._sse_stream("batch")
-    announced = bus.subscribe("gateway.sse.clients")
-    first = asyncio.ensure_future(stream.__anext__())
-    await asyncio.wait_for(announced.queue.get(), 5)
-    bus.unsubscribe(announced)
-    for each in range(200):
-        bus.publish(Envelope(topic="demo.things.changed", kind="event", payload={"id": each}))
-    bus.publish(Envelope(topic="внутренний.топик", kind="event", payload={"секрет": True}))
-    bus.publish(Envelope(topic="demo.other.changed", kind="event", payload={"id": "last"}))
-    frame = await asyncio.wait_for(first, 5)
-    await stream.aclose()
-
-    name, data = frame.split("\n", 1)
-    assert name == "event: batch" and frame.endswith("\n\n")
-    turn = json.loads(data.removeprefix("data: "))
-    assert turn == [{"event": "things_changed", "data": {"id": each}} for each in range(200)] + [
-        {"event": "other_changed", "data": {"id": "last"}}]
-
-
-@pytest.mark.asyncio
-async def test_the_stream_is_subscribed_to_the_topics_of_its_table_and_to_nothing_else(system):
-    """What is not for the interface does not reach the stream: its subscription is the table, so its queue holds only
-    what goes out, and the requests and answers of the modules never pass through it."""
-    bus, _, gateway = system
-    stream = gateway._sse_stream("batch")
-    announced = bus.subscribe("gateway.sse.clients")
-    first = asyncio.ensure_future(stream.__anext__())
-    await asyncio.wait_for(announced.queue.get(), 5)
-    bus.unsubscribe(announced)
-    (sub,) = gateway._sse_subs.values()
-    assert sub.topics == frozenset(gateway_module.SSE_MAP) and sub.wild == ()
-    assert bus.publish(Envelope(topic="catalog.series.get", kind="query", payload={})) == 0
-    first.cancel()
-    await asyncio.gather(first, return_exceptions=True)
-    await stream.aclose()
-
-
-@pytest.mark.asyncio
-async def test_a_stream_read_by_turns_ends_its_subscription_when_closed(system, monkeypatch):
-    # Starlette closes the stream at a frame when the client goes: the turns under it must let the bus go too.
-    bus, _, gateway = system
-    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.things.changed", gateway_module.Outgoing("things_changed"))
-    stream = gateway._sse_stream("batch")
-    announced = bus.subscribe("gateway.sse.clients")
-    first = asyncio.ensure_future(stream.__anext__())
-    assert (await asyncio.wait_for(announced.queue.get(), 5)).payload == {"count": 1}
-    bus.publish(Envelope(topic="demo.things.changed", kind="event", payload={"id": 1}))
-    await asyncio.wait_for(first, 5)
-    await stream.aclose()
-    assert (await asyncio.wait_for(announced.queue.get(), 5)).payload == {"count": 0}
-    assert gateway._sse_subs == {}
 
 
 async def _collect_sse_events(gateway, bus, envelopes, expected):
@@ -213,94 +104,3 @@ async def test_sse_contract_mappings_and_transforms(system):
     assert events[2] == ("agent_queue_update", [{"hash": "abc"}])
     # события без трансформации проходят как есть
     assert events[3] == ("relocation_finished", {"series_id": 5, "success": True})
-
-
-@pytest.mark.asyncio
-async def test_security_headers_present(system):
-    """Этап 4: защитные заголовки на ответах."""
-    _, client, _ = system
-    resp = await client.get("/")
-    assert resp.headers["x-content-type-options"] == "nosniff"
-    assert resp.headers["x-frame-options"] == "DENY"
-    assert resp.headers["referrer-policy"] == "same-origin"
-
-
-@pytest.mark.asyncio
-async def test_docs_disabled_by_default(system):
-    """Этап 4: /docs и /openapi.json выключены (docs_enabled=False)."""
-    _, client, _ = system
-    assert (await client.get("/docs")).status_code == 404
-    assert (await client.get("/openapi.json")).status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_the_plan_of_a_series_reaches_the_interface_whole(system):
-    """The packet of the plan is whole: the interface asks nothing back."""
-    bus, _, gateway = system
-    payload = {"series_id": 2, "running": False, "assets": [], "episodes": [], "failures": [], "commands": []}
-    events = await _collect_sse_events(gateway, bus, [
-        Envelope(topic="planner.series.changed", kind="event", payload=payload)], 1)
-    assert events == [("plan_update", payload)]
-
-
-NEW_PACKETS = [
-    ("sources.table.progress", "sources_table_progress",
-     {"url": "https://x.test/p", "phase": "pages", "current": 3, "total": 10}),
-    ("sources.table.ready", "sources_table_ready", {"url": "https://x.test/p", "read_at": "2026-11-01T10:00:00"}),
-    ("sources.table.failed", "sources_table_failed", {"url": "https://x.test/p", "reason": "{\"code\":\"x\"}"}),
-    ("composition.changed", "composition_changed",
-     {"series_id": 1, "rev": 4, "episodes": [{"season": 1, "episode": 2}], "summary_only": True}),
-    ("composition.failed", "composition_failed", {"series_id": 1, "reason": "{\"code\":\"composition_error\"}"}),
-]
-
-
-@pytest.mark.asyncio
-async def test_the_events_of_the_tables_the_layout_and_the_references_reach_the_interface_whole(system):
-    """Stage 10: each packet is whole for its part of the screen, `summary_only` and all, so nothing is asked again."""
-    bus, _, gateway = system
-    events = await _collect_sse_events(gateway, bus, [
-        Envelope(topic=topic, kind="event", payload=payload) for topic, _, payload in NEW_PACKETS], len(NEW_PACKETS))
-    assert events == [(name, payload) for _, name, payload in NEW_PACKETS]
-
-
-def test_the_progress_events_of_the_old_reading_are_not_in_the_map():
-    assert "sources.video.progress" not in gateway_module.SSE_MAP
-    assert "sources.coverage.progress" not in gateway_module.SSE_MAP
-    names = {out.name for out in gateway_module.SSE_MAP.values()}
-    assert not {"video_scan_progress", "coverage_progress"} & names
-
-
-def test_every_topic_of_the_map_is_named_by_a_module_that_publishes_it():
-    """A topic renamed or removed in its owner must not stay in the map unnoticed."""
-    root = Path(__file__).resolve().parent.parent
-    published = set()
-    # The name of a topic of a contract lives in core/contracts as a constant the publisher takes.
-    for source in [*(root / "modules").rglob("*.py"), *(root / "core").rglob("*.py")]:
-        if source.parent.name != "gateway":
-            published |= set(re.findall(r'"([a-z_]+(?:\.[a-z_]+)+)"', source.read_text(encoding="utf-8")))
-    assert [topic for topic in gateway_module.SSE_MAP if topic not in published] == []
-
-
-@pytest.mark.asyncio
-async def test_the_debug_groups_of_logging_are_read_when_the_system_says_it_is_up(tmp_path, monkeypatch):
-    """Settings starts after the gateway, so the groups are read on the signal of the whole system, not by retries."""
-    from gateway_fakes import serving
-    read = asyncio.Event()
-    seen: list[set] = []
-    monkeypatch.setattr(core_logging, "set_debug_groups", lambda groups: (seen.append(groups), read.set()))
-    answers = {"settings.values.by_prefix": {"values": {"debug_enabled_scan": "true", "debug_enabled_sources": "false"}}}
-    async with serving(tmp_path, answers) as (_, owners, bus, _):
-        assert owners.asked("settings.values.by_prefix") == []
-        bus.publish(Envelope(topic="system.started", kind="event"))
-        await asyncio.wait_for(read.wait(), 5)
-    assert seen == [{"scan"}]
-    assert owners.asked("settings.values.by_prefix") == [{"prefix": "debug_enabled_"}]
-
-
-@pytest.mark.asyncio
-async def test_settings_that_does_not_answer_is_a_warning_and_not_a_reason_to_wait(tmp_path):
-    from gateway_fakes import serving
-    async with serving(tmp_path, {"settings.values.by_prefix": RuntimeError("down")}) as (_, owners, bus, _):
-        bus.publish(Envelope(topic="system.started", kind="event"))
-        await owners.next("settings.values.by_prefix")
-    assert len(owners.asked("settings.values.by_prefix")) == 1

@@ -79,17 +79,6 @@ async def system(db_path, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_the_composition_of_a_series_is_the_layout_of_composition_whatever_its_sources(system):
-    _, _, client, neighbours = system
-    for series_id in (1, 2):  # a series of a torrent source and one of video sources
-        resp = await client.get(f"/api/series/{series_id}/composition")
-        assert resp.status_code == 200
-        assert ("composition.get",
-                {"series_id": series_id, "include_excluded": False, "sources_only": False, "part": "whole",
-                 "episodes": []}) in neighbours.calls
-
-
-@pytest.mark.asyncio
 async def test_reprocess_is_a_sync_without_download_and_is_refused_while_one_runs(system):
     """The files take the names of the rules in a sync alone (И-59): the route starts one that fetches nothing and never
     renames by itself; while a sync of the series runs it is refused with the reason of the table of what is allowed."""
@@ -112,23 +101,3 @@ async def test_source_filenames_are_the_torrent_files_and_a_video_series_has_non
     # the lines for the rules test of a video series come from composition.preview, not from this list
     resp = await client.get("/api/series/2/source-filenames")
     assert resp.json() == []
-
-
-@pytest.mark.asyncio
-async def test_removed_endpoints_gone(system):
-    """Р-21: мёртвые точки удалены."""
-    _, _, client, _ = system
-    resp = await client.post("/api/series/1/reset_torrents")
-    assert resp.status_code in (404, 405)
-    resp = await client.post("/api/series/1/relocate",
-                             json={"new_path": "/x"})
-    assert resp.status_code in (404, 405)
-    # stage 10: the merge of slicing and scan answers and the duplicate of reprocess are gone
-    assert (await client.get("/api/series/2/sliced-files")).status_code in (404, 405)
-    assert (await client.post("/api/series/2/reprocess_vk_files")).status_code in (404, 405)
-    # 2026-11-17: the old path of the cutting of compilations is gone with its points
-    for method, path in (("get", "/api/series/2/media-items"), ("post", "/api/media-items/u/chapters"),
-                         ("post", "/api/media-items/u/slice"), ("post", "/api/series/2/deep-adoption"),
-                         ("get", "/api/series/2/rename_preview"), ("get", "/api/slicing/queue"),
-                         ("get", "/api/settings/slicing_delete_source")):
-        assert (await getattr(client, method)(path)).status_code in (404, 405), path

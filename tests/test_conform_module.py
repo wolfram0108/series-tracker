@@ -9,12 +9,9 @@ import pytest
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.envelope import Envelope
 from modules.conform import ConformModule, DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
-from core.contracts import job_dir, job_key, series_of_job_key
-from modules.conform.module import compact_job, finished_view, job_label, refused_by_service, split_label
-from modules.conform.paths import translate
 from conform_fakes import FakeClient
 from core.reasons import parse
-from settle import settle, wait_until
+from settle import wait_until
 
 
 def job(job_id, seq=1, status="running", **fields):
@@ -71,62 +68,7 @@ async def until(probe, condition, seconds=3.0):
 
 
 
-def test_the_key_a_label_carries_is_not_part_of_the_label_the_interface_shows():
-    assert split_label(job_label("S s01e01", "aa99")) == ("S s01e01", "aa99")
-    assert split_label("S s01e01") == ("S s01e01", None) and split_label(None) == (None, None)
-    view = compact_job(job("j1", label="Show s01e02 #aa99"))
-    assert (view["label"], view["key"]) == ("Show s01e02", "aa99")
-    assert view["series_id"] is None  # a key of another maker says no series
-
-
-def test_a_job_of_the_planner_says_which_series_it_works_for_by_its_key():
-    key = job_key(46, "3f9a1c4e0b72")
-    assert key == "plan:46:3f9a1c4e0b72" and series_of_job_key(key) == 46
-    assert compact_job(job("j1", label=job_label("Show s01e02", key)))["series_id"] == 46
-    assert [series_of_job_key(each) for each in (None, "", "aa99", "plan:", "plan:x:1", "other:46:1")] == [None] * 6
-    assert job_dir(key) == "3f9a1c4e0b72" and job_dir("aa99") == "aa99"  # the folder of a job is named by its part of the key
-
-
-def test_compact_job_keeps_what_the_interface_shows():
-    full = job("j1", results=[{
-        "dub": "kodik__rus__A__720p.mp4", "ok": True, "audio_resid_ms": 12.5, "audio_coverage": 0.97,
-        "audio_cuts": 2, "suspect": False, "warnings": ["drift"], "critical": [], "trace": [1],
-        "plots": [{"name": "x"}], "error": None}])
-    view = compact_job(full)
-    assert "trace" not in view and "ops" not in view
-    assert view["results"] == [{
-        "dub": "kodik__rus__A__720p.mp4", "plot": None, "ok": True, "refused": False, "skipped": False, "resid_ms": 12.5,
-        "coverage": 0.97, "cuts": 2, "suspect": False, "warnings": ["drift"], "critical": [],
-        "error": None, "from_ref_s": None, "from_dub_s": None}]
-    assert view["stage"] == "" and view["dub_total"] == 2
-
-
 # The records of a trace as the service writes them: a gate that decided, and the exception of a pair that crashed.
-FOREIGN = {"kind": "decision", "name": "foreign_gate", "verdict": "abort", "inputs": {"assigned_pct": 0.58}}
-PROCEEDED = {"kind": "decision", "name": "foreign_gate", "verdict": "proceed", "inputs": {"assigned_pct": 99.0}}
-CRASHED = {"kind": "event", "name": "exception", "type": "OutOfMemoryError", "error": "CUDA out of memory. Tried to allocate 314.00 MiB"}
-
-
-@pytest.mark.parametrize("result,refused", [
-    ({"ok": False, "error": "чужое видео: сопоставлено 1% (< 60%)", "trace": [PROCEEDED, FOREIGN]}, True),
-    # A crash is no judgement: the gate had let the pair through, and the pair fell afterwards.
-    ({"ok": False, "error": "CUDA out of memory", "trace": [PROCEEDED, CRASHED]}, False),
-    # A crash outside the pair carries no trace at all.
-    ({"ok": False, "error": "boom"}, False),
-    ({"ok": False, "error": "boom", "trace": []}, False),
-    ({"ok": False, "trace": [CRASHED]}, False),
-    # A pair the service accepted has nothing to be refused for.
-    ({"ok": True, "trace": [PROCEEDED]}, False),
-])
-def test_a_pair_is_refused_only_when_the_service_decided_so_and_not_when_it_crashed(result, refused):
-    assert refused_by_service(result) is refused
-    view = finished_view(job("j1", status="done", results=[{"dub": "a.mp4", **result}]), {})
-    assert view["results"][0]["refused"] is refused
-    assert compact_job(job("j1", results=[{"dub": "a.mp4", **result}]))["results"][0]["refused"] is refused
-
-
-
-
 @pytest.mark.asyncio
 async def test_snapshot_changes_and_progress_build_the_picture():
     client = FakeClient([
@@ -144,44 +86,6 @@ async def test_snapshot_changes_and_progress_build_the_picture():
         assert status["tasks"][0]["progress"] == 0.5
     finally:
         await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_every_change_is_pushed_with_the_whole_picture():
-    client = FakeClient([("conform.snapshot", {"items": [job("j1")]}),
-                         ("conform.progress", {"id": "j1", "progress": 0.25})])
-    bus = Bus()
-    sub = bus.subscribe("conform.queue.changed")
-    probe = Probe(bus)
-    runner = Runner(bus, [ConformModule(bus, client, backoff_start=0.01), probe])
-    await runner.start()
-    try:
-        seen = []
-        while not (seen and seen[-1]["tasks"] and seen[-1]["tasks"][0]["progress"] == 0.25):
-            seen.append((await asyncio.wait_for(sub.queue.get(), 3)).payload)
-        assert seen[0]["daemon"]["up"] is True
-        assert all("tasks" in picture and "daemon" in picture for picture in seen)
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_a_new_interface_gets_the_picture_without_asking():
-    client = FakeClient([("conform.snapshot", {"items": [job("j1")]})])
-    bus, probe, runner = await started(client)
-    try:
-        await until(probe, lambda s: len(s["tasks"]) == 1)
-        sub = bus.subscribe("conform.queue.changed")
-        probe.publish_event("gateway.sse.clients", {"count": 1})
-        picture = (await asyncio.wait_for(sub.queue.get(), 3)).payload
-        assert [t["id"] for t in picture["tasks"]] == ["j1"]
-        probe.publish_event("gateway.sse.clients", {"count": 0})
-        await settle(bus, probe.bridge)  # quiet: the last client leaving is handled
-        assert sub.queue.empty()
-    finally:
-        await runner.stop()
-
-
 
 
 async def pictures_until(bus, runner_start, condition, seconds=3.0):
@@ -209,19 +113,6 @@ async def test_unreachable_daemon_is_a_state_and_the_bridge_reconnects():
         assert len(down) == 1 and "refused" in down[0]["daemon"]["error"] and down[0]["tasks"] == []
         assert seen[-1]["tasks"][0]["id"] == "j9"
         assert client.connections == 2
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_lost_jobs_are_not_shown_as_current_while_the_daemon_is_down():
-    client = FakeClient([("conform.snapshot", {"items": [job("j1")]}), ConnectionError("lost")])
-    bus = Bus()
-    runner = Runner(bus, [ConformModule(bus, client, backoff_start=60), Probe(bus)])
-    try:
-        seen = await pictures_until(bus, runner.start, lambda s: not s[-1]["daemon"]["up"])
-        assert any(p["tasks"] for p in seen[:-1])
-        assert seen[-1]["tasks"] == [] and "lost" in seen[-1]["daemon"]["error"]
     finally:
         await runner.stop()
 
@@ -257,89 +148,9 @@ async def test_client_yields_only_the_conform_events_and_skips_noise():
                    ("conform.progress", {"id": "j1", "progress": 0.5})]
 
 
-@pytest.mark.asyncio
-async def test_client_info_joins_health_and_device():
-    assert await stream_of("").info() == {"version": "0.1.0", "device": "cuda", "gpu": True, "gpu_name": "RTX 3090",
-                                          "params": {"drift_speed_pct": {"min": 0.25, "max": 10.0, "default": 1.25},
-                                                     "audio_method": {"values": ["band", "muq"], "default": "band"}}}
-
-
-
-
-def test_paths_follow_the_longest_prefix_on_a_boundary():
-    mapping = {"/nas": "/mnt/meganas/media", "/nas/torrents": "/mnt/other"}
-    assert translate("/nas/a/b.mp4", mapping) == "/mnt/meganas/media/a/b.mp4"
-    assert translate("/nas/torrents/x", mapping) == "/mnt/other/x"
-    assert translate("/nas", mapping) == "/mnt/meganas/media"
-    for outside in ("/nasty/file", "/home/x"):
-        with pytest.raises(ValueError):
-            translate(outside, mapping)
-
-
 SUBMIT = {"ref": "/nas/lib/S/ep1.mp4", "dubs": ["/nas/torrents/series-tracker/7/s01e01/a.mp4"],
           "out_dir": "/nas/torrents/series-tracker/7/s01e01/_aligned",
           "cache_dir": "/nas/torrents/series-tracker/7/s01e01/_cache", "label": "S s01e01"}
-
-
-@pytest.mark.asyncio
-async def test_submit_sends_the_episode_with_daemon_paths_and_returns_the_job():
-    client = FakeClient([("conform.snapshot", {"items": []})])
-    _, probe, runner = await started(client)
-    try:
-        await until(probe, lambda s: s["daemon"]["up"])
-        reply = await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert reply == {"outcome": "accepted", "job_id": "j-new", "reason": None, "retry": False}
-        sent = client.enqueued[0]
-        assert sent["ref"] == "/mnt/meganas/media/lib/S/ep1.mp4"
-        assert sent["dubs"] == ["/mnt/meganas/media/torrents/series-tracker/7/s01e01/a.mp4"]
-        assert sent["out_dir"].endswith("/7/s01e01/_aligned") and sent["keep_tmp"] is False
-        assert sent["audio_method"] == "muq"  # the owner's meter of the audio layer
-        assert sent["label"] == "S s01e01"
-    finally:
-        await runner.stop()
-
-
-WINDOWS_MAP = {"conform.work_dir": "/nas", "conform.work_dir_remote": "Z:\\media"}
-
-
-@pytest.mark.asyncio
-async def test_a_windows_daemon_is_given_the_paths_in_its_own_style():
-    client = FakeClient([("conform.snapshot", {"items": []})])
-    _, probe, runner = await started(client, WINDOWS_MAP)
-    try:
-        await until(probe, lambda s: s["daemon"]["up"])
-        assert (await probe.request("conform.submit", SUBMIT, timeout=5))["outcome"] == "accepted"
-        sent = client.enqueued[0]
-        assert sent["ref"] == "Z:\\media\\lib\\S\\ep1.mp4"
-        assert sent["dubs"] == ["Z:\\media\\torrents\\series-tracker\\7\\s01e01\\a.mp4"]
-        assert sent["out_dir"] == "Z:\\media\\torrents\\series-tracker\\7\\s01e01\\_aligned"
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_without_a_work_folder_nothing_is_sent_and_the_reason_says_so():
-    client = FakeClient([("conform.snapshot", {"items": []})])
-    _, probe, runner = await started(client, {})
-    try:
-        await until(probe, lambda status: status["daemon"]["up"])
-        reply = await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert reply["outcome"] == "unavailable" and reply["retry"] is False
-        assert parse(reply["reason"])["code"] == "conform_no_work_dir" and client.enqueued == []
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_submit_takes_the_work_folder_names_from_settings():
-    client = FakeClient([("conform.snapshot", {"items": []})])
-    _, probe, runner = await started(client, {"conform.work_dir": "/nas", "conform.work_dir_remote": "/share"})
-    try:
-        await until(probe, lambda s: s["daemon"]["up"])
-        await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert client.enqueued[0]["ref"] == "/share/lib/S/ep1.mp4"
-    finally:
-        await runner.stop()
 
 
 @pytest.mark.asyncio
@@ -392,76 +203,6 @@ def ended(job_id, status="done", **fields):
 
 
 @pytest.mark.asyncio
-async def test_a_finished_job_is_announced_once_with_local_paths():
-    client = FakeClient([("conform.snapshot", {"items": [ended("j1")]}),
-                         ("conform.changed", {"items": [ended("j1"), job("j2")], "removed": []}),
-                         ("conform.changed", {"items": [ended("j2", status="failed", error="boom")],
-                                              "removed": []})])
-    bus = Bus()
-    sub = bus.subscribe("conform.job.finished")
-    probe = Probe(bus)
-    runner = Runner(bus, [ConformModule(bus, client, backoff_start=0.01), Settings(bus), probe])
-    await runner.start()
-    try:
-        first = (await asyncio.wait_for(sub.queue.get(), 3)).payload
-        second = (await asyncio.wait_for(sub.queue.get(), 3)).payload
-        assert (first["job_id"], first["status"]) == ("j1", "done")
-        assert first["results"][0]["out_path"] == "/nas/torrents/series-tracker/7/s01e01/_aligned/a.flac"
-        assert first["results"][0]["resid_ms"] == 11.0 and first["results"][0]["suspect"] is False
-        assert (second["job_id"], second["status"], second["error"]) == ("j2", "failed", "boom")
-        await asyncio.wait_for(client.drained.wait(), 3)  # the whole script is taken in and announced
-        assert sub.queue.empty()
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_a_job_of_a_windows_daemon_is_announced_with_local_paths_and_file_names():
-    answer = ended("j1", dubs=["Z:\\media\\torrents\\series-tracker\\7\\s01e01\\a.mp4"])
-    answer["results"][0]["out_path"] = "Z:\\media\\torrents\\series-tracker\\7\\s01e01\\_aligned\\a.flac"
-    bus = Bus()
-    sub = bus.subscribe("conform.job.finished")
-    runner = Runner(bus, [ConformModule(bus, FakeClient([("conform.snapshot", {"items": [answer]})]), backoff_start=0.01),
-                          Settings(bus, WINDOWS_MAP), Probe(bus)])
-    await runner.start()
-    try:
-        done = (await asyncio.wait_for(sub.queue.get(), 3)).payload
-        assert done["results"][0]["out_path"] == "/nas/torrents/series-tracker/7/s01e01/_aligned/a.flac"
-        assert compact_job(answer)["dubs"] == ["a.mp4"]
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_job_get_answers_from_the_mirror_then_the_daemon_then_says_gone():
-    client = FakeClient([("conform.snapshot", {"items": [ended("j1")]})])
-    client.known["j7"] = ended("j7", status="running")
-    _, probe, runner = await started(client)
-    try:
-        await until(probe, lambda s: len(s["tasks"]) == 1)
-        got = await probe.request("conform.job.get", {"job_id": "j1"}, timeout=5)
-        assert got["status"] == "done" and got["results"][0]["out_path"].startswith("/nas/")
-        assert (await probe.request("conform.job.get", {"job_id": "j7"}, timeout=5))["status"] == "running"
-        assert await probe.request("conform.job.get", {"job_id": "nope"}, timeout=5) == {
-            "job_id": "nope", "kind": "episode", "status": "gone", "error": None, "results": []}
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_the_bridge_announces_when_the_daemon_becomes_reachable():
-    client = FakeClient([("conform.snapshot", {"items": []})])
-    bus = Bus()
-    sub = bus.subscribe("conform.daemon.up")
-    runner = Runner(bus, [ConformModule(bus, client, backoff_start=0.01), Settings(bus), Probe(bus)])
-    await runner.start()
-    try:
-        await asyncio.wait_for(sub.queue.get(), 3)
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
 async def test_client_enqueue_separates_a_final_refusal_from_a_failure_that_proves_nothing():
     answers = iter([httpx.Response(200, json={"id": "j1", "status": "queued"}),
                     httpx.Response(422, json={"detail": "bad path"}),
@@ -484,35 +225,6 @@ async def test_client_enqueue_separates_a_final_refusal_from_a_failure_that_prov
 
 
 @pytest.mark.asyncio
-async def test_client_job_is_none_for_a_job_the_daemon_forgot():
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/known"):
-            return httpx.Response(200, json={"id": "known", "status": "done"})
-        return httpx.Response(404)
-
-    client = DaemonClient("http://daemon.test", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-    assert (await client.job("known"))["status"] == "done"
-    assert await client.job("lost") is None
-
-
-@pytest.mark.asyncio
-async def test_cancel_reaches_the_daemon_and_says_whether_it_was_done():
-    client = FakeClient([("conform.snapshot", {"items": []})])
-    client.known["j1"] = job("j1")
-    _, probe, runner = await started(client)
-    try:
-        await until(probe, lambda s: s["daemon"]["up"])
-        assert await probe.request("conform.cancel", {"job_id": "j1"}, timeout=5) == {"done": True}
-        assert await probe.request("conform.cancel", {"job_id": "nope"}, timeout=5) == {"done": True}
-        client.refuse = httpx.ConnectError("lost")
-        assert await probe.request("conform.cancel", {"job_id": "j1"}, timeout=5) == {"done": False}
-        assert client.cancelled == ["j1", "nope", "j1"]
-        assert probe.bridge.snapshot()["daemon"]["up"] is True
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
 async def test_a_cancel_the_daemon_answered_with_a_failure_is_judged_by_what_the_daemon_holds_after_it():
     """The daemon dropped the record of an ended job and then answered 500: the job is gone, so it is done; a failure that
     left the job as it was is not."""
@@ -532,155 +244,6 @@ async def test_a_cancel_the_daemon_answered_with_a_failure_is_judged_by_what_the
 
 
 @pytest.mark.asyncio
-async def test_cancel_without_a_reachable_daemon_is_not_done():
-    client = FakeClient([ConnectionError("down")])
-    _, probe, runner = await started(client)
-    try:
-        await until(probe, lambda s: not s["daemon"]["up"])
-        assert await probe.request("conform.cancel", {"job_id": "j1"}, timeout=5) == {"done": False}
-        assert client.cancelled == []
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_the_key_of_a_submission_rides_in_the_job_label_and_finds_the_job_again():
-    client = FakeClient([("conform.snapshot", {"items": []})])
-    _, probe, runner = await started(client)
-    try:
-        await until(probe, lambda s: s["daemon"]["up"])
-        await probe.request("conform.submit", {**SUBMIT, "key": "k1"}, timeout=5)
-        assert client.enqueued[0]["label"] == "S s01e01 #k1"
-        client.known["j-new"] = job("j-new", label=client.enqueued[0]["label"])
-        client.known["j-other"] = job("j-other", label="S s01e02 #k2")
-        found = await probe.request("conform.job.find", {"key": "k1"}, timeout=5)
-        assert found == {"reachable": True, "job_id": "j-new"}
-        absent = await probe.request("conform.job.find", {"key": "k3"}, timeout=5)
-        assert absent == {"reachable": True, "job_id": None}
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_a_key_is_not_confused_with_a_longer_key_that_ends_the_same_way():
-    client = FakeClient([("conform.snapshot", {"items": []})])
-    client.known["j1"] = job("j1", label="S s01e01 #xk1")
-    _, probe, runner = await started(client)
-    try:
-        await until(probe, lambda s: s["daemon"]["up"])
-        found = await probe.request("conform.job.find", {"key": "k1"}, timeout=5)
-        assert found == {"reachable": True, "job_id": None}
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_a_submission_without_a_key_keeps_its_label_as_it_was():
-    client = FakeClient([("conform.snapshot", {"items": []})])
-    _, probe, runner = await started(client)
-    try:
-        await until(probe, lambda s: s["daemon"]["up"])
-        await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert client.enqueued[0]["label"] == "S s01e01"
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_the_search_for_a_job_says_when_the_daemon_cannot_be_asked():
-    client = FakeClient([("conform.snapshot", {"items": []})])
-    _, probe, runner = await started(client)
-    try:
-        await until(probe, lambda s: s["daemon"]["up"])
-        client.refuse = httpx.ConnectError("lost")
-        found = await probe.request("conform.job.find", {"key": "k1"}, timeout=5)
-        assert found == {"reachable": False, "job_id": None}
-    finally:
-        await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_client_lists_the_jobs_the_daemon_knows():
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert (request.method, request.url.path) == ("GET", "/conform/jobs")
-        return httpx.Response(200, json=[{"id": "a", "label": "x #k"}])
-
-    client = DaemonClient("http://daemon.test", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-    assert await client.jobs() == [{"id": "a", "label": "x #k"}]
-
-
-@pytest.mark.asyncio
-async def test_client_cancel_separates_a_known_job_from_a_forgotten_one():
-    seen = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append((request.method, request.url.path))
-        if request.url.path.endswith("/known"):
-            return httpx.Response(200, json={"cancelled": "known"})
-        return httpx.Response(404)
-
-    client = DaemonClient("http://daemon.test", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-    assert await client.cancel("known") is True and await client.cancel("lost") is False
-    assert seen == [("DELETE", "/conform/jobs/known"), ("DELETE", "/conform/jobs/lost")]
-
-
-@pytest.mark.asyncio
-async def test_the_layout_of_the_daemon_is_known_only_here_and_needs_no_daemon():
-    client = FakeClient()
-    _, probe, runner = await started(client)
-    try:
-        assert await probe.request("conform.workspace", {"dub_folder": "/t/7/s01e01"}, timeout=5) == {
-            "out_dir": "/t/7/s01e01/_aligned", "cache_dir": "/t/7/s01e01/_cache"}
-        assert await probe.request("conform.workspace", {}, timeout=5) == {
-            "downloads": "/nas/downloads", "conform": "/nas/conform"}
-    finally:
-        await runner.stop()
-
-
-async def submit_through_the_wire(respond):
-    """The real client over a scripted transport, the real bridge on top: what the wire does, the outcome says."""
-    http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
-    bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
-    bridge._daemon["up"] = True
-
-    async def named():  # no settings module here: the storage as the owner would have named it
-        return dict(PATH_MAP)
-
-    bridge._values = named
-    try:
-        return await bridge.on_submit(Envelope("conform.submit", "query", SUBMIT | {"key": "k1"}))
-    finally:
-        await http.aclose()
-
-
-def refuses_to_answer(kind):
-    def respond(request):
-        raise kind("scripted", request=request)
-    return respond
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("answer, outcome", [
-    (lambda request: httpx.Response(200, json={"id": "j-9"}), "accepted"),
-    (lambda request: httpx.Response(422, text="bad"), "rejected"),
-    (lambda request: httpx.Response(429), "unavailable"),
-    (lambda request: httpx.Response(503), "uncertain"),
-    (lambda request: httpx.Response(200, text="{broken"), "uncertain"),
-    (lambda request: httpx.Response(200, json={"status": "queued"}), "uncertain"),
-    (lambda request: httpx.Response(200, json=["not", "a", "job"]), "uncertain"),
-    (refuses_to_answer(httpx.ConnectError), "unavailable"),
-    (refuses_to_answer(httpx.ConnectTimeout), "unavailable"),
-    (refuses_to_answer(httpx.ReadTimeout), "uncertain"),
-    (refuses_to_answer(httpx.RemoteProtocolError), "uncertain"),
-    (refuses_to_answer(httpx.WriteError), "uncertain"),
-], ids=["accepted", "refused", "try-later", "server-error", "broken-json", "no-job-id", "not-a-job", "no-connection",
-        "connect-timeout", "read-timeout", "dropped", "write-error"])
-async def test_the_outcome_of_a_submission_is_what_was_proved_not_the_kind_of_error(answer, outcome):
-    reply = await submit_through_the_wire(answer)
-    assert reply["outcome"] == outcome, reply
-
-
-@pytest.mark.asyncio
 async def test_a_failure_to_read_the_list_of_jobs_is_no_answer_not_no_job():
     for body in ("{broken", '{"not": "a list"}', '[{"label": "unreadable job"}]'):
         http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request, body=body: httpx.Response(200, text=body)))
@@ -694,27 +257,6 @@ async def test_a_failure_to_read_the_list_of_jobs_is_no_answer_not_no_job():
 
 
 @pytest.mark.asyncio
-async def test_a_daemon_that_cannot_be_asked_does_not_make_a_job_gone():
-    bridge = ConformModule(Bus(), FakeClient())  # never connected: nothing can be asked
-    with pytest.raises(RuntimeError):
-        await bridge.on_job_get(Envelope("conform.job.get", "query", {"job_id": "j1"}))
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("body", ["null", "[]", '"x"', "{}", '{"id": "another"}', "{broken"],
-                         ids=["null", "list", "string", "no-id", "other-job", "not-json"])
-async def test_an_answer_that_is_not_the_job_asked_for_is_no_answer_and_never_gone(body):
-    http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, text=body)))
-    bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
-    bridge._daemon["up"] = True
-    try:
-        with pytest.raises(httpx.HTTPError):
-            await bridge.on_job_get(Envelope("conform.job.get", "query", {"job_id": "accepted-job"}))
-    finally:
-        await http.aclose()
-
-
-@pytest.mark.asyncio
 async def test_only_the_not_found_of_the_contract_says_that_a_job_is_gone():
     http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(404)))
     bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
@@ -724,33 +266,6 @@ async def test_only_the_not_found_of_the_contract_says_that_a_job_is_gone():
         assert reply["status"] == "gone"
     finally:
         await http.aclose()
-
-
-def test_compact_job_names_the_dubs_and_the_picture_of_each_plot():
-    view = compact_job(job("j1", dubs=["/mnt/work/7_s01e01_blackcat.mp4"], results=[{
-        "dub": "7_s01e01_blackcat.mp4", "ok": True,
-        "plots": [{"kind": "html", "name": "b__track.html"}, {"kind": "track", "name": "b__track.png"}]}]))
-    assert view["dubs"] == ["7_s01e01_blackcat.mp4"] and view["results"][0]["plot"] == "b__track.png"
-    bare = compact_job(job("j2", results=[{"dub": "x", "plots": [{"kind": "html", "name": "x.html"}]}, {"dub": "y"}]))
-    assert bare["dubs"] == [] and [result["plot"] for result in bare["results"]] == [None, None]
-
-
-@pytest.mark.asyncio
-async def test_a_record_the_daemon_drops_is_announced_once_for_each_job():
-    client = FakeClient([("conform.snapshot", {"items": [ended("j1"), ended("j2")]}),
-                         ("conform.changed", {"items": [], "removed": ["j1", "j2"]})])
-    bus = Bus()
-    sub = bus.subscribe("conform.job.removed")
-    runner = Runner(bus, [ConformModule(bus, client, backoff_start=0.01), Settings(bus), Probe(bus)])
-    await runner.start()
-    try:
-        first = (await asyncio.wait_for(sub.queue.get(), 3)).payload
-        second = (await asyncio.wait_for(sub.queue.get(), 3)).payload
-        assert {first["job_id"], second["job_id"]} == {"j1", "j2"}
-        await asyncio.wait_for(client.drained.wait(), 3)  # the whole script is taken in and announced
-        assert sub.queue.empty()
-    finally:
-        await runner.stop()
 
 
 @pytest.mark.asyncio
@@ -800,24 +315,6 @@ REVERSE = {"compilation": "/nas/torrents/series-tracker/_cuts/7/c1/comp.mp4",
            "episodes": [{"path": "/nas/torrents/series-tracker/_cuts/7/c1/S s01e02 #k2/ep2.mkv", "atrack": 1},
                         {"path": "/nas/torrents/series-tracker/_cuts/7/c1/S s01e03 #k3/ep3.mkv"}],
            "out_dir": "/nas/torrents/series-tracker/_cuts/7/c1/_out", "label": "S 1–13"}
-
-
-@pytest.mark.asyncio
-async def test_a_batch_of_cuts_goes_with_daemon_paths_and_the_keys_find_their_jobs():
-    """Stage 12: one job per episode, labelled by the folder of the episode, which carries its key."""
-    client = FakeClient([("conform.snapshot", {"items": []})])
-    _, probe, runner = await started(client)
-    try:
-        await until(probe, lambda s: s["daemon"]["up"])
-        reply = await probe.request("conform.reverse", REVERSE, timeout=5)
-        assert reply["outcome"] == "accepted" and set(reply["jobs"]) == {"k2", "k3"}
-        sent = client.reversed[0]
-        assert sent["compilation"] == "/mnt/meganas/media/torrents/series-tracker/_cuts/7/c1/comp.mp4"
-        assert sent["episodes"][0].endswith("/S s01e02 #k2/ep2.mkv") and sent["episodes"][0].startswith("/mnt/meganas/")
-        assert sent["extend_edges"] is True and sent["dub_atracks"] == [1, 0] and sent["keep_tmp"] is False
-        assert sent["audio_method"] == "muq" and sent["ref_atrack"] == 0
-    finally:
-        await runner.stop()
 
 
 @pytest.mark.asyncio

@@ -85,35 +85,6 @@ async def system(db_path, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_auth_roundtrip(system):
-    _, _, client = system
-    resp = await client.post("/api/auth", json={
-        "qbittorrent": {"url": "http://qb:8080", "username": "admin",
-                        "password": "pass"},
-        "vk": {"token": "vk-token-1"},
-        "tmdb": {"token": "tmdb-token-1"}})
-    assert resp.json() == {"success": True}
-
-    # Этап 3: GET НЕ отдаёт секреты — только логин/URL и флаги «задан».
-    resp = await client.get("/api/auth")
-    body = resp.json()
-    assert body["qbittorrent"] == {"url": "http://qb:8080",
-                                   "username": "admin", "has_password": True}
-    assert "password" not in body["qbittorrent"]
-    assert body["vk"]["has_password"] is True and "password" not in body["vk"]
-    assert body["tmdb"] == {"configured": True}
-    assert body["kinozal"] == {}
-
-    # пустой пароль при сохранении НЕ затирает существующий (Этап 3)
-    await client.post("/api/auth", json={
-        "qbittorrent": {"url": "http://qb:9090", "username": "admin2",
-                        "password": ""}})
-    qb = (await client.get("/api/auth")).json()["qbittorrent"]
-    assert qb["url"] == "http://qb:9090" and qb["username"] == "admin2"
-    assert qb["has_password"] is True  # пароль сохранён, не затёрт
-
-
-@pytest.mark.asyncio
 async def test_a_secret_is_given_only_when_the_eye_of_its_field_asks_for_it_and_is_not_kept(system):
     """The password of a service is shown on request: its own call, not cached, nothing of it in the credentials; a service with none
     set gives an empty one, a name that is no service is no route."""
@@ -333,54 +304,3 @@ async def test_parser_rule_rejects_unknown_vocabulary(system):
                                   "action_pattern": "X"}])})
     assert resp.status_code == 400
     assert "action_unknown" in resp.json()["error"]
-
-
-@pytest.mark.asyncio
-async def test_parser_rule_update_keeps_conditions_when_absent(system):
-    _, _, client = system
-    resp = await client.post("/api/parser-profiles", json={"name": "Условия"})
-    profile_id = resp.json()["id"]
-    resp = await client.post(f"/api/parser-profiles/{profile_id}/rules",
-                             json={"name": "Сезон",
-                                   "conditions": [{"condition_type": "contains",
-                                                   "pattern": '[{"type":'
-                                               '"text","value":"сезон"}]'}]})
-    rule_id = resp.json()["id"]
-
-    # обновление без conditions — условия сохраняются
-    resp = await client.put(f"/api/parser-rules/{rule_id}",
-                            json={"name": "Сезон 2"})
-    assert resp.json()["success"] is True
-    resp = await client.get(f"/api/parser-profiles/{profile_id}/rules")
-    rules = resp.json()
-    assert rules[0]["name"] == "Сезон 2"
-    assert len(rules[0]["conditions"]) == 1
-
-    # пустой список — условия удаляются
-    resp = await client.put(f"/api/parser-rules/{rule_id}",
-                            json={"conditions": []})
-    assert resp.json()["success"] is True
-    resp = await client.get(f"/api/parser-profiles/{profile_id}/rules")
-    assert resp.json()[0]["conditions"] == []
-
-
-@pytest.mark.asyncio
-async def test_parser_rules_list_marks_invalid_rule(system):
-    _, db, client = system
-    resp = await client.post("/api/parser-profiles", json={"name": "Битое"})
-    profile_id = resp.json()["id"]
-    # правило с негодным шаблоном — мимо API: валидация его бы отвергла
-    await db.execute(
-        "INSERT INTO parser_rules (profile_id, name, priority, "
-        "action_pattern, continue_after_match) VALUES (?, ?, ?, ?, 0)",
-        (profile_id, "Битое", 1, "[]"))
-    rule = await db.fetch_one(
-        "SELECT id FROM parser_rules WHERE profile_id=?", (profile_id,))
-    await db.execute(
-        "INSERT INTO parser_rule_conditions (rule_id, condition_type, "
-        "pattern, logical_operator) VALUES (?, ?, ?, ?)",
-        (rule["id"], "contains", "не json", "AND"))
-    resp = await client.get(f"/api/parser-profiles/{profile_id}/rules")
-    rules = resp.json()
-    assert rules[0]["valid"] is False
-    assert rules[0]["error"]

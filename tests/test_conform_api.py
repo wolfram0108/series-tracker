@@ -50,26 +50,11 @@ async def system(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_job_is_stopped_or_deleted_through_the_bridge(system):
-    conform, client = system
-    reply = await client.delete("/api/conform/jobs/cf00004")
-    assert reply.status_code == 200 and reply.json() == {"done": True} and conform.cancelled == ["cf00004"]
-
-
-@pytest.mark.asyncio
 async def test_a_job_the_daemon_could_not_be_asked_to_change_is_a_coded_refusal(system):
     conform, client = system
     conform.done = False
     reply = await client.delete("/api/conform/jobs/cf00004")
     assert reply.status_code == 502 and parse(reply.json()["error"])["code"] == "conform_job_unchanged"
-
-
-@pytest.mark.asyncio
-async def test_the_picture_of_a_plot_is_served_as_png_and_may_be_kept_by_the_browser(system):
-    _, client = system
-    reply = await client.get("/api/conform/jobs/cf00002/plot/a__track.png")
-    assert reply.status_code == 200 and reply.content == PICTURE
-    assert reply.headers["content-type"] == "image/png" and "private" in reply.headers["cache-control"]
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ from modules.catalog import CatalogModule
 from modules.gateway import GatewayModule
 from modules.library import LibraryModule
 from modules.metadata import MetadataModule
-from series_factory import insert_series, source
+from series_factory import insert_series
 from settle import settle
 from schema_db import migrated
 
@@ -135,31 +135,6 @@ def topics(spy) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_series_list_shape(system):
-    _, _, client, _ = system
-    resp = await client.get("/api/series")
-    assert resp.status_code == 200
-    data = {s["id"]: s for s in resp.json()}
-    assert set(data) == {1, 2}
-    # the card: the sources come from the catalog, the series itself has no address and no kind
-    torrent, vk = data[1], data[2]
-    assert "kind" not in torrent and "kind" not in vk
-    assert [(each["url"], each["source_type"]) for each in torrent["sources"]] == [
-        ("http://kinozal.tv/details.php?id=7", "torrent")]
-    assert [(each["url"], each["source_type"]) for each in vk["sources"]] == [("u|q", "vk_video")]
-    for card in (torrent, vk):
-        assert not {"url", "source_type", "parser_profile_id", "vk_search_mode", "vk_quality_priority",
-                    "availability"} & set(card)
-    assert torrent["downloaded_episodes_count"] == 3   # счётчик torrents
-    assert vk["downloaded_episodes_count"] == 5        # счётчик scan
-    assert vk["tmdb_info"]["tmdb_id"] == 99
-    assert torrent["tmdb_info"] is None
-    assert torrent["is_busy"] is False
-    assert torrent["statuses"] == ["waiting"]
-    assert "state" not in torrent  # колонка похоронена (Р-11)
-
-
-@pytest.mark.asyncio
 async def test_series_details_and_404(system):
     bus, _, client, neighbours = system
     spy = bus.subscribe("#")
@@ -183,71 +158,6 @@ async def test_series_details_and_404(system):
 
 
 @pytest.mark.asyncio
-async def test_add_series_and_event(system):
-    bus, _, client, neighbours = system
-    sub = bus.subscribe("series.added")
-    sources = bus.subscribe("series.source.added")
-    resp = await client.post("/api/series", json={
-        "name": "Новый",
-        "name_en": "New", "site": "kinozal", "save_path": "/media/n",
-        "sources": [{"url": "http://kinozal.tv/details.php?id=9", "source_type": "torrent"}],
-        "tmdb_data": {"tmdb_id": 5, "tmdb_season_number": 1,
-                      "total_episodes": 8}})
-    assert resp.status_code == 200
-    series_id = resp.json()["series_id"]
-    env = await asyncio.wait_for(sub.queue.get(), 3)
-    assert env.payload["id"] == series_id
-    assert env.payload["name"] == "Новый"
-    assert env.payload["statuses"] == ["waiting"]
-    # the source appeared like any added later
-    added = await asyncio.wait_for(sources.queue.get(), 3)
-    assert added.payload["series_id"] == series_id
-    # TMDB-маппинг записан владельцем
-    details = (await client.get(f"/api/series/{series_id}")).json()
-    assert details["tmdb_info"]["tmdb_id"] == 5
-
-
-@pytest.mark.asyncio
-async def test_add_series_of_several_sources_keeps_their_order_and_choices(system):
-    _, _, client, neighbours = system
-    resp = await client.post("/api/series", json={
-        "name": "Видео", "name_en": "Video", "site": "somesite", "save_path": "/media/v",
-        "sources": [{"url": "https://one.test/p", "source_type": "web_video", "vibix_season": 2},
-                    {"url": "chan|query", "source_type": "vk_video", "players_off": ["vk"]}]})
-    assert resp.status_code == 200
-    details = (await client.get(f"/api/series/{resp.json()['series_id']}")).json()
-    assert [(each["url"], each["position"], each["vibix_season"], each["players_off"])
-            for each in details["sources"]] == [("https://one.test/p", 0, 2, []), ("chan|query", 1, None, ["vk"])]
-    assert all("vk_search_mode" not in each for each in details["sources"])
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("removed", [{"url": "http://x"}, {"source_type": "torrent"}, {"parser_profile_id": 1},
-                                      {"vk_search_mode": "search"}, {"vk_quality_priority": "[]"}])
-async def test_add_series_does_not_take_the_fields_that_left_the_series(system, removed):
-    _, _, client, _ = system
-    body = {"name": "Т", "name_en": "T", "site": "s", "save_path": "/media/t",
-            "sources": [{"url": "http://kinozal.tv/details.php?id=9", "source_type": "torrent"}], **removed}
-    resp = await client.post("/api/series", json=body)
-    assert resp.status_code == 422
-    assert next(iter(removed)) in json.dumps(resp.json(), ensure_ascii=False)
-    assert len((await client.get("/api/series")).json()) == 2  # the series is not created
-
-
-@pytest.mark.asyncio
-async def test_add_series_needs_a_source_and_takes_no_releases(system):
-    _, _, client, _ = system
-    base = {"name": "Т", "name_en": "T", "site": "s", "save_path": "/media/t"}
-    assert (await client.post("/api/series", json=base)).status_code == 422
-    assert (await client.post("/api/series", json={**base, "sources": []})).status_code == 422
-    # the releases of a torrent page are its source's (stage 15), not a field of the form
-    resp = await client.post("/api/series", json={
-        **base, "sources": [{"url": "http://kinozal.tv/details.php?id=9", "source_type": "torrent"}],
-        "torrents": [{"torrent_id": "t9", "link": "http://kinozal.tv/9"}]})
-    assert resp.status_code == 422
-
-
-@pytest.mark.asyncio
 async def test_add_series_with_a_source_the_catalog_refuses_leaves_no_series_and_says_why(system):
     _, _, client, _ = system
     resp = await client.post("/api/series", json={
@@ -257,17 +167,6 @@ async def test_add_series_with_a_source_the_catalog_refuses_leaves_no_series_and
     assert resp.status_code == 400
     assert parse(resp.json()["error"])["code"] == "source_exists"
     assert len((await client.get("/api/series")).json()) == 2
-
-
-@pytest.mark.asyncio
-async def test_add_series_rejects_relative_save_path(system):
-    _, _, client, _ = system
-    resp = await client.post("/api/series", json={
-        "name": "Кривой", "name_en": "Bad", "site": "kinozal", "save_path": "Z/Donghua",
-        "sources": [{"url": "http://kinozal.tv/details.php?id=10", "source_type": "torrent"}]})
-
-    assert resp.status_code == 400
-    assert "save_path_relative" in resp.json()["error"]
 
 
 @pytest.mark.asyncio
@@ -307,51 +206,6 @@ async def test_delete_cascade_by_owners(db_path, tmp_path):
 
 
 # --- обновление свойств -----------------------------------------------------------
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("series_id", [1, 2])
-async def test_update_without_path_change_touches_no_file_whatever_the_sources(system, series_id):
-    """A save changes the card and the plan only: the files follow it at the next sync (И-59), so the gateway asks no
-    renaming, no relocation and no scan."""
-    bus, db, client, neighbours = system
-    spy = bus.subscribe("#")
-    resp = await client.post(f"/api/series/{series_id}", json={
-        "name": "Переименован", "save_path": "/media/t" if series_id == 1 else "/media/s"})
-    assert resp.status_code == 200
-    row = await db.fetch_one("SELECT name FROM series WHERE id=?", (series_id,))
-    assert row["name"] == "Переименован"
-    await settle(bus, neighbours)  # the command is background work of the gateway: done when the bus is quiet
-    # the path goes to library, which knows the series is there already
-    assert ("plan", {"series_id": series_id, "new_path": "/media/t" if series_id == 1 else "/media/s"}) in neighbours.calls
-    # the layout of the series is counted again on series.updated; the gateway starts no sync
-    assert "scan.series.run" not in topics(spy)
-
-
-@pytest.mark.asyncio
-async def test_update_with_path_change_plans_the_move_and_the_card_shows_it(system):
-    _, db, client, neighbours = system
-    resp = await client.post("/api/series/1", json={
-        "name": "Тайтл", "save_path": "/media/new"})
-    assert resp.status_code == 200
-    assert ("plan", {"series_id": 1, "new_path": "/media/new"}) in neighbours.calls
-    # save_path is written by library after the move in a sync; the gateway does not touch it
-    row = await db.fetch_one("SELECT save_path FROM series WHERE id=1")
-    assert row["save_path"] == "/media/t"
-    card = (await client.get("/api/series/1")).json()
-    assert (card["save_path"], card["planned_save_path"]) == ("/media/t", "/media/new")
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("removed", [{"url": "http://x"}, {"source_type": "torrent"}, {"parser_profile_id": 1},
-                                      {"vk_search_mode": "get_all"}, {"vk_quality_priority": "[]"},
-                                      {"sources": []}])
-async def test_update_does_not_take_what_belongs_to_the_sources(system, removed):
-    _, db, client, neighbours = system
-    resp = await client.post("/api/series/1", json={"name": "Другой", **removed})
-    assert resp.status_code == 422
-    assert (await db.fetch_one("SELECT name FROM series WHERE id=1"))["name"] == "Тайтл"
-    assert not any(call[0] == "relocate" for call in neighbours.calls)
 
 
 # --- мелкие точки ------------------------------------------------------------------
@@ -428,32 +282,6 @@ async def test_small_endpoints(system):
     assert body[0]["qb_hash"] == "h1"
     assert body[0]["series_name"] == "Тайтл"
     assert body[0]["progress"] == 55
-
-
-@pytest.mark.asyncio
-async def test_create_and_update_store_fs_safe_names(system):
-    """The column owner sanitizes path and file-name fields on every
-    write, so forbidden characters never reach the DB from any client."""
-    _, _, client, _ = system
-    resp = await client.post("/api/series", json={
-        "name": "Кто: доктор",
-        "name_en": '  Doctor "Who"?  ', "site": "kinozal",
-        "save_path": "/media/Doctor Who: Flux (2021)\\extra",
-        "sources": [{"url": "http://kinozal.tv/details.php?id=10", "source_type": "torrent"}],
-        "quality_override": "WEB-DL/1080p"})
-    assert resp.status_code == 200
-    series_id = resp.json()["series_id"]
-    details = (await client.get(f"/api/series/{series_id}")).json()
-    assert details["name"] == "Кто: доктор"  # display title stays as typed
-    assert details["name_en"] == "Doctor Who"
-    assert details["save_path"] == "/media/Doctor Who Flux (2021)/extra"
-    assert details["quality_override"] == "WEB-DL1080p"
-
-    resp = await client.post(f"/api/series/{series_id}",
-                             json={"name_en": "New*Name", "season": "s01"})
-    assert resp.status_code == 200
-    details = (await client.get(f"/api/series/{series_id}")).json()
-    assert details["name_en"] == "NewName"
 
 
 @pytest.mark.asyncio

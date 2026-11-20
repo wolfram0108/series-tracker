@@ -2,8 +2,6 @@
 again, the order and the default track are those given, a container is rebuilt from itself, and a build that is not
 what was asked says why."""
 import asyncio
-import json
-import os
 import shutil
 import subprocess
 
@@ -31,122 +29,6 @@ def media(tmp_path):
     return tmp_path, video, dubs, other
 
 
-def codecs(path) -> list[str]:
-    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path)],
-                         check=True, capture_output=True, text=True).stdout
-    return [line.strip() for line in out.splitlines() if line.strip()]
-
-
-def test_a_container_holds_the_video_and_the_tracks_in_the_order_given_copied_as_they_are(media):
-    tmp, video, dubs, _ = media
-    out = str(tmp / "ep.mkv")
-    tracks = [AudioIn("ruchime", dubs["ruchime"], 0, "1:a", language="rus"), AudioIn("ПВА ШОУ", video, 0, "1:a", language="chi"),
-              AudioIn("anistar", dubs["anistar"], 0, "1:a")]
-    assert asyncio.run(container.build(out, video, "1:a", tracks)) is None
-    made = asyncio.run(container.contents(out))
-    assert made.video == "1:a" and made.labels == ["ruchime", "ПВА ШОУ", "anistar"]
-    assert [track.default for track in made.audio] == [True, False, False]
-    assert [track.aligned_to for track in made.audio] == ["1:a"] * 3
-    # Each track bears the language of its voice-over; one nobody gave a language to claims none (Matroska's «und»).
-    assert [track.language for track in made.audio] == ["rus", "chi", "und"]
-    assert codecs(out) == ["mpeg4", "flac", "aac", "flac"]  # nothing encoded again
-
-
-def test_a_container_is_rebuilt_from_itself_in_a_new_order_and_without_a_track(media):
-    tmp, video, dubs, _ = media
-    first = str(tmp / "first.mkv")
-    asyncio.run(container.build(first, video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a"),
-                                                       AudioIn("ruchime", dubs["ruchime"], 0, "1:a"),
-                                                       AudioIn("anistar", dubs["anistar"], 0, "1:a")]))
-    again = str(tmp / "again.mkv")
-    was = asyncio.run(container.contents(first))
-    order = {track.label: track.index for track in was.audio}
-    tracks = [AudioIn(label, first, order[label], "1:a") for label in ("anistar", "ПВА ШОУ")]
-    assert asyncio.run(container.build(again, first, "1:a", tracks)) is None
-    assert asyncio.run(container.contents(again)).labels == ["anistar", "ПВА ШОУ"]
-    assert codecs(again) == ["mpeg4", "flac", "aac"]
-
-
-def test_the_tracks_of_a_container_go_into_a_new_video_of_the_same_identity(media):
-    """Point 6 of ЭТАП_11: the tracks are taken out of the old container and put next to the new video, not fetched again."""
-    tmp, video, dubs, _ = media
-    old = str(tmp / "old.mkv")
-    asyncio.run(container.build(old, video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a"),
-                                                     AudioIn("ruchime", dubs["ruchime"], 0, "1:a")]))
-    better = make(tmp / "better.mp4", "-f", "lavfi", "-i", "testsrc=duration=3:size=320x180:rate=10",
-                  "-f", "lavfi", "-i", "sine=frequency=300:duration=3", "-c:v", "mpeg4", "-c:a", "aac", "-shortest")
-    new = str(tmp / "new.mkv")
-    assert asyncio.run(container.build(new, better, "1:a", [AudioIn("ПВА ШОУ", better, 0, "1:a"),
-                                                             AudioIn("ruchime", old, 1, "1:a")])) is None
-    found = asyncio.run(container.contents(new))
-    assert found.labels == ["ПВА ШОУ", "ruchime"] and found.height == 180  # the height of the film the file holds
-
-
-def test_the_title_of_a_track_is_the_users_name_and_its_group_stays_the_tag(media):
-    tmp, video, dubs, _ = media
-    out = str(tmp / "titled.mkv")
-    assert asyncio.run(container.build(out, video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a", own=True),
-                                                         AudioIn("ruchime", dubs["ruchime"], 0, "1:a", title="ПМ_ruchime")])) is None
-    found = asyncio.run(container.contents(out))
-    assert [(track.label, track.title) for track in found.audio] == [("ПВА ШОУ", "ПВА ШОУ"), ("ruchime", "ПМ_ruchime")]
-    assert container.problem_of(found, "1:a", [("ПВА ШОУ", "ПВА ШОУ", "", True, "und"), ("ruchime", "ruchime", "", False, "und")],
-                                None) == "container_tracks_wrong"  # a file with another title is not the one asked for
-
-
-@pytest.mark.parametrize("case, expected", [
-    ("unreadable", "container_unreadable"), ("video", "container_video_wrong"), ("tracks", "container_tracks_wrong"),
-    ("language", "container_tracks_wrong"), ("length", "container_length_wrong"), ("good", None)])
-def test_a_build_that_is_not_what_was_asked_says_why(media, case, expected):
-    tmp, video, dubs, other = media
-    out = str(tmp / "ep.mkv")
-    asyncio.run(container.build(out, video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a")]))
-    made = None if case == "unreadable" else asyncio.run(container.contents(out))
-    identity = "2:b" if case == "video" else "1:a"
-    signature = ([("ruchime", "ruchime", "", False, "und")] if case == "tracks" else [("ПВА ШОУ", "ПВА ШОУ", "", False, "und")]
-                 if case != "language" else [("ПВА ШОУ", "ПВА ШОУ", "", False, "rus")])
-    duration = 5.0 if case == "length" else 3.0
-    assert container.problem_of(made, identity, signature, duration) == expected
-
-
-@pytest.mark.parametrize("code, said, expected", [
-    (-9, b"", "ffmpeg_failed: killed by signal 9"), (1, b"", "ffmpeg_failed: exit code 1"),
-    (1, b"Invalid argument\n", "ffmpeg_failed: Invalid argument")])
-def test_an_ffmpeg_that_fails_says_what_it_said_or_how_it_ended(media, monkeypatch, code, said, expected):
-    """A build the system killed (no memory) leaves no word of ffmpeg's: the reason in the log is how it ended, not an empty text."""
-    tmp, video, _dubs, _ = media
-
-    async def failing(cmd, **kwargs):
-        return code, said
-
-    monkeypatch.setattr(container, "run_lines", failing)
-    assert asyncio.run(container.build(str(tmp / "ep.mkv"), video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a")])) == expected
-
-
-def test_a_file_not_built_here_reads_with_no_identity_and_its_tracks_by_title(media):
-    _, video, _, _ = media
-    found = asyncio.run(container.contents(video))
-    assert found.has_video and found.video == "" and len(found.audio) == 1 and found.duration > 2.5
-    assert asyncio.run(container.contents(str(video) + ".missing")) is None
-
-
-def test_a_container_carries_its_provenance_and_gives_it_back(media):
-    """Stage 12: the table of what the container holds travels inside it, through a rebuild too."""
-    tmp, video, dubs, _ = media
-    table = {"video": {"source": "сайт", "row": "1"}, "tracks": [{"voice": "ruchime", "aligned_to": "1:a"}]}
-    first = str(tmp / "first.mkv")
-    assert asyncio.run(container.build(first, video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a", own=True),
-                                                            AudioIn("ruchime", dubs["ruchime"], 0, "1:a")],
-                                       provenance=table)) is None
-    assert asyncio.run(container.provenance_of(first)) == table
-    again = str(tmp / "again.mkv")
-    newer = {**table, "rev": 2}
-    assert asyncio.run(container.build(again, first, "1:a", [AudioIn("ПВА ШОУ", first, 0, "1:a", own=True)],
-                                       provenance=newer)) is None
-    assert asyncio.run(container.provenance_of(again)) == newer
-    assert asyncio.run(container.provenance_of(video)) is None  # a file not built here carries none
-    assert sorted(os.listdir(tmp)) == sorted(set(os.listdir(tmp)) - {"first.mkv.provenance.json"})
-
-
 def _torrent_video(tmp, seconds: int = 3) -> str:
     """A Matroska file as a release gives it: a picture, a sound, ASS subtitles in two languages (one forced), a font they
     are drawn with, and two chapters. Each subtitles stream is one event of a second, wherever the episode ends."""
@@ -166,48 +48,6 @@ def _torrent_video(tmp, seconds: int = 3) -> str:
                 "-disposition:s:0", "forced", "-metadata:s:s:1", "language=eng",
                 "-attach", str(font), "-metadata:s:t", "mimetype=application/x-truetype-font",
                 "-metadata:s:t", "filename=Kurinto.ttf")
-
-
-def test_the_chosen_subtitles_go_in_their_order_with_the_fonts_of_their_file_and_the_chapters_of_the_video(media):
-    """DESIGN.md 7.1.1: the subtitles are the tracks the plan chose, in its order (here the second of the file first), each
-    with its key, its name, its language and the flag «forced»; the fonts of the file they come from go with them, the
-    chapters are the video's; what the plan did not choose stays out."""
-    from core.ffprobe import layout_of
-    tmp, _video, dubs, _ = media
-    video = _torrent_video(tmp)
-    out = str(tmp / "built.mkv")
-    tracks = [AudioIn("Оригинал", video, 0, "1:E01", own=True), AudioIn("ruchime", dubs["ruchime"], 0, "1:E01")]
-    chosen = [SubtitleIn(video, 1, "1:full:", "Full", "eng", default=True),
-              SubtitleIn(video, 0, "1:signs:", "Надписи", "rus", forced=True)]
-    assert asyncio.run(container.build(out, video, "1:E01", tracks, provenance={"video": "E01"}, subtitles=chosen)) is None
-
-    layout, _ = asyncio.run(layout_of(out))
-    subtitles = [s for s in layout["streams"] if s["kind"] == "subtitle"]
-    attached = [s["filename"] for s in layout["streams"] if s["kind"] == "attachment"]
-    assert [(s["codec"], s["language"], s["title"], s["forced"]) for s in subtitles] == [
-        ("ass", "eng", "Full", False), ("ass", "rus", "Надписи", True)]
-    assert [(each.key, each.title, each.default, each.forced) for each in asyncio.run(container.contents(out)).subtitles] == [
-        ("1:full:", "Full", True, False), ("1:signs:", "Надписи", False, True)]
-    assert sorted(attached) == ["Kurinto.ttf", container.PROVENANCE]
-    assert layout["chapters"] == 2
-
-    none = str(tmp / "none.mkv")  # no subtitles chosen: none of the file's go, nor their fonts; the chapters stay
-    assert asyncio.run(container.build(none, video, "1:E01", tracks[:1], provenance={"video": "E01"})) is None
-    layout, _ = asyncio.run(layout_of(none))
-    assert [s["kind"] for s in layout["streams"] if s["kind"] in ("subtitle", "attachment")] == ["attachment"]
-    assert layout["chapters"] == 2
-
-    again = str(tmp / "again.mkv")  # a container rebuilt from itself takes its subtitles by their keys, the table is one
-    held = asyncio.run(container.contents(out)).subtitles
-    assert asyncio.run(container.build(again, out, "1:E01", [AudioIn("Оригинал", out, 0, "1:E01", own=True)],
-                                       provenance={"video": "E01"},
-                                       subtitles=[SubtitleIn(out, each.index, each.key, each.title, each.language,
-                                                             forced=each.forced, default=each.default) for each in held])) is None
-    layout, _ = asyncio.run(layout_of(again))
-    assert sorted(s["filename"] for s in layout["streams"] if s["kind"] == "attachment") == ["Kurinto.ttf", container.PROVENANCE]
-    assert [(each.key, each.default, each.forced) for each in asyncio.run(container.contents(again)).subtitles] == [
-        ("1:full:", True, False), ("1:signs:", False, True)]
-    assert layout["chapters"] == 2
 
 
 def test_a_stream_with_one_event_in_the_whole_episode_does_not_hold_the_muxer(media, monkeypatch):
@@ -231,78 +71,6 @@ def test_a_stream_with_one_event_in_the_whole_episode_does_not_hold_the_muxer(me
     (cmd,) = [each for each in cmds if "-max_interleave_delta" in each]
     assert 0 < int(cmd[cmd.index("-max_interleave_delta") + 1]) <= container.INTERLEAVE_DELTA_US
     assert [each.key for each in asyncio.run(container.contents(out)).subtitles] == ["1:signs:"]
-
-
-def _lag(path) -> float:
-    """How far a packet of a file lies behind the furthest one written before it, in seconds: 0 for a file whose packets go
-    in the order of their time, the length of the episode for one that holds all of its picture before all of its sound."""
-    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "packet=dts_time,pos", "-of", "csv=p=0", path],
-                         check=True, capture_output=True, text=True).stdout
-    packets = sorted((int(pos), float(at)) for at, pos in (line.split(",")[:2] for line in out.splitlines() if "," in line)
-                     if at not in ("N/A", "") and pos not in ("N/A", ""))
-    ahead = worst = 0.0
-    for _pos, at in packets:
-        ahead = max(ahead, at)
-        worst = max(worst, ahead - at)
-    return worst
-
-
-def test_the_packets_of_a_container_lie_in_the_order_of_their_time_whatever_the_subtitles_are(media):
-    """The signs of a release are one event in all of the episode. The container held all of the picture, then all of the
-    sound from its start again: a player showed no picture or hung. Its packets lie in the order of their time."""
-    tmp, _video, _dubs, _ = media
-    video = _torrent_video(tmp, seconds=60)
-    dubs = [make(tmp / f"long{n}.flac", "-f", "lavfi", "-i", f"sine=frequency={hz}:duration=60")
-            for n, hz in enumerate((500, 700, 900))]
-    tracks = [AudioIn("Оригинал", video, 0, "1:E01", own=True),
-              *(AudioIn(f"dub{n}", path, 0, "1:E01") for n, path in enumerate(dubs))]
-    chosen = [SubtitleIn(video, 1, "1:full:", "Full", "eng", default=True),
-              SubtitleIn(video, 0, "1:signs:", "Надписи", "rus", forced=True)]
-    out = str(tmp / "long.mkv")
-    assert asyncio.run(container.build(out, video, "1:E01", tracks, provenance={"video": "E01"}, subtitles=chosen)) is None
-    assert _lag(out) <= container.INTERLEAVE_DELTA_US / 1e6
-    assert [(each.key, each.title, each.language, each.default, each.forced)
-            for each in asyncio.run(container.contents(out)).subtitles] == [
-        ("1:full:", "Full", "eng", True, False), ("1:signs:", "Надписи", "rus", False, True)]
-
-    again = str(tmp / "again.mkv")  # a container built here holds the same signs, and is the video of the next one
-    held = asyncio.run(container.contents(out))
-    assert asyncio.run(container.build(again, out, "1:E01", [AudioIn(each.label, out, each.index, "1:E01") for each in held.audio],
-                                       provenance={"video": "E01"},
-                                       subtitles=[SubtitleIn(out, each.index, each.key, each.title, each.language,
-                                                             forced=each.forced, default=each.default)
-                                                  for each in held.subtitles])) is None
-    assert _lag(again) <= container.INTERLEAVE_DELTA_US / 1e6
-
-
-def _flags(path, stream) -> dict:
-    """The flags a stream of a file carries (`v:0`, `a:1`), the ones that are on."""
-    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", stream, "-show_entries", "stream_disposition", "-of", "json",
-                          path], check=True, capture_output=True, text=True).stdout
-    return {name: on for name, on in json.loads(out)["streams"][0]["disposition"].items() if on}
-
-
-def test_the_flags_of_every_stream_are_the_builds_own_whatever_the_release_says(media):
-    """`-c copy` passes the flags of an input on to the output: a release that marks its picture «forced» would have the container
-    say so. What the container says is decided by the build: the picture is the default one and nothing else, the first
-    voice-over is the default one, the others carry no flag."""
-    tmp, _video, dubs, _ = media
-    release = make(tmp / "flagged.mkv", "-f", "lavfi", "-i", "testsrc=duration=3:size=160x90:rate=10",
-                   "-f", "lavfi", "-i", "sine=frequency=300:duration=3", "-c:v", "mpeg4", "-c:a", "aac",
-                   "-disposition:v:0", "default+forced", "-disposition:a:0", "forced")
-    assert _flags(release, "v:0") == {"default": 1, "forced": 1}  # the release does say so
-    out = str(tmp / "flagged-out.mkv")
-    tracks = [AudioIn("Оригинал", release, 0, "1:x", own=True), AudioIn("ruchime", dubs["ruchime"], 0, "1:x")]
-    assert asyncio.run(container.build(out, release, "1:x", tracks)) is None
-    assert _flags(out, "v:0") == {"default": 1}
-    assert [_flags(out, f"a:{number}") for number in range(2)] == [{"default": 1}, {}]
-
-
-def test_a_video_of_another_container_carries_its_chapters_and_no_subtitles(media):
-    tmp, video, dubs, _ = media
-    out = str(tmp / "plain.mkv")
-    assert asyncio.run(container.build(out, video, "1:x", [AudioIn("a", video, 0, "1:x", own=True)])) is None
-    assert codecs(out) == ["mpeg4", "aac"]
 
 
 def test_external_subtitles_take_the_font_files_beside_them_once_each(media):

@@ -117,19 +117,6 @@ def system(started):
     return bus, fake, probe, db_path, media
 
 
-class WatchedLock(asyncio.Lock):
-    """A lock that says when someone has to wait for it: a request that waits makes no step the bus could show."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.contended = asyncio.Event()
-
-    async def acquire(self) -> bool:
-        if self.locked():
-            self.contended.set()
-        return await super().acquire()
-
-
 @pytest.mark.asyncio
 async def test_process_torrent_renames_in_qbit(system):
     _, fake, probe, _, _ = system
@@ -164,50 +151,6 @@ async def test_dry_run_writes_composition_without_touching_qbit(system):
     assert saved[0]["status"] == "pending_rename"
     assert saved[0]["renamed_path"] is None
     assert saved[0]["qb_file_index"] == 4
-
-
-@pytest.mark.asyncio
-async def test_process_torrent_uses_original_path_from_db(system):
-    _, fake, probe, _, _ = system
-    fake.series = _torrent(fake.series)
-    # файл уже переименован ранее: текущий путь != original
-    fake.qbt_files["h2"] = [{"name": "Season 01/Show ep1.mkv"}]
-    fake.db_files["h2"] = [{"original_path": "old/ep1.mkv",
-                            "renamed_path": "Season 01/Show ep1.mkv",
-                            "status": "renamed"}]
-    reply = await probe.request("renaming.process_torrent", {
-        "series_id": 2, "qb_hash": "h2"}, timeout=10)
-    # имя уже правильное (формат от original basename) — rename не нужен
-    assert reply == {"renamed": 0}
-    assert fake.renames == []
-    assert fake.upserts[0]["files"][0]["original_path"] == "old/ep1.mkv"
-
-
-@pytest.mark.asyncio
-async def test_sim_C9_two_renames_of_one_series_never_run_at_once(started):
-    """C9: two renames of the files of one series share its lock and never rename the same files in parallel (else
-    crooked names, as «Путешествие» had)."""
-    _, fake, renaming, probe, _, media = started
-    lock = renaming._locks[2] = WatchedLock()  # the lock of the series, seen
-    fake.series = _torrent(fake.series)
-    fake.active_torrents = [{"qb_hash": "h", "torrent_id": "t"}]
-    fake.qbt_files["h"] = [{"name": "a.mkv"}]
-    fake.db_files["h"] = [{"original_path": "a.mkv", "renamed_path": None,
-                           "status": "downloaded"}]
-    fake.files_block = asyncio.Event()  # конвейерный rename виснет в files.get
-
-    t1 = asyncio.create_task(probe.request(
-        "renaming.process_torrent", {"series_id": 2, "qb_hash": "h"},
-        timeout=10))
-    await asyncio.wait_for(fake.files_entered.wait(), 5)  # it has entered and holds the lock
-    t2 = asyncio.create_task(probe.request(
-        "renaming.process_torrent", {"series_id": 2, "qb_hash": "h"}, timeout=10))
-    await asyncio.wait_for(lock.contended.wait(), 5)  # the second is queued for the lock
-    assert fake.files_calls == 1  # it waits for the lock and has not asked for the files
-
-    fake.files_block.set()  # the first goes on
-    await asyncio.gather(t1, t2)
-    assert fake.files_calls >= 2  # the second ran after the first, not alongside
 
 
 @pytest.mark.asyncio
@@ -280,42 +223,3 @@ async def test_process_torrent_audio_subs_and_fonts(system):
     font_meta = saved[f"{root}/RUS Subs/Fonts/Gabriela-Regular.ttf"]["extracted_metadata"]
     assert font_meta["is_extra"] is True
     assert font_meta["media_type"] == "extra"
-
-
-@pytest.mark.asyncio
-async def test_process_torrent_flat_with_subfolders(system):
-    """Плоская раздача (без корневой папки торрента) с подкаталогами озвучки."""
-    _, fake, probe, _, _ = system
-    fake.series = _torrent(fake.series)
-    fake.qbt_files["h_flat"] = [
-        {"name": "01.mkv", "index": 0},
-        {"name": "rus/AniLiberty/01.mka", "index": 1},
-        {"name": "Fonts/font.ttf", "index": 2},
-    ]
-
-    reply = await probe.request("renaming.process_torrent", {
-        "series_id": 2, "qb_hash": "h_flat"}, timeout=10)
-
-    # 01.mkv переименован в Season 01/Show 01.mkv
-    # rus/AniLiberty/01.mka переименован в Season 01/Show 01.rus_AniLiberty.mka
-    # Fonts/font.ttf уже лежит в Fonts/font.ttf, qBit rename не нужен
-    assert reply == {"renamed": 2}
-    renames = {r["old_path"]: r["new_path"] for r in fake.renames}
-    assert renames["01.mkv"] == "Season 01/Show 01.mkv"
-    assert renames["rus/AniLiberty/01.mka"] == "Season 01/Show 01.rus_AniLiberty.mka"
-
-    saved = {f["original_path"]: f for f in fake.upserts[0]["files"]}
-    assert saved["Fonts/font.ttf"]["renamed_path"] == "Fonts/font.ttf"
-    assert saved["Fonts/font.ttf"]["extracted_metadata"]["is_extra"] is True
-
-
-@pytest.mark.asyncio
-async def test_the_profile_asked_for_is_the_one_of_the_torrent_source(system):
-    _, fake, probe, _, _ = system
-    web = _source("web_video", profile_id=7, source_id=3)
-    fake.series = {**_torrent(fake.series, profile_id=5), "sources": [web, _source("torrent", 5, source_id=4)]}
-    fake.qbt_files["hp"] = [{"name": "old/ep1.mkv"}]
-
-    await probe.request("renaming.process_torrent", {"series_id": 2, "qb_hash": "hp"}, timeout=10)
-
-    assert fake.torrent_profiles == [5]

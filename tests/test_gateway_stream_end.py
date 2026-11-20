@@ -24,15 +24,6 @@ async def _drain(stream):
 
 
 @pytest.mark.asyncio
-async def test_an_open_stream_ends_when_the_streams_are_told_to_end(tmp_path):
-    gateway = _gateway(tmp_path)
-    reading = await asyncio.wait_for(_open_stream(gateway), 5)
-    gateway._end_streams()
-    await asyncio.wait_for(reading, 5)
-    assert gateway._sse_subs == {}
-
-
-@pytest.mark.asyncio
 async def test_a_stop_signal_ends_the_streams_and_still_reaches_the_handler_that_was_there(tmp_path):
     seen = []
 

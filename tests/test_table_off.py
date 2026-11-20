@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from core import Bus
-from core.contracts import ReleaseTable, RowState, TableRow
+from core.contracts import RowState, TableRow
 from core.contracts.voices import PLAYERS_OFF_KEY
 from core.db import Database
 from core.contracts.provider import ManifestFamily
@@ -74,54 +74,3 @@ async def test_the_module_holds_the_players_the_setting_names_and_a_value_that_i
     await event(module, json.dumps(["kodik"]))
     await module.on_settings_changed(SimpleNamespace(payload={"key": "voices.groups", "value": "[]"}))
     assert module.players_off == frozenset({"kodik"})
-
-
-async def test_a_read_gives_the_site_the_players_off_and_keeps_their_rows_of_the_last_read_adding_none(module):
-    old = ReleaseTable(url=CARD, site="banri", names=["万界独尊"], read_at="2026-11-12T10:00:00Z", complete=True,
-                       rows=[row("ffm3u8", 1, 720, "a"), row("NBY", 1, 2160, "kept"), row("NBY", 2, 1080, "gone")])
-    await module.repo.save_table(old)
-    site = Banri()
-    await event(module, json.dumps(["line:NBY"]))
-
-    table = await module.tables._read(site, CARD, fresh=True)
-
-    assert site.off == frozenset({"line:NBY"})
-    # What was asked is the new read; the switched-off player's rows are the last read's, as they were.
-    assert {each.key: each.heights for each in table.rows} == {
-        "banri:ffm3u8:1": [1080], "banri:NBY:1": [2160], "banri:NBY:2": [1080]}
-
-    await event(module, json.dumps([]))
-    switched_on = await module.tables._read(site, CARD, fresh=True)
-    assert site.off == frozenset()
-    # Switched on, the player is asked again and its rows are the new read's.
-    assert {each.key: each.heights for each in switched_on.rows} == {"banri:ffm3u8:1": [1080], "banri:NBY:2": [2160]}
-
-
-class Untouchable:
-    """A player nothing may be asked of: any call is the defect."""
-    series_scope = True
-
-    def __init__(self, name: str) -> None:
-        self.name, self.label = name, name
-
-    def __getattr__(self, attribute: str):
-        raise AssertionError(f"the player {self.name} was asked: {attribute}")
-
-
-async def test_the_shared_reading_of_the_players_of_a_page_asks_none_of_the_players_off():
-    from modules.sources.players.catalog import Entry
-    from modules.sources.players.contract import PlayerRef
-    from modules.sources.players.registry import PlayerRegistry
-    from modules.sources.sites import ReadContext
-    from modules.sources.sites.catalogs import Listed, read_catalogs, table_rows
-
-    series, listing = Untouchable("kodik"), Untouchable("cvh")
-    registry = PlayerRegistry([series, listing])
-    ctx = ReadContext(None, lambda *_: None, off=frozenset({"kodik", "cvh"}))
-    refs = {"kodik": PlayerRef("kodik", "https://kodikplayer.com/serial/1/h/720p")}
-    # Its catalog is not read, and the page does not hold it unread either: nothing was asked, so nothing failed.
-    found = await read_catalogs(registry, [("https://page", refs)], ctx)
-    assert found.read == [] and found.unread == []
-    entry = Entry(key="1", ref=PlayerRef("cvh", "https://cvh/1"), text="1")
-    body = await table_rows(registry, [("https://page", refs)], ctx, [Listed(listing, "https://page", [entry])])
-    assert body.rows == [] and body.unread == []

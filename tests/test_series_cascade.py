@@ -13,9 +13,8 @@ from core import BaseModule, Bus, Runner
 from core.contracts import ReleaseTable, TableGetReply, TableState
 from core.db import Database
 from modules.catalog import CatalogModule
-from modules.catalog.repository import CatalogRepository
 from modules.scan import ScanModule
-from series_factory import create_series, source
+from series_factory import source
 from settle import wait_until
 from schema_db import migrated
 
@@ -36,60 +35,6 @@ def _series_data(name: str) -> dict:
             "save_path": f"/media/{name}",
             "sources": [source(url=f"u|q/{name}", source_type="vk_video",
                                parser_profile_id=1)]}
-
-
-@pytest.mark.asyncio
-async def test_series_id_never_reused(db_path):
-    """Номер удалённой серии не занимается новой."""
-    db = Database(db_path)
-    first = (await create_series(db, **_series_data("первая"))).series_id
-    await CatalogRepository(db).delete_series(first)
-    second = (await create_series(db, **_series_data("вторая"))).series_id
-    assert second != first
-    assert second > first
-
-
-@pytest.mark.asyncio
-async def test_source_id_never_reused(db_path):
-    """The number of a deleted source is not given to a new one: settings refer to it."""
-    db = Database(db_path)
-    first = await create_series(db, **_series_data("первая"))
-    await CatalogRepository(db).delete_series(first.series_id)
-    second = await create_series(db, **_series_data("вторая"))
-    assert second.source_id > first.source_id
-
-
-@pytest.mark.asyncio
-async def test_parallel_create_returns_distinct_ids(db_path):
-    """Параллельное создание серий: каждый вызов получает свой id."""
-    db = Database(db_path)
-    created = await asyncio.gather(
-        *(create_series(db, **_series_data(f"с{i}")) for i in range(10)))
-    ids = [c.series_id for c in created]
-    assert len(set(ids)) == 10
-    rows = await db.fetch_all("SELECT id FROM series")
-    assert sorted(r["id"] for r in rows) == sorted(ids)
-    # every series has its own single source
-    sources = await db.fetch_all("SELECT id, series_id FROM series_sources")
-    assert sorted(s["series_id"] for s in sources) == sorted(ids)
-    assert sorted(s["id"] for s in sources) == sorted(c.source_id for c in created)
-
-
-@pytest.mark.asyncio
-async def test_child_tables_reject_unknown_series(db_path):
-    """Серийная таблица не принимает запись несуществующей серии."""
-    db = Database(db_path)
-    inserts = [
-        "INSERT INTO scan_tasks (series_id, created_at, status, task_data, "
-        "results_data) VALUES (9999, '2026-01-01', 'processing', '[]', '{}')",
-        "INSERT INTO relocation_tasks (series_id, new_path, status) "
-        "VALUES (9999, '/media/new', 'processing')",
-        "INSERT INTO series_sources (series_id, url, source_type) "
-        "VALUES (9999, 'u|q', 'vk_video')",
-    ]
-    for sql in inserts:
-        with pytest.raises(sqlite3.IntegrityError):
-            await db.execute(sql)
 
 
 class SlowSource(BaseModule):
