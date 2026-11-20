@@ -120,8 +120,9 @@ from datetime import datetime, timezone
 from core import storage
 from core.module import BaseModule, BusRequestError
 from core.source_types import torrent_profile_id
-from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, SERIES_PURGED, SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET,
-                         SETTINGS_VALUE_SET, TRACKERAUTH_CREDENTIALS_CHANGED, TRACKERAUTH_CREDENTIALS_GET)
+from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, METADATA_SEASONS_RECOMPUTE, SERIES_PURGED,
+                         SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, TRACKERAUTH_CREDENTIALS_CHANGED,
+                         TRACKERAUTH_CREDENTIALS_GET)
 from core.contracts import (RUN_CHANGED, CredentialsChanged, RunChanged, SeriesCard, SeriesDeleted, SeriesPurged, SeriesUpdated,
                             SettingValue, SourceType, StatusContribution)
 from core.contracts.torrent import RELEASE_CHANGED_TOPIC, STAGING_DIR_KEY
@@ -720,7 +721,7 @@ class TorrentsModule(BaseModule):
             return
         await self._project_and_apply(event.series_id, allow_resume=True)
         await self._broadcast_downloaded(event.series_id)
-        self.send_command("metadata.seasons.recompute", {"series_id": event.series_id})
+        self.send_command(METADATA_SEASONS_RECOMPUTE, {"series_id": event.series_id})
 
     # --- реестр раздач (контракты Р-12) ----------------------------------------------
 
@@ -1181,8 +1182,7 @@ class TorrentsModule(BaseModule):
                           {"series_id": task["series_id"]})
         # Переименование разложило файлы по Season NN → реальные сезоны
         # известны: пересчитать многосезонный агрегат TMDB.
-        self.send_command("metadata.seasons.recompute",
-                          {"series_id": task["series_id"]})
+        self.send_command(METADATA_SEASONS_RECOMPUTE, {"series_id": task["series_id"]})
         self.log.info("[%s] задача конвейера выполнена", qb_hash[:8])
         self._broadcast_queue()
         await self._contribute(task["series_id"])

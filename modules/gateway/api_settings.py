@@ -20,9 +20,9 @@ from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, Co
                             PlayersListReply, ProviderSaved, ProviderSettingsDraft, ProviderView, VoiceSettingsDraft,
                             VoiceSettingsSaved, VoiceSettingsView)
 from core.reasons import code_of, reason, relayed
-from core.topics import (SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST, SETTINGS_PATHS_REMOVE, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET,
-                         SETTINGS_VALUES_BY_PREFIX, TRACKERAUTH_CREDENTIALS_GET, TRACKERAUTH_CREDENTIALS_SET,
-                         TRACKERAUTH_SECRET_GET)
+from core.topics import (METADATA_DETAILS, METADATA_SEARCH, SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST, SETTINGS_PATHS_REMOVE,
+                         SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SETTINGS_VALUES_BY_PREFIX, TRACKERAUTH_CREDENTIALS_GET,
+                         TRACKERAUTH_CREDENTIALS_SET, TRACKERAUTH_SECRET_GET)
 
 from .routing import refusal, route_per_method
 from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse
@@ -278,24 +278,23 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 {"success": False, "error": reason("query_missing")},
                 status_code=400)
         try:
-            reply = await gw.request("metadata.search", {"query": query})
+            reply = await gw.reply_of(METADATA_SEARCH, {"query": query})
         except BusRequestError as exc:
             return JSONResponse(
                 {"success": False, "error": relayed(str(exc))},
                 status_code=400)
-        return {"success": True, "results": reply["results"]}
+        return {"success": True, "results": [each.model_dump() for each in reply.results]}
 
     @r.get("/api/tmdb/details/{tmdb_id}", response_model=DynamicObject,
            responses=_ERR)
     async def tmdb_details(tmdb_id: int):
         try:
-            reply = await gw.request("metadata.details",
-                                     {"tmdb_id": tmdb_id})
+            reply = await gw.reply_of(METADATA_DETAILS, {"tmdb_id": tmdb_id})
         except BusRequestError as exc:
             return JSONResponse(
                 {"success": False, "error": relayed(str(exc))},
                 status_code=404)
-        return {"success": True, **reply}
+        return {"success": True, **reply.model_dump()}
 
     # --- трекеры (владелец — sources) -----------------------------------------------
 

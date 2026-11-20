@@ -27,6 +27,8 @@ from .release_table import (LINE_FIELDS, LINE_SEPARATOR, ParsedDomains, PlayerFa
 from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, RulesProfileChanged
 from .series_sources import SeriesSource, SourceChanged, SourceEvent, SourceType
 from .auth import AdminState, LoginReply, PasswordSaved
+from .metadata import (MapGet, MapListReply, MapReply, MapSaved, MapSet, SeasonsRecompute, SeasonsRecounted, TmdbDetails,
+                       TmdbDetailsRequest, TmdbFound, TmdbMapping, TmdbSearchReply, TmdbSearchRequest, TmdbSeason)
 from .trackerauth import (Credentials, CredentialsChanged, CredentialsReply, CredentialsSaved, CredentialsSet, FetchReply,
                           FetchRequest, SecretReply, ServiceRef)
 from .settings import SavedPath, SavedPaths, SettingValue, SettingValues
@@ -50,7 +52,9 @@ __all__ = ["TitleCard", "TitleLine", "TitleSearchReply", "TitleSearchRequest", "
            "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",
            "WRITABLE_FIELDS", "BusyContribution", "SeriesCard", "SeriesDeleted", "SeriesListReply", "SeriesPurged", "SeriesStatusChanged", "SeriesUpdated",
            "SourcesReply", "StatusContribution", "AdminState", "LoginReply", "PasswordSaved", "Credentials", "CredentialsChanged",
-           "CredentialsReply", "CredentialsSaved", "CredentialsSet", "FetchReply", "FetchRequest", "SecretReply", "ServiceRef", "SavedPath", "SavedPaths", "SettingValue", "SettingValues",
+           "CredentialsReply", "CredentialsSaved", "CredentialsSet", "FetchReply", "FetchRequest", "SecretReply", "ServiceRef", "MapGet", "MapListReply", "MapReply", "MapSaved", "MapSet",
+           "SeasonsRecompute", "SeasonsRecounted", "TmdbDetails", "TmdbDetailsRequest", "TmdbFound", "TmdbMapping",
+           "TmdbSearchReply", "TmdbSearchRequest", "TmdbSeason", "SavedPath", "SavedPaths", "SettingValue", "SettingValues",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan", "VoiceTitleSet",
            "EpisodeRef", "Exclusion", "LAYOUT_PARTS", "LayoutPart", "PlayerSummary", "SourceStatus", "SourceSummary",

@@ -11,10 +11,11 @@ import json
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from core.contracts import SeriesCard
+from core.contracts import SeriesCard, TmdbMapping
 from core.module import BusRequestError
 from core.reasons import code_of, reason, relayed
-from core.topics import CATALOG_SERIES_CREATE, CATALOG_SERIES_GET, CATALOG_SERIES_LIST
+from core.topics import (CATALOG_SERIES_CREATE, CATALOG_SERIES_GET, CATALOG_SERIES_LIST, METADATA_MAP_GET, METADATA_MAP_LIST,
+                         METADATA_MAP_SET)
 from .routing import admitted
 
 from .schemas import (CreatedSeries, ErrorResponse, FailuresReset, FailuresResetBody, OkResponse, SyncCancelled, SyncScopeBody,
@@ -63,11 +64,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return {}
 
-    def _card(series: SeriesCard, mapping: dict | None, **added) -> dict:
+    def _card(series: SeriesCard, mapping: TmdbMapping | None, **added) -> dict:
         """The series as the window shows it: the card the catalog answered written as data with its date in ISO, the
         mapping of TMDB (its date in ISO too) and the fields the gateway adds. What a module answered is its own and is
         not changed."""
-        tmdb = {**mapping, "last_updated": _iso(mapping.get("last_updated"))} if mapping else mapping
+        tmdb = {**mapping.model_dump(), "last_updated": _iso(mapping.last_updated)} if mapping else None
         return {**series.model_dump(mode="json"), "last_scan_time": _iso(series.last_scan_time), "tmdb_info": tmdb, **added}
 
     # --- список и карточки ----------------------------------------------------
@@ -75,8 +76,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/series", response_model=list[SeriesObject])
     async def list_series():
         series = (await gw.reply_of(CATALOG_SERIES_LIST, {})).series
-        reply = await gw.request("metadata.map.list", {})
-        mappings = {m["series_id"]: m for m in reply["mappings"]}
+        mappings = {m.series_id: m for m in (await gw.reply_of(METADATA_MAP_LIST, {})).mappings}
         # Each owner counts its own rows and a series has rows with one of them only, so the sum needs no kind.
         counts = [await _counts("planner.downloaded_counts"),
                   await _counts("torrents.db.downloaded_counts")]
@@ -92,7 +92,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return _error_response(exc)
         series_id = series.id
         if body.tmdb_data:
-            await gw.request("metadata.map.set", {
+            await gw.request(METADATA_MAP_SET, {
                 "series_id": series_id, "tmdb_data": body.tmdb_data})
         return {"success": True, "series_id": series_id}
 
@@ -115,10 +115,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             s = await gw.reply_of(CATALOG_SERIES_GET, {"series_id": series_id})
         except BusRequestError as exc:
             return _error_response(exc, with_success=False)
-        reply = await gw.request("metadata.map.get",
-                                 {"series_id": series_id})
+        reply = await gw.reply_of(METADATA_MAP_GET, {"series_id": series_id})
         planned = (await gw.request("library.relocation.get", {"series_id": series_id}))["new_path"]
-        return _card(s, reply["mapping"], planned_save_path=planned)
+        return _card(s, reply.mapping, planned_save_path=planned)
 
     @r.post("/api/series/{series_id}", response_model=OkResponse,
             response_model_exclude_none=True, responses=_ERRORS)
@@ -135,7 +134,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 await gw.request("catalog.series.update", {
                     "series_id": series_id, "fields": fields})
                 if tmdb_data := sent.get("tmdb_data"):
-                    await gw.request("metadata.map.set", {
+                    await gw.request(METADATA_MAP_SET, {
                         "series_id": series_id, "tmdb_data": tmdb_data})
                 if new_path := sent.get("save_path"):
                     await gw.request("library.relocation.plan", {

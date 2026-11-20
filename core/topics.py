@@ -49,6 +49,8 @@ from pydantic import BaseModel
 
 from .contracts import (
     CredentialsChanged, CredentialsReply, CredentialsSaved, CredentialsSet, FetchReply, FetchRequest, SecretReply, ServiceRef,
+    MapGet, MapListReply, MapReply, MapSaved, MapSet, SeasonsRecompute, SeasonsRecounted, TmdbDetails, TmdbDetailsRequest,
+    TmdbSearchReply, TmdbSearchRequest,
     AdminState, AlignmentJob, BusyContribution, CompositionChanged, CompositionFailed, CompositionGetRequest,
     CompositionPreviewReply, CompositionPreviewRequest, CompositionReply, ConformParams, ConformSettingsDraft,
     ConformSettingsSaved, ConformSettingsView, GroupsResolveReply, GroupsResolveRequest, LoginReply, OutputSwitch,
@@ -354,12 +356,17 @@ LIBRARY_RELOCATION_PLANNED = Topic("library.relocation.planned", EVENT, "library
 LIBRARY_RELOCATION_STARTED = Topic("library.relocation.started", EVENT, "library")
 
 # --- metadata ----------------------------------------------------------------------------------------------------
-METADATA_DETAILS = Topic("metadata.details", QUERY, "metadata", fuse=STANDARD_S)
-METADATA_MAP_GET = Topic("metadata.map.get", QUERY, "metadata", fuse=QUICK_S)
-METADATA_MAP_LIST = Topic("metadata.map.list", QUERY, "metadata", fuse=QUICK_S)
-METADATA_MAP_SET = Topic("metadata.map.set", COMMAND, "metadata", fuse=QUICK_S)
-METADATA_SEARCH = Topic("metadata.search", QUERY, "metadata", fuse=STANDARD_S)
-METADATA_SEASONS_RECOMPUTE = Topic("metadata.seasons.recompute", COMMAND, "metadata", fuse=STANDARD_S)
+# The read of TMDB over the network: a query (it changes nothing here).
+METADATA_DETAILS = Topic(
+    "metadata.details", QUERY, "metadata", request=TmdbDetailsRequest, reply=TmdbDetails, fuse=STANDARD_S)
+METADATA_MAP_GET = Topic("metadata.map.get", QUERY, "metadata", request=MapGet, reply=MapReply, fuse=QUICK_S)
+METADATA_MAP_LIST = Topic("metadata.map.list", QUERY, "metadata", reply=MapListReply, fuse=QUICK_S)
+METADATA_MAP_SET = Topic("metadata.map.set", COMMAND, "metadata", request=MapSet, reply=MapSaved, fuse=QUICK_S)
+METADATA_SEARCH = Topic(
+    "metadata.search", QUERY, "metadata", request=TmdbSearchRequest, reply=TmdbSearchReply, fuse=STANDARD_S)
+# The count of the episodes of a series of several seasons: asks the catalog, the plan and TMDB, writes the mapping, tells the card.
+METADATA_SEASONS_RECOMPUTE = Topic(
+    "metadata.seasons.recompute", COMMAND, "metadata", request=SeasonsRecompute, reply=SeasonsRecounted, fuse=STANDARD_S)
 
 # --- planner -----------------------------------------------------------------------------------------------------
 # A deletion and a forgetting are written once the plan of the series is counted again.

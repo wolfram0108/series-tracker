@@ -76,7 +76,7 @@ async def test_metadata_search_formats_results(system, monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
     reply = await probe.request("metadata.search",
                                 {"query": "breaking"}, timeout=5)
-    assert reply["results"] == [{
+    assert [each.model_dump() for each in reply.results] == [{
         "id": 4638, "name": "Во все тяжкие", "name_en": "Breaking Bad",
         "original_name": "Breaking Bad", "year": "2008",
         "poster_path": "/p.jpg", "overview": "химия"}]

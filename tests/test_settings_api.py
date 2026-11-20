@@ -45,7 +45,8 @@ class Neighbours(BaseModule):
 
     def register(self):
         async def search(env):
-            return {"results": [{"id": 7, "name": "Тайтл"}]}
+            return {"results": [{"id": 7, "name": "Тайтл", "name_en": None, "original_name": None, "year": "",
+                                 "poster_path": None, "overview": ""}]}
 
         async def details(env):
             return {"name": "Тайтл", "poster_path": None,
@@ -139,7 +140,8 @@ async def test_tmdb_wrappers(system):
     _, _, client = system
     resp = await client.post("/api/tmdb/search", json={"query": "Тайтл"})
     assert resp.json() == {"success": True,
-                           "results": [{"id": 7, "name": "Тайтл"}]}
+                           "results": [{"id": 7, "name": "Тайтл", "name_en": None, "original_name": None, "year": "",
+                                        "poster_path": None, "overview": ""}]}
     resp = await client.post("/api/tmdb/search", json={})
     assert resp.status_code == 400
     resp = await client.get("/api/tmdb/details/7")

@@ -1,13 +1,17 @@
-"""Репозиторий metadata: таблица series_tmdb_mappings (Р-19)."""
+"""Repository of metadata: the table series_tmdb_mappings (Р-19)."""
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 
+from calc.metadata.seasons import stored_counts
+from core.contracts import TmdbMapping
 from core.db import Database
 
 _FIELDS = ("tmdb_id", "tmdb_season_number", "total_episodes",
            "poster_path", "series_name", "year")
+# The columns of the record in the order of the table, so that the model is the same record whatever a migration adds later.
+_COLUMNS = ("series_id, tmdb_id, tmdb_season_number, total_episodes, last_updated, poster_path, series_name, year, "
+            "season_episode_counts")
 
 
 def _now() -> str:
@@ -18,13 +22,14 @@ class MetadataRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    async def get_mapping(self, series_id: int) -> dict | None:
-        return await self._db.fetch_one(
-            "SELECT * FROM series_tmdb_mappings WHERE series_id=?",
+    async def get_mapping(self, series_id: int) -> TmdbMapping | None:
+        row = await self._db.fetch_one(
+            f"SELECT {_COLUMNS} FROM series_tmdb_mappings WHERE series_id=?",
             (series_id,))
+        return TmdbMapping(**row) if row else None
 
-    async def all_mappings(self) -> list[dict]:
-        return await self._db.fetch_all("SELECT * FROM series_tmdb_mappings")
+    async def all_mappings(self) -> list[TmdbMapping]:
+        return [TmdbMapping(**row) for row in await self._db.fetch_all(f"SELECT {_COLUMNS} FROM series_tmdb_mappings")]
 
     async def upsert_mapping(self, series_id: int, data: dict) -> None:
         fields = {k: data[k] for k in _FIELDS if k in data}
@@ -46,14 +51,12 @@ class MetadataRepository:
 
     async def set_aggregate(self, series_id: int, total_episodes: int,
                             season_counts: dict) -> None:
-        """Многосезонный агрегат: total_episodes = сумма по реальным сезонам,
-        season_episode_counts = кэш числа серий по всем сезонам шоу (TMDB)."""
+        """The aggregate of a series of several seasons: total_episodes is the sum over the real seasons,
+        season_episode_counts the cache of the episodes of every season of the show (TMDB)."""
         await self._db.execute(
             "UPDATE series_tmdb_mappings SET total_episodes=?, "
             "season_episode_counts=?, last_updated=? WHERE series_id=?",
-            (total_episodes,
-             json.dumps({str(k): v for k, v in season_counts.items()}),
-             _now(), series_id))
+            (total_episodes, stored_counts(season_counts), _now(), series_id))
 
     async def delete_for_series(self, series_id: int) -> None:
         await self._db.execute(

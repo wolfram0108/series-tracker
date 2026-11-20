@@ -72,8 +72,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from core.module import NO_HANDLER, BaseModule, BusRequestError
-from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, EDIT_STUCK_S, SERIES_BUSY_CONTRIBUTION, SERIES_PURGED,
-                         SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, TABLE_WAIT_S)
+from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, EDIT_STUCK_S, METADATA_SEASONS_RECOMPUTE,
+                         SERIES_BUSY_CONTRIBUTION, SERIES_PURGED, SERIES_STATUS_CONTRIBUTION, SETTINGS_VALUE_GET,
+                         SETTINGS_VALUE_SET, TABLE_WAIT_S)
 from core.contracts import (RUN_CHANGED, WORK_STATE, BusyContribution, RunSnapshot, availability, OutputSwitch, RunChanged,
                             SeriesCard, SeriesDeleted, SeriesPurged, SettingValue, Slot, StatusContribution, SyncScope, WorkState)
 from core.db import Database
@@ -496,8 +497,7 @@ class ScanModule(BaseModule):
             self._contribute(series_id, scanning=series_id in self._runs, error=series_id in self._failed)
             # Многосезонный агрегат TMDB: реальные сезоны могли измениться
             # (новый сезон/файлы) — пересчитать число серий по сезонам.
-            self.send_command("metadata.seasons.recompute",
-                              {"series_id": series_id})
+            self.send_command(METADATA_SEASONS_RECOMPUTE, {"series_id": series_id})
             return result
         except asyncio.CancelledError:
             if series_id not in self._cancelling:

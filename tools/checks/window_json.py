@@ -1334,7 +1334,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
             await done(f"metadata:map:set:{label}")
             await over_bus(f"metadata:map:set:{label}:get", "metadata.map.get", {"series_id": payload["series_id"]})
         for each in [*multi[:4], *mapped[:3], sid, 999999]:
-            await over_bus(f"metadata:recompute:{each}", "metadata.seasons.recompute", {"series_id": each})
+            await over_bus(f"metadata:recompute:{each}", "metadata.seasons.recompute", {"series_id": each}, drop_none=True)
             await done(f"metadata:recompute:{each}")
         probe.send_command("metadata.seasons.recompute", {"series_id": sid})
         await done("metadata:recompute:command")
