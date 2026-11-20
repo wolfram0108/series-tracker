@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from calc.plan.codec import container_json, container_of
 from core.bus import Bus
 from core.module import BaseModule
 from core.runner import Runner
@@ -20,7 +21,7 @@ from core.contracts import (VOICE_TAKE, CompositionReply, CompositionRow, Effect
                             RowState, group_target)
 from core.db import Database
 from core.envelope import Envelope
-from modules.planner.files import BuildFailed, Library, container_json, container_of
+from modules.planner.files import BuildFailed, Library
 from modules.conform.module import finished_view, job_label
 from modules.downloads import ytdlp
 from modules.planner import PlannerModule

@@ -15,10 +15,11 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable
 
 from core.contracts import PlannerView, SyncScope
-from modules.planner.executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, video_of
 from calc.plan.planner import Plan, cut_video, own_track, plan, restricted, switched_off, voice_of
+from calc.plan.steps import DOWNLOADS, Crashed, Made, Passing, video_of
 from calc.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video, episode_of
 from calc.view.view import view_of
+from modules.planner.executor import SeriesSync
 
 
 def truth_of(season: int, episode: int, part: int | None = None) -> int:

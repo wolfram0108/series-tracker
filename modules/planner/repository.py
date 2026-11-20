@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+from calc.plan.codec import container_of
 from calc.plan.tables import Container
 from core.contracts import PackCard
 from core.db import Database
-
-from .files import container_of
 
 
 def _key(value) -> str:

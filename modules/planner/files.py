@@ -1,5 +1,5 @@
-"""The files of the plan of a series (stage 12): the table of the asset as JSON (the database and the attachment of every
-container agree), the build of the container of a goal, and the journal that applies a sync to the library.
+"""The files of the plan of a series (stage 12): the build of the container of a goal, and the journal that applies a sync to the
+library. The table of the asset as JSON (the database and the attachment of every container agree) is calc/plan/codec.py.
 
 The journal is of a group of a sync (the episodes and files that share work): its new containers are built aside
 (staging), then the journal — the steps and the table they lead to — is written, then carried out: out of the way, remove,
@@ -11,62 +11,17 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from dataclasses import asdict, replace
+from dataclasses import replace
 
+from calc.plan.codec import container_json, dub_key, key_in
 from calc.plan.planner import Goal, Group, Plan, subtitles_op, video_op
-from calc.plan.tables import Container, RowId, Snapshot, Subtitle, Track, Video
+from calc.plan.steps import Made, video_of
+from calc.plan.tables import Container, RowId, Track
 from core import container as mkv
 from core.ffprobe import subtitle_events
 
-from .executor import Made, video_of
-
 JOURNAL = ".plan-journal.json"
 STAGING = ".plan-staging"
-
-
-def row_json(row: RowId | None):
-    return None if row is None else asdict(row)
-
-
-def container_json(container: Container) -> dict:
-    return {"name": container.name, "off": container.off, "video": {
-        "id": asdict(container.video.id), "snapshot": asdict(container.video.snapshot),
-        "episode": list(container.video.episode), "timeline": asdict(container.video.timeline),
-        "cut_of": row_json(container.video.cut_of),
-        **({"timeline_snapshot": asdict(container.video.timeline_snapshot)} if container.video.timeline_snapshot else {})},
-        "tracks": [{"dub": asdict(track.dub), "snapshot": asdict(track.snapshot), "episode": list(track.episode),
-                    "aligned_to": asdict(track.aligned_to), **({"tag": track.tag} if track.tag else {}),
-                    **({"file": track.file} if track.file else {})}
-                   for track in container.tracks], **({"own_at": container.own_at} if container.own_at else {}),
-        **({"titles": dict(container.titles)} if container.titles else {}),
-        **({"languages": dict(container.languages)} if container.languages else {}),
-        **({"subtitles": [{**asdict(each), "row": asdict(each.row), "timeline": asdict(each.timeline)}
-                          for each in container.subtitles]} if container.subtitles else {})}
-
-
-def container_of(data: dict) -> Container:
-    video = data["video"]
-    return Container(data["name"], Video(RowId(**video["id"]), Snapshot(**video["snapshot"]), tuple(video["episode"]),
-                                         RowId(**video["timeline"]), RowId(**video["cut_of"]) if video["cut_of"] else None,
-                                         Snapshot(**video["timeline_snapshot"]) if video.get("timeline_snapshot") else None),
-                     tuple(Track(RowId(**track["dub"]), Snapshot(**track["snapshot"]), tuple(track["episode"]),
-                                 RowId(**track["aligned_to"]), track.get("tag", ""), track.get("file", ""))
-                           for track in data["tracks"]),
-                     data["off"], data.get("own_at", 0), tuple(sorted((data.get("titles") or {}).items())),
-                     tuple(sorted((data.get("languages") or {}).items())),
-                     tuple(Subtitle(**{**each, "row": RowId(**each["row"]), "timeline": RowId(**each["timeline"])})
-                           for each in data.get("subtitles") or ()))
-
-
-def dub_key(dub: RowId) -> str:
-    """The key of a track in its container's tags: the row it came from."""
-    return f"{dub.source_id}:{dub.row_key}:{dub.video}"
-
-
-def key_in(container: Container, dub: RowId) -> str:
-    """The key a track of a container has in the file's tags."""
-    track = next((each for each in container.tracks if each.dub == dub), None)
-    return track.tag if track is not None and track.tag else dub_key(dub)
 
 
 async def without_silent(files: "Library", container: Container) -> Container:
@@ -292,6 +247,15 @@ class Library:
     def sweep(self) -> None:
         """Nothing of a sync works any more: what was made aside and never put in place goes."""
         shutil.rmtree(os.path.join(self.root, STAGING), ignore_errors=True)
+
+    def sizes(self, names: list[str]) -> dict[str, float]:
+        """The size (MB) of each file of the library named, as it lies after the journal."""
+        out = {}
+        for name in names:
+            path = self.path(name)
+            if os.path.isfile(path):
+                out[name] = round(os.path.getsize(path) / 1024 ** 2, 1)
+        return out
 
     def files(self) -> list[str]:
         """The containers of the folder (names relative to it), the folders of the plan aside."""

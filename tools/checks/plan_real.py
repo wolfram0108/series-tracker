@@ -27,7 +27,7 @@ from core.contracts import (CompositionGetRequest, CompositionRow, RulesApplyRep
                             SeriesSource, SourceType)
 from core.db import Database  # noqa: E402
 from calc.plan import inputs as plan_inputs  # noqa: E402
-from modules.planner.files import container_of  # noqa: E402
+from calc.plan.codec import container_of  # noqa: E402
 from calc.plan.tables import Container, Inputs, OnlineRow  # noqa: E402
 from modules.catalog.repository import CatalogRepository  # noqa: E402
 from calc.layout import project  # noqa: E402

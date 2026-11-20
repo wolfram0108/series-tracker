@@ -101,30 +101,33 @@ import hashlib
 import json
 import os
 import shutil
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict
 
+from calc.plan.codec import (command_of_key, containers_json, failure_of_key, key_of_command, key_of_failure,
+                             stored_command)
+from calc.plan.inputs import assets_table, layout_inputs
+from calc.plan.names import filename_of, namer_over, wanted_names
+from calc.plan.planner import Plan, cut_video, name_of, video_op
+from calc.plan.steps import DOWNLOADS, Crashed, Made, Passing, fate_of, judged, video_of
+from calc.plan.tables import Track, Video, label_of
+from calc.view.body import Held, view_body
+from calc.view.packing import card_id
+from calc.view.view import placed
 from core import compute, storage
-from core.module import NO_HANDLER, BaseModule, BusRequestError
-from core import container as mkv
 from core.clock import beat_while
-from core.dump import plain
-from core.contracts import (WORK_WITHDRAWN, job_dir, job_key, CompositionReply, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView, SyncScope, SeriesSource, SourceType, SubmitOutcome,
-                            SubmitReply)
+from core.contracts import (WORK_WITHDRAWN, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, SeriesSource, SourceType,
+                            SubmitOutcome, SubmitReply, SyncScope, job_dir, job_key)
 from core.contracts.torrent import fonts_of, parse_link
 from core.contracts.work import WORK_STATE, WorkState, WorkWithdrawn
+from core.dump import plain
 from core.envelope import Envelope
 from core.ffprobe import END_SLACK_S, duration_of
 from core.fsnames import sanitize_name
+from core.module import NO_HANDLER, BaseModule, BusRequestError
 from core.reasons import describe, reason
-from calc.plan.inputs import assets_against, planner_inputs
-from calc.plan.marks import references_of
-from calc.plan.planner import Plan, cut_video, name_of, video_op
-from calc.plan.tables import RowId, Track, Video, label_of
-from calc.view.packing import card_id
-from calc.view.view import placed, view_of
 
-from .executor import DOWNLOADS, Crashed, Made, Passing, SeriesSync, judged, video_of
-from .files import Library, as_in_file, container_json, container_of
+from .executor import SeriesSync
+from .files import Library, as_in_file
 from .kept import Kept
 from .packing import PackBook
 from .repository import PlannerRepository
@@ -134,85 +137,13 @@ PLANNER = "planner"
 COPY_TIMEOUT_S = 1800.0
 ENDED = ("done", "failed", "cancelled", "gone")  # the states of a job that ended (conform.job.get)
 WORK = "planner"  # the folder of the planner's work inside the work folder of the alignment service
-KEPT = "kept"  # beside it: the alignments kept until their containers are built (modules/planner/kept.py)
 # The containers built at one time, whatever series they are of: the episodes of a sync are built as each is ready, the
 # machine of the service holds 4 GB and the library lies on a network disk. A container that waits is `queued` in its card.
 BUILDS_AT_ONCE = 2
 
 
-def kept_of(conform: str, series_id: int) -> Kept:
-    """The alignments kept for a series, beside the folders of the jobs (which the sweep of the planner clears)."""
-    return Kept(os.path.join(conform, KEPT, str(series_id)))
-
-
-def _fate_of(passing: Passing) -> str:
-    """What the sync does with a step the service did not bring to an end, for the log."""
-    if isinstance(passing, Crashed):
-        return "источник пропущен в этой синхронизации (берётся следующий), неудача не записана"
-    return "повторится при следующей синхронизации"
-
-
-def _row_key(row: RowId) -> list:
-    return [row.source_id, row.row_key, row.video]
-
-
-def _command(payload: dict) -> list:
-    command = [payload["kind"], payload["name"]]
-    if payload["kind"] == "track":
-        dub = payload["dub"]
-        command.append([dub["source_id"], dub["row_key"], dub.get("video", "")])
-    return command
-
-
-def _decoded(command: list) -> tuple:
-    return (command[0], command[1], RowId(*command[2])) if command[0] == "track" else (command[0], command[1])
-
-
-def _encoded(command: tuple) -> list:
-    return [command[0], command[1], _row_key(command[2])] if command[0] == "track" else [command[0], command[1]]
-
-
-def _failure_decoded(key: list) -> tuple:
-    return (key[0], *(RowId(*each) for each in key[1:]))
-
-
-def _failure_encoded(key: tuple) -> list:
-    return [key[0], *(_row_key(each) for each in key[1:])]
-
-
 # Every download but the video of the reference is taken not above this height (the owner's rule, stage 10).
 OTHER_MAX_HEIGHT = 720
-
-def _sizes(files: Library, names: list[str]) -> dict[str, float]:
-    """The size (MB) of each file of the library named, as it lies after the journal."""
-    out = {}
-    for name in names:
-        path = files.path(name)
-        if os.path.isfile(path):
-            out[name] = round(os.path.getsize(path) / 1024 ** 2, 1)
-    return out
-
-
-def _inputs_of(layout: CompositionReply, series: dict, voices: dict) -> tuple:
-    """The rows and the choices of a series from its layout (the model `composition.layout` gives), and its compilations by
-    their row: thousands of rows (the pool)."""
-    online, choices = planner_inputs(layout, series, voices)
-    return online, choices, {(each.ref.source_id, each.ref.row_key): each.ref for each in layout.compilations}
-
-
-def _item_of(slot, video) -> dict:
-    """The episode as the rule of names is asked about it (`media_item` of `rules.format_filename`)."""
-    snapshot = video.snapshot
-    item = {"season": slot[0], "episode_start": slot[1], "episode_end": None, "part": slot[2] if len(slot) > 2 else None,
-            "resolution": snapshot.height, "voiceover_tag": snapshot.group, "source_url": snapshot.link}
-    if video.kind == "cut" or (video.container is not None and video.container.video.cut_of is not None):
-        item["cut"] = json.dumps({"height": snapshot.height, "voice_group": snapshot.group})
-    return item
-
-
-def _key_of(item: dict) -> str:
-    return json.dumps(item, sort_keys=True, ensure_ascii=False)
-
 
 # What the view of a series is counted from — the questions the planner asks its neighbours while it counts it — and the
 # event that tells that the answer changed: one table, so that an input added to the view is an input whose change counts
@@ -224,27 +155,6 @@ VIEW_INPUTS: dict[str, str] = {
     "voices.settings.get": "voices.settings.changed",
     "rules.format_filename": "series.updated",  # the rule of names reads the card and the numbers of the episode
 }
-
-
-@dataclass(frozen=True)
-class _Held:
-    """What the view reads of a sync: its table, its failures and its commands at one moment."""
-
-    containers: dict
-    failed: frozenset
-    commands: frozenset
-
-
-def _view_body(series_id: int, held: _Held, made: Plan | None, inputs, members: dict, running: bool,
-               problems: list) -> dict:
-    """The view of the window from what the tables and the plan give: pure work over thousands of rows (the pool)."""
-    # Online is what the sources give now: a row that stands from an earlier read is not.
-    online = frozenset(row.id for row in inputs.online if row.current) if inputs is not None else None
-    references = references_of(inputs, made, members) if inputs is not None and made is not None else []
-    view = {**view_of(series_id, held, made, running=running, online=online,
-                      rows=inputs.online if inputs is not None else ()),
-            "problems": problems, "references": [each.model_dump(mode="json") for each in references]}
-    return PlannerView.model_validate(view).model_dump(mode="json")
 
 
 class BusSync(SeriesSync):
@@ -267,7 +177,7 @@ class BusSync(SeriesSync):
         # The names the rule of the series gave, kept by the module for the card they were given for: a view of the window
         # and a sync of the same card ask none of them again.
         self.names: dict[tuple, str] = module.names_of(series)
-        self.namer = self._namer()
+        self.namer = namer_over(self.names)
         self.told = False  # the window was shown the plan this sync froze
         self.flags: dict[str, int] = {}  # the steps under way by what they are, for the card of the series
         self.run_mark = ""  # when the sync under way began (plan_runs): the same after a stop, so its jobs are found again
@@ -316,34 +226,24 @@ class BusSync(SeriesSync):
         if folders.get("downloads") and folders.get("conform"):
             self.downloads_dir = os.path.join(folders["downloads"], WORK, str(self.series["id"]))
             self.conform_dir = os.path.join(folders["conform"], WORK, str(self.series["id"]))
-            self.kept = kept_of(folders["conform"], self.series["id"])
+            self.kept = Kept.of(folders["conform"], self.series["id"])
 
     async def namer_for(self, made: Plan):
         """The series' own rule of names (`rules.format_filename`), asked once for every goal the names do not hold yet.
         The namer of the sync when no name was added (the plan made with it stands); a new one when names came. A name is
         kept by the request it answered, whole (the card and the item): what the rule is given is what tells two names
         apart, and nothing else."""
-        wanted = {}
-        for goal in made.goals:
-            item = _item_of(goal.slot, goal.video)
-            key = (_key_of(item), goal.off)
-            if key not in self.names:
-                wanted[key] = (goal.slot, goal.video, item)
+        wanted = wanted_names(made.goals, self.names)
         for key, (slot, video, item) in wanted.items():
             off = key[-1]
             try:
                 made_name = (await self.m.request("rules.format_filename", {"series": self.series, "media_item": item}))["filename"]
-                self.names[key] = os.path.splitext(made_name)[0] + ".mkv" + (".off" if off else "")
+                self.names[key] = filename_of(made_name, off)
             except (BusRequestError, KeyError):
                 self.names[key] = name_of(slot, video.snapshot, off)  # the rule refused: the planner's own name
             except asyncio.TimeoutError:
                 continue  # no answer is no word of the rule: its own name stands for now, and the rule is asked again
-        return self._namer() if wanted else self.namer
-
-    def _namer(self):
-        def namer(slot, video, off):
-            return self.names.get((_key_of(_item_of(slot, video)), off)) or name_of(slot, video.snapshot, off)
-        return namer
+        return namer_over(self.names) if wanted else self.namer
 
     # --- the steps -------------------------------------------------------------------------------------------------
 
@@ -675,7 +575,7 @@ class BusSync(SeriesSync):
                 made = judged(result, cut=False)
             except Passing as passing:
                 self.m.log.warning("%s %s: выравнивание не сделано: сбой сервиса в задаче %s: %s; %s", label, way.voice,
-                                   job_id, describe(why), _fate_of(passing))
+                                   job_id, describe(why), fate_of(passing))
                 outcomes[op.id] = type(passing)(reason("daemon_job_failed", job=job_id, cause=why))
                 continue
             if made is None:
@@ -755,7 +655,7 @@ class BusSync(SeriesSync):
             out = judged(result, cut=True)
         except Passing as passing:
             self.m.log.warning("%s: разбор не сделан: сбой сервиса в задаче %s: %s; %s", label, job_id, describe(why),
-                               _fate_of(passing))
+                               fate_of(passing))
             raise type(passing)(reason("daemon_job_failed", job=job_id, cause=why)) from None
         self.jobs.append((job_id, out is not None and ended.get("status") == "done"))
         if out is None:
@@ -802,7 +702,7 @@ class BusSync(SeriesSync):
         sync waits for the one under way."""
         self.committing = staged is None
         held = sorted(self.containers.values(), key=lambda each: each.name)
-        table = await compute.run(lambda: [container_json(each) for each in held])
+        table = await compute.run(containers_json, held)
         if staged:
             steps = await storage.call(self.files.write_journal, staged, table)
             self.m.packing.journal(self.series["id"], steps)
@@ -811,7 +711,7 @@ class BusSync(SeriesSync):
             await self.m.carry_out(self.series["id"], self.files, steps, table, self.m.packing.step_done)
             names = [card.name for card in self.m.packing.cards.values()
                      if card.series_id == self.series["id"] and card.status == "apply"]
-            sizes = await storage.call(_sizes, self.files, names)
+            sizes = await storage.call(self.files.sizes, names)
             self.m.packing.applied(self.series["id"], lambda name: sizes.get(name))
             self.m.pack_publish()
         await self.m.save(self.series["id"], self)
@@ -911,7 +811,7 @@ class PlannerModule(BaseModule):
             await self._load(series_id, sync)
             online, choices = await self._inputs(series)
             sync.voice_order = dict(choices.groups)
-            sync.containers = {each.name: each for each in assets_against(sync.containers.values(), online)}
+            sync.containers = assets_table(sync.containers.values(), online)
             await sync.prepare()
             synced = await sync.sync(online, choices)
             await self.repo.save_outcome(series_id, [
@@ -981,8 +881,8 @@ class PlannerModule(BaseModule):
             else:
                 self.log.warning("сериал %d: файла %s нет на диске — он уходит из таблицы актива", series_id, container.name)
         sync.containers = containers
-        sync.failed = {_failure_decoded(each) for each in await self.repo.failures(series_id)}
-        sync.commands = frozenset(_decoded(each) for each in await self.repo.commands(series_id))
+        sync.failed = {failure_of_key(each) for each in await self.repo.failures(series_id)}
+        sync.commands = frozenset(command_of_key(each) for each in await self.repo.commands(series_id))
         self._loaded[series_id] = (frozenset(sync.failed), sync.commands)
         self._forgot.discard(series_id)
         self._shed.pop(series_id, None)
@@ -991,7 +891,7 @@ class PlannerModule(BaseModule):
         """The table, the failures and the commands after a sync. What the user said while it ran is kept: a command
         recorded meanwhile waits for the next sync, a reset of the failures leaves only those this sync recorded."""
         loaded_failures, loaded_commands = self._loaded.get(series_id, (frozenset(), frozenset()))
-        now = frozenset(_decoded(each) for each in await self.repo.commands(series_id))
+        now = frozenset(command_of_key(each) for each in await self.repo.commands(series_id))
         commands = set(sync.commands) | (now - loaded_commands)
         commands -= loaded_commands - now  # a command the user took back meanwhile
         if series_id in self._forgot:
@@ -1000,9 +900,9 @@ class PlannerModule(BaseModule):
             self._forgot.discard(series_id)
         failed = set(sync.failed) - self._shed.get(series_id, set())
         held = list(sync.containers.values())
-        await self.repo.save(series_id, await compute.run(lambda: [container_json(each) for each in held]),
-                             [_failure_encoded(each) for each in sorted(failed, key=repr)],
-                             [_encoded(each) for each in sorted(commands, key=repr)])
+        await self.repo.save(series_id, await compute.run(containers_json, held),
+                             [key_of_failure(each) for each in sorted(failed, key=repr)],
+                             [key_of_command(each) for each in sorted(commands, key=repr)])
         # A sync writes after every group it applies: what it wrote is what the next writing of it starts from.
         self._loaded[series_id] = (frozenset(failed), frozenset(sync.commands))
 
@@ -1010,7 +910,7 @@ class PlannerModule(BaseModule):
         series_id = series["id"]
         layout = await self.request("composition.layout", {"series_id": series_id})
         voices = await self.request("voices.settings.get", {})
-        online, choices, self._members[series_id] = await compute.run(_inputs_of, layout, series, voices)
+        online, choices, self._members[series_id] = await compute.run(layout_inputs, layout, series, voices)
         return online, choices
 
     # --- the picture of the packing ------------------------------------------------------------------------------
@@ -1129,7 +1029,7 @@ class PlannerModule(BaseModule):
         try:
             root = (await self.request("conform.workspace", {})).get("conform")
             if root:
-                await storage.call(kept_of(root, series_id).drop, timeout=storage.REMOVE_TIMEOUT_S)
+                await storage.call(Kept.of(root, series_id).drop, timeout=storage.REMOVE_TIMEOUT_S)
         except (BusRequestError, asyncio.TimeoutError, OSError):
             self.log.warning("сериал %d: сохранённые выравнивания не убраны с удалением сериала", series_id)
         self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})
@@ -1468,23 +1368,22 @@ class PlannerModule(BaseModule):
                 series = None
             fresh = BusSync(self, series, False) if series is not None else SeriesSync()
             fresh.containers = {each.name: each for each in await self.repo.containers(series_id)}
-            fresh.failed = {_failure_decoded(each) for each in await self.repo.failures(series_id)}
-            fresh.commands = frozenset(_decoded(each) for each in await self.repo.commands(series_id))
+            fresh.failed = {failure_of_key(each) for each in await self.repo.failures(series_id)}
+            fresh.commands = frozenset(command_of_key(each) for each in await self.repo.commands(series_id))
             if made is None and series is not None:
                 try:
                     rows, choices = await self._inputs(series)
                     held = list(fresh.containers.values())
-                    fresh.containers = await compute.run(
-                        lambda: {each.name: each for each in assets_against(held, rows)})
+                    fresh.containers = await compute.run(assets_table, held, rows)
                     inputs = fresh.inputs(rows, choices)
                     made = await fresh.plan_of(inputs)
                 except (BusRequestError, asyncio.TimeoutError) as exc:
                     self.log.warning("сериал %d: план для окна не посчитан: %s", series_id, exc)
             sync = sync or fresh
         # What the view reads of the sync, as it is now: the sync goes on while the view is counted in the pool.
-        held_now = _Held(dict(sync.containers), frozenset(sync.failed), frozenset(sync.commands))
+        held_now = Held(dict(sync.containers), frozenset(sync.failed), frozenset(sync.commands))
         problems = await self.repo.outcome(series_id)
-        return await compute.run(_view_body, series_id, held_now, made, inputs, dict(self._members.get(series_id, {})),
+        return await compute.run(view_body, series_id, held_now, made, inputs, dict(self._members.get(series_id, {})),
                                  running, problems)
 
     async def on_references_get(self, env: Envelope) -> list[dict]:
@@ -1516,14 +1415,14 @@ class PlannerModule(BaseModule):
         if command.kind == "track" and (command.dub is None or not any(
                 track["dub"] == command.dub.model_dump() for track in held[command.name]["tracks"])):
             raise ValueError("planner_delete_no_track")
-        await self.repo.add_command(series_id, _command(command.model_dump()))
+        await self.repo.add_command(series_id, stored_command(command.model_dump()))
         await self._publish_view(series_id)
         return {"recorded": True}
 
     async def on_delete_cancel(self, env: Envelope) -> dict:
         command = PlanDelete.model_validate(env.payload)
         series_id = command.series_id
-        dropped = await self.repo.drop_command(series_id, _command(command.model_dump()))
+        dropped = await self.repo.drop_command(series_id, stored_command(command.model_dump()))
         await self._publish_view(series_id)
         return {"dropped": bool(dropped)}
 
@@ -1568,7 +1467,7 @@ class PlannerModule(BaseModule):
                 self._forgot.add(series_id)
         else:
             gone = await self._failures_of(series_id, forget)
-            reset = await self.repo.forget_failures(series_id, [_failure_encoded(each) for each in gone])
+            reset = await self.repo.forget_failures(series_id, [key_of_failure(each) for each in gone])
             if series_id in self._runs:
                 # What a sync under way holds of them is not written back by it.
                 self._shed.setdefault(series_id, set()).update(gone)
@@ -1578,7 +1477,7 @@ class PlannerModule(BaseModule):
     async def _failures_of(self, series_id: int, forget: PlanForget) -> list[tuple]:
         """The failed attempts of the series that belong to the level, placed by the rows the sources give now."""
         series = await self.request("catalog.series.get", {"series_id": series_id})
-        held = {_failure_decoded(each) for each in await self.repo.failures(series_id)}
+        held = {failure_of_key(each) for each in await self.repo.failures(series_id)}
         rows, choices = await self._inputs(series)
         inputs = BusSync(self, series, False).inputs(rows, choices)
         return [each["key"] for each in placed(held, inputs.online) if forget.holds(each)]

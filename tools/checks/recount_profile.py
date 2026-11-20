@@ -112,8 +112,10 @@ async def main(series: list[int], base: str, rounds: int, out: str | None) -> No
             (composition_module, "derive", "composition: projection and comparison (pool)"),
             (composition_module, "layout_of", "composition: the layout as the model for the planner (pool)"),
             (planner_module, "_inputs_of", "planner: the inputs of the plan from the layout (pool)"),
+            (planner_module, "layout_inputs", "planner: the inputs of the plan from the layout (pool)"),
             (executor, "plan", "planner: the plan (pool)"),
             (planner_module, "_view_body", "planner: the view (pool)"),
+            (planner_module, "view_body", "planner: the view (pool)"),
             (planner.repo, "containers", "planner: read the asset")):
         if owner is not None and timed(owner, name, label):
             wrapped.append(label)

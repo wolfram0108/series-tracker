@@ -19,6 +19,7 @@ from calc.plan.tables import label_of
 from core.fsnames import sanitize_name
 
 MANIFEST = "manifest.json"
+KEPT = "kept"  # beside the folders of the planner's jobs in the work folder of the alignment service
 
 
 class Kept:
@@ -27,6 +28,11 @@ class Kept:
 
     def __init__(self, root: str) -> None:
         self.root = root
+
+    @classmethod
+    def of(cls, conform: str, series_id: int) -> "Kept":
+        """The alignments kept for a series, beside the folders of the jobs (which the sweep of the planner clears)."""
+        return cls(os.path.join(conform, KEPT, str(series_id)))
 
     def folder(self, slot) -> str:
         return os.path.join(self.root, label_of(tuple(slot)))

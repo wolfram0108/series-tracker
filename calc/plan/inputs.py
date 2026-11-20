@@ -9,7 +9,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, MARKUP_ALLOW, MARKUP_ORDER, MARKUP_SAME, REFERENCE_ALLOW, REFERENCE_ORDER, REFERENCE_SAME,
                             SUBTITLES_ALLOW, SUBTITLES_ORDER, VOICE_ALLOW,
-                            VOICE_ORDER, VOICE_TAKE, CompositionReply, CompositionRow, EffectiveLever, Level, RowState,
+                            VOICE_ORDER, VOICE_TAKE, CompilationRef, CompositionReply, CompositionRow, EffectiveLever, Level, RowState,
                             SeriesSource, compilation_key,
                             parse_group_target, parse_variant_target)
 from core.ignored import parse_memory
@@ -165,3 +165,16 @@ def planner_inputs(layout: CompositionReply, series: Mapping[str, Any],
                          sources=sources, voice_order=order, off_episodes=off, titles=layout.voice_titles,
                          languages=voices.get("voice_languages") or {})
     return online, choices
+
+
+def layout_inputs(layout: CompositionReply, series: Mapping[str, Any],
+                  voices: Mapping[str, Any]) -> tuple[tuple[OnlineRow, ...], Choices, dict[tuple[int, str], CompilationRef]]:
+    """The rows and the choices of a series from its layout, and its compilations by their row (source id, row key): the
+    references name the compilation an episode is cut out of by it. Thousands of rows: the pool counts it."""
+    online, choices = planner_inputs(layout, series, voices)
+    return online, choices, {(each.ref.source_id, each.ref.row_key): each.ref for each in layout.compilations}
+
+
+def assets_table(containers: Iterable[Container], online: Iterable[OnlineRow]) -> dict[str, Container]:
+    """The asset read against the rows of the sources (`assets_against`), by the name of each file."""
+    return {each.name: each for each in assets_against(containers, online)}
