@@ -50,7 +50,7 @@ class ReadContext:
     # The rows of the last complete table of the page: what a player said of a link that names its video for good (the
     # frame of a playlist) is taken from here instead of being asked again.
     last_rows: tuple[TableRow, ...] = ()
-    # How many rows of each line of a title of the provider to read (core/row_limit.py: `all`, `N` the first N, `-N` the last
+    # How many rows of each line of a title of the provider to read (calc/row_limit.py: `all`, `N` the first N, `-N` the last
     # N); a site that reads no lines ignores it. The core keeps the rows of the earlier read that this one did not take.
     rows: str = "all"
     # The players the owner switched off for every source (their names in the order of sources: `kodik`, `line:CO4K`):

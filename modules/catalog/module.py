@@ -75,6 +75,8 @@ from __future__ import annotations
 import asyncio
 import os
 
+from calc.catalog.aggregator import StatusAggregator
+from calc.catalog.series_sources import checked_fields, checked_sources, refuse_removed_fields
 from core.fsnames import sanitize_name, sanitize_path
 from core.module import BaseModule
 from core.contracts import SourceEvent, availability
@@ -82,9 +84,7 @@ from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
 
-from .aggregator import StatusAggregator
 from .repository import CatalogRepository
-from .series_sources import checked_fields, checked_sources, refuse_removed_fields
 
 # Columns that end up as path components on disk; the owner normalises
 # them on every write so no client can store an unusable name.

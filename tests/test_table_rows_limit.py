@@ -1,9 +1,9 @@
 """The first read of a title of the provider waits for the user, and a read takes the first or the last rows of each line
-(core/row_limit.py): the rows of the earlier reads that it did not take stay in the table as they were."""
+(calc/row_limit.py): the rows of the earlier reads that it did not take stay in the table as they were."""
 
 import pytest
 
-from core.row_limit import limit_of, limited
+from calc.row_limit import limit_of, limited
 from modules.sources.sites import ReadContext, TableDraft
 from test_sources_table import PAGE, FakeSite, build, entry, row, assert_no_second_read
 

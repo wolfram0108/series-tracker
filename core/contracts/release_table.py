@@ -189,7 +189,7 @@ class TableGetRequest(BaseModel):
 
     url: str
     refresh: bool = True
-    # How many rows of each line of a title a provider source reads (core/row_limit.py): the setting of the source
+    # How many rows of each line of a title a provider source reads (calc/row_limit.py): the setting of the source
     # the read is for; a site that reads no lines ignores it. None is all.
     rows: str = "all"
     # The request is a synchronization's own. The page of a site that waits for the user (a title of the provider) is begun

@@ -27,7 +27,7 @@ from core.contracts.torrent import order_name
 from core.topics import TABLE_READ_S
 from core.logging import get_logger
 from core.reasons import EXTERNAL, describe, parse, reason
-from core.row_limit import limit_of
+from calc.row_limit import limit_of
 
 from .players.registry import PlayerRegistry
 from .repository import SourcesRepository, Stored

@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 from core.db import Database
 from modules.catalog.repository import CatalogRepository
-from modules.catalog.series_sources import checked_sources
+from calc.catalog.series_sources import checked_sources
 
 SERIES_DEFAULTS = {
     "name": "Тайтл",

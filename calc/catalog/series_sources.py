@@ -4,8 +4,8 @@ No bus and no database here, so that the repository and the module apply the sam
 """
 from __future__ import annotations
 
+from calc.row_limit import normalized
 from core.contracts import SeriesSource
-from core.row_limit import normalized
 from core.reasons import reason
 
 # The columns that left `series`: the first four live in a source now, the last one went with its feature.
