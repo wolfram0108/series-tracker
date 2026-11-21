@@ -200,8 +200,8 @@ async def test_fetch_unreachable_sources_is_an_error_not_a_blind_download(system
 
 
 @pytest.mark.asyncio
-async def test_a_fetch_silent_past_the_fuse_is_taken_off_with_what_it_waited_for_and_its_source_fails_at_once(
-        system, tmp_path, monkeypatch, caplog):
+async def test_a_fetch_silent_past_the_fuse_is_taken_off_with_what_it_waited_for_and_tried_again(system, tmp_path, monkeypatch,
+                                                                                                    caplog):
     monkeypatch.setattr("modules.downloads.module.RETRY_DELAY_S", 0.0)
     monkeypatch.setattr("modules.downloads.module.SILENCE_FUSE_S", 0.3)  # a short fuse: the test waits for it to end
     bus, _, dl, probe = system
@@ -209,9 +209,7 @@ async def test_a_fetch_silent_past_the_fuse_is_taken_off_with_what_it_waited_for
     with caplog.at_level(logging.WARNING, logger="downloads"):
         (done,) = await _fetch(probe, bus, 1, jobs=[
             {"key": "dub:7", "url": "https://site/#kodik=7", "path": str(tmp_path / "s.mp4"), "series_id": 3}])
-    # A silent source is not asked again: the episode goes to its next source.
-    assert done["ok"] is False and done["transient"] is False and dl.started.count("https://site/#kodik=7") == 1
-    assert parse(done["error"])["code"] == "no_signs_of_life"
+    assert done["ok"] is True and dl.started.count("https://site/#kodik=7") == 2
     taken_off = [record.getMessage() for record in caplog.records if "ждала" in record.getMessage()]
     assert len(taken_off) == 1 and "__call__" in taken_off[0], "the log names what the download waited for"
 

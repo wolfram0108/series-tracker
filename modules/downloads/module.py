@@ -71,7 +71,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 from calc.downloads import cards as cardbook
-from calc.downloads.failure import Failed, Stalled, Unasked, kind_of
+from calc.downloads.failure import Failed, Unasked, kind_of
 from calc.downloads.fetch import (Job, Stream, finished, job_of, may_begin, need_of, path_refusal, refusal_words, removable, started,
                                   stops_notice, stops_series, stream_of, task_key, unreached)
 from calc.downloads.limits import KEYS, MULTI, PROVIDER, SINGLE, after_setting, change_of, limits_of
@@ -99,7 +99,7 @@ from .repository import DownloadsRepository
 
 # A download says it is alive by its progress, byte by byte; its silent steps (a probe of the length, a check of the file)
 # end well within this. A download silent for longer waits for what will not come: it is taken off, the log shows what it
-# waited for, and the episode goes to its next source at once.
+# waited for, and it is tried again like any way that broke.
 SILENCE_FUSE_S = 60.0
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
@@ -491,8 +491,7 @@ class DownloadsModule(BaseModule):
         stopped = False
         try:
             (ok, error, said), _attempts, _exhausted = await retrying(
-                attempt_once, final=lambda result: result[0] or result[2] in (Failed.FINAL, Failed.STALLED), budget=budget,
-                on_retry=report)
+                attempt_once, final=lambda result: result[0] or result[2] is Failed.FINAL, budget=budget, on_retry=report)
         except asyncio.CancelledError:
             stopped = key not in self._cancelled
             if not stopped:
@@ -594,7 +593,7 @@ class DownloadsModule(BaseModule):
 
     async def _watched(self, key: str, url: str, path: str, on_progress, *, downloader=None, **kw) -> tuple[bool, str]:
         """A download under the fuse of silence: each report of progress is a sign of life, and a download that gives none
-        for SILENCE_FUSE_S is taken off with what it waited for in the log; its failure is the source's at once (STALLED).
+        for SILENCE_FUSE_S is taken off with what it waited for in the log; its failure is one the queue tries again.
         `downloader` takes the place of the downloader of this module for a file a provider takes itself."""
         alive = asyncio.Event()
 
@@ -613,11 +612,11 @@ class DownloadsModule(BaseModule):
                 if run in done:
                     return run.result()
                 if not done:
-                    self.log.warning("загрузка %s: нет признаков жизни %.0f с — снята, дальше следующий источник; ждала:\n%s",
+                    self.log.warning("загрузка %s: нет признаков жизни %.0f с — снята и повторится; ждала:\n%s",
                                      key, SILENCE_FUSE_S, awaited(run))
                     run.cancel()
                     await asyncio.gather(run, return_exceptions=True)
-                    return False, Stalled(reason("no_signs_of_life", seconds=f"{SILENCE_FUSE_S:.0f}"))
+                    return False, reason("no_signs_of_life", seconds=f"{SILENCE_FUSE_S:.0f}")
         finally:
             if beat is not None:
                 beat.cancel()  # a download cancelled in the middle of the wait leaves no watch behind
