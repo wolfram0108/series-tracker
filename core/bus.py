@@ -1,22 +1,22 @@
-"""«Тупая» внутрипроцессная шина: publish + subscribe, больше ничего.
+"""In-process "dumb" bus: publish and subscribe, nothing else.
 
-Чего шина НЕ делает и не должна уметь никогда (см. ТЗ, раздел 2.2):
-маршрутизация по содержимому, трансформация payload, retry,
-persistence, приоритеты, знание о модулях. Request/reply реализован
-в обвязке модуля (core/module.py) ПОВЕРХ pub/sub — шина о нём не знает.
+The bus must never do the following (spec, section 2.2): route by content,
+transform payloads, retry, persist, set priorities, or know about modules.
+Request/reply is built in the module wrapper (core/module.py) on top of pub/sub;
+the bus knows nothing about it.
 
-Учёт обработки (`settled`) — не маршрутизация, а сигнал для того, кто ждёт тишины: подписка модуля (`tracked`) сообщает
-о каждом обработанном конверте, и шина знает, сколько конвертов ещё в пути или в работе. Так ожидание тишины — это
-сигнал, а не пауза; подписка без учёта (тест, поток SSE) в него не входит.
+Accounting for processing (`settled`) is not routing: it is a signal for whoever waits for silence. A module
+subscription (`tracked`) reports each envelope it has finished, so the bus knows how many envelopes are still
+in transit or in work. Waiting for silence is thus a signal, not a pause. Untracked subscriptions (tests, SSE
+streams) are not counted.
 
-Подписка — один или несколько шаблонов с одной очередью: конверты всех её топиков приходят в порядке публикации.
-Рабочий подписчик (модуль, поток интерфейса) подписан ровно на те точные топики, которые разбирает; шаблоны с `*` и `#`
-— для наблюдателей (тесты, приборы), которым нужен весь поток.
+A subscription is one or more patterns sharing one queue: envelopes of all its topics arrive in publication order.
+A working subscriber (module, UI stream) subscribes to exactly the topics it parses; patterns with `*` and `#`
+are for observers (tests, instruments) that need the whole stream.
 
-Очереди подписчиков неограниченные: потеря сообщения недопустима как
-тихий режим работы, а backpressure в однопользовательском процессе —
-несуществующая проблема. Если очередь растёт — это баг подписчика,
-и он должен быть виден (см. предупреждение в publish).
+Subscriber queues are unbounded: silent message loss is not acceptable, and backpressure
+is not a problem in a single-user process. A growing queue is a subscriber bug and must be
+visible (see the warning in publish).
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from .envelope import Envelope, topic_matches
 
 _log = logging.getLogger("bus")
 
-# Порог, после которого рост очереди подписчика считается аномалией.
+# A backlog this large means the subscriber cannot keep up, not a burst.
 _QUEUE_WARN_SIZE = 1000
 
 
@@ -41,7 +41,7 @@ def is_exact(pattern: str) -> bool:
 
 @dataclass(slots=True)
 class Subscription:
-    """Подписка: шаблоны топиков + личная очередь конвертов."""
+    """Subscriber's topic patterns and its private envelope queue."""
     sub_id: int
     patterns: tuple[str, ...]
     topics: frozenset[str] = frozenset()  # the exact ones: a topic is found among them without matching
@@ -86,13 +86,13 @@ class Bus:
         self._step = asyncio.Event()
 
     def next_step(self) -> asyncio.Event:
-        """Сигнал следующего шага шины: конверт опубликован или разобран. Берётся в тот же миг, когда проверено условие,
-        и тогда ни один шаг между проверкой и ожиданием не теряется; пока в системе ничего не происходит, условие
-        не изменится."""
+        """Signal of the bus's next step: an envelope was published or taken apart. Take it at the same moment
+        the condition is checked, so no step between the check and the wait is lost. While nothing happens,
+        the condition does not change."""
         return self._step
 
     def processed(self, sub: Subscription) -> None:
-        """Потребитель учитываемой подписки закончил с одним конвертом (разобрал или отказался)."""
+        """The consumer of a tracked subscription is done with one envelope (parsed it or rejected it)."""
         self._tick()
         if sub.tracked and self._unfinished:
             self._unfinished -= 1
@@ -100,12 +100,12 @@ class Bus:
                 self._quiet.set()
 
     async def settled(self) -> None:
-        """Ждёт, пока все конверты учитываемых подписок разобраны, включая те, что обработчики породили по дороге."""
+        """Waits until all envelopes of tracked subscriptions are taken apart, including those handlers produced on the way."""
         while self._unfinished:
             await self._quiet.wait()
 
     def publish(self, env: Envelope) -> int:
-        """Кладёт конверт всем подходящим подписчикам. Возвращает их число."""
+        """Puts the envelope into every matching subscriber's queue. Returns how many received it."""
         self._tick()
         for observer in tuple(self._taps):
             try:

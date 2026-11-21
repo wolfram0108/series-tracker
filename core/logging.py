@@ -1,8 +1,8 @@
-"""Категоризированное логирование (принцип 6).
+"""Categorized logging (principle 6).
 
-Группа = имя модуля. Формат и раскладка сохранены от старой системы:
-ротируемые JSON-строки в папке ST_LOG_DIR, по файлу на уровень (debug.log,
-info.log, warning.log, error.log). Без внешних зависимостей.
+Group = module name. The format and layout match the previous system, so existing log tooling keeps working:
+rotating JSON lines in the ST_LOG_DIR folder, one file per level (debug.log,
+info.log, warning.log, error.log). No external dependencies.
 
 Files are written only where ST_LOG_DIR names a folder: the service sets it (start.sh), so a script or a test run from
 the folder of the project does not write into the logs of the service. Without it the lines go to stderr.
@@ -24,9 +24,8 @@ _LEVELS = {
 }
 _configured = False
 
-# Группы с включённой DEBUG-детализацией (принцип 6: регулируемые
-# уровни). Пустой набор = DEBUG не пишется никому; INFO+ — всегда.
-# Управляется вкладкой отладки через gateway (Р-22).
+# Groups whose DEBUG lines are written; an empty set writes none, INFO and above are always written.
+# Changed at runtime by the debug tab through the gateway (Р-22).
 _debug_groups: set[str] = set()
 
 
@@ -72,7 +71,7 @@ class _JsonFormatter(logging.Formatter):
 
 
 def configure(level: int = logging.DEBUG) -> None:
-    """Идемпотентная настройка корневого логгера под раскладку logs/."""
+    """Idempotently configure the root logger for the logs/ layout."""
     global _configured
     if _configured:
         return
@@ -99,6 +98,6 @@ def configure(level: int = logging.DEBUG) -> None:
 
 
 def get_logger(group: str) -> logging.Logger:
-    """Логгер группы. Имя группы = имя модуля (принцип 6)."""
+    """Logger of a group; the group name is the module name (principle 6)."""
     configure()
     return logging.getLogger(group)

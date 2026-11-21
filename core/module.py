@@ -1,17 +1,17 @@
-"""BaseModule — обвязка модуля над шиной.
+"""BaseModule: the module's wrapper over the bus.
 
-Даёт модулю:
-- декларативные подписки (handle("точный.топик")) с потребителями: модуль подписан ровно на то, что разбирает;
-- publish_event / send_command — отправка без ожидания;
-- request() — query или command → reply с correlation_id и предохранителем (поверх pub/sub); вид конверта и
-  предохранитель берутся из реестра топиков (core/topics.py); reply_of() — тот же ответ моделью записи реестра;
-- автоматический ответ на query и на command с reply_to: значение, возвращённое обработчиком,
-  уезжает reply-конвертом в reply_to запроса;
-- жизненный цикл start/stop и хук on_start (reconcile: добор
-  незавершённых задач из БД — правило «шина — сигнал, БД — истина»).
+What it gives a module:
+- declarative subscriptions (handle("exact.topic")); a module is subscribed to exactly what it handles;
+- publish_event / send_command: sending without waiting for an answer;
+- request(): query or command -> reply with a correlation_id and a fuse, built over pub/sub; the envelope kind and
+  the fuse come from the topic registry (core/topics.py); reply_of() returns the answer as the model of the record;
+- an automatic reply to a query and to a command with reply_to: the value returned by the handler travels as a
+  reply envelope to the request's reply_to;
+- start/stop lifecycle and the on_start hook (reconcile: pick up unfinished tasks from the DB; the rule "the bus
+  is a signal, the DB is the truth").
 
-Правило изоляции: модуль импортирует только core/*, никогда — другой
-модуль. Всё межмодульное общение — через шину.
+Isolation rule: a module imports only core/*, never another module. All communication between modules goes
+through the bus.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ _REFUSALS = ("LookupError", "NotAllowed", "ValueError")
 
 
 def is_refusal(exc: BaseException) -> bool:
-    """A no the module gives as its answer, not its failure: a refusal of the table of what is allowed, a «not found» of
+    """A refusal the module gives as its answer, not a failure of its own: a refusal of the table of what is allowed, a «not found» of
     its own (LookupError itself; its KeyError and IndexError are slips of code), a value refused with a coded reason
     (ValueError itself with a code of core.reasons; the ValueError of a library carries none)."""
     if isinstance(exc, NotAllowed) or type(exc) is LookupError:
@@ -57,7 +57,7 @@ def _name_of(topic: Topic | str) -> str:
 
 
 class BusRequestError(RuntimeError):
-    """Обработчик на той стороне ответил ошибкой."""
+    """The handler on the other side answered with an error."""
 
 
 class BaseModule:
@@ -77,31 +77,29 @@ class BaseModule:
         self._reply_topic = f"{REPLY_PREFIX}.{self.name}"
         self.register()
 
-    # --- объявление интерфейса модуля -------------------------------------
+    # --- module interface declaration -------------------------------------
 
     def register(self) -> None:
-        """Переопределяется модулем: здесь объявляются self.handle(...)."""
+        """Overridden by the module: declare self.handle(...) here."""
 
     def handle(self, pattern: Topic | str, handler: Handler, *,
                concurrent: bool = False) -> None:
-        """concurrent=True — каждый конверт обрабатывается отдельной
-        задачей: долгий обработчик (скан, загрузка) не блокирует
-        очередь топика для следующих запросов. По умолчанию —
-        последовательно: порядок обработки сохраняется (важно, например,
-        для свёрток статусов)."""
+        """concurrent=True: each envelope is handled in its own task, so a long handler (a scan, a download) does
+        not block the topic's queue for the next requests. By default handling is sequential, which keeps the order
+        (important, e.g., for folding statuses)."""
         pattern = _name_of(pattern)
         # A family of topics would bring the module envelopes it does not handle, and an answer to a query of any of them.
         if not is_exact(pattern):
             raise ValueError(f"модуль {self.name}: подписка '{pattern}' — не точный топик")
         self._handlers.append((pattern, handler, concurrent))
 
-    # --- жизненный цикл ----------------------------------------------------
+    # --- lifecycle ----------------------------------------------------
 
     async def on_start(self) -> None:
-        """Хук модуля: reconcile незавершённых задач, инициализация."""
+        """Module hook: reconcile unfinished tasks, initialize."""
 
     async def on_stop(self) -> None:
-        """Хук модуля: корректное завершение."""
+        """Module hook: orderly shutdown."""
 
     async def start(self) -> None:
         reply_sub = self.bus.subscribe(self._reply_topic, tracked=True)
@@ -147,7 +145,7 @@ class BaseModule:
         self._subs.clear()
         self.log.info("модуль остановлен")
 
-    # --- отправка ----------------------------------------------------------
+    # --- sending ----------------------------------------------------------
 
     def publish_event(self, topic: Topic | str, payload: Any = None) -> None:
         self.bus.publish(Envelope(topic=_name_of(topic), kind="event", payload=payload))
@@ -202,11 +200,11 @@ class BaseModule:
         return await compute.run(topic.reply.model_validate, answer)
 
     def background(self) -> set[asyncio.Task]:
-        """Задачи, в которых модуль работает вне обработчиков шины; тот, кто ждёт тишины, ждёт и их."""
+        """Tasks in which the module works outside the bus handlers; whoever waits for quiet waits for them too."""
         return set(self._bg)
 
 
-    # --- потребители -------------------------------------------------------
+    # --- consumers -------------------------------------------------------
 
     async def _consume(self, sub: Subscription, handler: Handler,
                        concurrent: bool = False) -> None:
@@ -224,9 +222,8 @@ class BaseModule:
                     self.bus.processed(sub)
 
     async def _handle_one(self, env: Envelope, handler: Handler) -> None:
-        # A request of an admitted change is handled under that admission: what the handler asks of others is part of the
-        # change, and the answer goes back only once those requests are answered too (late ones included), so the change
-        # is over when its last write is, however deep.
+        # A request of an admitted change runs under that admission; its answer goes back only after its own requests
+        # are answered, so the change ends with its last write, however deep.
         asked = env.kind in ("query", "command")
         relay = _Relay(env.admission, self.log) if env.admission and asked else None
         context = current_admission.set(relay.admission) if relay is not None else None

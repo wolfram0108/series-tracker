@@ -1,10 +1,10 @@
-"""Лёгкий асинхронный доступ модулей к SQLite.
+"""Lightweight async access to SQLite for modules.
 
-Каждый модуль работает ТОЛЬКО со своими таблицами (карта владения — ТЗ,
-раздел 6); это соглашение, инструмент его не навязывает. Блокирующие
-вызовы sqlite уходят в поток (to_thread) — событийный цикл не виснет.
-Соединение на операцию: дёшево для SQLite и снимает вопросы потоков;
-WAL позволяет параллельное чтение.
+Each module works only with its own tables (ownership map: spec, section 6).
+This is a convention the tool does not enforce. Blocking sqlite calls run in
+a thread (to_thread) so the event loop never stalls. One connection per
+operation: cheap for SQLite and sidesteps thread-affinity issues; WAL allows
+parallel reads.
 """
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from typing import Any, Callable, Iterable, TypeVar
 
 T = TypeVar("T")
 
-# Сколько ждём переключения журнала в WAL: PRAGMA journal_mode требует
-# эксклюзивной блокировки и не ждёт busy-timeout.
+# How long to wait for the switch to WAL: PRAGMA journal_mode needs an
+# exclusive lock and ignores busy-timeout.
 _WAL_TIMEOUT = 5.0
 _WAL_RETRY = 0.05
 
@@ -54,12 +54,12 @@ class Database:
 
     @staticmethod
     def _ensure_wal(conn: sqlite3.Connection) -> None:
-        """Журнал WAL переключается один раз на файл.
+        """Switch the journal to WAL once per file.
 
-        PRAGMA journal_mode требует эксклюзивной блокировки и НЕ ждёт
-        busy-timeout: база, созданная alembic, живёт в режиме delete,
-        и параллельные подключения при старте роняют друг друга
-        «database is locked». Уже переключённая база — no-op.
+        PRAGMA journal_mode needs an exclusive lock and does NOT wait for
+        busy-timeout: a database created by alembic lives in delete mode, and
+        concurrent connections at startup fail each other with
+        'database is locked'. An already switched database is a no-op.
         """
         mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         if str(mode).lower() == "wal":
@@ -98,10 +98,10 @@ class Database:
             return cur.lastrowid
 
     async def insert(self, query: str, params: Iterable[Any] = ()) -> int:
-        """id вставленной строки — его выдаёт сама база (lastrowid).
+        """Return the id of the inserted row, as reported by the database (lastrowid).
 
-        Чтение «максимального id» вместо lastrowid отдаёт id чужой
-        строки при параллельной вставке."""
+        Reading the "max id" instead of lastrowid returns another row's id
+        when inserts run in parallel."""
         return await self._threaded(self._insert_sync, query, params)
 
     async def fetch_all(self, query: str, params: Iterable[Any] = ()) -> list[dict]:
@@ -114,10 +114,9 @@ class Database:
     @staticmethod
     def coerce_bools(rows: list[dict] | dict | None,
                      columns: tuple[str, ...]) -> list[dict] | dict | None:
-        """SQLite хранит BOOLEAN как 0/1; старый контракт (SQLAlchemy)
-        отдавал true/false, и фронт (Vue v-model) различает это строго —
-        находка 41. Владельцы таблиц приводят свои булевы колонки на
-        выдаче наружу."""
+        """SQLite stores BOOLEAN as 0/1, while the old contract (SQLAlchemy)
+        returned true/false, and the frontend (Vue v-model) distinguishes them
+        strictly — находка 41. Table owners coerce their boolean columns on output."""
         if rows is None:
             return None
         single = isinstance(rows, dict)
@@ -144,9 +143,8 @@ class Database:
 
     async def execute(self, query: str, params: Iterable[Any] = (), *,
                       enforce_fk: bool = True) -> int:
-        """enforce_fk=False — для событийного каскада удаления (Р-19):
-        родительская строка удаляется сразу, дочерние таблицы дочищают
-        их владельцы по событию; мгновенные сироты допустимы (в старой
-        системе FK не принуждались вовсе)."""
+        """enforce_fk=False is for the event-driven delete cascade (Р-19): the parent
+        row is deleted at once and its owners clean up child tables on the event;
+        transient orphans are allowed (the old system did not enforce FKs at all)."""
         return await self._threaded(self._execute_sync, query, params,
                                        enforce_fk)

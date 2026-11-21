@@ -1,14 +1,14 @@
-"""Шифрование секретов в БД (Этап 3Б, docs/security.md).
+"""Encryption of secrets stored in the database (see docs/security.md).
 
-Fernet (AES-128-CBC + HMAC-SHA256). Ключ берётся из ST_ENCRYPTION_KEY
-(base64 urlsafe, 32 байта — формат Fernet) либо выводится из ST_SECRET_KEY
-(sha256 → base64). Ключ обязан быть стабильным: при его смене ранее
-зашифрованные секреты не расшифруются.
+Fernet (AES-128-CBC + HMAC-SHA256). The key comes from ST_ENCRYPTION_KEY
+(urlsafe base64, 32 bytes, the Fernet format) or is derived from ST_SECRET_KEY
+(sha256 → base64). The key must stay stable: changing it makes previously
+encrypted secrets undecryptable.
 
-Хранение: секрет в БД лежит как Fernet-токен (начинается с 'gAAAAA').
-Чтение прозрачно расшифровывает; значение в открытом виде (legacy, до
-миграции) распознаётся по отсутствию префикса и возвращается как есть —
-это обеспечивает плавный переход и устойчивость к недозашифрованным данным.
+A secret is stored in the database as a Fernet token (starts with 'gAAAAA').
+Reads decrypt it transparently; a plaintext value (legacy, before migration) is
+recognised by the missing prefix and returned as is, which allows a smooth
+transition and tolerates partially encrypted data.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import os
 
 from cryptography.fernet import Fernet, InvalidToken
 
-_TOKEN_PREFIX = "gAAAAA"  # маркер Fernet-токена (версия 0x80 в base64)
+_TOKEN_PREFIX = "gAAAAA"  # Fernet version byte 0x80 always encodes to this base64 prefix
 _fernet: Fernet | None = None
 
 
@@ -36,7 +36,7 @@ def _get_fernet() -> Fernet:
 
 
 def reset_cache() -> None:
-    """Сбросить кэш ключа (для тестов, меняющих окружение)."""
+    """Drop the cached key so the next call re-reads the environment (for tests that change it)."""
     global _fernet
     _fernet = None
 
@@ -46,15 +46,15 @@ def is_encrypted(value: str | None) -> bool:
 
 
 def encrypt(value: str | None) -> str | None:
-    """Зашифровать секрет. Пустое/None — без изменений. Уже зашифрованное
-    повторно не шифруется (идемпотентно — безопасно для миграции)."""
+    """Encrypt a secret. Empty or None is returned unchanged; an already encrypted
+    value is not encrypted again (idempotent, so it is safe for migrations)."""
     if not value or is_encrypted(value):
         return value
     return _get_fernet().encrypt(value.encode()).decode()
 
 
 def decrypt(value: str | None) -> str | None:
-    """Расшифровать секрет. Открытый (legacy) текст возвращается как есть."""
+    """Decrypt a secret. Plaintext (legacy) is returned as is."""
     if not is_encrypted(value):
         return value
     try:

@@ -3,8 +3,8 @@
 > Полный контракт push-обновлений фронта. Старый контракт снят с кода
 > прода (sse.py + static/js/app.js + agents/*), решения согласованы
 > 2026-06-12 (Р-18 в [revision.md](revision.md)). Реализация —
-> `modules/gateway/module.py` (SSE_MAP: топик шины → имя SSE +
-> трансформация payload).
+> `modules/gateway/module.py` (SSE_MAP: запись реестра топика
+> (`core/topics.py`) → `Outgoing`: имя SSE-события, форма пакета, ключ картины).
 
 ## Механика
 

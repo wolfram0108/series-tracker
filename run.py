@@ -1,26 +1,26 @@
-"""Точка входа: сборка шины, модулей и HTTP-приложения.
+"""Entry point: assembles the bus, the modules and the HTTP application.
 
-Запуск:  uvicorn run:app --host 0.0.0.0 --port 5000
-Перед первым запуском: alembic upgrade head (создаёт/обновляет БД).
+Run:    uvicorn run:app --host 0.0.0.0 --port 5000
+Before the first run: alembic upgrade head (creates or updates the DB).
 
-Окружение:
-  ST_DB_PATH   путь к SQLite (по умолчанию app.db)
+Environment:
+  ST_DB_PATH   path to SQLite (default app.db)
   ST_CONFORM_URL
                address of the alignment daemon (track-muxer); empty — the conform module
                stays idle
   ST_READ_RECENT
-               a stand only (it needs ST_STAND=1, or the process does not start): a table is read for the last this many
-               episodes of each voice-over, so that a check does not load a site with hundreds of requests, and an old
-               episode that is not in the table leaves the plan; the product leaves it unset and reads the whole page
+               stand only (requires ST_STAND=1, otherwise the process does not start): the table is read for the
+               last N episodes of each voice-over, so a check does not load the site with hundreds of requests; an
+               old episode missing from the table leaves the plan. The product leaves it unset and reads the whole page
   ST_QBIT_URL / ST_QBIT_USER / ST_QBIT_PASS
-               qBittorrent; без ST_QBIT_URL модуль torrents не стартует
-               (удобно для разработки без qBit)
+               qBittorrent; without ST_QBIT_URL the torrents module does not start
+               (convenient for development without qBit)
   ST_PROVIDER_URL / ST_PROVIDER_TOKEN
                the provider of the socket of external sources (contracts/provider_socket.md): its address and the
                token its requests carry; without an address there is no socket and the service reads what it has itself
 
-Все модули живут в одном asyncio-процессе (ТЗ, раздел 2.1); жизненным
-циклом управляет lifespan FastAPI.
+All modules live in one asyncio process (technical spec, section 2.1); the
+lifespan of FastAPI manages their lifecycle.
 """
 from __future__ import annotations
 
@@ -53,23 +53,22 @@ if read_recent is not None and os.environ.get("ST_STAND") != "1":
 require_head(db_path)
 db = Database(db_path)
 
-# Ключ подписи сессионной куки входа: стабильный из .env, иначе сессии
-# слетают при рестарте (см. docs/security.md, Этап 1).
+# Signing key of the login session cookie; it must be stable (from .env), or logins drop on restart.
+# See docs/security.md, stage 1.
 secret_key = os.environ.get("ST_SECRET_KEY", "")
 if not secret_key:
     log.warning("ST_SECRET_KEY не задан — сессии входа будут сбрасываться "
                 "при рестарте; задайте ST_SECRET_KEY в .env")
-# Secure-куки (только https). За nginx с TLS — true; для входа по http
-# (локально, до настройки nginx) временно ST_COOKIE_SECURE=false.
+# Secure cookies are sent over https only: true behind nginx with TLS; for local http set ST_COOKIE_SECURE=false.
+# Use that only until nginx is configured.
 cookie_secure = os.environ.get("ST_COOKIE_SECURE", "true").lower() != "false"
-# Поэтапный выкат: код входа можно задеплоить с ВЫКЛЮЧЕННЫМ замком
-# (ST_AUTH_REQUIRED=false), пока фронт не умеет логиниться, и включить
-# позже одним флагом. По умолчанию замок включён (безопасно).
+# Staged rollout: the login code can ship with the lock switched off (ST_AUTH_REQUIRED=false) while the
+# front end cannot log in yet; one flag enables it later. On by default for safety.
 auth_required = os.environ.get("ST_AUTH_REQUIRED", "true").lower() != "false"
-# /docs и /openapi.json выключены в проде (Этап 4); для gen:api поднять с
-# ST_DOCS_ENABLED=true (dev-инстанс или временно).
+# /docs and /openapi.json are off in production (stage 4); gen:api needs ST_DOCS_ENABLED=true
+# on a dev instance or temporarily.
 docs_enabled = os.environ.get("ST_DOCS_ENABLED", "false").lower() == "true"
-# Проверка Host (Этап 2): домен + loopback. Пусто → проверки нет (dev).
+# Host header check: the domain plus loopback; empty means no check (dev).
 _hosts = os.environ.get("ST_ALLOWED_HOSTS", "").strip()
 allowed_hosts = [h.strip() for h in _hosts.split(",") if h.strip()] or None
 gateway, modules = assemble(bus, db, Options(

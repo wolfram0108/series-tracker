@@ -49,7 +49,7 @@ class RulesRepository:
                 (rule["id"],))
         return rules
 
-    # --- CRUD конструктора (Р-22) ----------------------------------------------
+    # --- CRUD of the rule constructor (Р-22) ----------------------------------------------
 
     async def create_profile(self, name: str, kind: str = "series") -> int:
         if await self._db.fetch_one(

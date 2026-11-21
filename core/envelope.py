@@ -1,9 +1,9 @@
-"""Конверт сообщения шины.
+"""Envelope of a bus message.
 
-Единственный формат, в котором модули обмениваются информацией.
-Payload — только JSON-сериализуемые данные: никаких объектов, сессий,
-коннектов. Это правило делает будущий переезд на внешний брокер
-заменой одного файла (core/bus.py), а не переписыванием модулей.
+The only format in which modules exchange information.
+Payloads are JSON-serializable data only: no objects, sessions or connections.
+This rule keeps a future move to an external broker a change of one file
+(core/bus.py), not a rewrite of the modules.
 """
 from __future__ import annotations
 
@@ -32,10 +32,10 @@ class Envelope:
 
 
 def topic_matches(pattern: str, topic: str) -> bool:
-    """Сопоставление топика с шаблоном.
+    """Checks a topic against a pattern.
 
-    Сегменты разделяются точкой; `*` закрывает ровно один сегмент,
-    `#` — весь хвост (только в конце шаблона).
+    Segments are dot-separated; `*` matches exactly one segment,
+    `#` matches the whole tail (only at the end of the pattern).
     """
     if pattern == "#":
         return True

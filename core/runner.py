@@ -1,4 +1,4 @@
-"""Раннер: сборка и жизненный цикл набора модулей над одной шиной."""
+"""Runner: assembles and runs the set of modules over one bus."""
 from __future__ import annotations
 
 from .bus import Bus
@@ -19,7 +19,7 @@ class Runner:
                       ", ".join(m.name for m in self.modules))
 
     async def stop(self) -> None:
-        # Остановка в обратном порядке: кто стартовал последним, гасится первым.
+        # Stop in reverse order: the module started last is stopped first.
         for module in reversed(self.modules):
             await module.stop()
         self.log.info("все модули остановлены")
