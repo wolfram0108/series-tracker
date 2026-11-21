@@ -1,6 +1,6 @@
 """HTTP points of the output section of a series: its composition, the references and the levers of the output.
 
-Each answer is the answer of one owner, as it is: the layout of `composition`, the references of `scan`. The window
+Each answer is the answer of one owner, as it is: the layout of `composition`, the references and the plan of `planner`. The window
 puts them side by side by (season, episode); the gateway does not merge them.
 """
 from __future__ import annotations

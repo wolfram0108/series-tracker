@@ -113,6 +113,17 @@ _CLOCK = re.compile(r'("(?:read_at|fresh_until)":\s*)"[^"]*"')
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{6}")
 
 
+def sse_packet(table, topic: str, payload):
+    """What the stream of the gateway writes for an event of `topic`: its table keys the entries by the name of the topic (the trees before
+    the stage 5d of the mission) or by the record of the topic (the trees after it); an event the table does not list is not written."""
+    out = next((each for key, each in table.items() if getattr(key, "name", key) == topic), None)
+    if out is None:
+        return payload
+    if hasattr(out, "packet"):
+        return out.packet(payload)
+    return out.form(payload) if out.form else payload
+
+
 def masked(text: str) -> str:
     """The text with the values of the clock fields replaced (what is there, and that it is a text, stays compared)."""
     text = _STAMP.sub("<stamp>", _CLOCK.sub(r'\1"<time>"', text))
@@ -267,6 +278,32 @@ async def quiet(bus, planner, modules=(), sources=None) -> None:
 
 async def collect(root: str, base: str, out: str, series: list[int], windows: bool, owners: bool = False,
                   sources_run: bool = False, torrents_run: bool = False) -> None:
+    from core.topics import (AUTH_EXISTS, AUTH_LOGIN, AUTH_PASSWORD_SET, CATALOG_SERIES_CREATE, CATALOG_SERIES_DELETE,
+                            CATALOG_SERIES_GET, CATALOG_SERIES_LIST, CATALOG_SERIES_SET_SAVE_PATH,
+                            CATALOG_SERIES_TOUCH_SCAN_TIME, CATALOG_SERIES_UPDATE, CATALOG_SOURCES_BY_PROFILE,
+                            CATALOG_SOURCES_LIST, GATEWAY_SSE_CLIENTS, LIBRARY_DIRECTORIES_LIST, LIBRARY_RELOCATION_APPLY,
+                            LIBRARY_RELOCATION_GET, LIBRARY_RELOCATION_PLAN, METADATA_DETAILS, METADATA_MAP_GET,
+                            METADATA_MAP_LIST, METADATA_MAP_SET, METADATA_SEARCH, METADATA_SEASONS_RECOMPUTE,
+                            PLANNER_DOWNLOADED_COUNTS, PLANNER_FILES_GET, PLANNER_PACK_GET, PLANNER_REFERENCES_GET,
+                            PLANNER_SEASONS, PLANNER_SERIES_GET, PLANNER_WORK_GET, RULES_APPLY, RULES_FORMAT_FILENAME,
+                            RULES_FORMAT_TORRENT_FILE, RULES_PROFILES_EXPORT, RULES_PROFILES_LIST, RULES_RULES_LIST,
+                            SCAN_RUNS_GET, SCAN_RUN_CHANGED, SERIES_BUSY_CONTRIBUTION, SERIES_DELETED, SERIES_PURGED,
+                            SERIES_STATUS_CONTRIBUTION, SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST, SETTINGS_PATHS_REMOVE,
+                            SETTINGS_VALUES_BY_PREFIX, SETTINGS_VALUES_SET_MANY, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET,
+                            SOURCES_PAGES_CHECK, SOURCES_PARSE, SOURCES_PLAYERS_LIST, SOURCES_PROVIDER_GET,
+                            SOURCES_PROVIDER_MANIFEST, SOURCES_PROVIDER_STATE, SOURCES_RELEASES_GET, SOURCES_SETTINGS_GET,
+                            SOURCES_SITE_RESOLVE, SOURCES_TABLES_FRESH, SOURCES_TABLE_CANCEL, SOURCES_TABLE_FAILED,
+                            SOURCES_TABLE_GET, SOURCES_TABLE_PROGRESS, SOURCES_TABLE_READ, SOURCES_TABLE_READY,
+                            SOURCES_TERMS_GET, SOURCES_TITLES_SEARCH, SOURCES_TORRENT_FILE_DROP, SOURCES_TORRENT_FILE_GET,
+                            SOURCES_TRACKERS_LIST, SOURCES_VIDEO_FETCH, SOURCES_VIDEO_FETCH_STOP, SOURCES_VIDEO_STREAM,
+                            TORRENTS_COMPOSITION, TORRENTS_DB_ACTIVE, TORRENTS_DB_DOWNLOADED_COUNTS,
+                            TORRENTS_DB_FILES_FOR_SERIES, TORRENTS_DB_FILES_LIST, TORRENTS_DB_HISTORY,
+                            TORRENTS_DB_PROGRESS_LIST, TORRENTS_FILES_GET, TORRENTS_INFO_GET, TORRENTS_PROGRESS_CHANGED,
+                            TORRENTS_QUEUE_CHANGED, TORRENTS_QUEUE_GET, TORRENTS_RELEASES_GET, TORRENTS_RELEASE_CHANGED,
+                            TORRENTS_RELEASE_DROP_FILES, TORRENTS_SEASONS, TORRENTS_STAGING_GET, TORRENTS_STAGING_SET,
+                            TRACKERAUTH_CREDENTIALS_GET, TRACKERAUTH_CREDENTIALS_SET, TRACKERAUTH_FETCH,
+                            TRACKERAUTH_SECRET_GET, UNPACK_EDITOR_GET, UNPACK_TABLE_GET, VOICES_GROUPS_RESOLVE,
+                            VOICES_PLAYERS_GET, VOICES_SETTINGS_EXPORT, VOICES_SETTINGS_GET)
     from core.bus import Bus
     from core.db import Database
     from core.module import BaseModule, BusRequestError
@@ -303,7 +340,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
             super().__init__(bus)
 
         def register(self) -> None:
-            self.handle("torrents.releases.get", self.on_get)
+            self.handle(TORRENTS_RELEASES_GET, self.on_get)
 
         async def on_get(self, env) -> dict:
             views = []
@@ -320,15 +357,15 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         name = "neighbours"
 
         def register(self) -> None:
-            self.handle("library.relocation.get", self.on_planned)
-            self.handle("series.deleted", self.on_deleted)
+            self.handle(LIBRARY_RELOCATION_GET, self.on_planned)
+            self.handle(SERIES_DELETED, self.on_deleted)
 
         async def on_planned(self, env) -> dict:
             return {"new_path": None}
 
         async def on_deleted(self, env) -> None:
             for owner in ("scan", "torrents", "library"):
-                self.publish_event("series.purged", {"series_id": env.payload["series_id"], "owner": owner})
+                self.publish_event(SERIES_PURGED, {"series_id": env.payload["series_id"], "owner": owner})
 
     folder = tempfile.mkdtemp(prefix="window_json_")
     path = os.path.join(folder, "app.db")
@@ -417,9 +454,9 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                 self.move_fails = False
 
             def register(self) -> None:
-                for topic, handler in (("sources.releases.get", self.on_page), ("sources.torrent_file.get", self.on_file),
-                                       ("sources.site.resolve", self.on_resolve), ("scan.runs.get", self.on_runs),
-                                       ("planner.files.get", self.on_names), ("series.deleted", self.on_deleted)):
+                for topic, handler in ((SOURCES_RELEASES_GET, self.on_page), (SOURCES_TORRENT_FILE_GET, self.on_file),
+                                       (SOURCES_SITE_RESOLVE, self.on_resolve), (SCAN_RUNS_GET, self.on_runs),
+                                       (PLANNER_FILES_GET, self.on_names), (SERIES_DELETED, self.on_deleted)):
                     self.handle(topic, handler)
 
             async def on_page(self, env):
@@ -444,7 +481,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
 
             async def on_deleted(self, env) -> None:
                 for owner in ("scan", "composition", "planner", "sources"):
-                    self.publish_event("series.purged", {"series_id": env.payload["series_id"], "owner": owner})
+                    self.publish_event(SERIES_PURGED, {"series_id": env.payload["series_id"], "owner": owner})
 
         pages = Pages(bus)
         library_root = os.path.join(folder, "library")
@@ -461,8 +498,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
 
     def seen(env) -> None:
         if env.topic in WATCHED or (sources_run and env.topic in WATCHED_SOURCES) or (torrents_run and env.topic in WATCHED_TORRENTS):
-            sse = SSE_MAP.get(env.topic)
-            payload = sse.form(env.payload) if sse is not None and sse.form else env.payload
+            payload = sse_packet(SSE_MAP, env.topic, env.payload)
             text = masked(json.dumps(payload, ensure_ascii=False, default=plain))
             # The word of the client about a torrent taken again after it was given up is told as the tick that asks it comes: before or
             # after the answer to the one who took it. A step that takes such a torrent says so (`client_free`) and the word is left out.
@@ -487,7 +523,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         record(name, response.status_code, response.content)
         return response
 
-    async def over_bus(name: str, topic: str, payload: dict, drop_none: bool = False) -> None:
+    async def over_bus(name: str, topic, payload: dict, drop_none: bool = False) -> None:
         """What a module answers another: the model or the dictionary, written as text; a refusal as its words."""
         try:
             record(name, 200, written(await probe.request(topic, payload), drop_none).encode())
@@ -530,32 +566,32 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
     async def rules_window(client) -> None:
         """The profiles and rules: lists, export, apply on the lines of the sources, a profile of its own written to, the names."""
         await ask(client, "rules:profiles", "GET", "/api/parser-profiles")
-        await over_bus("rules:profiles:default", "rules.profiles.list", {})
-        await over_bus("rules:profiles:torrent", "rules.profiles.list", {"kind": "torrent"})
-        torrent = [each["id"] for each in await probe.request("rules.profiles.list", {"kind": "torrent"})]
+        await over_bus("rules:profiles:default", RULES_PROFILES_LIST, {})
+        await over_bus("rules:profiles:torrent", RULES_PROFILES_LIST, {"kind": "torrent"})
+        torrent = [each["id"] for each in await probe.request(RULES_PROFILES_LIST, {"kind": "torrent"})]
         for profile in sorted(used) + torrent[:6]:
             await ask(client, f"rules:rules:{profile}", "GET", f"/api/parser-profiles/{profile}/rules")
-        await over_bus("rules:rules:unknown", "rules.rules.list", {"profile_id": 999999})
-        await over_bus("rules:export", "rules.profiles.export", {"profile_ids": sorted(used)})
-        await over_bus("rules:export:torrent", "rules.profiles.export", {"profile_ids": torrent[:6]})
-        await over_bus("rules:export:unknown", "rules.profiles.export", {"profile_ids": [999999]})
+        await over_bus("rules:rules:unknown", RULES_RULES_LIST, {"profile_id": 999999})
+        await over_bus("rules:export", RULES_PROFILES_EXPORT, {"profile_ids": sorted(used)})
+        await over_bus("rules:export:torrent", RULES_PROFILES_EXPORT, {"profile_ids": torrent[:6]})
+        await over_bus("rules:export:unknown", RULES_PROFILES_EXPORT, {"profile_ids": [999999]})
         for source_id, profile, lines in samples:
             if not profile:
                 continue
             body = [{"key": f"k{each}", "text": text} for each, text in enumerate(lines)]
-            await over_bus(f"rules:apply:{source_id}", "rules.apply", {"profile_id": profile, "lines": body, "series_season": "1"})
-            await over_bus(f"rules:apply:{source_id}:no-season", "rules.apply", {"profile_id": profile, "lines": body})
-            kept = (await probe.request("rules.profiles.export", {"profile_ids": [profile]}))["profiles"][profile]
-            await over_bus(f"rules:apply:{source_id}:snapshot", "rules.apply",
+            await over_bus(f"rules:apply:{source_id}", RULES_APPLY, {"profile_id": profile, "lines": body, "series_season": "1"})
+            await over_bus(f"rules:apply:{source_id}:no-season", RULES_APPLY, {"profile_id": profile, "lines": body})
+            kept = (await probe.request(RULES_PROFILES_EXPORT, {"profile_ids": [profile]}))["profiles"][profile]
+            await over_bus(f"rules:apply:{source_id}:snapshot", RULES_APPLY,
                            {"profile_id": profile, "lines": body, "series_season": "2", "rules": kept})
-            await over_bus(f"rules:apply:{source_id}:keyed", "rules.apply", {"profile_id": profile, "series_season": "1", "lines": [
+            await over_bus(f"rules:apply:{source_id}:keyed", RULES_APPLY, {"profile_id": profile, "series_season": "1", "lines": [
                 {"key": f"k{each}", "text": text, "player": "kodik", "voice": "Студия"} for each, text in enumerate(lines[:20])]})
         if samples and samples[0][1]:
             profile, line = samples[0][1], samples[0][2][0]
-            await over_bus("rules:apply:repeated-keys", "rules.apply", {"profile_id": profile, "lines": [
+            await over_bus("rules:apply:repeated-keys", RULES_APPLY, {"profile_id": profile, "lines": [
                 {"key": "same", "text": line}, {"key": "same", "text": line}]})
-            await over_bus("rules:apply:empty", "rules.apply", {"profile_id": profile, "lines": []})
-        await over_bus("rules:apply:unknown-profile", "rules.apply", {"profile_id": 999999, "lines": [{"key": "a", "text": "x"}]})
+            await over_bus("rules:apply:empty", RULES_APPLY, {"profile_id": profile, "lines": []})
+        await over_bus("rules:apply:unknown-profile", RULES_APPLY, {"profile_id": 999999, "lines": [{"key": "a", "text": "x"}]})
 
         # A profile of its own: made, written to, ordered, applied, renamed and deleted; the tables are hashed after each.
         def rule(name: str, text: str, number: str) -> dict:
@@ -585,28 +621,28 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         lines = ["серия 3", "ep 4", "Серия 5 озвучка", "без номера"]
         body = {"profile_id": profile, "lines": [{"key": f"k{each}", "text": text} for each, text in enumerate(lines)],
                 "series_season": "1"}
-        await over_bus("rules:cmd:apply", "rules.apply", body)
+        await over_bus("rules:cmd:apply", RULES_APPLY, body)
         await ask(client, "rules:cmd:rule-update", "PUT", f"/api/parser-rules/{ids[0]}", json=rule("первое-новое", "сер", "серия "))
         await ask(client, "rules:cmd:rule-update:invalid", "PUT", f"/api/parser-rules/{ids[0]}",
                   json={"name": "x", "action_pattern": "нет", "conditions": []})
         await after("rules:cmd:rule-update")
         await ask(client, "rules:cmd:reorder", "POST", "/api/parser-rules/reorder", json=list(reversed(ids)))
         await after("rules:cmd:reorder")
-        await over_bus("rules:cmd:apply:reordered", "rules.apply", body)
-        await over_bus("rules:cmd:export", "rules.profiles.export", {"profile_ids": [profile]})
+        await over_bus("rules:cmd:apply:reordered", RULES_APPLY, body)
+        await over_bus("rules:cmd:export", RULES_PROFILES_EXPORT, {"profile_ids": [profile]})
         await ask(client, "rules:cmd:profile-rename", "PUT", f"/api/parser-profiles/{profile}", json={"name": "прибор: новое имя"})
         await ask(client, "rules:cmd:profile-rename:unknown", "PUT", "/api/parser-profiles/999999", json={"name": "а"})
         await after("rules:cmd:profile-rename")
         await ask(client, "rules:cmd:rule-delete", "DELETE", f"/api/parser-rules/{ids[1]}")
         await after("rules:cmd:rule-delete")
-        await over_bus("rules:cmd:apply:after-delete", "rules.apply", body)
+        await over_bus("rules:cmd:apply:after-delete", RULES_APPLY, body)
         if used:
             await ask(client, "rules:cmd:profile-delete:in-use", "DELETE", f"/api/parser-profiles/{sorted(used)[0]}")
             await after("rules:cmd:profile-delete:in-use")
         await ask(client, "rules:cmd:profile-delete", "DELETE", f"/api/parser-profiles/{profile}")
         await ask(client, "rules:cmd:profile-delete:again", "DELETE", f"/api/parser-profiles/{profile}")
         await after("rules:cmd:profile-delete")
-        await over_bus("rules:cmd:apply:deleted", "rules.apply", body)
+        await over_bus("rules:cmd:apply:deleted", RULES_APPLY, body)
         # The names of files: the numbers are ready, no rule is applied; and the name of a torrent file by a profile.
         items = [{"season": 1, "episode_start": 5, "episode_end": None, "part": None, "resolution": "1080", "voiceover_tag": None},
                  {"season": 1, "episode_start": 3, "episode_end": 5, "part": 2, "resolution": "1080", "voiceover_tag": "Дубляж"},
@@ -618,15 +654,15 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         for sid, card in cards.items():
             for number, item in enumerate(items):
                 for kind, extra in enumerate(extras):
-                    await over_bus(f"rules:name:{sid}:{number}:{kind}", "rules.format_filename",
+                    await over_bus(f"rules:name:{sid}:{number}:{kind}", RULES_FORMAT_FILENAME,
                                    {"series": card, "media_item": item, **extra})
             for each in [*torrent[:3], *sorted(used)[:2]]:
                 for basename in ("Show.S01E03.1080p.mkv", "[Group] Show - 07 [1080p].mkv", "Specials.mkv", "Show E12 WEB-DL 720p.mkv"):
-                    await over_bus(f"rules:torrent-name:{sid}:{each}:{basename}", "rules.format_torrent_file", {
+                    await over_bus(f"rules:torrent-name:{sid}:{each}:{basename}", RULES_FORMAT_TORRENT_FILE, {
                         "series": card, "profile_id": each, "file_basename": basename, "original_path": f"Show/{basename}"})
-            await over_bus(f"rules:torrent-name:{sid}:no-profile", "rules.format_torrent_file", {
+            await over_bus(f"rules:torrent-name:{sid}:no-profile", RULES_FORMAT_TORRENT_FILE, {
                 "series": card, "file_basename": "a.mkv", "original_path": "Show/a.mkv"})
-            await over_bus(f"rules:torrent-name:{sid}:unknown-profile", "rules.format_torrent_file", {
+            await over_bus(f"rules:torrent-name:{sid}:unknown-profile", RULES_FORMAT_TORRENT_FILE, {
                 "series": card, "profile_id": 999999, "file_basename": "a.mkv", "original_path": "Show/a.mkv"})
 
     async def unpack_window(client) -> None:
@@ -639,15 +675,15 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         await after("unpack:first-open")
         await ask(client, "unpack:first-open:again", "POST", "/api/torrent/editor", json={"url": FIRST_OPEN})
         await after("unpack:first-open:again")
-        await over_bus("unpack:first-open:profiles", "rules.profiles.list", {"kind": "torrent"})
+        await over_bus("unpack:first-open:profiles", RULES_PROFILES_LIST, {"kind": "torrent"})
         for page in pages:
-            await over_bus(f"unpack:{page}:table", "unpack.table.get", {"url": page})
-            await over_bus(f"unpack:{page}:editor", "unpack.editor.get", {"url": page})
+            await over_bus(f"unpack:{page}:table", UNPACK_TABLE_GET, {"url": page})
+            await over_bus(f"unpack:{page}:editor", UNPACK_EDITOR_GET, {"url": page})
             await ask(client, f"unpack:{page}:http", "POST", "/api/torrent/editor", json={"url": page})
-        await over_bus("unpack:unknown:table", "unpack.table.get", {"url": "https://nowhere.test/p"})
+        await over_bus("unpack:unknown:table", UNPACK_TABLE_GET, {"url": "https://nowhere.test/p"})
         await ask(client, "unpack:unknown:http", "POST", "/api/torrent/editor", json={"url": "https://nowhere.test/p"})
         page = max(pages, key=lambda each: each.endswith("6878393"))
-        view = (await probe.request("unpack.editor.get", {"url": page}))["view"]
+        view = (await probe.request(UNPACK_EDITOR_GET, {"url": page}))["view"]
         tabs = view["tabs"]
 
         def pick(tab: str, count: int = 1, kind: str | None = None) -> list[str]:
@@ -659,7 +695,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         async def command(label: str, route: str, body: dict) -> None:
             await ask(client, f"unpack:cmd:{label}", "POST", f"/api/torrent/editor{route}", json={"url": page, **body})
             await after(f"unpack:cmd:{label}")
-            await over_bus(f"unpack:cmd:{label}:table", "unpack.table.get", {"url": page})
+            await over_bus(f"unpack:cmd:{label}:table", UNPACK_TABLE_GET, {"url": page})
             await ask(client, f"unpack:cmd:{label}:editor", "POST", "/api/torrent/editor", json={"url": page})
 
         if videos:
@@ -687,18 +723,18 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         """The settings of the voices: read, saved as they are, refused, changed; the layout of a series after the change."""
         await ask(client, "voices:settings", "GET", "/api/voices/settings")
         await ask(client, "voices:players", "GET", "/api/voices/players")
-        for topic in ("voices.settings.get", "voices.settings.export", "voices.players.get"):
-            await over_bus(f"voices:bus:{topic}", topic, {})
+        for record_ in (VOICES_SETTINGS_GET, VOICES_SETTINGS_EXPORT, VOICES_PLAYERS_GET):
+            await over_bus(f"voices:bus:{record_.name}", record_, {})
         view = (await client.get("/api/voices/settings")).json()
         groups = view["voice_groups"]
         names = [*groups, *(each for triggers in groups.values() for each in triggers), "Неизвестный голос", "Студия / Дубляж", ""]
-        await over_bus("voices:groups", "voices.groups.resolve", {"names": names})
+        await over_bus("voices:groups", VOICES_GROUPS_RESOLVE, {"names": names})
         for key, value in (("voices.groups", json.dumps({"Группа": ["один", "два"]})), ("voices.groups", "{сломано"),
                            ("voices.source_priority", json.dumps(["vk", "kodik"])), ("voices.source_priority", "[]"),
                            ("voices.languages", json.dumps({"Группа": "xx"})), ("voices.players_off", "нет"),
                            ("voices.cut_max_height", "-1"), ("voices.player_groups", json.dumps({"Плеер": ["vk", "cvh"]}))):
-            await over_bus(f"voices:values:{key}:{value}", "voices.settings.get", {"values": {key: value}})
-            await over_bus(f"voices:resolve:{key}:{value}", "voices.groups.resolve", {"names": names, "values": {key: value}})
+            await over_bus(f"voices:values:{key}:{value}", VOICES_SETTINGS_GET, {"values": {key: value}})
+            await over_bus(f"voices:resolve:{key}:{value}", VOICES_GROUPS_RESOLVE, {"names": names, "values": {key: value}})
         draft = {key: view[key] for key in ("priority", "players_off", "voice_groups", "voice_languages")}
         answers["voices:owned:start"] = owned_digest(path)
 
@@ -706,7 +742,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
             await ask(client, f"voices:cmd:{label}", "PUT", "/api/voices/settings", json=body)
             await after(f"voices:cmd:{label}")
             await ask(client, f"voices:cmd:{label}:settings", "GET", "/api/voices/settings")
-            await over_bus(f"voices:cmd:{label}:export", "voices.settings.export", {})
+            await over_bus(f"voices:cmd:{label}:export", VOICES_SETTINGS_EXPORT, {})
 
         await save("as-they-are", draft)
         await save("empty-order", {**draft, "priority": []})
@@ -745,7 +781,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
             answers[f"{label}:owners"] = owners_digest(path)
             told(label)
 
-        async def listed(name: str, topic: str, payload: dict, field: str) -> None:
+        async def listed(name: str, topic, payload: dict, field: str) -> None:
             """A list over the bus: the new tree answers a model that holds the list, the old one the list itself."""
             try:
                 reply = await probe.request(topic, payload)
@@ -762,18 +798,18 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
 
         # --- the catalog: the list, every card and the sources of every series, over HTTP and over the bus --------------
         await ask(client, "owners:list", "GET", "/api/series")
-        await listed("owners:bus:list", "catalog.series.list", {}, "series")
+        await listed("owners:bus:list", CATALOG_SERIES_LIST, {}, "series")
         for each in ids:
             await ask(client, f"owners:card:{each}", "GET", f"/api/series/{each}")
-            await over_bus(f"owners:bus:get:{each}", "catalog.series.get", {"series_id": each})
+            await over_bus(f"owners:bus:get:{each}", CATALOG_SERIES_GET, {"series_id": each})
             await ask(client, f"owners:sources:{each}", "GET", f"/api/series/{each}/sources")
-            await listed(f"owners:bus:sources:{each}", "catalog.sources.list", {"series_id": each}, "sources")
+            await listed(f"owners:bus:sources:{each}", CATALOG_SOURCES_LIST, {"series_id": each}, "sources")
         await ask(client, "owners:card:unknown", "GET", "/api/series/999999")
         await ask(client, "owners:sources:unknown", "GET", "/api/series/999999/sources")
-        await over_bus("owners:bus:get:unknown", "catalog.series.get", {"series_id": 999999})
-        await listed("owners:bus:sources:unknown", "catalog.sources.list", {"series_id": 999999}, "sources")
+        await over_bus("owners:bus:get:unknown", CATALOG_SERIES_GET, {"series_id": 999999})
+        await listed("owners:bus:sources:unknown", CATALOG_SOURCES_LIST, {"series_id": 999999}, "sources")
         for each in [*profiles, 999999]:
-            await listed(f"owners:bus:by-profile:{each}", "catalog.sources.by_profile", {"profile_id": each}, "sources")
+            await listed(f"owners:bus:by-profile:{each}", CATALOG_SOURCES_BY_PROFILE, {"profile_id": each}, "sources")
         told("owners:read")
 
         # --- a series of the instrument: made with two sources, refused in the ways a series is refused ------------------
@@ -800,17 +836,17 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                             ("rows-invalid", {**base_data, "sources": [{**page, "rows_per_line": "0"}]}),
                             ("vibix-zero", {**base_data, "sources": [{**page, "vibix_season": 0}]}),
                             ("type-unknown", {**base_data, "sources": [{**page, "source_type": "nope"}]})):
-            await over_bus(f"owners:create:refused:{label}", "catalog.series.create", {"data": data})
+            await over_bus(f"owners:create:refused:{label}", CATALOG_SERIES_CREATE, {"data": data})
         await ask(client, "owners:create:refused:http-no-sources", "POST", "/api/series", json=base_data)
         await ask(client, "owners:create:refused:http-removed-field", "POST", "/api/series",
                   json={**base_data, "url": "x", "sources": [page]})
         await settled("owners:create:refused")
         # What the owner normalises on the way in: the names that become paths, the path itself.
-        second = plain(await probe.request("catalog.series.create", {"data": {
+        second = plain(await probe.request(CATALOG_SERIES_CREATE, {"data": {
             **base_data, "name_en": "a:b/c?", "quality_override": "x|y", "save_path": "/media/a:b/ c",
             "sources": [{**page, "url": "https://proto.invalid/s"}]}}))["id"]
         await settled("owners:create:sanitized")
-        await over_bus("owners:create:sanitized:card", "catalog.series.get", {"series_id": second})
+        await over_bus("owners:create:sanitized:card", CATALOG_SERIES_GET, {"series_id": second})
 
         # --- the change of the series: every field the window changes, and what it may not change -------------------------
         card_url = f"/api/series/{sid}"
@@ -824,9 +860,9 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                             ("path-unsafe", {"save_path": "/media/p:q"}), ("sources", {"sources": []}),
                             ("removed-url", {"url": "x"}), ("removed-profile", {"parser_profile_id": 1}),
                             ("not-writable", {"last_scan_time": "x", "bogus": 1}), ("unsafe-name", {"name_en": "a:b?"})):
-            await over_bus(f"owners:update:bus:{label}", "catalog.series.update", {"series_id": sid, "fields": data})
+            await over_bus(f"owners:update:bus:{label}", CATALOG_SERIES_UPDATE, {"series_id": sid, "fields": data})
             await settled(f"owners:update:bus:{label}")
-        await over_bus("owners:update:bus:unknown", "catalog.series.update", {"series_id": 999999, "fields": {"name": "x"}})
+        await over_bus("owners:update:bus:unknown", CATALOG_SERIES_UPDATE, {"series_id": 999999, "fields": {"name": "x"}})
         await ask(client, "owners:update:http-unknown", "POST", "/api/series/999999", json={"name": "x"})
         for label, method, route, body in (("auto-scan", "POST", "toggle_auto_scan", {"enabled": True}),
                                            ("auto-scan-off", "POST", "toggle_auto_scan", {"enabled": False}),
@@ -838,10 +874,10 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
             await ask(client, f"owners:flag:{label}", method, f"{card_url}/{route}", json=body)
             await settled(f"owners:flag:{label}")
         await ask(client, "owners:flag:card", "GET", card_url)
-        await over_bus("owners:save-path", "catalog.series.set_save_path", {"series_id": sid, "save_path": "/media/proto3"})
-        await over_bus("owners:save-path:relative", "catalog.series.set_save_path", {"series_id": sid, "save_path": "x/y"})
+        await over_bus("owners:save-path", CATALOG_SERIES_SET_SAVE_PATH, {"series_id": sid, "save_path": "/media/proto3"})
+        await over_bus("owners:save-path:relative", CATALOG_SERIES_SET_SAVE_PATH, {"series_id": sid, "save_path": "x/y"})
         await settled("owners:save-path")
-        probe.send_command("catalog.series.touch_scan_time", {"series_id": sid})
+        probe.send_command(CATALOG_SERIES_TOUCH_SCAN_TIME, {"series_id": sid})
         await settled("owners:touch")
         await ask(client, "owners:touch:card", "GET", card_url)
 
@@ -849,27 +885,27 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         for label, state in (("viewing", ["viewing"]), ("closed", [])):
             await ask(client, f"owners:state:{label}", "POST", f"{card_url}/state", json={"state": state})
             await settled(f"owners:state:{label}")
-        probe.publish_event("series.status.contribution", {"series_id": sid, "source": "probe", "flags": {"downloading": True}})
+        probe.publish_event(SERIES_STATUS_CONTRIBUTION, {"series_id": sid, "source": "probe", "flags": {"downloading": True}})
         await settled("owners:contribution")
-        probe.publish_event("series.status.contribution", {"series_id": sid, "source": "probe", "flags": {"bogus": True}})
+        probe.publish_event(SERIES_STATUS_CONTRIBUTION, {"series_id": sid, "source": "probe", "flags": {"bogus": True}})
         await settled("owners:contribution:unknown-flag")
-        probe.publish_event("series.status.contribution", {"series_id": sid, "source": "probe", "flags": {"downloading": False}})
+        probe.publish_event(SERIES_STATUS_CONTRIBUTION, {"series_id": sid, "source": "probe", "flags": {"downloading": False}})
         await settled("owners:contribution:cleared")
         await ask(client, "owners:state:viewing-again", "POST", f"{card_url}/state", json={"state": ["viewing"]})
-        probe.publish_event("gateway.sse.clients", {"count": 1})
+        probe.publish_event(GATEWAY_SSE_CLIENTS, {"count": 1})
         await settled("owners:clients:one")
-        probe.publish_event("gateway.sse.clients", {"count": 0})
+        probe.publish_event(GATEWAY_SSE_CLIENTS, {"count": 0})
         await settled("owners:clients:none")
-        probe.publish_event("series.busy.contribution", {"series_id": sid, "source": "probe", "busy": True})
+        probe.publish_event(SERIES_BUSY_CONTRIBUTION, {"series_id": sid, "source": "probe", "busy": True})
         await settled("owners:busy")
         await ask(client, "owners:busy:card", "GET", card_url)
         await ask(client, "owners:busy:update", "POST", card_url, json={"name": "занят"})
         await ask(client, "owners:busy:source-add", "POST", f"{card_url}/sources",
                   json={"url": "https://proto.invalid/z", "source_type": "web_video"})
         await settled("owners:busy:refused")
-        probe.publish_event("series.busy.contribution", {"series_id": sid, "source": "probe", "busy": False})
+        probe.publish_event(SERIES_BUSY_CONTRIBUTION, {"series_id": sid, "source": "probe", "busy": False})
         await settled("owners:busy:over")
-        probe.publish_event("series.busy.contribution", {"series_id": sid, "source": "probe", "busy": False})
+        probe.publish_event(SERIES_BUSY_CONTRIBUTION, {"series_id": sid, "source": "probe", "busy": False})
         await settled("owners:busy:over-again")
 
         # --- the sources of the series: added, refused, changed, cleared ----------------------------------------------------
@@ -916,31 +952,31 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         await settled("owners:delete")
         await ask(client, "owners:delete:card", "GET", card_url)
         await ask(client, "owners:delete:again", "DELETE", card_url)
-        await over_bus("owners:delete:bus", "catalog.series.delete", {"series_id": second})
+        await over_bus("owners:delete:bus", CATALOG_SERIES_DELETE, {"series_id": second})
         await settled("owners:delete:bus")
         await ask(client, "owners:delete:list", "GET", "/api/series")
-        await listed("owners:delete:bus:list", "catalog.series.list", {}, "series")
+        await listed("owners:delete:bus:list", CATALOG_SERIES_LIST, {}, "series")
 
         # --- the settings: by key and by prefix, written one and many, a secret, the saved paths -------------------------------
         for key in ("voices.source_priority", "debug_enabled_catalog", "scanner_agent_enabled", "no.such.key"):
-            await over_bus(f"owners:settings:get:{key}", "settings.value.get", {"key": key})
+            await over_bus(f"owners:settings:get:{key}", SETTINGS_VALUE_GET, {"key": key})
         for prefix in ("voices.", "debug_enabled_", "conform", "tmdb", "no.such.", ""):
-            await over_bus(f"owners:settings:prefix:{prefix}", "settings.values.by_prefix", {"prefix": prefix})
-        for label, topic, payload in (("set", "settings.value.set", {"key": "probe.one", "value": "1"}),
-                                      ("set-again", "settings.value.set", {"key": "probe.one", "value": "1"}),
-                                      ("set-empty", "settings.value.set", {"key": "probe.one", "value": ""}),
-                                      ("set-many", "settings.values.set_many",
+            await over_bus(f"owners:settings:prefix:{prefix}", SETTINGS_VALUES_BY_PREFIX, {"prefix": prefix})
+        for label, topic, payload in (("set", SETTINGS_VALUE_SET, {"key": "probe.one", "value": "1"}),
+                                      ("set-again", SETTINGS_VALUE_SET, {"key": "probe.one", "value": "1"}),
+                                      ("set-empty", SETTINGS_VALUE_SET, {"key": "probe.one", "value": ""}),
+                                      ("set-many", SETTINGS_VALUES_SET_MANY,
                                        {"values": {"probe.a": "x", "probe.b": 2, "probe.c": True}}),
-                                      ("set-many-empty", "settings.values.set_many", {"values": {}}),
-                                      ("secret", "settings.value.set", {"key": "tmdb_token", "value": "probe-token"}),
-                                      ("secret-many", "settings.values.set_many",
+                                      ("set-many-empty", SETTINGS_VALUES_SET_MANY, {"values": {}}),
+                                      ("secret", SETTINGS_VALUE_SET, {"key": "tmdb_token", "value": "probe-token"}),
+                                      ("secret-many", SETTINGS_VALUES_SET_MANY,
                                        {"values": {"provider.token": "probe-provider", "probe.d": "1"}})):
             await over_bus(f"owners:settings:{label}", topic, payload)
             await settled(f"owners:settings:{label}")
         for key in ("tmdb_token", "provider.token", "probe.one"):
-            await over_bus(f"owners:settings:after:{key}", "settings.value.get", {"key": key})
+            await over_bus(f"owners:settings:after:{key}", SETTINGS_VALUE_GET, {"key": key})
         for prefix in ("probe.", "provider.", "tmdb"):
-            await over_bus(f"owners:settings:after-prefix:{prefix}", "settings.values.by_prefix", {"prefix": prefix})
+            await over_bus(f"owners:settings:after-prefix:{prefix}", SETTINGS_VALUES_BY_PREFIX, {"prefix": prefix})
         flag = "/api/settings/conform_clear_finished"
         await ask(client, "owners:settings:http:flag", "GET", flag)
         await ask(client, "owners:settings:http:flag-set", "POST", flag, json={"enabled": True})
@@ -964,24 +1000,24 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         for number, each in enumerate((await client.get(paths)).json()["paths"]):
             await ask(client, f"owners:paths:remove:{number}", "DELETE", paths, json={"id": each["id"]})
             await settled(f"owners:paths:remove:{number}")
-        await over_bus("owners:paths:bus:add", "settings.paths.add", {"path": "/media/c"})
-        await over_bus("owners:paths:bus:list", "settings.paths.list", {})
-        await over_bus("owners:paths:bus:remove", "settings.paths.remove", {"id": "1"})
+        await over_bus("owners:paths:bus:add", SETTINGS_PATHS_ADD, {"path": "/media/c"})
+        await over_bus("owners:paths:bus:list", SETTINGS_PATHS_LIST, {})
+        await over_bus("owners:paths:bus:remove", SETTINGS_PATHS_REMOVE, {"id": "1"})
         await settled("owners:paths:bus")
 
         # --- auth: the admin read, a known password set, the login right and wrong, the session, the lock ----------------------
-        await over_bus("owners:auth:exists", "auth.exists", {})
-        await over_bus("owners:auth:set:empty", "auth.password.set", {"username": "", "password": "x"})
-        await over_bus("owners:auth:set:no-password", "auth.password.set", {"username": "proto"})
+        await over_bus("owners:auth:exists", AUTH_EXISTS, {})
+        await over_bus("owners:auth:set:empty", AUTH_PASSWORD_SET, {"username": "", "password": "x"})
+        await over_bus("owners:auth:set:no-password", AUTH_PASSWORD_SET, {"username": "proto"})
         answers["owners:auth:refused:owners"] = owners_digest(path)
-        await over_bus("owners:auth:set", "auth.password.set", {"username": "proto", "password": "proto-password-1"})
+        await over_bus("owners:auth:set", AUTH_PASSWORD_SET, {"username": "proto", "password": "proto-password-1"})
         answers["owners:auth:set:owners"] = owners_digest(path)
-        await over_bus("owners:auth:exists:after", "auth.exists", {})
+        await over_bus("owners:auth:exists:after", AUTH_EXISTS, {})
         for label, payload in (("right", {"username": "proto", "password": "proto-password-1"}),
                                ("padded", {"username": " proto ", "password": "proto-password-1"}),
                                ("wrong", {"username": "proto", "password": "nope"}),
                                ("unknown", {"username": "ghost", "password": "proto-password-1"}), ("empty", {})):
-            await over_bus(f"owners:auth:login:{label}", "auth.login", payload)
+            await over_bus(f"owners:auth:login:{label}", AUTH_LOGIN, payload)
         answers["owners:auth:login:owners"] = owners_digest(path)
         await ask(client, "owners:auth:me:before", "GET", "/api/me")
         await ask(client, "owners:auth:status:before", "GET", "/api/auth/status")
@@ -1011,11 +1047,11 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         weak.commit()
         weak.close()
         answers["owners:auth:weak:owners"] = owners_digest(path)
-        await over_bus("owners:auth:login:weak-wrong", "auth.login", {"username": "proto", "password": "nope"})
+        await over_bus("owners:auth:login:weak-wrong", AUTH_LOGIN, {"username": "proto", "password": "nope"})
         answers["owners:auth:weak-wrong:owners"] = owners_digest(path)
-        await over_bus("owners:auth:login:weak", "auth.login", {"username": "proto", "password": "proto-password-3"})
+        await over_bus("owners:auth:login:weak", AUTH_LOGIN, {"username": "proto", "password": "proto-password-3"})
         answers["owners:auth:rehashed:owners"] = owners_digest(path)
-        await over_bus("owners:auth:login:rehashed", "auth.login", {"username": "proto", "password": "proto-password-3"})
+        await over_bus("owners:auth:login:rehashed", AUTH_LOGIN, {"username": "proto", "password": "proto-password-3"})
         # The lock: five wrong passwords from one address, then the right one is refused too.
         for number in range(5):
             await status_of(f"owners:auth:lock:wrong:{number}", "POST", "/api/login",
@@ -1138,33 +1174,33 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
 
         # --- the tables of the pages the base holds, and the pages it does not ------------------------------------------------
         for url in urls:
-            await over_bus(f"sources:table:{url}", "sources.table.get", {"url": url, "refresh": False})
+            await over_bus(f"sources:table:{url}", SOURCES_TABLE_GET, {"url": url, "refresh": False})
         for label, payload in (("absent", {"url": "https://1.ruchime.org/release/never-read", "refresh": False}),
                                ("no-site", {"url": "https://example.invalid/page", "refresh": False}),
                                ("provider-card", {"url": card, "refresh": False}), ("no-url", {}), ("empty", {"url": ""})):
-            await over_bus(f"sources:table:{label}", "sources.table.get", payload)
+            await over_bus(f"sources:table:{label}", SOURCES_TABLE_GET, payload)
 
         # --- an address and the site that reads it: every page, its other spellings, and none -----------------------------------
         for url in urls:
-            await over_bus(f"sources:resolve:{url}", "sources.site.resolve", {"url": url})
+            await over_bus(f"sources:resolve:{url}", SOURCES_SITE_RESOLVE, {"url": url})
             await ask(client, f"sources:resolve:http:{url}", "POST", "/api/sources/resolve", json={"url": url})
         for label, url in (("kinozal-dl", "https://dl.kinozal.me/details.php?id=2034617"), ("kinozal-www", "https://www.kinozal.tv/details.php?id=1"),
                            ("rutracker", "https://rutracker.org/forum/viewtopic.php?t=1"), ("anilibria", "https://anilibria.top/anime/releases/release/x/episodes"),
                            ("vk", "https://vkvideo.ru/@chan|тайтл"), ("none", "https://example.invalid/x"), ("empty", ""),
                            ("card", card), ("not-a-url", "хочу смотреть")):
-            await over_bus(f"sources:resolve:{label}", "sources.site.resolve", {"url": url})
+            await over_bus(f"sources:resolve:{label}", SOURCES_SITE_RESOLVE, {"url": url})
             await ask(client, f"sources:resolve:http:{label}", "POST", "/api/sources/resolve", json={"url": url})
-        await over_bus("sources:resolve:no-url", "sources.site.resolve", {})
+        await over_bus("sources:resolve:no-url", SOURCES_SITE_RESOLVE, {})
         await ask(client, "sources:resolve:http:no-url", "POST", "/api/sources/resolve", json={})
 
         # --- the players, the trackers and the settings of the sources ----------------------------------------------------------
         for label, payload in (("none", {}), ("all", {"urls": urls}), ("some", {"urls": urls[:5]}), ("unknown", {"urls": ["https://example.invalid/x"]}),
                                ("twice", {"urls": urls[:2] + urls[:2]})):
-            await over_bus(f"sources:players:{label}", "sources.players.list", payload)
+            await over_bus(f"sources:players:{label}", SOURCES_PLAYERS_LIST, payload)
         await ask(client, "sources:settings", "GET", "/api/sources/settings")
-        await over_bus("sources:settings:bus", "sources.settings.get", {})
+        await over_bus("sources:settings:bus", SOURCES_SETTINGS_GET, {})
         await ask(client, "sources:trackers", "GET", "/api/trackers")
-        await over_bus("sources:trackers:bus", "sources.trackers.list", {})
+        await over_bus("sources:trackers:bus", SOURCES_TRACKERS_LIST, {})
         kinozal = trackers_stored[2]
         for label, body in (("mirrors", {"mirrors": ["kinozal.me", "kinozal.guru", "kinozal.tv", "kinozal.example"]}),
                             ("same", {"mirrors": ["kinozal.me", "kinozal.guru", "kinozal.tv", "kinozal.example"]}),
@@ -1179,11 +1215,11 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
 
         # --- the terms of the sites: read, set, refused, and what the tables say of them ------------------------------------------
         await ask(client, "sources:terms", "GET", "/api/settings/source_terms")
-        await over_bus("sources:terms:bus", "sources.terms.get", {})
+        await over_bus("sources:terms:bus", SOURCES_TERMS_GET, {})
         await ask(client, "sources:fresh", "POST", "/api/sources/fresh", json={"urls": urls})
-        await over_bus("sources:fresh:bus", "sources.tables.fresh", {"urls": [*urls[:3], "https://example.invalid/x", card]})
-        await over_bus("sources:fresh:bus:none", "sources.tables.fresh", {"urls": []})
-        await over_bus("sources:fresh:bus:no-urls", "sources.tables.fresh", {})
+        await over_bus("sources:fresh:bus", SOURCES_TABLES_FRESH, {"urls": [*urls[:3], "https://example.invalid/x", card]})
+        await over_bus("sources:fresh:bus:none", SOURCES_TABLES_FRESH, {"urls": []})
+        await over_bus("sources:fresh:bus:no-urls", SOURCES_TABLES_FRESH, {})
         for label, body in (("set", {"site": hosts[0], "minutes": 15}), ("padded", {"site": hosts[1], "minutes": " 90 "}),
                             ("same", {"site": hosts[0], "minutes": 15}), ("zero", {"site": hosts[0], "minutes": 0}),
                             ("text", {"site": hosts[0], "minutes": "abc"}), ("month", {"site": hosts[2], "minutes": 44640}),
@@ -1197,8 +1233,8 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         # --- the credentials of the trackers (the run's own: none of the base is read), TMDB's token among them ----------------------
         await ask(client, "trackerauth:http:empty", "GET", "/api/auth")
         for service in ("qbittorrent", "kinozal", "rutracker", "vk", "astar", "nothing"):
-            await over_bus(f"trackerauth:get:empty:{service}", "trackerauth.credentials.get", {"service": service})
-            await over_bus(f"trackerauth:secret:empty:{service}", "trackerauth.secret.get", {"service": service})
+            await over_bus(f"trackerauth:get:empty:{service}", TRACKERAUTH_CREDENTIALS_GET, {"service": service})
+            await over_bus(f"trackerauth:secret:empty:{service}", TRACKERAUTH_SECRET_GET, {"service": service})
         await ask(client, "trackerauth:http:save", "POST", "/api/auth", json={
             "qbittorrent": {"url": "http://qb:8080", "username": "admin", "password": "probe-qb-pass"},
             "kinozal": {"username": " probe-kz ", "password": "probe-kz-pass", "url": ""},
@@ -1209,16 +1245,16 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         for service in ("qbittorrent", "kinozal", "rutracker", "vk", "tmdb", "astar", "nothing"):
             await ask(client, f"trackerauth:http:secret:{service}", "GET", f"/api/auth/{service}/secret")
         for service in ("qbittorrent", "kinozal", "rutracker", "vk", "astar", "nothing"):
-            await over_bus(f"trackerauth:get:{service}", "trackerauth.credentials.get", {"service": service})
-            await over_bus(f"trackerauth:secret:{service}", "trackerauth.secret.get", {"service": service})
+            await over_bus(f"trackerauth:get:{service}", TRACKERAUTH_CREDENTIALS_GET, {"service": service})
+            await over_bus(f"trackerauth:secret:{service}", TRACKERAUTH_SECRET_GET, {"service": service})
         for label, payload in (("unchanged", {"service": "kinozal", "username": "probe-kz", "password": ""}),
                                ("no-password", {"service": "rutracker", "username": " probe-rt ", "url": "https://rutracker.org"}),
                                ("changed", {"service": "rutracker", "username": "probe-rt", "password": "probe-rt-pass-2"}),
                                ("empty-name", {"service": "astar", "username": "", "password": None}), ("no-service", {"username": "x"})):
-            await over_bus(f"trackerauth:set:{label}", "trackerauth.credentials.set", payload)
+            await over_bus(f"trackerauth:set:{label}", TRACKERAUTH_CREDENTIALS_SET, payload)
             await done(f"trackerauth:set:{label}")
-            await over_bus(f"trackerauth:set:{label}:get", "trackerauth.credentials.get", {"service": payload.get("service", "kinozal")})
-            await over_bus(f"trackerauth:set:{label}:secret", "trackerauth.secret.get", {"service": payload.get("service", "kinozal")})
+            await over_bus(f"trackerauth:set:{label}:get", TRACKERAUTH_CREDENTIALS_GET, {"service": payload.get("service", "kinozal")})
+            await over_bus(f"trackerauth:set:{label}:secret", TRACKERAUTH_SECRET_GET, {"service": payload.get("service", "kinozal")})
         await ask(client, "trackerauth:http:after", "GET", "/api/auth")
         await ask(client, "trackerauth:http:save:no-body", "POST", "/api/auth", json={})
         await ask(client, "trackerauth:http:save:blank", "POST", "/api/auth", json={"kinozal": {"password": ""}, "vk": {}})
@@ -1234,36 +1270,36 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                                ("vk", {"service": "vk", "url": "https://api.vk.com/method/video.get", "params": {"owner_id": 1}}),
                                ("unknown-service", {"service": "nothing", "url": "https://example.invalid/x"}),
                                ("no-credentials", {"service": "astar", "url": "https://astar.example/x"}), ("no-url", {"service": "kinozal"})):
-            await over_bus(f"trackerauth:fetch:{label}", "trackerauth.fetch", payload, drop_none=True)
+            await over_bus(f"trackerauth:fetch:{label}", TRACKERAUTH_FETCH, payload, drop_none=True)
             await done(f"trackerauth:fetch:{label}")
         trackers["kinozal_in"] = False  # the session of the tracker expired: the login is wanted again, within its rate limit
-        await over_bus("trackerauth:fetch:rate-limit", "trackerauth.fetch", {"service": "kinozal", "url": kz}, drop_none=True)
+        await over_bus("trackerauth:fetch:rate-limit", TRACKERAUTH_FETCH, {"service": "kinozal", "url": kz}, drop_none=True)
         await done("trackerauth:fetch:rate-limit")
         trackers["kinozal_in"] = True
 
         # --- the releases of a tracker page, the page parsed, and the file of a release in the cache -------------------------------------
         for label, url in (("kinozal", kz), ("rutracker", "https://rutracker.org/forum/viewtopic.php?t=1"),
                            ("unknown", "https://example.invalid/x"), ("not-a-page", "хочу")):
-            await over_bus(f"sources:releases:{label}", "sources.releases.get", {"url": url})
+            await over_bus(f"sources:releases:{label}", SOURCES_RELEASES_GET, {"url": url})
             await ask(client, f"sources:releases:http:{label}", "POST", "/api/torrent/page", json={"url": url})
-        await over_bus("sources:parse:anilibria", "sources.parse", {"url": "https://anilibria.top/anime/releases/release/x/episodes"})
-        await over_bus("sources:parse:unknown", "sources.parse", {"url": "https://example.invalid/x"})
-        await over_bus("sources:parse:no-url", "sources.parse", {})
+        await over_bus("sources:parse:anilibria", SOURCES_PARSE, {"url": "https://anilibria.top/anime/releases/release/x/episodes"})
+        await over_bus("sources:parse:unknown", SOURCES_PARSE, {"url": "https://example.invalid/x"})
+        await over_bus("sources:parse:no-url", SOURCES_PARSE, {})
         dl = "https://dl.kinozal.me/download.php?id=2034617"
         for label, payload in (("miss", {"url": dl, "torrent_id": "t1"}), ("hit", {"url": dl, "torrent_id": "t1"}),
                                ("unknown-tracker", {"url": "https://example.invalid/x.torrent", "torrent_id": "t2"}),
                                ("no-id", {"url": dl})):
-            await over_bus(f"sources:torrent-file:{label}", "sources.torrent_file.get", payload)
-        probe.send_command("sources.torrent_file.drop", {"torrent_id": "t1"})
-        probe.send_command("sources.torrent_file.drop", {"torrent_id": "never-cached"})
+            await over_bus(f"sources:torrent-file:{label}", SOURCES_TORRENT_FILE_GET, payload)
+        probe.send_command(SOURCES_TORRENT_FILE_DROP, {"torrent_id": "t1"})
+        probe.send_command(SOURCES_TORRENT_FILE_DROP, {"torrent_id": "never-cached"})
         await done("sources:torrent-file:drop")
-        await over_bus("sources:torrent-file:after-drop", "sources.torrent_file.get", {"url": dl, "torrent_id": "t1"})
+        await over_bus("sources:torrent-file:after-drop", SOURCES_TORRENT_FILE_GET, {"url": dl, "torrent_id": "t1"})
 
         # --- a page read again when its table is not current: the term, the reads that fail over the model of the sites, the user's read --
         await over_bus("sources:refresh:fresh", refresh_topic, refreshing(newest))
         await over_bus("sources:refresh:stale", refresh_topic, refreshing(oldest))
         await done("sources:refresh:stale")
-        await over_bus("sources:refresh:stale:get", "sources.table.get", {"url": oldest, "refresh": False})
+        await over_bus("sources:refresh:stale:get", SOURCES_TABLE_GET, {"url": oldest, "refresh": False})
         await over_bus("sources:refresh:stale:again", refresh_topic, refreshing(oldest, rows="5"))
         await done("sources:refresh:stale:again")
         await over_bus("sources:refresh:no-site", refresh_topic, refreshing("https://example.invalid/page"))
@@ -1271,13 +1307,13 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         chines = next((each for each in urls if each.startswith("title://")), card)
         await over_bus("sources:refresh:provider-page", refresh_topic, refreshing(chines, by_sync=True))
         await done("sources:refresh:provider-page")
-        probe.send_command("sources.table.read", {"url": oldest, "rows": "-3"})
+        probe.send_command(SOURCES_TABLE_READ, {"url": oldest, "rows": "-3"})
         await done("sources:read:oldest")
-        probe.send_command("sources.table.read", {"url": "https://example.invalid/page"})
+        probe.send_command(SOURCES_TABLE_READ, {"url": "https://example.invalid/page"})
         await done("sources:read:no-site")
-        await over_bus("sources:cancel:none", "sources.table.cancel", {"url": oldest})
+        await over_bus("sources:cancel:none", SOURCES_TABLE_CANCEL, {"url": oldest})
         await ask(client, "sources:cancel:http:none", "POST", "/api/sources/cancel", json={"url": oldest})
-        await over_bus("sources:cancel:no-url", "sources.table.cancel", {})
+        await over_bus("sources:cancel:no-url", SOURCES_TABLE_CANCEL, {})
         clock["now"] += timedelta(days=10)
         await over_bus("sources:refresh:later", refresh_topic, refreshing(newest))
         await done("sources:refresh:later")
@@ -1294,22 +1330,22 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         link = link_of("X", "tok 1")
         pages_asked = [card, "title://mock/8/Z", kz, chines, "title://other/9/X", "https://example.invalid/x"]
         await ask(client, "provider:none", "GET", "/api/provider")
-        await over_bus("provider:none:bus", "sources.provider.get", {})
+        await over_bus("provider:none:bus", SOURCES_PROVIDER_GET, {})
         await ask(client, "provider:none:search", "POST", "/api/sources/search", json={"query": "名"})
-        await over_bus("provider:none:search:bus", "sources.titles.search", {"query": "名", "page": 1})
-        await over_bus("provider:none:pages", "sources.pages.check", {"urls": pages_asked})
-        await over_bus("provider:none:table", "sources.table.get", {"url": card, "refresh": False})
-        probe.send_command("sources.table.read", {"url": card})
+        await over_bus("provider:none:search:bus", SOURCES_TITLES_SEARCH, {"query": "名", "page": 1})
+        await over_bus("provider:none:pages", SOURCES_PAGES_CHECK, {"urls": pages_asked})
+        await over_bus("provider:none:table", SOURCES_TABLE_GET, {"url": card, "refresh": False})
+        probe.send_command(SOURCES_TABLE_READ, {"url": card})
         await done("provider:none:read")
-        await over_bus("provider:none:stream", "sources.video.stream", {"url": link}, drop_none=True)
-        await over_bus("provider:none:stream:web", "sources.video.stream", {"url": "https://example.invalid/x"}, drop_none=True)
-        await over_bus("provider:none:fetch", "sources.video.fetch", {"url": link, "target": os.path.join(folder, "dl", "none.mp4")}, drop_none=True)
-        await over_bus("provider:none:fetch:stop", "sources.video.fetch.stop", {"target": os.path.join(folder, "dl", "none.mp4")}, drop_none=True)
+        await over_bus("provider:none:stream", SOURCES_VIDEO_STREAM, {"url": link}, drop_none=True)
+        await over_bus("provider:none:stream:web", SOURCES_VIDEO_STREAM, {"url": "https://example.invalid/x"}, drop_none=True)
+        await over_bus("provider:none:fetch", SOURCES_VIDEO_FETCH, {"url": link, "target": os.path.join(folder, "dl", "none.mp4")}, drop_none=True)
+        await over_bus("provider:none:fetch:stop", SOURCES_VIDEO_FETCH_STOP, {"target": os.path.join(folder, "dl", "none.mp4")}, drop_none=True)
         for label, body in (("not-http", {"url": "ftp://x"}), ("spaces", {"url": "http://a b"}), ("no-host", {"url": "http://"}),
                             ("no-url", {})):
             await ask(client, f"provider:set:{label}", "PUT", "/api/provider", json=body)
             await done(f"provider:set:{label}")
-        sub = bus.subscribe("sources.provider.state")
+        sub = bus.subscribe(SOURCES_PROVIDER_STATE.name)
         await ask(client, "provider:set:wrong-token", "PUT", "/api/provider", json={"url": server.url, "token": "wrong"})
         await socket_is(sub, "down")
         await done("provider:set:wrong-token")
@@ -1320,21 +1356,21 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         first = await ask(client, "provider:view", "GET", "/api/provider")
         second = await ask(client, "provider:view:again", "GET", "/api/provider")
         answers["provider:view:grows"] = {"grows": second.json()["seq"] > first.json()["seq"]}
-        await over_bus("provider:view:bus", "sources.provider.get", {})
+        await over_bus("provider:view:bus", SOURCES_PROVIDER_GET, {})
         await ask(client, "provider:settings", "GET", "/api/sources/settings")
         await ask(client, "provider:resolve", "POST", "/api/sources/resolve", json={"url": card})
-        await over_bus("provider:players", "sources.players.list", {"urls": [card, *urls[:3]]})
-        await over_bus("provider:players:none", "sources.players.list", {})
+        await over_bus("provider:players", SOURCES_PLAYERS_LIST, {"urls": [card, *urls[:3]]})
+        await over_bus("provider:players:none", SOURCES_PLAYERS_LIST, {})
         await ask(client, "provider:search", "POST", "/api/sources/search", json={"query": "名"})
         await ask(client, "provider:search:page", "POST", "/api/sources/search", json={"query": "名", "page": 2})
-        await over_bus("provider:search:bus", "sources.titles.search", {"query": "他", "page": 1})
-        await over_bus("provider:search:no-query", "sources.titles.search", {})
+        await over_bus("provider:search:bus", SOURCES_TITLES_SEARCH, {"query": "他", "page": 1})
+        await over_bus("provider:search:no-query", SOURCES_TITLES_SEARCH, {})
         mock.search_status = 500
         await ask(client, "provider:search:fails", "POST", "/api/sources/search", json={"query": "名"})
         mock.search_status = 200
-        await over_bus("provider:pages", "sources.pages.check", {"urls": pages_asked})
-        await over_bus("provider:pages:none", "sources.pages.check", {"urls": []})
-        await over_bus("provider:pages:no-urls", "sources.pages.check", {})
+        await over_bus("provider:pages", SOURCES_PAGES_CHECK, {"urls": pages_asked})
+        await over_bus("provider:pages:none", SOURCES_PAGES_CHECK, {"urls": []})
+        await over_bus("provider:pages:no-urls", SOURCES_PAGES_CHECK, {})
         made = await ask(client, "provider:series", "POST", "/api/series", json={
             "name": "Прибор", "name_en": "Proto", "site": "kinozal", "save_path": "/media/proto", "season": "",
             "sources": [{"url": card, "source_type": "web_video", "parser_profile_id": None}],
@@ -1347,12 +1383,12 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         await over_bus("provider:refresh:first-read", refresh_topic, refreshing(card))
         await over_bus("provider:refresh:by-sync", refresh_topic, refreshing(card, by_sync=True))
         await done("provider:refresh:by-sync")
-        ended = bus.subscribe("sources.table.ready", "sources.table.failed")
+        ended = bus.subscribe(SOURCES_TABLE_READY.name, SOURCES_TABLE_FAILED.name)
         await ask(client, "provider:read", "POST", "/api/sources/read", json={"url": card})
         await asyncio.wait_for(ended.queue.get(), 30)
         await done("provider:read")
-        await over_bus("provider:read:table", "sources.table.get", {"url": card, "refresh": False})
-        await over_bus("provider:read:fresh", "sources.tables.fresh", {"urls": [card]})
+        await over_bus("provider:read:table", SOURCES_TABLE_GET, {"url": card, "refresh": False})
+        await over_bus("provider:read:fresh", SOURCES_TABLES_FRESH, {"urls": [card]})
         await ask(client, "provider:read:fresh:http", "POST", "/api/sources/fresh", json={"urls": [card]})
         await over_bus("provider:refresh:read", refresh_topic, refreshing(card, by_sync=True))
         clock["now"] += timedelta(days=10)
@@ -1362,62 +1398,62 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         clock["now"] -= timedelta(days=10)
         await ask(client, "provider:read:rows", "POST", "/api/sources/read", json={"url": "title://mock/8/Z", "rows": "1"})
         await done("provider:read:rows")
-        await over_bus("provider:read:rows:table", "sources.table.get", {"url": "title://mock/8/Z", "refresh": False})
+        await over_bus("provider:read:rows:table", SOURCES_TABLE_GET, {"url": "title://mock/8/Z", "refresh": False})
         mock.read_error = json.dumps({"code": "title_unknown"})
         await ask(client, "provider:read:error", "POST", "/api/sources/read", json={"url": card})
         await done("provider:read:error")
-        await over_bus("provider:read:error:table", "sources.table.get", {"url": card, "refresh": False})
+        await over_bus("provider:read:error:table", SOURCES_TABLE_GET, {"url": card, "refresh": False})
         mock.read_error = ""
         mock.read_breaks = True
         await ask(client, "provider:read:breaks", "POST", "/api/sources/read", json={"url": card})
         await done("provider:read:breaks")
-        await over_bus("provider:read:breaks:table", "sources.table.get", {"url": card, "refresh": False})
+        await over_bus("provider:read:breaks:table", SOURCES_TABLE_GET, {"url": card, "refresh": False})
         mock.read_breaks = False
         mock.release.clear()
-        begun = bus.subscribe("sources.table.progress")
+        begun = bus.subscribe(SOURCES_TABLE_PROGRESS.name)
         await ask(client, "provider:read:slow", "POST", "/api/sources/read", json={"url": card})
         await asyncio.wait_for(begun.queue.get(), 30)  # the read has said where it is: a stop that comes now meets a read that goes
         bus.unsubscribe(begun)
-        await over_bus("provider:read:slow:table", "sources.table.get", {"url": card, "refresh": False})
+        await over_bus("provider:read:slow:table", SOURCES_TABLE_GET, {"url": card, "refresh": False})
         await over_bus("provider:read:slow:refresh", refresh_topic, refreshing(card, by_sync=True))
         await ask(client, "provider:cancel", "POST", "/api/sources/cancel", json={"url": card})
         await done("provider:cancel")
         mock.release.set()
-        await over_bus("provider:cancel:table", "sources.table.get", {"url": card, "refresh": False})
-        await over_bus("provider:stream", "sources.video.stream", {"url": link}, drop_none=True)
-        await over_bus("provider:stream:max-height", "sources.video.stream", {"url": link, "max_height": 720}, drop_none=True)
-        await over_bus("provider:stream:web", "sources.video.stream", {"url": "https://example.invalid/x"}, drop_none=True)
-        await over_bus("provider:stream:foreign", "sources.video.stream", {"url": "title://other/9/X"}, drop_none=True)
-        await over_bus("provider:stream:no-url", "sources.video.stream", {}, drop_none=True)
+        await over_bus("provider:cancel:table", SOURCES_TABLE_GET, {"url": card, "refresh": False})
+        await over_bus("provider:stream", SOURCES_VIDEO_STREAM, {"url": link}, drop_none=True)
+        await over_bus("provider:stream:max-height", SOURCES_VIDEO_STREAM, {"url": link, "max_height": 720}, drop_none=True)
+        await over_bus("provider:stream:web", SOURCES_VIDEO_STREAM, {"url": "https://example.invalid/x"}, drop_none=True)
+        await over_bus("provider:stream:foreign", SOURCES_VIDEO_STREAM, {"url": "title://other/9/X"}, drop_none=True)
+        await over_bus("provider:stream:no-url", SOURCES_VIDEO_STREAM, {}, drop_none=True)
         target = os.path.join(folder, "dl", "probe.mp4")
-        await over_bus("provider:fetch", "sources.video.fetch", {"url": link, "target": target, "max_height": 1080, "connections": 2}, drop_none=True)
+        await over_bus("provider:fetch", SOURCES_VIDEO_FETCH, {"url": link, "target": target, "max_height": 1080, "connections": 2}, drop_none=True)
         await done("provider:fetch")
         mock.download_of(link_of("X", "tok 2"), {"type": "error", "reason": json.dumps({"code": "no_such_file"}), "kind": "final"})
-        await over_bus("provider:fetch:refused", "sources.video.fetch", {"url": link_of("X", "tok 2"), "target": target + ".2"}, drop_none=True)
-        await over_bus("provider:fetch:not-owned", "sources.video.fetch", {"url": "https://example.invalid/x", "target": target + ".3"}, drop_none=True)
-        await over_bus("provider:fetch:stop", "sources.video.fetch.stop", {"target": target}, drop_none=True)
-        await over_bus("provider:fetch:stop:no-target", "sources.video.fetch.stop", {}, drop_none=True)
-        await over_bus("provider:fetch:no-url", "sources.video.fetch", {"target": target}, drop_none=True)
-        down = bus.subscribe("sources.provider.state")
+        await over_bus("provider:fetch:refused", SOURCES_VIDEO_FETCH, {"url": link_of("X", "tok 2"), "target": target + ".2"}, drop_none=True)
+        await over_bus("provider:fetch:not-owned", SOURCES_VIDEO_FETCH, {"url": "https://example.invalid/x", "target": target + ".3"}, drop_none=True)
+        await over_bus("provider:fetch:stop", SOURCES_VIDEO_FETCH_STOP, {"target": target}, drop_none=True)
+        await over_bus("provider:fetch:stop:no-target", SOURCES_VIDEO_FETCH_STOP, {}, drop_none=True)
+        await over_bus("provider:fetch:no-url", SOURCES_VIDEO_FETCH, {"target": target}, drop_none=True)
+        down = bus.subscribe(SOURCES_PROVIDER_STATE.name)
         await server.down()
         await socket_is(down, "down")
         await done("provider:down")
         await ask(client, "provider:down:view", "GET", "/api/provider")
-        await over_bus("provider:down:pages", "sources.pages.check", {"urls": pages_asked})
-        await over_bus("provider:down:search", "sources.titles.search", {"query": "名", "page": 1})
+        await over_bus("provider:down:pages", SOURCES_PAGES_CHECK, {"urls": pages_asked})
+        await over_bus("provider:down:search", SOURCES_TITLES_SEARCH, {"query": "名", "page": 1})
         await ask(client, "provider:down:search:http", "POST", "/api/sources/search", json={"query": "名"})
-        await over_bus("provider:down:table", "sources.table.get", {"url": card, "refresh": False})
+        await over_bus("provider:down:table", SOURCES_TABLE_GET, {"url": card, "refresh": False})
         await over_bus("provider:down:refresh", refresh_topic, refreshing(card, by_sync=True))
-        probe.send_command("sources.table.read", {"url": card})
+        probe.send_command(SOURCES_TABLE_READ, {"url": card})
         await done("provider:down:read")
-        await over_bus("provider:down:stream", "sources.video.stream", {"url": link}, drop_none=True)
-        await over_bus("provider:down:fetch", "sources.video.fetch", {"url": link, "target": target + ".4"}, drop_none=True)
+        await over_bus("provider:down:stream", SOURCES_VIDEO_STREAM, {"url": link}, drop_none=True)
+        await over_bus("provider:down:fetch", SOURCES_VIDEO_FETCH, {"url": link, "target": target + ".4"}, drop_none=True)
         await server.up()
         await socket_is(down, "up")
         await done("provider:up-again")
         await ask(client, "provider:up-again:view", "GET", "/api/provider")
-        await over_bus("provider:up-again:pages", "sources.pages.check", {"urls": pages_asked})
-        applied = bus.subscribe("sources.provider.manifest")
+        await over_bus("provider:up-again:pages", SOURCES_PAGES_CHECK, {"urls": pages_asked})
+        applied = bus.subscribe(SOURCES_PROVIDER_MANIFEST.name)
         mock.changed()
         await asyncio.wait_for(applied.queue.get(), 30)
         await done("provider:manifest-changed")
@@ -1427,14 +1463,14 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         bus.unsubscribe(applied)
         await ask(client, "provider:site-added:view", "GET", "/api/provider")
         await ask(client, "provider:site-added:settings", "GET", "/api/sources/settings")
-        await over_bus("provider:site-added:players", "sources.players.list", {"urls": [card]})
+        await over_bus("provider:site-added:players", SOURCES_PLAYERS_LIST, {"urls": [card]})
         await ask(client, "provider:clear", "PUT", "/api/provider", json={"url": "", "token": ""})
         await done("provider:clear")
         await ask(client, "provider:cleared", "GET", "/api/provider")
         await ask(client, "provider:cleared:settings", "GET", "/api/sources/settings")
-        await over_bus("provider:cleared:pages", "sources.pages.check", {"urls": pages_asked})
-        await over_bus("provider:cleared:players", "sources.players.list", {"urls": [card]})
-        await over_bus("provider:cleared:table", "sources.table.get", {"url": card, "refresh": False})
+        await over_bus("provider:cleared:pages", SOURCES_PAGES_CHECK, {"urls": pages_asked})
+        await over_bus("provider:cleared:players", SOURCES_PLAYERS_LIST, {"urls": [card]})
+        await over_bus("provider:cleared:table", SOURCES_TABLE_GET, {"url": card, "refresh": False})
         await server.down()
         bus.unsubscribe(sub)
         bus.unsubscribe(down)
@@ -1443,19 +1479,19 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         # --- the mappings of TMDB: the series with its mapping, the list, the search and the details over the model, the aggregate -------
         await ask(client, "metadata:http:list", "GET", "/api/series")
         for each in [*mapped[:6], sid, 999999]:
-            await over_bus(f"metadata:map:get:{each}", "metadata.map.get", {"series_id": each})
+            await over_bus(f"metadata:map:get:{each}", METADATA_MAP_GET, {"series_id": each})
             await ask(client, f"metadata:http:card:{each}", "GET", f"/api/series/{each}")
-        await over_bus("metadata:map:list", "metadata.map.list", {})
-        await over_bus("metadata:map:get:no-id", "metadata.map.get", {})
+        await over_bus("metadata:map:list", METADATA_MAP_LIST, {})
+        await over_bus("metadata:map:get:no-id", METADATA_MAP_GET, {})
         await ask(client, "metadata:http:search", "POST", "/api/tmdb/search", json={"query": "breaking"})
         await ask(client, "metadata:http:search:empty", "POST", "/api/tmdb/search", json={"query": ""})
-        await over_bus("metadata:search", "metadata.search", {"query": "breaking"})
-        await over_bus("metadata:search:no-query", "metadata.search", {})
+        await over_bus("metadata:search", METADATA_SEARCH, {"query": "breaking"})
+        await over_bus("metadata:search:no-query", METADATA_SEARCH, {})
         for ident in (4638, 12, 999):
             await ask(client, f"metadata:http:details:{ident}", "GET", f"/api/tmdb/details/{ident}")
-            await over_bus(f"metadata:details:{ident}", "metadata.details", {"tmdb_id": ident})
-        await over_bus("metadata:details:text-id", "metadata.details", {"tmdb_id": "x"})
-        await over_bus("metadata:details:no-id", "metadata.details", {})
+            await over_bus(f"metadata:details:{ident}", METADATA_DETAILS, {"tmdb_id": ident})
+        await over_bus("metadata:details:text-id", METADATA_DETAILS, {"tmdb_id": "x"})
+        await over_bus("metadata:details:no-id", METADATA_DETAILS, {})
         await ask(client, "metadata:http:update", "POST", f"/api/series/{sid}", json={"tmdb_data": {
             "tmdb_id": 4638, "tmdb_season_number": 2, "total_episodes": 7, "poster_path": "/q.jpg", "series_name": "Breaking Bad 2",
             "year": "2009"}})
@@ -1465,18 +1501,18 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                                ("unknown-field", {"series_id": sid, "tmdb_data": {"tmdb_id": 4638, "colour": "red"}}),
                                ("new", {"series_id": mapped[0] + 100000, "tmdb_data": {"tmdb_id": 1, "tmdb_season_number": 1}}),
                                ("no-data", {"series_id": sid})):
-            await over_bus(f"metadata:map:set:{label}", "metadata.map.set", payload)
+            await over_bus(f"metadata:map:set:{label}", METADATA_MAP_SET, payload)
             await done(f"metadata:map:set:{label}")
-            await over_bus(f"metadata:map:set:{label}:get", "metadata.map.get", {"series_id": payload["series_id"]})
+            await over_bus(f"metadata:map:set:{label}:get", METADATA_MAP_GET, {"series_id": payload["series_id"]})
         for each in [*multi[:4], *mapped[:3], sid, 999999]:
-            await over_bus(f"metadata:recompute:{each}", "metadata.seasons.recompute", {"series_id": each}, drop_none=True)
+            await over_bus(f"metadata:recompute:{each}", METADATA_SEASONS_RECOMPUTE, {"series_id": each}, drop_none=True)
             await done(f"metadata:recompute:{each}")
-        probe.send_command("metadata.seasons.recompute", {"series_id": sid})
+        probe.send_command(METADATA_SEASONS_RECOMPUTE, {"series_id": sid})
         await done("metadata:recompute:command")
         await ask(client, "metadata:http:delete", "DELETE", f"/api/series/{sid}")
         await done("metadata:http:delete")
-        await over_bus("metadata:map:get:deleted", "metadata.map.get", {"series_id": sid})
-        await over_bus("metadata:map:list:after", "metadata.map.list", {})
+        await over_bus("metadata:map:get:deleted", METADATA_MAP_GET, {"series_id": sid})
+        await over_bus("metadata:map:list:after", METADATA_MAP_LIST, {})
         await ask(client, "trackerauth:http:final", "GET", "/api/auth")
         await ask(client, "sources:settings:final", "GET", "/api/sources/settings")
         requests.adapters.HTTPAdapter.send = original_send
@@ -1492,8 +1528,8 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         staging = os.path.join(folder, "staging")
         shelf = os.path.join(folder, "library")
         page_a, page_b = "https://kinozal.tv/details.php?id=900001", "https://kinozal.tv/details.php?id=900002"
-        news = bus.subscribe("torrents.release.changed")
-        queue_sub, progress_sub = bus.subscribe("torrents.queue.changed"), bus.subscribe("torrents.progress.changed")
+        news = bus.subscribe(TORRENTS_RELEASE_CHANGED.name)
+        queue_sub, progress_sub = bus.subscribe(TORRENTS_QUEUE_CHANGED.name), bus.subscribe(TORRENTS_PROGRESS_CHANGED.name)
 
         async def done(label: str) -> None:
             """What a command left: the work it began has ended, then the tables of the modules and the packets told."""
@@ -1525,12 +1561,12 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         async def window_connects(label: str) -> None:
             """A window connects: the picture of the queue and of the monitor come again, as the owner tells them."""
             drain(queue_sub, progress_sub)
-            probe.publish_event("gateway.sse.clients", {"count": 1})
+            probe.publish_event(GATEWAY_SSE_CLIENTS, {"count": 1})
             record(f"{label}:queue", 200, written((await asyncio.wait_for(queue_sub.queue.get(), 60)).payload).encode())
             record(f"{label}:progress", 200, written((await asyncio.wait_for(progress_sub.queue.get(), 60)).payload).encode())
 
         async def releases_of(label: str, url: str) -> None:
-            await over_bus(f"{label}:bus", "torrents.releases.get", {"url": url})
+            await over_bus(f"{label}:bus", TORRENTS_RELEASES_GET, {"url": url})
             await ask(client, f"{label}:http", "POST", "/api/torrent/releases", json={"url": url})
 
         async def files_of(label: str, *roots: str) -> None:
@@ -1549,9 +1585,9 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         for url in urls:
             await releases_of(f"torrents:releases:{url}", url)
         await releases_of("torrents:releases:unknown", "https://kinozal.tv/details.php?id=1")
-        await over_bus("torrents:monitor:bus", "torrents.db.progress.list", {})
+        await over_bus("torrents:monitor:bus", TORRENTS_DB_PROGRESS_LIST, {})
         await ask(client, "torrents:monitor:http", "GET", "/api/series/active_torrents")
-        await over_bus("torrents:queue:bus", "torrents.queue.get", {})
+        await over_bus("torrents:queue:bus", TORRENTS_QUEUE_GET, {})
         await ask(client, "torrents:queue:http", "GET", "/api/agent/queue")
         await window_connects("torrents:connect:start")
 
@@ -1569,18 +1605,18 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
 
         # --- the folder the releases download into: read, refused in every way, set; a download is refused until it is set -------------
         await ask(client, "torrents:staging:get:unset", "GET", "/api/settings/torrent_staging")
-        await over_bus("torrents:staging:bus:get:unset", "torrents.staging.get", {})
+        await over_bus("torrents:staging:bus:get:unset", TORRENTS_STAGING_GET, {})
         for label, body in (("relative", {"value": "relative/dir"}), ("empty", {"value": ""}), ("none", {"value": None}),
                             ("missing", {}), ("number", {"value": 123}), ("spaces", {"value": "   "})):
             await ask(client, f"torrents:staging:set:{label}", "POST", "/api/settings/torrent_staging", json=body)
-        await over_bus("torrents:staging:bus:refused", "torrents.staging.set", {"value": "rel"}, drop_none=True)
+        await over_bus("torrents:staging:bus:refused", TORRENTS_STAGING_SET, {"value": "rel"}, drop_none=True)
         await done("torrents:staging:refused")
         await ask(client, "torrents:download:no-staging", "POST", "/api/torrent/download", json={"url": page_a, "release": "page"})
         await ask(client, "torrents:staging:set", "POST", "/api/settings/torrent_staging", json={"value": staging})
         await done("torrents:staging:set")
         await ask(client, "torrents:staging:get", "GET", "/api/settings/torrent_staging")
-        await over_bus("torrents:staging:bus:get", "torrents.staging.get", {})
-        await over_bus("torrents:staging:bus:set", "torrents.staging.set", {"value": f" {staging} "}, drop_none=True)
+        await over_bus("torrents:staging:bus:get", TORRENTS_STAGING_GET, {})
+        await over_bus("torrents:staging:bus:set", TORRENTS_STAGING_SET, {"value": f" {staging} "}, drop_none=True)
         await done("torrents:staging:set-again")
 
         # --- a download: refused in the ways it is refused, made, followed to its end ------------------------------------------------
@@ -1618,7 +1654,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         await files_of("torrents:update:files", second["folder"])
 
         # --- an update held by a sync of a series with the page: it waits for the end of the run, then begins ---------------------------
-        probe.publish_event("scan.run.changed", {"series_id": sid_page, "active": True, "seq": 1})
+        probe.publish_event(SCAN_RUN_CHANGED, {"series_id": sid_page, "active": True, "seq": 1})
         await quiet(bus, planner, modules)
         h3 = lists(release_of(V1), published="d3", link="L3")
         drain(news)
@@ -1627,7 +1663,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         await done("torrents:held")
         await releases_of("torrents:held:releases", page_a)
         client_free["on"] = True  # the update takes the infohash the release had before, whose client word the module still holds
-        probe.publish_event("scan.run.changed", {"series_id": sid_page, "active": False, "seq": 2})
+        probe.publish_event(SCAN_RUN_CHANGED, {"series_id": sid_page, "active": False, "seq": 2})
         third = await until("ready", lambda each: each["infohash"] == h3 and not each["pending"])
         await done("torrents:held:over")
         client_free["on"] = False
@@ -1637,7 +1673,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         await ask(client, "torrents:watch:off-again", "POST", "/api/torrent/watch", json={"url": page_a, "release": "page", "watched": False})
         await ask(client, "torrents:check:unwatched", "POST", "/api/torrent/check", json={"url": page_a})
         drain(news)
-        probe.send_command("torrents.release.drop_files", {"url": page_a, "release": "page"})
+        probe.send_command(TORRENTS_RELEASE_DROP_FILES, {"url": page_a, "release": "page"})
         await until("archived")
         await done("torrents:archived")
         await releases_of("torrents:archived:releases", page_a)
@@ -1668,7 +1704,7 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         await ask(client, "torrents:staging:move", "POST", "/api/settings/torrent_staging", json={"value": moved})
         await done("torrents:staging:move")
         await releases_of("torrents:staging:move:releases", page_a)
-        await over_bus("torrents:staging:bus:get:moved", "torrents.staging.get", {})
+        await over_bus("torrents:staging:bus:get:moved", TORRENTS_STAGING_GET, {})
         await window_connects("torrents:connect:moved")
 
         # --- the registry of the old pipeline, read: the rows are the run's own (a torrent, its files, its progress) -------------------------
@@ -1688,12 +1724,12 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                      (sid_old,))
         rows.commit()
         rows.close()
-        for label, topic, body in (("counts", "torrents.db.downloaded_counts", {}), ("for-series", "torrents.db.files.for_series", {"series_id": sid_old}),
-                                   ("files", "torrents.db.files.list", {"qb_hash": "abc123"}), ("files:unknown", "torrents.db.files.list", {"qb_hash": "no"}),
-                                   ("history", "torrents.db.history", {"series_id": sid_old}), ("seasons", "torrents.seasons", {"series_id": sid_old}),
-                                   ("composition", "torrents.composition", {"series_id": sid_old}), ("active", "torrents.db.active", {"series_id": sid_old}),
-                                   ("info", "torrents.info.get", {}), ("client-files", "torrents.files.get", {"hash": "abc123"}),
-                                   ("monitor", "torrents.db.progress.list", {}), ("queue", "torrents.queue.get", {})):
+        for label, topic, body in (("counts", TORRENTS_DB_DOWNLOADED_COUNTS, {}), ("for-series", TORRENTS_DB_FILES_FOR_SERIES, {"series_id": sid_old}),
+                                   ("files", TORRENTS_DB_FILES_LIST, {"qb_hash": "abc123"}), ("files:unknown", TORRENTS_DB_FILES_LIST, {"qb_hash": "no"}),
+                                   ("history", TORRENTS_DB_HISTORY, {"series_id": sid_old}), ("seasons", TORRENTS_SEASONS, {"series_id": sid_old}),
+                                   ("composition", TORRENTS_COMPOSITION, {"series_id": sid_old}), ("active", TORRENTS_DB_ACTIVE, {"series_id": sid_old}),
+                                   ("info", TORRENTS_INFO_GET, {}), ("client-files", TORRENTS_FILES_GET, {"hash": "abc123"}),
+                                   ("monitor", TORRENTS_DB_PROGRESS_LIST, {}), ("queue", TORRENTS_QUEUE_GET, {})):
             await over_bus(f"torrents:old:{label}", topic, body)
         await ask(client, "torrents:old:monitor:http", "GET", "/api/series/active_torrents")
         await ask(client, "torrents:old:filenames", "GET", f"/api/series/{sid_old}/source-filenames")
@@ -1718,8 +1754,8 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                              ("missing", os.path.join(shelf, "none")), ("outside", "/etc"), ("root", "/"), ("staging", staging)):
             await ask(client, f"library:directories:{label}", "GET", "/api/directories", params={"path": query})
         await ask(client, "library:directories:default", "GET", "/api/directories")
-        await over_bus("library:directories:bus", "library.directories.list", {"path": shelf})
-        await over_bus("library:directories:bus:default", "library.directories.list", {})
+        await over_bus("library:directories:bus", LIBRARY_DIRECTORIES_LIST, {"path": shelf})
+        await over_bus("library:directories:bus:default", LIBRARY_DIRECTORIES_LIST, {})
         old, fresh = os.path.join(shelf, "old"), os.path.join(shelf, "fresh")
         names = ["Show/S01E01.mkv", "Show/S01E02.mkv", "Show/Extras/x.mka"]
         for each in names:
@@ -1729,40 +1765,40 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
         pages.names = [*names, "Show/gone.mkv"]  # a file of the plan that is not on the disk is skipped
         card = f"/api/series/{sid_move}"
         await ask(client, "library:relocation:get:none", "GET", card)
-        await over_bus("library:relocation:bus:get:none", "library.relocation.get", {"series_id": sid_move})
+        await over_bus("library:relocation:bus:get:none", LIBRARY_RELOCATION_GET, {"series_id": sid_move})
         await ask(client, "library:relocation:plan", "POST", card, json={"save_path": fresh})
         await done("library:relocation:plan")
         await ask(client, "library:relocation:card", "GET", card)
-        await over_bus("library:relocation:bus:get", "library.relocation.get", {"series_id": sid_move})
+        await over_bus("library:relocation:bus:get", LIBRARY_RELOCATION_GET, {"series_id": sid_move})
         await ask(client, "library:relocation:replan", "POST", card, json={"save_path": fresh + "-b"})
         await done("library:relocation:replan")
-        await over_bus("library:relocation:bus:get:replanned", "library.relocation.get", {"series_id": sid_move})
+        await over_bus("library:relocation:bus:get:replanned", LIBRARY_RELOCATION_GET, {"series_id": sid_move})
         await ask(client, "library:relocation:drop", "POST", card, json={"save_path": old})
         await done("library:relocation:drop")
-        await over_bus("library:relocation:bus:get:dropped", "library.relocation.get", {"series_id": sid_move})
+        await over_bus("library:relocation:bus:get:dropped", LIBRARY_RELOCATION_GET, {"series_id": sid_move})
         for label, new_path in (("relative", "relative/dir"), ("outside", "/nowhere/else"), ("trimmed", f" {fresh} "), ("unsafe", fresh + ":x?")):
-            await over_bus(f"library:relocation:bus:plan:{label}", "library.relocation.plan", {"series_id": sid_move, "new_path": new_path})
+            await over_bus(f"library:relocation:bus:plan:{label}", LIBRARY_RELOCATION_PLAN, {"series_id": sid_move, "new_path": new_path})
             await done(f"library:relocation:plan:{label}")
-        await over_bus("library:relocation:bus:plan:unknown", "library.relocation.plan", {"series_id": 999999, "new_path": fresh})
-        await over_bus("library:relocation:bus:get:unknown", "library.relocation.get", {"series_id": 999999})
-        await over_bus("library:relocation:bus:apply:unplanned", "library.relocation.apply", {"series_id": sid_old})
-        await over_bus("library:relocation:bus:apply:unplanned-unknown", "library.relocation.apply", {"series_id": 999999})
-        await over_bus("library:relocation:bus:plan:again", "library.relocation.plan", {"series_id": sid_move, "new_path": fresh})
+        await over_bus("library:relocation:bus:plan:unknown", LIBRARY_RELOCATION_PLAN, {"series_id": 999999, "new_path": fresh})
+        await over_bus("library:relocation:bus:get:unknown", LIBRARY_RELOCATION_GET, {"series_id": 999999})
+        await over_bus("library:relocation:bus:apply:unplanned", LIBRARY_RELOCATION_APPLY, {"series_id": sid_old})
+        await over_bus("library:relocation:bus:apply:unplanned-unknown", LIBRARY_RELOCATION_APPLY, {"series_id": 999999})
+        await over_bus("library:relocation:bus:plan:again", LIBRARY_RELOCATION_PLAN, {"series_id": sid_move, "new_path": fresh})
         pages.move_fails = True
-        await over_bus("library:relocation:bus:apply:fails", "library.relocation.apply", {"series_id": sid_move})
+        await over_bus("library:relocation:bus:apply:fails", LIBRARY_RELOCATION_APPLY, {"series_id": sid_move})
         await done("library:relocation:apply:fails")
         await ask(client, "library:relocation:card:after-fail", "GET", card)
         await files_of("library:relocation:files:after-fail", shelf)
         pages.move_fails = False
-        await over_bus("library:relocation:bus:apply", "library.relocation.apply", {"series_id": sid_move})
+        await over_bus("library:relocation:bus:apply", LIBRARY_RELOCATION_APPLY, {"series_id": sid_move})
         await done("library:relocation:apply")
         await ask(client, "library:relocation:card:after", "GET", card)
-        await over_bus("library:relocation:bus:get:after", "library.relocation.get", {"series_id": sid_move})
+        await over_bus("library:relocation:bus:get:after", LIBRARY_RELOCATION_GET, {"series_id": sid_move})
         await files_of("library:relocation:files:after", shelf)
-        await over_bus("library:relocation:bus:apply:again", "library.relocation.apply", {"series_id": sid_move})
+        await over_bus("library:relocation:bus:apply:again", LIBRARY_RELOCATION_APPLY, {"series_id": sid_move})
         await ask(client, "library:relocation:delete", "DELETE", card)
         await done("library:relocation:delete")
-        await over_bus("library:relocation:bus:get:deleted", "library.relocation.get", {"series_id": sid_move})
+        await over_bus("library:relocation:bus:get:deleted", LIBRARY_RELOCATION_GET, {"series_id": sid_move})
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway.app), base_url="http://test",
                                  timeout=120) as client:
@@ -1772,16 +1808,16 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
                                    (sid,)).fetchall()
             conn.close()
             answers[f"{sid}:tables:start"] = tables_digest(path, sid)
-            cards[sid] = plain(await probe.request("catalog.series.get", {"series_id": sid}))
+            cards[sid] = plain(await probe.request(CATALOG_SERIES_GET, {"series_id": sid}))
             await plan_window(client, f"{sid}:start", sid)
             await ask(client, f"{sid}:plan:unknown-series", "GET", "/api/series/999999/plan")
             await ask(client, f"{sid}:output:unknown-series", "GET", "/api/series/999999/output")
             await ask(client, f"{sid}:pack:queue", "GET", "/api/pack/queue")
-            for topic, payload in (("planner.series.get", {"series_id": sid}), ("planner.references.get", {"series_id": sid}),
-                                   ("planner.work.get", {"series_id": sid}), ("planner.files.get", {"series_id": sid}),
-                                   ("planner.seasons", {"series_id": sid}), ("planner.downloaded_counts", {}),
-                                   ("planner.pack.get", {})):
-                await over_bus(f"{sid}:bus:{topic}", topic, payload)
+            for topic, payload in ((PLANNER_SERIES_GET, {"series_id": sid}), (PLANNER_REFERENCES_GET, {"series_id": sid}),
+                                   (PLANNER_WORK_GET, {"series_id": sid}), (PLANNER_FILES_GET, {"series_id": sid}),
+                                   (PLANNER_SEASONS, {"series_id": sid}), (PLANNER_DOWNLOADED_COUNTS, {}),
+                                   (PLANNER_PACK_GET, {})):
+                await over_bus(f"{sid}:bus:{topic.name}", topic, payload)
             base_url = f"/api/series/{sid}/composition"
             whole = await ask(client, f"{sid}:composition", "GET", base_url)
             await ask(client, f"{sid}:composition:include_excluded", "GET", base_url + "?include_excluded=true")
@@ -1974,6 +2010,8 @@ async def collect_executors(root: str, out: str) -> None:
     """The windows of `downloads`, `conform` and `scan` on the stand of the whole application (tests/app_stand.py): the user's way through
     the API, every module real, the site, the player and the alignment service as models, no network. Every step ends on the event of the
     work it began (the end of a run, the end of a job), never on a pause."""
+    from core.topics import (CONFORM_DAEMON_UP, CONFORM_JOB_GET, CONFORM_JOB_KEYS, CONFORM_WORKSPACE, DOWNLOADS_QUEUE_GET,
+                            SCAN_RUNS_GET, SCAN_RUN_CHANGED, SCAN_STATUS_GET)
     sys.path.insert(0, os.path.join(root, "tests"))
     from app_stand import STAND_LIMIT_S, AppStand
     from core import notices
@@ -1998,8 +2036,7 @@ async def collect_executors(root: str, out: str) -> None:
 
     def seen(env) -> None:
         if env.topic in WATCHED_EXECUTORS:
-            sse = SSE_MAP.get(env.topic)
-            payload = sse.form(env.payload) if sse is not None and sse.form else env.payload
+            payload = sse_packet(SSE_MAP, env.topic, env.payload)
             events.append((env.topic, masked(json.dumps(payload, ensure_ascii=False, default=plain))))
 
     untap = bus.tap(seen)
@@ -2014,7 +2051,7 @@ async def collect_executors(root: str, out: str) -> None:
         record(name, response.status_code, response.content)
         return response
 
-    async def over_bus(name: str, topic: str, payload: dict) -> None:
+    async def over_bus(name: str, topic, payload: dict) -> None:
         """What a module answers another, written as text; the fields a model leaves none are left out on both sides."""
         try:
             record(name, 200, written(await probe.request(topic, payload), True).encode())
@@ -2061,7 +2098,7 @@ async def collect_executors(root: str, out: str) -> None:
     told("start")
     answers["start:tables"] = executors_digest(stand.db_path)
     work = os.path.join(folder, "work")
-    connected = bus.subscribe("conform.daemon.up")
+    connected = bus.subscribe(CONFORM_DAEMON_UP.name)
     await ask("conform:settings:refused", "PUT", "/api/conform/settings", json={"url": "ftp://x", "work_dir": "rel", "work_dir_remote": ""})
     await ask("conform:settings:set", "PUT", "/api/conform/settings",
               json={"url": stand.daemon_http.url, "work_dir": work, "work_dir_remote": work})
@@ -2102,21 +2139,21 @@ async def collect_executors(root: str, out: str) -> None:
                                                          "voice_languages": {"AniStar": "rus", "AnimeVost": "rus"}})
     assert saved.json()["saved"], saved.text
     series_id = await stand.series("Сериал", ["ref", "dub"])
-    ended = bus.subscribe("scan.run.changed")
+    ended = bus.subscribe(SCAN_RUN_CHANGED.name)
     response = await api.post(f"/api/series/{series_id}/scan")
     record("sync:first", response.status_code, response.content)
     await run_ended(ended, series_id)
     await after("sync:first")
     await windows("sync:first")
     await ask("sync:first:plan", "GET", f"/api/series/{series_id}/plan")
-    await over_bus("sync:first:runs", "scan.runs.get", {})
-    await over_bus("sync:first:status", "scan.status.get", {})
-    await over_bus("sync:first:queue", "downloads.queue.get", {})
-    await over_bus("sync:first:workspace", "conform.workspace", {})
-    await over_bus("sync:first:keys", "conform.job.keys", {})
+    await over_bus("sync:first:runs", SCAN_RUNS_GET, {})
+    await over_bus("sync:first:status", SCAN_STATUS_GET, {})
+    await over_bus("sync:first:queue", DOWNLOADS_QUEUE_GET, {})
+    await over_bus("sync:first:workspace", CONFORM_WORKSPACE, {})
+    await over_bus("sync:first:keys", CONFORM_JOB_KEYS, {})
     jobs = sorted(stand.daemon.jobs)
     for label, job_id in (("kept", jobs[0] if jobs else "none"), ("missing", "no-such-job")):
-        await over_bus(f"conform:job:{label}", "conform.job.get", {"job_id": job_id})
+        await over_bus(f"conform:job:{label}", CONFORM_JOB_GET, {"job_id": job_id})
     await ask("conform:plot:missing", "GET", f"/api/conform/jobs/{jobs[0] if jobs else 'x'}/plot/none.png")
 
     # --- the switch of the output and the run that fetches nothing -----------------------------------------------------------------
@@ -2125,7 +2162,7 @@ async def collect_executors(root: str, out: str) -> None:
                         ("season-on", {"season": 1, "off": False})):
         await ask(f"switch:{label}", "PUT", switch, json=body)
         await after(f"switch:{label}")
-    ended = bus.subscribe("scan.run.changed")
+    ended = bus.subscribe(SCAN_RUN_CHANGED.name)
     await ask("reprocess", "POST", f"/api/series/{series_id}/reprocess")
     await run_ended(ended, series_id)
     await after("reprocess")
@@ -2138,7 +2175,7 @@ async def collect_executors(root: str, out: str) -> None:
     stand.site.episode("dub2", 1, height=480)
     second = await stand.series("Второй", ["ref2", "dub2"])
     stand.site.gone("dub2", 1)
-    ended = bus.subscribe("scan.run.changed")
+    ended = bus.subscribe(SCAN_RUN_CHANGED.name)
     response = await api.post(f"/api/series/{second}/scan")
     record("sync:failed", response.status_code, response.content)
     await run_ended(ended, second)
@@ -2159,7 +2196,7 @@ async def collect_executors(root: str, out: str) -> None:
     third = await stand.series("Третий", ["ref3", "dub3"])
     stand.daemon.hold = True
     stand.daemon.made.clear()
-    ended = bus.subscribe("scan.run.changed")
+    ended = bus.subscribe(SCAN_RUN_CHANGED.name)
     running = asyncio.create_task(api.post(f"/api/series/{third}/scan"))
     await asyncio.wait_for(asyncio.to_thread(stand.daemon.made.wait), STAND_LIMIT_S)
     await ask("busy:scan", "POST", f"/api/series/{third}/scan")

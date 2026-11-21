@@ -46,6 +46,7 @@ from core.bus import Bus  # noqa: E402
 from core.envelope import Envelope  # noqa: E402
 from core.runner import Runner  # noqa: E402
 from core.db import Database  # noqa: E402
+from core.topics import SYSTEM_STARTED  # noqa: E402
 from qbit_model import QbitModel, _File, _Release, _Torrent, bdecode, bencode, magnet_of  # noqa: E402
 
 PIECE = 16 * 1024 * 1024  # the pieces of a listed release are never read: a large piece keeps its table small
@@ -282,7 +283,7 @@ class Simulator:
         await self.runner.start()
         next(each for each in self.modules if each.name == "sources")._http = httpx.AsyncClient(
             transport=httpx.MockTransport(self._tracker))
-        self.bus.publish(Envelope(topic="system.started", kind="event"))
+        self.bus.publish(Envelope(topic=SYSTEM_STARTED.name, kind="event"))
         self.api = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.gateway.app), base_url="http://sim")
         # The folder of the releases is the simulator's own setting: written as the administrator, once per start.
         entered = await self.api.post("/api/login", json={"username": os.environ.get("ST_ADMIN_USER", ""),

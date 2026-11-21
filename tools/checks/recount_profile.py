@@ -82,6 +82,7 @@ class Probe(BaseModule):
 
 
 async def main(series: list[int], base: str, rounds: int, out: str | None) -> None:
+    from core.topics import (COMPOSITION_CHANGED, COMPOSITION_RECOMPUTE, PLANNER_SERIES_CHANGED)
     composition_module = importlib.import_module("modules.composition.module")
     planner_module = importlib.import_module("modules.planner.module")
     rules_module = importlib.import_module("modules.rules.module")
@@ -121,7 +122,7 @@ async def main(series: list[int], base: str, rounds: int, out: str | None) -> No
             (planner.repo, "containers", "planner: read the asset")):
         if owner is not None and timed(owner, name, label):
             wrapped.append(label)
-    started = bus.subscribe("composition.changed")
+    started = bus.subscribe(COMPOSITION_CHANGED.name)
     runner = Runner(bus, modules)
     await runner.start()
     await composition.idle()
@@ -146,7 +147,7 @@ async def main(series: list[int], base: str, rounds: int, out: str | None) -> No
             links[topic].append(time.perf_counter() - start)
 
     untap = bus.tap(seen)
-    told = bus.subscribe("planner.series.changed")
+    told = bus.subscribe(PLANNER_SERIES_CHANGED.name)
 
     def emit(series_id: int, round_: int, phase: str, wall: float, cpu: float) -> None:
         row = {**meta, "series": series_id, "round": round_, "phase": phase, "wall_ms": wall * 1000, "cpu_ms": cpu * 1000,
@@ -163,14 +164,14 @@ async def main(series: list[int], base: str, rounds: int, out: str | None) -> No
                 STEPS.clear()
                 links.clear()
                 start, cpu = time.perf_counter(), time.process_time()
-                await probe.request("composition.recompute", {"series_id": series_id}, timeout=170)
+                await probe.request(COMPOSITION_RECOMPUTE, {"series_id": series_id}, timeout=170)
                 emit(series_id, round_, "layout", time.perf_counter() - start, time.process_time() - cpu)
                 while not told.queue.empty():
                     told.queue.get_nowait()
                 STEPS.clear()
                 links.clear()
                 start, cpu = time.perf_counter(), time.process_time()
-                probe.publish_event("composition.changed", {"series_id": series_id, "rev": 0, "summary_only": False,
+                probe.publish_event(COMPOSITION_CHANGED, {"series_id": series_id, "rev": 0, "summary_only": False,
                                                             "part": "whole", "episodes": []})
                 while True:
                     env = await asyncio.wait_for(told.queue.get(), 170)

@@ -37,6 +37,7 @@ from core.db import Database
 from core.logging import configure, get_logger
 from core.loopwatch import LoopWatch, logged
 from core.schema import require_head
+from core.topics import SYSTEM_STARTED
 from modules.sources.players.alloha_session import profile_of as alloha_profile_of
 
 configure()
@@ -90,7 +91,7 @@ async def _lifespan(_app):
     proc.isolate()  # before any program starts: each lives in its own group of memory under the service
     await runner.start()
     # Whoever needs the whole system (the gateway reads the debug groups of logging) acts on this, not on a pause.
-    bus.publish(Envelope(topic="system.started", kind="event"))
+    bus.publish(Envelope(topic=SYSTEM_STARTED.name, kind="event"))
     log.info("система поднята")
     try:
         yield
