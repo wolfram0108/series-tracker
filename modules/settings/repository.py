@@ -18,7 +18,7 @@ class SettingsRepository:
             "SELECT value FROM settings WHERE key=?", (key,))
         if not row:
             return None
-        return crypto.decrypt(row["value"]) if key in SECRET_KEYS else row["value"]
+        return crypto.decrypt(row["value"], key) if key in SECRET_KEYS else row["value"]
 
     async def set(self, key: str, value: str) -> None:
         stored = crypto.encrypt(value) if key in SECRET_KEYS else value

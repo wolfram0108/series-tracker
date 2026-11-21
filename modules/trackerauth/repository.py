@@ -39,7 +39,7 @@ class TrackerAuthRepository:
         if not row:
             return None
         return {"username": row["username"],
-                "password": crypto.decrypt(row["password"]),
+                "password": crypto.decrypt(row["password"], f"auth:{service}"),
                 "url": row["url"]}
 
     async def upsert_credentials(self, service: str, username: str | None,
@@ -81,8 +81,8 @@ class TrackerAuthRepository:
         if not row:
             return {}, None, False
         # The rule of the binding (an unknown account is no mismatch, finding 65) is calc/trackerauth/session.py.
-        cookies, foreign = applicable_cookies(json.loads(crypto.decrypt(row["cookies_json"])),
-                                              row["account_fingerprint"], fingerprint, CLIENT_COOKIES)
+        stored = json.loads(crypto.decrypt(row["cookies_json"], f"tracker_sessions:{service}:{domain}"))
+        cookies, foreign = applicable_cookies(stored, row["account_fingerprint"], fingerprint, CLIENT_COOKIES)
         return cookies, row["user_agent"], foreign
 
     async def save_cookies(self, service: str, domain: str,
@@ -120,7 +120,8 @@ class TrackerAuthRepository:
             "SELECT domain, cookies_json FROM tracker_sessions "
             "WHERE service=?", (service,))
         for row in rows:
-            kept = client_cookies(json.loads(crypto.decrypt(row["cookies_json"])), CLIENT_COOKIES)
+            kept = client_cookies(
+                json.loads(crypto.decrypt(row["cookies_json"], f"tracker_sessions:{service}:{row['domain']}")), CLIENT_COOKIES)
             await self._db.execute(
                 "UPDATE tracker_sessions SET cookies_json=?, "
                 "account_fingerprint=NULL, updated_at=? "

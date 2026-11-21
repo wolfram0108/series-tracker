@@ -23,6 +23,7 @@ Events out:
 """
 from __future__ import annotations
 
+from core import crypto
 from core.contracts import SavedPaths, SettingValue, SettingValues
 from core.db import Database
 from core.envelope import Envelope
@@ -51,6 +52,7 @@ class SettingsModule(BaseModule):
         self.handle(SETTINGS_PATHS_REMOVE, self.on_paths_remove)
 
     async def on_start(self) -> None:
+        crypto.use_key()  # a missing key is told here, at the start
         # Stage 3Б: the secret keys (tmdb_token) are encrypted once.
         migrated = await self.repo.encrypt_legacy_secrets()
         if migrated:

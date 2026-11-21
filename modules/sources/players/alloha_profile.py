@@ -38,7 +38,7 @@ def _read(path: Path) -> Profile | None:
         return None
     if not crypto.is_encrypted(raw):
         raise ValueError("profile cache is not encrypted")
-    value = json.loads(crypto.decrypt(raw))
+    value = json.loads(crypto.decrypt(raw, "alloha profile"))
     if not isinstance(value, dict) or not all(isinstance(value.get(key), str) for key in ("fingerprint", "user_agent")):
         raise ValueError("invalid profile cache")
     return profile_of({"ST_ALLOHA_FINGERPRINT": value["fingerprint"], "ST_ALLOHA_USER_AGENT": value["user_agent"]})
