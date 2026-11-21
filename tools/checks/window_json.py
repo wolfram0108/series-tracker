@@ -2,6 +2,7 @@
 database, no network.
 
     window_json.py collect --root <tree> --db <copy of app.db> --out <answers.json> [--windows] [--owners] [--sources] [--torrents] 46 40
+    window_json.py collect --root <tree> --out <answers.json> --executors
     window_json.py compare <a.json> <b.json>
     window_json.py selftest
 
@@ -40,7 +41,15 @@ to its end, updated into the same folder, held by a sync of a series with its pa
 client and forgotten with its series, the registry of the old pipeline read (its rows are the run's own), the folders of the disk listed
 (admitted, refused, missing), and the move of a series planned, replanned, dropped, refused, failed and made; the tables of the three
 modules are hashed after each command and the files of the staging and the library folders listed. Each step ends on the event of the
-work it began. `compare` is byte for byte: to find out whether a
+work it began.
+With `--executors` (a run of its own too, on the stand of the whole application, tests/app_stand.py, with its own base: the model of the
+site and of the players, the model of the alignment service, no network) the windows of `downloads`, `conform` and `scan` answer: the settings
+and the parameters of the alignment (refused, set, read), the limits of the downloads (set, refused, nothing named), the schedule and the
+switch of the scanner (set, free, refused, empty, on, off, the pass over all series), a sync of a series of two sources to its end (the answer
+of the window, the plan, the queue of the downloads, what the three modules answer over the bus), the switch of episodes and of a season, the
+run that fetches nothing, a sync whose download fails for good and the card that stays until the user removes it, the refusals of a series
+that is busy, the stop of a sync while the service aligns, and the cancel of the jobs of the service; the tables of the three modules and
+their settings are hashed after each command, the pictures of the queues are told by their last packet. `compare` is byte for byte: to find out whether a
 change of code left the answers of the window as they were, collect from the tree before the change (`--root`, a commit
 exported into a folder) and from the one after, and compare. `selftest` is the red control of `compare`. Nothing is written to
 the base given; the copy is made again each run. A run ends with `WINDOW_JSON_DONE`; `compare` ends with `IDENTICAL` or
@@ -1916,6 +1925,269 @@ async def collect(root: str, base: str, out: str, series: list[int], windows: bo
     print("WINDOW_JSON_DONE")
 
 
+# The tables the executors own, and the settings they keep: hashed whole after each command of their run.
+EXECUTORS_OWNED = ("download_cards", "download_done", "scan_tasks")
+EXECUTORS_SETTINGS = ("scanner_agent_enabled", "schedule", "next_scan_timestamp", "download_threads_total", "download_threads_per_file",
+                      "download_single_at_once", "download_provider_at_once")
+# What the executors tell the window as events in their run (the table SSE_MAP names those it has; the rest is told as the bus has it).
+WATCHED_EXECUTORS = ("downloads.queue.changed", "downloads.fetch.started", "downloads.fetch.finished", "conform.queue.changed",
+                     "conform.settings.changed", "conform.daemon.up", "conform.job.finished", "conform.job.removed",
+                     "scan.status.changed", "scan.run.changed", "work.series.state", "series.status.contribution",
+                     "series.busy.contribution")
+# The pictures of a whole queue come as often as the machine works (every beat of a download, every step of the service): which of
+# the packets between the first and the last were told does not depend on the code, so the last one stands for them.
+VOLATILE_EXECUTORS = ("downloads.queue.changed", "conform.queue.changed", "work.series.state", "series.status.contribution",
+                      "series.busy.contribution")
+# What differs on every run whatever the code: the seconds a stage took, the moments of the clock, the numbers of the daemon's clock.
+_EXECUTORS_MASKS = [
+    (re.compile(r'((?:\\)?"(?:seconds|elapsed_s|stage_pct|progress|eta|speed|speed_x|done_mb|total_mb|dlspeed|position|running|limit)'
+                r'(?:\\)?":\s*)(?:[0-9.eE+-]+|null)'), r"\1<n>"),
+    (re.compile(r'((?:\\)?"(?:queued_at|finished_at|created_at|updated_at)(?:\\)?":\s*)(?:\\)?"[^"]*(?:\\)?"'), r'\1"<time>"'),
+    (re.compile(r'("seq":\s*)\d+'), r"\1<n>"),
+    (re.compile(r"127\.0\.0\.1:\d+"), "127.0.0.1:<port>"),
+    (re.compile(r"0x[0-9a-fA-F]{6,}"), "0x<address>"),
+    # The key a plan gives a job (and the folder named by it) is made of the paths of the run, whose folder is random.
+    (re.compile(r"(?<![0-9a-f])[0-9a-f]{12}(?![0-9a-f])"), "<key>"),
+    # The state of the work of an executor named the episodes it worked on (`busy`) in the tree before stage 5g; nobody read it, and it was
+    # always empty: the field is gone, and what remains is compared.
+    (re.compile(r',\s*"busy":\s*\[\]'), "")]
+
+
+def executors_digest(path: str) -> dict:
+    """The tables the executors own and their settings, each whole: rows and a hash; the ignored seasons and episodes of the series."""
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    out = {}
+    queries = {table: f"SELECT * FROM {table}" for table in EXECUTORS_OWNED}
+    # What a file was when its fetch ended (the time of its change, the moment of the record) is the clock of the run.
+    queries["download_done"] = "SELECT path, url, max_height FROM download_done"
+    queries["settings"] = "SELECT key, value FROM settings WHERE key IN (%s)" % ",".join(repr(each) for each in EXECUTORS_SETTINGS) \
+        + " OR key LIKE 'conform.%'"
+    queries["series:ignored"] = "SELECT id, ignored_seasons, ignored_episodes FROM series"
+    for name, query in queries.items():
+        rows = sorted(conn.execute(query).fetchall(), key=repr)
+        out[name] = {"rows": len(rows), "sha": hashlib.sha256(masked(repr(rows)).encode()).hexdigest()}
+    conn.close()
+    return out
+
+
+async def collect_executors(root: str, out: str) -> None:
+    """The windows of `downloads`, `conform` and `scan` on the stand of the whole application (tests/app_stand.py): the user's way through
+    the API, every module real, the site, the player and the alignment service as models, no network. Every step ends on the event of the
+    work it began (the end of a run, the end of a job), never on a pause."""
+    sys.path.insert(0, os.path.join(root, "tests"))
+    from app_stand import STAND_LIMIT_S, AppStand
+    from core import notices
+    from core.module import BaseModule, BusRequestError
+    from modules.gateway.module import SSE_MAP
+
+    class Probe(BaseModule):
+        name = "probe"
+
+    # The files of the stand are seconds long: the shortest an episode may be is of the scale of the stand, as the tests set it.
+    notices.EPISODE_MIN_S = 0.5
+
+    _RUN_MASKS[:] = list(_EXECUTORS_MASKS)
+    folder = tempfile.mkdtemp(prefix="window_json_")
+    _RUN_MASKS.append((re.compile(re.escape(folder)), "<tmp>"))
+    _RUN_MASKS.append((re.compile(r"window_j\.\.\.\w+(?=/)"), "window_j...<tmp>"))
+    stand = AppStand(folder)
+    await stand.start()
+    bus, api = stand.bus, stand.api
+    answers: dict[str, dict] = {}
+    events: list[tuple[str, str]] = []
+
+    def seen(env) -> None:
+        if env.topic in WATCHED_EXECUTORS:
+            sse = SSE_MAP.get(env.topic)
+            payload = sse.form(env.payload) if sse is not None and sse.form else env.payload
+            events.append((env.topic, masked(json.dumps(payload, ensure_ascii=False, default=plain))))
+
+    untap = bus.tap(seen)
+
+    def record(name: str, status: int, body: bytes) -> None:
+        body = masked(body.decode("utf-8")).encode("utf-8")
+        answers[name] = {"status": status, "length": len(body), "sha": hashlib.sha256(body).hexdigest(),
+                         "body": base64.b64encode(body[:65536]).decode()}
+
+    async def ask(name: str, method: str, url: str, **kwargs):
+        response = await api.request(method, url, **kwargs)
+        record(name, response.status_code, response.content)
+        return response
+
+    async def over_bus(name: str, topic: str, payload: dict) -> None:
+        """What a module answers another, written as text; the fields a model leaves none are left out on both sides."""
+        try:
+            record(name, 200, written(await probe.request(topic, payload), True).encode())
+        except BusRequestError as exc:
+            record(name, 500, str(exc).encode())
+
+    def told(label: str) -> None:
+        taken = list(events)
+        events.clear()
+        by_topic: dict[str, list[str]] = {}
+        for topic, text in taken:
+            by_topic.setdefault(topic, []).append(hashlib.sha256(text.encode()).hexdigest())
+        # The pictures of the queues land in the step that was under way when the machine got to them: they are told in the steps that run work.
+        answers[f"events:{label}"] = {"events": {
+            topic: {"count": len(each), "distinct": [each[-1]] if topic in VOLATILE_EXECUTORS else sorted(set(each)), "last": each[-1]}
+            for topic, each in sorted(by_topic.items())
+            if topic not in VOLATILE_EXECUTORS or label.split(":")[0] in ("sync", "stop", "reprocess")}}
+
+    async def after(label: str) -> None:
+        """What a command left: nothing is under way in the modules, then their tables and the packets told."""
+        await stand.bus.settled()
+        # The scan keeps its scheduler among its tasks in the tree before the stage 5g (a loop as long as its life): it is no work to wait for.
+        for module in stand.modules:
+            under_way = [task for task in module.background() if not task.done()] if module.name != "scan" else []
+            if under_way:
+                await asyncio.gather(*under_way, return_exceptions=True)
+        await stand.bus.settled()
+        answers[f"{label}:tables"] = executors_digest(stand.db_path)
+        told(label)
+
+    async def run_ended(ended, series_id: int) -> None:
+        await stand._run_end(ended, series_id)
+
+    async def windows(label: str) -> None:
+        for name, url in (("scanner", "/api/scanner/status"), ("queue", "/api/downloads/queue"), ("limits", "/api/settings/download_limits"),
+                          ("conform", "/api/conform/settings")):
+            await ask(f"{label}:{name}", "GET", url)
+
+    probe = Probe(bus)
+    await probe.start()
+
+    # --- the settings of the service of the alignment, the limits of the downloads, the schedule ------------------------------------
+    await windows("start")
+    told("start")
+    answers["start:tables"] = executors_digest(stand.db_path)
+    work = os.path.join(folder, "work")
+    connected = bus.subscribe("conform.daemon.up")
+    await ask("conform:settings:refused", "PUT", "/api/conform/settings", json={"url": "ftp://x", "work_dir": "rel", "work_dir_remote": ""})
+    await ask("conform:settings:set", "PUT", "/api/conform/settings",
+              json={"url": stand.daemon_http.url, "work_dir": work, "work_dir_remote": work})
+    await asyncio.wait_for(connected.queue.get(), STAND_LIMIT_S)
+    await after("conform:settings")
+    await ask("conform:params:refused", "PUT", "/api/conform/params",
+              json={"audio_method": "dsp", "drift_speed_pct": 11.0, "keep_tmp": False, "fill_silence": True, "extend_edges": True})
+    await ask("conform:params:set", "PUT", "/api/conform/params",
+              json={"audio_method": "band", "drift_speed_pct": 2.5, "keep_tmp": True, "fill_silence": True, "extend_edges": False})
+    await ask("conform:view", "GET", "/api/conform/settings")
+    await after("conform:params")
+    for label, body in (("set", {"single_at_once": "3"}), ("refused", {"threads_total": "0"}), ("none", {}),
+                        ("back", {"single_at_once": 4})):
+        await ask(f"limits:{label}", "POST", "/api/settings/download_limits", json=body)
+        await ask(f"limits:{label}:get", "GET", "/api/settings/download_limits")
+        await after(f"limits:{label}")
+    schedule = {"syncs": ["03:00", "15:00"], "torrent_mode": "between", "torrent_free": [], "torrent_between": 2}
+    for label, body in (("set", {"schedule": schedule}), ("free", {"schedule": {**schedule, "torrent_mode": "free",
+                                                                                  "torrent_free": ["09:30"]}}),
+                        ("refused", {"schedule": {**schedule, "torrent_mode": "no such"}}), ("empty", {"schedule": {"syncs": []}})):
+        await ask(f"schedule:{label}", "POST", "/api/schedule", json=body)
+        await after(f"schedule:{label}")  # the scan counts its next sync once the schedule is told: the status is read after that
+        await ask(f"schedule:{label}:status", "GET", "/api/scanner/status")
+    for label, enabled in (("on", True), ("off", False)):
+        await ask(f"scanner:{label}", "POST", "/api/scanner/settings", json={"enabled": enabled})
+        await after(f"scanner:{label}")
+        await ask(f"scanner:{label}:status", "GET", "/api/scanner/status")
+    await ask("scan_all", "POST", "/api/scanner/scan_all")
+    await after("scan_all")
+
+    # --- the voices, the site, a series of two sources, a sync to its end ----------------------------------------------------------
+    stand.site.release("ref", "AniStar")
+    stand.site.release("dub", "AnimeVost")
+    stand.site.episode("ref", 1, height=720)
+    stand.site.episode("dub", 1, height=480)
+    saved = await api.put("/api/voices/settings", json={"priority": ["vk", "cvh", "allvideo", "kodik"],
+                                                         "voice_groups": {"AniStar": [], "AnimeVost": []},
+                                                         "voice_languages": {"AniStar": "rus", "AnimeVost": "rus"}})
+    assert saved.json()["saved"], saved.text
+    series_id = await stand.series("Сериал", ["ref", "dub"])
+    ended = bus.subscribe("scan.run.changed")
+    response = await api.post(f"/api/series/{series_id}/scan")
+    record("sync:first", response.status_code, response.content)
+    await run_ended(ended, series_id)
+    await after("sync:first")
+    await windows("sync:first")
+    await ask("sync:first:plan", "GET", f"/api/series/{series_id}/plan")
+    await over_bus("sync:first:runs", "scan.runs.get", {})
+    await over_bus("sync:first:status", "scan.status.get", {})
+    await over_bus("sync:first:queue", "downloads.queue.get", {})
+    await over_bus("sync:first:workspace", "conform.workspace", {})
+    await over_bus("sync:first:keys", "conform.job.keys", {})
+    jobs = sorted(stand.daemon.jobs)
+    for label, job_id in (("kept", jobs[0] if jobs else "none"), ("missing", "no-such-job")):
+        await over_bus(f"conform:job:{label}", "conform.job.get", {"job_id": job_id})
+    await ask("conform:plot:missing", "GET", f"/api/conform/jobs/{jobs[0] if jobs else 'x'}/plot/none.png")
+
+    # --- the switch of the output and the run that fetches nothing -----------------------------------------------------------------
+    switch = f"/api/series/{series_id}/output/switch"
+    for label, body in (("off", {"season": 1, "episodes": [1], "off": True}), ("season-off", {"season": 1, "off": True}),
+                        ("season-on", {"season": 1, "off": False})):
+        await ask(f"switch:{label}", "PUT", switch, json=body)
+        await after(f"switch:{label}")
+    ended = bus.subscribe("scan.run.changed")
+    await ask("reprocess", "POST", f"/api/series/{series_id}/reprocess")
+    await run_ended(ended, series_id)
+    await after("reprocess")
+    await ask("reprocess:plan", "GET", f"/api/series/{series_id}/plan")
+
+    # --- a download that fails for good stays as a card until the user removes it; the stop of a sync while the service aligns ---------
+    stand.site.release("ref2", "AniStar")
+    stand.site.release("dub2", "AnimeVost")
+    stand.site.episode("ref2", 1, height=720)
+    stand.site.episode("dub2", 1, height=480)
+    second = await stand.series("Второй", ["ref2", "dub2"])
+    stand.site.gone("dub2", 1)
+    ended = bus.subscribe("scan.run.changed")
+    response = await api.post(f"/api/series/{second}/scan")
+    record("sync:failed", response.status_code, response.content)
+    await run_ended(ended, second)
+    await after("sync:failed")
+    await ask("sync:failed:queue", "GET", "/api/downloads/queue")
+    cards = (await api.get("/api/downloads/queue")).json()
+    for label, card in (("missing", "no-such-card"), ("kept", cards[0]["id"] if cards else "none")):
+        await ask(f"card:remove:{label}", "DELETE", f"/api/downloads/cards/{card}")
+        await ask(f"card:remove:{label}:queue", "GET", "/api/downloads/queue")
+        await after(f"card:remove:{label}")
+    await ask("queue:clear", "POST", "/api/downloads/queue/clear")
+    await ask("cancel:missing", "POST", "/api/downloads/7/cancel")
+    stand.site.gone("dub2", 1, False)
+    stand.site.release("ref3", "AniStar")
+    stand.site.release("dub3", "AnimeVost")
+    stand.site.episode("ref3", 1, height=720)
+    stand.site.episode("dub3", 1, height=480)
+    third = await stand.series("Третий", ["ref3", "dub3"])
+    stand.daemon.hold = True
+    stand.daemon.made.clear()
+    ended = bus.subscribe("scan.run.changed")
+    running = asyncio.create_task(api.post(f"/api/series/{third}/scan"))
+    await asyncio.wait_for(asyncio.to_thread(stand.daemon.made.wait), STAND_LIMIT_S)
+    await ask("busy:scan", "POST", f"/api/series/{third}/scan")
+    await ask("busy:switch", "PUT", f"/api/series/{third}/output/switch", json={"season": 1, "episodes": [1], "off": True})
+    await ask("busy:settings", "PUT", f"/api/series/{third}/output/settings", json={"season": 1, "lever": "no.such", "value": 1})
+    await ask("stop", "POST", f"/api/series/{third}/scan/cancel")
+    stopped = await running
+    record("stop:sync", stopped.status_code, stopped.content)
+    await run_ended(ended, third)
+    stand.daemon.hold = False
+    stand.daemon.release()
+    await after("stop")
+    await ask("stop:again", "POST", f"/api/series/{third}/scan/cancel")
+    await ask("stop:queue", "GET", "/api/downloads/queue")
+    for label, job_id in (("missing", "no-such-job"), ("kept", sorted(stand.daemon.jobs)[0] if stand.daemon.jobs else "none")):
+        await ask(f"conform:cancel:{label}", "DELETE", f"/api/conform/jobs/{job_id}")
+    await after("conform:cancel")
+    untap()
+    await probe.stop()
+    await stand.stop()
+    stand.close()
+    with open(out, "w", encoding="utf-8") as sink:
+        json.dump({"root": root, "when": time.strftime("%Y-%m-%d %H:%M:%S"), "answers": answers}, sink)
+    shutil.rmtree(folder, ignore_errors=True)
+    print(f"COLLECTED {len(answers)} answers; bytes {sum(each.get('length', 0) for each in answers.values())}")
+    print("WINDOW_JSON_DONE")
+
+
 def compare(first: str, second: str) -> int:
     a, b = json.load(open(first, encoding="utf-8"))["answers"], json.load(open(second, encoding="utf-8"))["answers"]
     keys = sorted(set(a) | set(b))
@@ -1996,6 +2268,9 @@ if __name__ == "__main__":
     # The windows of `torrents`, `renaming` and `library` need no series either and put the model of qBittorrent (tests/qbit_model.py)
     # and the model of the neighbours in place of the tracker, the client and the plan: `collect --torrents` alone is a run of its own.
     parser.add_argument("--torrents", action="store_true")
+    # The windows of `downloads`, `conform` and `scan` run on the stand of the whole application (tests/app_stand.py) with its own base:
+    # `collect --executors` alone is a run of its own and needs no copy of the base.
+    parser.add_argument("--executors", action="store_true")
     args = parser.parse_intermixed_args()
     if args.what == "selftest":
         sys.exit(selftest())
@@ -2009,8 +2284,11 @@ if __name__ == "__main__":
         os.environ[name] = "http://127.0.0.1:9"
     os.environ.pop("NO_PROXY", None)
     os.environ.pop("no_proxy", None)
-    if args.sources or args.torrents:
+    if args.sources or args.torrents or args.executors:
         # The model of the provider and the model of qBittorrent listen on this machine: it is the one address the proxy does not take.
         os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1"
+    if args.executors:
+        asyncio.run(collect_executors(root, args.out))
+        sys.exit(0)
     asyncio.run(collect(root, args.db, args.out, [int(each) for each in args.rest], args.windows, args.owners, args.sources,
                         args.torrents))
