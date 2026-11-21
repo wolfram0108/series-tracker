@@ -74,8 +74,6 @@ class World(BaseModule):
         self.settings_values: dict[str, str] = {}
         # Whether each executor has work of the series when a run asks (`<owner>.work.get`); none by default.
         self.work: dict[str, bool] = {}
-        # The episodes each executor works on, as its states name them (WorkState.busy).
-        self.busy: dict[str, list[list]] = {}
         # The number of the latest state an executor counted: events and replies carry it.
         self.seq = 0
         # An executor whose reply to `<owner>.work.get` waits for this gate (the answer is counted when it was asked).
@@ -147,21 +145,18 @@ class World(BaseModule):
     async def on_work_get(self, env) -> dict:
         owner = env.topic.split(".")[0]
         self.order.append(f"{env.topic} {env.payload['series_id']}")
-        counted = {"owner": owner, "series_id": env.payload["series_id"], "active": self.work.get(owner, False),
-                   "busy": self.busy.get(owner, []), "seq": self.seq}
+        counted = {"owner": owner, "series_id": env.payload["series_id"], "active": self.work.get(owner, False), "seq": self.seq}
         gate = self.work_gates.get(owner)
         if gate is not None:
             await gate.wait()
         return counted
 
-    def tell_work(self, series_id: int, owner: str, active: bool, busy: list[list] | None = None,
-                  failure: str | None = None) -> None:
+    def tell_work(self, series_id: int, owner: str, active: bool, failure: str | None = None) -> None:
         """An executor's state changed: a later count than any reply given before."""
         self.seq += 1
         self.work[owner] = active
-        self.busy[owner] = busy if busy is not None else []
         self.publish_event("work.series.state", {"owner": owner, "series_id": series_id, "active": active,
-                                                 "busy": self.busy[owner], "seq": self.seq, "failure": failure})
+                                                 "seq": self.seq, "failure": failure})
 
     async def on_profiles_export(self, env) -> dict:
         return {"profiles": {key: value for key, value in self.profiles_export.items()

@@ -76,7 +76,7 @@ class ErrorResponse(ApiModel):
 # --- блок «скан и очереди» (api_system) -------------------------------------
 
 class ScheduleValue(RequestModel):
-    """The times of day of the syncs and of the checks of the torrent releases (core/schedule.py), «HH:MM»."""
+    """The times of day of the syncs and of the checks of the torrent releases (calc/schedule.py), «HH:MM»."""
 
     syncs: list[str] = Field(default_factory=list)
     torrent_mode: Literal["between", "free"] = "between"
@@ -94,7 +94,7 @@ class ScannerStatus(ApiModel):
     next_scan_time: str | None = None
     next_check_time: str | None = None
     schedule: ScheduleValue
-    # The times of day the releases are checked, as the schedule makes them (core/schedule.py).
+    # The times of day the releases are checked, as the schedule makes them (calc/schedule.py).
     checks: list[str] = Field(default_factory=list)
 
 

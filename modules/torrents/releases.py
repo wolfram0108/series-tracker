@@ -30,7 +30,7 @@ from core.contracts.torrent import PageRelease, PageReleases, ReleaseState, Rele
 from core.logging import get_logger
 from core.topics import SOURCES_RELEASES_GET, SOURCES_TORRENT_FILE_GET
 from core.reasons import reason
-from core.schedule import next_at
+from calc.schedule import next_at
 
 from .qbt_client import QbtClient
 from .repository import ReleaseStore
@@ -82,7 +82,7 @@ class Releases:
     runs: dict[int, set[str]] = field(default_factory=dict)
     # Releases whose newer version waits for a run to end: (url, release) → the page release.
     pending: dict[tuple[str, str], PageRelease] = field(default_factory=dict)
-    # The minutes of the day the watched pages are checked (the schedule, core/schedule.py).
+    # The minutes of the day the watched pages are checked (the schedule, calc/schedule.py).
     checks: tuple[int, ...] = ()
     # What the client said of each torrent at its last asking: infohash → its state (a fact of the moment, not stored).
     clients: dict[str, str] = field(default_factory=dict)

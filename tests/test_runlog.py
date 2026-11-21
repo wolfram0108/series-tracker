@@ -7,7 +7,7 @@ import os
 
 from core.bus import Bus
 from core.runner import Runner
-from core.contracts.work import RUN_CHANGED
+from core.topics import SCAN_RUN_CHANGED
 from core.envelope import Envelope
 from modules.runlog import RunlogModule
 
@@ -23,7 +23,7 @@ def dumps(folder, series_id: int) -> list[str]:
 
 
 def run_changed(series_id: int, active: bool) -> Envelope:
-    return Envelope(topic=RUN_CHANGED, kind="event", payload={"series_id": series_id, "active": active, "seq": 1})
+    return Envelope(topic=SCAN_RUN_CHANGED.name, kind="event", payload={"series_id": series_id, "active": active, "seq": 1})
 
 
 async def test_all_the_dumps_keep_within_the_budget_the_oldest_go_first_and_the_one_being_written_stays(tmp_path):

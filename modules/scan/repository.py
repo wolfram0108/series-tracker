@@ -2,7 +2,7 @@
 
 scan_tasks: the journal that lets a torrent scan resume. The plan of replacements is persisted BEFORE it is carried
 out (task_data) and the results of the additions as they come (results_data); status='error' with a message is the
-carrier of the error flag of the status fold (R-11).
+carrier of the error flag of the status fold (Р-11).
 """
 from __future__ import annotations
 
@@ -31,8 +31,8 @@ class ScanRepository:
             (json.dumps(results, ensure_ascii=False), task_id))
 
     async def set_error(self, task_id: int, message: str) -> None:
-        # Сообщение — в results_data['error']: схема фиксирована,
-        # отдельной колонки под текст ошибки у scan_tasks нет.
+        # The message goes to results_data['error']: the schema is fixed and
+        # scan_tasks has no separate column for the error text.
         task = await self.get_task(task_id)
         results = task["results_data"] if task else {}
         results["error"] = message
@@ -59,8 +59,8 @@ class ScanRepository:
         return [self._task_row(r) for r in rows]
 
     async def delete_error_tasks(self, series_id: int) -> None:
-        """Новый скан сбрасывает прошлую ошибку (Р-11: сброс — повторным
-        сканом или действием пользователя)."""
+        """A new scan clears the previous error (Р-11: cleared by a repeated scan
+        or by a user action)."""
         await self._db.execute(
             "DELETE FROM scan_tasks WHERE series_id=? AND status='error'",
             (series_id,))

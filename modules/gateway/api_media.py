@@ -9,7 +9,7 @@ from fastapi import APIRouter
 
 from core.module import BusRequestError
 from core.reasons import reason
-from core.topics import TORRENTS_DB_FILES_FOR_SERIES
+from core.topics import SCAN_SERIES_RUN, TORRENTS_DB_FILES_FOR_SERIES
 
 from .routing import refusal
 from .schemas import ErrorOnly, ErrorResponse, OkResponse
@@ -29,7 +29,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The files take the names of the rules: the disk changes in a sync alone (И-59), so this is a sync of the
         series that fetches nothing; refused while one runs."""
         try:
-            await gw.request("scan.series.run", {"series_id": series_id, "download": False})
+            await gw.request(SCAN_SERIES_RUN, {"series_id": series_id, "download": False})
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True,

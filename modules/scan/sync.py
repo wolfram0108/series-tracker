@@ -1,31 +1,25 @@
 """The first step of a synchronization: every source of the series has its table, or a reason why it has not.
 
-A table is read by `sources`; this step asks for it and then waits for the verdict of that module (`ready` or
-`failed`), never for a clock. The ceiling of the wait is a safeguard: when it is reached the source counts as failed
-(`table_wait_timeout`), it is not taken for ready.
+A table is read by `sources`; this step asks for it and then waits for the verdict of that module (`ready` or `failed`), never for a
+clock. The ceiling of the wait is a safeguard: when it is reached the source counts as failed (`table_wait_timeout`), it is not taken for
+ready. What the answer and the verdict come to is counted in calc/scan/sync.py.
 """
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Sequence
 
-from core.module import BusRequestError
-from core.topics import SOURCES_TABLE_REFRESH, TABLE_WAIT_S
-from core.contracts import SeriesSource, TableGetReply, TableRefresh, TableState
+from calc.scan.sync import Verdict, read, settled
+from core.contracts import SeriesSource, SourceSync, TableRefresh
 from core.logging import get_logger
+from core.module import BusRequestError
 from core.reasons import reason
+from core.topics import SOURCES_TABLE_REFRESH, TABLE_WAIT_S
 
 log = get_logger("scan")
 
 
 Ask = Callable[..., Awaitable[Any]]
-
-
-@dataclass(frozen=True)
-class Verdict:
-    ok: bool
-    reason: str | None = None
 
 
 class TableSignals:
@@ -75,49 +69,23 @@ class TableSignals:
                 waiting.remove(future)
 
 
-@dataclass(frozen=True)
-class SourceSync:
-    """How a source stands after the step: `ready` (a table read now or within its term), `stale` (the read failed,
-    the last complete table stays in force) or `skipped` (the read failed and there is no table at all)."""
-
-    source_id: int
-    url: str
-    state: str
-    reason: str | None = None
-
-    def as_dict(self) -> dict[str, Any]:
-        return {"source_id": self.source_id, "url": self.url, "state": self.state, "reason": self.reason}
-
-
 async def sync_tables(sources: Sequence[SeriesSource], ask: Ask, signals: TableSignals,
                       safeguard_s: float = TABLE_WAIT_S) -> list[SourceSync]:
-    """Every source at once; the answer is in the order of `sources`. A failure of one source never stops the others."""
+    """Every source at once; the answer is in the order of `sources`. A failure of one source never stops the others. `ask` is the
+    reply of a topic as the model of its record (`BaseModule.reply_of`)."""
     return list(await asyncio.gather(*(_sync_source(source, ask, signals, safeguard_s) for source in sources)))
 
 
 async def _sync_source(source: SeriesSource, ask: Ask, signals: TableSignals, safeguard_s: float) -> SourceSync:
     since = signals.mark()
     request = TableRefresh(url=source.url, rows=source.rows_per_line, by_sync=True)
+    step = SOURCES_TABLE_REFRESH.name
     try:
-        reply = TableGetReply.model_validate(await ask(SOURCES_TABLE_REFRESH, request.model_dump(mode="json")))
+        reply = await ask(SOURCES_TABLE_REFRESH, request.model_dump(mode="json"))
     except (BusRequestError, asyncio.TimeoutError) as exc:
         log.error("источник %d: запрос таблицы %s не выполнен: %s", source.id, source.url, exc)
-        return SourceSync(source.id, source.url, "skipped", reason("scan_step_failed", step=SOURCES_TABLE_REFRESH.name))
-    if reply.state == TableState.READY:
-        return SourceSync(source.id, reply.url, "ready")
-    failure = reply.reason if reply.state == TableState.FAILED else None
-    if reply.state == TableState.READING:
-        verdict = await signals.verdict(reply.url, since, safeguard_s)
-        if verdict is None:
-            failure = reason("table_wait_timeout", url=reply.url)
-        elif verdict.ok:
-            return SourceSync(source.id, reply.url, "ready")
-        else:
-            failure = verdict.reason or reason("scan_step_failed", step=SOURCES_TABLE_REFRESH.name)
-    elif reply.state == TableState.ABSENT:
-        # A page of the provider nobody has read waits for the user's read: the sync has nothing of it to wait for.
-        failure = reason("table_not_read", url=reply.url)
-    elif failure is None:
-        failure = reason("scan_step_failed", step=SOURCES_TABLE_REFRESH.name)
-    held = reply.table is not None and reply.table.complete
-    return SourceSync(source.id, reply.url, "stale" if held else "skipped", failure)
+        return SourceSync(source_id=source.id, url=source.url, state="skipped", reason=reason("scan_step_failed", step=step))
+    found = settled(source, reply, step)
+    if found is not None:
+        return found
+    return read(source, reply, await signals.verdict(reply.url, since, safeguard_s), step)

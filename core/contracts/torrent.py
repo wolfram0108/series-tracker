@@ -63,7 +63,7 @@ class ReleaseView(Frozen):
     pending: bool = False
     files: tuple[ReleaseFile, ...] = Field(default_factory=tuple)
     # When the page was last checked for a newer version of it (none: never), and the next check of the schedule after
-    # that (core/schedule.py; none: no check scheduled): past it the release is not known to be current.
+    # that (calc/schedule.py; none: no check scheduled): past it the release is not known to be current.
     checked_at: str | None = None
     fresh_until: str | None = None
     # What the client says of the torrent now, as it words it (qBittorrent's state: `checkingDL`, `downloading`, ...); none:

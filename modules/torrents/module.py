@@ -17,7 +17,7 @@ newer version) is pure and lives in calc/torrents/releases.py:
       infohash, else another date) begins its update — the old version leaves the client without its files, the new one comes started
       into the same folder, the client checks the files there and downloads the rest; while a sync of a series with the page runs
       (scan.run.changed) the update waits for its end. The check sets `checked_at` of every watched release of the page. The pages of
-      the series in the automatic mode are also checked at the times of the schedule (core/schedule.py) while the automatic sync is
+      the series in the automatic mode are also checked at the times of the schedule (calc/schedule.py) while the automatic sync is
       on, and a time missed while the service was down at the start; «Перечитать» of the source checks its page whatever the mode
       (trackers.py)
   torrents.release.watch ReleaseWatch -> ReleaseView — the automatic update on or off
@@ -132,7 +132,7 @@ from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason, relayed
 from core.retry import UNTIMED, Budget, retrying
-from core.schedule import SCHEDULE_KEY, last_at, next_at, parse
+from calc.schedule import SCHEDULE_KEY, last_at, next_at, parse
 
 from .qbt_client import QbtClient, QbtError
 from .releases import Releases
@@ -1324,9 +1324,8 @@ class TorrentsModule(BaseModule):
             stored = None
         self.releases.staging = stored or ""
         try:
-            runs = (await self.request(SCAN_RUNS_GET, {})).get("runs") or []
-            for run in runs:
-                self.releases.runs[run["series_id"]] = await self._pages_of(run["series_id"])
+            for run in (await self.reply_of(SCAN_RUNS_GET, {})).runs:
+                self.releases.runs[run.series_id] = await self._pages_of(run.series_id)
         except Exception:  # noqa: BLE001 - an update that begins in a run is the worse loss: none begins until the next run news
             self.log.exception("the open syncs were not read; the updates wait for the news of a run")
         try:
@@ -1442,7 +1441,7 @@ class TorrentsModule(BaseModule):
             self._release_wake.clear()
 
     async def _watch_loop(self) -> None:
-        """The watched pages are checked at the times of the schedule (core/schedule.py; the time of day is the subject of
+        """The watched pages are checked at the times of the schedule (calc/schedule.py; the time of day is the subject of
         the wait): a page not checked since the last of them is checked now, so a time missed while the service was down
         is made up at the start. Only the pages of the series in the automatic mode are checked, and only while the
         automatic sync is on: a series switched off is not asked of the tracker by the schedule («Перечитать» still asks).

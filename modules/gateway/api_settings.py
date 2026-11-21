@@ -20,7 +20,7 @@ from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, Co
                             PlayersListReply, ProviderSaved, ProviderSettingsDraft, ProviderView, VoiceSettingsDraft,
                             VoiceSettingsSaved, VoiceSettingsView)
 from core.reasons import code_of, reason, relayed
-from core.topics import (LIBRARY_DIRECTORIES_LIST, METADATA_DETAILS, METADATA_SEARCH, SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST,
+from core.topics import (CONFORM_PARAMS_SET, CONFORM_SETTINGS_GET, CONFORM_SETTINGS_SET, DOWNLOADS_LIMITS_GET, DOWNLOADS_LIMITS_SET, LIBRARY_DIRECTORIES_LIST, METADATA_DETAILS, METADATA_SEARCH, SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST,
                          SETTINGS_PATHS_REMOVE, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SETTINGS_VALUES_BY_PREFIX,
                          SOURCES_PROVIDER_GET, SOURCES_PROVIDER_SET, SOURCES_TERMS_GET, SOURCES_TERMS_SET,
                          SOURCES_TRACKER_SET_MIRRORS, SOURCES_TRACKERS_LIST, TORRENTS_STAGING_GET, TORRENTS_STAGING_SET,
@@ -147,11 +147,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """How many downloads go at once, by the way a file comes (downloads, limits.py): {threads_total,
         threads_per_file, single_at_once, provider_at_once, multi_at_once} both ways; a value the module refuses is 400 with its reason."""
         if request.method == "POST":
-            reply = await gw.request("downloads.limits.set", await request.json())
-            if not reply.get("ok"):
-                return JSONResponse({"error": reply["reason"]}, status_code=400)
-            return reply["limits"]
-        return await gw.request("downloads.limits.get", {})
+            reply = await gw.reply_of(DOWNLOADS_LIMITS_SET, await request.json())
+            if not reply.ok:
+                return JSONResponse({"error": reply.reason}, status_code=400)
+            return reply.limits.model_dump(mode="json")
+        return (await gw.reply_of(DOWNLOADS_LIMITS_GET, {})).model_dump(mode="json")
 
     @route_per_method(r, "/api/settings/source_terms", methods=["GET", "POST"], response_model=DynamicObject,
                       responses=_ERR1)
@@ -214,17 +214,17 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/conform/settings", response_model=ConformSettingsView)
     async def conform_settings():
         """The address of the alignment server and the path map as they apply now."""
-        return await gw.request("conform.settings.get", {})
+        return await gw.reply_of(CONFORM_SETTINGS_GET, {})
 
     @r.put("/api/conform/params", response_model=ConformSettingsSaved)
     async def save_conform_params(params: ConformParams):
         """How the daemon is asked to align: written whole or refused with coded reasons (`saved: false`)."""
-        return await gw.request("conform.params.set", params.model_dump(mode="json"))
+        return await gw.reply_of(CONFORM_PARAMS_SET, params.model_dump(mode="json"))
 
     @r.put("/api/conform/settings", response_model=ConformSettingsSaved)
     async def save_conform_settings(draft: ConformSettingsDraft):
         """Written whole and taken at once, or refused with coded reasons (`saved: false`) and nothing written."""
-        return await gw.request("conform.settings.set", draft.model_dump(mode="json"))
+        return await gw.reply_of(CONFORM_SETTINGS_SET, draft.model_dump(mode="json"))
 
     @r.get("/api/provider", response_model=ProviderView)
     async def provider_view():

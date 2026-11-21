@@ -15,8 +15,8 @@ from core.contracts import SeriesCard, TmdbMapping
 from core.module import BusRequestError
 from core.reasons import code_of, reason, relayed
 from core.topics import (CATALOG_SERIES_CREATE, CATALOG_SERIES_GET, CATALOG_SERIES_LIST, LIBRARY_RELOCATION_GET,
-                         LIBRARY_RELOCATION_PLAN, METADATA_MAP_GET, METADATA_MAP_LIST, METADATA_MAP_SET,
-                         TORRENTS_DB_DOWNLOADED_COUNTS, TORRENTS_DB_PROGRESS_LIST, TORRENTS_FS_VERIFY, Topic)
+                         LIBRARY_RELOCATION_PLAN, METADATA_MAP_GET, METADATA_MAP_LIST, METADATA_MAP_SET, SCAN_RUN_CANCEL,
+                         SCAN_SERIES_RUN, TORRENTS_DB_DOWNLOADED_COUNTS, TORRENTS_DB_PROGRESS_LIST, TORRENTS_FS_VERIFY, Topic)
 from .routing import admitted
 
 from .schemas import (CreatedSeries, ErrorResponse, FailuresReset, FailuresResetBody, OkResponse, SyncCancelled, SyncScopeBody,
@@ -245,7 +245,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         С телом (сезон, серия сезона) — синхронизация в рамках сезона или серии: источники те же, исполняется
         то, что касается области (серия компиляции приводит всю компиляцию); сериал занят на всё время."""
         try:
-            result = await gw.request("scan.series.run", {
+            result = await gw.reply_of(SCAN_SERIES_RUN, {
                 "series_id": series_id, **({} if download else {"download": False}),
                 **(body.model_dump(exclude_none=True) if body is not None else {})})
         except BusRequestError as exc:
@@ -254,17 +254,18 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             code = 409 if code_of(str(exc)) == "not_allowed" or str(exc).startswith("NotAllowed") else 500
             return JSONResponse({"success": False, "error": msg},
                                 status_code=code)
-        return {"success": True, **result}
+        # A sync names what it came to by the fields it sets: the others are not in the answer.
+        return {"success": True, **result.model_dump(mode="json", exclude_unset=True)}
 
     @r.post("/api/series/{series_id}/scan/cancel", response_model=SyncCancelled, responses={500: {"model": ErrorResponse}})
     async def cancel_scan(series_id: int):
         """Остановить синхронизацию сериала: чтение страниц, загрузки, задачи сервиса выравнивания, сборку файлов.
         Из остановленной синхронизации ничего не применяется; идущий журнал библиотеки она дожидается."""
         try:
-            done = await gw.request("scan.run.cancel", {"series_id": series_id})
+            done = await gw.reply_of(SCAN_RUN_CANCEL, {"series_id": series_id})
         except BusRequestError as exc:
             return JSONResponse({"success": False, "error": relayed(str(exc))}, status_code=500)
-        return {"success": True, "cancelled": bool(done.get("cancelled"))}
+        return {"success": True, "cancelled": done.cancelled}
 
     @r.post("/api/series/{series_id}/failures/reset", response_model=FailuresReset, responses=_ERRORS)
     async def reset_failures(series_id: int, body: FailuresResetBody | None = None):

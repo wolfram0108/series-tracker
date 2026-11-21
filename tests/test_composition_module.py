@@ -395,7 +395,7 @@ async def test_a_request_that_asks_for_no_read_of_a_page_nothing_was_read_of_giv
 
 @pytest.mark.asyncio
 async def test_the_order_of_the_voices_of_a_season_is_shown_kept_and_set_by_the_user_only(system):
-    from core.contracts import RUN_CHANGED
+    from core.topics import SCAN_RUN_CHANGED
     s = system
     s.voices.groups = {"Ruchime": ["Ruchime"], "AniStar": ["AniStar"]}
     series_id = await laid_out(s, page(*season_rows(1, range(1, 4)),
@@ -420,7 +420,7 @@ async def test_the_order_of_the_voices_of_a_season_is_shown_kept_and_set_by_the_
     [order] = (await s.get(series_id)).voice_orders
     assert [(voice.label, bool(voice.episodes)) for voice in order.voices] == [
         ("Held", False), *((label, True) for label in labels)]
-    s.probe.publish_event(RUN_CHANGED, {"series_id": series_id, "active": True})
+    s.probe.publish_event(SCAN_RUN_CHANGED, {"series_id": series_id, "active": True})
     await s.bus.settled()
     with pytest.raises(BusRequestError, match="not_allowed"):
         await s.probe.request("composition.voice_order.set", {"series_id": series_id, "season": 1, "labels": labels},
@@ -429,7 +429,7 @@ async def test_the_order_of_the_voices_of_a_season_is_shown_kept_and_set_by_the_
 
 @pytest.mark.asyncio
 async def test_the_name_of_the_track_of_a_voice_is_kept_for_the_series_taken_back_and_set_by_the_user_only(system):
-    from core.contracts import RUN_CHANGED
+    from core.topics import SCAN_RUN_CHANGED
     s = system
     series_id = await laid_out(s, page(*season_rows(1, range(1, 3), player="kodik", voice="AniStar")))
     assert (await s.get(series_id)).voice_titles == {}
@@ -448,7 +448,7 @@ async def test_the_name_of_the_track_of_a_voice_is_kept_for_the_series_taken_bac
     with pytest.raises(BusRequestError, match="one line"):
         await s.probe.request("composition.voice_title.set", {"series_id": series_id, "label": "AniStar",
                                                                "title": "две\nстроки"}, timeout=STUCK_S)
-    s.probe.publish_event(RUN_CHANGED, {"series_id": series_id, "active": True})
+    s.probe.publish_event(SCAN_RUN_CHANGED, {"series_id": series_id, "active": True})
     await s.bus.settled()
     with pytest.raises(BusRequestError, match="not_allowed"):
         await s.probe.request("composition.voice_title.set", {"series_id": series_id, "label": "AniStar", "title": "x"},

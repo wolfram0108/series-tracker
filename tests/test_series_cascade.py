@@ -89,7 +89,7 @@ async def test_delete_during_scan_leaves_no_rows(db_path):
         assert await wait_until(lambda: series_id in scan._aborted, bus, scan)
         source.release.set()
         result = await asyncio.wait_for(task, 15)
-        assert result.get("aborted") is True
+        assert result.aborted is True
         assert source.asked == ["sources.table.refresh"]  # the scan went no further than the step it was in
         assert await db.fetch_all("SELECT * FROM scan_tasks WHERE series_id=?",
                                   (series_id,)) == []

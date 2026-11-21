@@ -14,7 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from core.module import BusRequestError
 from core.reasons import reason, relayed
-from core.topics import CATALOG_SERIES_GET
+from core.topics import CATALOG_SERIES_GET, SCAN_OUTPUT_SWITCH
 from core.contracts import (CompositionGetRequest, CompositionReply, LayoutPart, OutputSwitch, PlanDelete, PlannerView,
                             PlanRowRef, QueuesGet, QueuesReply, Reference, SettingsReset, SettingsSet, SettingsSetMany,
                             VoiceOrderSet, VoiceTitleSet)
@@ -123,7 +123,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         command = _contract(OutputSwitch, series_id=series_id, **body.model_dump())
         try:
             async with admitted(gw, series_id):
-                await gw.request("scan.output.switch", command.model_dump(mode="json"))
+                await gw.request(SCAN_OUTPUT_SWITCH, command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}

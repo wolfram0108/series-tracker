@@ -10,11 +10,13 @@ import sqlite3
 from dataclasses import dataclass
 
 import pytest
+from pydantic import BaseModel
 
 from core.bus import Bus
 from core.module import BaseModule
 from core.runner import Runner
-from core.contracts import RUN_CHANGED, TableState
+from core.contracts import TableState
+from core.topics import SCAN_RUN_CHANGED
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
@@ -30,6 +32,11 @@ URL2 = "https://fake.test/p/2"
 
 class Probe(BaseModule):
     name = "probe"
+
+    async def request(self, topic, payload=None, *args, **options):
+        """The reply of a module as the plain JSON it comes to (the tests read it by key)."""
+        reply = await super().request(topic, payload, *args, **options)
+        return reply.model_dump(mode="json", exclude_unset=True) if isinstance(reply, BaseModel) else reply
 
 
 @dataclass
@@ -114,7 +121,7 @@ async def test_a_synchronization_stopped_while_its_page_is_read_stops_the_read_a
     """The user stops the sync while the pass waits for the read of its page: the pass stops, the read of the page is
     stopped too, the planner is told to stop, the run closes, and no command is left to take the sync up again."""
     rig.world.pages[URL1] = Page(TableState.READING, held=False)
-    runs = rig.bus.subscribe(RUN_CHANGED)
+    runs = rig.bus.subscribe(SCAN_RUN_CHANGED.name)
     run = rig.start_run()
     await rig.world.asked.get()
     stopped = await rig.probe.request("scan.run.cancel", {"series_id": rig.series_id}, timeout=STUCK_S)
@@ -237,15 +244,15 @@ def runs_of(events: list[dict]) -> list[bool]:
     return [each["active"] for each in events]
 
 
-def work_state(rig: "Rig", owner: str, active: bool, busy: list[list] | None = None, failure: str | None = None) -> None:
-    rig.world.tell_work(rig.series_id, owner, active, busy, failure)
+def work_state(rig: "Rig", owner: str, active: bool, failure: str | None = None) -> None:
+    rig.world.tell_work(rig.series_id, owner, active, failure)
 
 
 async def test_a_run_whose_executor_broke_ends_as_failed_with_its_reason_not_as_a_success(rig):
     """The work of the executor ended with a failure: the run is not a success — its command stays as the error of the
     series with the reason the executor told, and the series shows the error until the next sync."""
     rig.world.work = {"planner": True}
-    runs = rig.bus.subscribe(RUN_CHANGED)
+    runs = rig.bus.subscribe(SCAN_RUN_CHANGED.name)
     await rig.run()
     assert runs_of(drain(runs)) == [True]
     work_state(rig, "planner", False, failure=reason("planner_sync_failed", cause="RuntimeError: boom"))
@@ -298,7 +305,7 @@ async def test_a_caller_that_stops_waiting_for_its_grant_gives_it_back_and_the_s
         publish(grants[0])  # now the request is read: it opens nothing
     await rig.bus.settled()
 
-    assert entered == [] and not rig.scan._edits.get(rig.series_id) and not rig.scan._ended_early.get(rig.series_id)
+    assert entered == [] and not rig.scan._edits.open.get(rig.series_id) and not rig.scan._edits.early.get(rig.series_id)
     await asyncio.wait_for(rig.run(download=False), 10)
 
 

@@ -16,11 +16,12 @@ import pytest
 from app_stand import Served
 from core.bus import Bus
 from core.module import BaseModule
-from core.contracts import RUN_CHANGED, SeriesListReply
+from core.contracts import SeriesListReply
+from core.topics import SCAN_RUN_CHANGED
 from series_factory import series_card
 from core.contracts.torrent import PageRelease, PageReleases
 from core.db import Database
-from core.schedule import next_at
+from calc.schedule import next_at
 from core.topics import TORRENTS_RELEASE_CHANGED
 from modules.torrents.module import TorrentsModule
 from modules.torrents.qbt_client import QbtClient
@@ -179,14 +180,14 @@ async def test_an_update_waits_for_the_end_of_a_sync_of_a_series_with_the_page(s
     await world.request("torrents.release.download", {"url": PAGE, "release": "page"})
     await until(told, "ready")
 
-    world.publish_event(RUN_CHANGED, {"series_id": 1, "active": True, "seq": 1})
+    world.publish_event(SCAN_RUN_CHANGED, {"series_id": 1, "active": True, "seq": 1})
     await asyncio.wait_for(_until_held(torrents), LIMIT_S)
     h2 = world.lists(model, release(V2), published="d2", link="L2")
     await world.request("torrents.release.check", {"url": PAGE})
     waiting = await until(told, "ready", lambda news: news["pending"])
     assert h2 not in model.torrents
 
-    world.publish_event(RUN_CHANGED, {"series_id": 1, "active": False, "seq": 2})
+    world.publish_event(SCAN_RUN_CHANGED, {"series_id": 1, "active": False, "seq": 2})
     ready = await until(told, "ready", lambda news: news["infohash"] == h2)
     assert not ready["pending"]
 

@@ -17,6 +17,7 @@ from core.module import NO_HANDLER, BusRequestError
 from core.admission import Admission
 from core.admission import current as current_admission
 from core.reasons import code_of, relayed
+from core.topics import SCAN_EDIT_BEGIN, SCAN_EDIT_END
 
 
 def plain(value: Any) -> Any:
@@ -73,16 +74,16 @@ async def admitted(gw: Any, series_id: int) -> AsyncIterator[None]:
     stops waiting for the grant (its fuse, a dropped request) gives the grant back by it, whether it was made or not."""
     token = uuid.uuid4().hex
     try:
-        await gw.request("scan.edit.begin", {"series_id": series_id, "token": token})
+        await gw.request(SCAN_EDIT_BEGIN, {"series_id": series_id, "token": token})
     except BusRequestError as exc:
         if code_of(str(exc)) != NO_HANDLER:
             raise  # refused: the owner answered, nothing was granted
         yield  # no runs in this process: nothing to hold off
         return
     except BaseException:
-        gw.send_command("scan.edit.end", {"series_id": series_id, "token": token})
+        gw.send_command(SCAN_EDIT_END, {"series_id": series_id, "token": token})
         raise
-    admission = Admission(token, lambda: gw.send_command("scan.edit.end", {"series_id": series_id, "token": token}),
+    admission = Admission(token, lambda: gw.send_command(SCAN_EDIT_END, {"series_id": series_id, "token": token}),
                           log=getattr(gw, "log", None))
     current = current_admission.set(admission)
     try:

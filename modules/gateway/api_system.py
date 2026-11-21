@@ -12,9 +12,10 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
 from core.module import BusRequestError
-from core.contracts import DownloadCard, PackCard
+from core.contracts import DownloadCard, JobCancelled, PackCard
 from core.reasons import reason, relayed
-from core.topics import SETTINGS_VALUE_SET, TORRENTS_QUEUE_GET
+from core.topics import (CONFORM_CANCEL, CONFORM_PLOT, DOWNLOADS_CANCEL, DOWNLOADS_CARD_REMOVE, DOWNLOADS_QUEUE_CLEAR, DOWNLOADS_QUEUE_GET,
+                         SCAN_ALL_START, SCAN_SCHEDULE_SET, SCAN_STATUS_GET, SETTINGS_VALUE_SET, TORRENTS_QUEUE_GET)
 
 from .schemas import (ConformJobChange, DynamicObject, ErrorOnly, ErrorResponse, OkResponse, QueueTask, ScannerStatus,
                       ScheduleBody)
@@ -25,7 +26,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/scanner/status", response_model=ScannerStatus)
     async def scanner_status():
-        return await gw.request("scan.status.get", {})
+        return (await gw.reply_of(SCAN_STATUS_GET, {})).model_dump(mode="json")
 
     @r.post("/api/scanner/settings", response_model=OkResponse,
             response_model_exclude_none=True)
@@ -43,17 +44,17 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def schedule(body: ScheduleBody):
         """The times of day of the syncs and of the checks of the torrent releases; a schedule scan refuses is 400 with
         its reason."""
-        reply = await gw.request("scan.schedule.set", body.model_dump(mode="json"))
-        if not reply.get("ok"):
-            return JSONResponse({"error": reply["reason"]}, status_code=400)
-        return {"schedule": reply["schedule"]}
+        reply = await gw.reply_of(SCAN_SCHEDULE_SET, body.model_dump(mode="json"))
+        if not reply.ok:
+            return JSONResponse({"error": reply.reason}, status_code=400)
+        return {"schedule": reply.schedule.model_dump(mode="json")}
 
     @r.post("/api/scanner/scan_all", response_model=OkResponse,
             response_model_exclude_none=True,
             responses={409: {"model": ErrorResponse}})
     async def scan_all(request: Request):
-        reply = await gw.request("scan.all.start", {})
-        if not reply["started"]:
+        reply = await gw.reply_of(SCAN_ALL_START, {})
+        if not reply.started:
             return JSONResponse(
                 {"success": False, "error": reason("scan_all_running")},
                 status_code=409)
@@ -72,22 +73,22 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def downloads_queue():
         """The cards of the downloads (core/contracts/downloads.py): one to a need of a plan, its stages and attempts."""
         try:
-            reply = await gw.request("downloads.queue.get", {})
+            reply = await gw.reply_of(DOWNLOADS_QUEUE_GET, {})
         except BusRequestError:
             return []
-        return reply["tasks"]
+        return list(reply.tasks)
 
     @r.post("/api/downloads/queue/clear", response_model=OkResponse,
             response_model_exclude_none=True,
             responses={500: {"model": ErrorResponse}})
     async def downloads_queue_clear():
         try:
-            reply = await gw.request("downloads.queue.clear", {})
+            reply = await gw.reply_of(DOWNLOADS_QUEUE_CLEAR, {})
         except BusRequestError as exc:
             return JSONResponse({"success": False, "error": relayed(str(exc))},
                                 status_code=500)
         return {"success": True,
-                "message": reason("queue_tasks_removed", count=reply["deleted"])}
+                "message": reason("queue_tasks_removed", count=reply.deleted)}
 
     @r.get("/api/pack/queue", response_model=list[PackCard])
     async def pack_queue():
@@ -117,7 +118,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def downloads_card_remove(card_id: str):
         """A card that stayed after its sync is removed."""
         try:
-            await gw.request("downloads.card.remove", {"id": card_id})
+            await gw.request(DOWNLOADS_CARD_REMOVE, {"id": card_id})
         except BusRequestError as exc:
             msg = str(exc)
             return JSONResponse({"success": False, "error": relayed(msg)},
@@ -132,7 +133,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """Точечная отмена загрузки: убить процесс + удалить файл +
         снять задачу (находка 45)."""
         try:
-            await gw.request("downloads.cancel", {"task_id": task_id})
+            await gw.request(DOWNLOADS_CANCEL, {"task_id": task_id})
         except BusRequestError as exc:
             msg = str(exc)
             code = 404 if "LookupError" in msg else 409 if msg.startswith("NotAllowed") else 500
@@ -145,10 +146,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def conform_job_delete(job_id: str):
         """Stops a job that waits or runs; deletes the record of a job that ended."""
         try:
-            reply = await gw.request("conform.cancel", {"job_id": job_id})
+            reply = await gw.reply_of(CONFORM_CANCEL, {"job_id": job_id})
         except BusRequestError:
-            reply = {"done": False}
-        if not reply["done"]:
+            reply = JobCancelled(done=False)
+        if not reply.done:
             return JSONResponse({"error": reason("conform_job_unchanged")}, status_code=502)
         return {"done": True}
 
@@ -157,12 +158,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def conform_plot(job_id: str, name: str):
         """The picture of an alignment plot, as the daemon made it."""
         try:
-            reply = await gw.request("conform.plot", {"job_id": job_id, "name": name})
+            reply = await gw.reply_of(CONFORM_PLOT, {"job_id": job_id, "name": name})
         except BusRequestError as exc:
             return JSONResponse({"error": relayed(str(exc))}, status_code=502)
-        if not reply["found"]:
+        if not reply.found:
             return JSONResponse({"error": reason("conform_plot_missing")}, status_code=404)
-        return Response(base64.b64decode(reply["data"]), media_type="image/png",
+        return Response(base64.b64decode(reply.data), media_type="image/png",
                         headers={"Cache-Control": "private, max-age=3600"})
 
     return r
