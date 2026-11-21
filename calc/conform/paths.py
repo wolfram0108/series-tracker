@@ -10,6 +10,7 @@ import os
 import re
 from pathlib import PurePath, PurePosixPath, PureWindowsPath
 
+from core.contracts import ConformFolders, JobFolders
 from core.reasons import reason
 
 # The two folders inside the work folder: voice-overs wait for alignment in the first, the service works in the second.
@@ -25,16 +26,16 @@ _WINDOWS = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
 _TOP = re.compile(r"(?:[A-Za-z]:|\\\\[^\\/]+[\\/][^\\/]+)")
 
 
-def roots(work_dir: str | None) -> dict[str, str]:
+def roots(work_dir: str | None) -> ConformFolders:
     """The two folders inside the work folder; both empty while the owner has not named it."""
     if not work_dir:
-        return {"downloads": "", "conform": ""}
-    return {"downloads": os.path.join(work_dir, DOWNLOADS_DIR), "conform": os.path.join(work_dir, CONFORM_DIR)}
+        return ConformFolders(downloads="", conform="")
+    return ConformFolders(downloads=os.path.join(work_dir, DOWNLOADS_DIR), conform=os.path.join(work_dir, CONFORM_DIR))
 
 
-def workspace(dub_folder: str) -> dict[str, str]:
+def workspace(dub_folder: str) -> JobFolders:
     """Where the daemon writes the tracks and keeps its cache for the episode folder `dub_folder`."""
-    return {"out_dir": os.path.join(dub_folder, OUT_DIR), "cache_dir": os.path.join(dub_folder, CACHE_DIR)}
+    return JobFolders(out_dir=os.path.join(dub_folder, OUT_DIR), cache_dir=os.path.join(dub_folder, CACHE_DIR))
 
 
 def _pure(path: str) -> PurePath:

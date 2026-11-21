@@ -162,7 +162,7 @@ class ProviderHost:
 
     async def _downloads_dir(self) -> str:
         try:
-            return str((await self._request(CONFORM_WORKSPACE, {})).get("downloads") or "")
+            return (await self._reply(CONFORM_WORKSPACE, {})).downloads
         except (BusRequestError, asyncio.TimeoutError):
             return ""
 

@@ -46,7 +46,7 @@ from calc.plan.steps import DOWNLOADS, Made, Passing, judged, video_of
 from calc.plan.tables import Track, Video, label_of
 from modules.planner.files import Library
 from modules.conform.client import DaemonClient, Unconfirmed
-from modules.conform.module import ABORT, finished_view
+from calc.conform.jobs import ABORT, finished_view
 from modules.downloads import ytdlp
 from plan_world import World
 
@@ -566,7 +566,7 @@ class DiskWorld(World):
         finally:
             await client.close()
         # The service's answer as the conform module reads it: the verdict is the product's own reading of it.
-        results = finished_view(job, {})["results"]
+        results = finished_view(job, {}).results
         return judged(results[0] if results else None, cut=route == "reverse")
 
     def aligned_truth(self, aligned: Made) -> tuple[int, ...]:

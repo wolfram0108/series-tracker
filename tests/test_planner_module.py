@@ -22,7 +22,7 @@ from core.contracts import (VOICE_TAKE, CompositionReply, CompositionRow, Effect
 from core.db import Database
 from core.envelope import Envelope
 from modules.planner.files import BuildFailed, Library
-from modules.conform.module import finished_view, job_label
+from calc.conform.jobs import finished_view, job_label
 from modules.downloads import ytdlp
 from modules.planner import PlannerModule
 from plan_disk import Codec, Daemon, Host
@@ -63,6 +63,7 @@ class Neighbours(BaseModule):
         self.handle("composition.get", self.on_composition)
         self.handle("voices.settings.get", self.on_voices)
         self.handle("conform.workspace", self.on_workspace)
+        self.handle("conform.job.folders", self.on_folders)
         self.handle("downloads.fetch", self.on_fetch, concurrent=True)
         self.handle("conform.submit", self.on_submit, concurrent=True)
         self.handle("conform.reverse", self.on_reverse, concurrent=True)
@@ -84,10 +85,11 @@ class Neighbours(BaseModule):
     async def on_voices(self, env: Envelope) -> VoiceSettingsView:
         return VoiceSettingsView(priority=["vk", "cvh", "kodik"], voice_groups={}, default_priority=[], rejected=[])
 
+    async def on_folders(self, env: Envelope) -> dict:
+        return {"out_dir": os.path.join(env.payload["dub_folder"], "out"),
+                "cache_dir": os.path.join(env.payload["dub_folder"], "cache")}
+
     async def on_workspace(self, env: Envelope) -> dict:
-        if env.payload.get("dub_folder"):
-            return {"out_dir": os.path.join(env.payload["dub_folder"], "out"),
-                    "cache_dir": os.path.join(env.payload["dub_folder"], "cache")}
         return {"downloads": os.path.join(self.root, "work", "downloads"), "conform": os.path.join(self.root, "work", "conform")}
 
     async def on_fetch(self, env: Envelope) -> None:
@@ -104,7 +106,7 @@ class Neighbours(BaseModule):
             await client.close()
         # Told as the conform module tells it: the service's results read by its own view.
         self.publish_event("conform.job.finished", {"job_id": job["id"], "kind": job["kind"], "status": job["status"],
-                                                    "error": None, "results": finished_view(job, {})["results"]})
+                                                    "error": None, "results": finished_view(job, {}).model_dump(mode="json")["results"]})
 
     async def on_submit(self, env: Envelope) -> dict:
         body = {key: env.payload[key] for key in ("ref", "dubs", "dub_atracks", "out_dir", "label")
@@ -149,7 +151,7 @@ class Neighbours(BaseModule):
         if job is None:
             return {"job_id": env.payload["job_id"], "status": "gone", "results": []}
         return {"job_id": job["id"], "status": job["status"], "error": job.get("error"),
-                "results": finished_view(job, {})["results"]}
+                "results": finished_view(job, {}).model_dump(mode="json")["results"]}
 
     async def on_job_keys(self, env: Envelope) -> dict:
         return {"reachable": True, "keys": sorted({str(job.get("label") or "").rsplit("#", 1)[-1].strip()

@@ -3,11 +3,12 @@
 import asyncio
 
 import pytest
+from pydantic import BaseModel
 
 from core.bus import Bus
 from core.module import BaseModule
 from core.runner import Runner
-from core.contracts import ConformSettingsDraft
+from core.contracts import ConformSettingsDraft, DaemonState
 from modules.conform import ConformModule
 from conform_fakes import FakeClient
 
@@ -45,6 +46,11 @@ class Settings(BaseModule):
 
 class Probe(BaseModule):
     name = "probe"
+
+    async def request(self, topic, payload=None, *args, **options):
+        """The reply of a module as the plain JSON it comes to (the tests read it by key)."""
+        reply = await super().request(topic, payload, *args, **options)
+        return reply.model_dump(mode="json", exclude_unset=True) if isinstance(reply, BaseModel) else reply
 
 
 # What the service asked before the parameters were settings: what a store with none of them gives.
@@ -118,7 +124,7 @@ async def test_the_parameters_are_checked_against_what_the_daemon_accepts_and_wr
         assert settings.values == {}
 
         probe_bridge = next(each for each in runner.modules if each.name == "conform")
-        probe_bridge._daemon["params"] = DOMAIN
+        probe_bridge._daemon = DaemonState(up=True, error=None, params=DOMAIN)
         wrong = await probe.request("conform.params.set", params(audio_method="dsp", drift_speed_pct=11.0), timeout=5)
         assert [p["field"] for p in wrong["problems"]] == ["audio_method", "drift_speed_pct"] and settings.values == {}
 

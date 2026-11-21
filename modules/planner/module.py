@@ -121,9 +121,9 @@ from calc.view.packing import card_id
 from calc.view.view import placed
 from core import compute, storage
 from core.clock import beat_while
-from core.contracts import (CompositionGetRequest, DownloadNeed, DownloadVariant, PlanDelete, PlanForget, PlannerView,
+from core.contracts import (AlignmentJob, CompositionGetRequest, DownloadFetch, DownloadNeed, DownloadVariant, FetchFinished, JobRemoved, PlanDelete, PlanForget, PlannerView,
                             Reference, SeriesCard, SeriesDeleted, SeriesPurged, SourceType, StatusContribution,
-                            SubmitOutcome, SubmitReply, SyncScope, job_dir, job_key)
+                            SubmitOutcome, SyncScope, job_dir, job_key)
 from core.contracts.torrent import ReleaseState, fonts_of, parse_link
 from core.contracts.work import WorkState, WorkWithdrawn
 from core.dump import plain
@@ -133,7 +133,7 @@ from core.fsnames import sanitize_name
 from core.module import NO_HANDLER, BaseModule, BusRequestError
 from core.reasons import describe, reason
 from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, CATALOG_SERIES_TOUCH_SCAN_TIME, COMPOSITION_CHANGED,
-                         COMPOSITION_GET, CONFORM_CANCEL, CONFORM_JOB_FIND, CONFORM_JOB_FINISHED, CONFORM_JOB_GET,
+                         COMPOSITION_GET, CONFORM_CANCEL, CONFORM_JOB_FIND, CONFORM_JOB_FINISHED, CONFORM_JOB_FOLDERS, CONFORM_JOB_GET,
                          CONFORM_JOB_KEYS, CONFORM_JOB_REMOVED, CONFORM_REVERSE, CONFORM_SETTINGS_GET, CONFORM_SUBMIT,
                          CONFORM_WORKSPACE, DOWNLOADS_FETCH, DOWNLOADS_FETCH_FINISHED, DOWNLOADS_WITHDRAW,
                          GATEWAY_SSE_CLIENTS, PLANNER_DELETE, PLANNER_DELETE_CANCEL, PLANNER_DOWNLOADED_COUNTS,
@@ -243,11 +243,11 @@ class BusSync(SeriesSync):
                                                     "download": self.download, "data": body})
 
     async def prepare(self) -> None:
-        folders = await self.m.request(CONFORM_WORKSPACE, {})
-        if folders.get("downloads") and folders.get("conform"):
-            self.downloads_dir = os.path.join(folders["downloads"], WORK, str(self.series.id))
-            self.conform_dir = os.path.join(folders["conform"], WORK, str(self.series.id))
-            self.kept = Kept.of(folders["conform"], self.series.id)
+        folders = await self.m.reply_of(CONFORM_WORKSPACE, {})
+        if folders.downloads and folders.conform:
+            self.downloads_dir = os.path.join(folders.downloads, WORK, str(self.series.id))
+            self.conform_dir = os.path.join(folders.conform, WORK, str(self.series.id))
+            self.kept = Kept.of(folders.conform, self.series.id)
 
     async def namer_for(self, made: Plan):
         """The series' own rule of names (`rules.format_filename`), asked once for every goal the names do not hold yet.
@@ -334,7 +334,7 @@ class BusSync(SeriesSync):
             name = f"{name} {key.split(':')[-1]}"
         return name + ".mp4"
 
-    def _telemetry(self, op, row, cap: int | None) -> dict:
+    def _telemetry(self, op, row, cap: int | None) -> tuple[DownloadNeed, DownloadVariant]:
         """What a download is for and which variant it takes (core/contracts/downloads.py): every variant the plan takes
         for one need is one card of the queue, in the marks of the window «Выход»."""
         kind = {"download_video": "video", "download_dub": "dub"}.get(op.kind, "picture")
@@ -347,7 +347,7 @@ class BusSync(SeriesSync):
         place, color = self.source_marks.get(row.id.source_id, (0, 0))
         variant = DownloadVariant(source_id=row.id.source_id, source_n=place, source_color=color, place=row.source,
                                   player=row.player, player_label=row.player_label or row.player, height=row.height or None)
-        return {"need": need.model_dump(mode="json"), "variant": variant.model_dump(mode="json")}
+        return need, variant
 
     async def _height_cap(self, op) -> int | None:
         """The highest a download may be: a single video is taken whole — the video of the reference, and the timeline a
@@ -371,18 +371,17 @@ class BusSync(SeriesSync):
         path = os.path.join(self.downloads_dir, self._download_name(op, row, key))
         await storage.call(os.makedirs, self.downloads_dir, exist_ok=True)
         cap = await self._height_cap(op)
-        finished = await self.m.fetch(key, {"key": key, "url": row.link, "path": path, "series_id": self.series.id,
-                                            "whole": op.kind == "download_video",
-                                            "ytdlp": row.id.source_id in self.vk_sources,
-                                            **({"max_height": cap} if cap else {}),
-                                            **self._telemetry(op, row, cap)})
-        if not finished.get("ok"):
-            if finished.get("transient"):
+        need, variant = self._telemetry(op, row, cap)
+        finished = await self.m.fetch(key, DownloadFetch(
+            key=key, url=row.link, path=path, series_id=self.series.id, whole=op.kind == "download_video",
+            ytdlp=row.id.source_id in self.vk_sources, max_height=cap or None, need=need, variant=variant))
+        if not finished.ok:
+            if finished.transient:
                 self.m.log.warning("сериал %d: загрузка %s не удалась, повторится при следующей синхронизации: %s",
-                                   self.series.id, op.id, describe(finished.get("error") or ""))
-                raise Passing(reason("download_not_done", cause=finished.get("error") or ""))
+                                   self.series.id, op.id, describe(finished.error))
+                raise Passing(reason("download_not_done", cause=finished.error))
             self.m.log.warning("сериал %d: загрузка %s не удалась, записано как неудача: %s", self.series.id, op.id,
-                               describe(finished.get("error") or ""))
+                               describe(finished.error))
             return None
         if op.kind == "download_video":
             return Made(Video(row.id, row.snapshot(), row.slot, row.timeline), path, retimed=await self._retimed(row.id, path))
@@ -570,7 +569,7 @@ class BusSync(SeriesSync):
         key = self._job_key("align", goal.slot, timeline,
                             sorted((op.subject[1].voice, repr(op.subject[1].dub)) for op in ops))
         folder = os.path.join(self.conform_dir, job_dir(key))
-        places = await self.m.request(CONFORM_WORKSPACE, {"dub_folder": folder})
+        places = await self.m.reply_of(CONFORM_JOB_FOLDERS, {"dub_folder": folder})
         of_dub = {}
         for op in ops:  # the name the file of each voice-over has in the job (the job taken up again has the same)
             way = op.subject[1]
@@ -584,13 +583,13 @@ class BusSync(SeriesSync):
         if found is None:
             return {op.id: None for op in ops}
         job_id, ended = found
-        await self._shed(folder, places["out_dir"])
-        by_dub = {os.path.basename(result.get("dub") or ""): result for result in ended.get("results") or []}
+        await self._shed(folder, places.out_dir)
+        by_dub = {os.path.basename(result.dub or ""): result for result in ended.results}
         outcomes = {}
         for name, op in of_dub.items():
             way = op.subject[1]
             result = by_dub.get(name)
-            why = (result or {}).get("error") or ended.get("error") or reason("daemon_no_result")
+            why = (result.error if result else None) or ended.error or reason("daemon_no_result")
             try:
                 made = judged(result, cut=False)
             except Passing as passing:
@@ -599,14 +598,14 @@ class BusSync(SeriesSync):
                 outcomes[op.id] = type(passing)(reason("daemon_job_failed", job=job_id, cause=why))
                 continue
             if made is None:
-                what = "критичные замечания" if result and result.get("ok") else why
+                what = "критичные замечания" if result and result.ok else why
                 self.m.log.warning("%s %s: сервис выравнивания отказал в задаче %s, записано как неудача: %s", label,
                                    way.voice, job_id, what)
                 outcomes[op.id] = None
             else:
                 outcomes[op.id] = Made(Track(way.dub, way.snapshot, goal.slot, timeline), made)
                 await self._keep(goal, way, timeline, made)
-        clean = ended.get("status") == "done" and all(isinstance(each, Made) for each in outcomes.values())
+        clean = ended.status == "done" and all(isinstance(each, Made) for each in outcomes.values())
         self.jobs.append((job_id, clean))
         return outcomes
 
@@ -634,8 +633,8 @@ class BusSync(SeriesSync):
             dubs.append(dub)
             streams.append(stream)
         return await self.m.job(key, CONFORM_SUBMIT, body={
-            "ref": ref, "dubs": dubs, "dub_atracks": streams, "out_dir": places["out_dir"],
-            "cache_dir": places["cache_dir"], "label": label, "key": key,
+            "ref": ref, "dubs": dubs, "dub_atracks": streams, "out_dir": places.out_dir,
+            "cache_dir": places.cache_dir, "label": label, "key": key,
             **({"ref_atrack": ref_atrack} if ref_atrack else {})})
 
     async def _cut(self, op, results):
@@ -645,7 +644,7 @@ class BusSync(SeriesSync):
         key = self._job_key("cut", op.slot, way.row.id, ref2)
         label = f"{self.series.name} {label_of(op.slot)}"
         folder = os.path.join(self.conform_dir, f"{label_of(op.slot)} #{job_dir(key)}")
-        places = await self.m.request(CONFORM_WORKSPACE, {"dub_folder": folder})
+        places = await self.m.reply_of(CONFORM_JOB_FOLDERS, {"dub_folder": folder})
         self.keys.add(key)
         job_id = await self.m.find_job(key)
         if job_id:
@@ -664,22 +663,22 @@ class BusSync(SeriesSync):
             picture = await self._copy(picture, os.path.join(folder, "picture"))
             found = await self.m.job(key, CONFORM_REVERSE, body={
                 "compilation": picture, "compilation_atrack": picture_atrack,
-                "episodes": [{"path": episode, "atrack": atrack}], "out_dir": places["out_dir"], "label": label})
+                "episodes": [{"path": episode, "atrack": atrack}], "out_dir": places.out_dir, "label": label})
         if found is None:
             return None
         job_id, ended = found
-        await self._shed(folder, places["out_dir"])
-        result = next(iter(ended.get("results") or []), None)
-        why = (result or {}).get("error") or ended.get("error") or reason("daemon_no_result")
+        await self._shed(folder, places.out_dir)
+        result = next(iter(ended.results), None)
+        why = (result.error if result else None) or ended.error or reason("daemon_no_result")
         try:
             out = judged(result, cut=True)
         except Passing as passing:
             self.m.log.warning("%s: разбор не сделан: сбой сервиса в задаче %s: %s; %s", label, job_id, describe(why),
                                fate_of(passing))
             raise type(passing)(reason("daemon_job_failed", job=job_id, cause=why)) from None
-        self.jobs.append((job_id, out is not None and ended.get("status") == "done"))
+        self.jobs.append((job_id, out is not None and ended.status == "done"))
         if out is None:
-            what = "критичные замечания" if result and result.get("ok") else why
+            what = "критичные замечания" if result and result.ok else why
             self.m.log.warning("%s: сервис выравнивания отказал в задаче %s, записано как неудача: %s", label, job_id, what)
             return None
         return Made(cut_video(way, op.slot), out)
@@ -753,7 +752,7 @@ class PlannerModule(BaseModule):
         self._halting: set[int] = set()  # the series whose sync the user stops
         self._fetches: dict[str, asyncio.Future] = {}
         self._jobs: dict[str, asyncio.Future] = {}
-        self._ended: dict[str, dict] = {}  # jobs that ended before anyone waited for them
+        self._ended: dict[str, AlignmentJob] = {}  # jobs that ended before anyone waited for them
         self._views: dict[int, tuple] = {}
         self._failures: dict[int, str] = {}  # why the last sync of a series broke, told with the end of its work
         self._names: dict[int, tuple[str, dict]] = {}  # the names the rule gave each series, with the card they are of
@@ -1047,7 +1046,7 @@ class PlannerModule(BaseModule):
             task.cancel()
         await self.repo.purge(series_id)
         try:
-            root = (await self.request(CONFORM_WORKSPACE, {})).get("conform")
+            root = (await self.reply_of(CONFORM_WORKSPACE, {})).conform
             if root:
                 await storage.call(Kept.of(root, series_id).drop, timeout=storage.REMOVE_TIMEOUT_S)
         except (BusRequestError, asyncio.TimeoutError, OSError):
@@ -1056,20 +1055,21 @@ class PlannerModule(BaseModule):
 
     # --- the workers' signals ------------------------------------------------------------------------------------
 
-    async def fetch(self, key: str, job: dict) -> dict:
+    async def fetch(self, key: str, job: DownloadFetch) -> FetchFinished:
         future = self._fetches.setdefault(key, asyncio.get_running_loop().create_future())
-        self.send_command(DOWNLOADS_FETCH, job)
+        self.send_command(DOWNLOADS_FETCH, job.model_dump(mode="json"))
         try:
             return await future
         finally:
             self._fetches.pop(key, None)
 
     async def on_fetch_finished(self, env: Envelope) -> None:
-        future = self._fetches.get(env.payload.get("key") or "")
+        finished = FetchFinished.model_validate(env.payload)
+        future = self._fetches.get(finished.key or "")
         if future is not None and not future.done():
-            future.set_result(env.payload)
+            future.set_result(finished)
 
-    async def job(self, key: str, topic: Topic, body: dict) -> tuple[str, dict] | None:
+    async def job(self, key: str, topic: Topic, body: dict) -> tuple[str, AlignmentJob] | None:
         """A job at the alignment service: its number and how it ended (the result of each of its files, judged by the
         caller), None when the service refused the job; `Passing` when it could not be asked or its answer never came.
         Every end but a success is written to the log with its reason: the service keeps the reason of a crash, and
@@ -1082,23 +1082,18 @@ class PlannerModule(BaseModule):
                              describe(str(passing.args[0])) if passing.args else "ответа сервиса нет")
             raise
 
-    async def _job(self, key: str, topic: Topic, body: dict) -> tuple[str, dict] | None:
+    async def _job(self, key: str, topic: Topic, body: dict) -> tuple[str, AlignmentJob] | None:
         label = body.get("label") or key
         try:
-            if topic is CONFORM_SUBMIT:
-                reply = SubmitReply.model_validate(await self.request(topic, body))
-                outcome, refusal, job_id = reply.outcome, reply.reason, reply.job_id
-            else:
-                reply = await self.request(topic, body)
-                outcome, refusal = SubmitOutcome(reply["outcome"]), reply.get("reason")
-                job_id = next(iter((reply.get("jobs") or {}).values()), None)
+            reply = await self.reply_of(topic, body)
+            outcome, refusal = reply.outcome, reply.reason
+            job_id = reply.job_id if topic is CONFORM_SUBMIT else next(iter(reply.jobs.values()), None)
         except (BusRequestError, asyncio.TimeoutError) as exc:
             if NO_HANDLER in str(exc):
                 raise Passing from None
             outcome, refusal, job_id = SubmitOutcome.UNCERTAIN, str(exc), None
         if outcome is SubmitOutcome.UNCERTAIN and job_id is None:
-            found = await self.request(CONFORM_JOB_FIND, {"key": key})
-            job_id = found.get("job_id")
+            job_id = (await self.reply_of(CONFORM_JOB_FIND, {"key": key})).job_id
             if not job_id:
                 raise Passing(reason("daemon_job_lost", cause=str(refusal)))
         elif outcome is SubmitOutcome.UNAVAILABLE:
@@ -1155,7 +1150,7 @@ class PlannerModule(BaseModule):
         """A job of a stopped sync: stopped if it waits or runs, then its record leaves the history (its folder with it)."""
         for _ in range(2):  # the first stops a job under way, the second removes the record of a job that ended
             try:
-                if not (await self.request(CONFORM_CANCEL, {"job_id": job_id})).get("done"):
+                if not (await self.reply_of(CONFORM_CANCEL, {"job_id": job_id})).done:
                     return
             except (BusRequestError, asyncio.TimeoutError):
                 self.log.warning("задача %s сервиса выравнивания не снята: сервис не ответил", job_id)
@@ -1196,40 +1191,40 @@ class PlannerModule(BaseModule):
     async def find_job(self, key: str) -> str | None:
         """The job of the service a stop left behind, by its key: taken up instead of being sent again."""
         try:
-            return (await self.request(CONFORM_JOB_FIND, {"key": key})).get("job_id")
+            return (await self.reply_of(CONFORM_JOB_FIND, {"key": key})).job_id
         except (BusRequestError, asyncio.TimeoutError):
             return None
 
-    async def attach(self, job_id: str) -> tuple[str, dict]:
+    async def attach(self, job_id: str) -> tuple[str, AlignmentJob]:
         """The end of a job: its event, or its state when it ended before anybody waited (a stop in between)."""
         future = self._jobs.setdefault(job_id, asyncio.get_running_loop().create_future())
         try:
             ended = self._ended.pop(job_id, None)
             if ended is None:
                 try:
-                    state = await self.request(CONFORM_JOB_GET, {"job_id": job_id})
+                    state = await self.reply_of(CONFORM_JOB_GET, {"job_id": job_id})
                 except (BusRequestError, asyncio.TimeoutError):
-                    state = {}  # not told now: the end of the job comes as its event
-                if state.get("status") in ENDED:
+                    state = None  # not told now: the end of the job comes as its event
+                if state is not None and state.status in ENDED:
                     ended = state
             if ended is None:
-                ended = await future
+                ended = await future  # none when the record of the job was removed
         finally:
             self._jobs.pop(job_id, None)
-        if ended.get("removed") or ended.get("status") in ("cancelled", "gone"):
+        if ended is None or ended.status in ("cancelled", "gone"):
             raise Passing(reason("daemon_job_removed", job=job_id))
         return job_id, ended
 
     async def sweep(self, series_ids=None) -> None:
         """A folder of a job stays while the record of the job is in the service's history (the plots are shown from
         it); a record gone takes its folder. A series whose sync is under way is left to the end of its sync."""
-        root = (await self.request(CONFORM_WORKSPACE, {})).get("conform")
+        root = (await self.reply_of(CONFORM_WORKSPACE, {})).conform
         if not root:
             return
-        known = await self.request(CONFORM_JOB_KEYS, {})
-        if not known.get("reachable"):
+        known = await self.reply_of(CONFORM_JOB_KEYS, {})
+        if not known.reachable:
             return
-        keys, base = {job_dir(key) for key in known.get("keys") or []}, os.path.join(root, WORK)
+        keys, base = {job_dir(key) for key in known.keys}, os.path.join(root, WORK)
 
         def sweep() -> None:
             for name in os.listdir(base) if os.path.isdir(base) else ():
@@ -1249,25 +1244,24 @@ class PlannerModule(BaseModule):
     async def clear_finished(self, jobs: list[tuple[str, bool]]) -> None:
         """The setting conform.clear_finished: a job that ended with every result taken leaves the service's history at
         once (its folder goes with it); one that ended in an error stays for the owner."""
-        if not jobs or not (await self.request(CONFORM_SETTINGS_GET, {})).get("clear_finished"):
+        if not jobs or not (await self.reply_of(CONFORM_SETTINGS_GET, {})).clear_finished:
             return
         for job_id, clean in jobs:
             if clean:
                 await self.request(CONFORM_CANCEL, {"job_id": job_id})
 
     async def on_job_finished(self, env: Envelope) -> None:
-        job_id = env.payload.get("job_id")
-        future = self._jobs.get(job_id)
+        ended = AlignmentJob.model_validate(env.payload)
+        future = self._jobs.get(ended.job_id)
         if future is not None and not future.done():
-            future.set_result(env.payload)
+            future.set_result(ended)
         else:
-            self._ended[job_id] = env.payload
+            self._ended[ended.job_id] = ended
 
     async def on_job_removed(self, env: Envelope) -> None:
-        job_id = env.payload.get("job_id")
-        future = self._jobs.get(job_id)
+        future = self._jobs.get(JobRemoved.model_validate(env.payload).job_id)
         if future is not None and not future.done():
-            future.set_result({"removed": True})
+            future.set_result(None)
         try:
             await self.sweep()
         except Exception:  # noqa: BLE001 - the folder waits for the next sweep
@@ -1297,12 +1291,12 @@ class PlannerModule(BaseModule):
     def _state(self, series_id: int) -> WorkState:
         self._seq += 1
         running = series_id in self._runs and not self._runs[series_id].done()
-        return WorkState(owner=PLANNER, series_id=series_id, active=running, busy=(), seq=self._seq,
+        return WorkState(owner=PLANNER, series_id=series_id, active=running, seq=self._seq,
                          failure=None if running else self._failures.get(series_id))
 
     def _announce_work(self, series_id: int, active: bool) -> None:
         self._seq += 1
-        self.publish_event(WORK_SERIES_STATE, WorkState(owner=PLANNER, series_id=series_id, active=active, busy=(), seq=self._seq,
+        self.publish_event(WORK_SERIES_STATE, WorkState(owner=PLANNER, series_id=series_id, active=active, seq=self._seq,
                                                         failure=None if active else self._failures.get(series_id)).model_dump(mode="json"))
 
     async def on_work_get(self, env: Envelope) -> WorkState:

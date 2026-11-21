@@ -3,7 +3,7 @@ and how the daemon is asked to align (`ConformParams`: the fields of its jobs, c
 accepts). Whether finished jobs clear themselves from the queue is a pipeline flag (`conform.clear_finished`, "true" or
 "false"), written by the debug tab like the other flags and only read here.
 
-Pure functions over stored values: the module only carries their results across the bus. A save is checked as a whole and
+Pure functions over stored values (calc): the module only carries their results across the bus. A save is checked as a whole and
 refused with coded problems; a refused value is never written. The folders are named by the owner: nothing is assumed.
 """
 from __future__ import annotations
@@ -50,10 +50,11 @@ def clean(draft: ConformSettingsDraft) -> ConformSettingsDraft:
                                 work_dir_remote=paths.folder(draft.work_dir_remote))
 
 
-def check(draft: ConformSettingsDraft) -> list[SettingProblem]:
+def check(draft: ConformSettingsDraft, mounted: bool) -> list[SettingProblem]:
     """What is wrong with the draft once it is cleaned: an address needs both folders, a folder is absolute and is
     not the top of a storage (results would be written beside everything else that lives there). The folder here is a
-    path of this server; the folder of the daemon is a path in the daemon's own style (POSIX or Windows)."""
+    path of this server, `mounted` says whether the disk has a file system mounted on it; the folder of the daemon is a path in
+    the daemon's own style (POSIX or Windows)."""
     draft = clean(draft)
     problems = []
     if draft.url:
@@ -64,7 +65,7 @@ def check(draft: ConformSettingsDraft) -> list[SettingProblem]:
             problems.append(_problem("work_dir", reason("work_dir_here_missing")))
         if not draft.work_dir_remote:
             problems.append(_problem("work_dir_remote", reason("work_dir_daemon_missing")))
-    here = (draft.work_dir, os.path.isabs, lambda path: path == "/" or os.path.ismount(path))
+    here = (draft.work_dir, os.path.isabs, lambda path: path == "/" or mounted)
     there = (draft.work_dir_remote, paths.is_absolute, paths.is_root)
     for field, (path, is_absolute, is_root) in (("work_dir", here), ("work_dir_remote", there)):
         if path and not is_absolute(path):

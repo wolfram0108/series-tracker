@@ -5,8 +5,10 @@ import json
 
 import httpx
 import pytest
+from pydantic import BaseModel
 
 from core.bus import Bus
+from core.contracts import DaemonState
 from core.module import BaseModule, BusRequestError
 from core.runner import Runner
 from core.envelope import Envelope
@@ -50,6 +52,11 @@ class Settings(BaseModule):
 class Probe(BaseModule):
     name = "probe"
 
+    async def request(self, topic, payload=None, *args, **options):
+        """The reply of a module as the plain JSON it comes to (the tests read it by key)."""
+        reply = await super().request(topic, payload, *args, **options)
+        return reply.model_dump(mode="json", exclude_unset=True) if isinstance(reply, BaseModel) else reply
+
 
 async def started(client, settings=None, **options):
     bus = Bus()
@@ -63,9 +70,11 @@ async def started(client, settings=None, **options):
 async def until(probe, condition, seconds=3.0):
     """The bridge pushes; the test only waits for the picture it expects."""
     # The bus carries the picture only as a push; the test reads the bridge's copy after every step.
-    assert await wait_until(lambda: condition(probe.bridge.snapshot()), probe.bus, probe.bridge, seconds=seconds), \
-        probe.bridge.snapshot()
-    return probe.bridge.snapshot()
+    def picture():
+        return probe.bridge.snapshot().model_dump(mode="json", exclude_unset=True)
+
+    assert await wait_until(lambda: condition(picture()), probe.bus, probe.bridge, seconds=seconds), picture()
+    return picture()
 
 
 
@@ -254,10 +263,10 @@ async def test_a_failure_to_read_the_list_of_jobs_is_no_answer_not_no_job():
     for body in ("{broken", '{"not": "a list"}', '[{"label": "unreadable job"}]'):
         http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request, body=body: httpx.Response(200, text=body)))
         bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
-        bridge._daemon["up"] = True
+        bridge._daemon = DaemonState(up=True, error=None)
         bridge._looked.set()
         try:
-            assert await bridge.on_job_find(Envelope("conform.job.find", "query", {"key": "k1"})) == {
+            assert (await bridge.on_job_find(Envelope("conform.job.find", "query", {"key": "k1"}))).model_dump() == {
                 "reachable": False, "job_id": None}
         finally:
             await http.aclose()
@@ -267,11 +276,11 @@ async def test_a_failure_to_read_the_list_of_jobs_is_no_answer_not_no_job():
 async def test_only_the_not_found_of_the_contract_says_that_a_job_is_gone():
     http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(404)))
     bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
-    bridge._daemon["up"] = True
+    bridge._daemon = DaemonState(up=True, error=None)
     bridge._looked.set()
     try:
         reply = await bridge.on_job_get(Envelope("conform.job.get", "query", {"job_id": "lost"}))
-        assert reply["status"] == "gone"
+        assert reply.status == "gone"
     finally:
         await http.aclose()
 

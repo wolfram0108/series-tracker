@@ -8,7 +8,11 @@ without a restart. The work folder is two settings, `conform.work_dir` (as this 
 `conform.work_dir_remote` (the same folder as the daemon names it); no default, the owner names both. Everything the
 daemon is given or writes lies inside it, and the paths cross the boundary through these two names. The daemon may run
 on Windows: its folder is written as `Z:\\...` or `\\\\server\\share\\...`, and a path of the daemon is read by its own syntax
-(`paths.py`), so it is the same location whatever separators and letter case the daemon writes it with.
+(calc/conform/paths.py), so it is the same location whatever separators and letter case the daemon writes it with.
+
+What the settings, the jobs and the requests come to is counted in calc/conform; this module holds the connection to the daemon (the
+event feed, the HTTP client, its backoff), the mirror of its history and the address in force. Every reply and event is a model of
+core/contracts (alignment.py, conform_settings.py), handed over as it is; an event goes on the bus as its JSON.
 
 The daemon is not told down before it was looked at: a request that needs it (submit, reverse, cancel, plot, job.find, job.get of a
 job the mirror does not hold, job.keys, params.set) waits for the end of the first attempt to connect to the daemon of the address
@@ -16,9 +20,8 @@ in force (the address is read at the start, the feed connects after it) and is a
 of its topic. A daemon that was up and dropped is down at once, as before.
 
 Query:
-  conform.submit {ref, dubs: [path], out_dir, cache_dir, label?, key?, ref_atrack?, dub_atracks?} -> SubmitReply
-      (core/contracts):
-      {outcome, job_id?, reason?, retry}
+  conform.submit JobSubmit {ref, dubs: [path], out_dir, cache_dir, label?, key?, ref_atrack?, dub_atracks?} -> SubmitReply
+      (core/contracts): {outcome, job_id?, reason?, retry}
       One episode: a reference video and the voice-over files to align to it, local paths. `key`
       is written into the job's label so that the job can be found again when the answer is lost.
       The outcome is what was proved. `accepted`: the daemon named the job. `rejected` is final for this request: a path
@@ -34,8 +37,9 @@ Query:
       `clear_finished` (the setting conform.clear_finished, "true" or "false", written by the pipeline flag
       `/api/settings/conform_clear_finished` of the debug tab): a job that ended and whose result was taken leaves the
       daemon's history on its own, unless it ended in an error; off, the history keeps it until the owner deletes it.
-  conform.settings.set {url, work_dir, work_dir_remote} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
-      through settings.values.set_many and taken at once, or refused with coded problems and nothing written.
+  conform.settings.set ConformSettingsDraft {url, work_dir, work_dir_remote} -> ConformSettingsSaved {saved, problems, settings}:
+      checked as a whole, written through settings.values.set_many and taken at once, or refused with coded problems and nothing
+      written.
   conform.params.set ConformParams {audio_method, drift_speed_pct, keep_tmp, fill_silence, extend_edges} ->
       ConformSettingsSaved: how the daemon is asked to align (settings conform.audio_method, conform.drift_speed_pct,
       conform.keep_tmp, conform.fill_silence, conform.extend_edges; never stored: MuQ, the daemon's drift, no
@@ -49,35 +53,35 @@ Query:
       track of the picture that is its own sound. The folder of each episode
       is the label of its job and carries the key that finds it again (`… #key`); `jobs` maps the keys to the jobs the
       service named. The outcome reads as for conform.submit; a key the answer does not name is asked by its key.
-  conform.workspace {} -> {downloads, conform}: the two folders inside the work folder, where voice-overs wait for
+  conform.workspace {} -> ConformFolders {downloads, conform}: the two folders inside the work folder, where voice-overs wait for
       alignment and where the service works; both empty while no work folder is named.
-  conform.workspace {dub_folder} -> {out_dir, cache_dir}: the folders the daemon is asked to write the aligned
+  conform.job.folders JobFoldersOf {dub_folder} -> JobFolders {out_dir, cache_dir}: the folders the daemon is asked to write the aligned
       tracks and its cache to for an episode folder of the service. Pure: no daemon is asked.
-  conform.cancel {job_id} -> {done: bool} — stop a job that waits or runs (its record stays as `cancelled`), or delete the
-      record of a job that ended: the daemon then drops the files it keeps for the record (graphs, journal, time map,
+  conform.cancel JobRef {job_id} -> JobCancelled {done: bool} — stop a job that waits or runs (its record stays as `cancelled`), or
+      delete the record of a job that ended: the daemon then drops the files it keeps for the record (graphs, journal, time map,
       cache) and leaves the output audio. `done` is true when it is stopped or the daemon does not know it,
       false when the daemon could not be reached. An answer of failure is checked against what the daemon holds after
       it: a record that is gone, or is `cancelled`, is done.
-  conform.job.keys {} -> {reachable, keys}: the keys of the jobs the daemon's history holds (the end of their labels).
-  conform.plot {job_id, name} -> {found: bool, data?: base64 PNG} — the picture of a plot named in a result (`plot`); only
-      a plain PNG name is asked of the daemon.
-  conform.job.find {key} -> {reachable: bool, job_id: str | None} — the job sent with this key.
-  conform.job.get {job_id} -> {job_id, status, error, results}   status `gone` only when the daemon was
+  conform.job.keys {} -> JobKeys {reachable, keys}: the keys of the jobs the daemon's history holds (the end of their labels).
+  conform.plot PlotRef {job_id, name} -> PlotReply {found: bool, data?: base64 PNG} — the picture of a plot named in a result (`plot`);
+      only a plain PNG name is asked of the daemon.
+  conform.job.find JobKey {key} -> JobFound {reachable: bool, job_id: str | None} — the job sent with this key.
+  conform.job.get JobRef {job_id} -> AlignmentJob {job_id, status, error, results}   status `gone` only when the daemon was
       asked and does not know the job; when it cannot be asked the query fails; results as in
       conform.job.finished.
 Event:
-  conform.queue.changed {daemon, tasks}   the whole picture on every change and whenever an
+  conform.queue.changed ConformQueue {daemon, tasks}   the whole picture on every change and whenever an
                                           interface connects (gateway.sse.clients)
-  conform.job.finished {job_id, kind, status, error, results: [{dub, ok, refused, skipped, out_path, suspect,
+  conform.job.finished AlignmentJob {job_id, kind, status, error, results: [{dub, ok, refused, skipped, out_path, suspect,
       critical, warnings, resid_ms, error, from_ref_s, from_dub_s}]}   once per job that ended (done, failed, cancelled);
       out_path is a local path. A pair that is not `ok` is `refused` only when the service itself turned it down (its trace
       holds a decision that went `abort`); otherwise it crashed in the service and no judgement of the voice-over was made.
       The results of a failed or stopped job are those of the pairs it had finished.
   conform.daemon.up {}                    the daemon became reachable: waiting work may be sent
-  conform.job.removed {job_id}            the daemon dropped the record of a job (deleted by the owner, by the service
+  conform.job.removed JobRemoved {job_id}  the daemon dropped the record of a job (deleted by the owner, by the service
                                           or by the cleanup of this project)
   conform.settings.changed ConformSettingsView   after every save, so that every open interface shows it
-A task is the compact view of one daemon job: id, label (the human part), key (the one the label carries,
+A task is the compact view of one daemon job (ConformTask): id, label (the human part), key (the one the label carries,
 if any), series_id (the series the key says the job works for: contracts/alignment.py), status, progress, stage, stage_pct,
 detail, dub_index, dub_total, cur_dub, dubs (file names), elapsed_s, error and results[{dub, plot, ok, refused, skipped, resid_ms,
 coverage, cuts, suspect, warnings, critical, error}]; `plot` names the picture of the voice-over's plot, if the daemon made one.
@@ -87,108 +91,34 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
-import re
 from collections.abc import Callable
 from typing import Any
 
 import httpx
 
-from core.module import BaseModule, BusRequestError
-from core.contracts import (AlignmentJob, series_of_job_key, ConformParams, ConformSettingsDraft, ConformSettingsSaved, DubResult, JobKind,
-                            JobStatus,
-                            ReverseReply, ReverseSubmit, SubmitOutcome,
+from calc.conform import jobs as conform_jobs
+from calc.conform import settings as conform_settings
+from calc.conform.jobs import (episode_body, finished_view, job_with_key, keys_of, named_jobs, picture_of, plot_is_plain, reverse_body,
+                               reverse_keys, reverse_label, stopped_or_gone, unannounced)
+from calc.conform.paths import reverse, roots, workspace
+from calc.conform.settings import PREFIX, REMOTE_DIR_KEY, URL_KEY, WORK_DIR_KEY, mapping_of
+from core import storage
+from core.contracts import (AlignmentJob, ConformFolders, ConformParams, ConformQueue, ConformSettingsDraft, ConformSettingsSaved,
+                            ConformSettingsView, DaemonState, DaemonUp, JobCancelled, JobFolders, JobFoldersOf, JobFound, JobKeys, JobKey,
+                            JobRef, JobRemoved, JobStatus, JobSubmit, PlotRef, PlotReply, ReverseReply, ReverseSubmit, SubmitOutcome,
                             SubmitReply)
 from core.envelope import Envelope
+from core.module import BaseModule, BusRequestError
 from core.reasons import describe, reason
-from core.topics import SETTINGS_VALUE_GET, SETTINGS_VALUES_BY_PREFIX, SETTINGS_VALUES_SET_MANY
+from core.topics import (CONFORM_CANCEL, CONFORM_DAEMON_UP, CONFORM_JOB_FIND, CONFORM_JOB_FINISHED, CONFORM_JOB_FOLDERS, CONFORM_JOB_GET,
+                         CONFORM_JOB_KEYS, CONFORM_JOB_REMOVED, CONFORM_PARAMS_SET, CONFORM_PLOT, CONFORM_QUEUE_CHANGED, CONFORM_REVERSE,
+                         CONFORM_SETTINGS_CHANGED, CONFORM_SETTINGS_GET, CONFORM_SETTINGS_SET, CONFORM_SUBMIT, CONFORM_WORKSPACE,
+                         GATEWAY_SSE_CLIENTS, SETTINGS_VALUE_GET, SETTINGS_VALUES_BY_PREFIX, SETTINGS_VALUES_SET_MANY)
 
 from .client import DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
-from . import settings as conform_settings
-from .paths import name_of, reverse, roots, translate, workspace
-from .settings import PREFIX, REMOTE_DIR_KEY, URL_KEY, WORK_DIR_KEY, mapping_of
 
 BACKOFF_START_S = 2.0
 BACKOFF_MAX_S = 30.0
-ENDED = ("done", "failed", "cancelled")
-# The word of the service's trace for a gate that turns a pair down (the one gate there is: a foreign video).
-ABORT = "abort"
-
-_JOB_FIELDS = ("id", "kind", "label", "status", "progress", "stage", "stage_pct", "detail", "dub_index",
-               "dub_total", "cur_dub", "elapsed_s", "error", "created_at", "updated_at")
-
-
-def compact_job(job: dict[str, Any]) -> dict[str, Any]:
-    """The part of a daemon job the interface shows; traces, plots and operation logs stay behind."""
-    view = {field: job.get(field) for field in _JOB_FIELDS}
-    view["label"], view["key"] = split_label(job.get("label"))
-    view["series_id"] = series_of_job_key(view["key"])
-    view["dubs"] = [name_of(str(dub)) for dub in job.get("dubs") or []]
-    view["results"] = [{
-        "dub": result.get("dub"), "plot": plot_of(result),
-        "ok": bool(result.get("ok")), "refused": refused_by_service(result), "skipped": bool(result.get("skipped")),
-        "resid_ms": result.get("audio_resid_ms"), "coverage": result.get("audio_coverage"),
-        "cuts": result.get("audio_cuts"), "suspect": bool(result.get("suspect")),
-        "warnings": list(result.get("warnings") or []), "critical": list(result.get("critical") or []),
-        "error": result.get("error"), "from_ref_s": result.get("from_ref_s"), "from_dub_s": result.get("from_dub_s"),
-    } for result in job.get("results") or []]
-    return view
-
-
-def refused_by_service(result: dict[str, Any]) -> bool:
-    """The service itself turned the pair down: its trace holds a decision that went the way of `abort`. A pair that is not `ok`
-    without such a decision crashed in the service (its trace may end in an `exception`, or hold nothing): no judgement of
-    the voice-over, only a failure to make one."""
-    return not result.get("ok") and any(
-        record.get("kind") == "decision" and record.get("verdict") == ABORT for record in result.get("trace") or [])
-
-
-def plot_of(result: dict[str, Any]) -> str | None:
-    """The name of the picture of a voice-over's alignment plot; the interactive page of it is not shown."""
-    return next((str(ref["name"]) for ref in result.get("plots") or []
-                 if ref.get("kind") == "track" and str(ref.get("name") or "").endswith(".png")), None)
-
-
-def job_label(label: str | None, key: str | None) -> str | None:
-    """The label the job carries: the human one and, when given, the key that finds the job again."""
-    return f"{label or ''} #{key}".strip() if key else label
-
-
-_KEY_SUFFIX = re.compile(r"(?:^|\s+)#(\S+)$")
-_JOB_ID = re.compile(r"[\w-]+")
-# A plot is named after the file of its voice-over (`<series> s06e08 — <voice-over> AniLiberty__track.png`): any name of one file
-# of the folder of the job, nothing that leaves it (no separator of a path, no control character).
-_PLOT_NAME = re.compile(r"[^/\\\x00-\x1f]+\.png")
-
-
-def split_label(label: str | None) -> tuple[str | None, str | None]:
-    """The inverse of job_label: the human part of a job's label and the key it carries, if any."""
-    found = _KEY_SUFFIX.search(label or "")
-    return ((label or "")[:found.start()], found.group(1)) if found else (label, None)
-
-
-# The meter of the audio layer of every job (the service's `audio_method`: band or muq): the owner's choice.
-
-
-def finished_view(job: dict[str, Any], to_local: dict[str, str]) -> dict[str, Any]:
-    """How a job ended, with the output paths translated back to this server."""
-    def local(path: str | None) -> str | None:
-        if not path:
-            return None
-        try:
-            return translate(path, to_local)
-        except ValueError:
-            return path
-
-    return AlignmentJob(
-        job_id=job.get("id"), kind=job.get("kind") or JobKind.EPISODE, status=job.get("status"), error=job.get("error"),
-        results=[DubResult(
-            dub=result.get("dub"), ok=bool(result.get("ok")), refused=refused_by_service(result),
-            skipped=bool(result.get("skipped")),
-            out_path=local(result.get("out_path")), suspect=bool(result.get("suspect")),
-            critical=list(result.get("critical") or []), warnings=list(result.get("warnings") or []),
-            resid_ms=result.get("audio_resid_ms"), error=result.get("error"),
-            from_ref_s=result.get("from_ref_s"), from_dub_s=result.get("from_dub_s"),
-        ) for result in job.get("results") or []]).model_dump(mode="json")
 
 
 class ConformModule(BaseModule):
@@ -202,27 +132,29 @@ class ConformModule(BaseModule):
         self._default_url = default_url
         self._address_lock = asyncio.Lock()
         self._backoff_start = backoff_start
+        # The mirror of the history of the daemon: its jobs as it sends them, by number.
         self._jobs: dict[str, dict[str, Any]] = {}
         self._announced: set[str] = set()
-        self._daemon: dict[str, Any] = {"up": False, "error": None}
+        self._daemon = DaemonState(up=False, error=None)
         # Set when the first look at the daemon of the address in force is over: it answered, or did not, or there is none to ask.
         self._looked = asyncio.Event()
         self._runner: asyncio.Task | None = None
         super().__init__(bus)
 
     def register(self) -> None:
-        self.handle("conform.submit", self.on_submit)
-        self.handle("conform.reverse", self.on_reverse)
-        self.handle("conform.job.get", self.on_job_get)
-        self.handle("conform.workspace", self.on_workspace)
-        self.handle("conform.cancel", self.on_cancel)
-        self.handle("conform.plot", self.on_plot)
-        self.handle("conform.settings.get", self.on_settings_get)
-        self.handle("conform.settings.set", self.on_settings_set)
-        self.handle("conform.params.set", self.on_params_set)
-        self.handle("conform.job.find", self.on_job_find)
-        self.handle("conform.job.keys", self.on_job_keys)
-        self.handle("gateway.sse.clients", self.on_clients)
+        self.handle(CONFORM_SUBMIT, self.on_submit)
+        self.handle(CONFORM_REVERSE, self.on_reverse)
+        self.handle(CONFORM_JOB_GET, self.on_job_get)
+        self.handle(CONFORM_WORKSPACE, self.on_workspace)
+        self.handle(CONFORM_JOB_FOLDERS, self.on_job_folders)
+        self.handle(CONFORM_CANCEL, self.on_cancel)
+        self.handle(CONFORM_PLOT, self.on_plot)
+        self.handle(CONFORM_SETTINGS_GET, self.on_settings_get)
+        self.handle(CONFORM_SETTINGS_SET, self.on_settings_set)
+        self.handle(CONFORM_PARAMS_SET, self.on_params_set)
+        self.handle(CONFORM_JOB_FIND, self.on_job_find)
+        self.handle(CONFORM_JOB_KEYS, self.on_job_keys)
+        self.handle(GATEWAY_SSE_CLIENTS, self.on_clients)
 
     async def _known(self) -> None:
         """The daemon is looked at before anything is said of it: the address is read at the start and the feed makes its first
@@ -234,9 +166,11 @@ class ConformModule(BaseModule):
         while not self._looked.is_set():  # another address starts the look over
             await self._looked.wait()
 
-    def snapshot(self) -> dict[str, Any]:
-        tasks = sorted(self._jobs.values(), key=lambda job: job.get("seq") or 0)
-        return {"daemon": dict(self._daemon), "tasks": [compact_job(job) for job in tasks]}
+    def _reachable(self) -> bool:
+        return self._client is not None and self._daemon.up
+
+    def snapshot(self) -> ConformQueue:
+        return picture_of(self._jobs, self._daemon)
 
     async def _stored(self, key: str) -> str | None:
         try:
@@ -257,24 +191,25 @@ class ConformModule(BaseModule):
         values = await self._values() if values is None else values
         return mapping_of(values.get(WORK_DIR_KEY), values.get(REMOTE_DIR_KEY))
 
-    async def on_settings_get(self, env: Envelope) -> dict:
-        return (await self._settings_view()).model_dump(mode="json")
+    async def on_settings_get(self, env: Envelope) -> ConformSettingsView:
+        return await self._settings_view()
 
-    async def on_settings_set(self, env: Envelope) -> dict:
-        draft = ConformSettingsDraft.model_validate(env.payload)
-        problems = conform_settings.check(draft)
+    async def on_settings_set(self, env: Envelope) -> ConformSettingsSaved:
+        draft = conform_settings.clean(ConformSettingsDraft.model_validate(env.payload))
+        # The disk is asked here, off the loop: whether a file system is mounted on the folder is a fact the check is given.
+        mounted = bool(draft.work_dir) and await storage.call(os.path.ismount, draft.work_dir)
+        problems = conform_settings.check(draft, mounted)
         if not problems:
-            draft = conform_settings.clean(draft)
             await self.request(SETTINGS_VALUES_SET_MANY, {"values": {
                 **conform_settings.stored(draft), **conform_settings.next_revision(await self._values())}})
             await self._use_address(draft.url)
         view = await self._settings_view()
         if not problems:
             self.log.info("conform: настройки сервера сохранены, адрес %s", draft.url or "не задан")
-            self.publish_event("conform.settings.changed", view.model_dump(mode="json"))
-        return ConformSettingsSaved(saved=not problems, problems=problems, settings=view).model_dump(mode="json")
+            self.publish_event(CONFORM_SETTINGS_CHANGED, view.model_dump(mode="json"))
+        return ConformSettingsSaved(saved=not problems, problems=problems, settings=view)
 
-    async def on_params_set(self, env: Envelope) -> dict:
+    async def on_params_set(self, env: Envelope) -> ConformSettingsSaved:
         """How the daemon is asked to align, checked against what it says it accepts and written whole, or refused with
         coded problems and nothing written; the next job takes it."""
         params = ConformParams.model_validate(env.payload)
@@ -286,13 +221,13 @@ class ConformModule(BaseModule):
         view = await self._settings_view()
         if not problems:
             self.log.info("conform: параметры выравнивания сохранены: %s", params.model_dump(mode="json"))
-            self.publish_event("conform.settings.changed", view.model_dump(mode="json"))
-        return ConformSettingsSaved(saved=not problems, problems=problems, settings=view).model_dump(mode="json")
+            self.publish_event(CONFORM_SETTINGS_CHANGED, view.model_dump(mode="json"))
+        return ConformSettingsSaved(saved=not problems, problems=problems, settings=view)
 
     def _domain(self):
-        return conform_settings.domain_of(self._daemon.get("params"))
+        return conform_settings.domain_of(self._daemon.params)
 
-    async def _settings_view(self):
+    async def _settings_view(self) -> ConformSettingsView:
         url = self._client.base_url if self._client is not None else ""
         return conform_settings.view(url, await self._values(), self._domain())
 
@@ -304,7 +239,7 @@ class ConformModule(BaseModule):
             await self._stop_feed()
             self._client = self._client_factory(url) if url else None
             self._jobs.clear()
-            self._daemon = {"up": False, "error": None}
+            self._daemon = DaemonState(up=False, error=None)
             self._looked.set()  # whoever waited for the old address looks again, at the new one
             self._looked = asyncio.Event()
             if self._client is None:
@@ -312,106 +247,89 @@ class ConformModule(BaseModule):
             self._publish()
             self._start_feed()
 
-    async def on_submit(self, env: Envelope) -> dict:
-        await self._known()
+    def _unavailable(self) -> str | None:
+        """The reason nothing can be sent to the daemon now: there is none to send to, or it is down; none when it is up."""
         if self._client is None:
-            return SubmitReply.unavailable(reason("conform_not_configured"), retry=False).model_dump()
-        if not self._daemon.get("up"):
-            return SubmitReply.unavailable(reason("conform_down", error=self._daemon.get("error") or ""),
-                                           retry=False).model_dump()
-        payload = env.payload
-        label = payload.get("label") or ""
+            return reason("conform_not_configured")
+        if not self._daemon.up:
+            return reason("conform_down", error=self._daemon.error or "")
+        return None
+
+    async def on_submit(self, env: Envelope) -> SubmitReply:
+        request = JobSubmit.model_validate(env.payload)
+        await self._known()
+        if (why := self._unavailable()) is not None:
+            return SubmitReply.unavailable(why, retry=False)
+        label = request.label or ""
         values = await self._values()
         mapping = await self._path_map(values)
         if not mapping:
-            return SubmitReply.unavailable(reason("conform_no_work_dir"), retry=False).model_dump()
+            return SubmitReply.unavailable(reason("conform_no_work_dir"), retry=False)
         try:  # before anything is sent: a problem here is a certain refusal
-            body = self._request_body(payload, mapping, conform_settings.params_of(values))
+            body = episode_body(request, mapping, conform_settings.params_of(values))
         except ValueError as exc:
             self.log.warning("conform: задача %s отклонена: %s", label, describe(str(exc)))
-            return SubmitReply.rejected(str(exc)).model_dump()
+            return SubmitReply.rejected(str(exc))
         try:
             job = await self._client.enqueue(body)
         except DaemonRefused as exc:
             self.log.warning("conform: задача %s отклонена: %s", label, describe(str(exc)))
-            return SubmitReply.rejected(str(exc)).model_dump()
+            return SubmitReply.rejected(str(exc))
         except NotDelivered as exc:
             self.log.warning("conform: задача %s не поставлена: %s", label, exc)
-            return SubmitReply.unavailable(reason("conform_unreachable", error=str(exc)), retry=True).model_dump()
+            return SubmitReply.unavailable(reason("conform_unreachable", error=str(exc)), retry=True)
         except Unconfirmed as exc:
             # The request may have reached the daemon: the caller must ask by the key, not send again.
             self.log.warning("conform: ответа на постановку %s нет: %s", label, exc)
-            return SubmitReply.uncertain(reason("conform_no_answer", error=str(exc))).model_dump()
+            return SubmitReply.uncertain(reason("conform_no_answer", error=str(exc)))
         self.log.info("conform: поставлена задача %s (%s), озвучек %d", job["id"], label, len(body["dubs"]))
-        return SubmitReply.accepted(str(job["id"])).model_dump()
+        return SubmitReply.accepted(str(job["id"]))
 
-    async def on_reverse(self, env: Envelope) -> dict:
+    async def on_reverse(self, env: Envelope) -> ReverseReply:
         """A batch of cuts out of one compilation (stage 12): one job per episode, each labelled by the folder of its
         episode, which carries the key that finds the job again. The outcome is told as for `conform.submit`."""
         request = ReverseSubmit.model_validate(env.payload)
-        label = request.label or os.path.basename(request.compilation)
+        label = reverse_label(request)
         await self._known()
-        if self._client is None:
-            return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=reason("conform_not_configured")).model_dump()
-        if not self._daemon.get("up"):
-            return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE,
-                                reason=reason("conform_down", error=self._daemon.get("error") or "")).model_dump()
+        if (why := self._unavailable()) is not None:
+            return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=why)
         values = await self._values()
         mapping = await self._path_map(values)
         if not mapping:
-            return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=reason("conform_no_work_dir")).model_dump()
-        keys = [split_label(os.path.basename(os.path.dirname(each.path)))[1] for each in request.episodes]
+            return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=reason("conform_no_work_dir"))
+        keys = reverse_keys(request)
         try:  # before anything is sent: a problem here is a certain refusal
-            if not all(keys):
-                raise ValueError(reason("conform_reverse_no_key"))
-            body = {"compilation": translate(request.compilation, mapping),
-                    "episodes": [translate(each.path, mapping) for each in request.episodes],
-                    "out_dir": translate(request.out_dir, mapping), "label": label,
-                    "ref_atrack": request.compilation_atrack, "dub_atracks": [each.atrack for each in request.episodes],
-                    **conform_settings.compilation_fields(conform_settings.params_of(values))}
+            body = reverse_body(request, label, keys, mapping, conform_settings.params_of(values))
         except ValueError as exc:
             self.log.warning("conform: разбор %s отклонён: %s", label, describe(str(exc)))
-            return ReverseReply(outcome=SubmitOutcome.REJECTED, reason=str(exc)).model_dump()
+            return ReverseReply(outcome=SubmitOutcome.REJECTED, reason=str(exc))
         try:
             jobs = await self._client.reverse(body)
         except DaemonRefused as exc:
             self.log.warning("conform: разбор %s отклонён: %s", label, describe(str(exc)))
-            return ReverseReply(outcome=SubmitOutcome.REJECTED, reason=str(exc)).model_dump()
+            return ReverseReply(outcome=SubmitOutcome.REJECTED, reason=str(exc))
         except NotDelivered as exc:
             self.log.warning("conform: разбор %s не поставлен: %s", label, exc)
-            return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=reason("conform_unreachable", error=str(exc)),
-                                retry=True).model_dump()
+            return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=reason("conform_unreachable", error=str(exc)), retry=True)
         except Unconfirmed as exc:
             self.log.warning("conform: ответа на разбор %s нет: %s", label, exc)
-            return ReverseReply(outcome=SubmitOutcome.UNCERTAIN, reason=reason("conform_no_answer", error=str(exc))).model_dump()
-        named = {key: str(job["id"]) for job in jobs if (key := split_label(job.get("label"))[1]) in keys}
+            return ReverseReply(outcome=SubmitOutcome.UNCERTAIN, reason=reason("conform_no_answer", error=str(exc)))
+        named = named_jobs(jobs, keys)
         self.log.info("conform: поставлен разбор %s — задач %d из %d", label, len(named), len(keys))
-        return ReverseReply(outcome=SubmitOutcome.ACCEPTED, jobs=named).model_dump()
+        return ReverseReply(outcome=SubmitOutcome.ACCEPTED, jobs=named)
 
-    @staticmethod
-    def _request_body(payload: dict[str, Any], mapping: dict[str, str],
-                      params: ConformParams = conform_settings.DEFAULTS) -> dict[str, Any]:
-        return {"ref": translate(payload["ref"], mapping),
-                "dubs": [translate(path, mapping) for path in payload["dubs"]],
-                "out_dir": translate(payload["out_dir"], mapping),
-                "cache_dir": translate(payload["cache_dir"], mapping),
-                "label": job_label(payload.get("label"), payload.get("key")), **conform_settings.episode_fields(params),
-                # A voice-over that is a container gives the track of its number (a track aligned out of an old file).
-                **({"dub_atracks": [int(each) for each in payload["dub_atracks"]]} if payload.get("dub_atracks") else {}),
-                # A reference that is a container holds several tracks: the alignment listens to the video's own sound.
-                **({"ref_atrack": int(payload["ref_atrack"])} if payload.get("ref_atrack") else {})}
+    async def on_workspace(self, env: Envelope) -> ConformFolders:
+        return roots(await self._stored(WORK_DIR_KEY))
 
-    async def on_workspace(self, env: Envelope) -> dict:
-        if not env.payload.get("dub_folder"):
-            return roots(await self._stored(WORK_DIR_KEY))
-        return workspace(env.payload["dub_folder"])
+    async def on_job_folders(self, env: Envelope) -> JobFolders:
+        return workspace(JobFoldersOf.model_validate(env.payload).dub_folder)
 
-    async def on_cancel(self, env: Envelope) -> dict:
-        job_id = env.payload["job_id"]
+    async def on_cancel(self, env: Envelope) -> JobCancelled:
+        job_id = JobRef.model_validate(env.payload).job_id
         await self._known()
-        if self._client is None or not self._daemon.get("up"):
+        if not self._reachable():
             self.log.info("conform: задачу %s отменить некому — демон недоступен", job_id)
-            return {"done": False}
+            return JobCancelled(done=False)
         try:
             known = await self._client.cancel(job_id)
         except httpx.HTTPError as exc:
@@ -421,63 +339,64 @@ class ConformModule(BaseModule):
                 left = await self._client.job(job_id)
             except httpx.HTTPError:
                 left = {"status": "unknown"}
-            done = left is None or left.get("status") == "cancelled"
+            done = stopped_or_gone(left)
             self.log.warning("conform: на отмену задачи %s демон ответил ошибкой (%s); задача %s", job_id, exc,
                              "удалена" if left is None else "отменена" if done else f"осталась в состоянии {left.get('status')}")
-            return {"done": done}
+            return JobCancelled(done=done)
         self.log.info("conform: задача %s %s", job_id, "отменена" if known else "демону неизвестна")
-        return {"done": True}
+        return JobCancelled(done=True)
 
-    async def on_plot(self, env: Envelope) -> dict:
+    async def on_plot(self, env: Envelope) -> PlotReply:
         """The picture of a plot of a job, taken from the daemon; the names are checked before anything is asked."""
-        job_id, name = str(env.payload.get("job_id")), str(env.payload.get("name"))
-        if not (_JOB_ID.fullmatch(job_id) and _PLOT_NAME.fullmatch(name)):
-            return {"found": False}
+        ref = PlotRef.model_validate(env.payload)
+        if not plot_is_plain(ref):
+            return PlotReply(found=False)
         await self._known()
-        if self._client is None or not self._daemon.get("up"):
-            raise RuntimeError(reason("conform_down", error=self._daemon.get("error") or ""))
+        if not self._reachable():
+            raise RuntimeError(reason("conform_down", error=self._daemon.error or ""))
         try:
-            picture = await self._client.plot(job_id, name)
+            picture = await self._client.plot(ref.job_id, ref.name)
         except httpx.HTTPError as exc:
             raise RuntimeError(reason("conform_down", error=str(exc))) from exc
         if picture is None:
-            return {"found": False}
-        return {"found": True, "data": base64.b64encode(picture).decode("ascii")}
+            return PlotReply(found=False)
+        return PlotReply(found=True, data=base64.b64encode(picture).decode("ascii"))
 
-    async def on_job_find(self, env: Envelope) -> dict:
+    async def _history(self) -> list[dict[str, Any]] | None:
+        """Every job the daemon's history holds; none when it cannot be asked."""
         await self._known()
-        if self._client is None or not self._daemon.get("up"):
-            return {"reachable": False, "job_id": None}
+        if not self._reachable():
+            return None
         try:
-            jobs = await self._client.jobs()
+            return await self._client.jobs()
         except httpx.HTTPError:
-            return {"reachable": False, "job_id": None}
-        mark = f"#{env.payload['key']}"
-        found = next((job["id"] for job in jobs if str(job.get("label") or "").endswith(mark)), None)
-        return {"reachable": True, "job_id": found}
+            return None
 
-    async def on_job_keys(self, env: Envelope) -> dict:
+    async def on_job_find(self, env: Envelope) -> JobFound:
+        key = JobKey.model_validate(env.payload).key
+        history = await self._history()
+        if history is None:
+            return JobFound(reachable=False, job_id=None)
+        return JobFound(reachable=True, job_id=job_with_key(history, key))
+
+    async def on_job_keys(self, env: Envelope) -> JobKeys:
         """The keys of the jobs the daemon's history holds (`… #key` of their labels): what a caller keeps a folder of a
         job for."""
-        await self._known()
-        if self._client is None or not self._daemon.get("up"):
-            return {"reachable": False, "keys": []}
-        try:
-            jobs = await self._client.jobs()
-        except httpx.HTTPError:
-            return {"reachable": False, "keys": []}
-        return {"reachable": True, "keys": sorted({key for job in jobs if (key := split_label(job.get("label"))[1])})}
+        history = await self._history()
+        if history is None:
+            return JobKeys(reachable=False, keys=())
+        return JobKeys(reachable=True, keys=keys_of(history))
 
-    async def on_job_get(self, env: Envelope) -> dict:
-        job_id = env.payload["job_id"]
+    async def on_job_get(self, env: Envelope) -> AlignmentJob:
+        job_id = JobRef.model_validate(env.payload).job_id
         job = self._jobs.get(job_id)
         if job is None:
             await self._known()
-            if self._client is None or not self._daemon.get("up"):
-                raise RuntimeError(reason("conform_down", error=self._daemon.get("error") or ""))  # not asked is not "gone"
+            if not self._reachable():
+                raise RuntimeError(reason("conform_down", error=self._daemon.error or ""))  # not asked is not "gone"
             job = await self._client.job(job_id)
         if job is None:
-            return AlignmentJob(job_id=job_id, status=JobStatus.GONE).model_dump(mode="json")
+            return AlignmentJob(job_id=job_id, status=JobStatus.GONE)
         return finished_view(job, reverse(await self._path_map()))
 
     async def on_clients(self, env: Envelope) -> None:
@@ -511,21 +430,20 @@ class ConformModule(BaseModule):
             await self._client.close()
 
     def _publish(self) -> None:
-        picture = self.snapshot()
-        self.publish_event("conform.queue.changed",
-                           {"daemon": picture["daemon"], "tasks": picture["tasks"]})
+        # A report names what it knows: a daemon that is down has no version, and the picture says so by leaving it out.
+        self.publish_event(CONFORM_QUEUE_CHANGED, self.snapshot().model_dump(mode="json", exclude_unset=True))
 
     async def _run(self) -> None:
         assert self._client is not None
         delay = self._backoff_start
         while True:
             try:
-                self._daemon = {"up": True, "error": None, **await self._client.info()}
+                self._daemon = DaemonState(up=True, error=None, **await self._client.info())
                 self._looked.set()
                 self._publish()
-                self.publish_event("conform.daemon.up", {})
+                self.publish_event(CONFORM_DAEMON_UP, DaemonUp().model_dump(mode="json"))
                 # What the daemon accepts is part of the settings screen: an open one learns it now.
-                self.publish_event("conform.settings.changed", (await self._settings_view()).model_dump(mode="json"))
+                self.publish_event(CONFORM_SETTINGS_CHANGED, (await self._settings_view()).model_dump(mode="json"))
                 self.log.info("conform: подключён к демону %s", self._client.base_url)
                 async for name, payload in self._client.events():
                     delay = self._backoff_start
@@ -537,7 +455,7 @@ class ConformModule(BaseModule):
                 raise
             except Exception as exc:  # noqa: BLE001 - any transport failure means "daemon unreachable"
                 problem = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
-            self._daemon = {"up": False, "error": problem}
+            self._daemon = DaemonState(up=False, error=problem)
             self._looked.set()
             self._jobs.clear()
             self._publish()
@@ -547,26 +465,16 @@ class ConformModule(BaseModule):
 
     async def _announce(self) -> None:
         """Report every job that ended since the last look, once."""
-        ended = [job for job in self._jobs.values()
-                 if job.get("status") in ENDED and job["id"] not in self._announced]
+        ended = unannounced(self._jobs, self._announced)
         if not ended:
             return
         to_local = reverse(await self._path_map())
         for job in ended:
             self._announced.add(job["id"])
-            self.publish_event("conform.job.finished", finished_view(job, to_local))
+            self.publish_event(CONFORM_JOB_FINISHED, finished_view(job, to_local).model_dump(mode="json"))
 
     def _apply(self, name: str, payload: dict[str, Any]) -> None:
-        if name == "conform.snapshot":
-            self._jobs = {job["id"]: job for job in payload.get("items") or []}
-        elif name == "conform.changed":
-            for job in payload.get("items") or []:
-                self._jobs[job["id"]] = job
-            for job_id in payload.get("removed") or []:
-                self._jobs.pop(job_id, None)
-                self._announced.discard(job_id)
-                self.publish_event("conform.job.removed", {"job_id": job_id})
-        elif name == "conform.progress":
-            job = self._jobs.get(payload.get("id"))
-            if job is not None:
-                job.update({k: v for k, v in payload.items() if k != "id"})
+        self._jobs, removed = conform_jobs.mirrored(self._jobs, name, payload)
+        for job_id in removed:
+            self._announced.discard(job_id)
+            self.publish_event(CONFORM_JOB_REMOVED, JobRemoved(job_id=job_id).model_dump(mode="json"))

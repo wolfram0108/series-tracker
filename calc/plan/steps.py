@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from core.contracts import DubResult
+
 from .planner import Goal, Group, Op, Plan, video_op
 from .tables import Container, Track, Video
 
@@ -43,7 +45,7 @@ class Made:
         return self.sound or self.file
 
 
-def judged(result: dict | None, *, cut: bool) -> str | None:
+def judged(result: DubResult | None, *, cut: bool) -> str | None:
     """The file a job of the alignment service made, by the service's own verdict: an aligned track is taken by `ok` (what
     it found critical is a mark, the track is in step); a cut needs `ok` and nothing critical. A pair the service looked at
     and turned down (`refused`) is a failure (None, recorded). A pair the service fell on (its result is there, with no
@@ -52,9 +54,9 @@ def judged(result: dict | None, *, cut: bool) -> str | None:
     either, and the service may only be late: `Passing`, the episode waits for it unchanged."""
     if result is None:
         raise Passing
-    if result.get("ok") and result.get("out_path"):
-        return None if cut and result.get("critical") else result["out_path"]
-    if result.get("refused"):
+    if result.ok and result.out_path:
+        return None if cut and result.critical else result.out_path
+    if result.refused:
         return None
     raise Crashed
 
