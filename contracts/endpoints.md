@@ -87,10 +87,10 @@ gateway с `diag=True` (в проде выключен) — в таблице 12
 
 | Метод | Путь | Назначение | Панель |
 |---|---|---|---|
-| GET | `/api/series` | Список сериалов: `kind`, `sources`, статусы, счётчик скачанного | `series.ts` |
+| GET | `/api/series` | Список сериалов: `sources`, статусы, счётчик скачанного | `series.ts` |
 | POST | `/api/series` | Создание серии с источниками (минимум один; + TMDB-маппинг, + раздачи торрента) | `AddSeriesModal.vue` |
 | GET | `/api/series/active_torrents` | Прогресс активных загрузок с именами серий | — |
-| GET | `/api/series/{series_id}` | Карточка серии: `kind`, `sources`, `tracker_info` (если адрес источника — трекер) | `StatusModal.vue` |
+| GET | `/api/series/{series_id}` | Карточка серии: `sources`, `tmdb_info`, `planned_save_path` | `StatusModal.vue` |
 | POST | `/api/series/{series_id}` | Сохранение свойств серии (без источников): catalog → metadata → library/renaming | `StatusProperties.vue` |
 | DELETE | `/api/series/{series_id}` | Удаление серии (каскад по событию) | `App.vue` |
 | POST | `/api/series/{series_id}/state` | Эфемерный viewing: открытие/закрытие статус-окна | `ui.ts` |
@@ -326,7 +326,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 12
 
 ## 6. Контракты
 
-> Контракт маршрутов, которых здесь нет (план, очереди и рычаги выхода, торрент-источник, расписание, пределы загрузок и других), — модели `core/contracts`
+> Тексты ниже сверены с моделями шлюза для маршрутов серий и источников (2026-11-21); контракт маршрутов, которых здесь нет (план, очереди и рычаги выхода, торрент-источник, расписание, пределы загрузок и других), — модели `core/contracts`
 > и схемы `modules/gateway/schemas.py`; их читает документ OpenAPI (раздел 8).
 
 Тела запросов эндпоинтов этапа 10 и сохранения/создания серии — модели в `schemas.py` с `extra="forbid"`: поле,
@@ -358,44 +358,40 @@ gateway с `diag=True` (в проде выключен) — в таблице 12
 ### 6.2 Серии
 
 **GET `/api/series`** — список объектов серии. Постоянные поля: `id`, `name`,
-`name_en`, `site`, `save_path`, `kind` (`torrent` | `video`), `sources`, `auto_scan_enabled`,
+`name_en`, `site`, `save_path`, `sources`, `auto_scan_enabled`,
 `is_busy`, `statuses`, `last_scan_time`, `tmdb_info`; непостоянные — `season`,
 `quality`, `quality_override`, `resolution_override`, `ignored_seasons`,
-`ignored_episodes`, `downloaded_episodes_count`. Адреса, типа источника и профиля у самого
+`ignored_episodes`, `downloaded_episodes_count` (в списке), `planned_save_path` (в карточке). Адреса, типа источника и профиля у самого
 сериала нет: они в `sources` — списке `SeriesSource` (`id`, `series_id`,
-`position`, `url`, `source_type`, `parser_profile_id`, `vk_search_mode`,
-`vibix_season`, `players_off`). `tmdb_info` — маппинг или `null`;
+`position`, `url`, `source_type`, `parser_profile_id`,
+`vibix_season`, `players_off`, `rows_per_line`, `color`). `tmdb_info` — маппинг или `null`;
 `downloaded_episodes_count` — целое (0, если модуль недоступен).
 
 **POST `/api/series`** — тело `SeriesCreate`. Обязательные: `name`, `name_en`,
 `site`, `save_path`, `sources` (минимум один: `{url, source_type, parser_profile_id?,
-vk_search_mode?, vibix_season?, players_off?, voice_name?}`, `source_type` — `torrent` | `vk_video` |
+vibix_season?, players_off?, rows_per_line?}`, `source_type` — `torrent` | `vk_video` |
 `web_video`). Необязательные: `season`, `quality`, `quality_override`,
 `resolution_override`, `auto_scan_enabled`, `ignored_seasons`, `ignored_episodes`,
-`tmdb_data`, `torrents` (только при торрент-источнике). Поля `url`, `source_type`,
-`parser_profile_id`, `vk_search_mode`, `vk_quality_priority` на верхнем уровне
-отклоняются (422). `tmdb_data` — объект `{tmdb_id, tmdb_season_number, total_episodes,
-poster_path, series_name, year}`; `torrents` — список `{torrent_id, link, date_time,
-quality, episodes}`, `link` обязателен. Ответ `{success, series_id}`; 400 — отказ catalog
-с кодом (`source_exists`, `profile_not_found`) или относительный путь. Ошибка записи раздач
-не влияет на ответ: она логируется как предупреждение, серия создаётся без них.
+`tmdb_data`. Поле, которого модель не знает (в том числе `url`, `source_type`,
+`parser_profile_id` на верхнем уровне), отклоняется (422). `tmdb_data` — объект `{tmdb_id, tmdb_season_number, total_episodes,
+poster_path, series_name, year}`. Ответ `{success, series_id}`; 400 — отказ catalog
+с кодом (`source_exists`, `profile_not_found`) или относительный путь.
 
-**GET `/api/series/{series_id}`** — объект серии плюс `tracker_info`, если
-адрес одного из источников — адрес трекера. Ошибки: 404 (не найден), 400, 409, 500.
+**GET `/api/series/{series_id}`** — объект серии с `planned_save_path` (папка, которую сохранение просило и куда
+следующая синхронизация переносит файлы). Ошибки: 404 (не найден), 400, 409, 500.
 
 **POST `/api/series/{series_id}`** — тело `SeriesUpdate`: поля серии (без источников),
-все необязательные; меняются только переданные, неизвестное поле — 422. `save_path` идёт не в `catalog`,
-а в `library.relocate`; `tmdb_data` — в `metadata.map.set`. Если путь не изменился —
-команда `renaming.reprocess` (что она делает с видео и с торрентом, решает `renaming`);
-шлюз не запускает скан, раскладка видео пересчитывается по событию `series.updated`. Ответ
+все необязательные; меняются только переданные, неизвестное поле — 422. Одно сохранение — одна правка (синхронизация между её частями не
+начинается): поля серии — в `catalog.series.update`, `tmdb_data` — в `metadata.map.set`, `save_path` — планом переноса в
+`library.relocation.plan` (файлы переезжают при следующей синхронизации). Шлюз не запускает скан; раскладка видео пересчитывается
+по событию `series.updated`. Ответ
 `{success, message}`.
 
-**DELETE `/api/series/{series_id}`** — query `delete_from_qb` (bool, по
-умолчанию false) — снять раздачи и в qBittorrent. Ответ `{success}`.
+**DELETE `/api/series/{series_id}`** — ответ `{success}`; каскад по событию `series.deleted`.
 
 **POST `/api/series/{series_id}/state`** — тело `{state: ["viewing"]}` при
 открытии статус-окна, `{state: []}` при закрытии. Открытие дополнительно
-просит каждого владельца файлов (`downloads.fs.sync`, `torrents.fs.verify`) сверить свои файлы с диском;
+просит владельца файлов раздач (`torrents.fs.verify`) сверить свои файлы с диском;
 вида сериала шлюз не знает. Ответ `{success}`.
 
 **POST `/api/series/{series_id}/toggle_auto_scan`** — тело `{enabled}`
@@ -408,14 +404,14 @@ quality, episodes}`, `link` обязателен. Ответ `{success, series_i
 `{episodes: {"<сезон>": [номера]}}`. Ключ — номер серии сериала, а не файл
 раздачи: выбор обязан пережить замену релиза. 400 при отсутствии ключа.
 
-**POST `/api/series/{series_id}/scan`** — синхронный: HTTP ждёт результата
-(таймаут шины 900 с). Ответ `{success, changed, tasks_created}` для торрента,
-сводка для видео. 409 — сканирование уже идёт.
+**POST `/api/series/{series_id}/scan`** — синхронный: HTTP ждёт результата. Тело необязательно: `{season, episode?}` — синхронизация
+в рамках сезона или серии; query `download=false` — без загрузок. Ответ `{success, changed, sources}` (или `cancelled`, `aborted`: поля, которых нет, не
+присылаются). 409 — отказ состояния (сериал занят) или поставщика, не поднятого для страниц серии.
 
 ### 6.3 Медиа и файлы
 
-**POST `/api/series/{series_id}/reprocess`** — ответ `{success, message}`; 409 — переименование
-уже выполняется (что оно делает с видео и с торрентом, решает `renaming`).
+**POST `/api/series/{series_id}/reprocess`** — синхронизация сериала без загрузок (диск меняется только синхронизацией); ответ
+`{success, message}`; 409 — сериал занят.
 
 **GET `/api/series/{series_id}/source-filenames`** — список базовых имён файлов раздач
 торрент-сериала для теста правил; у видео-сериала пуст (строки для его теста даёт
@@ -687,12 +683,12 @@ POST /api/parser-profiles/{profile_id}/rules
 
 **GET `/api/series/{series_id}/sources`** — список `SeriesSource`; 404 — сериала нет.
 
-**POST `/api/series/{series_id}/sources`** — тело `{url, source_type, parser_profile_id?, vk_search_mode?, vibix_season?,
-players_off?, voice_name?, position?}`; поля, которых нет в теле, шлюз не посылает, умолчания подставляет `catalog`. Ответ `{id}`.
+**POST `/api/series/{series_id}/sources`** — тело `{url, source_type, parser_profile_id?, vibix_season?,
+players_off?, rows_per_line?, position?}`; поля, которых нет в теле, шлюз не посылает, умолчания подставляет `catalog`. Ответ `{id}`.
 400: `source_exists` (тот же адрес у сериала), `profile_not_found`; 404 — сериала нет.
 
-**PUT `/api/series/{series_id}/sources/{source_id}`** — тело: любое из `url`, `parser_profile_id`, `vk_search_mode`,
-`vibix_season`, `players_off`, `voice_name`, `position`; не присланное остаётся, `null` снимает профиль и сезон Vibix; `source_type` и
+**PUT `/api/series/{series_id}/sources/{source_id}`** — тело: любое из `url`, `parser_profile_id`,
+`vibix_season`, `players_off`, `rows_per_line`, `position`; не присланное остаётся, `null` снимает профиль и сезон Vibix; `source_type` и
 прочие поля — 422. Ответ `{success, applied}` (`applied` — поля, отличавшиеся от хранимых; без изменений события нет).
 404 с кодом `source_not_found` — источник другого сериала или его нет.
 
