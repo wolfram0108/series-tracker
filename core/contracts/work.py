@@ -8,21 +8,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from .frozen import Frozen
 
-WORK_WITHDRAWN = "work.withdrawn"
-# A sync of a series is one run: it opens with the sync and closes when every work it gave out has ended (scan owns it).
-RUN_CHANGED = "scan.run.changed"
-# An executor tells whether it has live work of a series (downloads, voices); the run closes when nobody has.
-WORK_STATE = "work.series.state"
 
-
-class RunChanged(BaseModel):
-    """`active` true: a sync of the series runs, the series is busy and its layout and plan stay as the sync found them
-    (the snapshot); false: every work of it ended, edits are allowed and what was owed meanwhile is counted. An active
-    run is told with its snapshot: an executor works by it in every pass of the run."""
+class RunChanged(Frozen):
+    """The event `scan.run.changed`: a sync of a series is one run, which opens with the sync and closes when every work it gave out
+    has ended (scan owns it). `active` true: a sync of the series runs, the series is busy and its layout and plan stay as the sync
+    found them (the snapshot); false: every work of it ended, edits are allowed and what was owed meanwhile is counted. An active run
+    is told with its snapshot: an executor works by it in every pass of the run."""
 
     series_id: int
     active: bool
@@ -32,40 +27,29 @@ class RunChanged(BaseModel):
     seq: int = 0
 
 
-# An episode of a series as the works of a run name it: (season, episode, part), with no part as 0.
-Slot = tuple[int | None, int, int]
-
-
-def slot_of(season: int | None, episode: int, part: int | None) -> Slot:
-    return season, episode, part or 0
-
-
 class WorkState(Frozen):
-    """Whether `owner` has live work of the series: a download that waits or runs, a voice-over admitted and not at
-    its end; and `busy`, the episodes that work is of, so that the run makes the container of an episode as soon as no
-    work of it is left (each episode is a process of its own). Live work whose episode is not known keeps `active` with
-    no slot. Sent when either changes, and asked as `<owner>.work.get {series_id}` -> WorkState. `seq` grows with every
+    """The event `work.series.state`: whether `owner` (an executor) has live work of the series (a download that waits or runs, a
+    voice-over admitted and not at its end); the run closes when no executor has. Sent when it changes, and asked as `<owner>.work.get {series_id}` -> WorkState. `seq` grows with every
     state the owner counts: of two records of one owner the one with the greater `seq` is in force."""
 
     owner: str
     series_id: int
     active: bool
-    busy: tuple[Slot, ...] = Field(default_factory=tuple)
     seq: int = 0
     # Why the last work of the owner ended in failure (a reason, core/reasons), told once it is not active; None when it
     # ended well. The run that waited for it ends as failed with this reason, not as a success.
     failure: str | None = None
 
 
-class WorkWithdrawn(BaseModel):
-    """`keys` are the keys of the work the owner gave out (`dub:<id>` for a voice-over, `file:<id>` for a file read by
+class WorkWithdrawn(Frozen):
+    """The event `work.withdrawn`. `keys` are the keys of the work the owner gave out (`dub:<id>` for a voice-over, `file:<id>` for a file read by
     several); without `keys` all the work of the series is not needed."""
 
     series_id: int
-    keys: list[str] | None = None
+    keys: tuple[str, ...] | None = None
 
 
-class RunSnapshot(BaseModel):
+class RunSnapshot(Frozen):
     """The configuration a run works by (И-60): taken when the sync starts, kept with its command (it outlives a restart),
     and given to every step of the run that would read it. `profiles` are the rules of each profile the sources of the
     series are read by, as stored by `rules`; `voices` are the stored settings of the voice-overs (groups of names, the

@@ -8,72 +8,93 @@ cap, the size and the time of change of the file), and the same fetch asked agai
 answered at once, ended well — no ask of its source, no card, no place in the queue. A file that changed or went is
 fetched as any.
 
+What the cards, the queue and the limits mean, what a stream or a refused transfer says of its source, and when the next fetch
+begins is counted in calc/downloads; this module holds the tasks, the places, the programs (yt-dlp, ffmpeg, the readers of
+playlists) and the disk. Every reply and event is a model of core/contracts/downloads.py, handed over as it is (an event goes on
+the bus as its JSON).
+
 Queries / commands:
-  downloads.fetch {key, url, path, max_height?, series_id?, whole?, ytdlp?, need?, variant?} - the stream behind the link
-      into an absolute path. `need` (DownloadNeed) names what the fetch is for and `variant` (DownloadVariant) which row it
-      takes, in the marks of the window «Выход»: fetches of one need are one card. `whole`: the video of a reference; `ytdlp`: the downloader may take over a link whose stream
-      request failed (a VK video). A key already waiting or under way is not asked twice. The fetches wait in one queue in
-      the order asked; how many go at once is by the way each file comes (limits.py): a download by many connections takes
-      `threads_per_file` of the `threads_total` (2 at once with 16 and 32), one by a single connection a place of
-      `single_at_once` (4), one a provider of the socket makes a place of `provider_at_once` (2).
-  downloads.limits.get {} -> {threads_total, threads_per_file, single_at_once, provider_at_once, multi_at_once} - the limits now.
-  downloads.limits.set {threads_total?, threads_per_file?, single_at_once?, provider_at_once?} -> {ok, limits} | {ok: false, reason} - the
-      limits are changed and kept as settings; a value that is no whole number from 1 up is refused with its reason.
-  downloads.withdraw {series_id} -> {stopped} - the owner stops the fetches of a series and waits for them: the answer
-      comes once each has ended, its program stopped and what it wrote removed (work.withdrawn is the same, told).
-  downloads.queue.get {} -> {tasks, count} - `count`: the downloads that wait or go; `tasks`: the cards of the downloads (core/contracts/downloads.py DownloadCard): one to
-      a need of a plan, through every fetch the plan gives it — the stages with their time, a line of attempts per variant,
-      the plan rebuilt on another variant, the figures of the stage under way.
-  downloads.queue.clear {} -> {deleted} - the waiting fetches are dropped (their owners hear them end, failed).
-  downloads.cancel {task_id} -> {cancelled} - one fetch (`fetch:<key>`) stops; its owner hears it end, failed.
-  downloads.card.remove {id} -> {removed} - the user removes a card that stayed after its sync.
+  downloads.fetch DownloadFetch {key, url, path, max_height?, series_id?, whole?, ytdlp?, need?, variant?} - the stream behind the
+      link into an absolute path. `need` (DownloadNeed) names what the fetch is for and `variant` (DownloadVariant) which row it
+      takes, in the marks of the window «Выход»: fetches of one need are one card. `whole`: the video of a reference; `ytdlp`:
+      the downloader may take over a link whose stream request failed (a VK video). A key already waiting or under way is not
+      asked twice. The fetches wait in one queue in the order asked; how many go at once is by the way each file comes
+      (calc/downloads/limits.py): a download by many connections takes `threads_per_file` of the `threads_total` (2 at once with
+      16 and 32), one by a single connection a place of `single_at_once` (4), one a provider of the socket makes a place of
+      `provider_at_once` (2).
+  downloads.limits.get {} -> DownloadLimits {threads_total, threads_per_file, single_at_once, provider_at_once, multi_at_once} - the
+      limits now.
+  downloads.limits.set LimitsSet {threads_total?, threads_per_file?, single_at_once?, provider_at_once?} -> LimitsSaved {ok, limits} |
+      {ok: false, reason} - the limits are changed and kept as settings; a value that is no whole number from 1 up is refused with
+      its reason.
+  downloads.withdraw SeriesRef {series_id} -> FetchesWithdrawn {stopped} - the owner stops the fetches of a series and waits for
+      them: the answer comes once each has ended, its program stopped and what it wrote removed (work.withdrawn is the same, told).
+  downloads.queue.get {} -> DownloadQueue {tasks, count} - `count`: the downloads that wait or go; `tasks`: the cards of the downloads
+      (core/contracts/downloads.py DownloadCard): one to a need of a plan, through every fetch the plan gives it — the stages with
+      their time, a line of attempts per variant, the plan rebuilt on another variant, the figures of the stage under way.
+  downloads.queue.clear {} -> QueueCleared {deleted} - the waiting fetches are dropped (their owners hear them end, failed).
+  downloads.cancel FetchCancel {task_id} -> FetchCancelled {cancelled} - one fetch (`fetch:<key>`) stops; its owner hears it end,
+      failed.
+  downloads.card.remove CardRemove {id} -> CardRemoved {removed} - the user removes a card that stayed after its sync.
 
 Events out:
-  downloads.fetch.started {key, series_id, path}, downloads.fetch.finished {key, ok, error, transient, path, series_id}.
-      A fetch is given its attempts (failure.py): the last word of the source ends it at once, a way that broke is asked
-      again (a playlist is continued from the segments it got), and a fetch that spent its attempts failed. `transient`
-      is only a failure that said nothing of the source (a module of ours did not answer, a name was busy): the owner
-      asks the same source again at its next round; any other failure is the source's, and the owner goes to the next.
-      A file that came is no episode when it is a clip the host served in its place (core/notices.py: known by its head,
-      a way that broke) or shorter than any episode (`EPISODE_MIN_S`, a minute: an upload the host broke, its last word).
-  downloads.queue.changed {tasks, count} - the cards changed, on the beat of core/clock while a download goes, and when an
-      interface connects (gateway.sse.clients): SSE download_queue_update. The cards live with the sync of their series
-      (scan.run.changed): while it runs every card is kept; at its end only a failed card and a finished one whose plan
-      was rebuilt stay, in the table download_cards, until the user removes them or the next sync of the series begins.
-A link whose player downloads the file itself (`player_fetch` of its stream: Alloha) is taken by `sources.video.fetch`
-into the raw file of the download, the progress by `sources.video.progress`; the rest is as for any playlist.
+  downloads.fetch.started FetchStarted {key, series_id, path}, downloads.fetch.finished FetchFinished {key, ok, error, transient,
+      path, series_id}. A fetch is given its attempts (failure.py): the last word of the source ends it at once, a way that broke is
+      asked again (a playlist is continued from the segments it got), and a fetch that spent its attempts failed. `transient` is
+      only a failure that said nothing of the source (a module of ours did not answer, a name was busy): the owner asks the same
+      source again at its next round; any other failure is the source's, and the owner goes to the next. A file that came is no
+      episode when it is a clip the host served in its place (core/notices.py: known by its head, a way that broke) or shorter than
+      any episode (`EPISODE_MIN_S`, a minute: an upload the host broke, its last word).
+  downloads.queue.changed DownloadQueue - the cards changed, on the beat of core/clock while a download goes, and when an interface
+      connects (gateway.sse.clients): SSE download_queue_update. The cards live with the sync of their series (scan.run.changed):
+      while it runs every card is kept; at its end only a failed card and a finished one whose plan was rebuilt stay, in the table
+      download_cards, until the user removes them or the next sync of the series begins.
+A link whose player downloads the file itself (`player_fetch` of its stream: Alloha) is taken by `sources.video.fetch` into the raw
+file of the download, the progress by `sources.video.progress`; the rest is as for any playlist.
 A link of a provider of the socket (`fetch_by: provider`) is no stream the downloader reads: the provider takes the whole file by
 its own way into the path of the download (`sources.video.fetch`, contracts/provider_socket.md, section 7), the progress is its
 telemetry (`sources.video.progress`), and the file that lies at the path goes the standard way: the checks of this module, the
 card, the end of the fetch. The way of a download is its own place in the limits (`provider_at_once`).
-Events in: sources.video.progress {target, ...figures}, scan.run.changed, settings.changed (download_threads_total, download_threads_per_file, download_single_at_once, download_provider_at_once),
-  work.withdrawn {series_id, keys?},
-  series.deleted (the fetches of the series stop).
+Events in: sources.video.progress VideoProgress {target, ...figures}, scan.run.changed, settings.changed (download_threads_total,
+  download_threads_per_file, download_single_at_once, download_provider_at_once), work.withdrawn {series_id, keys?}, series.deleted
+  (the fetches of the series stop).
+Resumability: the cards that stayed and the files fetches ended well with are in the store (`on_start` reads them); the fetches
+themselves are the plan's, which asks again after a stop.
 """
 from __future__ import annotations
 
 import asyncio
 import os
+import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import replace
+from datetime import datetime, timezone
 
+from calc.downloads import cards as cardbook
+from calc.downloads.failure import Failed, Unasked, kind_of
+from calc.downloads.fetch import (Job, Stream, finished, job_of, may_begin, need_of, path_refusal, refusal_words, removable, started,
+                                  stops_notice, stops_series, stream_of, task_key, unreached)
+from calc.downloads.limits import KEYS, MULTI, PROVIDER, SINGLE, after_setting, change_of, limits_of
+from calc.downloads.queue import queue_of
 from core import notices, storage
-from core.module import BaseModule
 from core.clock import beat_while
-from core.ffprobe import duration_of, film_stream, streams_of
-from core.contracts import (RUN_CHANGED, WORK_WITHDRAWN, DownloadNeed, DownloadVariant, SeriesDeleted, SettingValue,
-                            WorkWithdrawn)
+from core.contracts import (CardRemove, CardRemoved, DownloadFetch, DownloadLimits, DownloadQueue, FetchCancel, FetchCancelled,
+                            FetchesWithdrawn, LimitsSaved, LimitsSet, Progress, QueueCleared, RunChanged, SeriesDeleted, SeriesRef,
+                            SettingValue, VideoProgress, WorkWithdrawn)
 from core.db import Database
 from core.envelope import Envelope
+from core.ffprobe import duration_of, film_stream, streams_of
+from core.module import BaseModule
 from core.reasons import describe, reason
-from core.topics import (SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SOURCES_VIDEO_FETCH, SOURCES_VIDEO_FETCH_STOP,
-                         SOURCES_VIDEO_PROGRESS, SOURCES_VIDEO_STREAM)
 from core.retry import UNTIMED, Budget, retrying
+from core.topics import (DOWNLOADS_CANCEL, DOWNLOADS_CARD_REMOVE, DOWNLOADS_FETCH, DOWNLOADS_FETCH_FINISHED,
+                         DOWNLOADS_FETCH_STARTED, DOWNLOADS_LIMITS_GET, DOWNLOADS_LIMITS_SET, DOWNLOADS_QUEUE_CHANGED,
+                         DOWNLOADS_QUEUE_CLEAR, DOWNLOADS_QUEUE_GET, DOWNLOADS_WITHDRAW, GATEWAY_SSE_CLIENTS, SCAN_RUN_CHANGED,
+                         SERIES_DELETED, SETTINGS_CHANGED, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SOURCES_VIDEO_FETCH,
+                         SOURCES_VIDEO_FETCH_STOP, SOURCES_VIDEO_PROGRESS, SOURCES_VIDEO_STREAM, WORK_WITHDRAWN)
 
 from . import ytdlp
-from .failure import Failed, Final, Unasked, kind_of
-from .limits import KEYS, MULTI, PROVIDER, SINGLE, Limits, Places, whole
-from .cards import CardBook
+from .places import Places
 from .repository import DownloadsRepository
 
 # A download says it is alive by its progress; its silent steps (a probe of the length, a check of the file) end well within
@@ -82,6 +103,16 @@ from .repository import DownloadsRepository
 SILENCE_FUSE_S = 900.0
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
+
+
+def _now() -> float:
+    return time.monotonic()
+
+
+def _wall() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _stat_of(path: str) -> tuple[int, int] | None:
     """The size and the time of change (nanoseconds) of a file; none when there is no file."""
     try:
@@ -89,28 +120,6 @@ def _stat_of(path: str) -> tuple[int, int] | None:
     except FileNotFoundError:
         return None
     return found.st_size, found.st_mtime_ns
-
-
-async def _always() -> bool:
-    return True
-
-
-async def _never() -> bool:
-    """A link whose stream request failed is not handed to yt-dlp: a page of a web player is no stream."""
-    return False
-
-
-@dataclass(frozen=True)
-class Stream:
-    """What the stream request of a link says: the address and the headers, how the file comes, or why it cannot."""
-
-    url: str
-    headers: dict | None = None
-    error: tuple[str, Failed] | None = None  # the words of the refusal and what they say of the source
-    progressive: bool = False
-    playlist: bool = False
-    by_player: bool = False    # the player downloads the file itself (`sources.video.fetch`), the segments of a playlist
-    by_provider: bool = False  # a provider of the socket takes the whole file by its own way into the path
 
 
 def awaited(task: asyncio.Task) -> str:
@@ -124,11 +133,6 @@ def awaited(task: asyncio.Task) -> str:
         step = getattr(step, "cr_await", None) or getattr(step, "gi_yieldfrom", None)
     return "".join(traceback.format_list([(f.f_code.co_filename, f.f_lineno, f.f_code.co_name, "") for f in frames])) \
         or repr(task)
-
-
-def _under_way(cards: list[dict]) -> int:
-    """The downloads that wait or go: a card of an ended one is no work."""
-    return sum(card["status"] not in ("done", "failed") for card in cards)
 
 
 def remove_download(path: str) -> bool:
@@ -157,103 +161,96 @@ class DownloadsModule(BaseModule):
     def __init__(self, bus, db: Database, *, downloader=ytdlp.download) -> None:
         self.repo = DownloadsRepository(db)
         self._download = downloader  # replaced in tests
-        self.places = Places(Limits())  # how many fetches go at once, by the way a file comes
+        self.places = Places(DownloadLimits())  # how many fetches go at once, by the way a file comes
         self._placing: dict[str, str] = {}  # fetches that asked their stream and wait for a place of its way
-        self._fetch_queue: list[dict] = []
+        self._fetch_queue: list[Job] = []
         self._fetch_active: dict[str, tuple[asyncio.Task, int | None]] = {}
-        self._fetch_jobs: dict[str, dict] = {}  # the job of every fetch under way: the window names it by its path
-        self.cards = CardBook()  # the telemetry of every need under way (core/contracts/downloads.py)
+        self._fetch_jobs: dict[str, Job] = {}  # the job of every fetch under way: the window names it by its path
+        self._book = cardbook.Book()  # the telemetry of every need under way (core/contracts/downloads.py)
         self._going = asyncio.Event()  # a card is under way: the queue is told on the beat of core/clock
         self._cancelled: set[str] = set()  # fetches the user stopped: their owners hear them end
         self._player_progress: dict[str, object] = {}  # the files players download now -> where their progress goes
         super().__init__(bus)
 
     def register(self) -> None:
-        self.handle("gateway.sse.clients", self.on_sse_clients)
-        self.handle("settings.changed", self.on_settings_changed)
-        self.handle("downloads.queue.get", self.on_queue_get)
-        self.handle("downloads.limits.get", self.on_limits_get)
-        self.handle("downloads.limits.set", self.on_limits_set)
-        self.handle("downloads.queue.clear", self.on_queue_clear)
-        self.handle("downloads.cancel", self.on_cancel)
-        self.handle("downloads.fetch", self.on_fetch)
+        self.handle(GATEWAY_SSE_CLIENTS, self.on_sse_clients)
+        self.handle(SETTINGS_CHANGED, self.on_settings_changed)
+        self.handle(DOWNLOADS_QUEUE_GET, self.on_queue_get)
+        self.handle(DOWNLOADS_LIMITS_GET, self.on_limits_get)
+        self.handle(DOWNLOADS_LIMITS_SET, self.on_limits_set)
+        self.handle(DOWNLOADS_QUEUE_CLEAR, self.on_queue_clear)
+        self.handle(DOWNLOADS_CANCEL, self.on_cancel)
+        self.handle(DOWNLOADS_FETCH, self.on_fetch)
         self.handle(SOURCES_VIDEO_PROGRESS, self.on_player_progress)
         self.handle(WORK_WITHDRAWN, self.on_work_withdrawn)
-        self.handle("downloads.withdraw", self.on_withdraw, concurrent=True)
-        self.handle("series.deleted", self.on_series_deleted)
-        self.handle(RUN_CHANGED, self.on_run_changed)
-        self.handle("downloads.card.remove", self.on_card_remove)
+        self.handle(DOWNLOADS_WITHDRAW, self.on_withdraw, concurrent=True)
+        self.handle(SERIES_DELETED, self.on_series_deleted)
+        self.handle(SCAN_RUN_CHANGED, self.on_run_changed)
+        self.handle(DOWNLOADS_CARD_REMOVE, self.on_card_remove)
 
     async def on_start(self) -> None:
         for card in await self.repo.cards():
-            self.cards.kept(card)
+            self._book = cardbook.kept(self._book, card)
         # The files of a sync go with its folder when it ends: their records go with them.
         for path in await self.repo.done_paths():
             if await storage.call(_stat_of, path) is None:
                 await self.repo.forget_done(path)
         self.spawn(self._ticker(), name="downloads:cards", lasting=True)
-        default = Limits()
-        await self.places.set(Limits(**{name: await self._read_setting(key, getattr(default, name)) for name, key in KEYS.items()}))
-        self.log.info("пределы загрузок: %s", self.places.limits.as_dict())
+        await self.places.set(limits_of({name: await self._read_setting(key) for name, key in KEYS.items()}))
+        self.log.info("пределы загрузок: %s", self.places.limits.model_dump(mode="json"))
 
-    async def _read_setting(self, key: str, default: int) -> int:
+    async def _read_setting(self, key: str) -> str | None:
         try:
-            reply = await self.reply_of(SETTINGS_VALUE_GET, {"key": key})
+            return (await self.reply_of(SETTINGS_VALUE_GET, {"key": key})).value
         except (Exception,):  # noqa: BLE001 - a setting that cannot be read takes its default
-            return default
-        return whole(reply.value) or default
+            return None
 
-    async def on_limits_get(self, env: Envelope) -> dict:
-        return self.places.limits.as_dict()
+    async def on_limits_get(self, env: Envelope) -> DownloadLimits:
+        return self.places.limits
 
-    async def on_limits_set(self, env: Envelope) -> dict:
-        asked = {name: env.payload[name] for name in KEYS if name in env.payload}
-        wrong = next((name for name, value in asked.items() if whole(value) is None), None)
-        if wrong is not None:
-            return {"ok": False, "reason": reason("download_limit_invalid", name=wrong, value=str(asked[wrong]))}
-        for name, value in asked.items():
-            await self.request(SETTINGS_VALUE_SET, {"key": KEYS[name], "value": str(whole(value))})
-        await self._apply(Limits(**{**vars(self.places.limits), **{name: whole(value) for name, value in asked.items()}}))
-        return {"ok": True, "limits": self.places.limits.as_dict()}
+    async def on_limits_set(self, env: Envelope) -> LimitsSaved:
+        change = change_of(LimitsSet.model_validate(env.payload))
+        if change.refusal is not None:
+            return LimitsSaved(ok=False, reason=change.refusal)
+        for setting, value in change.writes:
+            await self.request(SETTINGS_VALUE_SET, {"key": setting, "value": value})
+        await self._apply(change.applied_to(self.places.limits))
+        return LimitsSaved(ok=True, limits=self.places.limits)
 
-    async def _apply(self, limits: Limits) -> None:
+    async def _apply(self, limits: DownloadLimits) -> None:
         if limits != self.places.limits:
             await self.places.set(limits)
-            self.log.info("пределы загрузок: %s", limits.as_dict())
+            self.log.info("пределы загрузок: %s", limits.model_dump(mode="json"))
             self._fetch_pump()
 
     # --- events -------------------------------------------------------------------
 
     async def on_settings_changed(self, env: Envelope) -> None:
         setting = SettingValue.model_validate(env.payload)
-        name = next((name for name, key in KEYS.items() if key == setting.key), None)
-        value = whole(setting.value)
-        if name is not None and value is not None:
-            await self._apply(Limits(**{**vars(self.places.limits), name: value}))
+        changed = after_setting(self.places.limits, setting.key, setting.value)
+        if changed is not None:
+            await self._apply(changed)
 
     async def on_series_deleted(self, env: Envelope) -> None:
-        series_id = SeriesDeleted.model_validate(env.payload).series_id
-        await self._withdraw(lambda job_key, owner: owner == series_id)
+        await self._withdraw(stops_series(SeriesDeleted.model_validate(env.payload).series_id))
 
     async def on_work_withdrawn(self, env: Envelope) -> None:
         """The owner of the work does not need it: the jobs of the series, or of the keys it names, stop. This module
         stops them itself and removes what they wrote; nobody tells it how."""
-        notice = WorkWithdrawn.model_validate(env.payload)
-        await self._withdraw(lambda job_key, owner: owner == notice.series_id and (notice.keys is None or job_key in notice.keys))
+        await self._withdraw(stops_notice(WorkWithdrawn.model_validate(env.payload)))
 
-    async def on_withdraw(self, env: Envelope) -> dict:
+    async def on_withdraw(self, env: Envelope) -> FetchesWithdrawn:
         """The owner stops the fetches of a series and waits for them: the answer comes once every one has ended, its
         program stopped and what it wrote removed."""
-        series_id = int(env.payload["series_id"])
-        return {"stopped": await self._withdraw(lambda job_key, owner: owner == series_id)}
+        return FetchesWithdrawn(stopped=await self._withdraw(stops_series(SeriesRef.model_validate(env.payload).series_id)))
 
     async def _withdraw(self, wanted) -> int:
         """The fetches wanted stop: those waiting leave the queue, those under way are cancelled and waited for (their
         programs are stopped and what they wrote goes on their way out)."""
         for job in [*self._fetch_queue, *self._fetch_jobs.values()]:
-            if wanted(job["key"], job["series_id"]):
-                self.cards.withdrawn(job["need_key"])
-        self._fetch_queue = [job for job in self._fetch_queue if not wanted(job["key"], job["series_id"])]
+            if wanted(job.key, job.series_id):
+                self._book = cardbook.withdrawn(self._book, job.need_key)
+        self._fetch_queue = [job for job in self._fetch_queue if not wanted(job.key, job.series_id)]
         runners = [runner for job_key, (runner, owner) in list(self._fetch_active.items()) if wanted(job_key, owner)]
         for runner in runners:
             runner.cancel()
@@ -261,156 +258,129 @@ class DownloadsModule(BaseModule):
         await asyncio.gather(*runners, return_exceptions=True)
         return len(runners)
 
-    async def on_cancel(self, env: Envelope) -> dict:
+    async def on_cancel(self, env: Envelope) -> FetchCancelled:
         """One fetch stopped by the user: its owner hears it end, failed, and decides what follows."""
-        key = str(env.payload["task_id"]).removeprefix("fetch:")
-        waiting = [job for job in self._fetch_queue if job["key"] == key]
+        key = task_key(FetchCancel.model_validate(env.payload).task_id)
+        waiting = [job for job in self._fetch_queue if job.key == key]
         if waiting:
-            self._fetch_queue = [job for job in self._fetch_queue if job["key"] != key]
+            self._fetch_queue = [job for job in self._fetch_queue if job.key != key]
             for job in waiting:
-                self.cards.finished(job["need_key"], False)
-                self._finished(job, False, reason("cancelled_by_user"), False)
+                self._end_waiting(job, reason("cancelled_by_user"))
         elif key in self._fetch_active:
             self._cancelled.add(key)
             self._fetch_active[key][0].cancel()
         else:
             raise LookupError(reason("fetch_not_found", key=key))
         self._announce_queue()
-        return {"cancelled": True}
+        return FetchCancelled(cancelled=True)
 
-    async def on_queue_clear(self, env: Envelope) -> dict:
+    async def on_queue_clear(self, env: Envelope) -> QueueCleared:
         waiting, self._fetch_queue = self._fetch_queue, []
         for job in waiting:
-            self.cards.finished(job["need_key"], False)
-            self._finished(job, False, reason("queue_cleared_by_user"), False)
+            self._end_waiting(job, reason("queue_cleared_by_user"))
         self._announce_queue()
-        return {"deleted": len(waiting)}
+        return QueueCleared(deleted=len(waiting))
 
-    async def on_queue_get(self, env: Envelope) -> dict:
-        tasks = self._queue()
-        return {"tasks": tasks, "count": _under_way(tasks)}
+    def _end_waiting(self, job: Job, why: str) -> None:
+        """A fetch that waited in the queue is ended by the user: its owner hears it end, failed."""
+        self._book = cardbook.finished(self._book, job.need_key, False, _now(), _wall())
+        self._finished(job, False, why, False)
 
-    def _queue(self) -> list[dict]:
-        """The cards, with the place of each waiting one: those waiting for a place of their way first, with how many of
-        their way go of how many may; then the queue, with how many fetches go of how many may whatever their way."""
-        need_of = {job["key"]: job["need_key"] for job in [*self._fetch_jobs.values(), *self._fetch_queue]}
-        places: dict[str, tuple[int, int, int]] = {}
-        for number, (key, way) in enumerate(self._placing.items(), start=1):
-            places[need_of[key]] = (number, self.places.busy(way), self.places.room(way))
-        going = len(self._fetch_active) - len(self._placing)
-        for number, job in enumerate(self._fetch_queue, start=len(places) + 1):
-            places[job["need_key"]] = (number, going, self.places.total)
-        out = []
-        for card in self.cards.view():
-            if card.id in places:
-                card.position, card.running, card.limit = places[card.id]
-            out.append(card.model_dump(mode="json"))
-        return out
+    async def on_queue_get(self, env: Envelope) -> DownloadQueue:
+        return self._queue()
+
+    def _queue(self) -> DownloadQueue:
+        return queue_of(cardbook.view(self._book, _now()),
+                        need_of={job.key: job.need_key for job in [*self._fetch_jobs.values(), *self._fetch_queue]},
+                        placing=self._placing, waiting=[job.need_key for job in self._fetch_queue],
+                        going=len(self._fetch_active) - len(self._placing), busy=self.places.counts, limits=self.places.limits)
 
     async def on_run_changed(self, env: Envelope) -> None:
         """The cards live with the sync of their series: a new one takes away what the one before left; at its end only a
         failed card and a finished one whose plan was rebuilt stay, kept in the store."""
-        series_id, active = int(env.payload["series_id"]), bool(env.payload.get("active"))
-        if active:
-            await self.repo.drop_cards(self.cards.run_started(series_id))
+        run = RunChanged.model_validate(env.payload)
+        if run.active:
+            self._book, gone = cardbook.run_started(self._book, run.series_id)
+            await self.repo.drop_cards(gone)
         else:
-            stay, gone = self.cards.run_ended(series_id)
+            self._book, stay, gone = cardbook.run_ended(self._book, run.series_id)
             await self.repo.keep_cards(stay)
             await self.repo.drop_cards(gone)
         self._announce_queue()
 
-    async def on_card_remove(self, env: Envelope) -> dict:
+    async def on_card_remove(self, env: Envelope) -> CardRemoved:
         """The user removes a card that stayed after its sync."""
-        key = str(env.payload["id"])
-        if key not in self.cards.cards or key in {job["need_key"] for job in [*self._fetch_queue, *self._fetch_jobs.values()]}:
+        key = CardRemove.model_validate(env.payload).id
+        in_work = {job.need_key for job in [*self._fetch_queue, *self._fetch_jobs.values()]}
+        if not removable(key, list(self._book.cards), in_work):
             raise LookupError(reason("card_not_removable", key=key))
-        self.cards.forget(key)
+        self._book = cardbook.forget(self._book, key)
         await self.repo.drop_cards([key])
         self._announce_queue()
-        return {"removed": True}
+        return CardRemoved(removed=True)
 
     async def _ticker(self) -> None:
         """While a download goes the queue is told on the beat of the clock of displays (core/clock): its cards show the
         time of each stage."""
         while True:
             await self._going.wait()
-            await beat_while(self.cards.running, self._announce_queue)
+            await beat_while(lambda: cardbook.running(self._book), self._announce_queue)
             self._going.clear()
 
     async def on_sse_clients(self, env: Envelope) -> None:
         """An interface connected: it gets the queue as it is, with no question of its own."""
         if (env.payload or {}).get("count"):
-            self._broadcast_queue()
-
-    def _broadcast_queue(self) -> None:
-        tasks = self._queue()
-        self.publish_event("downloads.queue.changed", {"tasks": tasks, "count": _under_way(tasks)})
+            self._announce_queue()
 
     def _announce_queue(self) -> None:
         """A fetch began, waits or ended: the window sees it."""
-        self._broadcast_queue()
+        self.publish_event(DOWNLOADS_QUEUE_CHANGED, self._queue().model_dump(mode="json"))
 
     # --- the fetches ------------------------------------------------------------------
 
-    async def _resolve_stream(self, url: str, *, max_height: int | None = None, ytdlp_fallback) -> Stream:
-        """The stream of a link, via the provider that owns it. The provider says itself whether its refusal is its last
-        word; a provider that did not answer said nothing of the source. `by_player`: the player downloads the file itself
-        (`sources.video.fetch`), a playlist by its segments; `by_provider`: a provider of the socket takes the whole file.
-
-        `ytdlp_fallback` is an async callable asked only when the request fails: True hands the link to
-        the downloader as it is, False makes the failure the error of the job, since a page of a web
-        player is no stream and yt-dlp would scrape a foreign player."""
-        payload = {"url": url, **({"max_height": max_height} if max_height else {})}
+    async def _resolve_stream(self, job: Job) -> Stream:
+        """The stream of a link, via the provider that owns it (calc/downloads/fetch.py says what the answer comes to). A request that
+        fails hands the link to the downloader only when the job allows it (`ytdlp`: a VK video), otherwise the failure is the error of
+        the job."""
+        payload = {"url": job.url, **({"max_height": job.max_height} if job.max_height else {})}
         try:
             reply = await self.reply_of(SOURCES_VIDEO_STREAM, payload)
-            if reply.error:
-                # `unasked`: the player was not reached (a provider that is not up), the failure is nobody's.
-                kind = Failed.UNASKED if reply.unasked else Failed.BROKEN if reply.transient else Failed.FINAL
-                return Stream(url, error=(reply.error, kind))
-            if reply.handled:
-                by_player = bool(reply.player_fetch)
-                return Stream(reply.stream_url, reply.headers, progressive=bool(reply.progressive),
-                              playlist=bool(reply.playlist) or by_player, by_player=by_player,
-                              by_provider=reply.fetch_by == "provider")
         except Exception as exc:
-            if not await ytdlp_fallback():
-                return Stream(url, error=(reason("stream_not_got", cause=str(exc)), Failed.UNASKED))
-            self.log.debug("sources.video.stream не обработан для %s: %s", url, exc)
-        return Stream(url)
+            if job.ytdlp:
+                self.log.debug("sources.video.stream не обработан для %s: %s", job.url, exc)
+            return unreached(job.url, str(exc), bool(job.ytdlp))
+        return stream_of(job.url, reply)
 
     async def on_fetch(self, env: Envelope) -> None:
-        job = {k: env.payload.get(k) for k in ("key", "url", "path", "max_height", "series_id", "whole", "ytdlp")}
-        if not (job["path"] or "").startswith("/"):
-            self._finished(job, False, reason("save_path_relative"), False)
+        fetch = DownloadFetch.model_validate(env.payload)
+        job = job_of(fetch)
+        if (refused := path_refusal(job)) is not None:
+            self._finished(job, False, refused, False)
             return
-        if job["key"] in self._fetch_active or any(queued["key"] == job["key"] for queued in self._fetch_queue):
+        if job.key in self._fetch_active or any(queued.key == job.key for queued in self._fetch_queue):
             return
         if await self._kept(job):
             self.log.info("загрузка %s: файл уже скачан и проверен этой же загрузкой — взят без обращения к источнику",
-                          job["key"])
+                          job.key)
             self._finished(job, True, "", False)
             return
-        # What the fetch is for and which variant it takes, as its owner tells it; a fetch that names no need is one.
-        need = DownloadNeed.model_validate(env.payload["need"]) if env.payload.get("need") else DownloadNeed(
-            key=job["key"], series_id=job["series_id"] or 0, kind="video" if job.get("whole") else "dub",
-            cap=job.get("max_height"))
-        variant = DownloadVariant.model_validate(env.payload["variant"]) if env.payload.get("variant") else None
-        job["need_key"] = need.key
-        self.cards.queued(need, variant)
+        need = need_of(job, fetch)
+        job = replace(job, need_key=need.key)
+        self._book = cardbook.queued(self._book, need, fetch.variant, _now(), _wall())
         self._going.set()
         self._fetch_queue.append(job)
         self._fetch_pump()
         self._announce_queue()
 
-    async def _kept(self, job: dict) -> bool:
+    async def _kept(self, job: Job) -> bool:
         """Whether the file at the path of the job is the one the same fetch (its link and its cap) ended well with: it
         lies there with the size and the time of change it had then. A record the file no longer answers goes."""
-        done = await self.repo.done_of(job["path"])
-        if done is None or (done["url"], done["max_height"]) != (job["url"], job.get("max_height")):
+        done = await self.repo.done_of(job.path)
+        if done is None or (done["url"], done["max_height"]) != (job.url, job.max_height):
             return False
-        if await storage.call(_stat_of, job["path"]) == (done["size"], done["mtime_ns"]):
+        if await storage.call(_stat_of, job.path) == (done["size"], done["mtime_ns"]):
             return True
-        await self.repo.forget_done(job["path"])
+        await self.repo.forget_done(job.path)
         return False
 
     def background(self) -> set[asyncio.Task]:
@@ -418,50 +388,39 @@ class DownloadsModule(BaseModule):
         return super().background() | {runner for runner, _ in self._fetch_active.values()}
 
     def _fetch_pump(self) -> None:
-        """What waits starts in the order asked: a fetch asks its stream, learns its way and takes the place of its way or
-        waits for it. As many start as may go at once whatever their way (`Places.total`), not counting those waiting for a
-        place, and no more wait than that: a full way does not hold the queue from the other, and the links of the whole
-        queue are not asked at once."""
-        while (self._fetch_queue and len(self._fetch_active) - len(self._placing) < self.places.total
-               and len(self._placing) < self.places.total):
+        """What waits starts in the order asked (calc/downloads/fetch.py `may_begin` says how many): a fetch asks its stream,
+        learns its way and takes the place of its way or waits for it."""
+        while may_begin(len(self._fetch_queue), len(self._fetch_active), len(self._placing), self.places.total):
             job = self._fetch_queue.pop(0)
-            job["turn"] = self.places.turn()
-            runner = self.spawn(self._fetch_one(job))
-            self._fetch_active[job["key"]] = (runner, job["series_id"])
-            self._fetch_jobs[job["key"]] = job
-            self.publish_event("downloads.fetch.started", {
-                "key": job["key"], "series_id": job["series_id"], "path": job["path"]})
+            runner = self.spawn(self._fetch_one(job, self.places.turn()))
+            self._fetch_active[job.key] = (runner, job.series_id)
+            self._fetch_jobs[job.key] = job
+            self.publish_event(DOWNLOADS_FETCH_STARTED, started(job).model_dump(mode="json"))
 
-    def _finished(self, job: dict, ok: bool, error: str, transient: bool) -> None:
-        self.publish_event("downloads.fetch.finished", {
-            "key": job["key"], "ok": ok, "error": "" if ok else error, "transient": transient,
-            "path": job["path"], "series_id": job.get("series_id")})
+    def _finished(self, job: Job, ok: bool, error: str, transient: bool) -> None:
+        self.publish_event(DOWNLOADS_FETCH_FINISHED, finished(job, ok, error, transient).model_dump(mode="json"))
 
-    async def _fetch_one(self, job: dict) -> None:
+    async def _fetch_one(self, job: Job, turn: int) -> None:
         """One download with its attempts (modules/downloads/failure.py): the source's last word ends it at once; a way
         that broke is asked again, a playlist continued from the segments it got; a download that spent its attempts
         failed, and its owner goes to the next source. `transient` of the end is only a failure that said nothing of the
         source: the owner asks the same source again at its next round."""
-        key, path = job["key"], job["path"]
+        key, path = job.key, job.path
         ok, error, said = False, "", None
 
-        need_key = job["need_key"]
+        need_key = job.need_key
         tries = 0
 
         async def on_progress(data: dict) -> None:
-            self.cards.progress(need_key, data)
-
-        def resolve():
-            return self._resolve_stream(job["url"], max_height=job.get("max_height"),
-                                        ytdlp_fallback=_always if job.get("ytdlp") else _never)
+            self._book = cardbook.progress(self._book, need_key, Progress.model_validate(data), _now())
 
         async def attempt_once() -> tuple[bool, str, Failed | None]:
             nonlocal tries
             tries += 1
-            self.cards.attempt(need_key, tries, budget.attempts)
+            self._book = cardbook.attempt(self._book, need_key, tries, budget.attempts, _now())
             self.places.asking(turn)
             try:
-                stream = await resolve()
+                stream = await self._resolve_stream(job)
                 if stream.error is not None:
                     return (False, *stream.error)
                 way = (PROVIDER if stream.by_provider else
@@ -469,7 +428,7 @@ class DownloadsModule(BaseModule):
 
                 def wait() -> None:
                     # The way of the file is full: the fetch waits in the queue.
-                    self.cards.waiting(need_key)
+                    self._book = cardbook.waiting(self._book, need_key, _now())
                     self._placing[key] = way
                     self._fetch_pump()
                     self._announce_queue()
@@ -483,8 +442,8 @@ class DownloadsModule(BaseModule):
             try:
                 if waited:
                     # An address a host signed may not outlive the wait: the stream is asked anew.
-                    self.cards.attempt(need_key, tries, budget.attempts)
-                    stream = await resolve()
+                    self._book = cardbook.attempt(self._book, need_key, tries, budget.attempts, _now())
+                    stream = await self._resolve_stream(job)
                     if stream.error is not None:
                         return (False, *stream.error)
                 return await fetched(stream)
@@ -495,13 +454,13 @@ class DownloadsModule(BaseModule):
             if stream.by_provider:
                 # The provider takes the whole file by its own way: no address, no headers, no threads of ours.
                 done, failure = await self._watched(key, stream.url, path, on_progress,
-                                                    downloader=self._by_provider(job.get("max_height")))
+                                                    downloader=self._by_provider(job.max_height))
             else:
                 kw: dict = {"threads": self.places.limits.threads_per_file}
                 if stream.by_player:
-                    kw["fetcher"] = self._by_player(stream.url, job.get("max_height"), self.places.limits.threads_per_file)
-                if job.get("max_height"):
-                    kw["max_height"] = job["max_height"]  # a page the downloader reads itself keeps the cap of the job
+                    kw["fetcher"] = self._by_player(stream.url, job.max_height, self.places.limits.threads_per_file)
+                if job.max_height:
+                    kw["max_height"] = job.max_height  # a page the downloader reads itself keeps the cap of the job
                 if stream.headers:
                     kw["headers"] = stream.headers
                 if stream.progressive:
@@ -523,10 +482,9 @@ class DownloadsModule(BaseModule):
             return done, failure, None if done else kind_of(failure)
 
         budget = _download_budget()
-        turn = job["turn"]
 
         def report(result: tuple[bool, str, Failed | None], attempt: int, pause: float) -> None:
-            self.cards.attempt_failed(need_key)
+            self._book = cardbook.attempt_failed(self._book, need_key, _now())
             self.log.warning("загрузка %s: %s — повтор %d/%d через %.0f с", key, describe(result[1]), attempt,
                              budget.attempts, pause)
 
@@ -558,11 +516,12 @@ class DownloadsModule(BaseModule):
                     # Kept for the same fetch asked again (a sync taken up after a stop): the file is taken as it lies.
                     stat = await storage.call(_stat_of, path)
                     if stat is not None:
-                        await self.repo.keep_done(path, job["url"], job.get("max_height"), *stat)
+                        await self.repo.keep_done(path, job.url, job.max_height, *stat)
                 # The height of what came, read from the header of the file (no frame is decoded).
                 film = film_stream(await streams_of(path) or []) if size else None
-                self.cards.finished(need_key, ok, size_mb=round(size / 1024 ** 2, 1) if size else None,
-                                    height=(film or {}).get("height"))
+                self._book = cardbook.finished(self._book, need_key, ok, _now(), _wall(),
+                                               size_mb=round(size / 1024 ** 2, 1) if size else None,
+                                               height=(film or {}).get("height"))
                 self._finished(job, ok, error, not ok and said is Failed.UNASKED)
             self._fetch_pump()
             self._announce_queue()
@@ -595,11 +554,7 @@ class DownloadsModule(BaseModule):
             return False, Unasked(reason("player_fetch_silent", cause=str(exc)))
         finally:
             self._player_progress.pop(path, None)
-        if reply.ok:
-            return True, ""
-        words = reason("player_fetch_failed", cause=reply.error) if reply.error else reason("player_fetch_refused")
-        kind = reply.kind or ("final" if reply.final else "broken")
-        return False, Final(words) if kind == "final" else Unasked(words) if kind == "unasked" else words
+        return (True, "") if reply.ok else (False, refusal_words(reply))
 
     def _by_player(self, url: str, max_height: int | None, connections: int):
         """The transfer of a file its player downloads itself (`sources.video.fetch`): the segments into the raw file of
@@ -619,15 +574,15 @@ class DownloadsModule(BaseModule):
             finally:
                 self._player_progress.pop(target, None)
             if not reply.ok:
-                words = reason("player_fetch_failed", cause=reply.error) if reply.error else reason("player_fetch_refused")
-                return False, Final(words) if reply.final else words, 0.0, 0.0
+                return False, refusal_words(reply), 0.0, 0.0
             return True, "", float(reply.seconds or 0), float(reply.longest or 0)
         return fetch
 
     async def on_player_progress(self, env: Envelope) -> None:
-        told = self._player_progress.get(env.payload.get("target", ""))
+        progress = VideoProgress.model_validate(env.payload)
+        told = self._player_progress.get(progress.target)
         if told is not None:
-            await told({key: value for key, value in env.payload.items() if key != "target"})
+            await told(progress.model_dump(exclude={"target"}, exclude_unset=True))
 
     async def _drop_fetched(self, path: str) -> None:
         """What a fetch that did not end whole wrote goes; a name another operation still owns stays, and the log says so."""

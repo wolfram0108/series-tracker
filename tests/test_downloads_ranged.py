@@ -81,7 +81,7 @@ async def test_a_part_that_fails_twice_is_asked_again_and_the_file_is_whole(tmp_
 
 @pytest.mark.asyncio
 async def test_a_refused_link_is_not_asked_again_and_a_link_that_expired_can_be_retried_by_the_caller(tmp_path):
-    from modules.downloads.failure import Failed, kind_of
+    from calc.downloads.failure import Failed, kind_of
 
     server = Server(bytes(25), status={10: 403})
 

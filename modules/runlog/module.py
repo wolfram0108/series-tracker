@@ -38,8 +38,7 @@ from pydantic import BaseModel
 from core import compute, storage
 from core.module import BaseModule
 from core.secrets import redacted
-from core.topics import SOURCES_TABLE_TRACE
-from core.contracts.work import RUN_CHANGED
+from core.topics import SCAN_RUN_CHANGED, SOURCES_TABLE_TRACE
 from core.envelope import Envelope
 
 KEEP = 3  # dumps kept per series and per page: the last syncs are what is looked into
@@ -234,7 +233,7 @@ class RunlogModule(BaseModule):
 
     def _seen(self, env: Envelope) -> None:
         payload = env.payload if isinstance(env.payload, dict) else {}
-        if env.topic == RUN_CHANGED and payload.get("active"):
+        if env.topic == SCAN_RUN_CHANGED.name and payload.get("active"):
             series_id = int(payload["series_id"])
             if series_id not in self.runs or self.runs[series_id].closing:
                 self._open(series_id, {"series_id": series_id}, str(series_id))
@@ -245,7 +244,7 @@ class RunlogModule(BaseModule):
             if url and not in_a_sync and (url not in self.runs or self.runs[url].closing):
                 self._open(url, {"url": url}, os.path.join(READS, page_folder(url)))
         self.take(("bus", _now(), env))
-        ended = (int(payload["series_id"]) if env.topic == RUN_CHANGED and not payload.get("active")
+        ended = (int(payload["series_id"]) if env.topic == SCAN_RUN_CHANGED.name and not payload.get("active")
                  else str(payload.get("url") or "") if env.topic == SOURCES_TABLE_TRACE.name and payload.get("kind") == "end" else None)
         run = self.runs.get(ended) if ended not in (None, "") else None
         if run is not None and not run.closing:

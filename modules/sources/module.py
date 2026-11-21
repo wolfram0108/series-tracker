@@ -133,7 +133,7 @@ from core.contracts import (BlockedPage, MirrorsSaved, MirrorsSet, NotAllowed, P
                             SiteResolveRequest, SourceEvent, SourceType, SourcesSettingsView, StreamReply, TableCancel, TableCancelled,
                             TableGetReply, TableGetRequest, TableRead, TableRefresh, TablesFresh, TablesFreshReply, TermSaved, TermSet,
                             TermsReply, TitleSearchReply, TitleSearchRequest, TorrentFile, TorrentFileDrop, TorrentFileGet, TrackersReply,
-                            VideoFetch, VideoFetched, VideoFetchStop, VideoFetchStopped, VideoStream)
+                            VideoFetch, VideoFetched, VideoFetchStop, VideoFetchStopped, VideoProgress, VideoStream)
 from core.topics import (CATALOG_SERIES_LIST, SERIES_DELETED, SERIES_PURGED, SERIES_SOURCE_ADDED, SERIES_SOURCE_REMOVED,
                          SERIES_SOURCE_UPDATED, SETTINGS_CHANGED, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SOURCES_PAGES_CHECK,
                          SOURCES_PAGES_FORGOTTEN, SOURCES_PARSE, SOURCES_PLAYERS_LIST, SOURCES_PROVIDER_GET, SOURCES_PROVIDER_SET,
@@ -659,7 +659,13 @@ class SourcesModule(BaseModule):
             return VideoFetched(ok=False, error=reason("no_player_downloads"), final=True, kind="final")
 
         async def told(figures: dict) -> None:
-            self.publish_event(SOURCES_VIDEO_PROGRESS, {"target": target, **figures})
+            try:
+                progress = VideoProgress.model_validate({**figures, "target": target})
+            except ValueError as exc:  # a frame that breaks the standard of the telemetry is dropped; the download goes on
+                self.log.warning("%s: кадр хода загрузки не принят: %s", os.path.basename(target), exc)
+                return
+            # A report names what it knows: a figure it does not name is absent in the event, not none.
+            self.publish_event(SOURCES_VIDEO_PROGRESS, progress.model_dump(mode="json", exclude_unset=True))
 
         work = asyncio.ensure_future(player.transfer(url, target, request.max_height, int(request.connections or 1), told))
         self._transfers[target] = work

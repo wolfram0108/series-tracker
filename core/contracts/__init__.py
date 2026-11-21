@@ -4,14 +4,18 @@ A producer builds its payload with one of these models and a consumer reads it w
 so the two cannot drift apart unnoticed. Modules import their contracts from here, never from each other.
 """
 from .titles import TitleCard, TitleLine, TitleSearchReply, TitleSearchRequest
-from .alignment import (AlignmentJob, DubResult, JobKind, JobStatus, ReverseEpisode, ReverseReply, ReverseSubmit, SubmitOutcome,
-                        SubmitReply, job_dir, job_key, series_of_job_key)
+from .alignment import (AlignmentJob, ConformFolders, ConformQueue, ConformTask, DaemonState, DaemonUp, DubResult, JobCancelled,
+                        JobFolders, JobFoldersOf, JobFound, JobKey, JobKeys, JobKind, JobRef, JobRemoved, JobStatus, JobSubmit,
+                        PlotReply, PlotRef, ReverseEpisode, ReverseReply, ReverseSubmit, SubmitOutcome, SubmitReply, TaskResult,
+                        job_dir, job_key, series_of_job_key)
 from .composition import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                           CompositionPreviewRequest, CompositionReply, PreviewLine, SeasonVoiceOrder, VoiceOrderSet, VoiceSpan, VoiceTitleSet,
                           CompositionRow, EpisodeRef, Exclusion, LAYOUT_PARTS, LayoutPart, PlayerSummary, SourceStatus, SourceSummary)
 from .compilation import (Absence, CompilationEpisode, CompilationRef, CompilationView, compilation_key,
                           parse_compilation_key)
-from .downloads import (STAGES, AttemptLine, DownloadCard, DownloadNeed, DownloadVariant, Figures, StageView)
+from .downloads import (STAGES, AttemptLine, CardRemove, CardRemoved, DownloadCard, DownloadFetch, DownloadLimits, DownloadNeed,
+                        DownloadQueue, DownloadVariant, FetchCancel, FetchCancelled, FetchesWithdrawn, FetchFinished, FetchStarted,
+                        Figures, LimitsSaved, LimitsSet, Progress, QueueCleared, SeriesRef, StageView, VideoProgress)
 from .packing import PACK_STAGES, JournalStep, PackCard, PackFigures, PackJournal, PackStageView, PackTrack
 from .conform_settings import ConformDomain, ConformParams, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
 from .provider_settings import ProviderSite, ProviderSaved, ProviderSettingsDraft, ProviderView
@@ -42,13 +46,15 @@ from .voice_groups import GroupsResolveReply, GroupsResolveRequest
 from .library import (DirectoriesGet, DirectoryItem, DirectoryListing, Relocated, RelocationFinished, RelocationOf, RelocationPath,
                       RelocationPlan, RelocationPlanned, RelocationStarted)
 from .availability import Action, NotAllowed, allowed, refusal, require, variant_state
-from .work import RUN_CHANGED, WORK_STATE, WORK_WITHDRAWN, RunChanged, RunSnapshot, Slot, WorkState, WorkWithdrawn, slot_of
+from .work import RunChanged, RunSnapshot, WorkState, WorkWithdrawn
+from .scan import (EditAdmitted, EditBegin, EditEnd, OpenRun, OpenRuns, OutputSwitched, RunCancelled, ScanStarted, ScanStatus,
+                   ScheduleSaved, ScheduleSet, ScheduleTimes, SeriesRun, SeriesStop, SourceSync, SyncResult)
 from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, DubsScope, DubsSnapshot, DubState, DubStatus,
                      Reason, SettingProblem, SnapshotItem,
                      VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
 
 __all__ = ["TitleCard", "TitleLine", "TitleSearchReply", "TitleSearchRequest", "PACK_STAGES", "JournalStep", "PackCard", "PackFigures", "PackJournal", "PackStageView", "PackTrack", "STAGES", "AttemptLine", "DownloadCard", "DownloadNeed", "DownloadVariant", "Figures", "StageView", "Absence", "CompilationEpisode", "CompilationRef", "CompilationView", "compilation_key", "parse_compilation_key",
-           "COMPILATION_MEMBER", "COMPILATION_TAKE", "Action", "NotAllowed", "allowed", "refusal", "require", "variant_state", "LEVER_FORMS", "WORK_WITHDRAWN", "WorkWithdrawn", "RUN_CHANGED", "WORK_STATE", "RunChanged", "RunSnapshot", "Slot", "WorkState", "slot_of", "AlignmentJob", "DubResult", "JobKind", "JobStatus", "ReverseEpisode", "ReverseReply", "ReverseSubmit", "SubmitOutcome", "SubmitReply", "job_dir", "job_key", "series_of_job_key", "DubEvent",
+           "COMPILATION_MEMBER", "COMPILATION_TAKE", "Action", "NotAllowed", "allowed", "refusal", "require", "variant_state", "LEVER_FORMS", "WorkWithdrawn", "RunChanged", "RunSnapshot", "WorkState", "AlignmentJob", "DubResult", "JobKind", "JobStatus", "ReverseEpisode", "ReverseReply", "ReverseSubmit", "SubmitOutcome", "SubmitReply", "job_dir", "job_key", "series_of_job_key", "DubEvent",
            "DubEventStatus", "DubHint", "DubItem", "DubRecord", "DubsSnapshot", "DubState", "DubStatus", "Reason", "SnapshotItem", "SettingProblem", "VoiceSettingsDraft",
            "VoiceSettingsSaved", "VoiceSettingsView", "DubsScope", "ConformSettingsDraft", "ConformSettingsSaved",
            "ConformSettingsView", "ConformDomain", "ConformParams", "ProviderSite", "ProviderSaved", "ProviderSettingsDraft", "ProviderView",
@@ -79,6 +85,13 @@ from .planner import (PlanAsset, PlanAssetTrack, PlanSubtitle, PlanAssetVideo, P
                       PlanFailure, PlanForget, PlanGoalTrack, PlanGoalVideo, PlannerView, PlanProblem, PlanRowRef, PlanSnapshot,
                       SyncScope)
 
+__all__ += ["ConformFolders", "ConformQueue", "ConformTask", "DaemonState", "DaemonUp", "JobCancelled", "JobFolders", "JobFoldersOf",
+            "JobFound", "JobKey", "JobKeys", "JobRef", "JobRemoved", "JobSubmit", "PlotReply", "PlotRef", "TaskResult",
+            "CardRemove", "CardRemoved", "DownloadFetch", "DownloadLimits", "DownloadQueue", "FetchCancel", "FetchCancelled",
+            "FetchesWithdrawn", "FetchFinished", "FetchStarted", "LimitsSaved", "LimitsSet", "Progress", "QueueCleared", "SeriesRef",
+            "VideoProgress", "EditAdmitted", "EditBegin", "EditEnd", "OpenRun", "OpenRuns", "OutputSwitched", "RunCancelled",
+            "ScanStarted", "ScanStatus", "ScheduleSaved", "ScheduleSet", "ScheduleTimes", "SeriesRun", "SeriesStop", "SourceSync",
+            "SyncResult"]
 __all__ += ["PlanAsset", "PlanAssetTrack", "PlanSubtitle", "PlanAssetVideo", "PlanCommand", "PlanDelete", "PlanEpisode", "PlanFailure",
             "PlanProblem", "PlanForget", "SyncScope",
             "PlanGoalTrack", "PlanGoalVideo", "PlannerView", "PlanRowRef", "PlanSnapshot"]

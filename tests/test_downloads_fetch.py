@@ -16,7 +16,7 @@ from core.runner import Runner
 from core.db import Database
 from core.reasons import parse, reason
 from modules.downloads import DownloadsModule
-from modules.downloads.failure import Final
+from calc.downloads.failure import Final
 from modules.downloads.ytdlp import player_target
 from settle import settle, wait_until
 from schema_db import migrated
@@ -240,7 +240,7 @@ async def test_a_need_is_one_card_through_the_variants_and_its_sync_leaves_only_
     fetch("k4", "https://site/#cvh=4", "need:lost", "cvh", ok=False)
     await _wait(lambda: os.path.isfile(tmp_path / "k3.mp4"))
     await _quiet()
-    cards = {each["id"]: each for each in (await probe.request("downloads.queue.get", {}, timeout=5))["tasks"]}
+    cards = {each["id"]: each for each in (await probe.request("downloads.queue.get", {}, timeout=5)).model_dump(mode="json")["tasks"]}
     kazoku = cards["need:kazoku"]
     assert [(line["kind"], line["variant"]["player"] if line["variant"] else None, line["outcome"])
             for line in kazoku["log"]] == [("attempt", "cvh", "failed"), ("replan", "kodik", "running"),
@@ -249,14 +249,14 @@ async def test_a_need_is_one_card_through_the_variants_and_its_sync_leaves_only_
 
     probe.publish_event("scan.run.changed", {"series_id": 88, "active": False, "seq": 2})
     await _quiet()
-    left = {each["id"]: each for each in (await probe.request("downloads.queue.get", {}, timeout=5))["tasks"]}
+    left = {each["id"]: each for each in (await probe.request("downloads.queue.get", {}, timeout=5)).model_dump(mode="json")["tasks"]}
     assert set(left) == {"need:kazoku", "need:lost"} and left["need:lost"]["log"][-1]["kind"] == "exhausted"
     assert {card.id for card in await _running.downloads.repo.cards()} == {"need:kazoku", "need:lost"}
 
-    assert (await probe.request("downloads.card.remove", {"id": "need:lost"}, timeout=5))["removed"]
+    assert (await probe.request("downloads.card.remove", {"id": "need:lost"}, timeout=5)).removed
     probe.publish_event("scan.run.changed", {"series_id": 88, "active": True, "seq": 3})
     await _quiet()
-    assert (await probe.request("downloads.queue.get", {}, timeout=5))["tasks"] == []
+    assert (await probe.request("downloads.queue.get", {}, timeout=5)).model_dump(mode="json")["tasks"] == []
     assert await _running.downloads.repo.cards() == []
 
 
@@ -266,12 +266,12 @@ async def test_how_many_go_at_once_is_by_the_way_the_file_comes(system, tmp_path
     connection have places of their own. A full way holds neither the queue nor the other way, and a fetch that waited
     for its place asks its stream anew."""
     bus, fake, dl, probe = system
-    assert await probe.request("downloads.limits.get", {}) == {
+    assert (await probe.request("downloads.limits.get", {})).model_dump(mode="json") == {
         "threads_total": 32, "threads_per_file": 16, "single_at_once": 4, "provider_at_once": 2, "multi_at_once": 2}
     said = await probe.request("downloads.limits.set", {"single_at_once": "1"})
-    assert said["ok"] and said["limits"]["single_at_once"] == 1
+    assert said.ok and said.limits.single_at_once == 1
     refused = await probe.request("downloads.limits.set", {"threads_total": "0"})
-    assert not refused["ok"] and "download_limit_invalid" in refused["reason"]
+    assert not refused.ok and "download_limit_invalid" in refused.reason
     assert fake.settings == {"download_single_at_once": "1"}, "a limit is kept as a setting; a refused one is not"
     dl.gate = asyncio.Event()
     # A page yt-dlp reads takes many connections; a stream ffmpeg reads (a link with the headers of its host) takes one.
@@ -306,7 +306,7 @@ async def test_a_file_its_player_takes_that_is_cancelled_stops_the_player(system
     probe.send_command("downloads.fetch", {"key": "video:2", "url": PLAYER_LINK, "path": path, "series_id": 3})
     assert await _wait(lambda: fake.player_fetches)
 
-    assert await probe.request("downloads.cancel", {"task_id": "fetch:video:2"}, timeout=5) == {"cancelled": True}
+    assert (await probe.request("downloads.cancel", {"task_id": "fetch:video:2"}, timeout=5)).cancelled
     done = (await asyncio.wait_for(sub.queue.get(), 5)).payload
 
     assert done["ok"] is False and await _wait(lambda: fake.player_stops == [player_target(path)])

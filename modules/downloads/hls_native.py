@@ -28,6 +28,7 @@ from urllib.parse import urljoin
 
 import httpx
 
+from calc.downloads.failure import Final
 from core import storage
 from core.hls_playlist import Insertion, without_insertions  # noqa: F401 - the words of the downloader too
 from core.http_limits import bounded_client
@@ -35,7 +36,7 @@ from core.proc import exited, spawn, stop
 from core.reasons import reason
 
 from . import failure as failure_words
-from .failure import GONE, Final
+from .failure import GONE
 
 ProgressCb = Callable[[dict], Awaitable[None]]
 logger = logging.getLogger("downloads")

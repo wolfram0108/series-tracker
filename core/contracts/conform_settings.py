@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from .frozen import Frozen
 from .voices import SettingProblem
 
 
-class ConformParams(BaseModel):
+class ConformParams(Frozen):
     """How the daemon is asked to align (the fields of its jobs): the meter of the audio layer (`audio_method`), how fast
     the laid sound may follow a drift (`drift_speed_pct`, %/s; None: the daemon's own default), whether the data of an
     episode stays in its cache for a rerun (`keep_tmp`, the checkpoints), whether the silence left in a voice-over where
@@ -21,11 +22,11 @@ class ConformParams(BaseModel):
     extend_edges: bool
 
 
-class ConformDomain(BaseModel):
+class ConformDomain(Frozen):
     """What the daemon accepts, as it states it (`GET /conform/settings`): its audio methods and the default, the range
     and the default of the drift speed."""
 
-    audio_methods: list[str]
+    audio_methods: tuple[str, ...]
     audio_default: str
     drift_min: float
     drift_max: float
@@ -41,7 +42,7 @@ class ConformSettingsDraft(BaseModel):
     work_dir_remote: str
 
 
-class ConformSettingsView(ConformSettingsDraft):
+class ConformSettingsView(ConformSettingsDraft, Frozen):
     """The reply of `conform.settings.get`: what applies now, every value stated. `clear_finished` is read here and
     written by the pipeline flag of the debug tab. `domain` is what the daemon accepts, None while it has not said."""
 
@@ -53,9 +54,9 @@ class ConformSettingsView(ConformSettingsDraft):
     revision: int = 0
 
 
-class ConformSettingsSaved(BaseModel):
+class ConformSettingsSaved(Frozen):
     """The reply of `conform.settings.set`: saved, or the problems that kept it from being saved."""
 
     saved: bool
-    problems: list[SettingProblem]
+    problems: tuple[SettingProblem, ...]
     settings: ConformSettingsView

@@ -14,8 +14,7 @@ import pytest
 from core import storage
 from core.reasons import parse
 from modules.downloads import hls_native, ytdlp
-from modules.downloads import failure
-from modules.downloads.failure import Failed, kind_of
+from calc.downloads.failure import Failed, Final, kind_of
 from modules.downloads.hls_worker import transport_stream
 from plan_disk import Codec, Host, _run
 
@@ -170,7 +169,7 @@ def player(folder: str, seconds: float, *, refused: str = ""):
     """A player that takes the segments of the stream on disk into the raw file it is given, or refuses with `refused`."""
     async def fetch(target: str, on_progress) -> tuple[bool, str, float, float]:
         if refused:
-            return False, failure.Final(refused), 0.0, 0.0
+            return False, Final(refused), 0.0, 0.0
         with open(target, "ab") as raw:
             for index in range(4):
                 with open(os.path.join(folder, f"seg{index}.ts"), "rb") as segment:

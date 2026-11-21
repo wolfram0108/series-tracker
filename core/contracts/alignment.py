@@ -3,7 +3,11 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from typing import Any
+
 from pydantic import BaseModel, Field, model_validator
+
+from .frozen import Frozen
 
 
 def job_key(series_id: int, part: str) -> str:
@@ -37,7 +41,7 @@ class JobStatus(StrEnum):
     GONE = "gone"
 
 
-class DubResult(BaseModel):
+class DubResult(Frozen):
     """The result for one voice-over (a pair: the reference and the voice-over).
 
     A pair that is not `ok` is one of two things: the service looked at it and turned it down (`refused`), or it could not
@@ -49,8 +53,8 @@ class DubResult(BaseModel):
     skipped: bool = False
     out_path: str | None = None
     suspect: bool = False
-    critical: list[str] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
+    critical: tuple[str, ...] = Field(default_factory=tuple)
+    warnings: tuple[str, ...] = Field(default_factory=tuple)
     resid_ms: float | None = None
     error: str | None = None
     # A cut out of a compilation (stage 12): seconds of the video taken from the compilation and from the episode itself.
@@ -65,14 +69,14 @@ class JobKind(StrEnum):
     REVERSE = "reverse"
 
 
-class AlignmentJob(BaseModel):
+class AlignmentJob(Frozen):
     """The end of a job: `conform.job.finished` and the reply of `conform.job.get`."""
 
     job_id: str | None = None
     kind: JobKind = JobKind.EPISODE
     status: JobStatus
     error: str | None = None
-    results: list[DubResult] = Field(default_factory=list)
+    results: tuple[DubResult, ...] = Field(default_factory=tuple)
 
 
 class SubmitOutcome(StrEnum):
@@ -84,7 +88,7 @@ class SubmitOutcome(StrEnum):
     UNCERTAIN = "uncertain"  # may have been delivered: only the key can tell
 
 
-class SubmitReply(BaseModel):
+class SubmitReply(Frozen):
     """The reply of `conform.submit`. Whatever is not a clear answer is no answer: it is read as uncertain."""
 
     outcome: SubmitOutcome
@@ -137,7 +141,7 @@ class ReverseSubmit(BaseModel):
     label: str | None = None
 
 
-class ReverseReply(BaseModel):
+class ReverseReply(Frozen):
     """The reply of `conform.reverse`: the outcome of the batch as for one job (`SubmitReply`), and, when it was taken,
     the job of each key the service named. A key the answer does not name is not known to be taken: it is asked by its key."""
 
@@ -145,3 +149,160 @@ class ReverseReply(BaseModel):
     jobs: dict[str, str] = Field(default_factory=dict)
     reason: str | None = None
     retry: bool = False
+
+
+class JobSubmit(BaseModel):
+    """`conform.submit`: one episode, a reference video and the voice-over files to align to it (local paths), and where the service
+    writes and keeps its cache. `key` is written into the label of the job, so that it can be found again when the answer is lost;
+    `ref_atrack` and `dub_atracks` name the tracks of a container."""
+
+    ref: str
+    dubs: list[str]
+    out_dir: str
+    cache_dir: str
+    label: str | None = None
+    key: str | None = None
+    ref_atrack: int | None = None
+    dub_atracks: list[int] | None = None
+
+
+class JobRef(BaseModel):
+    """`conform.cancel` and `conform.job.get`: the job of the service."""
+
+    job_id: str
+
+
+class JobKey(BaseModel):
+    """`conform.job.find`: the key a job was sent with."""
+
+    key: str
+
+
+class PlotRef(BaseModel):
+    """`conform.plot`: the picture named in a result, of a job."""
+
+    job_id: str
+    name: str
+
+
+class JobFoldersOf(BaseModel):
+    """`conform.job.folders`: the episode folder of a job."""
+
+    dub_folder: str
+
+
+class JobCancelled(Frozen):
+    """The reply of `conform.cancel`: the job is stopped, or deleted, or the service does not know it; false when it could not be reached."""
+
+    done: bool
+
+
+class JobFound(Frozen):
+    """The reply of `conform.job.find`: the job sent with the key, and whether the service could be asked."""
+
+    reachable: bool
+    job_id: str | None = None
+
+
+class JobKeys(Frozen):
+    """The reply of `conform.job.keys`: the keys of the jobs the history of the service holds, and whether it could be asked."""
+
+    reachable: bool
+    keys: tuple[str, ...]
+
+
+class PlotReply(Frozen):
+    """The reply of `conform.plot`: the picture as base64 PNG, when the service holds it."""
+
+    found: bool
+    data: str | None = None
+
+
+class ConformFolders(Frozen):
+    """The reply of `conform.workspace`: the two folders inside the work folder, where voice-overs wait for alignment and where the
+    service works; both empty while no work folder is named."""
+
+    downloads: str
+    conform: str
+
+
+class JobFolders(Frozen):
+    """The reply of `conform.job.folders`: where the service is asked to write the aligned tracks and keep its cache for an episode folder."""
+
+    out_dir: str
+    cache_dir: str
+
+
+class JobRemoved(Frozen):
+    """The event `conform.job.removed`: the service dropped the record of a job."""
+
+    job_id: str
+
+
+class DaemonUp(Frozen):
+    """The event `conform.daemon.up`: the service became reachable, so waiting work may be sent."""
+
+
+class DaemonState(Frozen):
+    """What is known of the service: whether it is up, why not, and what it told of itself when it answered (`params` is what it accepts
+    for the fields of its jobs, as it states it)."""
+
+    up: bool
+    error: str | None
+    version: Any = None
+    device: Any = None
+    gpu: bool | None = None
+    gpu_name: Any = None
+    params: Any = None
+
+
+class TaskResult(Frozen):
+    """The result of one voice-over of a job, as the window shows it; `plot` names the picture of the plot, if the service made one."""
+
+    dub: str | None
+    plot: str | None
+    ok: bool
+    refused: bool
+    skipped: bool
+    resid_ms: Any
+    coverage: Any
+    cuts: Any
+    suspect: bool
+    warnings: tuple[str, ...]
+    critical: tuple[str, ...]
+    error: str | None
+    from_ref_s: Any
+    from_dub_s: Any
+
+
+class ConformTask(Frozen):
+    """The compact view of one job of the service: what the window shows; traces, plots and operation logs stay behind. `label` is the
+    human part of its label and `key` the one it carries, `series_id` the series the key says the job works for. The figures are the
+    service's own."""
+
+    id: str
+    kind: Any
+    label: str | None
+    status: Any
+    progress: Any
+    stage: Any
+    stage_pct: Any
+    detail: Any
+    dub_index: Any
+    dub_total: Any
+    cur_dub: Any
+    elapsed_s: Any
+    error: Any
+    created_at: Any
+    updated_at: Any
+    key: str | None
+    series_id: int | None
+    dubs: tuple[str, ...]
+    results: tuple[TaskResult, ...]
+
+
+class ConformQueue(Frozen):
+    """The event `conform.queue.changed`: the whole picture of the service, on every change and whenever a window connects."""
+
+    daemon: DaemonState
+    tasks: tuple[ConformTask, ...]

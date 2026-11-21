@@ -13,11 +13,12 @@ from typing import Awaitable, Callable
 
 import httpx
 
+from calc.downloads.failure import Final
 from core import storage
 from core.reasons import reason
 from core.retry import UNTIMED, Budget, retrying
 
-from .failure import GONE, Final
+from .failure import GONE
 
 ProgressCb = Callable[[dict], Awaitable[None]]
 

@@ -10,7 +10,7 @@ from core.proc import program
 from core.reasons import code_of, parse
 from modules.downloads import ytdlp
 from modules.downloads import failure
-from modules.downloads.failure import Failed, kind_of
+from calc.downloads.failure import Failed, kind_of
 from proc_helpers import Spy, alive, stalled_downloader
 
 # The codes of a download that ended short or unreadable (modules/downloads/ytdlp.py).

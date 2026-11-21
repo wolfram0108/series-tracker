@@ -69,6 +69,11 @@ from .contracts import (
     WorkState, WorkWithdrawn,
     DirectoriesGet, DirectoryListing, Relocated, RelocationFinished, RelocationOf, RelocationPath, RelocationPlan,
     RelocationPlanned, RelocationStarted,
+    CardRemove, CardRemoved, ConformFolders, ConformQueue, DaemonUp, DownloadFetch, DownloadLimits, DownloadQueue, FetchCancel,
+    FetchCancelled, FetchesWithdrawn, FetchFinished, FetchStarted, JobCancelled, JobFolders, JobFoldersOf, JobFound, JobKey, JobKeys,
+    JobRef, JobRemoved, JobSubmit, LimitsSaved, LimitsSet, OpenRuns, OutputSwitched, PlotReply, PlotRef, QueueCleared, RunCancelled,
+    ScanStarted, ScanStatus, ScheduleSaved, ScheduleSet, SeriesRun, SeriesStop, SyncResult, EditAdmitted, EditBegin, EditEnd,
+    SeriesRef, VideoProgress,
 )
 from .contracts.provider import ProviderState
 from .contracts.torrent import (PageReleases, ReleaseRef, ReleasesChecked, ReleasesReply, ReleaseView, ReleaseWatch, StagingFolder,
@@ -199,20 +204,23 @@ SETTINGS_VALUES_BY_PREFIX = Topic("settings.values.by_prefix", QUERY, "settings"
 SETTINGS_VALUES_SET_MANY = Topic("settings.values.set_many", COMMAND, "settings", reply=SettingValues, fuse=QUICK_S)
 
 # --- conform -----------------------------------------------------------------------------------------------------
-CONFORM_CANCEL = Topic("conform.cancel", COMMAND, "conform", fuse=STANDARD_S)
-CONFORM_DAEMON_UP = Topic("conform.daemon.up", EVENT, "conform")
-CONFORM_JOB_FIND = Topic("conform.job.find", QUERY, "conform", fuse=STANDARD_S)
+CONFORM_CANCEL = Topic("conform.cancel", COMMAND, "conform", request=JobRef, reply=JobCancelled, fuse=STANDARD_S)
+CONFORM_DAEMON_UP = Topic("conform.daemon.up", EVENT, "conform", request=DaemonUp)
+CONFORM_JOB_FIND = Topic("conform.job.find", QUERY, "conform", request=JobKey, reply=JobFound, fuse=STANDARD_S)
 CONFORM_JOB_FINISHED = Topic("conform.job.finished", EVENT, "conform", request=AlignmentJob)
+# Pure: no service is asked. Where the service is told to write the tracks of an episode folder and to keep its cache.
+CONFORM_JOB_FOLDERS = Topic(
+    "conform.job.folders", QUERY, "conform", request=JobFoldersOf, reply=JobFolders, fuse=QUICK_S)
 CONFORM_JOB_GET = Topic(
-    "conform.job.get", QUERY, "conform", reply=AlignmentJob,
+    "conform.job.get", QUERY, "conform", request=JobRef, reply=AlignmentJob,
     fuse=after(STANDARD_S, SETTINGS_VALUE_GET, SETTINGS_VALUE_GET))
-CONFORM_JOB_KEYS = Topic("conform.job.keys", QUERY, "conform", fuse=STANDARD_S)
-CONFORM_JOB_REMOVED = Topic("conform.job.removed", EVENT, "conform")
+CONFORM_JOB_KEYS = Topic("conform.job.keys", QUERY, "conform", reply=JobKeys, fuse=STANDARD_S)
+CONFORM_JOB_REMOVED = Topic("conform.job.removed", EVENT, "conform", request=JobRemoved)
 CONFORM_PARAMS_SET = Topic(
     "conform.params.set", COMMAND, "conform", request=ConformParams, reply=ConformSettingsSaved,
     fuse=after(QUICK_S, SETTINGS_VALUES_BY_PREFIX, SETTINGS_VALUES_SET_MANY, SETTINGS_VALUES_BY_PREFIX))
-CONFORM_PLOT = Topic("conform.plot", QUERY, "conform", fuse=STANDARD_S)
-CONFORM_QUEUE_CHANGED = Topic("conform.queue.changed", EVENT, "conform")
+CONFORM_PLOT = Topic("conform.plot", QUERY, "conform", request=PlotRef, reply=PlotReply, fuse=STANDARD_S)
+CONFORM_QUEUE_CHANGED = Topic("conform.queue.changed", EVENT, "conform", request=ConformQueue)
 CONFORM_REVERSE = Topic("conform.reverse", COMMAND, "conform", request=ReverseSubmit, reply=ReverseReply, fuse=STANDARD_S)
 CONFORM_SETTINGS_CHANGED = Topic("conform.settings.changed", EVENT, "conform", request=ConformSettingsView)
 CONFORM_SETTINGS_GET = Topic(
@@ -221,8 +229,8 @@ CONFORM_SETTINGS_GET = Topic(
 CONFORM_SETTINGS_SET = Topic(
     "conform.settings.set", COMMAND, "conform", request=ConformSettingsDraft, reply=ConformSettingsSaved,
     fuse=after(QUICK_S, SETTINGS_VALUES_BY_PREFIX, SETTINGS_VALUES_SET_MANY, SETTINGS_VALUES_BY_PREFIX))
-CONFORM_SUBMIT = Topic("conform.submit", COMMAND, "conform", reply=SubmitReply, fuse=SERVICE_S)
-CONFORM_WORKSPACE = Topic("conform.workspace", QUERY, "conform", fuse=after(QUICK_S, SETTINGS_VALUE_GET))
+CONFORM_SUBMIT = Topic("conform.submit", COMMAND, "conform", request=JobSubmit, reply=SubmitReply, fuse=SERVICE_S)
+CONFORM_WORKSPACE = Topic("conform.workspace", QUERY, "conform", reply=ConformFolders, fuse=after(QUICK_S, SETTINGS_VALUE_GET))
 
 # --- sources -----------------------------------------------------------------------------------------------------
 # The reads of sources (a table, a check of pages, a search, a stream) wait for the first look at the provider when a page of its world
@@ -298,8 +306,8 @@ SOURCES_VIDEO_FETCH = Topic(
     "sources.video.fetch", COMMAND, "sources", request=VideoFetch, reply=VideoFetched, fuse=None)
 SOURCES_VIDEO_FETCH_STOP = Topic(
     "sources.video.fetch.stop", COMMAND, "sources", request=VideoFetchStop, reply=VideoFetchStopped, fuse=QUICK_S)
-# How far a download goes: {target, phase, progress, ...the figures the player gives}, which differ by player, so a dictionary.
-SOURCES_VIDEO_PROGRESS = Topic("sources.video.progress", EVENT, "sources")
+# How far a download goes: the file `target` and the figures the player or the provider gives (all optional, they differ by player).
+SOURCES_VIDEO_PROGRESS = Topic("sources.video.progress", EVENT, "sources", request=VideoProgress)
 # A link of Vibix also writes the manifest file and the key: a cache, as the file of a release.
 SOURCES_VIDEO_STREAM = Topic(
     "sources.video.stream", QUERY, "sources", request=VideoStream, reply=StreamReply, fuse=HEAVY_S)
@@ -360,17 +368,20 @@ COMPOSITION_VOICE_TITLE_SET = Topic(
     fuse=STANDARD_S)
 
 # --- downloads ---------------------------------------------------------------------------------------------------
-DOWNLOADS_CANCEL = Topic("downloads.cancel", COMMAND, "downloads", fuse=STANDARD_S)
-DOWNLOADS_CARD_REMOVE = Topic("downloads.card.remove", COMMAND, "downloads", fuse=STANDARD_S)
-DOWNLOADS_FETCH = Topic("downloads.fetch", COMMAND, "downloads", fuse=STANDARD_S)
-DOWNLOADS_FETCH_FINISHED = Topic("downloads.fetch.finished", EVENT, "downloads")
-DOWNLOADS_FETCH_STARTED = Topic("downloads.fetch.started", EVENT, "downloads")
-DOWNLOADS_LIMITS_GET = Topic("downloads.limits.get", QUERY, "downloads", fuse=STANDARD_S)
-DOWNLOADS_LIMITS_SET = Topic("downloads.limits.set", COMMAND, "downloads", fuse=STANDARD_S)
-DOWNLOADS_QUEUE_CHANGED = Topic("downloads.queue.changed", EVENT, "downloads")
-DOWNLOADS_QUEUE_CLEAR = Topic("downloads.queue.clear", COMMAND, "downloads", fuse=STANDARD_S)
-DOWNLOADS_QUEUE_GET = Topic("downloads.queue.get", QUERY, "downloads", fuse=STANDARD_S)
-DOWNLOADS_WITHDRAW = Topic("downloads.withdraw", COMMAND, "downloads", fuse=STANDARD_S)
+DOWNLOADS_CANCEL = Topic("downloads.cancel", COMMAND, "downloads", request=FetchCancel, reply=FetchCancelled, fuse=STANDARD_S)
+DOWNLOADS_CARD_REMOVE = Topic("downloads.card.remove", COMMAND, "downloads", request=CardRemove, reply=CardRemoved, fuse=STANDARD_S)
+# Sent as a command nobody answers: the end of the fetch is told by `downloads.fetch.finished`.
+DOWNLOADS_FETCH = Topic("downloads.fetch", COMMAND, "downloads", request=DownloadFetch, fuse=STANDARD_S)
+DOWNLOADS_FETCH_FINISHED = Topic("downloads.fetch.finished", EVENT, "downloads", request=FetchFinished)
+DOWNLOADS_FETCH_STARTED = Topic("downloads.fetch.started", EVENT, "downloads", request=FetchStarted)
+DOWNLOADS_LIMITS_GET = Topic("downloads.limits.get", QUERY, "downloads", reply=DownloadLimits, fuse=STANDARD_S)
+DOWNLOADS_LIMITS_SET = Topic(
+    "downloads.limits.set", COMMAND, "downloads", request=LimitsSet, reply=LimitsSaved, fuse=STANDARD_S)
+DOWNLOADS_QUEUE_CHANGED = Topic("downloads.queue.changed", EVENT, "downloads", request=DownloadQueue)
+DOWNLOADS_QUEUE_CLEAR = Topic("downloads.queue.clear", COMMAND, "downloads", reply=QueueCleared, fuse=STANDARD_S)
+DOWNLOADS_QUEUE_GET = Topic("downloads.queue.get", QUERY, "downloads", reply=DownloadQueue, fuse=STANDARD_S)
+DOWNLOADS_WITHDRAW = Topic(
+    "downloads.withdraw", COMMAND, "downloads", request=SeriesRef, reply=FetchesWithdrawn, fuse=STANDARD_S)
 
 # --- gateway -----------------------------------------------------------------------------------------------------
 # The count of the connected windows (protocol: gateway publishes, others read).
@@ -452,25 +463,27 @@ RENAMING_PROCESS_TORRENT = Topic("renaming.process_torrent", COMMAND, "renaming"
 SYSTEM_STARTED = Topic("system.started", EVENT, "run")
 
 # --- scan --------------------------------------------------------------------------------------------------------
-SCAN_ALL_START = Topic("scan.all.start", COMMAND, "scan", fuse=STANDARD_S)
-SCAN_EDIT_BEGIN = Topic("scan.edit.begin", COMMAND, "scan", fuse=after(QUICK_S, CATALOG_SERIES_GET))
-SCAN_EDIT_END = Topic("scan.edit.end", COMMAND, "scan", fuse=QUICK_S)
+SCAN_ALL_START = Topic("scan.all.start", COMMAND, "scan", reply=ScanStarted, fuse=STANDARD_S)
+SCAN_EDIT_BEGIN = Topic(
+    "scan.edit.begin", COMMAND, "scan", request=EditBegin, reply=EditAdmitted, fuse=after(QUICK_S, CATALOG_SERIES_GET))
+SCAN_EDIT_END = Topic("scan.edit.end", COMMAND, "scan", request=EditEnd, fuse=QUICK_S)
 SCAN_OUTPUT_SWITCH = Topic(
-    "scan.output.switch", COMMAND, "scan", request=OutputSwitch,
+    "scan.output.switch", COMMAND, "scan", request=OutputSwitch, reply=OutputSwitched,
     fuse=after(STANDARD_S, *each(4, CATALOG_SERIES_GET), CATALOG_SERIES_UPDATE, DOWNLOADS_QUEUE_GET, COMPOSITION_GET,
                VOICES_SETTINGS_GET))
 # A stop of a sync: the run of the series, the work of its plan and the reads of its pages, one after another.
 SCAN_RUN_CANCEL = Topic(
-    "scan.run.cancel", COMMAND, "scan",
+    "scan.run.cancel", COMMAND, "scan", request=SeriesStop, reply=RunCancelled,
     fuse=after(QUICK_S, CATALOG_SERIES_GET, PLANNER_SYNC_CANCEL, SOURCES_TABLE_CANCEL))
 # The run of a sync of a series (RUN_CHANGED of core.contracts.work).
 SCAN_RUN_CHANGED = Topic("scan.run.changed", EVENT, "scan", request=RunChanged)
-SCAN_RUNS_GET = Topic("scan.runs.get", QUERY, "scan", fuse=QUICK_S)
-SCAN_SCHEDULE_SET = Topic("scan.schedule.set", COMMAND, "scan", fuse=STANDARD_S)
+SCAN_RUNS_GET = Topic("scan.runs.get", QUERY, "scan", reply=OpenRuns, fuse=QUICK_S)
+SCAN_SCHEDULE_SET = Topic(
+    "scan.schedule.set", COMMAND, "scan", request=ScheduleSet, reply=ScheduleSaved, fuse=STANDARD_S)
 # No fuse of its own: a sync is as long as the steps it is made of, each of which has one.
-SCAN_SERIES_RUN = Topic("scan.series.run", COMMAND, "scan", fuse=None)
-SCAN_STATUS_CHANGED = Topic("scan.status.changed", EVENT, "scan")
-SCAN_STATUS_GET = Topic("scan.status.get", QUERY, "scan", fuse=after(QUICK_S, *each(3, SETTINGS_VALUE_GET)))
+SCAN_SERIES_RUN = Topic("scan.series.run", COMMAND, "scan", request=SeriesRun, reply=SyncResult, fuse=None)
+SCAN_STATUS_CHANGED = Topic("scan.status.changed", EVENT, "scan", request=ScanStatus)
+SCAN_STATUS_GET = Topic("scan.status.get", QUERY, "scan", reply=ScanStatus, fuse=after(QUICK_S, *each(3, SETTINGS_VALUE_GET)))
 # What an executor tells the run about its work of a series (WORK_STATE of core.contracts.work); the run is scan's.
 WORK_SERIES_STATE = Topic("work.series.state", EVENT, "scan", request=WorkState)
 

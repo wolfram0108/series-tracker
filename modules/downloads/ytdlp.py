@@ -1,19 +1,18 @@
-"""Загрузка VK-видео в две фазы, каждая с мониторингом ИЗ ВЫВОДА
-инструмента (мониторинг по размеру файла на диске запрещён — требование
-пользователя).
+"""Downloads a VK video in two phases, each monitored by the OUTPUT of the
+tool (monitoring by the file size on disk is not allowed).
 
-Фаза 1 (download): yt-dlp тянет hls-поток в N параллельных фрагментов
-    (-N) — единственная комбинация, дающая реальный прирост на VK
-    (замер на стенде: hls+-N ≈ ×27 к скорости; -N без hls не помогает).
-    Постобработку yt-dlp отключаем (--fixup never): remux делаем сами,
-    чтобы владеть его метриками.
-Фаза 2 (remux): наш ffmpeg -c copy с -progress pipe:1 перепаковывает
-    промежуточный MPEG-TS в mp4. Прогресс и ETA считаются из метрик
-    ffmpeg (out_time / длительность, speed) — постобработка обязана
-    показывать прогресс и оставшееся время (ТЗ пользователя).
+Phase 1 (download): yt-dlp fetches the hls stream in N parallel fragments
+    (-N) — the only combination that gives a real speedup on VK
+    (measured on the stand: hls+-N ≈ ×27 speed; -N without hls does not help).
+    yt-dlp post-processing is disabled (--fixup never): the remux is done here
+    so that its metrics stay under our control.
+Phase 2 (remux): our ffmpeg -c copy with -progress pipe:1 repackages the
+    intermediate MPEG-TS into mp4. Progress and ETA are computed from the ffmpeg
+    metrics (out_time / duration, speed) — post-processing must show
+    progress and the remaining time (the specification).
 
-Разбор строк — чистые функции (тестируются без процессов); запуск —
-асинхронные subprocess с убийством при отмене (находка 45).
+Line parsing is done by pure functions (tested without processes); running is
+asynchronous subprocesses killed on cancellation (finding 45).
 """
 from __future__ import annotations
 
@@ -25,6 +24,7 @@ import time
 from typing import Awaitable, Callable
 from urllib.parse import urlsplit
 
+from calc.downloads.failure import Failed, Final, Unasked, kind_of
 from core import storage
 from core.ffprobe import duration_of, readable_length
 from core.proc import LOST, REAP_TIMEOUT_S, exited, program, run_capture, spawn, stop
@@ -33,7 +33,6 @@ from core.retry import UNTIMED, Budget, retrying
 
 from . import hls_native, ranged
 from . import failure
-from .failure import Failed, Final, Unasked, kind_of
 
 ProgressCb = Callable[[dict], Awaitable[None]]
 
@@ -57,15 +56,13 @@ PROBE_ATTEMPTS = 3
 PROBE_RETRY_S = 2.0
 PROBE_TIMEOUT_S = 60.0
 
-# hls + лучший muxed-поток; fallback на обычный best, если hls нет
-# (тогда без ускорения, но загрузка работает).
+# HLS + best muxed stream; falls back to plain best when there is no HLS
+# (then without acceleration, but the download still works).
 HLS_FORMAT = "b[protocol*=m3u8]/b"
 
-# Отказ от m3u8: на некоторых VK-роликах CDN отдаёт 404 на хвостовые
-# HLS-фрагменты (манифест шире, чем реально долитые сегменты) — весь
-# файл выходит пустым. DASH/progressive не фрагментированы так же
-# (одно соединение на поток) — не подвержены этой дыре, но без -N
-# параллелизма (медленнее).
+# Some VK videos get 404s on trailing HLS fragments (the manifest outruns the
+# uploaded segments), leaving the whole file empty. DASH/progressive are not
+# fragmented that way (one connection per stream) but lack -N parallelism (slower).
 DASH_FALLBACK_FORMAT = "b[protocol!*=m3u8]"
 
 
@@ -108,8 +105,8 @@ def _cleanup_artifacts(full_output_path: str) -> None:
     for leftover in download_artifacts(full_output_path):
         storage.remove_file(leftover)
 
-# Формат hlsnative+-N отличается от обычного: после '~' идут пробелы,
-# ETA бывает 'Unknown', в хвосте '(frag X/Y)' (находка 47).
+# The hlsnative+-N format differs from the plain one: spaces follow '~', ETA may
+# be 'Unknown', and the tail carries '(frag X/Y)' (finding 47).
 PROGRESS_RE = re.compile(
     r"\[download\]\s+(?P<percent>[\d.]+)%\s+of\s+~?\s*(?P<size>[\d.]+\w+)"
     r"\s+at\s+(?P<speed>[\d.]+\w+/s)\s+ETA\s+(?P<eta>[\d:]+|Unknown)")
@@ -135,7 +132,7 @@ def eta_to_seconds(text: str) -> int:
 
 
 def parse_progress_line(line: str) -> dict | None:
-    """Строка yt-dlp '[download] X% of ~Y at Z/s ETA W' -> метрики."""
+    """A yt-dlp line '[download] X% of ~Y at Z/s ETA W' -> metrics."""
     m = PROGRESS_RE.search(line)
     if not m:
         return None
@@ -160,8 +157,8 @@ def _hms_to_seconds(text: str) -> float:
 
 def ffmpeg_progress(fields: dict, duration: float,
                     phase: str = "remux") -> dict:
-    """Блок метрик ffmpeg -progress (out_time, speed) + длительность ->
-    прогресс фазы в % и ETA. Чистая функция (тестируется отдельно)."""
+    """ffmpeg -progress metrics block (out_time, speed) + duration ->
+    phase progress in % and ETA. A pure function (tested separately)."""
     out_time = _hms_to_seconds(fields.get("out_time", "") or "")
     speed_raw = (fields.get("speed", "") or "").replace("x", "").strip()
     try:
@@ -213,10 +210,10 @@ async def _next_line(proc, program: str, started: float, total: float | None = N
 
 
 async def _probe_duration(video_url: str) -> float:
-    """Длительность видео из yt-dlp (метаданные источника — НАДЁЖНО).
-    ffprobe промежуточного MPEG-TS даёт заниженную длительность (находка
-    52: 7343с вместо реальных 102787с), из-за чего процент remux был бы
-    100% сразу. yt-dlp --print даёт точное значение из метаданных VK."""
+    """Video duration from yt-dlp (the source metadata — RELIABLE).
+    ffprobe of the intermediate MPEG-TS gives an understated duration (finding
+    52: 7343 s instead of the real 102787 s), which would make the remux
+    percentage jump to 100% at once. yt-dlp --print gives the exact value from VK metadata."""
     executable = program("yt-dlp")
     if not executable:
         return 0.0
@@ -229,14 +226,14 @@ async def _probe_duration(video_url: str) -> float:
 
 
 def _download_artifact(full_output_path: str) -> str | None:
-    """Готовый промежуточный файл фазы download (`<path>.download.<ext>`),
-    либо None, если его нет.
+    """The ready intermediate file of the download phase (`<path>.download.<ext>`),
+    or None if there is none.
 
-    Имя пути — это ДАННЫЕ и может содержать спецсимволы glob (`[ ] * ?`):
-    каталоги медиатеки именуются с `[tmdbid-NNNN]`. Поэтому ищем файл
-    строковым сопоставлением через listdir, а НЕ glob — glob трактовал
-    `[tmdbid-…]` как класс символов и не находил реально скачанный файл
-    (ложное «yt-dlp не оставил файл»)."""
+    The path name is DATA and may contain glob special characters (`[ ] * ?`):
+    library directories are named `[tmdbid-NNNN]`. So the file is looked up by
+    string matching via listdir, NOT by glob — glob read `[tmdbid-…]` as a
+    character class and missed the really downloaded file (a false
+    "yt-dlp left no file")."""
     directory = os.path.dirname(full_output_path)
     prefix = os.path.basename(full_output_path) + ".download."
     try:
@@ -249,12 +246,12 @@ def _download_artifact(full_output_path: str) -> str | None:
 
 
 def download_artifacts(full_output_path: str) -> list[str]:
-    """Все временные артефакты загрузки/ремукса для данного финального пути:
-    промежуточный `.download.*`, tmp `.remux.mp4`, `.part`/`.ytdl` и фрагменты
-    yt-dlp (`<stem>.fNNN.*`). Сам финальный файл НЕ включается.
+    """All temporary artifacts of the download/remux for this final path:
+    the intermediate `.download.*`, the tmp `.remux.mp4`, `.part`/`.ytdl` and the
+    yt-dlp fragments (`<stem>.fNNN.*`). The final file itself is NOT included.
 
-    Сопоставление строками, не glob (причина — см. _download_artifact: имя
-    пути содержит спецсимволы glob из `[tmdbid-…]`)."""
+    Matched by strings, not glob (reason — see _download_artifact: the path name
+    contains glob special characters from `[tmdbid-…]`)."""
     directory = os.path.dirname(full_output_path)
     base = os.path.basename(full_output_path)
     stem = os.path.splitext(base)[0]
@@ -265,11 +262,11 @@ def download_artifacts(full_output_path: str) -> list[str]:
     out: list[str] = []
     for name in names:
         if (name.startswith(base + ".download.")   # .download.<ext>(.part/.ytdl/.fNNN)
-                or name == base + ".remux.mp4"     # незавершённый tmp remux
+                or name == base + ".remux.mp4"     # unfinished tmp remux
                 or name == base + ".part"
                 or (name.startswith(stem + ".") and name.endswith(".part"))
                 or (name.startswith(stem) and name.endswith(".ytdl"))
-                or name.startswith(stem + ".f")):  # фрагменты yt-dlp <stem>.fNNN.*
+                or name.startswith(stem + ".f")):  # yt-dlp fragments <stem>.fNNN.*
             out.append(os.path.join(directory, name))
     return out
 
@@ -592,8 +589,8 @@ async def _download_owned(video_url: str, full_output_path: str, on_progress: Pr
         await on_progress({"method": "ffmpeg"})
         return await _download_direct_ffmpeg(video_url, headers or {}, full_output_path, on_progress, announced)
 
-    # длительность для процента remux — из yt-dlp (метаданные источника),
-    # НЕ из промежуточного TS (находка 52)
+    # The remux percentage uses the duration from yt-dlp (source metadata),
+    # NOT from the intermediate TS (finding 52).
     duration = announced if announced is not None else await _probe_duration(video_url)
     await on_progress({"method": "ytdlp_hls"})
     raw = await _phase_download(video_url, full_output_path, on_progress,
@@ -618,8 +615,8 @@ async def _download_owned(video_url: str, full_output_path: str, on_progress: Pr
 async def _phase_download(video_url: str, full_output_path: str,
                           on_progress: ProgressCb, threads: int,
                           format_selector: str):
-    """yt-dlp (формат — вызывающая сторона: HLS или DASH-фолбэк), без
-    постобработки. Возвращает путь промежуточного файла (str) или
+    """yt-dlp (the format is chosen by the caller: HLS or the DASH fallback),
+    without post-processing. Returns the path of the intermediate file (str) or
     (False, error)."""
     executable = program("yt-dlp")
     if not executable:
@@ -678,31 +675,28 @@ async def _phase_download(video_url: str, full_output_path: str,
 async def _phase_remux(raw: str, full_output_path: str,
                        on_progress: ProgressCb,
                        duration: float) -> tuple[bool, str]:
-    """Наш ffmpeg -c copy с -progress pipe:1: remux в mp4, прогресс и ETA
-    из метрик ffmpeg (out_time/длительность, speed). duration — из
-    yt-dlp (надёжно), не из промежуточного TS (находка 52)."""
+    """Our ffmpeg -c copy with -progress pipe:1: remux into mp4, progress and ETA
+    from the ffmpeg metrics (out_time/duration, speed). duration comes from
+    yt-dlp (reliable), not from the intermediate TS (finding 52)."""
     executable = program("ffmpeg")
     if not executable:
         return False, Unasked(reason("program_missing", program="ffmpeg"))
     await on_progress({"phase": "remux", "progress": 0, "eta": 0,
                        "speed": 0.0})
 
-    # Атомарность (находка 50): ffmpeg пишет во временный файл, в финал
-    # переименовываем ТОЛЬКО при успехе. Прерванный/зависший remux не
-    # оставляет частичного финального файла, который потом приняли бы за
-    # готовый ('файл существует' в download()).
+    # Atomic publication (finding 50): ffmpeg writes a temp file, renamed to the
+    # final name only on success, so an interrupted remux never leaves a partial
+    # final file that download() would take as ready.
     tmp_out = full_output_path + ".remux.mp4"
-    # БЕЗ +faststart: на больших файлах он делает второй полный проход
-    # (переписать весь файл ради moov в начале) — минуты после
-    # progress=100 без метрик, «вечное зависание на 100%» (находка 51).
-    # Для медиатеки faststart не нужен (легаси его не использовал).
+    # NO +faststart: on large files it makes a second full pass to move moov to
+    # the front, which hangs at 100% for minutes (finding 51). The media library
+    # does not need it; the legacy code did not use it.
     proc = await spawn(
         executable, "-y", "-i", raw, "-c", "copy",
         "-progress", "pipe:1", "-nostats", tmp_out,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    # stderr дренируем параллельно: битый VK-hls сыпет тысячи
-    # 'Packet corrupt' в stderr, без вычитки буфер переполняется и
-    # ffmpeg намертво виснет на записи в него (deadlock — находка 48).
+    # stderr is drained in parallel: a broken VK hls floods it with thousands of
+    # 'Packet corrupt' lines; without draining, the buffer overflows and ffmpeg hangs (deadlock, finding 48).
     lines: list[bytes] = []
     stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr, lines))
     fields: dict[str, str] = {}
@@ -724,7 +718,7 @@ async def _phase_remux(raw: str, full_output_path: str,
                 continue
             key, value = text.split("=", 1)
             fields[key] = value
-            if key == "progress":  # конец блока метрик -> эмитим прогресс
+            if key == "progress":  # end of a metrics block -> emit progress
                 await on_progress(ffmpeg_progress(fields, duration))
                 fields = {}
         if not stopped:
