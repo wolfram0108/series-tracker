@@ -1,9 +1,12 @@
 """Генерация реестра HTTP-эндпоинтов из живого приложения.
 
-Запуск:  .venv/bin/python scripts/gen_endpoints.py
-Выход:   contracts/endpoints.json
+Запуск:  .venv/bin/python scripts/gen_endpoints.py [--check]
+Выход:   contracts/endpoints.json и разделы 1, 3, 5, 6 файла contracts/endpoints.md (остальное в нём — ручной текст).
+         С --check ничего не пишет: говорит ENDPOINTS_OK или ENDPOINTS_STALE <файлы> (код возврата 1).
 
-Реестр снимается с объекта FastAPI, поэтому не расходится с кодом.
+Реестр и контракты снимаются с объекта FastAPI и его документа OpenAPI, поэтому не расходятся с кодом; то, чего фреймворк не видит
+(тело, которое обработчик читает сам, ответ словарём любой формы), задано в MANUAL (scripts/endpoints_md.py), и скрипт не запускается,
+пока у такого маршрута нет записи.
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ os.environ.setdefault("ST_DOCS_ENABLED", "true")
 
 from core.bus import Bus  # noqa: E402
 from modules.gateway import GatewayModule  # noqa: E402
+from scripts.endpoints_md import GROUPS  # noqa: E402
 
 # Краткое назначение эндпоинтов: ключ — "МЕТОД путь", значение — одна строка.
 SUMMARIES = {
@@ -242,16 +246,60 @@ def build() -> list[dict]:
     return entries
 
 
+CONSTRUCTOR_TITLE = "Конструктор правил: устройство и словарь"
+
+
+def _document(entries: list[dict]) -> tuple[str, bool]:
+    """The text of contracts/endpoints.md with its generated sections (1, 3, 5, 6) made from the live application, and whether a route is
+    left without the text of its body or answer."""
+    from scripts.endpoints_md import manual_missing, panel_table_gaps, render, replace_section, vocabulary_gaps
+
+    app = GatewayModule(Bus(), db_path="app.db", secret_key="x", cookie_secure=False, auth_required=False,
+                        docs_enabled=True, allowed_hosts=None, diag=True).app
+    openapi = app.openapi()
+    gaps = manual_missing(entries, openapi, app)
+    if gaps:
+        print("Маршруты, чьё тело или ответ в MANUAL (scripts/endpoints_md.py) не описаны:\n  " + "\n  ".join(gaps))
+        return "", False
+    md_path = ROOT / "contracts" / "endpoints.md"
+    md = md_path.read_text(encoding="utf-8")
+    sections = render(entries, openapi, ROOT)
+    # The constructor of the rules is the one hand-written subsection of the contracts: it describes the data of a rule, which no model holds.
+    found = re.search(r"### 6\.\d+ " + re.escape(CONSTRUCTOR_TITLE) + r".*?(?=\n### |\n---\n|\n## )", md, re.S)
+    hand = re.sub(r"^### 6\.\d+ ", f"### 6.{len(GROUPS) + 1} ", found.group(0), count=1) if found else ""
+    stale = vocabulary_gaps(hand)
+    if not found or stale:
+        print("Подраздел конструктора правил расходится с движком:\n  " + "\n  ".join(stale or ["подраздел не найден"]))
+        return "", False
+    contracts = sections["contracts"].rstrip("\n") + "\n\n" + hand.rstrip("\n") + "\n\n---\n\n"
+    md = replace_section(md, "## 1. Объём", sections["volume"], "## 2. Доступ")
+    md = replace_section(md, "## 3. Карта эндпоинтов", sections["map"], "## 4. Функции панели")
+    md = replace_section(md, "## 5. Эндпоинты", sections["unused"], "## 6. Контракты")
+    md = replace_section(md, "## 6. Контракты", contracts, "## 7. Поток событий SSE")
+    stale = panel_table_gaps(md, entries)
+    if stale:
+        print("Раздел 4 расходится с реестром:\n  " + "\n  ".join(stale))
+        return "", False
+    return md, True
+
+
 def main() -> None:
     entries = build()
+    text = json.dumps(entries, ensure_ascii=False, indent=1) + "\n"
     target = ROOT / "contracts" / "endpoints.json"
-    target.write_text(
-        json.dumps(entries, ensure_ascii=False, indent=1) + "\n",
-        encoding="utf-8")
+    md_target = ROOT / "contracts" / "endpoints.md"
+    document, ok = _document(entries)
+    if not ok:
+        sys.exit(1)
+    if "--check" in sys.argv:
+        stale = [path.name for path, new in ((target, text), (md_target, document)) if path.read_text(encoding="utf-8") != new]
+        print("ENDPOINTS_STALE " + ", ".join(stale) if stale else "ENDPOINTS_OK")
+        sys.exit(1 if stale else 0)
+    target.write_text(text, encoding="utf-8")
+    md_target.write_text(document, encoding="utf-8")
     paths = {e["path"] for e in entries}
-    methods = len(entries)
-    print(f"{target.relative_to(ROOT)}: {methods} метод-эндпоинтов, "
-          f"{len(paths)} путей")
+    print(f"{target.relative_to(ROOT)}: {len(entries)} метод-эндпоинтов, {len(paths)} путей; "
+          f"{md_target.relative_to(ROOT)}: разделы 1, 3, 5, 6")
 
 
 if __name__ == "__main__":
