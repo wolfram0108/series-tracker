@@ -74,8 +74,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/auth/{service}/secret", response_model=DynamicObject)
     async def get_auth_secret(service: str):
-        """The secret of one service, as the eye of its field asks it (Этап 3, docs/security.md: a secret is never given with the
-        credentials, only on this request, to the administrator who is signed in): {secret}, empty when none is set. Not cached."""
+        """The secret of one service, as the eye of its field asks it (stage 3, docs/security.md: a secret is never given
+        with the credentials, only on this request, to the administrator who is signed in): {secret}, empty when none is set. Not cached."""
         if service == "tmdb":
             secret = (await gw.reply_of(SETTINGS_VALUE_GET, {"key": "tmdb_token"})).value or ""
         elif service in AUTH_SERVICES:
@@ -164,8 +164,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @route_per_method(r, "/api/settings/saved_paths", methods=["GET", "POST", "DELETE"],
                       response_model=DynamicObject)
     async def saved_paths(request: Request):
-        """Сохранённые пути загрузки: список, добавление, удаление.
-        Источник истины — модуль settings (таблица saved_paths)."""
+        """The saved download paths: the list, the addition, the removal. The source of truth is the module settings (the table
+        saved_paths)."""
         if request.method == "POST":
             data = await request.json()
             reply = await gw.reply_of(SETTINGS_PATHS_ADD, {"path": data.get("path", "")})
@@ -398,9 +398,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/logs/groups", response_model=list[str])
     async def log_groups():
-        """Динамический список групп логов: distinct поля 'group' из всех
-        лог-файлов. Фильтр просмотрщика берёт его, а не статичный набор,
-        чтобы не отставать от реальных групп (имя группы = имя модуля)."""
+        """The dynamic list of the log groups: the distinct field 'group' of all the log files. The filter of the viewer takes it,
+        not a static set, so as not to fall behind the real groups (the name of a group is the name of a module)."""
         def collect() -> list[str]:
             return groups_in_logs(_read_files(list(LOG_FILES)))
 

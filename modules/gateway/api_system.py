@@ -132,8 +132,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             responses={404: {"model": ErrorResponse},
                        500: {"model": ErrorResponse}})
     async def downloads_cancel(task_id: int):
-        """Точечная отмена загрузки: убить процесс + удалить файл +
-        снять задачу (находка 45)."""
+        """A pinpoint cancel of a download: kill the process, remove the file, remove the task (finding 45)."""
         try:
             await gw.reply_of(DOWNLOADS_CANCEL, {"task_id": task_id})
         except BusRequestError as exc:

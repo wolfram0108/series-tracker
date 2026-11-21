@@ -81,9 +81,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     # IMPORTANT: the static path is registered before /{series_id}.
     @r.get("/api/series/active_torrents", response_model=list[QueueTask])
     async def active_torrents():
-        """Прогресс торрент-загрузок с именами серий (таблица
-        «Мониторинг» вкладки агентов; Р-23 — исправление маппинга
-        блока 2: источник — torrent_progress модуля torrents, не очередь конвейера)."""
+        """The progress of the torrent downloads with the names of the series (the table «Мониторинг» of the agents tab;
+        Р-23 — the fix of the mapping of block 2: the source is torrent_progress of the module torrents, not the queue of the pipeline)."""
         try:
             reply = await gw.reply_of(TORRENTS_DB_PROGRESS_LIST, {})
         except BusRequestError:
@@ -137,10 +136,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/series/{series_id}/state", response_model=OkResponse,
             response_model_exclude_none=True)
     async def set_state(series_id: int, request: Request):
-        """Старый контракт фронта: ['viewing'] при открытии модалки,
-        [] при закрытии → эфемерный viewing (Р-11). Открытие модалки
-        дополнительно запускает сверку файлов с диском (Р-13/Р-14:
-        замена фоновых периодических проверок старой системы)."""
+        """The old contract of the front: ['viewing'] when the modal opens, [] when it closes → the ephemeral viewing (Р-11).
+        Opening the modal also starts the check of the files against the disk (Р-13/Р-14: the replacement of the periodic background checks
+        of the old system)."""
         data = await request.json()
         viewing = "viewing" in data.get("state", [])
         gw.send_command(CATALOG_VIEWING_START if viewing else CATALOG_VIEWING_STOP, {"series_id": series_id})
@@ -192,10 +190,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
            response_model=OkResponse, response_model_exclude_none=True,
            responses=_ERRORS)
     async def ignored_episodes(series_id: int, request: Request):
-        """Память отключённых серий: {"episodes": {"<сезон>": [номера]}}.
+        """The memory of the switched-off episodes: {"episodes": {"<season>": [numbers]}}.
 
-        Ключ — номер серии сериала, а не файл раздачи: выбор обязан
-        пережить замену релиза."""
+        The key is the number of the episode of the series, not the file of a release: the choice must survive the replacement of a release."""
         data = await request.json()
         episodes = data.get("episodes")
         if episodes is None:
@@ -216,11 +213,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             responses={409: {"model": ErrorResponse},
                        500: {"model": ErrorResponse}})
     async def scan_series(series_id: int, body: SyncScopeBody | None = None, download: bool = True):
-        """Синхронный скан одной серии, как в оригинале: HTTP ждёт
-        результата.
-        download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается.
-        С телом (сезон, серия сезона) — синхронизация в рамках сезона или серии: источники те же, исполняется
-        то, что касается области (серия компиляции приводит всю компиляцию); сериал занят на всё время."""
+        """A synchronous scan of one series, as in the original: HTTP waits for the result.
+        download=false — a scan without a download: the check of the files, the tables, the layout and the plan, but nothing is fetched.
+        With a body (a season, an episode of the season) — a sync within the season or the episode: the sources are the same, what is carried out
+        is what concerns the scope (an episode of a compilation brings the whole compilation); the series is busy for all of it."""
         try:
             result = await gw.reply_of(SCAN_SERIES_RUN, {
                 "series_id": series_id, **({} if download else {"download": False}),
@@ -236,8 +232,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.post("/api/series/{series_id}/scan/cancel", response_model=SyncCancelled, responses={500: {"model": ErrorResponse}})
     async def cancel_scan(series_id: int):
-        """Остановить синхронизацию сериала: чтение страниц, загрузки, задачи сервиса выравнивания, сборку файлов.
-        Из остановленной синхронизации ничего не применяется; идущий журнал библиотеки она дожидается."""
+        """Stops the sync of the series: the reading of the pages, the downloads, the jobs of the alignment service, the build of
+        the files. Nothing is applied from a stopped sync; it waits for a journal of the library under way."""
         try:
             done = await gw.reply_of(SCAN_RUN_CANCEL, {"series_id": series_id})
         except BusRequestError as exc:
@@ -246,10 +242,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.post("/api/series/{series_id}/failures/reset", response_model=FailuresReset, responses=_ERRORS)
     async def reset_failures(series_id: int, body: FailuresResetBody | None = None):
-        """Неудачные попытки сериала забываются: отклонённые и сбойные озвучки начинаются с первого источника своей
-        цепочки, видео, которое не скачалось, снова участвует в выборе референса. Это правка сериала, а не
-        синхронизация: работа по ним идёт со следующей синхронизацией. С телом — только попытки одного уровня (сезона,
-        серии, озвучки, нарезок): попытки остальных остаются, и выбор референса по ним не меняется."""
+        """The failed attempts of the series are forgotten: the rejected and failed voice-overs begin with the first source of
+        their chain, a video that did not download takes part in the choice of the reference again. This is an edit of the series, not a sync:
+        the work on them goes with the next sync. With a body — only the attempts of one level (a season, an episode, a voice-over, the cuts):
+        the attempts of the rest stay, and the choice of the reference by them does not change."""
         try:
             async with admitted(gw, series_id):
                 done = await gw.reply_of(PLANNER_FAILURES_FORGET, {

@@ -52,10 +52,9 @@ def build_router(gw):
 
     @r.get("/api/auth/status")
     async def auth_status(request: Request):
-        """Публичный статус для онбординга: настроен ли администратор, его имя
-        и вошёл ли текущий клиент. Фронт по нему выбирает модалку setup/login
-        и показывает на экране входа имя администратора (admin) вместо поля
-        ввода логина (приложение однопользовательское)."""
+        """The public status for the onboarding: whether the administrator is set up, his name and whether the current client is signed in.
+        By it the front chooses the setup or login modal and shows the name of the administrator (admin) on the login screen in place of the
+        field for the login (the application is single-user)."""
         admin = ""
         try:
             reply = await gw.reply_of(AUTH_EXISTS, {})
@@ -71,9 +70,8 @@ def build_router(gw):
 
     @r.post("/api/setup")
     async def setup(request: Request):
-        """Первичная установка администратора. Доступна ТОЛЬКО пока админа
-        нет; после создания — 403 (пересоздать в обход входа нельзя).
-        Успех сразу логинит (сессия)."""
+        """The first setup of the administrator. Available ONLY while there is no administrator; after it is made — 403 (it cannot
+        be made again bypassing the login). Success signs in at once (the session)."""
         try:
             exists = (await gw.reply_of(AUTH_EXISTS, {})).exists
         except BusRequestError:
@@ -102,13 +100,12 @@ def build_router(gw):
 
     @r.post("/api/auth/password")
     async def change_password(request: Request):
-        """Смена пароля вошедшим администратором (раздел «Аккаунт» настроек).
-        За «замком» (нужна сессия): проверяет длину нового пароля (≥8) и
-        обновляет хэш. Имя не меняется — сессия остаётся валидной.
+        """The change of the password by the administrator who is signed in (the section «Аккаунт» of the settings).
+        Behind the «lock» (a session is needed): checks the length of the new password (≥8) and renews the hash. The name does not change — the
+        session stays valid.
 
-        Текущий пароль НЕ запрашивается: активная сессия уже подтверждает
-        владельца (осознанное решение для однопользовательского приложения —
-        не заставлять вспоминать старый пароль при смене из-под входа)."""
+        The current password is NOT asked: the active session already confirms the owner (a deliberate decision for a single-user application —
+        not to make him recall the old password when changing it from under a login)."""
         user = request.session.get("user")
         if not user:
             return JSONResponse(

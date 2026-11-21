@@ -18,7 +18,7 @@ from core.contracts import SeriesSource, SourceType
 
 
 class ApiModel(BaseModel):
-    """База: лишние поля не отрезаются (additive-инвариант)."""
+    """The base: extra fields are not cut off (the additive invariant)."""
     model_config = ConfigDict(extra="allow")
 
 
@@ -28,19 +28,19 @@ class RequestModel(BaseModel):
 
 
 class OkResponse(ApiModel):
-    """Стандартный успех: {success: true[, message]}."""
+    """The standard success: {success: true[, message]}."""
     success: bool
     message: str | None = None
 
 
 class ReadCancelled(ApiModel):
-    """Чтение страницы остановлено: оно кончается неудачей «чтение остановлено», служит прежняя таблица; false — оно не шло."""
+    """The read of a page is stopped: it ends failed with «чтение остановлено», the former table serves; false — it was not going."""
     success: bool
     cancelled: bool = False
 
 
 class SyncCancelled(ApiModel):
-    """Синхронизация сериала остановлена: всё, что она делала, прервано, ничего не применено; false — она не шла."""
+    """The sync of a series is stopped: all it did is interrupted, nothing is applied; false — it was not going."""
     success: bool
     cancelled: bool = False
 
@@ -61,13 +61,13 @@ class FailuresResetBody(RequestModel):
 
 
 class FailuresReset(ApiModel):
-    """Неудачные попытки сериала сброшены: сколько озвучек начато сначала (работа — со следующей синхронизацией)."""
+    """The failed attempts of the series are reset: how many voice-overs begin anew (the work goes with the next sync)."""
     success: bool
     reset: int = 0
 
 
 class ErrorResponse(ApiModel):
-    """Ошибка (отдаётся через JSONResponse; здесь — для документации
+    """An error (it goes out through JSONResponse; here it is for the documentation of
     `responses={code: {"model": ErrorResponse}}`)."""
     success: bool = False
     error: str
@@ -99,8 +99,8 @@ class ScannerStatus(ApiModel):
 
 
 class QueueTask(ApiModel):
-    """Задача очереди (агент/загрузки/прогресс). Поля динамические —
-    extra='allow' пропускает всё; жёстко фиксировать не требуется."""
+    """A task of a queue (agent, downloads, progress). The fields are dynamic — extra='allow' lets everything through;
+    nothing needs to be fixed hard."""
 
 
 class ConformJobChange(ApiModel):
@@ -112,19 +112,17 @@ class ConformJobChange(ApiModel):
 # --- the «series» block (api_series) ----------------------------------------
 
 class DynamicObject(ApiModel):
-    """Динамический ответ (форма зависит от данных/типа серии): главы,
-    композиция, медиа-элементы, превью. extra='allow' пропускает всё —
-    ничего не отрезается; жёстко фиксировать форму не требуется."""
+    """A dynamic answer (the shape depends on the data or the kind of the series): chapters, composition, media items, previews.
+    extra='allow' lets everything through — nothing is cut off; the shape needs not be fixed hard."""
 
 
 class ErrorOnly(ApiModel):
-    """Тело ошибки вида {error: ...} (без success) — для документации."""
+    """The body of an error of the form {error: ...} (without success) — for the documentation."""
     error: str
 
 
 class TmdbInfo(ApiModel):
-    """TMDB-маппинг серии; поля динамические (tmdb_id, series_name, year,
-    poster_path, last_updated, ...)."""
+    """The TMDB mapping of a series; the fields are dynamic (tmdb_id, series_name, year, poster_path, last_updated, ...)."""
 
 
 class SeriesObject(ApiModel):
@@ -236,7 +234,7 @@ class CreatedSeries(ApiModel):
 
 class OutputSettingsSet(RequestModel):
     """The body of the command `composition.settings.set` without the series, which the path names; the fields
-    are those of core.contracts.SettingsSet (a test keeps them equal)."""
+    are those of core.contracts.SettingsSet without `series_id`."""
     season: int | None = None
     episode: int | None = None
     compilation: str | None = None
