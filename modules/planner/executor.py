@@ -383,7 +383,8 @@ class SeriesSync:
             self.note = {"recorded": recorded, "for_this_sync": moment, "retimed": retimed}
             return True
 
-        stale, waiting = True, False
+        stale = True
+        blocked: set[Slot] = set()  # the episodes of the groups that wait for the apply of the same episodes
         try:
             while True:
                 if stale:
@@ -398,10 +399,11 @@ class SeriesSync:
                                               "plan": made})
                     work = begin(made)
                     busy = {slot for _, group in applies.values() for slot in group.slots}
-                    stale = waiting = False
+                    stale = False
+                    blocked = set()
                     for group in made.groups:
                         if busy & set(group.slots):
-                            waiting = True  # its episodes are being applied by the plan before: looked at after that
+                            blocked |= set(group.slots)  # its episodes are being applied by the plan before: looked at after that
                         elif group.slots not in unbuilt:
                             watchers[asyncio.ensure_future(ended(group))] = group
                 if not watchers and not applies:
@@ -418,7 +420,10 @@ class SeriesSync:
                             applied.append(group.slots)
                     else:
                         unbuilt.add(group.slots)
-                    stale = stale or waiting
+                    # Only the end of an apply a group waits for is a reason to count again: the end of any other (a group kept as it
+                    # is applies at every plan, and ends at once) would count again, find the group waiting still, and so on while
+                    # the build it waits for lasts.
+                    stale = stale or bool(blocked & set(group.slots))
                 if take_news():
                     # A group is applied only by a plan made after everything known: the plan is made again first.
                     await self.trace("replan", self.note)
