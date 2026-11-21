@@ -4,7 +4,7 @@
   "path": "/",
   "func": "index",
   "file": "modules/gateway/module.py",
-  "line": 435,
+  "line": 438,
   "access": "public",
   "conditional": null,
   "summary": "Боевой фронт панели (web/dist/index.html)",
@@ -15,7 +15,7 @@
   "path": "/api/_diag/echo",
   "func": "diag_echo",
   "file": "modules/gateway/module.py",
-  "line": 399,
+  "line": 402,
   "access": "session",
   "conditional": "diag",
   "summary": "Диагностический прокси к шине (только при diag=True)",
@@ -108,7 +108,7 @@
   "conditional": null,
   "summary": "Остановить задачу выравнивания, которая ждёт или идёт, либо удалить запись завершённой",
   "panel_sites": [
-   "components/settings/AgentsPanel.vue:79"
+   "components/settings/AgentsPanel.vue:92"
   ]
  },
  {
@@ -224,7 +224,7 @@
   "conditional": null,
   "summary": "Убрать карточку загрузки, оставшуюся после синхронизации",
   "panel_sites": [
-   "components/settings/AgentsPanel.vue:75"
+   "components/settings/AgentsPanel.vue:88"
   ]
  },
  {
@@ -283,7 +283,7 @@
   "conditional": null,
   "summary": "Выход (очистка сессии)",
   "panel_sites": [
-   "App.vue:49"
+   "App.vue:53"
   ]
  },
  {
@@ -333,7 +333,7 @@
   "conditional": null,
   "summary": "Убрать карточку упаковки, оставшуюся после синхронизации",
   "panel_sites": [
-   "components/settings/AgentsPanel.vue:77"
+   "components/settings/AgentsPanel.vue:90"
   ]
  },
  {
@@ -617,7 +617,7 @@
   "conditional": null,
   "summary": "Удаление серии",
   "panel_sites": [
-   "App.vue:103"
+   "App.vue:107"
   ]
  },
  {
@@ -856,7 +856,7 @@
   "conditional": null,
   "summary": "Синхронный скан одной серии",
   "panel_sites": [
-   "App.vue:72",
+   "App.vue:76",
    "composables/outputCalls.ts:44"
   ]
  },
@@ -870,7 +870,7 @@
   "conditional": null,
   "summary": "Остановить синхронизацию сериала: чтение страниц, загрузки, задачи выравнивания, сборку файлов",
   "panel_sites": [
-   "App.vue:62",
+   "App.vue:66",
    "composables/outputCalls.ts:50"
   ]
  },
@@ -962,7 +962,7 @@
   "conditional": null,
   "summary": "Включение/выключение автоскана",
   "panel_sites": [
-   "App.vue:83"
+   "App.vue:87"
   ]
  },
  {
@@ -1242,7 +1242,7 @@
   "path": "/api/stream",
   "func": "stream",
   "file": "modules/gateway/module.py",
-  "line": 393,
+  "line": 396,
   "access": "session",
   "conditional": null,
   "summary": "SSE-поток событий шины",
@@ -1499,7 +1499,7 @@
   "path": "/legacy",
   "func": "legacy",
   "file": "modules/gateway/module.py",
-  "line": 440,
+  "line": 443,
   "access": "public",
   "conditional": null,
   "summary": "Старый фронт (откат), ассеты по /static",
@@ -1510,7 +1510,7 @@
   "path": "/v2",
   "func": "v2_redirect",
   "file": "modules/gateway/module.py",
-  "line": 449,
+  "line": 452,
   "access": "public",
   "conditional": null,
   "summary": "Редирект 307 на корень",
@@ -1521,7 +1521,7 @@
   "path": "/v2/",
   "func": "v2_redirect",
   "file": "modules/gateway/module.py",
-  "line": 449,
+  "line": 452,
   "access": "public",
   "conditional": null,
   "summary": "Редирект 307 на корень",
