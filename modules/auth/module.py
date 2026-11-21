@@ -4,7 +4,7 @@ Owns the table admin_user (Р-7). Keeps the argon2 hash of the password; the pas
 The HTTP part of the authentication (the session in the cookie, the "lock" before the requests, the guard against brute
 force by IP) is in the gateway; this module only checks and keeps the password. It has no count to take out to `calc`: the
 work is hashing (a hash and a check are about 100 ms each, with a salt that makes the hash differ on every call) and the
-table. The hashing runs in the pool of computation (`compute.run`), not in the loop that serves every module and window.
+table. The hashing runs in the pool of computation (`compute.run`), not in the loop that serves every module and window; the dummy hash for an unknown login too — it is made at the start of the module, not when the module is built.
 
 Queries (the answer is the model, as it is):
   auth.login {username, password} -> LoginReply {ok}
@@ -24,6 +24,7 @@ administrator is made of them (the first setup). Otherwise a warning: no login i
 """
 from __future__ import annotations
 
+import asyncio
 import os
 
 from argon2 import PasswordHasher
@@ -45,8 +46,9 @@ class AuthModule(BaseModule):
     def __init__(self, bus, db: Database) -> None:
         self.repo = AuthRepository(db)
         self._ph = PasswordHasher()
-        # a dummy hash for an answer in constant time when the login is unknown
-        self._dummy_hash = self._ph.hash("\x00timing-dummy")
+        # A dummy hash for an answer in constant time when the login is unknown: made once, in the pool of computation (a hash is
+        # about 100 ms), by the first that needs it, and at the start of the module.
+        self._dummy: asyncio.Future | None = None
         super().__init__(bus)
 
     def register(self) -> None:
@@ -55,6 +57,7 @@ class AuthModule(BaseModule):
         self.handle(AUTH_PASSWORD_SET, self.on_password_set)
 
     async def on_start(self) -> None:
+        await self._dummy_hash()
         if await self.repo.get() is not None:
             return
         user = os.environ.get("ST_ADMIN_USER", "").strip()
@@ -75,7 +78,7 @@ class AuthModule(BaseModule):
         if not row or username != row["username"]:
             # the dummy hash is checked: the time of the answer does not depend on whether the login exists (the guard
             # against a brute force by time)
-            await self._safe_verify(self._dummy_hash, password)
+            await self._safe_verify(await self._dummy_hash(), password)
             return LoginReply(ok=False)
         if not await self._safe_verify(row["password_hash"], password):
             return LoginReply(ok=False)
@@ -98,6 +101,11 @@ class AuthModule(BaseModule):
         await self.repo.set(username, await compute.run(self._ph.hash, password))
         self.log.info("учётка администратора обновлена: %s", username)
         return PasswordSaved(ok=True)
+
+    async def _dummy_hash(self) -> str:
+        if self._dummy is None:
+            self._dummy = asyncio.ensure_future(compute.run(self._ph.hash, "\x00timing-dummy"))
+        return await self._dummy
 
     async def _safe_verify(self, password_hash: str, password: str) -> bool:
         try:
