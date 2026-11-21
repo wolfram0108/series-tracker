@@ -4,7 +4,7 @@
 
 ## ГДЕ СЕЙЧАС (2026-11-20)
 
-Этапы 0–4 и подэтапы 5а–5г закрыты и выкачены. Реестр `core/topics.py` — 230 записей; `core/__init__.py` без переэкспорта; шлюз не
+Этапы 0–5 закрыты и выкачены. Реестр `core/topics.py` — 230 записей; `core/__init__.py` без переэкспорта; шлюз не
 меняет полученные ответы. composition: счёт в `calc/layout`, очереди вариантов и имена озвучек — в `calc/`, обработчики
 ступенями «запросы → чистая ступень в пуле», топики константами реестра, ответы — неизменяемыми моделями (`Frozen`,
 `core/contracts/frozen.py`); JSON окна сверен байт в байт на сериалах 40, 46, 49 (`tools/checks/window_json.py`);
@@ -39,7 +39,7 @@ JSON окон трёх модулей сверен, `rules.apply` в раскл�
 | 2 | composition — один проход | ✅ | счёт в `calc/layout`, обработчики «входы → счёт → публикация», топики по реестру; журнал из `settings.retarget` — в модуле; `voices.settings.get` — до цикла по пунктам команды; ответ `composition.get` моделью сохраняет нынешний JSON окна (`exclude_unset`, `composition/module.py:788-791`) |
 | 3 | planner — один проход | ✅ | `core/plan` чистое → `calc/plan`, `calc/view`; исполнитель, файлы плана и книга карточек упаковки → `modules/planner`; топики по реестру; планировщик спрашивает `composition.get`, запись `composition.layout` (второе имя того же обработчика) удаляется; в `core` не остаётся импортов `calc` |
 | 4 | rules, unpack, voices — по проходу на модуль | ✅ | `calc/rules`, `calc/unpack`; очереди и имена озвучек → `calc` |
-| 5 | Остальные модули — перевод на реестр | ⛔ | catalog, settings, sources, torrents, downloads, scan, conform, library, metadata, renaming, trackerauth, auth, runlog, gateway; модели ответов `catalog.series.get/list`, `catalog.sources.by_profile`; события `composition.*` — моделями после прохода их потребителей; чтения `sources` (`table.get`, `table.read`, `pages.check`, `titles.search`, `video.stream`) — `concurrent`, чтобы ожидание первого взгляда на поставщика не держало очередь; у torrents один путь к клиенту — через ожидание `_looked` (`releases.py`, `qbt_not_configured`); `SiteResolveReply` — `Frozen` с проходом sources; комментарии и докстринги модуля — по-английски (закон «Код»); ссылки на записи решений (`Р-…`, `Д-…`) остаются; с проходом gateway — `contracts/endpoints.md` сверяется с пересозданным `contracts/endpoints.json` (числа и перечень маршрутов, которые панель не вызывает) |
+| 5 | Остальные модули — перевод на реестр | ✅ | catalog, settings, sources, torrents, downloads, scan, conform, library, metadata, renaming, trackerauth, auth, runlog, gateway; модели ответов `catalog.series.get/list`, `catalog.sources.by_profile`; события `composition.*` — моделями после прохода их потребителей; чтения `sources` (`table.get`, `table.read`, `pages.check`, `titles.search`, `video.stream`) — `concurrent`, чтобы ожидание первого взгляда на поставщика не держало очередь; у torrents один путь к клиенту — через ожидание `_looked` (`releases.py`, `qbt_not_configured`); `SiteResolveReply` — `Frozen` с проходом sources; комментарии и докстринги модуля — по-английски (закон «Код»); ссылки на записи решений (`Р-…`, `Д-…`) остаются; с проходом gateway — `contracts/endpoints.md` сверяется с пересозданным `contracts/endpoints.json` (числа и перечень маршрутов, которые панель не вызывает) |
 | 6 | Итог | ⛔ | `core` — только инфраструктура; место чистых листьев `core.fsnames`, `core.ignored`, `core.reasons`; что из ответов-моделей пишет дамп синхронизации (`modules/runlog/module.py:77-79`); `contracts/bus_topics.md` из реестра; замер до и после; README, раздел «Архитектура» |
 
 Один модуль — один коммит, после него — тесты модуля и основной набор, выкатка.
@@ -52,7 +52,7 @@ JSON окон трёх модулей сверен, `rules.apply` в раскл�
 | 5б ✅ | sources, trackerauth, metadata | чтение страниц и внешние службы; маскировка секретов в дампе `runlog` для моделей с паролями; мёртвый помощник `World.stored` (`tests/test_provider_settings.py:66`) |
 | 5в ✅ | torrents, renaming, library | торрентный путь и библиотека; пароль qBittorrent из таблицы `auth` через `trackerauth.secret.get` (`modules/torrents/module.py:264`, сейчас всегда пустой; прод берёт адрес из окружения); лишний `import re` в `modules/trackerauth/providers.py:148` |
 | 5г ✅ | downloads, conform, scan | исполнение и прогоны; событие `sources.video.progress` моделью (`modules/downloads/module.py:627`) |
-| 5д | runlog, gateway | последние потребители: события моделями, ключи `SSE_MAP` — записи реестра, `contracts/endpoints.md`; ответы-подтверждения каталога (`{ok}`, `{id}`, `{applied}`) моделями; схемы шлюза `ScannerStatus`, `ScheduleValue` — из моделей контрактов (`ScanStatus`, `ScheduleTimes`); ответы `planner.sync`, `planner.sync.cancel`, `composition.recompute` моделями; пробный хеш `auth` — в `on_start` через пул (`modules/auth/module.py:49`); ключи `SSE_MAP` источников; событие `sources.table.trace` моделью (`modules/runlog/module.py:240-249`); маскировка секретов во вложенных моделях дампа (`modules/runlog/module.py:77`) | Этапы 2–4 повторяют перенос файлов на
+| 5д ✅ | runlog, gateway | последние потребители: события моделями, ключи `SSE_MAP` — записи реестра, `contracts/endpoints.md`; ответы-подтверждения каталога (`{ok}`, `{id}`, `{applied}`) моделями; схемы шлюза `ScannerStatus`, `ScheduleValue` — из моделей контрактов (`ScanStatus`, `ScheduleTimes`); ответы `planner.sync`, `planner.sync.cancel`, `composition.recompute` моделями; пробный хеш `auth` — в `on_start` через пул (`modules/auth/module.py:49`); ключи `SSE_MAP` источников; событие `sources.table.trace` моделью (`modules/runlog/module.py:240-249`); маскировка секретов во вложенных моделях дампа (`modules/runlog/module.py:77`) | Этапы 2–4 повторяют перенос файлов на
 текущем `main` по образцу ветки прототипа и добавляют к нему проход модуля.
 
 ## ИТОГИ ЭТАПА 0 (2026-11-20)
@@ -132,6 +132,6 @@ JSON окон трёх модулей сверен, `rules.apply` в раскл�
 
 ## СЛЕДУЮЩИЙ ШАГ
 
-Этап 5: проходы остальных модулей (catalog, settings, sources, torrents, downloads, scan, conform, library, metadata,
-renaming, trackerauth, auth, runlog, gateway) — чистое в `calc`, топики константами реестра, ответы и события моделями,
-записанные в строке этапа хвосты; сверка JSON и замер тем же способом. Служит требованиям 1, 3, 4 CHARTER.
+Этап 6: итог — `core` только инфраструктура (место `fsnames`, `ignored`, `reasons`, `secrets`), что из ответов-моделей
+пишет дамп синхронизации, `contracts/bus_topics.md` из реестра, замер до и после всей миссии, README, раздел
+«Архитектура». Служит критериям успеха CHARTER.
