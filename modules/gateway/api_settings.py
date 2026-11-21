@@ -138,7 +138,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @route_per_method(r, "/api/settings/source_terms", methods=["GET", "POST"], response_model=DynamicObject,
                       responses=_ERR1)
     async def source_terms(request: Request):
-        """The terms of the sites the sources read (sources, term.py): GET {sites: [{site, app, sources, minutes}]}, POST
+        """The terms of the sites the sources read (sources, term.py): GET {sites: [{site, provider, sources, minutes}]}, POST
         {site, minutes} sets one; a value the sources refuse is 400 with its reason."""
         if request.method == "POST":
             data = await request.json()
