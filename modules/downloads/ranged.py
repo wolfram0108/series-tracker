@@ -89,7 +89,8 @@ async def _fetch_part(client: httpx.AsyncClient, url: str, headers: dict, first:
                         await progress.add(len(chunk))
                     if got == expected:
                         return b"".join(chunks), ""
-                    progress.take_back(got)
+                    if got:
+                        await progress.add(-got)
                     return None, reason("part_short", first=first, last=last, got=got, expected=expected)
                 if status in _TRANSIENT_STATUSES or status >= 500:
                     return None, reason("part_refused", status=status, first=first, last=last)
@@ -97,7 +98,8 @@ async def _fetch_part(client: httpx.AsyncClient, url: str, headers: dict, first:
                 refused = reason("part_not_served", status=status, first=first, last=last)
                 raise _Failed(Final(refused) if status in GONE else refused)
         except httpx.HTTPError as exc:
-            progress.take_back(got)
+            if got:
+                await progress.add(-got)
             return None, reason("network_error", cause=type(exc).__name__)
 
     (data, problem), _attempts, _exhausted = await retrying(
@@ -109,22 +111,12 @@ async def _fetch_part(client: httpx.AsyncClient, url: str, headers: dict, first:
 
 
 class _Progress:
-    """The bytes of the file as they come. Only a new most of them is reported: it is the sign of life of the download,
-    and a host that sends the same first bytes of a part on every try and then falls silent gives none."""
-
     def __init__(self, total: int, on_progress: ProgressCb) -> None:
         self._total, self._on_progress = total, on_progress
-        self._done, self._most, self._started, self._last = 0, 0, time.monotonic(), 0.0
-
-    def take_back(self, size: int) -> None:
-        """The bytes of a part that failed: they are asked again, and reporting them would be a false sign of life."""
-        self._done -= size
+        self._done, self._started, self._last = 0, time.monotonic(), 0.0
 
     async def add(self, size: int) -> None:
         self._done += size
-        if self._done <= self._most:
-            return
-        self._most = self._done
         now = time.monotonic()
         if self._done < self._total and now - self._last < PROGRESS_INTERVAL_S:
             return
