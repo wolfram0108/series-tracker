@@ -4,6 +4,7 @@ import { useBodyScrollLock } from "../composables/useBodyScrollLock"
 import { useConfirm } from "../composables/useConfirm"
 import { provideWindowBusy } from "../composables/useWindowBusy"
 import { hasFocusable, useDialog } from "../composables/useLayers"
+import { useWindowBox } from "../composables/useWindowCover"
 import { t } from "../i18n"
 
 // Переиспользуемая оболочка модального окна (порт modern-modal): оверлей +
@@ -49,6 +50,8 @@ function onOverlayClick(e: MouseEvent) {
 
 // The window is a layer (useLayers): Escape and Tab belong to the top one, the focus goes in and comes back to what opened it.
 const { titleId } = useDialog(room, requestClose)
+// The main screen is not drawn under the window (composables/useWindowCover.ts).
+useWindowBox(room)
 
 // фон не прокручивается, пока окно открыто (scroll chaining)
 useBodyScrollLock()

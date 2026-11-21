@@ -24,6 +24,7 @@ import { useConfirm } from "./composables/useConfirm"
 import { useAction } from "./composables/useAction"
 import { useSSE } from "./composables/useSSE"
 import { useShownCells } from "./composables/useShownCells"
+import { useUnderWindows } from "./composables/useWindowCover"
 import { api } from "./api/client"
 
 // Главный экран: шапка + список серий на живых данных из стора. Модалки
@@ -32,6 +33,8 @@ const seriesStore = useSeriesStore()
 // A card of a series is drawn while it is near the view (composables/useShownCells.ts): a long list draws a screen of them.
 const seriesList = ref<HTMLElement | null>(null)
 const { built, cell, sizeOf } = useShownCells(seriesList)
+// Under an open window the list is not drawn: it is not seen there (composables/useWindowCover.ts).
+const listCut = useUnderWindows(seriesList)
 const scannerStore = useScannerStore()
 const ui = useUiStore()
 const auth = useAuthStore()
@@ -123,7 +126,7 @@ const remove = useAction(async (id: number) => {
       @settings="openModal = 'settings'"
       @logout="onLogout"
     />
-    <div ref="seriesList" class="series-list">
+    <div ref="seriesList" class="series-list" :style="listCut">
       <template v-for="s in seriesStore.list" :key="s.id">
         <div v-if="!built(s.id)" :ref="cell(s.id)" class="cell-shell series-shell" :style="sizeOf(s.id)" aria-hidden="true" />
         <SeriesCard
