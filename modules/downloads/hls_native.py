@@ -192,6 +192,8 @@ async def fetch(snap: Snapshot, headers: dict, target: str, fragments: int, on_p
     """The segments of the saved playlist into `target` by the worker; (False, why) when it did not take them all. What
     it took stays next to `target` and is continued by the next transfer into it (`continued`). The failure is final when
     the host said of a segment that it is not there."""
+    # The playlist is saved, so the link is good: a segment that never comes fails the download, not the link.
+    await on_progress({"phase": "download", "progress": 0, "eta": 0, "speed": 0.0})
     proc = await spawn(sys.executable, "-m", "modules.downloads.hls_worker", cwd=ROOT,
                        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
     proc.stdin.write((json.dumps({"url": snap.manifest, "target": target, "headers": headers,

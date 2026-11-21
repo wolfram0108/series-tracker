@@ -146,6 +146,9 @@ async def _fetch_all(client: httpx.AsyncClient, url: str, headers: dict, tmp_pat
                      threads: int) -> tuple[bool, str]:
     total = await _probe(client, url, headers)
     await storage.call(_allocate, tmp_path, total)
+    # The host answered with the size, so the link is good: a host that then sends no part fails the download, not the link.
+    await on_progress({"phase": "download", "progress": 0, "eta": 0, "speed": 0.0,
+                       "total_size_mb": round(total / (1024 ** 2), 2)})
     queue: asyncio.Queue[int] = asyncio.Queue()
     for first in range(0, total, PART_BYTES):
         queue.put_nowait(first)

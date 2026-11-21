@@ -123,6 +123,8 @@ async def transfer(session: AllohaSession, listed: Playlist, target: str, connec
     count, started = len(listed.segments), time.monotonic()
     if session.error:
         raise AllohaRefused(session.error, profile_rejected=session.profile_rejected)
+    # The playlist is read, so the link is good: a segment that never comes fails the download, not the link.
+    await on_progress({"phase": "download", "progress": 0, "eta": 0})
     if listed.init:
         await storage.call(_append, target, [await _media(session, listed.init)], owns=target)
     else:
