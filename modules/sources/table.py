@@ -27,7 +27,7 @@ from calc.row_limit import limit_of
 from calc.sources import pages
 from calc.sources.pages import Step
 from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableRead,
-                            TableReady, TableRefresh, TableRow, TableState, UnreadPart)
+                            TableReady, TableRefresh, TableRow, TableState, TableTrace, UnreadPart)
 from core.logging import get_logger
 from core.reasons import EXTERNAL, describe, parse, reason
 from core.topics import (SOURCES_TABLE_FAILED, SOURCES_TABLE_PROGRESS, SOURCES_TABLE_READY, SOURCES_TABLE_TRACE, TABLE_READ_S,
@@ -288,7 +288,8 @@ class TableReader:
         table: ReleaseTable | None = None
         problem: str | None = None
         began = time.monotonic()
-        self._publish(SOURCES_TABLE_TRACE, {"url": key, "site": site.name, "kind": "begin", "fresh": fresh})
+        self._publish(SOURCES_TABLE_TRACE, TableTrace(url=key, site=site.name, kind="begin", fresh=fresh)
+                      .model_dump(mode="json", exclude_unset=True))
         try:
             await self._repo.mark_reading(key, site.name, self._stamp())
             async with self._holding():
@@ -307,9 +308,10 @@ class TableReader:
         async with self._gate:
             problem = await self._settle(site, key, table, problem)
             self._reading.pop(key, None)
-        self._publish(SOURCES_TABLE_TRACE, {"url": key, "site": site.name, "kind": "end", "ok": problem is None,
-                                            "reason": problem, "seconds": round(time.monotonic() - began, 1),
-                                            **(pages.read_summary(table) if problem is None and table is not None else {})})
+        self._publish(SOURCES_TABLE_TRACE, TableTrace(
+            url=key, site=site.name, kind="end", ok=problem is None, reason=problem, seconds=round(time.monotonic() - began, 1),
+            **(pages.read_summary(table) if problem is None and table is not None else {})
+        ).model_dump(mode="json", exclude_unset=True))
         if problem is None and table is not None:
             self._publish(SOURCES_TABLE_READY, pages.ready_of(key, table.read_at or "", self._term.of(key)).model_dump(mode="json"))
         else:

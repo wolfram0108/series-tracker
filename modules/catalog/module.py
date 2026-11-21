@@ -27,7 +27,7 @@ Events in:
 
 Commands:
   catalog.viewing.start {series_id} / catalog.viewing.stop {series_id}: the modal opened or closed (user actions).
-  catalog.series.set_save_path {series_id, save_path} -> {ok}: `save_path` is our column; `library` writes it after a move.
+  catalog.series.set_save_path {series_id, save_path} -> Done: `save_path` is our column; `library` writes it after a move.
   catalog.series.touch_scan_time {series_id}: the scan time of the card ("the lifetime" of the card) after a successful
       download or processing; the event series.updated carries it to the interface (the date pill) without a reload.
 
@@ -42,16 +42,16 @@ Commands that answer:
   catalog.series.create {data} -> SeriesCard (+ the event series.added, then series.source.added for every initial source):
       data.sources is a list of sources (at least one), each the fields of SeriesSource without id and series_id; the
       position is the order in the list by default. The fields of data that are not in the schema of series are ignored.
-  catalog.series.update {series_id, fields} -> {applied: {...}} (+ the event series.updated with the fields applied: the
+  catalog.series.update {series_id, fields} -> Applied {applied: {...}} (+ the event series.updated with the fields applied: the
       delta of SSE); the sources are not changed here. A series that is busy is not changed (the table of what is allowed).
-  catalog.series.delete {series_id} -> {ok}: deletes the row of series with its sources and publishes series.deleted (there
+  catalog.series.delete {series_id} -> Done: deletes the row of series with its sources and publishes series.deleted (there
       are no separate series.source.removed); the owners of the other tables clean theirs on the event (Р-19, the cascade of
       events) and report with series.purged: a silent owner means a broken cascade and goes to the log.
-  catalog.sources.add {series_id, source} -> {id}: to the end of the list if the position is not given (+ the event
+  catalog.sources.add {series_id, source} -> Created {id}: to the end of the list if the position is not given (+ the event
       series.source.added).
-  catalog.sources.update {source_id, fields, series_id?} -> {applied: {...}}: only the fields that changed; without a change
+  catalog.sources.update {source_id, fields, series_id?} -> Applied {applied: {...}}: only the fields that changed; without a change
       no event is published (+ the event series.source.updated).
-  catalog.sources.remove {source_id} -> {ok}: the only source of a series cannot be removed (`last_source`);
+  catalog.sources.remove {source_id} -> Done: the only source of a series cannot be removed (`last_source`);
       + series.source.removed.
 
 Events out (a JSON packet of the model, as the stream of the interface and the dump of a run take it):
@@ -71,8 +71,8 @@ from calc.catalog.aggregator import StatusAggregator
 from calc.catalog.series import (absolute_path, card_of, fs_safe, list_of, source_event, status_of, touched_of, updated_of,
                                  written_of)
 from calc.catalog.series_sources import changed_fields, checked_fields, checked_sources, refuse_removed_fields
-from core.contracts import (BusyContribution, SeriesCard, SeriesDeleted, SeriesListReply, SeriesPurged, SeriesSource,
-                            SourcesReply, StatusContribution, availability)
+from core.contracts import (Applied, BusyContribution, Created, Done, SeriesCard, SeriesDeleted, SeriesListReply, SeriesPurged,
+                            SeriesSource, SourcesReply, SseClients, StatusContribution, availability)
 from core.db import Database
 from core.envelope import Envelope
 from core.module import BaseModule
@@ -164,13 +164,13 @@ class CatalogModule(BaseModule):
             self.publish_event(SERIES_BUSY_CHANGED,
                                status_of(series_id, self.agg.statuses(series_id), now).model_dump(mode="json"))
 
-    async def on_set_save_path(self, env: Envelope) -> dict:
+    async def on_set_save_path(self, env: Envelope) -> Done:
         """save_path is our column; library writes it after a move."""
         await self.repo.set_save_path(env.payload["series_id"], absolute_path(env.payload["save_path"]))
-        return {"ok": True}
+        return Done()
 
     async def on_sse_clients(self, env: Envelope) -> None:
-        if env.payload["count"] > 0:
+        if SseClients.model_validate(env.payload).count > 0:
             return
         changes = self.agg.clear_all_viewing()
         for series_id, statuses in changes.items():
@@ -219,7 +219,7 @@ class CatalogModule(BaseModule):
         availability.require(availability.Action.EDIT,
                              availability.SERIES_SCANNING if series_id in self._busy else availability.SERIES_IDLE)
 
-    async def on_series_update(self, env: Envelope) -> dict:
+    async def on_series_update(self, env: Envelope) -> Applied:
         series_id = env.payload["series_id"]
         fields = env.payload["fields"]
         self._require_free(series_id)
@@ -233,9 +233,9 @@ class CatalogModule(BaseModule):
             # The delta for SSE series_updated: the fields applied and the statuses/is_busy it must carry (finding 38).
             self.publish_event(SERIES_UPDATED, updated_of(written, self.agg.statuses(series_id), series_id in self._busy)
                                .model_dump(mode="json", exclude_unset=True))
-        return {"applied": applied}
+        return Applied(applied=applied)
 
-    async def on_series_delete(self, env: Envelope) -> dict:
+    async def on_series_delete(self, env: Envelope) -> Done:
         series_id = env.payload["series_id"]
         await self._require_series(series_id)
         await self.repo.delete_series(series_id)
@@ -245,7 +245,7 @@ class CatalogModule(BaseModule):
                       series_id)
         self.publish_event(SERIES_DELETED, SeriesDeleted(series_id=series_id).model_dump(mode="json"))
         self.spawn(self._await_purge_reports(series_id))
-        return {"ok": True}
+        return Done()
 
     # --- sources of a series (decision D-38) ------------------------------------
 
@@ -257,7 +257,7 @@ class CatalogModule(BaseModule):
     async def on_sources_by_profile(self, env: Envelope) -> SourcesReply:
         return SourcesReply(sources=tuple(await self.repo.sources_by_profile(int(env.payload["profile_id"]))))
 
-    async def on_source_add(self, env: Envelope) -> dict:
+    async def on_source_add(self, env: Envelope) -> Created:
         series_id = env.payload["series_id"]
         await self._require_series(series_id)
         self._require_free(series_id)
@@ -265,9 +265,9 @@ class CatalogModule(BaseModule):
         source_id = await self.repo.add_source(series_id, draft)
         self.log.info("сериал %d: добавлен источник %d", series_id, source_id)
         await self._publish_source("added", series_id, source_id)
-        return {"id": source_id}
+        return Created(id=source_id)
 
-    async def on_source_update(self, env: Envelope) -> dict:
+    async def on_source_update(self, env: Envelope) -> Applied:
         source_id = env.payload["source_id"]
         stored = await self._require_source(source_id)
         self._require_own(stored, env.payload.get("series_id"))
@@ -276,9 +276,9 @@ class CatalogModule(BaseModule):
         if applied:
             await self.repo.update_source(source_id, applied)
             await self._publish_source("updated", stored.series_id, source_id, sorted(applied))
-        return {"applied": applied}
+        return Applied(applied=applied)
 
-    async def on_source_remove(self, env: Envelope) -> dict:
+    async def on_source_remove(self, env: Envelope) -> Done:
         source_id = env.payload["source_id"]
         stored = await self._require_source(source_id)
         self._require_own(stored, env.payload.get("series_id"))
@@ -289,7 +289,7 @@ class CatalogModule(BaseModule):
             raise ValueError(reason("last_source", series_id=stored.series_id, source_id=source_id))
         self.log.info("сериал %d: удалён источник %d", stored.series_id, source_id)
         await self._publish_source("removed", stored.series_id, source_id)
-        return {"ok": True}
+        return Done()
 
     async def _require_series(self, series_id: int) -> None:
         if not await self.repo.series_exists(series_id):

@@ -1,8 +1,7 @@
-"""HTTP-точки блока «скан и очереди» (Р-20) — формы routes/system.py.
+"""HTTP points of the «scan and queues» block (Р-20) — the shapes of routes/system.py.
 
-/api/agent/reset не переносится: точка была сломана (находка 23) и
-мертва на фронте, а «зависшие статусы» в новой системе невозможны —
-статус нигде не хранится (Р-11).
+/api/agent/reset is not carried over: the point was broken (finding 23) and dead on the front, and «hung statuses» are
+impossible in the new system — a status is kept nowhere (Р-11).
 """
 from __future__ import annotations
 
@@ -11,11 +10,14 @@ import base64
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
+from calc.gateway.flags import flag_text
+from calc.gateway.queues import agent_tasks
 from core.module import BusRequestError
 from core.contracts import DownloadCard, JobCancelled, PackCard
 from core.reasons import reason, relayed
-from core.topics import (CONFORM_CANCEL, CONFORM_PLOT, DOWNLOADS_CANCEL, DOWNLOADS_CARD_REMOVE, DOWNLOADS_QUEUE_CLEAR, DOWNLOADS_QUEUE_GET,
-                         SCAN_ALL_START, SCAN_SCHEDULE_SET, SCAN_STATUS_GET, SETTINGS_VALUE_SET, TORRENTS_QUEUE_GET)
+from core.topics import (CONFORM_CANCEL, CONFORM_PLOT, DOWNLOADS_CANCEL, DOWNLOADS_CARD_REMOVE, DOWNLOADS_QUEUE_CLEAR,
+                         DOWNLOADS_QUEUE_GET, PLANNER_PACK_GET, PLANNER_PACK_REMOVE, SCAN_ALL_START, SCAN_SCHEDULE_SET,
+                         SCAN_STATUS_GET, SETTINGS_VALUE_SET, TORRENTS_QUEUE_GET)
 
 from .schemas import (ConformJobChange, DynamicObject, ErrorOnly, ErrorResponse, OkResponse, QueueTask, ScannerStatus,
                       ScheduleBody)
@@ -33,11 +35,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def scanner_settings(request: Request):
         data = await request.json()
         if "enabled" in data:
-            await gw.request(SETTINGS_VALUE_SET, {
+            await gw.reply_of(SETTINGS_VALUE_SET, {
                 "key": "scanner_agent_enabled",
-                "value": str(data["enabled"]).lower()})
-        # Пересчёт расписания делает scan по settings.changed (Р-20);
-        # немедленный полный скан старой системы не воспроизводится.
+                "value": flag_text(data["enabled"])})
+        # The schedule is counted again by scan on settings.changed (Р-20); the immediate full scan of the old system is not
+        # reproduced.
         return {"success": True}
 
     @r.post("/api/schedule", response_model=DynamicObject, responses={400: {"model": ErrorResponse}})
@@ -64,10 +66,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/agent/queue", response_model=list[QueueTask])
     async def agent_queue():
         try:
-            reply = await gw.request(TORRENTS_QUEUE_GET, {})
+            reply = await gw.reply_of(TORRENTS_QUEUE_GET, {})
         except BusRequestError:
-            return []  # модуль не поднят — как старый «нет агента»
-        return [{"hash": t.get("torrent_hash"), **t} for t in reply["tasks"]]
+            return []  # the module is not up — as the old «no agent»
+        return agent_tasks(reply["tasks"])
 
     @r.get("/api/downloads/queue", response_model=list[DownloadCard])
     async def downloads_queue():
@@ -94,10 +96,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def pack_queue():
         """The cards of the packing (core/contracts/packing.py): every container a sync builds, its stages and tracks."""
         try:
-            reply = await gw.request("planner.pack.get", {})
+            reply = await gw.reply_of(PLANNER_PACK_GET, {})
         except BusRequestError:
             return []
-        return reply["tasks"]
+        return list(reply.tasks)
 
     @r.delete("/api/pack/cards/{card_id}", response_model=OkResponse,
               response_model_exclude_none=True,
@@ -105,7 +107,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def pack_card_remove(card_id: str):
         """A card of the packing that stayed after its sync is removed."""
         try:
-            await gw.request("planner.pack.remove", {"id": card_id})
+            await gw.reply_of(PLANNER_PACK_REMOVE, {"id": card_id})
         except BusRequestError as exc:
             msg = str(exc)
             return JSONResponse({"success": False, "error": relayed(msg)},
@@ -118,7 +120,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def downloads_card_remove(card_id: str):
         """A card that stayed after its sync is removed."""
         try:
-            await gw.request(DOWNLOADS_CARD_REMOVE, {"id": card_id})
+            await gw.reply_of(DOWNLOADS_CARD_REMOVE, {"id": card_id})
         except BusRequestError as exc:
             msg = str(exc)
             return JSONResponse({"success": False, "error": relayed(msg)},
@@ -133,7 +135,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """Точечная отмена загрузки: убить процесс + удалить файл +
         снять задачу (находка 45)."""
         try:
-            await gw.request(DOWNLOADS_CANCEL, {"task_id": task_id})
+            await gw.reply_of(DOWNLOADS_CANCEL, {"task_id": task_id})
         except BusRequestError as exc:
             msg = str(exc)
             code = 404 if "LookupError" in msg else 409 if msg.startswith("NotAllowed") else 500

@@ -58,7 +58,7 @@ from calc.unpack.read import files_to_read, shape_of, subtitle_tracks, with_even
 from calc.unpack.reply import (PROFILE_COLUMNS, editor_reply, profile_name, profiles_of, results_of, stored_inputs,
                                table_reply, torrent_urls)
 from core import compute
-from core.contracts import RulesApplyReply
+from core.contracts import PageChanged, ReleaseReadProgress, RulesApplyReply, RulesProfileChanged
 from core.contracts.torrent import EditorTab, ReleaseState, ReleaseView
 from core.db import Database
 from core.envelope import Envelope
@@ -106,7 +106,7 @@ class UnpackModule(BaseModule):
             self.log.exception("the pages no source lists were not forgotten")
         # The rows of the pages can be asked now: a read of one that began before (a start) is made again from them.
         for url in await self.repo.pages():
-            self.publish_event(UNPACK_TABLE_CHANGED, {"url": url})
+            self.publish_event(UNPACK_TABLE_CHANGED, PageChanged(url=url).model_dump())
         self.spawn(self._read_unfinished(), name="unpack:read")
 
     async def _read_unfinished(self) -> None:
@@ -188,15 +188,15 @@ class UnpackModule(BaseModule):
         stored = await self.repo.profiles(url) or {}
         made = {}
         for tab, column in PROFILE_COLUMNS.items():
-            made[tab] = stored.get(column) or (await self.request(RULES_PROFILES_CREATE, {
-                "name": profile_name(url, tab), "kind": "torrent"}))["id"]
+            made[tab] = stored.get(column) or (await self.reply_of(RULES_PROFILES_CREATE, {
+                "name": profile_name(url, tab), "kind": "torrent"})).id
         if any(stored.get(column) != made[tab] for tab, column in PROFILE_COLUMNS.items()):
             await self.repo.save_profiles(url, made)
         return {"url": url, "profiles": made}
 
     def _changed(self, url: str) -> None:
-        self.publish_event(UNPACK_TABLE_CHANGED, {"url": url})
-        self.publish_event(UNPACK_EDITOR_CHANGED, {"url": url})
+        self.publish_event(UNPACK_TABLE_CHANGED, PageChanged(url=url).model_dump())
+        self.publish_event(UNPACK_EDITOR_CHANGED, PageChanged(url=url).model_dump())
 
     # --- what the user places -------------------------------------------------------------------------------------
 
@@ -283,10 +283,11 @@ class UnpackModule(BaseModule):
 
     def _progress(self, key: tuple[str, str], done: int, total: int) -> None:
         self._reading[key] = (done, total)
-        self.publish_event(UNPACK_READ_PROGRESS, {"url": key[0], "release": key[1], "done": done, "total": total})
+        self.publish_event(UNPACK_READ_PROGRESS, ReleaseReadProgress(
+            url=key[0], release=key[1], done=done, total=total).model_dump())
 
     async def on_profile_changed(self, env: Envelope) -> None:
-        profile_id = env.payload.get("profile_id")
+        profile_id = RulesProfileChanged.model_validate(env.payload).profile_id
         for url in await self._pages():
             if profile_id in profiles_of(await self.repo.profiles(url)).values():
                 self._changed(url)

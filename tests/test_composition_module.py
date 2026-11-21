@@ -17,7 +17,7 @@ from composition_fakes import (PAGE, FakeCatalog, FakeRules, FakeSources, FakeVo
 from core.bus import Bus
 from core.module import BaseModule, BusRequestError
 from core.runner import Runner
-from core.contracts import (TableGetRequest, CompositionPreviewReply, CompositionReply, Level, QueuesReply, ReleaseTable, RowState, RowVoice,
+from core.contracts import (TableGetRequest, CompositionPreviewReply, CompositionReply, Done, Level, QueuesReply, ReleaseTable, RowState, RowVoice,
                             SettingsReset, SettingsSet, SettingsSetMany,
                             SourceStatus, TableRow, TableState, group_target, variant_target)
 from core.db import Database
@@ -226,11 +226,11 @@ async def test_resetting_an_episode_back_to_its_season_touches_that_episode_alon
     await s.set(series_id, "reference.order", choice(source_id), season=1)
     await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1, episode=3)
     s.taken(s.changed)
-    assert await s.reset(series_id, season=1, episode=3) == {"ok": True}
+    assert await s.reset(series_id, season=1, episode=3) == Done()
     assert [event["episodes"] for event in s.taken(s.changed)] == [season_one(3)]
     follows = levers_by_episode(await s.get(series_id))[1, 3]
     assert [(x.value, x.level) for x in follows.values()] == [(choice(source_id), Level.SEASON)]
-    assert await s.reset(series_id, season=1, episode=3) == {"ok": True} and s.taken(s.changed) == []
+    assert await s.reset(series_id, season=1, episode=3) == Done() and s.taken(s.changed) == []
 
 
 @pytest.mark.asyncio

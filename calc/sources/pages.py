@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Callable, Iterable, Mapping, Sequence
 
-from core.contracts import ReleaseTable, TableGetReply, TableReady, TableRow, TableState
+from core.contracts import PlayerReading, ReleaseTable, RowCause, TableGetReply, TableReady, TableRow, TableState
 from core.contracts.release_table import site_of
 from core.contracts.torrent import order_name
 
@@ -144,7 +144,7 @@ def kept_rows(rows: Sequence[TableRow], stored: Sequence[TableRow]) -> list[Tabl
 
 def read_summary(table: ReleaseTable) -> dict:
     """What a read gave, player by player: its rows by state, the frames of the rows that play, and every cause a row was left without a
-    video with, counted. The debugging of a source begins here, not at the rows one by one."""
+    video with, counted. The debugging of a source begins here, not at the rows one by one. The fields of `TableTrace` that tell it."""
     players: dict[str, dict] = {}
     causes: dict[tuple[str, str, str], int] = {}
     for row in table.rows:
@@ -157,8 +157,8 @@ def read_summary(table: ReleaseTable) -> dict:
         if row.state.value != "playable":
             key = (row.player, row.state.value, row.reason or "")
             causes[key] = causes.get(key, 0) + 1
-    return {"rows": len(table.rows), "players": list(players.values()),
-            "causes": [{"player": player, "state": state, "reason": why, "rows": count}
-                       for (player, state, why), count in sorted(causes.items(), key=lambda item: -item[1])],
-            "unread": [part.model_dump(mode="json") for part in table.unread]}
+    return {"rows": len(table.rows), "players": tuple(PlayerReading(**held) for held in players.values()),
+            "causes": tuple(RowCause(player=player, state=state, reason=why, rows=count)
+                            for (player, state, why), count in sorted(causes.items(), key=lambda item: -item[1])),
+            "unread": tuple(table.unread)}
 

@@ -2,12 +2,12 @@
 cannot be read, the terms of the sites, the mirrors of the trackers, the file of a release, the stream and the download of a link."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from .frozen import Frozen
-from .release_table import TableReady
+from .release_table import TableReady, UnreadPart
 
 
 # --- the pages ---------------------------------------------------------------------------------------------------------------------
@@ -46,6 +46,44 @@ class PagesForgotten(Frozen):
     """The event `sources.pages.forgotten`: the tables of these pages are gone, no source lists them."""
 
     urls: tuple[str, ...]
+
+
+class PlayerReading(Frozen):
+    """What a read gave of one player: its rows, by state and by height (the frame of a row that plays)."""
+
+    player: str
+    label: str
+    rows: int
+    states: dict[str, int]
+    heights: dict[str, int]
+
+
+class RowCause(Frozen):
+    """A cause a row was left without a video with, counted: the player, the state the row stands in, the code of the reason."""
+
+    player: str
+    state: str
+    reason: str
+    rows: int
+
+
+class TableTrace(Frozen):
+    """The event `sources.table.trace`, for the dump of a run (modules/runlog): what a read of a page does. `begin` tells the
+    page was taken for a read (`fresh`: the read ignores what is held); `end` tells how the read ended (`ok`, the `reason` of
+    a failure, the `seconds` it took) and, for a read that gave a table, what it gave: the `rows`, the `players`, the `causes`
+    of the rows without a video and the `unread` parts. The fields a kind does not tell are not set."""
+
+    url: str
+    site: str
+    kind: Literal["begin", "end"]
+    fresh: bool | None = None
+    ok: bool | None = None
+    reason: str | None = None
+    seconds: float | None = None
+    rows: int | None = None
+    players: tuple[PlayerReading, ...] | None = None
+    causes: tuple[RowCause, ...] | None = None
+    unread: tuple[UnreadPart, ...] | None = None
 
 
 class TableCancel(BaseModel):

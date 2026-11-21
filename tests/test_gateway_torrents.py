@@ -5,12 +5,13 @@ from core.reasons import reason
 from gateway_fakes import serving
 
 URL = "https://kinozal.tv/details.php?id=7"
+RELEASE = {"url": URL, "release": "page", "state": "ready"}
 
 
 async def test_every_point_asks_its_owner_with_the_body_as_it_came(tmp_path):
     answers = {"sources.releases.get": {"url": URL, "site": "kinozal", "releases": []},
-               "torrents.releases.get": {"releases": []}, "torrents.release.download": {"release": "page"},
-               "torrents.release.check": {"releases": ["page"]}, "torrents.release.watch": {"watched": False},
+               "torrents.releases.get": {"releases": []}, "torrents.release.download": RELEASE,
+               "torrents.release.check": {"releases": ["page"]}, "torrents.release.watch": RELEASE,
                "unpack.editor.open": {"url": URL, "profiles": {}}, "unpack.editor.get": {"url": URL, "view": {}},
                "unpack.assign": None, "unpack.unassign": None,
                "unpack.folder.set": None, "unpack.folder.delete": None}

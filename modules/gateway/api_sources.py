@@ -9,7 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from core.module import BusRequestError
-from core.topics import (CATALOG_SOURCES_LIST, SOURCES_SETTINGS_GET, SOURCES_SITE_RESOLVE, SOURCES_TABLE_CANCEL,
+from core.topics import (CATALOG_SOURCES_ADD, CATALOG_SOURCES_LIST, CATALOG_SOURCES_REMOVE, CATALOG_SOURCES_UPDATE,
+                         COMPOSITION_PREVIEW, SOURCES_SETTINGS_GET, SOURCES_SITE_RESOLVE, SOURCES_TABLE_CANCEL,
                          SOURCES_TABLE_READ, SOURCES_TABLES_FRESH, SOURCES_TITLES_SEARCH)
 from core.contracts import (TitleSearchReply, TitleSearchRequest, CompositionPreviewReply, CompositionPreviewRequest,
                             SeriesSource, SourcesSettingsView, SiteResolveReply, SiteResolveRequest)
@@ -39,29 +40,30 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def add_source(series_id: int, body: SourceAdd):
         try:
             async with admitted(gw, series_id):
-                return await gw.request("catalog.sources.add", {
+                created = await gw.reply_of(CATALOG_SOURCES_ADD, {
                     "series_id": series_id, "source": body.model_dump(mode="json", exclude_unset=True)})
         except BusRequestError as exc:
             return refusal(exc)
+        return {"id": created.id}
 
     @r.put("/api/series/{series_id}/sources/{source_id}", response_model=ChangedSource, responses=_ERR)
     async def change_source(series_id: int, source_id: int, body: SourceChange):
         # The catalog refuses a source of another series than the one the path names.
         try:
             async with admitted(gw, series_id):
-                reply = await gw.request("catalog.sources.update", {
+                reply = await gw.reply_of(CATALOG_SOURCES_UPDATE, {
                     "series_id": series_id, "source_id": source_id,
                     "fields": body.model_dump(mode="json", exclude_unset=True)})
         except BusRequestError as exc:
             return refusal(exc)
-        return {"success": True, "applied": reply["applied"]}
+        return {"success": True, "applied": reply.applied}
 
     @r.delete("/api/series/{series_id}/sources/{source_id}", response_model=OkResponse,
               response_model_exclude_none=True, responses=_ERR)
     async def remove_source(series_id: int, source_id: int):
         try:
             async with admitted(gw, series_id):
-                await gw.request("catalog.sources.remove", {"series_id": series_id, "source_id": source_id})
+                await gw.reply_of(CATALOG_SOURCES_REMOVE, {"series_id": series_id, "source_id": source_id})
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -70,7 +72,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     async def _preview(request: CompositionPreviewRequest):
         try:
-            return await as_made(await gw.request("composition.preview", request.model_dump(mode="json")))
+            return await as_made(await gw.reply_of(COMPOSITION_PREVIEW, request.model_dump(mode="json")))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 

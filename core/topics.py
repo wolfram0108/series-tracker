@@ -74,6 +74,9 @@ from .contracts import (
     JobRef, JobRemoved, JobSubmit, LimitsSaved, LimitsSet, OpenRuns, OutputSwitched, PlotReply, PlotRef, QueueCleared, RunCancelled,
     ScanStarted, ScanStatus, ScheduleSaved, ScheduleSet, SeriesRun, SeriesStop, SyncResult, EditAdmitted, EditBegin, EditEnd,
     SeriesRef, VideoProgress,
+    Applied, Created, Done, DownloadedCounts, FailuresForgotten, FilesHeld, PackJournals, PackPicture, PackQueue, PackRemoved,
+    PageChanged, PlanDropped, PlanRecorded, Recounted, ReleaseReadProgress, SeasonsHeld, SeriesDownloaded, SeriesRecount,
+    SseClients, SyncAccepted, SyncStopped, SyncTrace, TableTrace,
 )
 from .contracts.provider import ProviderState
 from .contracts.torrent import (PageReleases, ReleaseRef, ReleasesChecked, ReleasesReply, ReleaseView, ReleaseWatch, StagingFolder,
@@ -145,17 +148,17 @@ AUTH_PASSWORD_SET = Topic("auth.password.set", COMMAND, "auth", reply=PasswordSa
 # --- catalog -----------------------------------------------------------------------------------------------------
 # Answered as the models themselves (immutable): a module of the process reads them as they are, the gateway writes them for the window.
 CATALOG_SERIES_CREATE = Topic("catalog.series.create", COMMAND, "catalog", reply=SeriesCard, fuse=STANDARD_S)
-CATALOG_SERIES_DELETE = Topic("catalog.series.delete", COMMAND, "catalog", fuse=STANDARD_S)
+CATALOG_SERIES_DELETE = Topic("catalog.series.delete", COMMAND, "catalog", reply=Done, fuse=STANDARD_S)
 CATALOG_SERIES_GET = Topic("catalog.series.get", QUERY, "catalog", reply=SeriesCard, fuse=STANDARD_S)
 CATALOG_SERIES_LIST = Topic("catalog.series.list", QUERY, "catalog", reply=SeriesListReply, fuse=STANDARD_S)
-CATALOG_SERIES_SET_SAVE_PATH = Topic("catalog.series.set_save_path", COMMAND, "catalog", fuse=STANDARD_S)
+CATALOG_SERIES_SET_SAVE_PATH = Topic("catalog.series.set_save_path", COMMAND, "catalog", reply=Done, fuse=STANDARD_S)
 CATALOG_SERIES_TOUCH_SCAN_TIME = Topic("catalog.series.touch_scan_time", COMMAND, "catalog", fuse=STANDARD_S)
-CATALOG_SERIES_UPDATE = Topic("catalog.series.update", COMMAND, "catalog", fuse=STANDARD_S)
-CATALOG_SOURCES_ADD = Topic("catalog.sources.add", COMMAND, "catalog", fuse=QUICK_S)
+CATALOG_SERIES_UPDATE = Topic("catalog.series.update", COMMAND, "catalog", reply=Applied, fuse=STANDARD_S)
+CATALOG_SOURCES_ADD = Topic("catalog.sources.add", COMMAND, "catalog", reply=Created, fuse=QUICK_S)
 CATALOG_SOURCES_BY_PROFILE = Topic("catalog.sources.by_profile", QUERY, "catalog", reply=SourcesReply, fuse=STANDARD_S)
 CATALOG_SOURCES_LIST = Topic("catalog.sources.list", QUERY, "catalog", reply=SourcesReply, fuse=QUICK_S)
-CATALOG_SOURCES_REMOVE = Topic("catalog.sources.remove", COMMAND, "catalog", fuse=QUICK_S)
-CATALOG_SOURCES_UPDATE = Topic("catalog.sources.update", COMMAND, "catalog", fuse=QUICK_S)
+CATALOG_SOURCES_REMOVE = Topic("catalog.sources.remove", COMMAND, "catalog", reply=Done, fuse=QUICK_S)
+CATALOG_SOURCES_UPDATE = Topic("catalog.sources.update", COMMAND, "catalog", reply=Applied, fuse=QUICK_S)
 CATALOG_VIEWING_START = Topic("catalog.viewing.start", COMMAND, "catalog", fuse=STANDARD_S)
 CATALOG_VIEWING_STOP = Topic("catalog.viewing.stop", COMMAND, "catalog", fuse=STANDARD_S)
 SERIES_ADDED = Topic("series.added", EVENT, "catalog", request=SeriesCard)
@@ -179,18 +182,18 @@ RULES_APPLY = Topic("rules.apply", QUERY, "rules", request=RulesApplyRequest, re
 RULES_FORMAT_FILENAME = Topic("rules.format_filename", QUERY, "rules", fuse=STANDARD_S)
 RULES_FORMAT_TORRENT_FILE = Topic("rules.format_torrent_file", QUERY, "rules", fuse=SERVICE_S)
 RULES_PROFILE_CHANGED = Topic("rules.profile.changed", EVENT, "rules", request=RulesProfileChanged)
-RULES_PROFILES_CREATE = Topic("rules.profiles.create", COMMAND, "rules", fuse=QUICK_S)
+RULES_PROFILES_CREATE = Topic("rules.profiles.create", COMMAND, "rules", reply=Created, fuse=QUICK_S)
 RULES_PROFILES_DELETE = Topic(
-    "rules.profiles.delete", COMMAND, "rules",
+    "rules.profiles.delete", COMMAND, "rules", reply=Done,
     fuse=after(QUICK_S, CATALOG_SOURCES_BY_PROFILE, CATALOG_SOURCES_BY_PROFILE))
 RULES_PROFILES_EXPORT = Topic("rules.profiles.export", QUERY, "rules", fuse=QUICK_S)
 RULES_PROFILES_LIST = Topic("rules.profiles.list", QUERY, "rules", fuse=QUICK_S)
-RULES_PROFILES_UPDATE = Topic("rules.profiles.update", COMMAND, "rules", fuse=QUICK_S)
-RULES_RULES_ADD = Topic("rules.rules.add", COMMAND, "rules", fuse=QUICK_S)
-RULES_RULES_DELETE = Topic("rules.rules.delete", COMMAND, "rules", fuse=QUICK_S)
+RULES_PROFILES_UPDATE = Topic("rules.profiles.update", COMMAND, "rules", reply=Done, fuse=QUICK_S)
+RULES_RULES_ADD = Topic("rules.rules.add", COMMAND, "rules", reply=Created, fuse=QUICK_S)
+RULES_RULES_DELETE = Topic("rules.rules.delete", COMMAND, "rules", reply=Done, fuse=QUICK_S)
 RULES_RULES_LIST = Topic("rules.rules.list", QUERY, "rules", fuse=QUICK_S)
-RULES_RULES_REORDER = Topic("rules.rules.reorder", COMMAND, "rules", fuse=QUICK_S)
-RULES_RULES_UPDATE = Topic("rules.rules.update", COMMAND, "rules", fuse=QUICK_S)
+RULES_RULES_REORDER = Topic("rules.rules.reorder", COMMAND, "rules", reply=Done, fuse=QUICK_S)
+RULES_RULES_UPDATE = Topic("rules.rules.update", COMMAND, "rules", reply=Done, fuse=QUICK_S)
 
 # --- settings ----------------------------------------------------------------------------------------------------
 # The packet tells the value of a secret as an empty one (SettingValue).
@@ -278,9 +281,8 @@ SOURCES_TABLE_READY = Topic("sources.table.ready", EVENT, "sources", request=Tab
 # page stands after that: the same answer as the query, taken in the step that decided.
 SOURCES_TABLE_REFRESH = Topic(
     "sources.table.refresh", COMMAND, "sources", request=TableRefresh, reply=TableGetReply, fuse=SERVICE_S)
-# What the read of a page does, for the dump of a run (kinds `begin` and `end`): {url, site, kind: "begin", fresh} and {url, site, kind:
-# "end", ok, reason, seconds, rows, players, causes, unread}. A dictionary: the dump of the runs and its reader take it so.
-SOURCES_TABLE_TRACE = Topic("sources.table.trace", EVENT, "sources")
+# What the read of a page does, for the dump of a run (kinds `begin` and `end`); the fields a kind does not tell are not in the packet.
+SOURCES_TABLE_TRACE = Topic("sources.table.trace", EVENT, "sources", request=TableTrace)
 SOURCES_TABLES_FRESH = Topic(
     "sources.tables.fresh", QUERY, "sources", request=TablesFresh, reply=TablesFreshReply, fuse=STANDARD_S)
 SOURCES_TERMS_GET = Topic("sources.terms.get", QUERY, "sources", reply=TermsReply, fuse=STANDARD_S)
@@ -348,23 +350,24 @@ COMPOSITION_QUEUES_GET = Topic(
     "composition.queues.get", QUERY, "composition", request=QueuesGet, reply=QueuesReply,
     fuse=after(QUICK_S, VOICES_SETTINGS_GET))
 # A recount asks the rules once for each source of the series: the fuse of the table is for one source.
-COMPOSITION_RECOMPUTE = Topic("composition.recompute", COMMAND, "composition", fuse=RULES_S)
+COMPOSITION_RECOMPUTE = Topic(
+    "composition.recompute", COMMAND, "composition", request=SeriesRecount, reply=Recounted, fuse=RULES_S)
 COMPOSITION_SERIES_READING = Topic("composition.series.reading", EVENT, "composition", request=SeriesReadProgress)
 COMPOSITION_SETTINGS_RESET = Topic(
-    "composition.settings.reset", COMMAND, "composition", request=SettingsReset,
+    "composition.settings.reset", COMMAND, "composition", request=SettingsReset, reply=Done,
     fuse=STANDARD_S)
 # A lever is checked against the series and the groups of the voice-overs before it is written.
 COMPOSITION_SETTINGS_SET = Topic(
-    "composition.settings.set", COMMAND, "composition", request=SettingsSet,
+    "composition.settings.set", COMMAND, "composition", request=SettingsSet, reply=Done,
     fuse=after(QUICK_S, CATALOG_SERIES_GET, VOICES_SETTINGS_GET))
 COMPOSITION_SETTINGS_SET_MANY = Topic(
-    "composition.settings.set_many", COMMAND, "composition", request=SettingsSetMany,
+    "composition.settings.set_many", COMMAND, "composition", request=SettingsSetMany, reply=Done,
     fuse=after(QUICK_S, CATALOG_SERIES_GET, VOICES_SETTINGS_GET))
 COMPOSITION_VOICE_ORDER_SET = Topic(
-    "composition.voice_order.set", COMMAND, "composition", request=VoiceOrderSet,
+    "composition.voice_order.set", COMMAND, "composition", request=VoiceOrderSet, reply=Done,
     fuse=STANDARD_S)
 COMPOSITION_VOICE_TITLE_SET = Topic(
-    "composition.voice_title.set", COMMAND, "composition", request=VoiceTitleSet,
+    "composition.voice_title.set", COMMAND, "composition", request=VoiceTitleSet, reply=Done,
     fuse=STANDARD_S)
 
 # --- downloads ---------------------------------------------------------------------------------------------------
@@ -385,7 +388,7 @@ DOWNLOADS_WITHDRAW = Topic(
 
 # --- gateway -----------------------------------------------------------------------------------------------------
 # The count of the connected windows (protocol: gateway publishes, others read).
-GATEWAY_SSE_CLIENTS = Topic("gateway.sse.clients", EVENT, "gateway")
+GATEWAY_SSE_CLIENTS = Topic("gateway.sse.clients", EVENT, "gateway", request=SseClients)
 
 # --- library -----------------------------------------------------------------------------------------------------
 LIBRARY_DIRECTORIES_LIST = Topic(
@@ -417,27 +420,28 @@ METADATA_SEASONS_RECOMPUTE = Topic(
 # --- planner -----------------------------------------------------------------------------------------------------
 # A deletion and a forgetting are written once the plan of the series is counted again.
 PLANNER_DELETE = Topic(
-    "planner.delete", COMMAND, "planner", request=PlanDelete,
+    "planner.delete", COMMAND, "planner", request=PlanDelete, reply=PlanRecorded,
     fuse=after(QUICK_S, CATALOG_SERIES_GET, VOICES_SETTINGS_GET))
 PLANNER_DELETE_CANCEL = Topic(
-    "planner.delete.cancel", COMMAND, "planner", request=PlanDelete,
+    "planner.delete.cancel", COMMAND, "planner", request=PlanDelete, reply=PlanDropped,
     fuse=after(QUICK_S, CATALOG_SERIES_GET, VOICES_SETTINGS_GET))
-PLANNER_DOWNLOADED_COUNTS = Topic("planner.downloaded_counts", QUERY, "planner", fuse=QUICK_S)
+PLANNER_DOWNLOADED_COUNTS = Topic("planner.downloaded_counts", QUERY, "planner", reply=DownloadedCounts, fuse=QUICK_S)
 PLANNER_FAILURES_FORGET = Topic(
-    "planner.failures.forget", COMMAND, "planner", request=PlanForget,
+    "planner.failures.forget", COMMAND, "planner", request=PlanForget, reply=FailuresForgotten,
     fuse=after(QUICK_S, CATALOG_SERIES_GET, VOICES_SETTINGS_GET, CATALOG_SERIES_GET, VOICES_SETTINGS_GET))
 # The files of a series also look for a journal in its folder.
-PLANNER_FILES_GET = Topic("planner.files.get", QUERY, "planner", fuse=after(QUICK_S + STANDARD_S, CATALOG_SERIES_GET))
-PLANNER_JOURNAL_CHANGED = Topic("planner.journal.changed", EVENT, "planner")
-PLANNER_PACK_CHANGED = Topic("planner.pack.changed", EVENT, "planner")
-PLANNER_PACK_GET = Topic("planner.pack.get", QUERY, "planner", fuse=STANDARD_S)
-PLANNER_PACK_REMOVE = Topic("planner.pack.remove", COMMAND, "planner", fuse=STANDARD_S)
+PLANNER_FILES_GET = Topic(
+    "planner.files.get", QUERY, "planner", reply=FilesHeld, fuse=after(QUICK_S + STANDARD_S, CATALOG_SERIES_GET))
+PLANNER_JOURNAL_CHANGED = Topic("planner.journal.changed", EVENT, "planner", request=PackJournals)
+PLANNER_PACK_CHANGED = Topic("planner.pack.changed", EVENT, "planner", request=PackQueue)
+PLANNER_PACK_GET = Topic("planner.pack.get", QUERY, "planner", reply=PackPicture, fuse=STANDARD_S)
+PLANNER_PACK_REMOVE = Topic("planner.pack.remove", COMMAND, "planner", reply=PackRemoved, fuse=STANDARD_S)
 # As planner.series.get. The references are counted from the layout as the view is: the layout, the settings of the
 # voice-overs, the names. The answer is a tuple of `Reference` (a row of models has no model of its own).
 PLANNER_REFERENCES_GET = Topic(
     "planner.references.get", QUERY, "planner",
     fuse=after(STANDARD_S, CATALOG_SERIES_GET, COMPOSITION_GET, VOICES_SETTINGS_GET))
-PLANNER_SEASONS = Topic("planner.seasons", QUERY, "planner", fuse=QUICK_S)
+PLANNER_SEASONS = Topic("planner.seasons", QUERY, "planner", reply=SeasonsHeld, fuse=QUICK_S)
 PLANNER_SERIES_CHANGED = Topic("planner.series.changed", EVENT, "planner", request=PlannerView)
 # A projection counted on demand (and published) when it is not there yet: a query. The view of the plan reads the table
 # of the series. Answered as the model itself (immutable): the gateway writes it for the window.
@@ -445,13 +449,14 @@ PLANNER_SERIES_GET = Topic(
     "planner.series.get", QUERY, "planner", reply=PlannerView,
     fuse=after(STANDARD_S, CATALOG_SERIES_GET, COMPOSITION_GET, VOICES_SETTINGS_GET))
 # The sync of the plan of a series is written down and started: its work is told by work.series.state.
-PLANNER_SYNC = Topic("planner.sync", COMMAND, "planner", fuse=QUICK_S)
-PLANNER_SYNC_CANCEL = Topic("planner.sync.cancel", COMMAND, "planner", fuse=STANDARD_S)
-PLANNER_SYNC_TRACE = Topic("planner.sync.trace", EVENT, "planner")
+PLANNER_SYNC = Topic("planner.sync", COMMAND, "planner", reply=SyncAccepted, fuse=QUICK_S)
+PLANNER_SYNC_CANCEL = Topic("planner.sync.cancel", COMMAND, "planner", reply=SyncStopped, fuse=STANDARD_S)
+# What the sync counted and did, step by step, for the dump of a run (modules/runlog).
+PLANNER_SYNC_TRACE = Topic("planner.sync.trace", EVENT, "planner", request=SyncTrace)
 # Takes the next number of the state (the order of the states): a read.
 PLANNER_WORK_GET = Topic("planner.work.get", QUERY, "planner", reply=WorkState, fuse=QUICK_S)
 # Published by planner and by the torrent pipeline; the meaning is the plan's.
-SERIES_DOWNLOADED_CHANGED = Topic("series.downloaded.changed", EVENT, "planner")
+SERIES_DOWNLOADED_CHANGED = Topic("series.downloaded.changed", EVENT, "planner", request=SeriesDownloaded)
 # The owner of an object tells that its work is not needed (WORK_WITHDRAWN of core.contracts.work).
 WORK_WITHDRAWN = Topic("work.withdrawn", EVENT, "planner", request=WorkWithdrawn)
 
@@ -488,12 +493,16 @@ SCAN_STATUS_GET = Topic("scan.status.get", QUERY, "scan", reply=ScanStatus, fuse
 WORK_SERIES_STATE = Topic("work.series.state", EVENT, "scan", request=WorkState)
 
 # --- torrents ----------------------------------------------------------------------------------------------------
-TORRENTS_ADD = Topic("torrents.add", COMMAND, "torrents", fuse=HEAVY_S)
+# The topics of the old torrent pipeline (the registry `torrents.db.*`, its queue, the preview of the add window) take no models of
+# their own: they leave with the pipeline (stage 15 of the mission voice-alignment, step 11); the counts of the downloaded are the one
+# answer the window reads next to the planner's, so they have the model of the planner's.
+TORRENTS_ADD =Topic("torrents.add", COMMAND, "torrents", fuse=HEAVY_S)
 TORRENTS_COMPOSITION = Topic("torrents.composition", QUERY, "torrents", fuse=900.0)
 TORRENTS_DB_ACTIVE = Topic("torrents.db.active", QUERY, "torrents", fuse=SERVICE_S)
 TORRENTS_DB_ADD = Topic("torrents.db.add", COMMAND, "torrents", fuse=QUICK_S)
 TORRENTS_DB_DEACTIVATE_ALL = Topic("torrents.db.deactivate_all", COMMAND, "torrents", fuse=HEAVY_S)
-TORRENTS_DB_DOWNLOADED_COUNTS = Topic("torrents.db.downloaded_counts", QUERY, "torrents", fuse=STANDARD_S)
+TORRENTS_DB_DOWNLOADED_COUNTS = Topic(
+    "torrents.db.downloaded_counts", QUERY, "torrents", reply=DownloadedCounts, fuse=STANDARD_S)
 TORRENTS_DB_FILES_FOR_SERIES = Topic("torrents.db.files.for_series", QUERY, "torrents", fuse=QUICK_S)
 TORRENTS_DB_FILES_LIST = Topic("torrents.db.files.list", QUERY, "torrents", fuse=STANDARD_S)
 TORRENTS_DB_FILES_UPSERT = Topic("torrents.db.files.upsert", COMMAND, "torrents", fuse=STANDARD_S)
@@ -554,7 +563,7 @@ TRACKERAUTH_SECRET_GET = Topic(
 # --- unpack ------------------------------------------------------------------------------------------------------
 UNPACK_ASSIGN = Topic("unpack.assign", COMMAND, "unpack", fuse=STANDARD_S)
 UNPACK_AUTO = Topic("unpack.auto", COMMAND, "unpack", fuse=STANDARD_S)
-UNPACK_EDITOR_CHANGED = Topic("unpack.editor.changed", EVENT, "unpack")
+UNPACK_EDITOR_CHANGED = Topic("unpack.editor.changed", EVENT, "unpack", request=PageChanged)
 # The editor of a page: its releases, then the profile of each of the five tabs applied, one after another. It changes nothing;
 # the profiles of the tabs are made by `unpack.editor.open`.
 UNPACK_EDITOR_GET = Topic(
@@ -566,9 +575,9 @@ UNPACK_EDITOR_OPEN = Topic(
     fuse=after(QUICK_S, SOURCES_SITE_RESOLVE, *each(5, RULES_PROFILES_CREATE)))
 UNPACK_FOLDER_DELETE = Topic("unpack.folder.delete", COMMAND, "unpack", fuse=STANDARD_S)
 UNPACK_FOLDER_SET = Topic("unpack.folder.set", COMMAND, "unpack", fuse=STANDARD_S)
-UNPACK_READ_PROGRESS = Topic("unpack.read.progress", EVENT, "unpack")
+UNPACK_READ_PROGRESS = Topic("unpack.read.progress", EVENT, "unpack", request=ReleaseReadProgress)
 UNPACK_REMOVE = Topic("unpack.remove", COMMAND, "unpack", fuse=STANDARD_S)
-UNPACK_TABLE_CHANGED = Topic("unpack.table.changed", EVENT, "unpack")
+UNPACK_TABLE_CHANGED = Topic("unpack.table.changed", EVENT, "unpack", request=PageChanged)
 # The layout of a tracker's page: its releases, then the profile of each of the five tabs applied, one after another.
 UNPACK_TABLE_GET = Topic(
     "unpack.table.get", QUERY, "unpack",

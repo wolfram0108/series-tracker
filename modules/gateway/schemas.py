@@ -73,7 +73,7 @@ class ErrorResponse(ApiModel):
     error: str
 
 
-# --- блок «скан и очереди» (api_system) -------------------------------------
+# --- the «scan and queues» block (api_system) ------------------------------
 
 class ScheduleValue(RequestModel):
     """The times of day of the syncs and of the checks of the torrent releases (calc/schedule.py), «HH:MM»."""
@@ -109,7 +109,7 @@ class ConformJobChange(ApiModel):
     done: bool
 
 
-# --- блок «серии» (api_series) ----------------------------------------------
+# --- the «series» block (api_series) ----------------------------------------
 
 class DynamicObject(ApiModel):
     """Динамический ответ (форма зависит от данных/типа серии): главы,

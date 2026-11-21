@@ -1,70 +1,41 @@
-"""HTTP-точки блока «настройки и справочники» (Р-22).
+"""HTTP points of the «settings and references» block (Р-22).
 
-Формы — старые routes/settings.py, parser.py, tmdb.py, trackers.py,
-filebrowser.py и database/logs из system.py. Не перенесены (Р-22):
-POST /api/database/clear (мёртвая полная очистка БД), тестовые страницы
+The shapes are those of the old routes/settings.py, parser.py, tmdb.py, trackers.py, filebrowser.py and the database/logs of
+system.py. Not carried over (Р-22): POST /api/database/clear (the dead full clearing of the database), the test pages
 hello-world / hello-info / directory-picker-test.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from core.module import BusRequestError
+from calc.gateway.database import is_shown, shown_tables
+from calc.gateway.flags import flag_on, flag_text
+from calc.gateway.logs import LOG_FILES, groups_in_logs, log_entries, log_files, logging_structure
 from core import logging as core_logging
 from core.contracts import (LINE_FIELDS, ConformParams, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView,
                             PlayersListReply, ProviderSaved, ProviderSettingsDraft, ProviderView, VoiceSettingsDraft,
                             VoiceSettingsSaved, VoiceSettingsView)
+from core.module import BusRequestError
 from core.reasons import code_of, reason, relayed
-from core.topics import (CONFORM_PARAMS_SET, CONFORM_SETTINGS_GET, CONFORM_SETTINGS_SET, DOWNLOADS_LIMITS_GET, DOWNLOADS_LIMITS_SET, LIBRARY_DIRECTORIES_LIST, METADATA_DETAILS, METADATA_SEARCH, SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST,
-                         SETTINGS_PATHS_REMOVE, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SETTINGS_VALUES_BY_PREFIX,
-                         SOURCES_PROVIDER_GET, SOURCES_PROVIDER_SET, SOURCES_TERMS_GET, SOURCES_TERMS_SET,
-                         SOURCES_TRACKER_SET_MIRRORS, SOURCES_TRACKERS_LIST, TORRENTS_STAGING_GET, TORRENTS_STAGING_SET,
-                         TRACKERAUTH_CREDENTIALS_GET, TRACKERAUTH_CREDENTIALS_SET, TRACKERAUTH_SECRET_GET)
+from core.topics import (CONFORM_PARAMS_SET, CONFORM_SETTINGS_GET, CONFORM_SETTINGS_SET, DOWNLOADS_LIMITS_GET,
+                         DOWNLOADS_LIMITS_SET, LIBRARY_DIRECTORIES_LIST, METADATA_DETAILS, METADATA_SEARCH, RULES_PROFILES_CREATE,
+                         RULES_PROFILES_DELETE, RULES_PROFILES_LIST, RULES_PROFILES_UPDATE, RULES_RULES_ADD, RULES_RULES_DELETE,
+                         RULES_RULES_LIST, RULES_RULES_REORDER, RULES_RULES_UPDATE, SETTINGS_PATHS_ADD, SETTINGS_PATHS_LIST,
+                         SETTINGS_PATHS_REMOVE, SETTINGS_VALUE_GET, SETTINGS_VALUE_SET, SOURCES_PROVIDER_GET, SOURCES_PROVIDER_SET,
+                         SOURCES_TERMS_GET, SOURCES_TERMS_SET, SOURCES_TRACKER_SET_MIRRORS, SOURCES_TRACKERS_LIST,
+                         TORRENTS_STAGING_GET, TORRENTS_STAGING_SET, TRACKERAUTH_CREDENTIALS_GET, TRACKERAUTH_CREDENTIALS_SET,
+                         TRACKERAUTH_SECRET_GET, VOICES_PLAYERS_GET, VOICES_SETTINGS_GET, VOICES_SETTINGS_SET)
 
 from .routing import refusal, route_per_method
 from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse
 
-# Документация веток ошибок (JSONResponse, response_model не трогает).
+# The documentation of the error branches (JSONResponse, the response_model does not touch them).
 _ERR = {c: {"model": ErrorResponse} for c in (400, 403, 404, 409, 500)}
 _ERR1 = {c: {"model": ErrorOnly} for c in (400, 403, 404, 500)}
-
-# The groups of logging the window lists: a code of each section and the modules in it; the window words both
-# (`logs.section.<code>`, `logs.module.<name>` of its catalog).
-LOGGING_MODULES = {
-    "core": [
-        {"name": "gateway"},
-        {"name": "catalog"},
-        {"name": "settings"},
-        {"name": "auth"},
-        {"name": "runlog"},
-    ],
-    "pipeline": [
-        {"name": "scan"},
-        {"name": "torrents"},
-        {"name": "unpack"},
-        {"name": "downloads"},
-        {"name": "planner"},
-        {"name": "renaming"},
-        {"name": "library"},
-        {"name": "voices"},
-        {"name": "conform"},
-    ],
-    "sources": [
-        {"name": "sources"},
-        {"name": "trackerauth"},
-        {"name": "rules"},
-        {"name": "composition"},
-        {"name": "metadata"},
-    ],
-}
-
-# Таблицы, закрытые от админ-вкладки БД: креды и живые куки трекеров.
-DB_EXCLUDED_TABLES = {"auth", "tracker_sessions"}
 
 AUTH_SERVICES = ("qbittorrent", "kinozal", "vk", "rutracker")
 
@@ -72,15 +43,27 @@ AUTH_SERVICES = ("qbittorrent", "kinozal", "vk", "rutracker")
 _FORBIDDEN_PATH_CODES = frozenset({"path_forbidden", "path_no_access"})
 
 
+def _read_files(names: list[str]) -> list[list[str]]:
+    """The lines of the log files that exist, in the order of the names."""
+    found = []
+    for name in names:
+        path = core_logging.log_file(name)
+        if path is None or not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as f:
+            found.append(f.readlines())
+    return found
+
+
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
     r = APIRouter()
 
-    # --- авторизации ------------------------------------------------------------
+    # --- authorizations ---------------------------------------------------------
 
     @r.get("/api/auth", response_model=DynamicObject)
     async def get_auth():
-        # Секреты НЕ отдаются на фронт (Этап 3, docs/security.md): только
-        # логин/URL и флаг has_password/configured (задан ли секрет).
+        # Secrets are NOT given to the front (stage 3, docs/security.md): only the login/URL and the flag has_password/configured
+        # (whether the secret is set).
         out = {}
         for service in AUTH_SERVICES:
             reply = await gw.reply_of(TRACKERAUTH_CREDENTIALS_GET, {"service": service})
@@ -104,37 +87,36 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/auth", response_model=OkResponse,
             response_model_exclude_none=True)
     async def save_auth(request: Request):
-        # Пустой пароль/токен = «не менять» (фронт не присылает текущий) — Этап 3.
+        # An empty password/token = «do not change» (the front does not send the current one) — stage 3.
         data = await request.json()
         for service in ("qbittorrent", "kinozal", "rutracker"):
             if creds := data.get(service):
-                await gw.request(TRACKERAUTH_CREDENTIALS_SET, {
+                await gw.reply_of(TRACKERAUTH_CREDENTIALS_SET, {
                     "service": service,
                     "username": creds.get("username"),
                     "password": creds.get("password") or None,
                     "url": creds.get("url")})
         if vk := data.get("vk"):
             # as in the original: the VK token goes in the field password
-            await gw.request(TRACKERAUTH_CREDENTIALS_SET, {
+            await gw.reply_of(TRACKERAUTH_CREDENTIALS_SET, {
                 "service": "vk", "username": "vk_token",
                 "password": vk.get("token") or None})
         if (tmdb := data.get("tmdb")) and tmdb.get("token"):
-            await gw.request(SETTINGS_VALUE_SET, {"key": "tmdb_token", "value": tmdb["token"]})
+            await gw.reply_of(SETTINGS_VALUE_SET, {"key": "tmdb_token", "value": tmdb["token"]})
         return {"success": True}
 
-    # --- настройки -------------------------------------------------------------------
+    # --- settings ---------------------------------------------------------------------
 
     async def _setting_flag(key: str, request: Request,
                             response_key: str = "enabled"):
         if request.method == "POST":
             data = await request.json()
             if response_key in data:
-                await gw.request(SETTINGS_VALUE_SET, {
-                    "key": key, "value": str(data[response_key]).lower()})
+                await gw.reply_of(SETTINGS_VALUE_SET, {
+                    "key": key, "value": flag_text(data[response_key])})
             return {"success": True}
         reply = await gw.reply_of(SETTINGS_VALUE_GET, {"key": key})
-        return {response_key: (reply.value or "false") == "true"}
-
+        return {response_key: flag_on(reply.value)}
 
     @route_per_method(r, "/api/settings/conform_clear_finished", methods=["GET", "POST"],
                       response_model=DynamicObject)
@@ -199,17 +181,17 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/voices/settings", response_model=VoiceSettingsView)
     async def voices_settings():
         """What applies now; the screen shows exactly this."""
-        return await gw.request("voices.settings.get", {})
+        return await gw.reply_of(VOICES_SETTINGS_GET, {})
 
     @r.get("/api/voices/players", response_model=PlayersListReply)
     async def voices_players():
         """Every player of the order of sources with where it is among the sources of the series."""
-        return await gw.request("voices.players.get", {})
+        return await gw.reply_of(VOICES_PLAYERS_GET, {})
 
     @r.put("/api/voices/settings", response_model=VoiceSettingsSaved)
     async def save_voices_settings(draft: VoiceSettingsDraft):
         """Written whole or refused with coded reasons (`saved: false`); a refusal writes nothing."""
-        return await gw.request("voices.settings.set", draft.model_dump(mode="json"))
+        return await gw.reply_of(VOICES_SETTINGS_SET, draft.model_dump(mode="json"))
 
     @r.get("/api/conform/settings", response_model=ConformSettingsView)
     async def conform_settings():
@@ -236,13 +218,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The address and the token: written whole and taken at once, or refused with coded reasons (`saved: false`)."""
         return await gw.reply_of(SOURCES_PROVIDER_SET, draft.model_dump(mode="json"))
 
-    async def _refresh_debug_groups():
-        flags = (await gw.reply_of(SETTINGS_VALUES_BY_PREFIX, {"prefix": "debug_enabled_"})).values
-        groups = {key.removeprefix("debug_enabled_")
-                  for key, value in flags.items() if value == "true"}
-        core_logging.set_debug_groups(groups)
-        return flags
-
     @route_per_method(r, "/api/settings/debug_flags", methods=["GET", "POST"],
                       response_model=DynamicObject, responses=_ERR)
     async def debug_flags(request: Request):
@@ -253,20 +228,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 return JSONResponse(
                     {"success": False,
                      "error": reason("module_missing")}, status_code=400)
-            await gw.request(SETTINGS_VALUE_SET, {
+            await gw.reply_of(SETTINGS_VALUE_SET, {
                 "key": f"debug_enabled_{module}",
-                "value": str(data.get("enabled")).lower()})
-            await _refresh_debug_groups()
+                "value": flag_text(data.get("enabled"))})
+            await gw.refresh_debug_groups()
             return {"success": True}
-        flags = await _refresh_debug_groups()
-
-        def enabled(name: str) -> bool:
-            return flags.get(f"debug_enabled_{name}") == "true"
-
-        logging_structure = {
-            group: [{**m, "enabled": enabled(m["name"])} for m in mods]
-            for group, mods in LOGGING_MODULES.items()}
-        return {"logging_modules": logging_structure}
+        return {"logging_modules": logging_structure(await gw.refresh_debug_groups())}
 
     # --- TMDB ----------------------------------------------------------------------
 
@@ -298,7 +265,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 status_code=404)
         return {"success": True, **reply.model_dump()}
 
-    # --- трекеры (владелец — sources) -----------------------------------------------
+    # --- the trackers (the owner is sources) -------------------------------------
 
     @r.get("/api/trackers", response_model=list[DynamicObject])
     async def trackers_list():
@@ -312,11 +279,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         if mirrors is None:
             return JSONResponse({"error": reason("mirrors_missing")},
                                 status_code=400)
-        await gw.request(SOURCES_TRACKER_SET_MIRRORS, {
+        await gw.reply_of(SOURCES_TRACKER_SET_MIRRORS, {
             "tracker_id": tracker_id, "mirrors": mirrors})
         return {"success": True, "message": reason("mirrors_saved")}
 
-    # --- каталоги -------------------------------------------------------------------
+    # --- the directories ------------------------------------------------------------
 
     @r.get("/api/directories", response_model=DynamicObject, responses=_ERR1)
     async def directories(path: str = "/"):
@@ -327,11 +294,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             code = 403 if code_of(str(exc)) in _FORBIDDEN_PATH_CODES else 400
             return JSONResponse({"error": msg}, status_code=code)
 
-    # --- конструктор правил -----------------------------------------------------------
+    # --- the constructor of rules -------------------------------------------------------
 
     @r.get("/api/parser-profiles", response_model=list[DynamicObject])
     async def profiles_list():
-        return await gw.request("rules.profiles.list", {})
+        return await gw.reply_of(RULES_PROFILES_LIST, {})
 
     @r.post("/api/parser-profiles", response_model=OkResponse,
             response_model_exclude_none=True,
@@ -344,11 +311,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 {"success": False, "error": reason("profile_name_missing")},
                 status_code=400)
         try:
-            reply = await gw.request("rules.profiles.create",
-                                     {"name": name})
+            reply = await gw.reply_of(RULES_PROFILES_CREATE, {"name": name})
         except BusRequestError as exc:
             return refusal(exc, 409)
-        return JSONResponse({"success": True, "id": reply["id"]},
+        return JSONResponse({"success": True, "id": reply.id},
                             status_code=201)
 
     @r.put("/api/parser-profiles/{profile_id}", response_model=OkResponse,
@@ -360,7 +326,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 {"success": False, "error": reason("profile_new_name_missing")},
                 status_code=400)
         try:
-            await gw.request("rules.profiles.update", {
+            await gw.reply_of(RULES_PROFILES_UPDATE, {
                 "profile_id": profile_id, "data": {"name": data["name"]}})
         except BusRequestError as exc:
             return refusal(exc, 409)
@@ -370,8 +336,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
               response_model_exclude_none=True, responses=_ERR)
     async def profile_delete(profile_id: int):
         try:
-            await gw.request("rules.profiles.delete",
-                             {"profile_id": profile_id})
+            await gw.reply_of(RULES_PROFILES_DELETE, {"profile_id": profile_id})
         except BusRequestError as exc:
             return refusal(exc, 400)
         return {"success": True}
@@ -385,8 +350,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/parser-profiles/{profile_id}/rules",
            response_model=list[DynamicObject])
     async def rules_list(profile_id: int):
-        return await gw.request("rules.rules.list",
-                                {"profile_id": profile_id})
+        return await gw.reply_of(RULES_RULES_LIST, {"profile_id": profile_id})
 
     @r.post("/api/parser-profiles/{profile_id}/rules",
             response_model=OkResponse, response_model_exclude_none=True,
@@ -394,19 +358,17 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def rule_add(profile_id: int, request: Request):
         data = await request.json()
         try:
-            reply = await gw.request("rules.rules.add", {
-                "profile_id": profile_id, "data": data})
+            reply = await gw.reply_of(RULES_RULES_ADD, {"profile_id": profile_id, "data": data})
         except BusRequestError as exc:
             return refusal(exc, 400)
-        return {"success": True, "id": reply["id"]}
+        return {"success": True, "id": reply.id}
 
     @r.put("/api/parser-rules/{rule_id}", response_model=OkResponse,
            response_model_exclude_none=True, responses=_ERR)
     async def rule_update(rule_id: int, request: Request):
         data = await request.json()
         try:
-            await gw.request("rules.rules.update",
-                             {"rule_id": rule_id, "data": data})
+            await gw.reply_of(RULES_RULES_UPDATE, {"rule_id": rule_id, "data": data})
         except BusRequestError as exc:
             return refusal(exc, 400)
         return {"success": True}
@@ -414,44 +376,25 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.delete("/api/parser-rules/{rule_id}", response_model=OkResponse,
               response_model_exclude_none=True)
     async def rule_delete(rule_id: int):
-        await gw.request("rules.rules.delete", {"rule_id": rule_id})
+        await gw.reply_of(RULES_RULES_DELETE, {"rule_id": rule_id})
         return {"success": True}
 
     @r.post("/api/parser-rules/reorder", response_model=OkResponse,
             response_model_exclude_none=True)
     async def rules_reorder(request: Request):
         ordered_ids = await request.json()
-        await gw.request("rules.rules.reorder",
-                         {"ordered_ids": ordered_ids})
+        await gw.reply_of(RULES_RULES_REORDER, {"ordered_ids": ordered_ids})
         return {"success": True}
 
-    # --- логи -----------------------------------------------------------------------
+    # --- logs -----------------------------------------------------------------------
 
     @r.get("/api/logs", response_model=list[DynamicObject])
     async def logs(group: str | None = None, level: str | None = None,
                    limit: int = 200):
-        files = ([f"{level.lower()}.log"] if level else
-                 ["error.log", "warning.log", "info.log", "debug.log"])
+        def read() -> list[dict]:
+            return log_entries(_read_files(log_files(level)), group, limit)
 
-        def read_logs() -> list[dict]:
-            entries = []
-            for fname in files:
-                path = core_logging.log_file(fname)
-                if path is None or not os.path.exists(path):
-                    continue
-                with open(path, encoding="utf-8") as f:
-                    for line in reversed(f.readlines()):
-                        try:
-                            entry = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        if group and entry.get("group") != group:
-                            continue
-                        entries.append(entry)
-            entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
-            return entries[:limit]
-
-        return await asyncio.to_thread(read_logs)
+        return await asyncio.to_thread(read)
 
     @r.get("/api/logs/groups", response_model=list[str])
     async def log_groups():
@@ -459,24 +402,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         лог-файлов. Фильтр просмотрщика берёт его, а не статичный набор,
         чтобы не отставать от реальных групп (имя группы = имя модуля)."""
         def collect() -> list[str]:
-            groups: set[str] = set()
-            for fname in ("error.log", "warning.log", "info.log", "debug.log"):
-                path = core_logging.log_file(fname)
-                if path is None or not os.path.exists(path):
-                    continue
-                with open(path, encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            g = json.loads(line).get("group")
-                        except json.JSONDecodeError:
-                            continue
-                        if g:
-                            groups.add(g)
-            return sorted(groups)
+            return groups_in_logs(_read_files(list(LOG_FILES)))
 
         return await asyncio.to_thread(collect)
 
-    # --- админ-вкладка БД (сознательный обход Р-7 — отладочный инструмент) -----------
+    # --- the administrator tab of the database (a deliberate bypass of Р-7 — a debugging tool) -----
 
     def _db_tables() -> list[str]:
         import sqlite3
@@ -489,14 +419,13 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/database/tables", response_model=list[str])
     async def database_tables():
-        tables = await asyncio.to_thread(_db_tables)
-        return [t for t in tables if t not in DB_EXCLUDED_TABLES]
+        return shown_tables(await asyncio.to_thread(_db_tables))
 
     @r.get("/api/database/table/{table_name}",
            response_model=list[DynamicObject], responses=_ERR1)
     async def database_table(table_name: str):
         tables = await asyncio.to_thread(_db_tables)
-        if table_name in DB_EXCLUDED_TABLES or table_name not in tables:
+        if not is_shown(table_name, tables):
             return JSONResponse({"error": reason("table_forbidden")},
                                 status_code=403)
 
@@ -520,7 +449,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 {"success": False, "error": reason("table_name_missing")},
                 status_code=400)
         tables = await asyncio.to_thread(_db_tables)
-        if table_name in DB_EXCLUDED_TABLES or table_name not in tables:
+        if not is_shown(table_name, tables):
             return JSONResponse(
                 {"success": False,
                  "error": reason("table_clear_failed", table=table_name)},

@@ -2,7 +2,7 @@
 file, the goal of every episode as the last sync counted it, the attempts that failed and the commands «Удалить» that wait."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -231,3 +231,81 @@ class SyncScope(BaseModel):
 
     def named(self) -> dict:
         return {"season": self.season, **({} if self.episode is None else {"episode": self.episode})}
+
+
+class SyncAccepted(Frozen):
+    """The reply of `planner.sync`: the sync of the series was taken up, or it was not, for the `reason` (a code of
+    core/reasons: one is under way already)."""
+
+    accepted: bool
+    reason: str | None = None
+
+
+class SyncStopped(Frozen):
+    """The reply of `planner.sync.cancel`: whether a sync of the series was stopped (false: none went, or it was past the point
+    where it can be stopped)."""
+
+    cancelled: bool
+
+
+class PlanRecorded(Frozen):
+    """The reply of `planner.delete`: the command «Удалить» waits for the next sync."""
+
+    recorded: bool
+
+
+class PlanDropped(Frozen):
+    """The reply of `planner.delete.cancel`: whether the command that waited was taken back (false: there was none)."""
+
+    dropped: bool
+
+
+class FailuresForgotten(Frozen):
+    """The reply of `planner.failures.forget`: how many failed attempts were forgotten."""
+
+    reset: int
+
+
+class DownloadedCounts(Frozen):
+    """The reply of `planner.downloaded_counts` (and of the registry of the old torrent pipeline): the episodes a series holds,
+    by the number of the series; a series that holds none is not listed."""
+
+    counts: dict[int, int]
+
+
+class SeasonsHeld(Frozen):
+    """The reply of `planner.seasons`: the seasons the files of a series are of, in order."""
+
+    seasons: tuple[int, ...]
+
+
+class FilesHeld(Frozen):
+    """The reply of `planner.files.get`: the files of the asset of a series, relative to its folder, with the journal a stop cut
+    short and what it put aside."""
+
+    names: tuple[str, ...]
+
+
+class SeriesDownloaded(Frozen):
+    """The event `series.downloaded.changed`: the series holds another number of episodes (specials aside); the card of the window
+    shows it at once."""
+
+    series_id: int
+    count: int
+
+
+class SyncTrace(Frozen):
+    """The event `planner.sync.trace`, for the dump of a run (modules/runlog): what the sync of a series counted and did, step by
+    step. `kind` names the step (`plan`, with the tables the plan was made of), `run` is the stamp of the sync's start,
+    `data` is what the step tells, as plain data."""
+
+    series_id: int
+    run: str
+    kind: str
+    download: bool
+    data: dict[str, Any]
+
+    def wire(self) -> dict[str, Any]:
+        """The packet as the bus carries it. `data` is plain already (and megabytes for the tables of a plan), so it goes as it is,
+        not copied by a dump."""
+        return {**self.model_dump(exclude={"data"}), "data": self.data}

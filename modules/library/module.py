@@ -185,7 +185,7 @@ class LibraryModule(BaseModule):
     async def _move_plan_files(self, series_id: int, old_base: str,
                                new_base: str) -> None:
         # The files of a series are the asset of its plan (modules/planner).
-        names = list((await self.request(PLANNER_FILES_GET, {"series_id": series_id}))["names"])
+        names = list((await self.reply_of(PLANNER_FILES_GET, {"series_id": series_id})).names)
         for old_abs, new_abs in moves_of(old_base, new_base, names):
             await storage.call(self._move_one, old_abs, new_abs, timeout=storage.MOVE_TIMEOUT_S, owns=(old_abs, new_abs))
 

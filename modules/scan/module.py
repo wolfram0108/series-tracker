@@ -86,8 +86,8 @@ from calc.scan.sync import open_runs, resume_step
 from calc.schedule import SCHEDULE_KEY
 from core.contracts import (BusyContribution, EditAdmitted, EditBegin, EditEnd, OpenRuns, OutputSwitch, OutputSwitched, RunCancelled,
                             RunChanged, RunSnapshot, ScanStarted, ScanStatus, ScheduleSaved, ScheduleSet, SeriesCard, SeriesDeleted,
-                            SeriesPurged, SeriesRun, SeriesStop, SettingValue, StatusContribution, SyncResult, SyncScope, TableFailed,
-                            TableReady, WorkState, availability)
+                            SeriesPurged, SeriesRecount, SeriesRun, SeriesStop, SettingValue, SseClients, StatusContribution,
+                            SyncResult, SyncScope, TableFailed, TableReady, WorkState, availability)
 from core.db import Database
 from core.envelope import Envelope
 from core.module import NO_HANDLER, BaseModule, BusRequestError
@@ -301,7 +301,7 @@ class ScanModule(BaseModule):
     async def on_sse_clients(self, env: Envelope) -> None:
         """A new SSE client: the current state is published, so that the settings tab does not live on the defaults
         until the first change (Р-20)."""
-        if env.payload.get("count", 0) > 0:
+        if SseClients.model_validate(env.payload).count > 0:
             await self._broadcast_status()
 
     # --- signals of the neighbours ---------------------------------------------------------------
@@ -323,7 +323,7 @@ class ScanModule(BaseModule):
     async def _step(self, topic: Topic, payload: dict, *, units: int = 1):
         """A request of a synchronization: any failure of it is the one signal that the step failed."""
         try:
-            return await self.request(topic, payload, units=units)
+            return await self.reply_of(topic, payload, units=units)
         except (BusRequestError, asyncio.TimeoutError) as exc:
             if "LookupError" in str(exc):
                 raise ScanAborted(reason("series_deleted_in_scan", series_id=payload.get("series_id"))) from exc
@@ -387,8 +387,7 @@ class ScanModule(BaseModule):
                 except (BusRequestError, asyncio.TimeoutError) as exc:
                     self.log.warning("сериал %d: чтение %s не остановлено: %s", series_id, source.url, exc)
             try:
-                reply = await self.request(PLANNER_SYNC_CANCEL, {"series_id": series_id})
-                stopped = bool(reply.get("cancelled")) or stopped
+                stopped = (await self.reply_of(PLANNER_SYNC_CANCEL, {"series_id": series_id})).cancelled or stopped
             except BusRequestError as exc:
                 if NO_HANDLER not in str(exc):
                     raise
@@ -510,16 +509,15 @@ class ScanModule(BaseModule):
                 self.log.warning("сериал %d, источник %d: страница %s — %s, причина %s", series_id, each.source_id,
                                  each.url, each.state, each.reason)
         self._alive(series_id)
-        snapshot = self._snapshots.get(series_id)
-        await self._step(COMPOSITION_RECOMPUTE, {"series_id": series_id, **(
-            {"snapshot": snapshot.model_dump(mode="json")} if snapshot is not None else {})}, units=len(series.sources))
+        recount = SeriesRecount(series_id=series_id, snapshot=self._snapshots.get(series_id))
+        await self._step(COMPOSITION_RECOMPUTE, recount.model_dump(mode="json"), units=len(series.sources))
         # The disk follows the plan here and nowhere else: the planner counts the plan of the series from its asset and
         # these tables, does its work and applies it once, at its end (modules/planner). Without download it applies only
         # what needs no work.
         self._alive(series_id)
         accepted = await self._step(PLANNER_SYNC, {"series_id": series_id, "download": download,
                                                    **({} if scope is None else scope.named())})
-        return SyncResult(changed=bool((accepted or {}).get("accepted")), sources=tuple(tables))
+        return SyncResult(changed=accepted.accepted, sources=tuple(tables))
 
     def _state(self, series_id: int) -> str:
         return availability.SERIES_SCANNING if series_id in self._running or series_id in self._runs \

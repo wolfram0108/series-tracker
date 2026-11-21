@@ -105,8 +105,8 @@ from calc.conform.settings import PREFIX, REMOTE_DIR_KEY, URL_KEY, WORK_DIR_KEY,
 from core import storage
 from core.contracts import (AlignmentJob, ConformFolders, ConformParams, ConformQueue, ConformSettingsDraft, ConformSettingsSaved,
                             ConformSettingsView, DaemonState, DaemonUp, JobCancelled, JobFolders, JobFoldersOf, JobFound, JobKeys, JobKey,
-                            JobRef, JobRemoved, JobStatus, JobSubmit, PlotRef, PlotReply, ReverseReply, ReverseSubmit, SubmitOutcome,
-                            SubmitReply)
+                            JobRef, JobRemoved, JobStatus, JobSubmit, PlotRef, PlotReply, ReverseReply, ReverseSubmit, SseClients,
+                            SubmitOutcome, SubmitReply)
 from core.envelope import Envelope
 from core.module import BaseModule, BusRequestError
 from core.reasons import describe, reason
@@ -401,7 +401,7 @@ class ConformModule(BaseModule):
 
     async def on_clients(self, env: Envelope) -> None:
         # A new interface has no history: it gets the whole picture at once.
-        if env.payload.get("count"):
+        if SseClients.model_validate(env.payload).count:
             self._publish()
 
     async def on_start(self) -> None:

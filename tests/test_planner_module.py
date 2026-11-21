@@ -229,7 +229,7 @@ async def sync(world, download: bool = True, **scope) -> dict:
     window is told when the sync starts (a sync without download tells nothing: the view is the plan as the tables give it)."""
     neighbours, planner, _ = world
     told = planner.bus.subscribe("planner.series.changed")
-    assert (await planner.request("planner.sync", {"series_id": SERIES, "download": download, **scope}))["accepted"]
+    assert (await planner.request("planner.sync", {"series_id": SERIES, "download": download, **scope})).accepted
     await settle(planner.bus, planner, neighbours, seconds=120)
     while not told.queue.empty():
         view = (await told.queue.get()).payload
@@ -305,21 +305,21 @@ async def test_the_reset_of_one_episode_forgets_its_failures_and_leaves_the_fail
     assert await failed() == every
     # A voice-over of one episode.
     assert (await planner.request("planner.failures.forget", {
-        "series_id": SERIES, "season": 1, "episode": 1, "voice": "G1"}))["reset"] == 1
+        "series_id": SERIES, "season": 1, "episode": 1, "voice": "G1"})).reset == 1
     assert await failed() == every - {("G1", ((1, 1),))}
     # One episode, whatever its voice-over.
-    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "season": 1, "episode": 2}))["reset"] == 2
+    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "season": 1, "episode": 2})).reset == 2
     assert await failed() == {("G2", ((1, 1),))}
     # A level that holds no failure resets none; the failures of the series are still there.
-    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "season": 2}))["reset"] == 0
-    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "kind": "cut"}))["reset"] == 0
+    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "season": 2})).reset == 0
+    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "kind": "cut"})).reset == 0
     assert await failed() == {("G2", ((1, 1),))}
     # A voice-over of a whole season; with no level, all that is left.
-    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "season": 1, "voice": "G2"}))["reset"] == 1
+    assert (await planner.request("planner.failures.forget", {"series_id": SERIES, "season": 1, "voice": "G2"})).reset == 1
     assert await failed() == set()
     await sync(world)
     assert len(await failed()) == 4, "the failed attempts are made again by the next sync, and they fail again"
-    assert (await planner.request("planner.failures.forget", {"series_id": SERIES}))["reset"] == 4
+    assert (await planner.request("planner.failures.forget", {"series_id": SERIES})).reset == 4
     assert await failed() == set()
 
 

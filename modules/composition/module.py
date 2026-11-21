@@ -32,7 +32,7 @@ Queries:
       from, with the compilation it stands in (`EpisodeSettings.compilation`), and the compilations of every season with
       the episodes each holds and why the others are not in it (`compilations`). A series not counted yet has revision 0
       and nothing else.
-  composition.recompute {series_id} → {rev, changed}: counts the series now, with the tables as they are stored (no
+  composition.recompute SeriesRecount {series_id, snapshot?} → Recounted {rev, changed}: counts the series now, with the tables as they are stored (no
       read of a site), and answers when a count that began no earlier than the request has ended, its record is
       written and its event is out. `changed` tells whether that count published. A count already running is
       not the answer: the request sets the flag and waits for the next one. Refused with ValueError(reason) when a
@@ -126,9 +126,10 @@ from calc.layout.reply import layout_of
 from calc.layout.stored import StoredSource
 from core import compute
 from core.contracts import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
-                            CompositionPreviewRequest, CompositionReply, EpisodeRef, GroupsResolveRequest, QueuesGet,
-                            QueuesReply, ReleaseTable, RulesApplyReply, RulesProfileChanged, RunChanged, RunSnapshot,
-                            SeriesCard, SeriesDeleted, SeriesPurged, SeriesReadProgress, SeriesSource, SeriesUpdated, SettingsReset, SettingsSet,
+                            CompositionPreviewRequest, CompositionReply, Done, EpisodeRef, GroupsResolveRequest, QueuesGet,
+                            QueuesReply, Recounted, ReleaseTable, RulesApplyReply, RulesProfileChanged, RunChanged, RunSnapshot,
+                            SeriesCard, SeriesDeleted, SeriesPurged, SeriesReadProgress, SeriesRecount, SeriesSource, SeriesUpdated,
+                            SettingsReset, SettingsSet,
                             SettingsSetMany, SourceEvent, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableRefresh,
                             TableState, VoiceOrderSet, VoiceSettingsView, VoiceTitleSet, availability)
 from core.db import Database
@@ -277,7 +278,7 @@ class CompositionModule(BaseModule):
         # The queues walk the rows and the levers of the level: counted off the loop.
         return await compute.run(queues.reply_of, stored, voices, request)
 
-    async def on_voice_order_set(self, env: Envelope) -> dict:
+    async def on_voice_order_set(self, env: Envelope) -> Done:
         """The user's order of the voice-overs of a season: the order of the tracks in its containers (ЭТАП_11). It is a
         plan: the containers follow it at the next sync."""
         command = VoiceOrderSet.model_validate(env.payload)
@@ -287,13 +288,13 @@ class CompositionModule(BaseModule):
             stored = await self.repo.stored(command.series_id)
             change = await compute.run(edit.reordered, stored, command)
             if change is None:
-                return {"ok": True}
+                return Done()
             rev = stored.rev + 1
             await self.repo.write(command.series_id, orders=change.orders, rev=rev)
             self._publish_changed(command.series_id, rev, change.touched, summary_only=False, part="levers")
-        return {"ok": True}
+        return Done()
 
-    async def on_voice_title_set(self, env: Envelope) -> dict:
+    async def on_voice_title_set(self, env: Envelope) -> Done:
         """The user's name of the track of a voice-over group in every container of the series. It is a plan: the
         containers take it at the next sync (their tracks are copied into a file that bears the name)."""
         command = VoiceTitleSet.model_validate(env.payload)
@@ -303,11 +304,11 @@ class CompositionModule(BaseModule):
             stored = await self.repo.stored(command.series_id)
             change = await compute.run(edit.renamed, stored, command)
             if change is None:
-                return {"ok": True}
+                return Done()
             rev = stored.rev + 1
             await self.repo.write(command.series_id, titles=change.titles, rev=rev)
             self._publish_changed(command.series_id, rev, change.touched, summary_only=False, part="levers")
-        return {"ok": True}
+        return Done()
 
     async def on_preview(self, env: Envelope) -> CompositionPreviewReply:
         """An address that is no source of a series yet, as the add window and the test of rules show it. It reads
@@ -347,12 +348,13 @@ class CompositionModule(BaseModule):
                 raise ValueError(exc.reason) from exc
         return await compute.run(lines_preview, request, results)
 
-    async def on_recompute(self, env: Envelope) -> dict:
-        series_id = env.payload["series_id"]
+    async def on_recompute(self, env: Envelope) -> Recounted:
+        request = SeriesRecount.model_validate(env.payload)
+        series_id = request.series_id
         if series_id in self._deleted:
             raise LookupError(reason("series_not_found", series_id=series_id))
-        if env.payload.get("snapshot") is not None:
-            self._snapshots[series_id] = RunSnapshot.model_validate(env.payload["snapshot"])
+        if request.snapshot is not None:
+            self._snapshots[series_id] = request.snapshot
         self._schedule(series_id, ordered=True)
         flight = self._flights[series_id]
         answer: asyncio.Future = asyncio.get_running_loop().create_future()
@@ -363,15 +365,15 @@ class CompositionModule(BaseModule):
             raise LookupError(reason("series_not_found", series_id=series_id))
         if outcome.failure is not None:
             raise ValueError(outcome.failure)
-        return {"rev": outcome.rev, "changed": outcome.changed}
+        return Recounted(rev=outcome.rev, changed=outcome.changed)
 
-    async def on_settings_set(self, env: Envelope) -> dict:
+    async def on_settings_set(self, env: Envelope) -> Done:
         return await self._set([SettingsSet.model_validate(env.payload)])
 
-    async def on_settings_set_many(self, env: Envelope) -> dict:
+    async def on_settings_set_many(self, env: Envelope) -> Done:
         return await self._set(SettingsSetMany.model_validate(env.payload).items)
 
-    async def _set(self, items: list[SettingsSet]) -> dict:
+    async def _set(self, items: list[SettingsSet]) -> Done:
         """The one way a lever is set, one item or many: every item is checked before anything is written, then all of
         them are applied in order in one write, so that the count that follows is one."""
         for record in items:
@@ -396,7 +398,7 @@ class CompositionModule(BaseModule):
         availability.require(availability.Action.EDIT,
                              availability.SERIES_SCANNING if series_id in self._frozen else availability.SERIES_IDLE)
 
-    async def on_settings_reset(self, env: Envelope) -> dict:
+    async def on_settings_reset(self, env: Envelope) -> Done:
         scope = SettingsReset.model_validate(env.payload)
         problem = settings.validate_reset(scope)
         if problem is not None:
@@ -404,7 +406,7 @@ class CompositionModule(BaseModule):
         self._require_editable(scope.series_id)
         return await self._edit(scope.series_id, edit.with_reset, scope)
 
-    async def _edit(self, series_id: int, change, argument) -> dict:
+    async def _edit(self, series_id: int, change, argument) -> Done:
         """Applies a command to the records of the series: `change(stored, argument)` is the pure step of `calc.layout.edit`
         that makes the records after it and what it touches."""
         # A command about a series the catalog does not have is refused with the catalog's own answer.
@@ -416,12 +418,12 @@ class CompositionModule(BaseModule):
             # The levers of every episode counted twice is tenths of a second over a big layout: off the loop.
             made = await compute.run(change, stored, argument)
             if not made.changed:
-                return {"ok": True}
+                return Done()
             rev = stored.rev + 1 if made.shown else None
             await self.repo.write(series_id, records=made.records, rev=rev)
             if made.shown:
                 self._publish_changed(series_id, rev, made.touched, summary_only=not made.touched, part="levers")
-        return {"ok": True}
+        return Done()
 
     # --- events -----------------------------------------------------------------------------
 

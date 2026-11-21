@@ -14,7 +14,10 @@ from pydantic import BaseModel, ValidationError
 
 from core.module import BusRequestError
 from core.reasons import reason, relayed
-from core.topics import CATALOG_SERIES_GET, SCAN_OUTPUT_SWITCH
+from core.topics import (CATALOG_SERIES_GET, COMPOSITION_GET, COMPOSITION_QUEUES_GET, COMPOSITION_SETTINGS_RESET,
+                         COMPOSITION_SETTINGS_SET, COMPOSITION_SETTINGS_SET_MANY, COMPOSITION_VOICE_ORDER_SET,
+                         COMPOSITION_VOICE_TITLE_SET, PLANNER_DELETE, PLANNER_DELETE_CANCEL, PLANNER_REFERENCES_GET,
+                         PLANNER_SERIES_GET, SCAN_OUTPUT_SWITCH)
 from core.contracts import (CompositionGetRequest, CompositionReply, LayoutPart, OutputSwitch, PlanDelete, PlannerView,
                             PlanRowRef, QueuesGet, QueuesReply, Reference, SettingsReset, SettingsSet, SettingsSetMany,
                             VoiceOrderSet, VoiceTitleSet)
@@ -60,7 +63,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return JSONResponse({"error": reason("series_not_found")}, status_code=404)
         try:
-            return await as_made(await gw.request("composition.get", query.model_dump(mode="json")))
+            return await as_made(await gw.reply_of(COMPOSITION_GET, query.model_dump(mode="json")))
         except BusRequestError as exc:
             return JSONResponse({"error": relayed(str(exc))}, status_code=500)
 
@@ -69,7 +72,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The reference of every episode of the series and why it is that one (the mark)."""
         try:
             # The reference a video series has is the one its plan takes (modules/planner).
-            return await as_made(await gw.request("planner.references.get", {"series_id": series_id}))
+            return await as_made(await gw.reply_of(PLANNER_REFERENCES_GET, {"series_id": series_id}))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 
@@ -81,7 +84,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         level say of each."""
         query = _contract(QueuesGet, series_id=series_id, season=season, episode=episode, compilation=compilation)
         try:
-            return await as_made(await gw.request("composition.queues.get", query.model_dump(mode="json")))
+            return await as_made(await gw.reply_of(COMPOSITION_QUEUES_GET, query.model_dump(mode="json")))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 
@@ -90,7 +93,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The plan of a video series (modules/planner): the asset with the provenance of every file and whether its row is
         online, the goal of every episode as the last sync counted it, the failures and the commands «Удалить» that wait."""
         try:
-            return await as_made(await gw.request("planner.series.get", {"series_id": series_id}))
+            return await as_made(await gw.reply_of(PLANNER_SERIES_GET, {"series_id": series_id}))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 
@@ -100,7 +103,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         episode; with none the file stays and the command waits."""
         command = _contract(PlanDelete, series_id=series_id, **body.model_dump())
         try:
-            await gw.request("planner.delete", command.model_dump(mode="json"))
+            await gw.reply_of(PLANNER_DELETE, command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -110,7 +113,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The command «Удалить» that waits is taken back."""
         command = _contract(PlanDelete, series_id=series_id, **body.model_dump())
         try:
-            await gw.request("planner.delete.cancel", command.model_dump(mode="json"))
+            await gw.reply_of(PLANNER_DELETE_CANCEL, command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -123,7 +126,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         command = _contract(OutputSwitch, series_id=series_id, **body.model_dump())
         try:
             async with admitted(gw, series_id):
-                await gw.request(SCAN_OUTPUT_SWITCH, command.model_dump(mode="json"))
+                await gw.reply_of(SCAN_OUTPUT_SWITCH, command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -136,7 +139,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         command = _contract(SettingsSet, series_id=series_id, **body.model_dump())
         try:
             async with admitted(gw, series_id):
-                await gw.request("composition.settings.set", command.model_dump(mode="json"))
+                await gw.reply_of(COMPOSITION_SETTINGS_SET, command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -150,7 +153,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                             items=[{**item.model_dump(), "series_id": series_id} for item in body.items])
         try:
             async with admitted(gw, series_id):
-                await gw.request("composition.settings.set_many", command.model_dump(mode="json"))
+                await gw.reply_of(COMPOSITION_SETTINGS_SET_MANY, command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -163,7 +166,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         command = _contract(VoiceOrderSet, series_id=series_id, **body.model_dump())
         try:
             async with admitted(gw, series_id):
-                await gw.request("composition.voice_order.set", command.model_dump(mode="json"))
+                await gw.reply_of(COMPOSITION_VOICE_ORDER_SET, command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -176,7 +179,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         command = _contract(VoiceTitleSet, series_id=series_id, **body.model_dump())
         try:
             async with admitted(gw, series_id):
-                await gw.request("composition.voice_title.set", command.model_dump(mode="json"))
+                await gw.reply_of(COMPOSITION_VOICE_TITLE_SET, command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -188,7 +191,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         command = _contract(SettingsReset, series_id=series_id, **body.model_dump())
         try:
             async with admitted(gw, series_id):
-                await gw.request("composition.settings.reset", command.model_dump(mode="json"))
+                await gw.reply_of(COMPOSITION_SETTINGS_RESET, command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}

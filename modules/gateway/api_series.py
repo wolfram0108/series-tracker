@@ -1,8 +1,7 @@
-"""HTTP-точки блока «серии» (Р-19) — адаптация старого контракта к шине.
+"""HTTP points of the series block (Р-19) — the old contract adapted to the bus.
 
-Формы ответов повторяют старые роуты routes/series.py; вся логика —
-в модулях, здесь только перекладка полей и маршрутизация ошибок шины
-в HTTP-коды (404 — нет сущности, 409 — занято, 400 — отказ валидации).
+The shapes of the answers repeat the old routes of routes/series.py; all the logic is in the modules, here are only the moving of the
+fields and the routing of the errors of the bus to HTTP codes (404 — no such entity, 409 — busy, 400 — a refusal of validation).
 """
 from __future__ import annotations
 
@@ -11,27 +10,21 @@ import json
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from core.contracts import SeriesCard, TmdbMapping
+from calc.gateway.series import downloaded_total, series_object
 from core.module import BusRequestError
 from core.reasons import code_of, reason, relayed
-from core.topics import (CATALOG_SERIES_CREATE, CATALOG_SERIES_GET, CATALOG_SERIES_LIST, LIBRARY_RELOCATION_GET,
-                         LIBRARY_RELOCATION_PLAN, METADATA_MAP_GET, METADATA_MAP_LIST, METADATA_MAP_SET, SCAN_RUN_CANCEL,
-                         SCAN_SERIES_RUN, TORRENTS_DB_DOWNLOADED_COUNTS, TORRENTS_DB_PROGRESS_LIST, TORRENTS_FS_VERIFY, Topic)
-from .routing import admitted
+from core.topics import (CATALOG_SERIES_CREATE, CATALOG_SERIES_DELETE, CATALOG_SERIES_GET, CATALOG_SERIES_LIST,
+                         CATALOG_SERIES_UPDATE, CATALOG_VIEWING_START, CATALOG_VIEWING_STOP, LIBRARY_RELOCATION_GET,
+                         LIBRARY_RELOCATION_PLAN, METADATA_MAP_GET, METADATA_MAP_LIST, METADATA_MAP_SET,
+                         PLANNER_DOWNLOADED_COUNTS, PLANNER_FAILURES_FORGET, SCAN_RUN_CANCEL, SCAN_SERIES_RUN,
+                         TORRENTS_DB_DOWNLOADED_COUNTS, TORRENTS_DB_PROGRESS_LIST, TORRENTS_FS_VERIFY, Topic)
 
+from .routing import admitted
 from .schemas import (CreatedSeries, ErrorResponse, FailuresReset, FailuresResetBody, OkResponse, SyncCancelled, SyncScopeBody,
                       QueueTask, SeriesCreate, SeriesObject, SeriesUpdate)
 
-# Общая документация веток ошибок (отдаются через JSONResponse, на них
-# response_model не распространяется).
+# The common documentation of the error branches (they go out through JSONResponse, so the response_model does not cover them).
 _ERRORS = {code: {"model": ErrorResponse} for code in (400, 404, 409, 500)}
-
-
-def _iso(value):
-    """Наивная UTC-строка БД ('%Y-%m-%d %H:%M:%S.%f') → ISO с 'T'
-    (контракт старого API: datetime.isoformat())."""
-    return value.replace(" ", "T", 1) if isinstance(value, str) else value
-
 
 # Refusals of a state that does not allow the change: the table of what is allowed, or a relocation under way.
 _CONFLICT_CODES = frozenset({"not_allowed", "move_in_progress"})
@@ -57,32 +50,21 @@ def _error_response(exc: BusRequestError, *, with_success: bool = True):
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
     r = APIRouter()
 
-    async def _counts(topic: Topic | str) -> dict:
-        """Счётчики скачанного; модуль может быть не запущен (torrents
-        без qBit) — тогда счётчик пустой, карточки живут дальше."""
+    async def _counts(topic: Topic) -> dict:
+        """The counts of the downloaded; a module may be down (torrents without qBit) — then its count is empty and the cards go on."""
         try:
-            return (await gw.request(topic, {}))["counts"]
+            return (await gw.reply_of(topic, {})).counts
         except BusRequestError:
             return {}
 
-    def _card(series: SeriesCard, mapping: TmdbMapping | None, **added) -> dict:
-        """The series as the window shows it: the card the catalog answered written as data with its date in ISO, the
-        mapping of TMDB (its date in ISO too) and the fields the gateway adds. What a module answered is its own and is
-        not changed."""
-        tmdb = {**mapping.model_dump(), "last_updated": _iso(mapping.last_updated)} if mapping else None
-        return {**series.model_dump(mode="json"), "last_scan_time": _iso(series.last_scan_time), "tmdb_info": tmdb, **added}
-
-    # --- список и карточки ----------------------------------------------------
+    # --- the list and the cards -----------------------------------------------
 
     @r.get("/api/series", response_model=list[SeriesObject])
     async def list_series():
         series = (await gw.reply_of(CATALOG_SERIES_LIST, {})).series
         mappings = {m.series_id: m for m in (await gw.reply_of(METADATA_MAP_LIST, {})).mappings}
-        # Each owner counts its own rows and a series has rows with one of them only, so the sum needs no kind.
-        counts = [await _counts("planner.downloaded_counts"),
-                  await _counts(TORRENTS_DB_DOWNLOADED_COUNTS)]
-        return [_card(s, mappings.get(s.id),
-                      downloaded_episodes_count=sum(each.get(s.id, 0) for each in counts)) for s in series]
+        counts = [await _counts(PLANNER_DOWNLOADED_COUNTS), await _counts(TORRENTS_DB_DOWNLOADED_COUNTS)]
+        return [series_object(s, mappings.get(s.id), downloaded_episodes_count=downloaded_total(counts, s.id)) for s in series]
 
     @r.post("/api/series", response_model=CreatedSeries, responses=_ERRORS)
     async def add_series(body: SeriesCreate):
@@ -93,11 +75,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return _error_response(exc)
         series_id = series.id
         if body.tmdb_data:
-            await gw.request(METADATA_MAP_SET, {
-                "series_id": series_id, "tmdb_data": body.tmdb_data})
+            await gw.reply_of(METADATA_MAP_SET, {"series_id": series_id, "tmdb_data": body.tmdb_data})
         return {"success": True, "series_id": series_id}
 
-    # ВАЖНО: статический путь регистрируется до /{series_id}.
+    # IMPORTANT: the static path is registered before /{series_id}.
     @r.get("/api/series/active_torrents", response_model=list[QueueTask])
     async def active_torrents():
         """Прогресс торрент-загрузок с именами серий (таблица
@@ -118,7 +99,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return _error_response(exc, with_success=False)
         reply = await gw.reply_of(METADATA_MAP_GET, {"series_id": series_id})
         planned = (await gw.reply_of(LIBRARY_RELOCATION_GET, {"series_id": series_id})).new_path
-        return _card(s, reply.mapping, planned_save_path=planned)
+        return series_object(s, reply.mapping, planned_save_path=planned)
 
     @r.post("/api/series/{series_id}", response_model=OkResponse,
             response_model_exclude_none=True, responses=_ERRORS)
@@ -132,14 +113,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         # One save is one change: a sync does not open between its parts.
         try:
             async with admitted(gw, series_id):
-                await gw.request("catalog.series.update", {
-                    "series_id": series_id, "fields": fields})
+                await gw.reply_of(CATALOG_SERIES_UPDATE, {"series_id": series_id, "fields": fields})
                 if tmdb_data := sent.get("tmdb_data"):
-                    await gw.request(METADATA_MAP_SET, {
-                        "series_id": series_id, "tmdb_data": tmdb_data})
+                    await gw.reply_of(METADATA_MAP_SET, {"series_id": series_id, "tmdb_data": tmdb_data})
                 if new_path := sent.get("save_path"):
-                    await gw.request(LIBRARY_RELOCATION_PLAN, {
-                        "series_id": series_id, "new_path": new_path})
+                    await gw.reply_of(LIBRARY_RELOCATION_PLAN, {"series_id": series_id, "new_path": new_path})
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True,
@@ -149,12 +127,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
               response_model_exclude_none=True, responses=_ERRORS)
     async def delete_series(series_id: int):
         try:
-            await gw.request("catalog.series.delete", {"series_id": series_id})
+            await gw.reply_of(CATALOG_SERIES_DELETE, {"series_id": series_id})
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True}
 
-    # --- просмотр и мелкие свойства ---------------------------------------------
+    # --- watching and the small properties ----------------------------------------
 
     @r.post("/api/series/{series_id}/state", response_model=OkResponse,
             response_model_exclude_none=True)
@@ -165,8 +143,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         замена фоновых периодических проверок старой системы)."""
         data = await request.json()
         viewing = "viewing" in data.get("state", [])
-        topic = "catalog.viewing.start" if viewing else "catalog.viewing.stop"
-        gw.send_command(topic, {"series_id": series_id})
+        gw.send_command(CATALOG_VIEWING_START if viewing else CATALOG_VIEWING_STOP, {"series_id": series_id})
         if viewing:
             # The owner of the files of the torrent pipeline checks its own and finds nothing of a foreign series, so
             # the gateway needs no kind to choose.
@@ -185,7 +162,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 status_code=400)
         try:
             async with admitted(gw, series_id):
-                await gw.request("catalog.series.update", {
+                await gw.reply_of(CATALOG_SERIES_UPDATE, {
                     "series_id": series_id,
                     "fields": {"auto_scan_enabled": bool(enabled)}})
         except BusRequestError as exc:
@@ -204,7 +181,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 status_code=400)
         try:
             async with admitted(gw, series_id):
-                await gw.request("catalog.series.update", {
+                await gw.reply_of(CATALOG_SERIES_UPDATE, {
                     "series_id": series_id,
                     "fields": {"ignored_seasons": json.dumps(seasons)}})
         except BusRequestError as exc:
@@ -227,7 +204,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 status_code=400)
         try:
             async with admitted(gw, series_id):
-                await gw.request("catalog.series.update", {
+                await gw.reply_of(CATALOG_SERIES_UPDATE, {
                     "series_id": series_id,
                     "fields": {"ignored_episodes": json.dumps(episodes)}})
         except BusRequestError as exc:
@@ -275,10 +252,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         серии, озвучки, нарезок): попытки остальных остаются, и выбор референса по ним не меняется."""
         try:
             async with admitted(gw, series_id):
-                done = await gw.request("planner.failures.forget", {
+                done = await gw.reply_of(PLANNER_FAILURES_FORGET, {
                     "series_id": series_id, **(body.model_dump(exclude_none=True) if body is not None else {})})
         except BusRequestError as exc:
             return _error_response(exc)
-        return {"success": True, "reset": int((done or {}).get("reset") or 0)}
+        return {"success": True, "reset": done.reset}
 
     return r

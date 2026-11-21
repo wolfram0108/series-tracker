@@ -1,44 +1,59 @@
-"""Gateway — единственная HTTP/SSE-точка входа.
+"""Gateway — the one HTTP/SSE entry point.
 
-Транслирует HTTP-запросы фронта в query/command шины и события шины —
-в SSE. Сам не содержит бизнес-логики (она в модулях); его логика —
-только адаптация протоколов и таблица соответствия топиков SSE-именам.
+It carries the HTTP requests of the interface to queries and commands of the bus, and the events of the bus to SSE. It holds no business
+logic (that is in the modules) and counts nothing of its own beyond the translation of the protocols: what it must count to answer is
+in `calc/gateway`. Its work is the adaptation of protocols and the table of the topics to the names of SSE events.
 
-SSE_MAP: ключ — топик шины, значение — Outgoing (имя SSE-события,
-форма пакета, ключ картины). Поток интерфейса подписан ровно на топики
-таблицы. Контракт — contracts/sse_contract.md (Р-18, Р-69).
+SSE_MAP: the key is the record of the topic (core/topics.py), the value is an Outgoing (the name of the SSE event, the form of the
+packet, the key of a picture). The stream of the interface is subscribed to exactly the topics of the table. The contract is
+contracts/sse_contract.md (Р-18, Р-69).
+
+Queries and commands: each goes by the record of its topic and its answer is read as the model of that record (`reply_of`); the gateway
+makes its own answer of it and does not change what a module answered. Where the owner gives no model (the registry of the old torrent
+pipeline, the profiles of the constructor listed), the answer is passed on as it came.
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import json
-from typing import Any, Callable, Literal, NamedTuple
 import os
 import secrets
 import signal
+from typing import Any, Callable, Literal, NamedTuple
 
-from fastapi import FastAPI, Request  # Request нужен diag-роуту
-from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse, Response,
-                               StreamingResponse)
+from fastapi import FastAPI, Request  # Request is the diagnostic route's
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from calc.gateway.flags import DEBUG_PREFIX, debug_groups
+from calc.gateway.queues import agent_tasks
+from calc.gateway.series import added_packet, updated_packet
+from core import logging as core_logging
+from core.contracts import (CompositionChanged, CompositionFailed, PackJournal, PlannerView, SeriesCard, SeriesDeleted,
+                            SeriesDownloaded, SeriesReadProgress, SeriesStatusChanged, SeriesUpdated, SourceChanged, SourceEvent,
+                            SseClients, TableFailed, TableProgress, TableReady)
 from core.module import BaseModule, BusRequestError
 from core.reasons import reason
-from core.topics import SETTINGS_VALUES_BY_PREFIX
-from core.contracts import (CompositionChanged, CompositionFailed, PackJournal, PlannerView,
-                            SeriesReadProgress, SourceChanged, TableFailed, TableProgress, TableReady)
+from core.topics import (COMPOSITION_CHANGED, COMPOSITION_FAILED, COMPOSITION_SERIES_READING, CONFORM_QUEUE_CHANGED,
+                         CONFORM_SETTINGS_CHANGED, DOWNLOADS_QUEUE_CHANGED, GATEWAY_SSE_CLIENTS, LIBRARY_RELOCATION_FINISHED,
+                         LIBRARY_RELOCATION_STARTED, PLANNER_JOURNAL_CHANGED, PLANNER_PACK_CHANGED, PLANNER_SERIES_CHANGED,
+                         SCAN_STATUS_CHANGED, SERIES_ADDED, SERIES_BUSY_CHANGED, SERIES_DELETED, SERIES_DOWNLOADED_CHANGED,
+                         SERIES_SOURCE_ADDED, SERIES_SOURCE_REMOVED, SERIES_SOURCE_UPDATED, SERIES_STATUS_CHANGED, SERIES_UPDATED,
+                         SETTINGS_VALUES_BY_PREFIX, SOURCES_PROVIDER_CHANGED, SOURCES_SETTINGS_CHANGED, SOURCES_TABLE_FAILED,
+                         SOURCES_TABLE_FRESH, SOURCES_TABLE_PROGRESS, SOURCES_TABLE_READY, SYSTEM_STARTED, TORRENTS_PREVIEW_FAILED,
+                         TORRENTS_PREVIEW_READY, TORRENTS_PROGRESS_CHANGED, TORRENTS_QUEUE_CHANGED, TORRENTS_RELEASE_CHANGED,
+                         TORRENTS_STAGING_CHANGED, UNPACK_EDITOR_CHANGED, UNPACK_READ_PROGRESS, VOICES_SETTINGS_CHANGED, Topic)
+
 from .routing import as_made
 
 
 class AuthGateMiddleware:
-    """ASGI-«замок»: всё, кроме страницы входа и статики фронта, требует
-    валидную сессию (иначе 401). Чистый ASGI (не BaseHTTPMiddleware) —
-    чтобы не сломать потоковый SSE (/api/stream): BaseHTTPMiddleware
-    буферизует StreamingResponse. Ставится ВНУТРИ SessionMiddleware,
-    поэтому scope['session'] уже распарсен."""
+    """The ASGI «lock»: everything but the login page and the static files of the front needs a valid session (else 401). Pure ASGI
+    (not BaseHTTPMiddleware) so that the streaming SSE (/api/stream) is not broken: BaseHTTPMiddleware buffers a StreamingResponse. It is
+    put INSIDE SessionMiddleware, so that scope['session'] is parsed already."""
 
     _PUBLIC_EXACT = {"/", "/legacy", "/v2", "/v2/", "/favicon.svg",
                      "/api/login", "/api/setup", "/api/auth/status"}
@@ -63,10 +78,8 @@ class AuthGateMiddleware:
 
 
 class SecurityHeadersMiddleware:
-    """Защитные HTTP-заголовки на все ответы (Этап 4). Чистый ASGI —
-    дописывает заголовки в http.response.start, не буферизуя тело (SSE
-    остаётся потоковым). HSTS не ставим здесь — он для https и задаётся на
-    nginx (Этап 2)."""
+    """The protective HTTP headers on every answer (stage 4). Pure ASGI — it adds the headers to http.response.start without buffering
+    the body (SSE stays a stream). HSTS is not set here: it is for https and is set on nginx (stage 2)."""
 
     _HEADERS = [
         (b"x-content-type-options", b"nosniff"),
@@ -94,51 +107,59 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
-def _series_delta(p: dict) -> dict:
-    """series_updated — дельта вместо полного объекта серии (Р-18).
+# --- the forms of the packets of the stream ---------------------------------------------------------------------
+# A form reads the payload of the event as the model of its record and tells it the way the interface takes it. A picture of a whole
+# queue (a list of tasks) is told as its owner wrote it: its list is taken out, not read again (the cards were checked when made).
 
-    Object.assign на фронте сливает только присланные поля; is_busy
-    обязан присутствовать в каждом событии (находка 38 — по falsy
-    is_busy фронт снимает спиннер сохранения)."""
-    return {"id": p["series_id"], "statuses": p["statuses"],
-            "is_busy": p["is_busy"]}
+def _series_delta(payload: Any) -> dict:
+    """series_updated — a delta instead of the whole card (Р-18).
 
-
-def _series_downloaded(p: dict) -> dict:
-    """series_updated — дельта только со счётчиком скачанного (Д1): фронт
-    сливает в карточку, число обновляется без перезагрузки."""
-    return {"id": p["series_id"],
-            "downloaded_episodes_count": p["count"]}
+    The front does Object.assign, which merges only the fields sent; `is_busy` must be in every event (finding 38 — on a falsy
+    is_busy the front removes the spinner of saving)."""
+    event = SeriesStatusChanged.model_validate(payload)
+    return {"id": event.series_id, "statuses": event.statuses, "is_busy": event.is_busy}
 
 
-def _bare_tasks(p: dict) -> list:
-    """Старый контракт очередей — голый массив задач."""
-    return p["tasks"]
+def _series_downloaded(payload: Any) -> dict:
+    """series_updated — a delta with the count of the downloaded alone (Д1): the front merges it into the card, the number is renewed
+    without a reload."""
+    event = SeriesDownloaded.model_validate(payload)
+    return {"id": event.series_id, "downloaded_episodes_count": event.count}
 
 
-def _agent_tasks(p: dict) -> list:
-    """Очередь торрент-конвейера: у задач старого контракта поле hash
-    (находка 39 — HTTP и SSE выборки выровнены)."""
-    return [{"hash": t.get("torrent_hash"), **t} for t in p["tasks"]]
+def _bare_tasks(payload: Any) -> list:
+    """The old contract of the queues — a bare list of tasks."""
+    return payload["tasks"]
 
 
-def _series_update_fields(p: dict) -> dict:
-    """series.updated (catalog, Р-19): применённые поля + обязательные
-    statuses/is_busy — дельта для Object.assign фронта."""
-    return {"id": p["series_id"],
-            **{k: v for k, v in p.items() if k != "series_id"}}
+def _agent_tasks(payload: Any) -> list:
+    """The queue of the torrent pipeline: the tasks of the old contract have the field `hash` (finding 39 — HTTP and SSE are the same)."""
+    return agent_tasks(payload["tasks"])
 
 
-def _deleted_id(p: dict) -> dict:
-    return {"id": p["series_id"]}
+def _journals(payload: Any) -> list:
+    return payload["journals"]
 
 
-def _series_added(p: dict) -> dict:
-    """Полный объект серии (контракт series_added); дата — в ISO."""
-    out = dict(p)
-    if isinstance(out.get("last_scan_time"), str):
-        out["last_scan_time"] = out["last_scan_time"].replace(" ", "T", 1)
-    return out
+def _series_updated(payload: Any) -> dict:
+    """series.updated (catalog, Р-19): the fields applied and the obligatory statuses/is_busy — the delta for the Object.assign of the front."""
+    return updated_packet(SeriesUpdated.model_validate(payload))
+
+
+def _series_deleted(payload: Any) -> dict:
+    return {"id": SeriesDeleted.model_validate(payload).series_id}
+
+
+def _series_added(payload: Any) -> dict:
+    """The whole card of the series (the contract of series_added); the date in ISO."""
+    return added_packet(SeriesCard.model_validate(payload))
+
+
+def _source_changed(what: str) -> Callable[[Any], dict]:
+    """The packet of a source that was added, changed or removed: the event and what happened to the source."""
+    def form(payload: Any) -> dict:
+        return SourceChanged(**SourceEvent.model_validate(payload).model_dump(), what=what).model_dump(mode="json")
+    return form
 
 
 class Outgoing(NamedTuple):
@@ -149,60 +170,72 @@ class Outgoing(NamedTuple):
     # the last one goes, since each replaces the one before. None — every event goes, in order.
     latest: Callable[[Any], Any] | None = None
 
+    def packet(self, payload: Any) -> Any:
+        """What the stream writes for the payload of an event."""
+        return self.form(payload) if self.form else payload
+
 
 def _whole(payload: Any) -> None:
     """The key of a picture of a whole queue: there is one."""
     return None
 
 
+def _table_url(payload: Any) -> str:
+    """The key of the progress of a read: the page."""
+    return TableProgress.model_validate(payload).url
+
+
 # The one table of the stream of the interface: the stream subscribes to the bus by its topics, makes the packets by it and
 # keeps the last of each picture by it. The contract of every event — contracts/sse_contract.md.
-# agent_heartbeat удалён по согласованию (Р-18).
+# agent_heartbeat was removed by agreement (Р-18).
 # The events of the sources, the layout and the references go as they are: a packet is whole for its part of
 # the screen, so the interface asks nothing more.
-SSE_MAP: dict[str, Outgoing] = {
-    "series.status.changed": Outgoing("series_updated", _series_delta),
-    "series.busy.changed": Outgoing("series_updated", _series_delta),
-    "series.downloaded.changed": Outgoing("series_updated", _series_downloaded),
-    "series.updated": Outgoing("series_updated", _series_update_fields),
-    "series.added": Outgoing("series_added", _series_added),
-    "series.deleted": Outgoing("series_deleted", _deleted_id),
-    "torrents.queue.changed": Outgoing("agent_queue_update", _agent_tasks, latest=_whole),
-    "torrents.progress.changed": Outgoing("torrent_progress_update", _bare_tasks, latest=_whole),
-    "torrents.preview.ready": Outgoing("preview_naming_ready"),
-    "torrents.preview.failed": Outgoing("preview_naming_failed"),
-    "downloads.queue.changed": Outgoing("download_queue_update", _bare_tasks, latest=_whole),
-    "scan.status.changed": Outgoing("scanner_status_update"),
-    "series.source.added": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "added"}),
-    "series.source.updated": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "updated"}),
-    "series.source.removed": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "removed"}),
-    "sources.table.progress": Outgoing("sources_table_progress", latest=lambda payload: payload.get("url")),
-    "sources.table.ready": Outgoing("sources_table_ready"),
+SSE_MAP: dict[Topic, Outgoing] = {
+    SERIES_STATUS_CHANGED: Outgoing("series_updated", _series_delta),
+    SERIES_BUSY_CHANGED: Outgoing("series_updated", _series_delta),
+    SERIES_DOWNLOADED_CHANGED: Outgoing("series_updated", _series_downloaded),
+    SERIES_UPDATED: Outgoing("series_updated", _series_updated),
+    SERIES_ADDED: Outgoing("series_added", _series_added),
+    SERIES_DELETED: Outgoing("series_deleted", _series_deleted),
+    TORRENTS_QUEUE_CHANGED: Outgoing("agent_queue_update", _agent_tasks, latest=_whole),
+    TORRENTS_PROGRESS_CHANGED: Outgoing("torrent_progress_update", _bare_tasks, latest=_whole),
+    TORRENTS_PREVIEW_READY: Outgoing("preview_naming_ready"),
+    TORRENTS_PREVIEW_FAILED: Outgoing("preview_naming_failed"),
+    DOWNLOADS_QUEUE_CHANGED: Outgoing("download_queue_update", _bare_tasks, latest=_whole),
+    SCAN_STATUS_CHANGED: Outgoing("scanner_status_update"),
+    SERIES_SOURCE_ADDED: Outgoing("series_sources_changed", _source_changed("added")),
+    SERIES_SOURCE_UPDATED: Outgoing("series_sources_changed", _source_changed("updated")),
+    SERIES_SOURCE_REMOVED: Outgoing("series_sources_changed", _source_changed("removed")),
+    SOURCES_TABLE_PROGRESS: Outgoing("sources_table_progress", latest=_table_url),
+    SOURCES_TABLE_READY: Outgoing("sources_table_ready"),
     # The term of the site of a page changed: the end of the term of its table moved.
-    "sources.table.fresh": Outgoing("sources_table_fresh"),
+    SOURCES_TABLE_FRESH: Outgoing("sources_table_fresh"),
     # The release of a torrent source and the editor of its page changed (stage 15): the tab «Торрент» shows them again.
-    "torrents.release.changed": Outgoing("torrent_release_update"),
-    "unpack.editor.changed": Outgoing("torrent_editor_update"),
-    "unpack.read.progress": Outgoing("torrent_read_update"),
-    "sources.table.failed": Outgoing("sources_table_failed"),
-    "composition.changed": Outgoing("composition_changed"),
-    "composition.failed": Outgoing("composition_failed"),
-    "composition.series.reading": Outgoing("series_read_progress"),
-    "conform.queue.changed": Outgoing("conform_queue_update", latest=_whole),
-    "planner.pack.changed": Outgoing("pack_queue_update", _bare_tasks, latest=_whole),
-    "planner.journal.changed": Outgoing("pack_journal_update", lambda payload: payload["journals"], latest=_whole),
-    "planner.series.changed": Outgoing("plan_update"),
-    "voices.settings.changed": Outgoing("voice_settings_update"),
-    "sources.settings.changed": Outgoing("sources_settings_update"),
-    "torrents.staging.changed": Outgoing("torrent_staging_update"),
-    "conform.settings.changed": Outgoing("conform_settings_update"),
-    "sources.provider.changed": Outgoing("provider_update"),
-    "library.relocation.started": Outgoing("relocation_started"),
-    "library.relocation.finished": Outgoing("relocation_finished"),
+    TORRENTS_RELEASE_CHANGED: Outgoing("torrent_release_update"),
+    UNPACK_EDITOR_CHANGED: Outgoing("torrent_editor_update"),
+    UNPACK_READ_PROGRESS: Outgoing("torrent_read_update"),
+    SOURCES_TABLE_FAILED: Outgoing("sources_table_failed"),
+    COMPOSITION_CHANGED: Outgoing("composition_changed"),
+    COMPOSITION_FAILED: Outgoing("composition_failed"),
+    COMPOSITION_SERIES_READING: Outgoing("series_read_progress"),
+    CONFORM_QUEUE_CHANGED: Outgoing("conform_queue_update", latest=_whole),
+    PLANNER_PACK_CHANGED: Outgoing("pack_queue_update", _bare_tasks, latest=_whole),
+    PLANNER_JOURNAL_CHANGED: Outgoing("pack_journal_update", _journals, latest=_whole),
+    PLANNER_SERIES_CHANGED: Outgoing("plan_update"),
+    VOICES_SETTINGS_CHANGED: Outgoing("voice_settings_update"),
+    SOURCES_SETTINGS_CHANGED: Outgoing("sources_settings_update"),
+    TORRENTS_STAGING_CHANGED: Outgoing("torrent_staging_update"),
+    CONFORM_SETTINGS_CHANGED: Outgoing("conform_settings_update"),
+    SOURCES_PROVIDER_CHANGED: Outgoing("provider_update"),
+    LIBRARY_RELOCATION_STARTED: Outgoing("relocation_started"),
+    LIBRARY_RELOCATION_FINISHED: Outgoing("relocation_finished"),
 }
 
 # The names of the events of the stream, as the interface types them (from the one table).
 SSE_EVENTS: tuple[str, ...] = tuple(dict.fromkeys(out.name for out in SSE_MAP.values()))
+
+# The envelope carries the name of its topic: the entry of the table by that name.
+_OUTGOING: dict[str, Outgoing] = {topic.name: out for topic, out in SSE_MAP.items()}
 
 
 def latest_only(batch: list) -> list:
@@ -210,7 +243,7 @@ def latest_only(batch: list) -> list:
     seen: set = set()
     kept = []
     for env in reversed(batch):
-        out = SSE_MAP.get(getattr(env, "topic", None))
+        out = _OUTGOING.get(getattr(env, "topic", None))
         if out is not None and out.latest is not None:
             key = (env.topic, out.latest(env.payload or {}))
             if key in seen:
@@ -246,22 +279,22 @@ class GatewayModule(BaseModule):
         self._sse_clients = 0
         self._sse_subs: dict = {}
         self._restore_signals: list = []
-        # путь к SQLite — только для админ-вкладки БД (Р-22: сознательный
-        # обход Р-7, отладочный инструмент пользователя)
+        # The path to SQLite is for the administrator tab of the database alone (Р-22: a deliberate bypass of Р-7, a debugging
+        # tool of the user).
         self.db_path = db_path
-        # ключ подписи сессионной куки; пустой → эфемерный (сессии слетят
-        # при рестарте — для прода задаётся ST_SECRET_KEY в run.py).
+        # The key that signs the session cookie; empty → an ephemeral one (sessions are lost at a restart; production sets
+        # ST_SECRET_KEY in run.py).
         self._secret_key = secret_key or secrets.token_hex(32)
-        # Secure-кука (только по https); за nginx с TLS — True (Этап 2).
+        # A Secure cookie (https only); behind nginx with TLS it is True (stage 2).
         self._cookie_secure = cookie_secure
-        # «Замок» включён в проде; тесты бизнес-роутов поднимают gateway с
-        # auth_required=False (вход проверяется отдельно — test_auth.py).
+        # The «lock» is on in production; the tests of the business routes raise the gateway with auth_required=False (the login is
+        # tested apart — test_auth.py).
         self._auth_required = auth_required
-        # /docs и /openapi.json — выключены в проде (Этап 4); включаются
-        # флагом ST_DOCS_ENABLED для разработки/генерации типов (gen:api).
+        # /docs and /openapi.json are off in production (stage 4); the flag ST_DOCS_ENABLED turns them on for development and the
+        # generation of types (gen:api).
         self._docs_enabled = docs_enabled
-        # Разрешённые Host (Этап 2): None → проверки нет (dev); в проде —
-        # домен + loopback (ST_ALLOWED_HOSTS), защита от host-header атак.
+        # The Hosts allowed (stage 2): None → no check (dev); in production the domain and the loopback (ST_ALLOWED_HOSTS), a guard
+        # against host-header attacks.
         self._allowed_hosts = allowed_hosts
         super().__init__(bus)
         self.app = self._create_app()
@@ -269,7 +302,7 @@ class GatewayModule(BaseModule):
     # SSE subscriptions are made per client connection in _sse_stream(); the one signal listened to
     # declaratively is "the system is up", which run.py sends.
     def register(self) -> None:
-        self.handle("system.started", self.on_system_started)
+        self.handle(SYSTEM_STARTED, self.on_system_started)
 
     async def on_start(self) -> None:
         self._end_streams_on_stop_signal()
@@ -306,22 +339,24 @@ class GatewayModule(BaseModule):
         for sub in list(self._sse_subs.values()):
             sub.queue.put_nowait(_STREAM_END)
 
+    async def refresh_debug_groups(self) -> dict[str, str]:
+        """The groups of logging that print debug lines are the settings of the window: read, and put into force. Returns the settings read."""
+        flags = (await self.reply_of(SETTINGS_VALUES_BY_PREFIX, {"prefix": DEBUG_PREFIX})).values
+        core_logging.set_debug_groups(debug_groups(flags))
+        return flags
+
     async def _load_debug_groups(self) -> None:
-        from core import logging as core_logging
         try:
-            reply = await self.reply_of(SETTINGS_VALUES_BY_PREFIX, {"prefix": "debug_enabled_"})
+            flags = await self.refresh_debug_groups()
         except (BusRequestError, asyncio.TimeoutError):
             self.log.warning("debug-группы логирования не загружены — "
                              "settings не ответил")
             return
-        groups = {k.removeprefix("debug_enabled_")
-                  for k, v in reply.values.items() if v == "true"}
-        core_logging.set_debug_groups(groups)
-        if groups:
+        if groups := debug_groups(flags):
             self.log.info("DEBUG-логирование включено для групп: %s",
                           ", ".join(sorted(groups)))
 
-    # --- FastAPI-приложение -------------------------------------------------
+    # --- the FastAPI application ----------------------------------------------
 
     @staticmethod
     def _describe_events(app: FastAPI) -> None:
@@ -346,9 +381,8 @@ class GatewayModule(BaseModule):
         app.openapi = openapi
 
     def _create_app(self) -> FastAPI:
-        # /docs и /openapi.json — выключены в проде (Этап 4: не раскрывать
-        # карту API наружу). Включаются флагом docs_enabled (ST_DOCS_ENABLED)
-        # для разработки и генерации TS-типов (gen:api → openapi-typescript).
+        # /docs and /openapi.json are off in production (stage 4: the map of the API is not shown outside). The flag docs_enabled
+        # (ST_DOCS_ENABLED) turns them on for development and for the generation of the TS types (gen:api → openapi-typescript).
         app = FastAPI(
             title="Series Tracker", redoc_url=None,
             docs_url="/docs" if self._docs_enabled else None,
@@ -366,6 +400,7 @@ class GatewayModule(BaseModule):
             async def diag_echo(request: Request) -> Response:
                 body = await request.json()
                 try:
+                    # The one request whose topic is data: the diagnostic proxy asks the bus for any topic the body names.
                     result = await self.request(
                         body["topic"], body.get("payload"),
                         timeout=float(body.get("timeout", 5)))
@@ -395,14 +430,13 @@ class GatewayModule(BaseModule):
         dist_favicon = os.path.join(self._web_dist_dir, "favicon.svg")
         has_dist = os.path.isdir(self._web_dist_dir)
 
-        # Ф6 cutover (Р-Ф7): корень «/» — НОВЫЙ фронт (Vite-сборка), старый
-        # уведён на «/legacy» для отката. Если сборки нет (dist отсутствует) —
-        # падаем обратно на старый фронт с корня, чтобы стенд не остался без UI.
+        # Ф6 cutover (Р-Ф7): the root «/» is the NEW front (the Vite build), the old one is moved to «/legacy» for a rollback. Without
+        # a build (no dist) the old front is served from the root, so that the stand is not left without a UI.
         @app.get("/")
         async def index() -> FileResponse:
             return FileResponse(dist_index if has_dist else legacy_index)
 
-        # Старый фронт (rollback): отдаём по /legacy; его ассеты — /static.
+        # The old front (rollback): served at /legacy; its assets are at /static.
         @app.get("/legacy")
         async def legacy() -> FileResponse:
             return FileResponse(legacy_index)
@@ -411,13 +445,13 @@ class GatewayModule(BaseModule):
             app.mount("/static", StaticFiles(directory=self._static_dir),
                       name="static")
 
-        # Старый адрес нового фронта «/v2» → редирект на корень.
+        # The old address of the new front «/v2» → a redirect to the root.
         @app.get("/v2")
         @app.get("/v2/")
         async def v2_redirect() -> RedirectResponse:
             return RedirectResponse("/", status_code=307)
 
-        # Ассеты нового фронта (абсолютные пути base="/"): /assets/* + favicon.
+        # The assets of the new front (absolute paths, base="/"): /assets/* + the favicon.
         if has_dist:
             app.mount("/assets",
                       StaticFiles(directory=os.path.join(self._web_dist_dir,
@@ -428,23 +462,22 @@ class GatewayModule(BaseModule):
             async def favicon() -> FileResponse:
                 return FileResponse(dist_favicon)
 
-        # Замок ставится ВНУТРИ сессии: add_middleware кладёт обёртку в
-        # начало стека, поэтому добавленный последним SessionMiddleware —
-        # внешний и распарсит куку до того, как AuthGate прочитает session.
+        # The lock is put INSIDE the session: add_middleware puts the wrapper at the start of the stack, so the SessionMiddleware
+        # added last is the outer one and parses the cookie before AuthGate reads the session.
         if self._auth_required:
             app.add_middleware(AuthGateMiddleware)
         app.add_middleware(
             SessionMiddleware, secret_key=self._secret_key,
             session_cookie="st_session", same_site="strict",
             https_only=self._cookie_secure, max_age=7 * 24 * 3600)
-        # самый внешний — заголовки на любой ответ (вкл. 401 замка и логин)
+        # the outermost — the headers on any answer (the 401 of the lock and the login too)
         app.add_middleware(SecurityHeadersMiddleware)
-        # ещё внешнее — проверка Host (отсекаем чужой Host до всякой логики)
+        # outer still — the check of the Host (a foreign Host is cut off before any logic)
         if self._allowed_hosts:
             app.add_middleware(TrustedHostMiddleware,
                                allowed_hosts=self._allowed_hosts)
 
-        # Непойманные ошибки наружу — без стек-трейсов (Этап 4); детали — в лог.
+        # Errors not caught go out without stack traces (stage 4); the details are in the log.
         @app.exception_handler(Exception)
         async def _unhandled(_request, _exc):  # noqa: ANN001
             self.log.exception("необработанная ошибка HTTP")
@@ -453,21 +486,19 @@ class GatewayModule(BaseModule):
 
         return app
 
-    # --- SSE: шина -> браузер -------------------------------------------------
+    # --- SSE: bus -> browser --------------------------------------------------
 
     async def _sse_batches(self):
         """The events of the stream by turns: what queued up while the last turn was being written is one list, each
         state once. An empty list is a quiet interval, for the keepalive."""
-        # Разрыв соединения обнаруживает Starlette: он закрывает генератор
-        # (GeneratorExit), и finally снимает подписку.
+        # A broken connection is found by Starlette: it closes the generator (GeneratorExit), and the finally removes the subscription.
         # The stream is subscribed to the topics of its table and to nothing else: what is not for the interface does not
         # reach it, so nothing is sifted here.
-        sub = self.bus.subscribe(*SSE_MAP)
+        sub = self.bus.subscribe(*_OUTGOING)
         self._sse_subs[sub.sub_id] = sub
         self._sse_clients += 1
-        # Счётчик подключений — страховка эфемерных состояний (Р-11):
-        # при count=0 catalog сбрасывает все viewing.
-        self.publish_event("gateway.sse.clients", {"count": self._sse_clients})
+        # The count of the connections is a safeguard for the ephemeral states (Р-11): at count=0 the catalog drops every viewing.
+        self.publish_event(GATEWAY_SSE_CLIENTS, SseClients(count=self._sse_clients).model_dump())
         self.log.info("SSE-клиент подключился (всего: %d)", self._sse_clients)
         try:
             while True:
@@ -486,16 +517,14 @@ class GatewayModule(BaseModule):
                         if events:
                             yield events
                         return
-                    out = SSE_MAP[env.topic]
-                    events.append((out.name, out.form(env.payload) if out.form else env.payload))
+                    events.append((_OUTGOING[env.topic].name, _OUTGOING[env.topic].packet(env.payload)))
                 if events:
                     yield events
         finally:
             self._sse_subs.pop(sub.sub_id, None)
             self.bus.unsubscribe(sub)
             self._sse_clients -= 1
-            self.publish_event("gateway.sse.clients",
-                               {"count": self._sse_clients})
+            self.publish_event(GATEWAY_SSE_CLIENTS, SseClients(count=self._sse_clients).model_dump())
             self.log.info("SSE-клиент отключился (осталось: %d)",
                           self._sse_clients)
 

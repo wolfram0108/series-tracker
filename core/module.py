@@ -192,11 +192,11 @@ class BaseModule:
             if unanswerable and self._admitted.pop(env.correlation_id, None) is not None:
                 admission.answered(env.correlation_id)
 
-    async def reply_of(self, topic: Topic, payload: Any = None) -> Any:
+    async def reply_of(self, topic: Topic, payload: Any = None, *, units: int = 1) -> Any:
         """The answer of the owner of `topic` as the model of its record (`Topic.reply`). An answer that came as that model is
         taken as it is; a dictionary is checked off the loop (a table or the answers of the rules are thousands of rows). A
-        topic with no model gives its answer as it came."""
-        answer = await self.request(topic, payload)
+        topic with no model gives its answer as it came. `units` is the one of `request`."""
+        answer = await self.request(topic, payload, units=units)
         if topic.reply is None or isinstance(answer, topic.reply):
             return answer
         return await compute.run(topic.reply.model_validate, answer)

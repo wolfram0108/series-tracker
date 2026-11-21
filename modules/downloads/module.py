@@ -83,7 +83,7 @@ from core import notices, storage
 from core.clock import beat_while
 from core.contracts import (CardRemove, CardRemoved, DownloadFetch, DownloadLimits, DownloadQueue, FetchCancel, FetchCancelled,
                             FetchesWithdrawn, LimitsSaved, LimitsSet, Progress, QueueCleared, RunChanged, SeriesDeleted, SeriesRef,
-                            SettingValue, VideoProgress, WorkWithdrawn)
+                            SettingValue, SseClients, VideoProgress, WorkWithdrawn)
 from core.db import Database
 from core.envelope import Envelope
 from core.ffprobe import duration_of, film_stream, streams_of
@@ -333,7 +333,7 @@ class DownloadsModule(BaseModule):
 
     async def on_sse_clients(self, env: Envelope) -> None:
         """An interface connected: it gets the queue as it is, with no question of its own."""
-        if (env.payload or {}).get("count"):
+        if SseClients.model_validate(env.payload).count:
             self._announce_queue()
 
     def _announce_queue(self) -> None:

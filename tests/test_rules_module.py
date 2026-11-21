@@ -155,13 +155,13 @@ def rule_data(name, actions, conditions=(), keep_going=False) -> dict:
 
 
 async def new_profile(probe, name="профиль") -> int:
-    return (await probe.request("rules.profiles.create", {"name": name}, timeout=5))["id"]
+    return (await probe.request("rules.profiles.create", {"name": name}, timeout=5)).id
 
 
 async def new_rule(probe, profile_id, name, actions, conditions=(), keep_going=False) -> int:
     reply = await probe.request("rules.rules.add", {
         "profile_id": profile_id, "data": rule_data(name, actions, conditions, keep_going)}, timeout=5)
-    return reply["id"]
+    return reply.id
 
 
 async def apply(probe, profile_id, lines, **extra) -> dict:

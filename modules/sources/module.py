@@ -75,9 +75,9 @@ Events (owner: sources; the payload is the model written as JSON):
   sources.pages.forgotten PagesForgotten {urls}                            the tables of these pages are gone: no source lists them
   sources.settings.changed SourcesSettingsView                            the mirrors of a tracker were saved: every open settings screen shows
                                                                            them without asking back
-  sources.table.trace {url, site, kind: begin | end, ...}                  what a read does, for its dump (modules/runlog): `end` carries the
+  sources.table.trace TableTrace {url, site, kind: begin | end, ...}       what a read does, for its dump (modules/runlog): `end` carries the
                                                                            seconds of the read and what every player of the page gave (rows by
-                                                                           state, frames, the causes of the rows without a video); a dictionary
+                                                                           state, frames, the causes of the rows without a video)
   sources.provider.changed ProviderView                                   the whole picture of the provider, told again whenever the socket, the
                                                                            manifest, the address or the pages of the sources change (`seq` grows
                                                                            with every one); the screen takes it as it is
@@ -128,8 +128,8 @@ from core.module import BaseModule
 from core import storage
 from core.contracts.torrent import PageReleases
 from core.contracts.voices import PLAYERS_OFF_KEY
-from core.contracts import (BlockedPage, MirrorsSaved, MirrorsSet, NotAllowed, PageUrl, PagesCheck, PagesCheckReply, PagesForgotten,
-                            PlayersListReply, PlayersListRequest, SeriesDeleted, SeriesPurged, SettingValue, SiteResolveReply,
+from core.contracts import (BlockedPage, MirrorsSaved, MirrorsSet, NotAllowed, PageChanged, PageUrl, PagesCheck, PagesCheckReply,
+                            PagesForgotten, PlayersListReply, PlayersListRequest, SeriesDeleted, SeriesPurged, SettingValue, SiteResolveReply,
                             SiteResolveRequest, SourceEvent, SourceType, SourcesSettingsView, StreamReply, TableCancel, TableCancelled,
                             TableGetReply, TableGetRequest, TableRead, TableRefresh, TablesFresh, TablesFreshReply, TermSaved, TermSet,
                             TermsReply, TitleSearchReply, TitleSearchRequest, TorrentFile, TorrentFileDrop, TorrentFileGet, TrackersReply,
@@ -431,7 +431,7 @@ class SourcesModule(BaseModule):
     async def on_unpack_table_changed(self, env: Envelope) -> None:
         """The tracks of a tracker's page changed (a release downloaded, read, updated, laid out anew): its table is made
         again from them; the end comes as `sources.table.ready` as for any page."""
-        await self.tables.read(TableRead(url=env.payload["url"]), changed=True)
+        await self.tables.read(TableRead(url=PageChanged.model_validate(env.payload).url), changed=True)
 
     async def on_parse(self, env: Envelope) -> dict:
         return await self._parse(env.payload["url"])

@@ -11,6 +11,7 @@ from .frozen import Frozen
 from .output_settings import EpisodeSettings, LeverSpec, LevelSettings
 from .release_table import RowState, RowTrack, SubtitleType, TableState
 from .rules import RuleResult
+from .work import RunSnapshot
 
 
 class Exclusion(StrEnum):
@@ -281,6 +282,22 @@ class CompositionChanged(BaseModel):
 class CompositionFailed(BaseModel):
     series_id: int
     reason: str
+
+
+class SeriesRecount(BaseModel):
+    """`composition.recompute`: the layout of the series is counted again from the tables its sources hold now. A sync sends
+    the configuration it works by (`snapshot`), so that the count follows it and not the settings changed meanwhile."""
+
+    series_id: int
+    snapshot: RunSnapshot | None = None
+
+
+class Recounted(Frozen):
+    """The reply of `composition.recompute`, once the count that began after the request is done: the number of the layout
+    (`rev`) and whether it changed."""
+
+    rev: int = 0
+    changed: bool = False
 
 
 class PreviewLine(Frozen):

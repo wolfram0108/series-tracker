@@ -122,9 +122,11 @@ from calc.view.packing import card_id
 from calc.view.view import placed
 from core import compute, storage
 from core.clock import beat_while
-from core.contracts import (AlignmentJob, CompositionGetRequest, DownloadFetch, DownloadNeed, DownloadVariant, FetchFinished, JobRemoved, PlanDelete, PlanForget, PlannerView,
-                            Reference, SeriesCard, SeriesDeleted, SeriesPurged, SourceType, StatusContribution,
-                            SubmitOutcome, SyncScope, job_dir, job_key)
+from core.contracts import (AlignmentJob, CompositionGetRequest, DownloadedCounts, DownloadFetch, DownloadNeed, DownloadVariant,
+                            FailuresForgotten, FetchFinished, FilesHeld, JobRemoved, PackJournals, PackPicture, PackQueue,
+                            PackRemoved, PlanDelete, PlanDropped, PlanForget, PlannerView, PlanRecorded, Reference, SeasonsHeld,
+                            SeriesCard, SeriesDeleted, SeriesDownloaded, SeriesPurged, SourceType, SseClients, StatusContribution,
+                            SubmitOutcome, SyncAccepted, SyncScope, SyncStopped, SyncTrace, job_dir, job_key)
 from core.contracts.torrent import ReleaseState, fonts_of, parse_link
 from core.contracts.work import WorkState, WorkWithdrawn
 from core.dump import plain
@@ -143,7 +145,7 @@ from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, CATALOG_SERIES
                          PLANNER_SERIES_CHANGED, PLANNER_SERIES_GET, PLANNER_SYNC, PLANNER_SYNC_CANCEL,
                          PLANNER_SYNC_TRACE, PLANNER_WORK_GET, RULES_FORMAT_FILENAME, SERIES_DELETED,
                          SERIES_DOWNLOADED_CHANGED, SERIES_PURGED, SERIES_STATUS_CONTRIBUTION, SERIES_UPDATED,
-                         SYSTEM_STARTED, TORRENTS_RELEASE_DROP_FILES, TORRENTS_RELEASES_GET, VOICES_SETTINGS_CHANGED,
+                         SYSTEM_STARTED, TOPICS, TORRENTS_RELEASE_DROP_FILES, TORRENTS_RELEASES_GET, VOICES_SETTINGS_CHANGED,
                          VOICES_SETTINGS_GET, WORK_SERIES_STATE, WORK_WITHDRAWN, Topic)
 
 from .executor import SeriesSync
@@ -242,8 +244,8 @@ class BusSync(SeriesSync):
     async def trace(self, kind: str, data: dict) -> None:
         # The tables of a plan of a big series are large: they are made plain off the loop.
         body = await compute.run(plain, data) if kind == "plan" else plain(data)
-        self.m.publish_event(PLANNER_SYNC_TRACE, {"series_id": self.series.id, "run": self.run_mark, "kind": kind,
-                                                    "download": self.download, "data": body})
+        self.m.publish_event(PLANNER_SYNC_TRACE, SyncTrace(
+            series_id=self.series.id, run=self.run_mark, kind=kind, download=self.download, data=body).wire())
 
     async def prepare(self) -> None:
         folders = await self.m.reply_of(CONFORM_WORKSPACE, {})
@@ -809,15 +811,15 @@ class PlannerModule(BaseModule):
 
     # --- the sync -----------------------------------------------------------------------------------------------
 
-    async def on_sync(self, env: Envelope) -> dict:
+    async def on_sync(self, env: Envelope) -> SyncAccepted:
         series_id = int(env.payload["series_id"])
         download = bool(env.payload.get("download", True))
         scope = SyncScope.of(env.payload)  # a season or an episode of it; none: the whole series
         if series_id in self._runs and not self._runs[series_id].done():
-            return {"accepted": False, "reason": "planner_sync_running"}
+            return SyncAccepted(accepted=False, reason="planner_sync_running")
         await self.repo.begin_run(series_id, download, None if scope is None else scope.named())
         self._start(series_id, download, scope)
-        return {"accepted": True}
+        return SyncAccepted(accepted=True)
 
     def _start(self, series_id: int, download: bool, scope: SyncScope | None = None) -> None:
         self._failures.pop(series_id, None)  # the failure told is of the sync before: this one has none yet
@@ -939,9 +941,9 @@ class PlannerModule(BaseModule):
     # --- the picture of the packing ------------------------------------------------------------------------------
 
     def pack_publish(self) -> None:
-        self.publish_event(PLANNER_PACK_CHANGED, {"tasks": [card.model_dump(mode="json") for card in self.packing.view()]})
+        self.publish_event(PLANNER_PACK_CHANGED, PackQueue(tasks=tuple(self.packing.view())).model_dump(mode="json"))
         self.publish_event(PLANNER_JOURNAL_CHANGED,
-                           {"journals": [each.model_dump(mode="json") for each in self.packing.journals_view()]})
+                           PackJournals(journals=tuple(self.packing.journals_view())).model_dump(mode="json"))
 
     def pack_going(self) -> None:
         self._packing_going.set()
@@ -954,11 +956,10 @@ class PlannerModule(BaseModule):
             await beat_while(self.packing.running, self.pack_publish)
             self._packing_going.clear()
 
-    async def on_pack_get(self, env: Envelope) -> dict:
-        return {"tasks": [card.model_dump(mode="json") for card in self.packing.view()],
-                "journals": [each.model_dump(mode="json") for each in self.packing.journals_view()]}
+    async def on_pack_get(self, env: Envelope) -> PackPicture:
+        return PackPicture(tasks=tuple(self.packing.view()), journals=tuple(self.packing.journals_view()))
 
-    async def on_pack_remove(self, env: Envelope) -> dict:
+    async def on_pack_remove(self, env: Envelope) -> PackRemoved:
         """The user removes a card of the packing that stayed after its sync."""
         key = str(env.payload["id"])
         card = self.packing.cards.get(key)
@@ -967,11 +968,11 @@ class PlannerModule(BaseModule):
         self.packing.forget(key)
         await self.repo.drop_pack_cards([key])
         self.pack_publish()
-        return {"removed": True}
+        return PackRemoved(removed=True)
 
     async def on_sse_clients(self, env: Envelope) -> None:
         """An interface connected: it gets the packing as it is, with no question of its own."""
-        if (env.payload or {}).get("count"):
+        if SseClients.model_validate(env.payload).count:
             self.pack_publish()
 
     # --- the journal ---------------------------------------------------------------------------------------------
@@ -1108,7 +1109,7 @@ class PlannerModule(BaseModule):
             return None
         return await self.attach(job_id)
 
-    async def on_sync_cancel(self, env: Envelope) -> dict:
+    async def on_sync_cancel(self, env: Envelope) -> SyncStopped:
         """The user stops the sync of a series: every work of it stops — the downloads (work.withdrawn: the executor
         stops them with their programs and removes what they wrote), the jobs of the service (cancelled and taken out of
         its history), the build of the containers aside. The episodes it applied by then stay applied; nothing more of
@@ -1117,10 +1118,10 @@ class PlannerModule(BaseModule):
         series_id = int(env.payload["series_id"])
         task, sync = self._runs.get(series_id), self._syncs.get(series_id)
         if task is None or task.done():
-            return {"cancelled": False}
+            return SyncStopped(cancelled=False)
         if sync is not None and sync.committing:
             await asyncio.wait({task})
-            return {"cancelled": False}
+            return SyncStopped(cancelled=False)
         self._halting.add(series_id)
         # A journal of the library under way is carried out to its end, and no other begins: the stop holds the lock of
         # the journals while the work is taken off.
@@ -1130,7 +1131,7 @@ class PlannerModule(BaseModule):
         try:
             if task.done() or (sync is not None and sync.committing):
                 await asyncio.wait({task})
-                return {"cancelled": False}
+                return SyncStopped(cancelled=False)
             await self._withdraw_downloads(series_id)
             task.cancel()
             await asyncio.wait({task})  # the run takes its jobs of the service off before it tells its end
@@ -1138,7 +1139,7 @@ class PlannerModule(BaseModule):
             if lock is not None:
                 lock.release()
             self._halting.discard(series_id)
-        return {"cancelled": True}
+        return SyncStopped(cancelled=True)
 
     async def _withdraw_downloads(self, series_id: int) -> None:
         """The downloads of the series stop, and the stop is over only once their programs have: asked and waited for;
@@ -1409,11 +1410,13 @@ class PlannerModule(BaseModule):
         """An input of the view changed (VIEW_INPUTS): the view of its series is counted again, the views of every series
         for an input of all of them (the settings of the voice-overs). A change that says it moved only the summaries of
         the sources moves nothing the plan reads."""
-        payload = env.payload if isinstance(env.payload, dict) else {}
-        if payload.get("summary_only"):
-            return
-        series_id = payload.get("series_id")
-        targets = [int(series_id)] if series_id is not None else sorted(
+        series_id = None  # the settings of the voice-overs are an input of every view
+        if env.topic != VOICES_SETTINGS_CHANGED.name:
+            event = TOPICS[env.topic].request.model_validate(env.payload)  # SeriesUpdated or CompositionChanged
+            if getattr(event, "summary_only", False):
+                return
+            series_id = event.series_id
+        targets = [series_id] if series_id is not None else sorted(
             set(await self.repo.series_with_assets()) | set(self._shown))
         for each in targets:
             self._ask_recount(each)
@@ -1421,7 +1424,7 @@ class PlannerModule(BaseModule):
     async def on_series_get(self, env: Envelope) -> PlannerView:
         return await self._shown_view(int(env.payload["series_id"]))
 
-    async def on_delete(self, env: Envelope) -> dict:
+    async def on_delete(self, env: Envelope) -> PlanRecorded:
         command = PlanDelete.model_validate(env.payload)
         series_id = command.series_id
         held = {data["name"]: data for data in await self.repo.assets(series_id)}
@@ -1432,32 +1435,32 @@ class PlannerModule(BaseModule):
             raise ValueError(reason("planner_delete_no_track", name=command.name))
         await self.repo.add_command(series_id, stored_command(command.model_dump()))
         await self._publish_view(series_id)
-        return {"recorded": True}
+        return PlanRecorded(recorded=True)
 
-    async def on_delete_cancel(self, env: Envelope) -> dict:
+    async def on_delete_cancel(self, env: Envelope) -> PlanDropped:
         command = PlanDelete.model_validate(env.payload)
         series_id = command.series_id
         dropped = await self.repo.drop_command(series_id, stored_command(command.model_dump()))
         await self._publish_view(series_id)
-        return {"dropped": bool(dropped)}
+        return PlanDropped(dropped=bool(dropped))
 
     async def count_changed(self, series_id: int) -> None:
         """The series holds another number of files: told to whoever shows it."""
         held = (await self.repo.episodes(series_id)).get(series_id, set())
-        self.publish_event(SERIES_DOWNLOADED_CHANGED,
-                           {"series_id": series_id, "count": sum(1 for season, _ in held if season != 0)})
+        self.publish_event(SERIES_DOWNLOADED_CHANGED, SeriesDownloaded(
+            series_id=series_id, count=sum(1 for season, _ in held if season != 0)).model_dump())
 
-    async def on_downloaded_counts(self, env: Envelope) -> dict:
+    async def on_downloaded_counts(self, env: Envelope) -> DownloadedCounts:
         """{counts: {series_id: n}}: the episodes of every series the library holds and shows, specials (season 0) aside."""
-        return {"counts": {series_id: sum(1 for season, _ in episodes if season != 0)
-                           for series_id, episodes in (await self.repo.episodes()).items()}}
+        return DownloadedCounts(counts={series_id: sum(1 for season, _ in episodes if season != 0)
+                                        for series_id, episodes in (await self.repo.episodes()).items()})
 
-    async def on_seasons(self, env: Envelope) -> dict:
+    async def on_seasons(self, env: Envelope) -> SeasonsHeld:
         """{seasons: [..]}: the seasons the files of a series are of (the aggregate of seasons of TMDB)."""
         held = (await self.repo.episodes()).get(int(env.payload["series_id"]), set())
-        return {"seasons": sorted({season for season, _ in held})}
+        return SeasonsHeld(seasons=tuple(sorted({season for season, _ in held})))
 
-    async def on_files_get(self, env: Envelope) -> dict:
+    async def on_files_get(self, env: Envelope) -> FilesHeld:
         """The files of the asset of a series, relative to its folder (the move of the folder takes them), with a journal a
         stop cut short and what it put aside: they go with the folder and are carried out there."""
         series_id = int(env.payload["series_id"])
@@ -1468,9 +1471,9 @@ class PlannerModule(BaseModule):
         if journal is not None:
             names.append(os.path.relpath(files.journal, files.root))
             names += [step[1] for step in journal["steps"] if step[0] == "publish"]
-        return {"names": names}
+        return FilesHeld(names=tuple(names))
 
-    async def on_failures_forget(self, env: Envelope) -> dict:
+    async def on_failures_forget(self, env: Envelope) -> FailuresForgotten:
         """The reset of failed attempts, of the whole series or of one level of it (PlanForget): the attempts of the other
         levels stay, so what the plan chose because they failed (the second reference of an episode whose first did not
         download) is not undone by the reset of another episode."""
@@ -1487,7 +1490,7 @@ class PlannerModule(BaseModule):
                 # What a sync under way holds of them is not written back by it.
                 self._shed.setdefault(series_id, set()).update(gone)
         await self._publish_view(series_id)
-        return {"reset": reset}
+        return FailuresForgotten(reset=reset)
 
     async def _failures_of(self, series_id: int, forget: PlanForget) -> list[tuple]:
         """The failed attempts of the series that belong to the level, placed by the rows the sources give now."""

@@ -174,12 +174,12 @@ class MetadataModule(BaseModule):
         """The real seasons from the naming (not 0): the seasons of the files of the plan of the series (planner.seasons; Р-7,
         what is another's is a query)."""
         try:
-            reply = await self.request(PLANNER_SEASONS, {"series_id": series.id})
+            reply = await self.reply_of(PLANNER_SEASONS, {"series_id": series.id})
         except BusRequestError as exc:
             self.log.warning("сезоны серии %d недоступны (%s): %s",
                              series.id, PLANNER_SEASONS.name, exc)
             return frozenset()
-        return real_seasons(reply.get("seasons", []))
+        return real_seasons(reply.seasons)
 
     async def _season_counts(self, mapping: TmdbMapping, real: frozenset[int]) -> dict[int, int]:
         """The episodes of each season of the show. The cache is in the mapping; TMDB is asked only when the real seasons

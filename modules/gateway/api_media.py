@@ -3,10 +3,9 @@ of the naming of the add form. The points of the old path of the cutting of comp
 deep adoption, the preview of renaming by media items) left with it (2026-11-17)."""
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter
 
+from calc.gateway.series import source_file_names
 from core.module import BusRequestError
 from core.reasons import reason
 from core.topics import SCAN_SERIES_RUN, TORRENTS_DB_FILES_FOR_SERIES
@@ -14,8 +13,8 @@ from core.topics import SCAN_SERIES_RUN, TORRENTS_DB_FILES_FOR_SERIES
 from .routing import refusal
 from .schemas import ErrorOnly, ErrorResponse, OkResponse
 
-# Документация веток ошибок (отдаются JSONResponse, response_model на них
-# не распространяется). _ERR — тело {success, error}; _ERR1 — {error}.
+# The documentation of the error branches (they go out through JSONResponse, so the response_model does not cover them).
+# _ERR is the body {success, error}; _ERR1 is {error}.
 _ERR = {c: {"model": ErrorResponse} for c in (400, 404, 409, 500)}
 _ERR1 = {c: {"model": ErrorOnly} for c in (404, 500)}
 
@@ -29,13 +28,13 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The files take the names of the rules: the disk changes in a sync alone (И-59), so this is a sync of the
         series that fetches nothing; refused while one runs."""
         try:
-            await gw.request(SCAN_SERIES_RUN, {"series_id": series_id, "download": False})
+            await gw.reply_of(SCAN_SERIES_RUN, {"series_id": series_id, "download": False})
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True,
                 "message": reason("files_follow_rules")}
 
-    # --- имена для теста парсера ----------------------------------------------------
+    # --- the names for the test of the parser ---------------------------------------
 
     @r.get("/api/series/{series_id}/source-filenames",
            response_model=list[str])
@@ -43,9 +42,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """File names of the series' torrents for the rules test; a video series has none, its lines
         for the test come from composition.preview."""
         try:
-            files = await gw.request(TORRENTS_DB_FILES_FOR_SERIES, {"series_id": series_id})
+            files = await gw.reply_of(TORRENTS_DB_FILES_FOR_SERIES, {"series_id": series_id})
         except BusRequestError:
             return []
-        return [os.path.basename(f["original_path"]) for f in files]
+        return source_file_names(files)
 
     return r

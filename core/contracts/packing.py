@@ -11,6 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .downloads import DownloadVariant
+from .frozen import Frozen
 
 # The stages of a build, in order: waiting for the others, ffmpeg copying the streams into the container, the result read
 # back, the file put in place by the journal of its group. Between the build and the journal a container is `built`: the
@@ -93,4 +94,29 @@ class PackJournal(BaseModel):
     file: str = ""
     started_at: str = ""
     seconds: float = 0.0
+
+
+class PackQueue(Frozen):
+    """The event `planner.pack.changed`: every card of the packing as it stands, for the queue the window shows."""
+
+    tasks: tuple[PackCard, ...]
+
+
+class PackJournals(Frozen):
+    """The event `planner.journal.changed`: the journals of the series being carried out as they stand."""
+
+    journals: tuple[PackJournal, ...]
+
+
+class PackPicture(Frozen):
+    """The reply of `planner.pack.get`: the cards and the journals as they stand."""
+
+    tasks: tuple[PackCard, ...]
+    journals: tuple[PackJournal, ...]
+
+
+class PackRemoved(Frozen):
+    """The reply of `planner.pack.remove`: the card that stayed after its sync is gone."""
+
+    removed: bool
 

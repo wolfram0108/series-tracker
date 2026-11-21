@@ -124,8 +124,8 @@ from core.topics import (CATALOG_SERIES_GET, CATALOG_SERIES_LIST, CATALOG_SERIES
                          TORRENTS_RESUME, TORRENTS_SEASONS, TORRENTS_SET_LOCATION, TORRENTS_STAGING_CHANGED,
                          TORRENTS_STAGING_GET, TORRENTS_STAGING_SET, TRACKERAUTH_CREDENTIALS_CHANGED,
                          TRACKERAUTH_CREDENTIALS_GET, TRACKERAUTH_SECRET_GET)
-from core.contracts import (CredentialsChanged, PageUrl, RunChanged, SeriesDeleted, SeriesPurged, SeriesUpdated,
-                            SettingValue, SourceType, StatusContribution)
+from core.contracts import (CredentialsChanged, DownloadedCounts, PageUrl, RunChanged, SeriesDeleted, SeriesDownloaded,
+                            SeriesPurged, SeriesUpdated, SettingValue, SourceType, SseClients, StatusContribution)
 from core.contracts.torrent import (STAGING_DIR_KEY, ReleaseRef, ReleasesChecked, ReleasesReply, ReleaseTask, ReleaseView,
                                     ReleaseWatch, StagingFolder, StagingSaved, StagingSet, TorrentProgress, TorrentTasks)
 from core.db import Database
@@ -935,9 +935,9 @@ class TorrentsModule(BaseModule):
             env.payload["series_id"], env.payload["torrents"])
         return {"added": added}
 
-    async def on_downloaded_counts(self, env: Envelope) -> dict:
+    async def on_downloaded_counts(self, env: Envelope) -> DownloadedCounts:
         """{counts: {series_id: n}} — renamed files (Р-19)."""
-        return {"counts": await self.repo.downloaded_counts()}
+        return DownloadedCounts(counts=await self.repo.downloaded_counts())
 
     async def on_seasons(self, env: Envelope) -> dict:
         """{seasons: [..]} — the real seasons of the series from the naming (for the TMDB aggregate over several seasons)."""
@@ -1163,7 +1163,7 @@ class TorrentsModule(BaseModule):
         """The downloaded files of the series changed -> push the counter to SSE
         (Д1): the card updates «скачано» at once, without a reload."""
         count = await self.repo.downloaded_count_for_series(series_id)
-        self.publish_event(SERIES_DOWNLOADED_CHANGED, {"series_id": series_id, "count": count})
+        self.publish_event(SERIES_DOWNLOADED_CHANGED, SeriesDownloaded(series_id=series_id, count=count).model_dump())
 
     # --- progress monitoring -----------------------------------------------------------
 
@@ -1242,7 +1242,7 @@ class TorrentsModule(BaseModule):
     async def on_sse_clients(self, env: Envelope) -> None:
         """A window that connects gets the pictures of the torrents at once, as those of the other queues: it does not wait
         for the next change or tick to see what the client holds."""
-        if not env.payload.get("count"):
+        if not SseClients.model_validate(env.payload).count:
             return
         self._broadcast_queue()
         self._progress_snapshot = None

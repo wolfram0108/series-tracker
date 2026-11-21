@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field, model_validator
 from core.module import BusRequestError
 from core.contracts import SubtitleType
 from core.topics import (SOURCES_RELEASES_GET, TORRENTS_RELEASE_CHECK, TORRENTS_RELEASE_DOWNLOAD, TORRENTS_RELEASE_WATCH,
-                         TORRENTS_RELEASES_GET, Topic)
+                         TORRENTS_RELEASES_GET, UNPACK_ASSIGN, UNPACK_AUTO, UNPACK_EDITOR_GET, UNPACK_EDITOR_OPEN,
+                         UNPACK_FOLDER_DELETE, UNPACK_FOLDER_SET, UNPACK_REMOVE, UNPACK_UNASSIGN, Topic)
 
 from .routing import as_made, refusal
 from .schemas import DynamicObject, ErrorResponse, OkResponse
@@ -103,15 +104,15 @@ class AutoBody(BaseModel):
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
     r = APIRouter()
 
-    async def asked(topic: Topic | str, payload: dict):
+    async def asked(topic: Topic, payload: dict):
         try:
-            return await as_made(await gw.request(topic, payload))
+            return await as_made(await gw.reply_of(topic, payload))
         except BusRequestError as exc:
             return refusal(exc)
 
-    async def told(topic: Topic | str, payload: dict):
+    async def told(topic: Topic, payload: dict):
         try:
-            await gw.request(topic, payload)
+            await gw.reply_of(topic, payload)
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -146,33 +147,33 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The torrent editor of the page: the items of its five tabs, the folders, what is unplaced, the profiles. The first
         opening of a page makes its profiles; the editor itself is a read."""
         try:
-            await gw.request("unpack.editor.open", body.model_dump())
+            await gw.reply_of(UNPACK_EDITOR_OPEN, body.model_dump())
         except BusRequestError as exc:
             return refusal(exc)
-        return await asked("unpack.editor.get", body.model_dump())
+        return await asked(UNPACK_EDITOR_GET, body.model_dump())
 
     @r.post("/api/torrent/editor/assign", response_model=OkResponse, responses=_ERR)
     async def assign(body: AssignBody):
-        return await told("unpack.assign", body.model_dump())
+        return await told(UNPACK_ASSIGN, body.model_dump())
 
     @r.post("/api/torrent/editor/unassign", response_model=OkResponse, responses=_ERR)
     async def unassign(body: UnassignBody):
-        return await told("unpack.unassign", body.model_dump())
+        return await told(UNPACK_UNASSIGN, body.model_dump())
 
     @r.post("/api/torrent/editor/folder", response_model=OkResponse, responses=_ERR)
     async def folder_set(body: FolderBody):
-        return await told("unpack.folder.set", body.model_dump())
+        return await told(UNPACK_FOLDER_SET, body.model_dump())
 
     @r.post("/api/torrent/editor/folder/delete", response_model=OkResponse, responses=_ERR)
     async def folder_delete(body: FolderRef):
-        return await told("unpack.folder.delete", body.model_dump())
+        return await told(UNPACK_FOLDER_DELETE, body.model_dump())
 
     @r.post("/api/torrent/editor/remove", response_model=OkResponse, responses=_ERR)
     async def remove(body: RemoveBody):
-        return await told("unpack.remove", body.model_dump())
+        return await told(UNPACK_REMOVE, body.model_dump())
 
     @r.post("/api/torrent/editor/auto", response_model=OkResponse, responses=_ERR)
     async def auto(body: AutoBody):
-        return await told("unpack.auto", body.model_dump())
+        return await told(UNPACK_AUTO, body.model_dump())
 
     return r
