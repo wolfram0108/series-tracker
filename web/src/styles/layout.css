@@ -24,7 +24,7 @@
 .indicator.ind-small { width: 18px; height: 18px; }
 .indicator.ind-active {
   background: var(--color-blue);
-  animation: indicatorPulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation: indicatorPulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; will-change: transform;
 }
 @keyframes indicatorPulse {
   0%, 100% { box-shadow: 0 0 8px 2px rgba(13, 110, 253, 0.5); }
@@ -63,6 +63,10 @@
    height, so that the form takes its place without moving what is round it. */
 /* It comes into sight after a moment (as the strip of a lost stream does), so that a read that is quick shows no flicker of grey. */
 .load-skeleton { animation: loadAppear 0.2s 0.2s backwards; }
+/* A card drawn as it comes near the view (composables/useShownCells.ts) fades in; until then its shell holds its place. */
+.cell-in { animation: cellIn 0.2s ease-out backwards; }
+@keyframes cellIn { from { opacity: 0; } }
+.cell-shell { box-sizing: border-box; border-radius: var(--border-radius); background: var(--bg-light); }
 @keyframes loadAppear { from { opacity: 0; } }
 .load-cards { display: flex; flex-direction: column; gap: 0.75rem; }
 .load-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.6rem; }

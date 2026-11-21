@@ -167,6 +167,8 @@
   background: color-mix(in srgb, var(--color-blue) 18%, transparent); animation: loadAppear 0.2s 0.2s backwards;
 }
 .modal-progress::after {
-  content: ""; position: absolute; inset-block: 0; inline-size: 35%; background: var(--color-blue); animation: modalProgress 1.2s ease-in-out infinite;
+  content: ""; position: absolute; inset-block: 0; inset-inline-start: 0; inline-size: 35%; background: var(--color-blue);
+  animation: modalProgress 1.2s ease-in-out infinite; will-change: transform;
 }
-@keyframes modalProgress { from { inset-inline-start: -35%; } to { inset-inline-start: 100%; } }
+/* From -35% to 100% of the track, told in the light's own width (35% of the track), so the compositor moves it. */
+@keyframes modalProgress { from { transform: translateX(-100%); } to { transform: translateX(calc(100% * 100 / 35)); } }

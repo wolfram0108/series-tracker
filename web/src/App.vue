@@ -23,11 +23,15 @@ import { useApi } from "./composables/useApi"
 import { useConfirm } from "./composables/useConfirm"
 import { useAction } from "./composables/useAction"
 import { useSSE } from "./composables/useSSE"
+import { useShownCells } from "./composables/useShownCells"
 import { api } from "./api/client"
 
 // Главный экран: шапка + список серий на живых данных из стора. Модалки
 // (add / logs / settings / status / confirmation) подключены и рабочие.
 const seriesStore = useSeriesStore()
+// A card of a series is drawn while it is near the view (composables/useShownCells.ts): a long list draws a screen of them.
+const seriesList = ref<HTMLElement | null>(null)
+const { built, cell, sizeOf } = useShownCells(seriesList)
 const scannerStore = useScannerStore()
 const ui = useUiStore()
 const auth = useAuthStore()
@@ -119,18 +123,22 @@ const remove = useAction(async (id: number) => {
       @settings="openModal = 'settings'"
       @logout="onLogout"
     />
-    <div class="series-list">
-      <SeriesCard
-        v-for="s in seriesStore.list"
-        :key="s.id"
-        :series="s"
-        :saving="seriesStore.isSaving(s.id)"
-        @open-status="onOpenStatus"
-        @scan="scan.run"
-        @cancel-scan="cancelScan.run"
-        @delete="remove.run"
-        @toggle-auto-scan="toggleAuto.run"
-      />
+    <div ref="seriesList" class="series-list">
+      <template v-for="s in seriesStore.list" :key="s.id">
+        <div v-if="!built(s.id)" :ref="cell(s.id)" class="cell-shell series-shell" :style="sizeOf(s.id)" aria-hidden="true" />
+        <SeriesCard
+          v-else
+          :ref="cell(s.id)"
+          class="cell-in"
+          :series="s"
+          :saving="seriesStore.isSaving(s.id)"
+          @open-status="onOpenStatus"
+          @scan="scan.run"
+          @cancel-scan="cancelScan.run"
+          @delete="remove.run"
+          @toggle-auto-scan="toggleAuto.run"
+        />
+      </template>
       <!-- Nothing is said of "no series" before the list has been read, and nothing of it where it could not be read. -->
       <div v-if="!seriesStore.list.length" class="empty-state" :role="seriesStore.loaded ? undefined : 'status'">
         <template v-if="seriesStore.failed">

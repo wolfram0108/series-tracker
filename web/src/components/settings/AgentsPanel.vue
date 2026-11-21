@@ -3,9 +3,11 @@ import { computed, ref } from "vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { stopReading } from "../../composables/sourceCalls"
+import { useShownCells } from "../../composables/useShownCells"
 import { useSSE } from "../../composables/useSSE"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
+import { sharing } from "../../lib/sharing"
 import { stateLabel, type StateName } from "../../lib/states"
 import {
   conformWork, downloadWork, journalWork, monitorWork, packWork, processingWork, readWork, type WorkAction, type WorkView,
@@ -35,22 +37,33 @@ const { request } = useApi()
 // The queues are pictures the stream brings: before it is up the window knows nothing of them, so it does not say they are empty.
 const { connected: live } = useSSE()
 
+// A card is drawn while it is near the view (composables/useShownCells.ts): a queue of hundreds of works draws a screen of them.
+const panel = ref<HTMLElement | null>(null)
+const { built, cell, sizeOf } = useShownCells(panel)
+
 const picked = ref<number | null>(null)
 const filter = computed(() => props.seriesId ?? picked.value)
 
 interface Section { key: string; icon: string; title: string; chip: string; tone: StateName; views: WorkView[] }
+// Each queue is counted by itself, and a card that came out as it was is the object it was (lib/sharing.ts): a frame of
+// the stream redraws only the cards whose work changed, not every card of every queue.
+const downloadViews = sharing(() => q.downloads.map(downloadWork))
+const conformViews = sharing(() => (q.conform?.tasks ?? []).map((task) => conformWork(task, (file) => voices.dubName(task.id, file))))
+const packViews = sharing(() => [...q.journals.map(journalWork), ...q.pack.map(packWork)])
+const processingViews = sharing(() => q.agent.map(processingWork))
+const monitorViews = sharing(() => q.torrents.map(monitorWork))
+const readViews = sharing(() => reads.all().map(readWork))
 const sections = computed<Section[]>(() => [
   { key: "download", icon: "pi-download", title: t("download.title"), chip: stateLabel("download"), tone: "download",
-    views: q.downloads.map(downloadWork) },
+    views: downloadViews.value },
   { key: "conform", icon: "pi-sliders-h", title: t("agents.conform.title"), chip: stateLabel("align"), tone: "align",
-    views: (q.conform?.tasks ?? []).map((task) => conformWork(task, (file) => voices.dubName(task.id, file))) },
-  { key: "pack", icon: "pi-box", title: t("agents.pack.title"), chip: stateLabel("pack"), tone: "pack",
-    views: [...q.journals.map(journalWork), ...q.pack.map(packWork)] },
+    views: conformViews.value },
+  { key: "pack", icon: "pi-box", title: t("agents.pack.title"), chip: stateLabel("pack"), tone: "pack", views: packViews.value },
   { key: "processing", icon: "pi-cog", title: t("agents.processing.title"), chip: t("agents.chip.processing"), tone: "renaming",
-    views: q.agent.map(processingWork) },
+    views: processingViews.value },
   { key: "monitor", icon: "pi-wifi", title: t("agents.torrents.title"), chip: t("agents.chip.torrents"), tone: "download",
-    views: q.torrents.map(monitorWork) },
-  { key: "read", icon: "pi-globe", title: t("agents.reads.title"), chip: stateLabel("read"), tone: "read", views: reads.all().map(readWork) },
+    views: monitorViews.value },
+  { key: "read", icon: "pi-globe", title: t("agents.reads.title"), chip: stateLabel("read"), tone: "read", views: readViews.value },
 ])
 
 // A work that does not tell its series (none yet: an alignment of a key of another maker) shows only where no series is picked.
@@ -94,7 +107,7 @@ const str = (value: unknown) => String(value ?? "")
 </script>
 
 <template>
-  <div class="agents-panel">
+  <div ref="panel" class="agents-panel">
     <div class="agents-filter">
       <SheetField v-if="seriesId != null" class="agents-select is-readonly" :label="t('agents.filter.series')" icon="pi pi-filter">
         <StValue class="agents-fixed" :value="lockedLabel" />
@@ -125,10 +138,13 @@ const str = (value: unknown) => String(value ?? "")
         </template>
         <div v-if="!section.shown.length" class="queue-empty">{{ live ? t("agents.empty") : t("common.fetching") }}</div>
         <div v-else class="agents-cards">
-          <WorkCard
-            v-for="view in section.shown" :key="view.id" :view="view" :series-name="nameOf(view)" :busy="pending.has(view.id)"
-            @action="act(view, $event)" @plot="plot = $event"
-          />
+          <template v-for="view in section.shown" :key="view.id">
+            <WorkCard
+              v-if="built(view.id)" :ref="cell(view.id)" class="cell-in" :view="view" :series-name="nameOf(view)" :busy="pending.has(view.id)"
+              @action="act(view, $event)" @plot="plot = $event"
+            />
+            <div v-else :ref="cell(view.id)" class="cell-shell work-shell" :style="sizeOf(view.id)" aria-hidden="true" />
+          </template>
         </div>
       </SheetRow>
     </div>
@@ -151,6 +167,8 @@ const str = (value: unknown) => String(value ?? "")
   color: color-mix(in srgb, var(--tone-end) 72%, black);
 }
 .agents-cards { display: flex; flex-direction: column; gap: 0.5rem; }
+/* The place of a card not drawn yet: about the height of a card of a work. */
+.work-shell { block-size: 7rem; }
 .agents-daemon { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .queue-empty { padding: 1rem; text-align: center; color: var(--text-muted); background: var(--bg-light); border-radius: var(--border-radius); }
 </style>

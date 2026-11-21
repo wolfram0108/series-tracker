@@ -258,6 +258,9 @@ EVENT_PACKETS = (PlannerView, PackJournal, TableProgress, TableReady, TableFaile
                  CompositionFailed, SourceChanged, SeriesReadProgress)
 
 _KEEPALIVE_SECONDS = 15.0
+# The pace of the screen: after a frame, what comes within this time goes as the next frame, at once. A burst of telemetry
+# (progress, the queues of a hundred works) then changes every card of a window twice a second, not on every turn of the bus.
+FRAME_SECONDS = 0.5
 # Put into a stream's queue to end it: uvicorn waits for open responses before it stops the app.
 _STREAM_END = object()
 
@@ -489,7 +492,7 @@ class GatewayModule(BaseModule):
     # --- SSE: bus -> browser --------------------------------------------------
 
     async def _sse_batches(self):
-        """The events of the stream by turns: what queued up while the last turn was being written is one list, each
+        """The events of the stream by frames: what came within a frame of the screen (FRAME_SECONDS) is one list, each
         state once. An empty list is a quiet interval, for the keepalive."""
         # A broken connection is found by Starlette: it closes the generator (GeneratorExit), and the finally removes the subscription.
         # The stream is subscribed to the topics of its table and to nothing else: what is not for the interface does not
@@ -500,6 +503,8 @@ class GatewayModule(BaseModule):
         # The count of the connections is a safeguard for the ephemeral states (Р-11): at count=0 the catalog drops every viewing.
         self.publish_event(GATEWAY_SSE_CLIENTS, SseClients(count=self._sse_clients).model_dump())
         self.log.info("SSE-клиент подключился (всего: %d)", self._sse_clients)
+        loop = asyncio.get_running_loop()
+        sent = loop.time() - FRAME_SECONDS
         try:
             while True:
                 try:
@@ -508,9 +513,17 @@ class GatewayModule(BaseModule):
                 except asyncio.TimeoutError:
                     yield []
                     continue
+                # The first news after a quiet frame goes at once; what follows it within the frame joins it.
                 batch = [env]
+                while env is not _STREAM_END and (left := sent + FRAME_SECONDS - loop.time()) > 0:
+                    try:
+                        env = await asyncio.wait_for(sub.queue.get(), timeout=left)
+                    except asyncio.TimeoutError:
+                        break
+                    batch.append(env)
                 while not sub.queue.empty():
                     batch.append(sub.queue.get_nowait())
+                sent = loop.time()
                 events = []
                 for env in latest_only(batch):
                     if env is _STREAM_END:
@@ -529,7 +542,7 @@ class GatewayModule(BaseModule):
                           self._sse_clients)
 
     async def _sse_stream(self, frames: str = "each"):
-        """The stream as frames: `each` — a frame per event; `batch` — a frame per turn, so that a burst of events is
+        """The stream as frames: `each` — a frame per event; `batch` — one frame for what came within FRAME_SECONDS, so that a burst of events is
         taken by the interface at once and its screen is counted once, not once per event."""
         async with contextlib.aclosing(self._sse_batches()) as turns:
             async for events in turns:

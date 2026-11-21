@@ -43,8 +43,9 @@ const share = (row: ReadRow): string => `${row.total > 0 ? Math.min(100, (100 * 
 .read-phase { color: var(--text-muted); font-size: 0.75rem; }
 .read-bar { block-size: 0.5rem; border-radius: 4px; background: #dee2e6; overflow: hidden; }
 .read-bar i { display: block; block-size: 100%; border-radius: 4px; background: var(--color-blue); }
-.read-bar.is-unknown i { inline-size: 35% !important; opacity: 0.6; animation: read-wait 1.4s ease-in-out infinite alternate; }
-@keyframes read-wait { from { margin-inline-start: 0; } to { margin-inline-start: 65%; } }
+.read-bar.is-unknown i { inline-size: 35% !important; opacity: 0.6; animation: read-wait 1.4s ease-in-out infinite alternate; will-change: transform; }
+/* To 65% of the bar, told in the run's own width (35% of the bar), so the compositor moves it. */
+@keyframes read-wait { from { transform: translateX(0); } to { transform: translateX(calc(100% * 65 / 35)); } }
 .read-count { font-variant-numeric: tabular-nums; color: var(--color-gray-600); font-size: 0.75rem; white-space: nowrap; }
 /* Where the room is short of a row (a phone) the phase and the bar go under the source and the count. */
 @container fold-room (inline-size < 30rem) {

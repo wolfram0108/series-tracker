@@ -17,20 +17,24 @@ class Watcher {
   near(...elements: Element[]) {
     this.tell(elements.map((target) => ({ target, isIntersecting: true }) as IntersectionObserverEntry))
   }
+  far(element: Element, height: number) {
+    this.tell([{ target: element, isIntersecting: false, boundingClientRect: { height } } as IntersectionObserverEntry])
+  }
 }
 
-// A grid in a scrolling area: a built card is a <b>, a shell an <i> watched by its ref.
+// A grid in a scrolling area: a drawn card is a <b>, a shell an <i>; both are watched by their ref.
 const Grid = defineComponent({
   props: { episodes: { type: Array as () => number[], required: true } },
   setup(props) {
     const grid = ref<HTMLElement | null>(null)
-    const { built, shell } = useShownCells(grid)
+    const { built, cell, sizeOf } = useShownCells(grid)
     return () => h("div", { style: "overflow-y: auto" }, [h("div", { ref: grid }, props.episodes.map((episode) => built(episode)
-      ? h("b", { key: `b${episode}`, "data-episode": episode })
-      : h("i", { key: `i${episode}`, "data-episode": episode, ref: shell(episode) })))])
+      ? h("b", { key: `b${episode}`, "data-episode": episode, ref: cell(episode) })
+      : h("i", { key: `i${episode}`, "data-episode": episode, ref: cell(episode), style: sizeOf(episode) })))])
   },
 })
 const kinds = (w: ReturnType<typeof mount>) => w.findAll("[data-episode]").map((each) => each.element.tagName.toLowerCase())
+const at = (w: ReturnType<typeof mount>, episode: number) => w.find(`[data-episode='${episode}']`).element
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -38,34 +42,38 @@ afterEach(() => {
 })
 
 describe("useShownCells", () => {
-  it("builds a card when its shell comes near the view, and leaves the others shells", async () => {
+  it("draws a card near the view and takes it down when it goes far, its shell keeping the card's height", async () => {
     vi.stubGlobal("IntersectionObserver", Watcher)
     const w = mount(Grid, { props: { episodes: [1, 2, 3, 4] }, attachTo: document.body })
     await nextTick()
     expect(kinds(w)).toEqual(["i", "i", "i", "i"])
     const watcher = Watcher.last!
-    expect(watcher.watched.size).toBe(4)
     expect(watcher.options.root).toBe(w.element)  // the area that scrolls the grid
-    watcher.near(w.find("[data-episode='1']").element, w.find("[data-episode='2']").element)
+    watcher.near(at(w, 1), at(w, 2))
     await nextTick()
     expect(kinds(w)).toEqual(["b", "b", "i", "i"])
-    expect(watcher.watched.size).toBe(2)  // a built card is watched no more
+    expect(watcher.watched.size).toBe(4)  // a drawn card is watched too: it is taken down when it goes far
+    watcher.far(at(w, 1), 132)
+    await nextTick()
+    expect(kinds(w)).toEqual(["i", "b", "i", "i"])
+    expect((at(w, 1) as HTMLElement).style.blockSize).toBe("132px")
+    expect(watcher.watched.size).toBe(4)
     w.unmount()
   })
 
-  it("keeps a card built when the episodes shown change, and stops watching a shell that went", async () => {
+  it("stops watching a card that went from the list", async () => {
     vi.stubGlobal("IntersectionObserver", Watcher)
     const w = mount(Grid, { props: { episodes: [1, 2, 3] }, attachTo: document.body })
     await nextTick()
-    Watcher.last!.near(w.find("[data-episode='1']").element)
+    Watcher.last!.near(at(w, 1))
     await nextTick()
     await w.setProps({ episodes: [1, 3] })
     expect(kinds(w)).toEqual(["b", "i"])
-    expect(Watcher.last!.watched.size).toBe(1)
+    expect(Watcher.last!.watched.size).toBe(2)
     w.unmount()
   })
 
-  it("builds every card where the browser cannot tell what is near the view", async () => {
+  it("draws every card where the browser cannot tell what is near the view", async () => {
     vi.stubGlobal("IntersectionObserver", undefined)
     const w = mount(Grid, { props: { episodes: [1, 2, 3] } })
     await nextTick()

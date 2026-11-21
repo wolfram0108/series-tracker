@@ -3,7 +3,7 @@ import type { components } from "../api/schema"
 import { reloadIfRebuilt } from "../lib/build"
 
 /** The events of the stream are named by the one table of the gateway (SSE_MAP) and reach this type through the schema
- *  of the API. The stream is read in frames of a turn (`frames=batch`): `event: batch\ndata: [{event, data}, ...]`, the
+ *  of the API. The stream is read in frames of the screen, at most two a second (`frames=batch`, gateway FRAME_SECONDS): `event: batch\ndata: [{event, data}, ...]`, the
  *  events in their order; EventSource ignores the keepalive comments itself. */
 export type SSEEvent = components["schemas"]["StreamEvent"]["event"]
 type Handler = (data: unknown) => void

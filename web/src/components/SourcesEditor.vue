@@ -9,6 +9,7 @@ import StLabel from "./StLabel.vue"
 import { t } from "../i18n"
 import { joinVkAddress, splitVkAddress, vkQuery, type SourceItem } from "../lib/sources"
 import { kindOf } from "../composables/sourceAddress"
+import { useShownCells } from "../composables/useShownCells"
 import type { DraftPatch } from "../composables/useSourceDrafts"
 
 // The sources of a series, one group per source. The add window and the properties of a series use this one
@@ -28,6 +29,10 @@ const props = withDefaults(defineProps<{
   /** Names that cost a request (the original name of TMDB): asked once, when the search is first opened. */
   loadNames?: () => Promise<{ text: string; mark?: string }[]>
 }>(), { error: "", busy: false, names: () => [], loadNames: undefined })
+
+// A card of a source is drawn while it is near the view (composables/useShownCells.ts); one being edited holds the focus and stays.
+const list = ref<HTMLElement | null>(null)
+const { built, cell, sizeOf } = useShownCells(list)
 
 const emit = defineEmits<{
   (e: "remove", id: string | number): void
@@ -120,12 +125,15 @@ function clear(): void {
 </script>
 
 <template>
-  <div class="sources stack">
-    <SourceCard
-      v-for="(item, index) in items" :key="item.id" :item="item" :profiles="profiles" :busy="busy" :waiting="waiting" :place="index + 1"
-      @change="emit('change', item.id, $event)" @remove="emit('remove', item.id)"
-      @reread="emit('reread', item.id)" @stop="emit('stop', item.id)"
-    />
+  <div ref="list" class="sources stack">
+    <template v-for="(item, index) in items" :key="item.id">
+      <SourceCard
+        v-if="built(item.id)" :ref="cell(item.id)" class="cell-in" :item="item" :profiles="profiles" :busy="busy" :waiting="waiting"
+        :place="index + 1" @change="emit('change', item.id, $event)" @remove="emit('remove', item.id)"
+        @reread="emit('reread', item.id)" @stop="emit('stop', item.id)"
+      />
+      <div v-else :ref="cell(item.id)" class="cell-shell source-shell" :style="sizeOf(item.id)" aria-hidden="true" />
+    </template>
     <div class="stack">
       <div class="st-tabs st-tabs-wrap source-mode" role="tablist" :aria-label="t('sources.mode.label')">
         <StTab :active="mode === 'address'" :label="t('sources.mode.address')" @click="mode = 'address'">
@@ -159,4 +167,6 @@ function clear(): void {
 <style scoped>
 .source-hint { color: var(--text-muted); font-size: smaller; }
 .source-error { color: var(--color-red-1); overflow-wrap: anywhere; }
+/* The place of a card of a source not drawn now: about the height of a card. */
+.source-shell { block-size: 12rem; }
 </style>

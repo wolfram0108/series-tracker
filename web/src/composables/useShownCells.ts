@@ -1,17 +1,24 @@
-import { onBeforeUnmount, onMounted, ref, type Ref } from "vue"
+import { onBeforeUnmount, onMounted, reactive, type Ref } from "vue"
+
+type Key = string | number
 
 /**
- * The cards of a grid built only when they come near the visible part of the area that scrolls them: a season of hundreds
- * of episodes builds the rows on screen and the next screen, not every card at once (its first show froze the page for
- * seconds). Until then a card is a shell of its size (`shell` is its element ref), which the outline of the grid and the
- * selection count as the card. A card once built stays built. Where the browser cannot tell what is near the view (no
- * IntersectionObserver), every card is built.
+ * The cards of a list or a grid drawn only while they are near the visible part of the area that scrolls them: a list of
+ * hundreds of cards draws the ones on screen and a screen above and below, not every card at once. A card that goes
+ * further away is taken down, and a shell of the size it had stands in its place, so that the scroll, the grid and what
+ * counts the cards (the outline of a grid, the selection) stand as they did; the card is drawn again when it comes near.
+ * A card that holds the focus stays drawn. Where the browser cannot tell what is near the view (no IntersectionObserver),
+ * every card is drawn.
+ *
+ * A list renders `built(key)` ? its card : its shell, both with `:ref="cell(key)"`, the shell with `:style="sizeOf(key)"`.
  */
-export function useShownCells(grid: Ref<HTMLElement | null>) {
+export function useShownCells(area: Ref<HTMLElement | null>) {
   const every = typeof IntersectionObserver === "undefined"
-  const seen = ref<ReadonlySet<number>>(new Set())
-  const shells = new Map<number, Element>()
-  const episodeOf = new Map<Element, number>()
+  const near = reactive(new Set<Key>())
+  // The height a card had when it was taken down: its shell keeps it.
+  const heights = reactive(new Map<Key, number>())
+  const cells = new Map<Key, Element>()
+  const keyOf = new Map<Element, Key>()
   let observer: IntersectionObserver | null = null
 
   function scrollerOf(from: HTMLElement): HTMLElement | null {
@@ -22,45 +29,49 @@ export function useShownCells(grid: Ref<HTMLElement | null>) {
     return null
   }
 
-  function onSeen(entries: IntersectionObserverEntry[]): void {
-    const near = entries.filter((entry) => entry.isIntersecting).map((entry) => episodeOf.get(entry.target))
-      .filter((episode): episode is number => episode !== undefined)
-    if (near.length === 0) return
-    seen.value = new Set([...seen.value, ...near])
-    for (const episode of near) forget(episode)
-  }
-
-  function forget(episode: number): void {
-    const element = shells.get(episode)
-    if (!element) return
-    observer?.unobserve(element)
-    shells.delete(episode)
-    episodeOf.delete(element)
+  function onSight(entries: IntersectionObserverEntry[]): void {
+    for (const entry of entries) {
+      const key = keyOf.get(entry.target)
+      if (key === undefined) continue
+      if (entry.isIntersecting) near.add(key)
+      else if (near.has(key) && !entry.target.contains(document.activeElement)) {
+        if (entry.boundingClientRect.height > 0) heights.set(key, entry.boundingClientRect.height)
+        near.delete(key)
+      }
+    }
   }
 
   onMounted(() => {
-    if (every || !grid.value) return
-    // A screen above and below the view: the rows a scroll brings next are built before they show.
-    observer = new IntersectionObserver(onSeen, { root: scrollerOf(grid.value), rootMargin: "100% 0px" })
-    for (const element of shells.values()) observer.observe(element)
+    if (every || !area.value) return
+    // A screen above and below the view: the cards a scroll brings next are drawn before they show.
+    observer = new IntersectionObserver(onSight, { root: scrollerOf(area.value), rootMargin: "100% 0px" })
+    for (const element of cells.values()) observer.observe(element)
   })
   onBeforeUnmount(() => observer?.disconnect())
 
-  /** Whether the card of the episode is built. */
-  const built = (episode: number): boolean => every || seen.value.has(episode)
+  /** Whether the card of the key is drawn now. */
+  const built = (key: Key): boolean => every || near.has(key)
 
-  /** The element ref of the shell of an episode: watched until the card comes near the view. */
-  const shell = (episode: number) => (element: unknown): void => {
-    if (!(element instanceof Element)) {
-      forget(episode)
-      return
+  /** The element ref of the card of a key or of its shell: whichever stands there is watched. */
+  const cell = (key: Key) => (ref: unknown): void => {
+    const element = ref instanceof Element ? ref : (ref as { $el?: unknown } | null)?.$el
+    const old = cells.get(key)
+    if (old && old !== element) {
+      observer?.unobserve(old)
+      keyOf.delete(old)
+      cells.delete(key)
     }
-    if (shells.get(episode) === element) return
-    forget(episode)
-    shells.set(episode, element)
-    episodeOf.set(element, episode)
+    if (!(element instanceof Element) || old === element) return
+    cells.set(key, element)
+    keyOf.set(element, key)
     observer?.observe(element)
   }
 
-  return { built, shell }
+  /** The size of the shell of a key: the height its card had, or the shell's own (its CSS) before the card was ever drawn. */
+  const sizeOf = (key: Key): Record<string, string> | undefined => {
+    const height = heights.get(key)
+    return height === undefined ? undefined : { blockSize: `${height}px` }
+  }
+
+  return { built, cell, sizeOf }
 }

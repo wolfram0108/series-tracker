@@ -14,6 +14,8 @@
   position: relative;
   min-height: 120px;
 }
+/* The place of a card of a series not drawn now (composables/useShownCells.ts): the height and the gap of a card. */
+.series-shell { block-size: 120px; margin-bottom: 16px; border-radius: var(--card-border-radius); }
 .series-card:hover {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   transform: scale(1.02);
@@ -98,7 +100,9 @@
 .action-btn:disabled { opacity: 0.6; cursor: not-allowed; filter: none; }
 
 /* --- the layers of the status: the colour is the state of the series by the vocabulary (lib/states.ts, data-state), the order the z-index of the layer --- */
-.layer-stripes { position: absolute; inset: 0; }
+/* The stripes move as a layer that slides (transform), not as a background drawn anew in every frame: the layer is one tile wider
+   and slides by one tile, so what shows is the same at every moment, and the compositor moves it. */
+.layer-stripes { position: absolute; inset: 0; overflow: hidden; border-radius: var(--card-border-radius); }
 .color-layer {
   position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 0;
   overflow: hidden; transition: width 0.8s ease-in-out; border-radius: var(--card-border-radius);
@@ -106,7 +110,7 @@
 }
 .layer-stripes::before {
   content: ''; --stripe-size: 50px;
-  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  position: absolute; top: 0; left: calc(-1 * var(--stripe-size)); right: 0; bottom: 0;
   background-image: linear-gradient(
     45deg,
     rgba(255, 255, 255, var(--stripe-intensity)) 25%, transparent 25%,
@@ -129,7 +133,8 @@
 .layer-viewing    { z-index: 13; }
 .layer-error      { z-index: 14; }
 
-@keyframes move-stripes { from { background-position: 0 0; } to { background-position: 50px 0; } }
+@keyframes move-stripes { from { transform: translateX(0); } to { transform: translateX(var(--stripe-size)); } }
+.layer-stripes.stripes-normal::before, .layer-stripes.stripes-slow::before { will-change: transform; }
 .layer-stripes.stripes-normal::before { animation: move-stripes 2s linear infinite; }
 .layer-stripes.stripes-slow::before { animation: move-stripes 10s linear infinite; }
 .layer-stripes.stripes-stopped::before { animation: none; }
