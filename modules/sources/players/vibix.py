@@ -30,7 +30,8 @@ logger = logging.getLogger("sources")
 
 REFRESH_MARGIN_S = 600
 MANIFEST_TIMEOUT_S = 15.0
-_BUTTON = re.compile(r"""switchSource\(\s*["']vibix-embed["']""", re.IGNORECASE)
+# The site switches to Vibix by the whole embed (`vibix-embed`) or by one entry (`vibix:<id>:<type>:<season>:<episodes>`).
+_BUTTON = re.compile(r"""switchSource\(\s*["']vibix(?:-embed["']|:)""", re.IGNORECASE)
 _LINK = re.compile(r"^vibix=(\d+)/(\d+)$")
 _ABSOLUTE_URL = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 

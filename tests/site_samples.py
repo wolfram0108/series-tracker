@@ -133,7 +133,7 @@ def ruchime_episode(number: int) -> str:
 <div class="player-source-row">
 <button class="source-btn" data-player="vk" onclick="switchSource('{vk}',this)">VK Video</button>
 <button class="source-btn" data-player="allvideo" onclick="switchSource('https://fsst.online/embed/{allvideo_id}/',this)">AllVideo</button>
-<button class="source-btn" data-player="vibix" onclick="switchSource('vibix-embed',this)">Vibix</button>
+<button class="source-btn" data-player="vibix" onclick="switchSource('vibix:8164:series:1:{number}',this)">Vibix</button>
 <button class="source-btn" data-player="kodik" onclick="switchSource('{KODIK_SWITCH}', this)">Kodik</button>
 </div>
 </body></html>
