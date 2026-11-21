@@ -47,10 +47,9 @@ export interface paths {
         };
         /**
          * Auth Status
-         * @description Публичный статус для онбординга: настроен ли администратор, его имя
-         *     и вошёл ли текущий клиент. Фронт по нему выбирает модалку setup/login
-         *     и показывает на экране входа имя администратора (admin) вместо поля
-         *     ввода логина (приложение однопользовательское).
+         * @description The public status for the onboarding: whether the administrator is set up, his name and whether the current client is signed in.
+         *     By it the front chooses the setup or login modal and shows the name of the administrator (admin) on the login screen in place of the
+         *     field for the login (the application is single-user).
          */
         get: operations["auth_status_api_auth_status_get"];
         put?: never;
@@ -72,9 +71,8 @@ export interface paths {
         put?: never;
         /**
          * Setup
-         * @description Первичная установка администратора. Доступна ТОЛЬКО пока админа
-         *     нет; после создания — 403 (пересоздать в обход входа нельзя).
-         *     Успех сразу логинит (сессия).
+         * @description The first setup of the administrator. Available ONLY while there is no administrator; after it is made — 403 (it cannot
+         *     be made again bypassing the login). Success signs in at once (the session).
          */
         post: operations["setup_api_setup_post"];
         delete?: never;
@@ -94,13 +92,12 @@ export interface paths {
         put?: never;
         /**
          * Change Password
-         * @description Смена пароля вошедшим администратором (раздел «Аккаунт» настроек).
-         *     За «замком» (нужна сессия): проверяет длину нового пароля (≥8) и
-         *     обновляет хэш. Имя не меняется — сессия остаётся валидной.
+         * @description The change of the password by the administrator who is signed in (the section «Аккаунт» of the settings).
+         *     Behind the «lock» (a session is needed): checks the length of the new password (≥8) and renews the hash. The name does not change — the
+         *     session stays valid.
          *
-         *     Текущий пароль НЕ запрашивается: активная сессия уже подтверждает
-         *     владельца (осознанное решение для однопользовательского приложения —
-         *     не заставлять вспоминать старый пароль при смене из-под входа).
+         *     The current password is NOT asked: the active session already confirms the owner (a deliberate decision for a single-user application —
+         *     not to make him recall the old password when changing it from under a login).
          */
         post: operations["change_password_api_auth_password_post"];
         delete?: never;
@@ -170,9 +167,8 @@ export interface paths {
         };
         /**
          * Active Torrents
-         * @description Прогресс торрент-загрузок с именами серий (таблица
-         *     «Мониторинг» вкладки агентов; Р-23 — исправление маппинга
-         *     блока 2: источник — torrent_progress модуля torrents, не очередь конвейера).
+         * @description The progress of the torrent downloads with the names of the series (the table «Мониторинг» of the agents tab;
+         *     Р-23 — the fix of the mapping of block 2: the source is torrent_progress of the module torrents, not the queue of the pipeline).
          */
         get: operations["active_torrents_api_series_active_torrents_get"];
         put?: never;
@@ -218,10 +214,9 @@ export interface paths {
         put?: never;
         /**
          * Set State
-         * @description Старый контракт фронта: ['viewing'] при открытии модалки,
-         *     [] при закрытии → эфемерный viewing (Р-11). Открытие модалки
-         *     дополнительно запускает сверку файлов с диском (Р-13/Р-14:
-         *     замена фоновых периодических проверок старой системы).
+         * @description The old contract of the front: ['viewing'] when the modal opens, [] when it closes → the ephemeral viewing (Р-11).
+         *     Opening the modal also starts the check of the files against the disk (Р-13/Р-14: the replacement of the periodic background checks
+         *     of the old system).
          */
         post: operations["set_state_api_series__series_id__state_post"];
         delete?: never;
@@ -274,10 +269,9 @@ export interface paths {
         get?: never;
         /**
          * Ignored Episodes
-         * @description Память отключённых серий: {"episodes": {"<сезон>": [номера]}}.
+         * @description The memory of the switched-off episodes: {"episodes": {"<season>": [numbers]}}.
          *
-         *     Ключ — номер серии сериала, а не файл раздачи: выбор обязан
-         *     пережить замену релиза.
+         *     The key is the number of the episode of the series, not the file of a release: the choice must survive the replacement of a release.
          */
         put: operations["ignored_episodes_api_series__series_id__ignored_episodes_put"];
         post?: never;
@@ -298,11 +292,10 @@ export interface paths {
         put?: never;
         /**
          * Scan Series
-         * @description Синхронный скан одной серии, как в оригинале: HTTP ждёт
-         *     результата.
-         *     download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается.
-         *     С телом (сезон, серия сезона) — синхронизация в рамках сезона или серии: источники те же, исполняется
-         *     то, что касается области (серия компиляции приводит всю компиляцию); сериал занят на всё время.
+         * @description A synchronous scan of one series, as in the original: HTTP waits for the result.
+         *     download=false — a scan without a download: the check of the files, the tables, the layout and the plan, but nothing is fetched.
+         *     With a body (a season, an episode of the season) — a sync within the season or the episode: the sources are the same, what is carried out
+         *     is what concerns the scope (an episode of a compilation brings the whole compilation); the series is busy for all of it.
          */
         post: operations["scan_series_api_series__series_id__scan_post"];
         delete?: never;
@@ -322,8 +315,8 @@ export interface paths {
         put?: never;
         /**
          * Cancel Scan
-         * @description Остановить синхронизацию сериала: чтение страниц, загрузки, задачи сервиса выравнивания, сборку файлов.
-         *     Из остановленной синхронизации ничего не применяется; идущий журнал библиотеки она дожидается.
+         * @description Stops the sync of the series: the reading of the pages, the downloads, the jobs of the alignment service, the build of
+         *     the files. Nothing is applied from a stopped sync; it waits for a journal of the library under way.
          */
         post: operations["cancel_scan_api_series__series_id__scan_cancel_post"];
         delete?: never;
@@ -343,10 +336,10 @@ export interface paths {
         put?: never;
         /**
          * Reset Failures
-         * @description Неудачные попытки сериала забываются: отклонённые и сбойные озвучки начинаются с первого источника своей
-         *     цепочки, видео, которое не скачалось, снова участвует в выборе референса. Это правка сериала, а не
-         *     синхронизация: работа по ним идёт со следующей синхронизацией. С телом — только попытки одного уровня (сезона,
-         *     серии, озвучки, нарезок): попытки остальных остаются, и выбор референса по ним не меняется.
+         * @description The failed attempts of the series are forgotten: the rejected and failed voice-overs begin with the first source of
+         *     their chain, a video that did not download takes part in the choice of the reference again. This is an edit of the series, not a sync:
+         *     the work on them goes with the next sync. With a body — only the attempts of one level (a season, an episode, a voice-over, the cuts):
+         *     the attempts of the rest stay, and the choice of the reference by them does not change.
          */
         post: operations["reset_failures_api_series__series_id__failures_reset_post"];
         delete?: never;
@@ -1005,8 +998,7 @@ export interface paths {
         put?: never;
         /**
          * Downloads Cancel
-         * @description Точечная отмена загрузки: убить процесс + удалить файл +
-         *     снять задачу (находка 45).
+         * @description A pinpoint cancel of a download: kill the process, remove the file, remove the task (finding 45).
          */
         post: operations["downloads_cancel_api_downloads__task_id__cancel_post"];
         delete?: never;
@@ -1124,8 +1116,8 @@ export interface paths {
         };
         /**
          * Get Auth Secret
-         * @description The secret of one service, as the eye of its field asks it (Этап 3, docs/security.md: a secret is never given with the
-         *     credentials, only on this request, to the administrator who is signed in): {secret}, empty when none is set. Not cached.
+         * @description The secret of one service, as the eye of its field asks it (stage 3, docs/security.md: a secret is never given
+         *     with the credentials, only on this request, to the administrator who is signed in): {secret}, empty when none is set. Not cached.
          */
         get: operations["get_auth_secret_api_auth__service__secret_get"];
         put?: never;
@@ -1189,14 +1181,14 @@ export interface paths {
         };
         /**
          * Source Terms
-         * @description The terms of the sites the sources read (sources, term.py): GET {sites: [{site, app, sources, minutes}]}, POST
+         * @description The terms of the sites the sources read (sources, term.py): GET {sites: [{site, provider, sources, minutes}]}, POST
          *     {site, minutes} sets one; a value the sources refuse is 400 with its reason.
          */
         get: operations["source_terms_api_settings_source_terms_get"];
         put?: never;
         /**
          * Source Terms
-         * @description The terms of the sites the sources read (sources, term.py): GET {sites: [{site, app, sources, minutes}]}, POST
+         * @description The terms of the sites the sources read (sources, term.py): GET {sites: [{site, provider, sources, minutes}]}, POST
          *     {site, minutes} sets one; a value the sources refuse is 400 with its reason.
          */
         post: operations["source_terms_api_settings_source_terms_post"];
@@ -1241,21 +1233,21 @@ export interface paths {
         };
         /**
          * Saved Paths
-         * @description Сохранённые пути загрузки: список, добавление, удаление.
-         *     Источник истины — модуль settings (таблица saved_paths).
+         * @description The saved download paths: the list, the addition, the removal. The source of truth is the module settings (the table
+         *     saved_paths).
          */
         get: operations["saved_paths_api_settings_saved_paths_get"];
         put?: never;
         /**
          * Saved Paths
-         * @description Сохранённые пути загрузки: список, добавление, удаление.
-         *     Источник истины — модуль settings (таблица saved_paths).
+         * @description The saved download paths: the list, the addition, the removal. The source of truth is the module settings (the table
+         *     saved_paths).
          */
         post: operations["saved_paths_api_settings_saved_paths_post"];
         /**
          * Saved Paths
-         * @description Сохранённые пути загрузки: список, добавление, удаление.
-         *     Источник истины — модуль settings (таблица saved_paths).
+         * @description The saved download paths: the list, the addition, the removal. The source of truth is the module settings (the table
+         *     saved_paths).
          */
         delete: operations["saved_paths_api_settings_saved_paths_delete"];
         options?: never;
@@ -1614,9 +1606,8 @@ export interface paths {
         };
         /**
          * Log Groups
-         * @description Динамический список групп логов: distinct поля 'group' из всех
-         *     лог-файлов. Фильтр просмотрщика берёт его, а не статичный набор,
-         *     чтобы не отставать от реальных групп (имя группы = имя модуля).
+         * @description The dynamic list of the log groups: the distinct field 'group' of all the log files. The filter of the viewer takes it,
+         *     not a static set, so as not to fall behind the real groups (the name of a group is the name of a module).
          */
         get: operations["log_groups_api_logs_groups_get"];
         put?: never;
@@ -1789,7 +1780,8 @@ export interface paths {
         put?: never;
         /**
          * Editor
-         * @description The torrent editor of the page: the items of its five tabs, the folders, what is unplaced, the profiles.
+         * @description The torrent editor of the page: the items of its five tabs, the folders, what is unplaced, the profiles. The first
+         *     opening of a page makes its profiles; the editor itself is a read.
          */
         post: operations["editor_api_torrent_editor_post"];
         delete?: never;
@@ -2610,9 +2602,8 @@ export interface components {
         };
         /**
          * DynamicObject
-         * @description Динамический ответ (форма зависит от данных/типа серии): главы,
-         *     композиция, медиа-элементы, превью. extra='allow' пропускает всё —
-         *     ничего не отрезается; жёстко фиксировать форму не требуется.
+         * @description A dynamic answer (the shape depends on the data or the kind of the series): chapters, composition, media items, previews.
+         *     extra='allow' lets everything through — nothing is cut off; the shape needs not be fixed hard.
          */
         DynamicObject: {
             [key: string]: unknown;
@@ -2645,7 +2636,7 @@ export interface components {
         };
         /**
          * ErrorOnly
-         * @description Тело ошибки вида {error: ...} (без success) — для документации.
+         * @description The body of an error of the form {error: ...} (without success) — for the documentation.
          */
         ErrorOnly: {
             /** Error */
@@ -2655,7 +2646,7 @@ export interface components {
         };
         /**
          * ErrorResponse
-         * @description Ошибка (отдаётся через JSONResponse; здесь — для документации
+         * @description An error (it goes out through JSONResponse; here it is for the documentation of
          *     `responses={code: {"model": ErrorResponse}}`).
          */
         ErrorResponse: {
@@ -2679,7 +2670,7 @@ export interface components {
         Exclusion: "rule" | "no_number" | "source" | "settings";
         /**
          * FailuresReset
-         * @description Неудачные попытки сериала сброшены: сколько озвучек начато сначала (работа — со следующей синхронизацией).
+         * @description The failed attempts of the series are reset: how many voice-overs begin anew (the work goes with the next sync).
          */
         FailuresReset: {
             /** Success */
@@ -2846,7 +2837,7 @@ export interface components {
         };
         /**
          * OkResponse
-         * @description Стандартный успех: {success: true[, message]}.
+         * @description The standard success: {success: true[, message]}.
          */
         OkResponse: {
             /** Success */
@@ -2887,7 +2878,7 @@ export interface components {
         /**
          * OutputSettingsSet
          * @description The body of the command `composition.settings.set` without the series, which the path names; the fields
-         *     are those of core.contracts.SettingsSet (a test keeps them equal).
+         *     are those of core.contracts.SettingsSet without `series_id`.
          */
         OutputSettingsSet: {
             /** Season */
@@ -3686,8 +3677,8 @@ export interface components {
         };
         /**
          * QueueTask
-         * @description Задача очереди (агент/загрузки/прогресс). Поля динамические —
-         *     extra='allow' пропускает всё; жёстко фиксировать не требуется.
+         * @description A task of a queue (agent, downloads, progress). The fields are dynamic — extra='allow' lets everything through;
+         *     nothing needs to be fixed hard.
          */
         QueueTask: {
             [key: string]: unknown;
@@ -3731,7 +3722,7 @@ export interface components {
         };
         /**
          * ReadCancelled
-         * @description Чтение страницы остановлено: оно кончается неудачей «чтение остановлено», служит прежняя таблица; false — оно не шло.
+         * @description The read of a page is stopped: it ends failed with «чтение остановлено», the former table serves; false — it was not going.
          */
         ReadCancelled: {
             /** Success */
@@ -4269,7 +4260,7 @@ export interface components {
         };
         /**
          * SyncCancelled
-         * @description Синхронизация сериала остановлена: всё, что она делала, прервано, ничего не применено; false — она не шла.
+         * @description The sync of a series is stopped: all it did is interrupted, nothing is applied; false — it was not going.
          */
         SyncCancelled: {
             /** Success */
@@ -4433,8 +4424,7 @@ export interface components {
         };
         /**
          * TmdbInfo
-         * @description TMDB-маппинг серии; поля динамические (tmdb_id, series_name, year,
-         *     poster_path, last_updated, ...).
+         * @description The TMDB mapping of a series; the fields are dynamic (tmdb_id, series_name, year, poster_path, last_updated, ...).
          */
         TmdbInfo: {
             [key: string]: unknown;
