@@ -71,25 +71,33 @@ async def _probe(client: httpx.AsyncClient, url: str, headers: dict) -> int:
         raise _Failed(reason("network_error", cause=type(exc).__name__)) from exc
 
 
-async def _fetch_part(client: httpx.AsyncClient, url: str, headers: dict, first: int, last: int) -> bytes:
+async def _fetch_part(client: httpx.AsyncClient, url: str, headers: dict, first: int, last: int,
+                      progress: "_Progress") -> bytes:
     expected = last - first + 1
 
     async def ask() -> tuple[bytes | None, str]:
         """The part, or what went wrong with a try that may pass; a refusal that cannot pass ends the download at once."""
+        got = 0
         try:
             async with client.stream("GET", url, headers={**headers, "Range": f"bytes={first}-{last}"}) as response:
                 status = response.status_code
                 if status == 206:
-                    data = await response.aread()
-                    if len(data) == expected:
-                        return data, ""
-                    return None, reason("part_short", first=first, last=last, got=len(data), expected=expected)
+                    chunks = []
+                    async for chunk in response.aiter_bytes():
+                        chunks.append(chunk)
+                        got += len(chunk)
+                        await progress.add(len(chunk))
+                    if got == expected:
+                        return b"".join(chunks), ""
+                    progress.take_back(got)
+                    return None, reason("part_short", first=first, last=last, got=got, expected=expected)
                 if status in _TRANSIENT_STATUSES or status >= 500:
                     return None, reason("part_refused", status=status, first=first, last=last)
                 # A host that says a part is not there for good ends the download as the source's last word.
                 refused = reason("part_not_served", status=status, first=first, last=last)
                 raise _Failed(Final(refused) if status in GONE else refused)
         except httpx.HTTPError as exc:
+            progress.take_back(got)
             return None, reason("network_error", cause=type(exc).__name__)
 
     (data, problem), _attempts, _exhausted = await retrying(
@@ -101,12 +109,22 @@ async def _fetch_part(client: httpx.AsyncClient, url: str, headers: dict, first:
 
 
 class _Progress:
+    """The bytes of the file as they come. Only a new most of them is reported: it is the sign of life of the download,
+    and a host that sends the same first bytes of a part on every try and then falls silent gives none."""
+
     def __init__(self, total: int, on_progress: ProgressCb) -> None:
         self._total, self._on_progress = total, on_progress
-        self._done, self._started, self._last = 0, time.monotonic(), 0.0
+        self._done, self._most, self._started, self._last = 0, 0, time.monotonic(), 0.0
+
+    def take_back(self, size: int) -> None:
+        """The bytes of a part that failed: they are asked again, and reporting them would be a false sign of life."""
+        self._done -= size
 
     async def add(self, size: int) -> None:
         self._done += size
+        if self._done <= self._most:
+            return
+        self._most = self._done
         now = time.monotonic()
         if self._done < self._total and now - self._last < PROGRESS_INTERVAL_S:
             return
@@ -168,9 +186,8 @@ async def _fetch_all(client: httpx.AsyncClient, url: str, headers: dict, tmp_pat
                 first = queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
-            data = await _fetch_part(client, url, headers, first, min(first + PART_BYTES, total) - 1)
+            data = await _fetch_part(client, url, headers, first, min(first + PART_BYTES, total) - 1, progress)
             await write(first, data)
-            await progress.add(len(data))
 
     tasks = [asyncio.ensure_future(work()) for _ in range(max(1, min(threads, MAX_WORKERS)))]
     try:
