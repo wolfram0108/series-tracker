@@ -447,6 +447,7 @@ export const ru = {
   "reason.probe_failed": "проба не удалась: {error}",
   "reason.vibix_no_button": "на странице нет кнопки Vibix",
   "reason.vibix_api_timeout": "Vibix API не ответил за отведённое время; проверьте страницу и браузер",
+  "reason.vibix_series_status": "Vibix не отдал список серий сериала: статус {status}",
   "reason.vibix_no_episode": "серии нет в плейлисте Vibix",
   "reason.vibix_season_required": "в каталоге Vibix несколько сезонов, сезон не выбран ({seasons})",
   "reason.vibix_season_missing": "в каталоге Vibix нет сезона {season}",

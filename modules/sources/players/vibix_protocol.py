@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 
 from core.reasons import reason
 
@@ -362,14 +362,30 @@ async def capture_with_browser(browser: Browser, page_url: str, *,
             raise VibixUnavailable(reason("vibix_no_button")) from exc
         await button.click(timeout=15_000)
         response = await asyncio.wait_for(api_future, timeout=timeout_s)
-        body = await response.body()
+        api_url, body = await asyncio.wait_for(_whole_series(response), timeout=timeout_s)
         manifest_url, manifest_body = await _manifest(manifest_future)
-        return Capture(page_url=page_url, api_url=response.url, body=body,
+        return Capture(page_url=page_url, api_url=api_url, body=body,
                        manifest_url=manifest_url, manifest_body=manifest_body)
     except asyncio.TimeoutError as exc:
         raise VibixUnavailable(reason("vibix_api_timeout")) from exc
     finally:
         await asyncio.shield(context.close())
+
+
+async def _whole_series(response) -> tuple[str, bytes]:
+    """The list of every episode of the series. A page may embed the player of its own episode (`episode[]` in the ask of
+    the player): the same ask without it, made from the player's own frame, lists the whole series."""
+    parts = urlparse(response.url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if not any(name == "episode[]" for name, _value in query):
+        return response.url, await response.body()
+    whole = urlunparse(parts._replace(query=urlencode([(name, value) for name, value in query if name != "episode[]"])))
+    status, text = await response.frame.evaluate(
+        "async (url) => { const answer = await fetch(url, {credentials: 'include'}); return [answer.status, await answer.text()]; }",
+        whole)
+    if status != 200:
+        raise VibixUnavailable(reason("vibix_series_status", status=status))
+    return whole, text.encode()
 
 
 async def _manifest(future: asyncio.Future) -> tuple[str, bytes | None]:
