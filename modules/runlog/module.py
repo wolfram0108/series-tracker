@@ -20,32 +20,29 @@ ones go when a new run opens and at the start; and all the dumps together keep w
 when a run opens and at the start (a sync of hours is a dump of a gigabyte, and the disk is the disk of the database).
 Without ST_LOG_DIR (a script, a test that names no folder) nothing is written.
 
+The count is in `calc/runlog`: what an entry is as a line (a payload told without its secrets, models of any depth included), which
+dumps stay, which event opens or closes a run. Here are the disk and the threads: the files, the writer, the handler of the log.
+
 Queries, commands, events: none of its own; it only looks at the bus and the log (no subscription, no answer)."""
 from __future__ import annotations
 
 import asyncio
-import gzip
-import json
 import logging
 import os
-import re
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from pydantic import BaseModel
-
+from calc.runlog.lines import BUS, CLOSE, LOG, OPEN, pack
+from calc.runlog.retention import SUFFIX, oldest_first, surplus
+from calc.runlog.runs import log_body, read_signal, run_name, sync_signal
 from core import compute, storage
-from core.module import BaseModule
-from core.secrets import redacted
-from core.topics import SCAN_RUN_CHANGED, SOURCES_TABLE_TRACE
 from core.envelope import Envelope
+from core.module import BaseModule
+from core.topics import SCAN_RUN_CHANGED, SOURCES_TABLE_TRACE
 
 KEEP = 3  # dumps kept per series and per page: the last syncs are what is looked into
 BUDGET = 2 * 1024 ** 3  # bytes of all the dumps together; the dumps being written are never removed
-
-
-READS = "reads"  # the folder of the dumps of the reads of pages, beside the folders of the series
 
 
 @dataclass
@@ -58,42 +55,11 @@ class _Run:
 
     @property
     def name(self) -> str:
-        return f"сериал {self.subject['series_id']}" if "series_id" in self.subject else f"чтение {self.subject['url']}"
-
-
-def page_folder(url: str) -> str:
-    """The address of a page as the name of the folder of its dumps."""
-    return re.sub(r"[^0-9A-Za-zА-Яа-яЁё._-]+", "_", url.split("://", 1)[-1]).strip("_")[:100] or "page"
+        return run_name(self.subject)
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _written(payload, topic: str | None = None):
-    """What of a payload goes into a dump: a model handed over in the process whole (the layout, megabytes) is told by its
-    kind and the size of its lists; its rows are in the dump as the planner's trace of the inputs of its plan. `topic` is the
-    topic it goes to: some fields are a secret in the payload of one topic only (core/secrets.py)."""
-    if isinstance(payload, BaseModel):
-        # A model that carries a secret (a setting read, a password) is masked as its dictionary is: the dump keeps no secret.
-        return redacted({"model": type(payload).__name__,
-                         **{name: (len(value) if isinstance(value, (list, tuple, dict)) else value)
-                            for name, value in payload.__dict__.items()}}, topic)
-    if isinstance(payload, (list, tuple)) and any(isinstance(each, BaseModel) for each in payload):
-        return [_written(each, topic) for each in payload]  # a reply that is a row of models (the references of a series)
-    return redacted(payload, topic)
-
-
-def _line(entry) -> str:
-    kind, at, body = entry
-    if kind == "bus":
-        body = {"kind": body.kind, "topic": body.topic, "cid": body.correlation_id, "reply_to": body.reply_to,
-                "admission": body.admission, "payload": _written(body.payload, body.topic)}
-    return json.dumps({"t": at, "e": kind, **body}, ensure_ascii=False, default=repr)
-
-
-def _pack(entries: list) -> bytes:
-    return gzip.compress(("\n".join(_line(each) for each in entries) + "\n").encode("utf-8"), compresslevel=6)
 
 
 def _append(path: str, data: bytes) -> None:
@@ -105,8 +71,7 @@ def _append(path: str, data: bytes) -> None:
 def _prune(folder: str, keep: int) -> None:
     if not os.path.isdir(folder):
         return
-    names = sorted(name for name in os.listdir(folder) if name.endswith(".jsonl.gz"))
-    for name in names[:max(0, len(names) - keep)]:
+    for name in surplus(os.listdir(folder), keep):
         os.remove(os.path.join(folder, name))
 
 
@@ -122,7 +87,7 @@ def _within(root: str, budget: int, writing: set[str]) -> list[str]:
     found = []
     for folder, _dirs, names in os.walk(root):
         for name in names:
-            if name.endswith(".jsonl.gz"):
+            if name.endswith(SUFFIX):
                 path = os.path.join(folder, name)
                 try:
                     found.append((os.stat(path).st_mtime, os.path.getsize(path), path))
@@ -130,11 +95,9 @@ def _within(root: str, budget: int, writing: set[str]) -> list[str]:
                     continue
     total = sum(size for _at, size, _path in found)
     removed = []
-    for _at, size, path in sorted(found):
+    for size, path in oldest_first(found, writing):
         if total <= budget:
             break
-        if path in writing:
-            continue
         try:
             os.remove(path)
         except OSError:
@@ -154,12 +117,7 @@ class _Records(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         if record.name == RunlogModule.name or not self.module.runs:
             return
-        try:
-            body = {"level": record.levelname, "group": record.name, "message": record.getMessage(),
-                    "exception": logging.Formatter().formatException(record.exc_info) if record.exc_info else None}
-        except Exception:  # noqa: BLE001 — a line that cannot be made is named, not lost silently
-            body = {"level": record.levelname, "group": record.name, "message": repr(record.msg), "exception": None}
-        entry = ("log", _now(), body)
+        entry = (LOG, _now(), log_body(record))
         if threading.get_ident() == self.module.loop_thread:
             self.module.take(entry)
         else:
@@ -217,7 +175,7 @@ class RunlogModule(BaseModule):
             logging.getLogger().removeHandler(self._handler)
         for run in self.runs.values():
             if not run.closing:
-                run.lines.append(("close", _now(), {**run.subject, "stopped": True}))
+                run.lines.append((CLOSE, _now(), {**run.subject, "stopped": True}))
                 run.closing = True
         self._wake.set()
         await self.written()
@@ -232,30 +190,28 @@ class RunlogModule(BaseModule):
     # --- what comes in --------------------------------------------------------------------------------------------
 
     def _seen(self, env: Envelope) -> None:
-        payload = env.payload if isinstance(env.payload, dict) else {}
-        if env.topic == SCAN_RUN_CHANGED.name and payload.get("active"):
-            series_id = int(payload["series_id"])
-            if series_id not in self.runs or self.runs[series_id].closing:
-                self._open(series_id, {"series_id": series_id}, str(series_id))
-        elif env.topic == SOURCES_TABLE_TRACE.name and payload.get("kind") == "begin":
-            # A read inside the run of a series is in the dump of that run; one outside any is a run of its own.
-            url = str(payload.get("url") or "")
+        # Only the two events that move a run are read, as the models of their records; every envelope is taken into the open runs.
+        signal = None
+        if env.topic == SCAN_RUN_CHANGED.name:
+            signal = sync_signal(env.payload)
+        elif env.topic == SOURCES_TABLE_TRACE.name:
             in_a_sync = any(isinstance(key, int) and not run.closing for key, run in self.runs.items())
-            if url and not in_a_sync and (url not in self.runs or self.runs[url].closing):
-                self._open(url, {"url": url}, os.path.join(READS, page_folder(url)))
-        self.take(("bus", _now(), env))
-        ended = (int(payload["series_id"]) if env.topic == SCAN_RUN_CHANGED.name and not payload.get("active")
-                 else str(payload.get("url") or "") if env.topic == SOURCES_TABLE_TRACE.name and payload.get("kind") == "end" else None)
-        run = self.runs.get(ended) if ended not in (None, "") else None
+            signal = read_signal(env.payload, in_a_sync)
+        if signal is not None and signal.opens:
+            held = self.runs.get(signal.key)
+            if held is None or held.closing:
+                self._open(signal.key, signal.subject, signal.folder)
+        self.take((BUS, _now(), env))
+        run = self.runs.get(signal.key) if signal is not None and not signal.opens else None
         if run is not None and not run.closing:
-            run.lines.append(("close", _now(), {**run.subject, "stopped": False}))
+            run.lines.append((CLOSE, _now(), {**run.subject, "stopped": False}))
             run.closing = True
 
     def _open(self, key: int | str, subject: dict, folder: str) -> None:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
         path = os.path.join(self.folder, folder, f"{stamp}-{os.getpid()}.jsonl.gz")
         run = _Run(subject, path)
-        run.lines.append(("open", _now(), {**subject, "pid": os.getpid(), "path": path}))
+        run.lines.append((OPEN, _now(), {**subject, "pid": os.getpid(), "path": path}))
         self.runs[key] = run
 
     def take(self, entry) -> None:
@@ -279,7 +235,7 @@ class RunlogModule(BaseModule):
                 lines, run.lines = run.lines, []
                 if lines:
                     try:
-                        await storage.call(_append, run.path, await compute.run(_pack, lines))
+                        await storage.call(_append, run.path, await compute.run(pack, lines))
                     except Exception:  # noqa: BLE001 — the dump never stops the service; its loss is in the log
                         self.log.exception("%s: часть дампа не записана (%d строк)", run.name, len(lines))
                 if run.closing and not run.lines:
