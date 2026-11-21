@@ -23,6 +23,7 @@ class Job:
     whole: bool | None
     ytdlp: bool | None
     need_key: str = ""
+    place: tuple = ()  # where it waits in the queue (`waiting_place`)
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,14 @@ class Stream:
 
 def job_of(fetch: DownloadFetch) -> Job:
     return Job(fetch.key, fetch.url, fetch.path, fetch.max_height, fetch.series_id, fetch.whole, fetch.ytdlp)
+
+
+def waiting_place(fetch: DownloadFetch, asked: int) -> tuple:
+    """Where a fetch waits in the queue: the fetches of an earlier sync first, within a sync the earlier episode of the series (its video
+    and voice-overs together, so that an episode is ready for its alignment while the next one downloads; the next source of an episode
+    that failed goes before the later episodes), then the order asked. A fetch that names no place waits after those of its sync that do."""
+    sync = fetch.need.sync_started if fetch.need is not None else ""
+    return sync, fetch.place is None, fetch.place or 0, asked
 
 
 def path_refusal(job: Job) -> str | None:

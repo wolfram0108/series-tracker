@@ -103,6 +103,7 @@ Events in: gateway.sse.clients, downloads.fetch.finished, conform.job.finished, 
 from __future__ import annotations
 
 import asyncio
+import bisect
 import hashlib
 import json
 import os
@@ -194,6 +195,7 @@ class BusSync(SeriesSync):
         self.conform_dir = ""
         self.kept: Kept | None = None  # the alignments this series keeps until their containers are in place
         self.made: Plan | None = None  # the plan in force: what a step asks about its neighbours
+        self.slots: list = []  # the episodes of the plan in force, in their order: the place of a download in the queue
         self._aligners: tuple[Plan | None, dict] = (None, {})
         self.download_names: dict[str, str] = {}  # the name of the file of a download, by the step that took it
         # The names the rule of the series gave, kept by the module for the card they were given for: a view of the window
@@ -220,6 +222,7 @@ class BusSync(SeriesSync):
     async def plan_of(self, inputs):
         """The plan of the sync; the first one of it is the plan the window shows while the sync runs."""
         made = self.made = await super().plan_of(inputs)
+        self.slots = [goal.slot for goal in made.goals]
         if self.download and not self.told:
             self.told = True
             await self.m._publish_view(self.series.id, self, made, inputs)
@@ -374,7 +377,8 @@ class BusSync(SeriesSync):
         need, variant = self._telemetry(op, row, cap)
         finished = await self.m.fetch(key, DownloadFetch(
             key=key, url=row.link, path=path, series_id=self.series.id, whole=op.kind == "download_video",
-            ytdlp=row.id.source_id in self.vk_sources, max_height=cap or None, need=need, variant=variant))
+            ytdlp=row.id.source_id in self.vk_sources, max_height=cap or None, need=need, variant=variant,
+            place=bisect.bisect_left(self.slots, op.slot or (row.season, row.start))))
         if not finished.ok:
             if finished.transient:
                 self.m.log.warning("сериал %d: загрузка %s не удалась, повторится при следующей синхронизации: %s",

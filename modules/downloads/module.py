@@ -14,11 +14,13 @@ playlists) and the disk. Every reply and event is a model of core/contracts/down
 the bus as its JSON).
 
 Queries / commands:
-  downloads.fetch DownloadFetch {key, url, path, max_height?, series_id?, whole?, ytdlp?, need?, variant?} - the stream behind the
+  downloads.fetch DownloadFetch {key, url, path, max_height?, series_id?, whole?, ytdlp?, need?, variant?, place?} - the stream behind the
       link into an absolute path. `need` (DownloadNeed) names what the fetch is for and `variant` (DownloadVariant) which row it
       takes, in the marks of the window «Выход»: fetches of one need are one card. `whole`: the video of a reference; `ytdlp`:
       the downloader may take over a link whose stream request failed (a VK video). A key already waiting or under way is not
-      asked twice. The fetches wait in one queue in the order asked; how many go at once is by the way each file comes
+      asked twice. `place`: the place of the episode in its series. The fetches wait in one queue: those of an earlier sync first,
+      within a sync episode by episode (its video and voice-overs together, the next source of an episode before the later episodes),
+      then in the order asked (calc/downloads/fetch.py `waiting_place`); how many go at once is by the way each file comes
       (calc/downloads/limits.py): a download by many connections takes `threads_per_file` of the `threads_total` (2 at once with
       16 and 32), one by a single connection a place of `single_at_once` (4), one a provider of the socket makes a place of
       `provider_at_once` (2).
@@ -64,6 +66,7 @@ themselves are the plan's, which asks again after a stop.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import os
 import time
 import traceback
@@ -73,7 +76,7 @@ from datetime import datetime, timezone
 from calc.downloads import cards as cardbook
 from calc.downloads.failure import Failed, Unasked, kind_of
 from calc.downloads.fetch import (Job, Stream, finished, job_of, may_begin, need_of, path_refusal, refusal_words, removable, started,
-                                  stops_notice, stops_series, stream_of, task_key, unreached)
+                                  stops_notice, stops_series, stream_of, task_key, unreached, waiting_place)
 from calc.downloads.limits import KEYS, MULTI, PROVIDER, SINGLE, after_setting, change_of, limits_of
 from calc.downloads.queue import queue_of
 from core import notices, storage
@@ -163,7 +166,8 @@ class DownloadsModule(BaseModule):
         self._download = downloader  # replaced in tests
         self.places = Places(DownloadLimits())  # how many fetches go at once, by the way a file comes
         self._placing: dict[str, str] = {}  # fetches that asked their stream and wait for a place of its way
-        self._fetch_queue: list[Job] = []
+        self._fetch_queue: list[Job] = []  # in the order the fetches go (calc/downloads/fetch.py `waiting_place`)
+        self._asked = 0  # how many fetches were asked: the order asked, among those of one place
         self._fetch_active: dict[str, tuple[asyncio.Task, int | None]] = {}
         self._fetch_jobs: dict[str, Job] = {}  # the job of every fetch under way: the window names it by its path
         self._book = cardbook.Book()  # the telemetry of every need under way (core/contracts/downloads.py)
@@ -353,7 +357,8 @@ class DownloadsModule(BaseModule):
 
     async def on_fetch(self, env: Envelope) -> None:
         fetch = DownloadFetch.model_validate(env.payload)
-        job = job_of(fetch)
+        self._asked += 1
+        job = replace(job_of(fetch), place=waiting_place(fetch, self._asked))
         if (refused := path_refusal(job)) is not None:
             self._finished(job, False, refused, False)
             return
@@ -368,7 +373,7 @@ class DownloadsModule(BaseModule):
         job = replace(job, need_key=need.key)
         self._book = cardbook.queued(self._book, need, fetch.variant, _now(), _wall())
         self._going.set()
-        self._fetch_queue.append(job)
+        bisect.insort(self._fetch_queue, job, key=lambda each: each.place)
         self._fetch_pump()
         self._announce_queue()
 
@@ -388,7 +393,7 @@ class DownloadsModule(BaseModule):
         return super().background() | {runner for runner, _ in self._fetch_active.values()}
 
     def _fetch_pump(self) -> None:
-        """What waits starts in the order asked (calc/downloads/fetch.py `may_begin` says how many): a fetch asks its stream,
+        """What waits starts in the order of the queue (calc/downloads/fetch.py `may_begin` says how many): a fetch asks its stream,
         learns its way and takes the place of its way or waits for it."""
         while may_begin(len(self._fetch_queue), len(self._fetch_active), len(self._placing), self.places.total):
             job = self._fetch_queue.pop(0)

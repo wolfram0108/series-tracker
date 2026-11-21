@@ -196,7 +196,8 @@ class SeriesRef(BaseModel):
 class DownloadFetch(BaseModel):
     """`downloads.fetch`: the stream behind `url` into the absolute `path`. `key` is the fetch (one waiting or under way is not asked
     twice); `need` and `variant` tell what it is for and which row it takes; `whole` is the video of a reference, `ytdlp` lets the
-    downloader take over a link whose stream request failed, `max_height` caps the picture."""
+    downloader take over a link whose stream request failed, `max_height` caps the picture. `place` is the place of the episode the
+    fetch is for in its series: the queue gives out the fetches of a sync episode by episode, not in the order they came."""
 
     key: str | None = None
     url: str | None = None
@@ -207,6 +208,7 @@ class DownloadFetch(BaseModel):
     ytdlp: bool | None = None
     need: DownloadNeed | None = None
     variant: DownloadVariant | None = None
+    place: int | None = None
 
 
 class FetchStarted(Frozen):
