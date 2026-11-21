@@ -158,7 +158,8 @@ class Neighbours(BaseModule):
                                                    for job in self.daemon.jobs.values() if "#" in str(job.get("label"))})}
 
     async def on_conform_settings(self, env: Envelope) -> dict:
-        return {"clear_finished": False}
+        return {"url": "", "work_dir": "", "work_dir_remote": "", "clear_finished": False,
+                "params": {"audio_method": "muq", "drift_speed_pct": None, "keep_tmp": False, "fill_silence": True, "extend_edges": True}}
 
     async def on_cancel(self, env: Envelope) -> dict:
         self.daemon.jobs.pop(env.payload["job_id"], None)

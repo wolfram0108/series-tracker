@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
-from core.contracts import STAGES, AttemptLine, DownloadCard, DownloadNeed, DownloadVariant, Figures, Progress, StageView
+from core.contracts import STAGES, AttemptLine, DownloadCard, DownloadNeed, DownloadVariant, Figures, Progress
 
 MB = 1024 ** 2
 ENDED = ("done", "failed")

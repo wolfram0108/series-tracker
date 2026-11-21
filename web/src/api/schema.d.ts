@@ -3934,7 +3934,7 @@ export interface components {
         };
         /**
          * ScheduleValue
-         * @description The times of day of the syncs and of the checks of the torrent releases (core/schedule.py), «HH:MM».
+         * @description The times of day of the syncs and of the checks of the torrent releases (calc/schedule.py), «HH:MM».
          */
         ScheduleValue: {
             /** Syncs */
