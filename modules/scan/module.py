@@ -169,7 +169,7 @@ class ScanModule(BaseModule):
         for task in await self.repo.error_tasks():
             self._contribute(task["series_id"], scanning=False, error=True)
         if self._scheduler:
-            self.spawn(self._scheduler_loop())
+            self.spawn(self._scheduler_loop(), name="scan:scheduler", lasting=True)
 
     async def on_runs_get(self, env: Envelope) -> OpenRuns:
         """The runs of syncs that are open, as their commands are written: each with its snapshot. An executor that starts

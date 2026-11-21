@@ -247,6 +247,8 @@ class Progress(Frozen):
 
 
 class VideoProgress(Progress):
-    """The event `sources.video.progress`: the progress of the download of the file `target`, which a player or a provider takes itself."""
+    """The event `sources.video.progress`: the progress of the download of the file `target`, which a player or a provider takes itself. The
+    event carries the figures as the player told them (their order is theirs); the producer checks them against this model first, and the
+    consumer reads them with it."""
 
     target: str

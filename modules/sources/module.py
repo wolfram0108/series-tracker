@@ -659,13 +659,15 @@ class SourcesModule(BaseModule):
             return VideoFetched(ok=False, error=reason("no_player_downloads"), final=True, kind="final")
 
         async def told(figures: dict) -> None:
+            # The figures are the player's own and their order is theirs: the event carries them as they came, once they are known to
+            # keep to the standard of the telemetry (VideoProgress); a frame that breaks it is dropped, and the download goes on.
+            payload = {**figures, "target": target}
             try:
-                progress = VideoProgress.model_validate({**figures, "target": target})
-            except ValueError as exc:  # a frame that breaks the standard of the telemetry is dropped; the download goes on
+                VideoProgress.model_validate(payload)
+            except ValueError as exc:
                 self.log.warning("%s: кадр хода загрузки не принят: %s", os.path.basename(target), exc)
                 return
-            # A report names what it knows: a figure it does not name is absent in the event, not none.
-            self.publish_event(SOURCES_VIDEO_PROGRESS, progress.model_dump(mode="json", exclude_unset=True))
+            self.publish_event(SOURCES_VIDEO_PROGRESS, {"target": target, **figures})
 
         work = asyncio.ensure_future(player.transfer(url, target, request.max_height, int(request.connections or 1), told))
         self._transfers[target] = work
