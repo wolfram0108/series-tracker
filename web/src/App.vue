@@ -6,7 +6,7 @@ import { ref } from "vue"
 import { t } from "./i18n"
 import AppHeader from "./components/AppHeader.vue"
 import ConnectionBanner from "./components/ConnectionBanner.vue"
-import SeriesCard from "./components/SeriesCard.vue"
+import SeriesList from "./components/SeriesList.vue"
 import ConfirmDialog from "./components/ConfirmDialog.vue"
 import SettingsModal from "./components/SettingsModal.vue"
 import ExtensionsModal from "./components/ExtensionsModal.vue"
@@ -23,18 +23,11 @@ import { useApi } from "./composables/useApi"
 import { useConfirm } from "./composables/useConfirm"
 import { useAction } from "./composables/useAction"
 import { useSSE } from "./composables/useSSE"
-import { useShownCells } from "./composables/useShownCells"
-import { useUnderWindows } from "./composables/useWindowCover"
 import { api } from "./api/client"
 
 // Главный экран: шапка + список серий на живых данных из стора. Модалки
 // (add / logs / settings / status / confirmation) подключены и рабочие.
 const seriesStore = useSeriesStore()
-// A card of a series is drawn while it is near the view (composables/useShownCells.ts): a long list draws a screen of them.
-const seriesList = ref<HTMLElement | null>(null)
-const { built, cell, sizeOf } = useShownCells(seriesList)
-// Under an open window the list is not drawn: it is not seen there (composables/useWindowCover.ts).
-const listCut = useUnderWindows(seriesList)
 const scannerStore = useScannerStore()
 const ui = useUiStore()
 const auth = useAuthStore()
@@ -126,22 +119,13 @@ const remove = useAction(async (id: number) => {
       @settings="openModal = 'settings'"
       @logout="onLogout"
     />
-    <div ref="seriesList" class="series-list" :style="listCut">
-      <template v-for="s in seriesStore.list" :key="s.id">
-        <div v-if="!built(s.id)" :ref="cell(s.id)" class="cell-shell series-shell" :style="sizeOf(s.id)" aria-hidden="true" />
-        <SeriesCard
-          v-else
-          :ref="cell(s.id)"
-          class="cell-in"
-          :series="s"
-          :saving="seriesStore.isSaving(s.id)"
-          @open-status="onOpenStatus"
-          @scan="scan.run"
-          @cancel-scan="cancelScan.run"
-          @delete="remove.run"
-          @toggle-auto-scan="toggleAuto.run"
-        />
-      </template>
+    <SeriesList
+      @open-status="onOpenStatus"
+      @scan="scan.run"
+      @cancel-scan="cancelScan.run"
+      @delete="remove.run"
+      @toggle-auto-scan="toggleAuto.run"
+    >
       <!-- Nothing is said of "no series" before the list has been read, and nothing of it where it could not be read. -->
       <div v-if="!seriesStore.list.length" class="empty-state" :role="seriesStore.loaded ? undefined : 'status'">
         <template v-if="seriesStore.failed">
@@ -151,7 +135,7 @@ const remove = useAction(async (id: number) => {
         <template v-else-if="!seriesStore.loaded"><i class="pi pi-spin pi-spinner" aria-hidden="true" /> {{ t("app.loading") }}</template>
         <template v-else>{{ t("app.empty") }}</template>
       </div>
-    </div>
+    </SeriesList>
 
     <SettingsModal v-if="openModal === 'settings'" @close="openModal = null" />
     <ExtensionsModal v-if="openModal === 'extensions'" @close="openModal = null" />

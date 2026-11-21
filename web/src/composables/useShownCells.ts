@@ -52,19 +52,42 @@ export function useShownCells(area: Ref<HTMLElement | null>) {
   /** Whether the card of the key is drawn now. */
   const built = (key: Key): boolean => every || near.has(key)
 
-  /** The element ref of the card of a key or of its shell: whichever stands there is watched. */
-  const cell = (key: Key) => (ref: unknown): void => {
+  /** The element ref of the card of a key or of its shell: whichever stands there is watched. The ref of a key is one function
+   *  for the life of the list: a new one at every render would make the list unwatch and watch again every cell it holds. */
+  const refs = new Map<Key, (ref: unknown) => void>()
+  const cell = (key: Key): ((ref: unknown) => void) => {
+    let made = refs.get(key)
+    if (!made) {
+      made = (ref: unknown) => watchCell(key, ref)
+      refs.set(key, made)
+    }
+    return made
+  }
+  const forget = (key: Key, element: Element): void => {
+    observer?.unobserve(element)
+    keyOf.delete(element)
+    if (cells.get(key) === element) cells.delete(key)
+  }
+  const watchCell = (key: Key, ref: unknown): void => {
     const element = ref instanceof Element ? ref : (ref as { $el?: unknown } | null)?.$el
     const old = cells.get(key)
-    if (old && old !== element) {
-      observer?.unobserve(old)
-      keyOf.delete(old)
-      cells.delete(key)
+    if (element instanceof Element) {
+      if (old === element) return
+      if (old) forget(key, old)
+      cells.set(key, element)
+      keyOf.set(element, key)
+      observer?.observe(element)
+      return
     }
-    if (!(element instanceof Element) || old === element) return
-    cells.set(key, element)
-    keyOf.set(element, key)
-    observer?.observe(element)
+    // A cell went: the card that took its place may have come before this news, so what is gone is told once the render
+    // is over, by the element no longer being in the page. A key whose cell is gone for good is forgotten.
+    queueMicrotask(() => {
+      const now = cells.get(key)
+      if (now && !now.isConnected) {
+        forget(key, now)
+        refs.delete(key)
+      }
+    })
   }
 
   /** The size of the shell of a key: the height its card had, or the shell's own (its CSS) before the card was ever drawn. */

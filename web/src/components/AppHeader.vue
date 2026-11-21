@@ -5,8 +5,6 @@ import ScanClock from "./ScanClock.vue"
 import { useIndicatorsStore } from "../stores/indicators"
 import { useAuthStore } from "../stores/auth"
 import { t } from "../i18n"
-import { ref } from "vue"
-import { useUnderWindows } from "../composables/useWindowCover"
 
 // Шапка приложения: заголовок + индикаторы агентов (реактивно из стора) +
 // кнопки действий (открытие модалок — обрабатывает родитель).
@@ -14,14 +12,11 @@ import { useUnderWindows } from "../composables/useWindowCover"
 // four words are held from 66rem, the tier `xl`.
 const ind = useIndicatorsStore()
 const auth = useAuthStore()
-// Under an open window the header is not drawn: it is not seen there (composables/useWindowCover.ts).
-const bar = ref<HTMLElement | null>(null)
-const barCut = useUnderWindows(bar)
 defineEmits<{ (e: "add"): void; (e: "logs"): void; (e: "extensions"): void; (e: "settings"): void; (e: "logout"): void }>()
 </script>
 
 <template>
-  <header ref="bar" class="page-header fold-room" :style="barCut">
+  <header class="page-header fold-room">
     <div class="page-title-container">
       <h1 class="page-title">WOLFRAM TS</h1>
       <div class="agent-indicators">

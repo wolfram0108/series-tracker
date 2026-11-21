@@ -50,7 +50,10 @@ const word = computed(() => props.view.word ?? stateLabel(props.view.state))
 
     <div v-if="view.bar" class="work-bar-row">
       <span v-if="view.bar.label" class="work-bar-label">{{ view.bar.label }}</span>
-      <div class="work-bar"><div class="work-bar-fill" :style="{ width: `${view.bar.percent}%` }">{{ view.bar.percent }}%</div></div>
+      <div class="work-bar" :style="{ '--done': `${view.bar.percent}%` }">
+        <div class="work-bar-fill"><div class="work-bar-paint" /></div>
+        <span class="work-bar-text">{{ view.bar.percent }}%</span>
+      </div>
     </div>
 
     <div v-if="view.rows.length" class="work-rows">

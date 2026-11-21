@@ -435,9 +435,11 @@ class GatewayModule(BaseModule):
 
         # Ф6 cutover (Р-Ф7): the root «/» is the NEW front (the Vite build), the old one is moved to «/legacy» for a rollback. Without
         # a build (no dist) the old front is served from the root, so that the stand is not left without a UI.
+        # The page names its build by the hashed names of its assets: the browser asks for it again at every load (it gets a
+        # short "not changed" while it is the same), or it keeps an older build for as long as it guesses it is fresh.
         @app.get("/")
         async def index() -> FileResponse:
-            return FileResponse(dist_index if has_dist else legacy_index)
+            return FileResponse(dist_index if has_dist else legacy_index, headers={"Cache-Control": "no-cache"})
 
         # The old front (rollback): served at /legacy; its assets are at /static.
         @app.get("/legacy")

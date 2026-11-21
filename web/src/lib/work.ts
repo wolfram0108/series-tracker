@@ -47,6 +47,36 @@ export interface WorkLine {
 }
 export type WorkAction = "remove" | "stop" | "cancel" | "delete" | "stopRead"
 
+/**
+ * A work as a list holds it: its key and its series at once, its card (the view) only when it is asked, and once. A queue of
+ * thousands of works changes on every frame of the stream, while a screen draws a few of them (composables/useShownCells.ts):
+ * the views are built for the cards drawn, not for the whole queue.
+ */
+export interface WorkItem {
+  id: string
+  seriesId: number | null
+  view: () => WorkView
+}
+
+function item(id: string, seriesId: number | null, make: () => WorkView): WorkItem {
+  let made: WorkView | undefined
+  return { id, seriesId, view: () => (made ??= make()) }
+}
+
+/** An item of a view already built (the short queues of the torrents and of the reads). */
+export const viewItem = (view: WorkView): WorkItem => ({ id: view.id, seriesId: view.seriesId, view: () => view })
+
+const downloadId = (card: DownloadCard): string => `download:${card.id}`
+const packId = (card: PackCard): string => `pack:${card.id}`
+const journalId = (journal: PackJournal): string => `journal:${journal.series_id}`
+const conformId = (task: ConformTask): string => `conform:${task.id}`
+
+export const downloadItem = (card: DownloadCard): WorkItem => item(downloadId(card), card.need.series_id, () => downloadWork(card))
+export const packItem = (card: PackCard): WorkItem => item(packId(card), card.series_id, () => packWork(card))
+export const journalItem = (journal: PackJournal): WorkItem => item(journalId(journal), journal.series_id, () => journalWork(journal))
+export const conformItem = (task: ConformTask, nameOf: (file: string) => string): WorkItem =>
+  item(conformId(task), task.series_id ?? null, () => conformWork(task, nameOf))
+
 export interface WorkView {
   id: string
   /** What the core knows the work by (the id of a card, of a job, of a torrent, the address of a page): what an action names. */
@@ -118,7 +148,7 @@ export function downloadWork(card: DownloadCard): WorkView {
     : line.outcome === "failed" ? t(`download.failed.${line.stage ?? "link"}` as MessageKey)
       : stateWord(DOWNLOAD_STAGES[active ?? "queue"])
   return {
-    id: `download:${card.id}`, ref: card.id, kind: "download", seriesId: card.need.series_id, seriesName: card.need.series_name ?? "",
+    id: downloadId(card), ref: card.id, kind: "download", seriesId: card.need.series_id, seriesName: card.need.series_name ?? "",
     episode: card.need.episode, voiceNumber: card.need.kind === "dub" ? card.need.voice_number : null,
     what: card.need.kind === "dub" ? card.need.group ?? "" : t(`download.kind.${card.need.kind}` as MessageKey),
     state: DOWNLOAD_STATES[card.status],
@@ -178,7 +208,7 @@ export function packWork(card: PackCard): WorkView {
   const gone = tracks.filter((track) => track.kind === "gone")
   const title = (track: NonNullable<PackCard["tracks"]>[number]): string => t(`pack.track.${track.kind}` as MessageKey, { name: track.label })
   return {
-    id: `pack:${card.id}`, ref: card.id, kind: "pack", seriesId: card.series_id, seriesName: card.series_name ?? "", episode: card.episode,
+    id: packId(card), ref: card.id, kind: "pack", seriesId: card.series_id, seriesName: card.series_name ?? "", episode: card.episode,
     what: t("work.kind.container"), state: PACK_STATES[card.status],
     ...(card.status === "failed" ? { action: { name: "remove" as const, label: t("download.remove"), danger: true } } : {}),
     steps: steps(card.stages ?? [], (name) => stateLabel(PACK_STAGES[name as keyof typeof PACK_STAGES])),
@@ -220,7 +250,7 @@ export function packWork(card: PackCard): WorkView {
 export function journalWork(journal: PackJournal): WorkView {
   const done = journal.steps_done ?? 0, of = journal.steps_of ?? 0
   return {
-    id: `journal:${journal.series_id}`, ref: String(journal.series_id), kind: "journal", seriesId: journal.series_id, seriesName: journal.series_name ?? "",
+    id: journalId(journal), ref: String(journal.series_id), kind: "journal", seriesId: journal.series_id, seriesName: journal.series_name ?? "",
     episode: t(`pack.journal.kind.${journal.kind ?? "sync"}` as MessageKey), what: "", state: "apply",
     steps: [], cells: [],
     facts: [
@@ -263,7 +293,7 @@ export function conformWork(task: ConformTask, nameOf: (file: string) => string)
   })
   const active = isActive(task.status)
   return {
-    id: `conform:${task.id}`, ref: task.id, kind: "conform", seriesId: task.series_id ?? null, seriesName: "", episode: episode.toLowerCase(),
+    id: conformId(task), ref: task.id, kind: "conform", seriesId: task.series_id ?? null, seriesName: "", episode: episode.toLowerCase(),
     what: task.dub_total ? tn("work.dubs", task.dub_total) : "", state: stateOf(CONFORM_JOB_STATES, task.status) ?? "planned",
     word: stateOf(CONFORM_JOB_STATES, task.status) ? undefined : task.status,
     action: !active ? { name: "delete", label: t("agents.conform.action.delete"), danger: true }

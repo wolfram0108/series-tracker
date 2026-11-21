@@ -7,10 +7,10 @@ import { useShownCells } from "../../composables/useShownCells"
 import { useSSE } from "../../composables/useSSE"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
-import { sharing } from "../../lib/sharing"
 import { stateLabel, type StateName } from "../../lib/states"
 import {
-  conformWork, downloadWork, journalWork, monitorWork, packWork, processingWork, readWork, type WorkAction, type WorkView,
+  conformItem, downloadItem, journalItem, monitorWork, packItem, processingWork, readWork, viewItem, type WorkAction, type WorkItem,
+  type WorkView,
 } from "../../lib/work"
 import { useQueuesStore } from "../../stores/queues"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
@@ -44,36 +44,32 @@ const { built, cell, sizeOf } = useShownCells(panel)
 const picked = ref<number | null>(null)
 const filter = computed(() => props.seriesId ?? picked.value)
 
-interface Section { key: string; icon: string; title: string; chip: string; tone: StateName; views: WorkView[] }
-// Each queue is counted by itself, and a card that came out as it was is the object it was (lib/sharing.ts): a frame of
-// the stream redraws only the cards whose work changed, not every card of every queue.
-const downloadViews = sharing(() => q.downloads.map(downloadWork))
-const conformViews = sharing(() => (q.conform?.tasks ?? []).map((task) => conformWork(task, (file) => voices.dubName(task.id, file))))
-const packViews = sharing(() => [...q.journals.map(journalWork), ...q.pack.map(packWork)])
-const processingViews = sharing(() => q.agent.map(processingWork))
-const monitorViews = sharing(() => q.torrents.map(monitorWork))
-const readViews = sharing(() => reads.all().map(readWork))
+interface Section { key: string; icon: string; title: string; chip: string; tone: StateName; items: WorkItem[] }
+// The queues as items (lib/work.ts): the key and the series of every work at once, its card only when it is drawn. A frame of
+// the stream changes thousands of works, and only the few on screen are counted into cards.
 const sections = computed<Section[]>(() => [
   { key: "download", icon: "pi-download", title: t("download.title"), chip: stateLabel("download"), tone: "download",
-    views: downloadViews.value },
+    items: q.downloads.map(downloadItem) },
   { key: "conform", icon: "pi-sliders-h", title: t("agents.conform.title"), chip: stateLabel("align"), tone: "align",
-    views: conformViews.value },
-  { key: "pack", icon: "pi-box", title: t("agents.pack.title"), chip: stateLabel("pack"), tone: "pack", views: packViews.value },
+    items: (q.conform?.tasks ?? []).map((task) => conformItem(task, (file) => voices.dubName(task.id, file))) },
+  { key: "pack", icon: "pi-box", title: t("agents.pack.title"), chip: stateLabel("pack"), tone: "pack",
+    items: [...q.journals.map(journalItem), ...q.pack.map(packItem)] },
   { key: "processing", icon: "pi-cog", title: t("agents.processing.title"), chip: t("agents.chip.processing"), tone: "renaming",
-    views: processingViews.value },
+    items: q.agent.map((task) => viewItem(processingWork(task))) },
   { key: "monitor", icon: "pi-wifi", title: t("agents.torrents.title"), chip: t("agents.chip.torrents"), tone: "download",
-    views: monitorViews.value },
-  { key: "read", icon: "pi-globe", title: t("agents.reads.title"), chip: stateLabel("read"), tone: "read", views: readViews.value },
+    items: q.torrents.map((task) => viewItem(monitorWork(task))) },
+  { key: "read", icon: "pi-globe", title: t("agents.reads.title"), chip: stateLabel("read"), tone: "read",
+    items: reads.all().map((read) => viewItem(readWork(read))) },
 ])
 
 // A work that does not tell its series (none yet: an alignment of a key of another maker) shows only where no series is picked.
-const ofFilter = (view: WorkView): boolean => filter.value === null || view.seriesId === filter.value
-const shown = computed(() => sections.value.map((section) => ({ ...section, shown: section.views.filter(ofFilter) })))
+const ofFilter = (each: WorkItem): boolean => filter.value === null || each.seriesId === filter.value
+const shown = computed(() => sections.value.map((section) => ({ ...section, shown: section.items.filter(ofFilter) })))
 
 const nameOf = (view: WorkView): string => (view.seriesId == null ? "" : seriesStore.byId(view.seriesId)?.name ?? view.seriesName)
 
 const seriesOptions = computed(() => {
-  const ids = new Set<number>(sections.value.flatMap((section) => section.views.flatMap((view) => (view.seriesId == null ? [] : [view.seriesId]))))
+  const ids = new Set<number>(sections.value.flatMap((section) => section.items.flatMap((each) => (each.seriesId == null ? [] : [each.seriesId]))))
   if (filter.value !== null) ids.add(filter.value)
   return [{ label: t("agents.filter.all"), value: null as number | null },
     ...[...ids].sort((a, b) => a - b).map((id) => ({ label: `#${id} ${seriesStore.byId(id)?.name ?? ""}`.trim(), value: id as number | null }))]
@@ -138,12 +134,12 @@ const str = (value: unknown) => String(value ?? "")
         </template>
         <div v-if="!section.shown.length" class="queue-empty">{{ live ? t("agents.empty") : t("common.fetching") }}</div>
         <div v-else class="agents-cards">
-          <template v-for="view in section.shown" :key="view.id">
+          <template v-for="each in section.shown" :key="each.id">
             <WorkCard
-              v-if="built(view.id)" :ref="cell(view.id)" class="cell-in" :view="view" :series-name="nameOf(view)" :busy="pending.has(view.id)"
-              @action="act(view, $event)" @plot="plot = $event"
+              v-if="built(each.id)" :ref="cell(each.id)" class="cell-in" :view="each.view()" :series-name="nameOf(each.view())"
+              :busy="pending.has(each.id)" @action="act(each.view(), $event)" @plot="plot = $event"
             />
-            <div v-else :ref="cell(view.id)" class="cell-shell work-shell" :style="sizeOf(view.id)" aria-hidden="true" />
+            <div v-else :ref="cell(each.id)" class="cell-shell work-shell" :style="sizeOf(each.id)" aria-hidden="true" />
           </template>
         </div>
       </SheetRow>

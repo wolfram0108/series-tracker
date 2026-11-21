@@ -49,13 +49,22 @@
 .work-foot { border-top: 1px dashed rgba(0, 0, 0, 0.2); padding-top: 0.5rem; }
 .work-bar-row { display: flex; align-items: center; gap: 0.625rem; }
 .work-bar-label { font-size: 0.75rem; color: var(--color-gray-600); white-space: nowrap; }
-.work-bar { flex: 1; block-size: 1rem; border-radius: 6px; overflow: hidden; background: rgba(255, 255, 255, 0.75); }
-.work-bar-fill {
-  block-size: 100%; display: flex; align-items: center; padding-inline-start: 0.5rem; color: #fff; font-size: 0.72rem; font-weight: 600;
-  background-color: var(--tone); transition: width 0.6s ease;
+.work-bar { position: relative; flex: 1; block-size: 1rem; border-radius: 6px; overflow: hidden; background: rgba(255, 255, 255, 0.75); }
+/* The fill grows by sliding, which the compositor does, not by a width laid out and painted in every frame of its
+   transition: the fill is the whole track slid left by what is not done, and its paint slides back by as much, so the
+   stripes stand where they stood and only the edge moves, as a growing width moves it. */
+.work-bar-fill, .work-bar-paint { position: absolute; inset: 0; transition: transform 0.6s ease; }
+.work-bar-fill { overflow: hidden; transform: translateX(calc(var(--done) - 100%)); }
+.work-bar-paint {
+  transform: translateX(calc(100% - var(--done)));
+  background-color: var(--tone);
   background-image: linear-gradient(45deg, rgba(255, 255, 255, 0.18) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.18) 50%,
     rgba(255, 255, 255, 0.18) 75%, transparent 75%);
   background-size: 1rem 1rem;
+}
+.work-bar-text {
+  position: absolute; inset-block: 0; inset-inline-start: 0; display: flex; align-items: center; padding-inline-start: 0.5rem;
+  color: #fff; font-size: 0.72rem; font-weight: 600;
 }
 /* The rows of what the work holds, each with the state of its own (the voice-overs of an alignment). */
 .work-rows { background: rgba(255, 255, 255, 0.65); border: 1px solid #dee2e6; border-radius: 7px; overflow: hidden; }

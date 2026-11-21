@@ -63,6 +63,8 @@
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.15); color: #2c3e50 !important; overflow: hidden;
 }
 .status-pill.ms-auto { margin-left: auto; }
+/* A label wholly under an open window is not seen: its blur is not drawn (composables/useWindowCover.ts). */
+.unified-text-bg[data-covered], .status-pill[data-covered] { backdrop-filter: none; -webkit-backdrop-filter: none; }
 /* The hidden row the widths of the pills are measured on (priority+ of SeriesCard); it takes no room. */
 .status-pills-measure {
   position: absolute; inset-block-start: 0; inset-inline-start: 0; display: flex; gap: inherit;

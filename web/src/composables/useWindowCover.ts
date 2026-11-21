@@ -1,13 +1,18 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, type Ref } from "vue"
+import { onBeforeUnmount, onMounted, reactive, watch, type Ref } from "vue"
 
 /**
- * The screen under an open window is not seen: a window is opaque. The parts of the main screen (its header, the list of the
- * series) are cut where the largest open window stands, so the browser does not draw them there in every frame (their
- * stripes, pulses and the blur under their labels, which a window over them made the browser draw for nothing). The cut is
- * smaller than the window by the rounding of its corners, so whatever shows around the window shows as before.
+ * The screen under an open window is not seen: a window is opaque. A label of the main screen that lies wholly under the
+ * largest open window loses the blur of its backdrop (styles/card.css), which the browser otherwise draws again in every
+ * frame for nothing: measured in Chrome with the window «Агенты» open, 89–90 frames a second with it and 116–134 without it.
+ * What shows around the window keeps its blur, so the screen looks as before. The cover is smaller than the window by the
+ * rounding of its corners.
  */
-const boxes = reactive(new Map<number, { left: number; top: number; right: number; bottom: number }>())
+type Box = { left: number; top: number; right: number; bottom: number }
+const boxes = reactive(new Map<number, Box>())
 let nextWindow = 0
+
+// The elements of the main screen that blur their backdrop (styles/card.css).
+const BLURRED = ".unified-text-bg, .status-pill"
 
 /** A window tells where it stands while it is open. */
 export function useWindowBox(room: Ref<HTMLElement | null>): void {
@@ -35,42 +40,45 @@ export function useWindowBox(room: Ref<HTMLElement | null>): void {
   })
 }
 
-/** The style of a part of the main screen: cut where the largest open window covers it, nothing while no window is open. */
-export function useUnderWindows(part: Ref<HTMLElement | null>) {
-  const place = ref<{ left: number; top: number } | null>(null)
-  let observer: ResizeObserver | null = null
-  const measure = (): void => {
-    const box = part.value?.getBoundingClientRect()
-    place.value = box ? { left: box.left, top: box.top } : null
+function largest(): Box | null {
+  let cover: Box | null = null
+  for (const box of boxes.values()) {
+    const area = (box.right - box.left) * (box.bottom - box.top)
+    if (area > 0 && (!cover || area > (cover.right - cover.left) * (cover.bottom - cover.top))) cover = box
   }
-  onMounted(() => {
-    measure()
-    if (typeof ResizeObserver !== "undefined" && part.value) {
-      observer = new ResizeObserver(measure)
-      observer.observe(part.value)
+  return cover
+}
+
+/** The labels of a part of the main screen that lie wholly under the open window are marked `data-covered` while it is open. */
+export function useCoveredBlur(part: Ref<HTMLElement | null>): void {
+  let changes: MutationObserver | null = null
+  const mark = (): void => {
+    const root = part.value
+    if (!root) return
+    const cover = largest()
+    for (const element of root.querySelectorAll<HTMLElement>(BLURRED)) {
+      const box = element.getBoundingClientRect()
+      const covered = cover !== null && box.width > 0 && box.left >= cover.left && box.right <= cover.right
+        && box.top >= cover.top && box.bottom <= cover.bottom
+      if (covered !== element.hasAttribute("data-covered")) element.toggleAttribute("data-covered", covered)
     }
-    window.addEventListener("resize", measure)
-    window.addEventListener("scroll", measure, { passive: true })
-  })
-  // A window that opens or moves may move the part too (the lock of the scroll): the part is measured again after it.
-  watch(boxes, measure, { deep: true, flush: "post" })
+  }
+  // A window opens, moves or closes: the labels are marked again. While it is open, a label drawn anew (a pill of a status
+  // that came) is marked as it appears.
+  watch(boxes, () => {
+    mark()
+    if (largest() && !changes && part.value && typeof MutationObserver !== "undefined") {
+      changes = new MutationObserver(mark)
+      changes.observe(part.value, { childList: true, subtree: true })
+    } else if (!largest()) {
+      changes?.disconnect()
+      changes = null
+    }
+  }, { deep: true, flush: "post" })
+  onMounted(mark)
+  window.addEventListener("resize", mark)
   onBeforeUnmount(() => {
-    observer?.disconnect()
-    window.removeEventListener("resize", measure)
-    window.removeEventListener("scroll", measure)
-  })
-  return computed<Record<string, string> | undefined>(() => {
-    let cover: { left: number; top: number; right: number; bottom: number } | null = null
-    for (const box of boxes.values()) {
-      const area = (box.right - box.left) * (box.bottom - box.top)
-      if (area > 0 && (!cover || area > (cover.right - cover.left) * (cover.bottom - cover.top))) cover = box
-    }
-    if (!cover || !place.value) return undefined
-    const x0 = cover.left - place.value.left, y0 = cover.top - place.value.top
-    const x1 = cover.right - place.value.left, y1 = cover.bottom - place.value.top
-    // The outer edge lies far outside the part: what it draws beyond its box (the shadows of the cards) stays as it was.
-    const far = "9999px"
-    const outer = `-${far} -${far}, calc(100% + ${far}) -${far}, calc(100% + ${far}) calc(100% + ${far}), -${far} calc(100% + ${far}), -${far} -${far}`
-    return { clipPath: `polygon(evenodd, ${outer}, ${x0}px ${y0}px, ${x1}px ${y0}px, ${x1}px ${y1}px, ${x0}px ${y1}px, ${x0}px ${y0}px)` }
+    changes?.disconnect()
+    window.removeEventListener("resize", mark)
   })
 }
