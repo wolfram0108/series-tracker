@@ -63,8 +63,8 @@ describe("the code", () => {
 
   it("puts no markup of a text into the page, no timer that polls, no link that opens a tab without noopener", () => {
     expect(offenders(/v-html|innerHTML/)).toEqual([])
-    // The pages on samples whose beat is their subject: the gallery, the load of the interface (tools/LoadSim.vue).
-    expect(offenders(/\bsetInterval\(/, /Gallery\.vue$|LoadSim\.vue$/)).toEqual([])
+    // The pages on samples whose beat is their subject: the gallery, the loads of the interface (tools/LoadSim.vue, tools/OutputSim.vue).
+    expect(offenders(/\bsetInterval\(/, /Gallery\.vue$|(Load|Output)Sim\.vue$/)).toEqual([])
     expect(offenders(/target="_blank"(?![^>]*rel="[^"]*noopener)/)).toEqual([])
   })
 })

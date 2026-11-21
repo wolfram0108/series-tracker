@@ -18,6 +18,7 @@ import { pickOf, type Pick } from "../../../lib/selection"
 import { EPISODE_STATES, stateWord, TRACK_STATES, type StateName } from "../../../lib/states"
 import GroupOutline from "./GroupOutline.vue"
 import EpisodeCard from "./EpisodeCard.vue"
+import ShownCell from "../../ShownCell.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
 import FoldButton from "../../FoldButton.vue"
 import SyncButton from "../../SyncButton.vue"
@@ -121,7 +122,8 @@ const voicesText = computed(() => (Object.entries(meters.value.voices) as [keyof
   .filter(([, count]) => count > 0).map(([state, count]) => counted(TRACK_STATES[state], count)).join(" · "))
 
 const { grid, ruler, wide, columns, layout } = useCardGrid(() => props.mode, () => order.value.length, () => props.total)
-const { built, cell, sizeOf } = useShownCells(grid)
+const shown = useShownCells(grid)
+const { cell } = shown
 
 // The height of the reference each episode has now: a compilation no higher than it is not cut, whatever the layout says.
 const heights = computed(() => new Map(props.episodes.map((view) => [view.episode,
@@ -195,19 +197,23 @@ function step(by: number): void {
         <GroupOutline :grid="grid" :layout="layout + episodes.length + (opened ? 1 : 0)" :groups="outline" />
         <GroupOutline :grid="grid" :layout="layout + episodes.length + (opened ? 1 : 0)" :groups="selection" />
         <template v-for="item in items" :key="item.view.episode">
-          <EpisodeCard
-            v-if="mode === 'cards' && (built(item.view.episode) || props.opened === item.view.episode)" :ref="cell(item.view.episode)"
-            class="cell-in" :view="item.view" :cells="item.cells" :status="item.status" :marks="marks"
-            :file="wide ? item.file : undefined" :open="opened?.view.episode === item.view.episode" :busy="busy"
-            :badge="memberOf(members, season, item.view.episode)" selectable :selected="chosen.has(item.view.episode)"
-            :subtitles="subtitlesOf(item.view.episode)"
-            @open="toggleOpen(item.view.episode)" @select="emit('select', item.view.episode, $event)"
-            @switch="emit('switch-episode', item.view.episode, $event)"
-          />
-          <div
-            v-else-if="mode === 'cards'" :ref="cell(item.view.episode)" class="episode-card card-shell" :style="sizeOf(item.view.episode)" :data-season="season"
-            :data-episode="item.view.episode" aria-hidden="true"
-          />
+          <ShownCell v-if="mode === 'cards'" :cells="shown" :cell-key="item.view.episode" :keep="props.opened === item.view.episode">
+            <EpisodeCard
+              :ref="cell(item.view.episode)"
+              class="cell-in" :view="item.view" :cells="item.cells" :status="item.status" :marks="marks"
+              :file="wide ? item.file : undefined" :open="opened?.view.episode === item.view.episode" :busy="busy"
+              :badge="memberOf(members, season, item.view.episode)" selectable :selected="chosen.has(item.view.episode)"
+              :subtitles="subtitlesOf(item.view.episode)"
+              @open="toggleOpen(item.view.episode)" @select="emit('select', item.view.episode, $event)"
+              @switch="emit('switch-episode', item.view.episode, $event)"
+            />
+            <template #shell="{ size }">
+              <div
+                :ref="cell(item.view.episode)" class="episode-card card-shell" :style="size" :data-season="season"
+                :data-episode="item.view.episode" aria-hidden="true"
+              />
+            </template>
+          </ShownCell>
           <button
             v-else type="button" class="episode-tile" :data-episode="item.view.episode"
             :data-state="EPISODE_STATES[item.status]"

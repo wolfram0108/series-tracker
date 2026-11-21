@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue"
 import StTab from "./StTab.vue"
 import TitleSearch from "./TitleSearch.vue"
 import SourceCard from "./SourceCard.vue"
+import ShownCell from "./ShownCell.vue"
 import StGroup from "./StGroup.vue"
 import StInput from "./StInput.vue"
 import StLabel from "./StLabel.vue"
@@ -32,7 +33,8 @@ const props = withDefaults(defineProps<{
 
 // A card of a source is drawn while it is near the view (composables/useShownCells.ts); one being edited holds the focus and stays.
 const list = ref<HTMLElement | null>(null)
-const { built, cell, sizeOf } = useShownCells(list)
+const shown = useShownCells(list)
+const { cell } = shown
 
 const emit = defineEmits<{
   (e: "remove", id: string | number): void
@@ -126,14 +128,14 @@ function clear(): void {
 
 <template>
   <div ref="list" class="sources stack">
-    <template v-for="(item, index) in items" :key="item.id">
+    <ShownCell v-for="(item, index) in items" :key="item.id" :cells="shown" :cell-key="item.id">
       <SourceCard
-        v-if="built(item.id)" :ref="cell(item.id)" class="cell-in" :item="item" :profiles="profiles" :busy="busy" :waiting="waiting"
+        :ref="cell(item.id)" class="cell-in" :item="item" :profiles="profiles" :busy="busy" :waiting="waiting"
         :place="index + 1" @change="emit('change', item.id, $event)" @remove="emit('remove', item.id)"
         @reread="emit('reread', item.id)" @stop="emit('stop', item.id)"
       />
-      <div v-else :ref="cell(item.id)" class="cell-shell source-shell" :style="sizeOf(item.id)" aria-hidden="true" />
-    </template>
+      <template #shell="{ size }"><div :ref="cell(item.id)" class="cell-shell source-shell" :style="size" aria-hidden="true" /></template>
+    </ShownCell>
     <div class="stack">
       <div class="st-tabs st-tabs-wrap source-mode" role="tablist" :aria-label="t('sources.mode.label')">
         <StTab :active="mode === 'address'" :label="t('sources.mode.address')" @click="mode = 'address'">

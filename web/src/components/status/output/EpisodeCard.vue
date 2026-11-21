@@ -85,7 +85,9 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => observer?.disconnect())
-watch(variants, () => void nextTick(fit))
+// Measured again when the text of the variants changes, not when the card is counted again with the same text: a frame of
+// the stream counts every card again, and a measure is a layout of the page.
+watch(() => JSON.stringify(variants.value), () => void nextTick(fit))
 const label = computed(() => t("output.episode.card", { n: props.view.episode, status: stateWord(EPISODE_STATES[props.status]) }))
 </script>
 

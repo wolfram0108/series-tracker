@@ -1227,6 +1227,8 @@ export const ru = {
   "properties.savedDetail": "Изменения приняты в обработку",
   "properties.saveFailed": "Ошибка сохранения",
   "loadSim.title": "Агенты — {n} карточек",
+  "outputSim.title": "Выход — {n} серий",
+  "outputSim.series": "Сериал-образец",
   "loadSim.hud": "{fps} кадров/с · кадр до {worst} мс · поток {apply} мс/с",
   "gallery.heading": "Парити-галерея",
   "gallery.heading.version": "/v2 · Ф2",

@@ -13,6 +13,7 @@ import {
 import { isOff, trackCells, type EpisodeView, type QueueName, type QueueRow, type SourceMark as Mark } from "../../../lib/output"
 import type { CompilationRow } from "./CompilationTable.vue"
 import EpisodeCard from "./EpisodeCard.vue"
+import ShownCell from "../../ShownCell.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
 import FoldButton from "../../FoldButton.vue"
 import PowerSwitch from "./PowerSwitch.vue"
@@ -101,7 +102,8 @@ const cutText = computed(() => (Object.entries(cutCounts.value) as [CutState, nu
 // The rows hold as many cards as those of the season: the block is a copy of the season's for a part of its episodes.
 const { grid, ruler, columns } = useCardGrid(() => props.mode, () => props.order.length, () => props.episodes.length)
 // A card is drawn while it is near the view (composables/useShownCells.ts), as in a season.
-const { built, cell, sizeOf } = useShownCells(grid)
+const shown = useShownCells(grid)
+const { cell } = shown
 
 const opened = computed(() => items.value.find((item) => item.view.episode === props.opened) ?? null)
 function step(by: number): void {
@@ -165,19 +167,20 @@ const rows = computed<CompilationRow[]>(() => {
       <div ref="grid" class="season-grid" :class="`is-${mode}`" :style="columns">
         <span ref="ruler" class="grid-ruler" aria-hidden="true" />
         <template v-for="item in items" :key="item.view.episode">
-          <EpisodeCard
-            v-if="mode === 'cards' && (built(item.view.episode) || opened?.view.episode === item.view.episode)" :ref="cell(item.view.episode)"
-            class="cell-in" :view="item.view" :cells="item.cells" :status="item.status" :marks="marks"
-            :open="opened?.view.episode === item.view.episode" :busy="busy || !item.fits"
-            :badge="item.each.member ? badge : undefined" :note="item.note"
-            :switch-label="t(item.each.member ? 'output.compilation.leave' : 'output.compilation.take')"
-            @open="emit('open', opened?.view.episode === item.view.episode ? null : item.view.episode)"
-            @switch="emit('member', item.view.episode, $event ? '' : head.key)"
-          />
-          <div
-            v-else-if="mode === 'cards'" :ref="cell(item.view.episode)" class="episode-card card-shell" :style="sizeOf(item.view.episode)"
-            :data-episode="item.view.episode" aria-hidden="true"
-          />
+          <ShownCell v-if="mode === 'cards'" :cells="shown" :cell-key="item.view.episode" :keep="opened?.view.episode === item.view.episode">
+            <EpisodeCard
+              :ref="cell(item.view.episode)"
+              class="cell-in" :view="item.view" :cells="item.cells" :status="item.status" :marks="marks"
+              :open="opened?.view.episode === item.view.episode" :busy="busy || !item.fits"
+              :badge="item.each.member ? badge : undefined" :note="item.note"
+              :switch-label="t(item.each.member ? 'output.compilation.leave' : 'output.compilation.take')"
+              @open="emit('open', opened?.view.episode === item.view.episode ? null : item.view.episode)"
+              @switch="emit('member', item.view.episode, $event ? '' : head.key)"
+            />
+            <template #shell="{ size }">
+              <div :ref="cell(item.view.episode)" class="episode-card card-shell" :style="size" :data-episode="item.view.episode" aria-hidden="true" />
+            </template>
+          </ShownCell>
           <button
             v-else type="button" class="episode-tile" :data-episode="item.view.episode"
             :class="[`is-${item.status}`, { 'is-open': opened?.view.episode === item.view.episode }]"

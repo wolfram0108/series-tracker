@@ -40,6 +40,8 @@ const PAGES = {
   "card-colors": () => import("./tools/CardColors.vue"),
   // The interface under a fixed load: many series and a window of thousands of works changing on every frame (tools/LoadSim.vue).
   "load-sim": () => import("./tools/LoadSim.vue"),
+  // The window «Выход» of a series of a thousand episodes under a fixed round of actions (tools/OutputSim.vue).
+  "output-sim": () => import("./tools/OutputSim.vue"),
 } as const
 const sample = PAGES[window.location.hash.replace(/^#\/?/, "") as keyof typeof PAGES]
 const onSamples = sample !== undefined

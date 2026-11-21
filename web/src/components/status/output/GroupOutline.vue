@@ -26,17 +26,30 @@ function draw(): void {
     return
   }
   const box = grid.getBoundingClientRect()
-  const placed = cells.map((cell) => ({ episode: Number(cell.dataset.episode), rect: cell.getBoundingClientRect() }))
+  const group = new Map<number, number>()
+  props.groups.forEach((each, index) => each.episodes.forEach((episode) => group.set(episode, index)))
+  // The grid is regular: its columns are those of its first row, and a card outside every group is outside them wherever it
+  // lies. So the first row and the cards of the groups are measured, not every card of the season (a measure is a layout).
+  const firstRow: DOMRect[] = []
+  for (const cell of cells) {
+    const rect = cell.getBoundingClientRect()
+    if (firstRow.length && Math.round(rect.top) !== Math.round(firstRow[0].top)) break
+    firstRow.push(rect)
+  }
+  const placed = cells.filter((cell) => group.has(Number(cell.dataset.episode)))
+    .map((cell) => ({ episode: Number(cell.dataset.episode), rect: cell.getBoundingClientRect() }))
+  if (placed.length === 0) {
+    drawn.value = []
+    return
+  }
   const tops = [...new Set(placed.map((each) => Math.round(each.rect.top)))].sort((a, b) => a - b)
-  const lefts = [...new Set(placed.map((each) => Math.round(each.rect.left)))].sort((a, b) => a - b)
-  const first = placed[0].rect
+  const lefts = [...new Set(firstRow.map((rect) => Math.round(rect.left)))].sort((a, b) => a - b)
+  const first = firstRow[0]
   const style = getComputedStyle(grid)
   const gapX = parseFloat(style.columnGap) || 0
   const gapY = parseFloat(style.rowGap) || 0
   const pitchX = lefts.length > 1 ? lefts[1] - lefts[0] : first.width + gapX
   const pitchY = first.height + gapY
-  const group = new Map<number, number>()
-  props.groups.forEach((each, index) => each.episodes.forEach((episode) => group.set(episode, index)))
   const at = new Map<string, number>()
   for (const each of placed) at.set(`${tops.indexOf(Math.round(each.rect.top))},${lefts.indexOf(Math.round(each.rect.left))}`, each.episode)
   // Rows that follow one another at the step of the grid form a band; an opened episode between two rows breaks it, and
@@ -75,7 +88,9 @@ function draw(): void {
   }).filter((each) => each.own.length > 0)
 }
 
-watch(() => [props.grid, props.layout, props.groups], () => void nextTick(draw), { deep: true, immediate: true })
+// Drawn again when the grid, its layout or what the groups hold changes, not when the groups are counted again the same: a
+// frame of the stream counts them again, and a drawing measures every card of the season.
+watch(() => [props.grid, props.layout, JSON.stringify(props.groups)], () => void nextTick(draw), { immediate: true })
 const id = `outline-${Math.random().toString(36).slice(2)}`
 </script>
 

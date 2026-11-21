@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue"
 import SeriesCard from "./SeriesCard.vue"
+import ShownCell from "./ShownCell.vue"
 import { useShownCells } from "../composables/useShownCells"
 import { useCoveredBlur } from "../composables/useWindowCover"
 import { useSeriesStore } from "../stores/series"
@@ -18,16 +19,16 @@ const emit = defineEmits<{
 
 const seriesStore = useSeriesStore()
 const list = ref<HTMLElement | null>(null)
-const { built, cell, sizeOf } = useShownCells(list)
+const shown = useShownCells(list)
+const { cell } = shown
 useCoveredBlur(list)
 </script>
 
 <template>
   <div ref="list" class="series-list">
-    <template v-for="s in seriesStore.list" :key="s.id">
-      <div v-if="!built(s.id)" :ref="cell(s.id)" class="cell-shell series-shell" :style="sizeOf(s.id)" aria-hidden="true" />
+    <ShownCell v-for="s in seriesStore.list" :key="s.id" :cells="shown" :cell-key="s.id">
+      <template #shell="{ size }"><div :ref="cell(s.id)" class="cell-shell series-shell" :style="size" aria-hidden="true" /></template>
       <SeriesCard
-        v-else
         :ref="cell(s.id)"
         class="cell-in"
         :series="s"
@@ -38,7 +39,7 @@ useCoveredBlur(list)
         @delete="emit('delete', $event)"
         @toggle-auto-scan="(id, enabled) => emit('toggle-auto-scan', id, enabled)"
       />
-    </template>
+    </ShownCell>
     <slot />
   </div>
 </template>

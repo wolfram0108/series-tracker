@@ -10,8 +10,11 @@ type Key = string | number
  * A card that holds the focus stays drawn. Where the browser cannot tell what is near the view (no IntersectionObserver),
  * every card is drawn.
  *
- * A list renders `built(key)` ? its card : its shell, both with `:ref="cell(key)"`, the shell with `:style="sizeOf(key)"`.
+ * A list renders each card in a ShownCell (components/ShownCell.vue): the card, or its shell sized by `sizeOf(key)`, both with
+ * `:ref="cell(key)"`.
  */
+export type ShownCells = ReturnType<typeof useShownCells>
+
 export function useShownCells(area: Ref<HTMLElement | null>) {
   const every = typeof IntersectionObserver === "undefined"
   const near = reactive(new Set<Key>())

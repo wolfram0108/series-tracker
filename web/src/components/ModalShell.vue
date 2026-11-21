@@ -70,6 +70,16 @@ function reachBody(): void {
   if (el.scrollHeight > el.clientHeight + 1 && !hasFocusable(el)) el.tabIndex = 0
   else el.removeAttribute("tabindex")
 }
+// Asked once a frame: a body whose cards come and go as it scrolls changes many times between two frames.
+let reachAsked = false
+function reachSoon(): void {
+  if (reachAsked) return
+  reachAsked = true
+  requestAnimationFrame(() => {
+    reachAsked = false
+    reachBody()
+  })
+}
 let bodyResize: ResizeObserver | null = null
 let bodyChange: MutationObserver | null = null
 let shownTab: Element | null = null
@@ -113,8 +123,8 @@ function fitTabs(follow = false) {
 onMounted(() => {
   observer = new ResizeObserver(() => fitTabs(true))
   if (header.value) observer.observe(header.value)
-  bodyResize = new ResizeObserver(reachBody)
-  bodyChange = new MutationObserver(reachBody)
+  bodyResize = new ResizeObserver(reachSoon)
+  bodyChange = new MutationObserver(reachSoon)
   if (body.value) {
     bodyResize.observe(body.value)
     bodyChange.observe(body.value, { childList: true, subtree: true })

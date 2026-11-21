@@ -22,6 +22,7 @@ import StSelect from "../StSelect.vue"
 import StValue from "../StValue.vue"
 import ConformPlotViewer from "./ConformPlotViewer.vue"
 import WorkCard from "./WorkCard.vue"
+import ShownCell from "../ShownCell.vue"
 
 // The agents: every work the core is doing, as cards of one kind (lib/work.ts), by the agent that does it. Every card is of a
 // series, so the section is filtered by it: in the settings by the one the user picks (all by default), in the window of a
@@ -39,7 +40,8 @@ const { connected: live } = useSSE()
 
 // A card is drawn while it is near the view (composables/useShownCells.ts): a queue of hundreds of works draws a screen of them.
 const panel = ref<HTMLElement | null>(null)
-const { built, cell, sizeOf } = useShownCells(panel)
+const cellsOf = useShownCells(panel)
+const { cell } = cellsOf
 
 const picked = ref<number | null>(null)
 const filter = computed(() => props.seriesId ?? picked.value)
@@ -134,13 +136,13 @@ const str = (value: unknown) => String(value ?? "")
         </template>
         <div v-if="!section.shown.length" class="queue-empty">{{ live ? t("agents.empty") : t("common.fetching") }}</div>
         <div v-else class="agents-cards">
-          <template v-for="each in section.shown" :key="each.id">
+          <ShownCell v-for="each in section.shown" :key="each.id" :cells="cellsOf" :cell-key="each.id">
             <WorkCard
-              v-if="built(each.id)" :ref="cell(each.id)" class="cell-in" :view="each.view()" :series-name="nameOf(each.view())"
+              :ref="cell(each.id)" class="cell-in" :view="each.view()" :series-name="nameOf(each.view())"
               :busy="pending.has(each.id)" @action="act(each.view(), $event)" @plot="plot = $event"
             />
-            <div v-else :ref="cell(each.id)" class="cell-shell work-shell" :style="sizeOf(each.id)" aria-hidden="true" />
-          </template>
+            <template #shell="{ size }"><div :ref="cell(each.id)" class="cell-shell work-shell" :style="size" aria-hidden="true" /></template>
+          </ShownCell>
         </div>
       </SheetRow>
     </div>

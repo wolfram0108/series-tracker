@@ -20,8 +20,12 @@ function focusable(room: HTMLElement): HTMLElement[] {
     .filter((each) => typeof each.checkVisibility !== "function" || each.checkVisibility())
 }
 
+/** Whether the room holds something the focus can reach: the first one found is enough (a check of visibility is a layout). */
 export function hasFocusable(room: HTMLElement): boolean {
-  return focusable(room).length > 0
+  for (const each of room.querySelectorAll<HTMLElement>(FOCUSABLE)) {
+    if (typeof each.checkVisibility !== "function" || each.checkVisibility()) return true
+  }
+  return false
 }
 
 /** Tab walks the elements of the room in a ring, whatever the focus was when it began: outside the room it enters it. */
